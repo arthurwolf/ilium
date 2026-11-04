@@ -38,6 +38,14 @@ A published version is never deleted by its publisher ([PKG-399](/pages/referenc
 **[PUB-012]** `deprecate` MUST NOT change installed copies or block any install. It MUST show the message and the successor id when the successor is in the registry. Test: deprecate a plugin with a successor, install it, and check that the install succeeds and prints the message once.
 **[PUB-013]** `unlist` MUST remove the plugin from `index.json` and from search, and MUST keep `plugins/<id>.json`, every blob and the lock resolution, as [PKG-398](/pages/reference-registry/#publishing) requires. Test: unlist a plugin, then run `ilium plugin update` on an installed copy and check that the update still succeeds.
 
+### Unlisting a plugin that people use
+
+An unlist hides the plugin from search at once ([PUB-013](#what-each-action-does)). Users who have the plugin installed then see no warning, unless the publisher warned them first. The rule below gives them a notice period.
+
+**[PKG-184]** (proposed, owner to confirm) A publisher that unlists a plugin with installed copies MUST first deprecate the plugin with `ilium plugin deprecate` for at least 30 days before the unlist, and the deprecation message MUST name the date of the unlist. The registry does not count installed copies ([PKG-376]), so the publisher decides whether copies exist from its own knowledge of its users. A publisher with no such knowledge MUST treat the plugin as having installed copies when any version was downloaded in the last 365 days.
+
+**[PKG-185]** (proposed, owner to confirm) A client MUST show the deprecation message and the unlist date named in it in the text form of `ilium plugin list`, on the line after the plugin's line, for each installed copy of a deprecated plugin.
+
 - **[PUB-047]** The registry MUST refuse a yank reason, a deprecate message or a takedown reason that contains a control character other than line feed, with `registry.reason-invalid`; a client MUST render these texts as plain text, MUST NOT interpret them as links or terminal escapes, and MUST truncate them at 500 Unicode scalar values on screen (proposed, owner to confirm).
 
 ### Takedown
@@ -49,6 +57,14 @@ A takedown is the operator's removal. It is not a publisher action. The operator
 **[PUB-016]** After a takedown, every maintainer of the publisher id MUST receive a notice ([SEC-723](/pages/reference-trust-and-supply-chain/)), and the notice MUST include the appeal address from `policy.json`.
 
 - **[PUB-048]** After a takedown, the registry MUST send a notice to every maintainer of every plugin whose latest release has a non-optional `requires.plugins` range that only the taken-down version satisfies, and MUST record the count of such dependents in the takedown's transparency log entry (proposed, owner to confirm).
+
+### Secret or personal data in a published version
+
+A published version cannot be changed or deleted by its publisher ([PKG-394](/pages/reference-registry/#publishing), [PKG-399](/pages/reference-registry/#publishing)). A secret or personal data that reached a published blob therefore stays in that blob until the operator acts. The publisher rotates the secret, the operator takes the blob down, and both sides record what happened.
+
+**[PUB-076]** When a publisher or the operator reports that a published blob contains a secret or personal data, the operator MUST take the version down under [PKG-403](/pages/reference-registry/#policy) and remove the blob from serving within 24 hours of the report. The operator MUST keep the digest and the tombstone under [PKG-821](/pages/reference-registry/), and MUST record the reason and the time in the transparency log.
+
+**[PUB-077]** The publisher MUST rotate the leaked secret before the operator reinstates any version with the same digest, and the release notes of the replacement version MUST state that the earlier version was withdrawn for a secret leak without repeating the secret.
 
 ### Worked example: a security yank
 

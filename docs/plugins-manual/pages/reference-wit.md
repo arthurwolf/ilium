@@ -1289,6 +1289,10 @@ interface codec {
   /// Errors: quota-exceeded when width times height passes max-pixels.
   decode-image: func(data: list<u8>, frame: u32, max-pixels: u32) -> result<decoded-image, plugin-error>;
   sha256: func(data: list<u8>) -> list<u8>;
+  /// Errors: invalid-argument when the key is over 4 KiB or the input is over 16 MiB.
+  hmac-sha256: func(key: list<u8>, data: list<u8>) -> result<list<u8>, plugin-error>;
+  /// False at once when the lengths differ. Cannot fail.
+  constant-time-equal: func(a: list<u8>, b: list<u8>) -> bool;
   /// Gray in the alpha channel.
   rasterize-text: func(request: raster-text) -> result<decoded-image, plugin-error>;
 }
@@ -1943,6 +1947,46 @@ These rules apply to every `take-*` function of this package [ABI-014].
 
 The full table of slow calls is in [Requests and outcomes](/pages/requests-and-outcomes/).
 
+### 5.41 self-limits
+
+S C. Grant: none. API page: [Self limits](/pages/api-self-limits/).
+
+```text
+interface self-limits {
+  /// One budget of the calling side. remaining is never more than effective.
+  /// resets-at-ms is Unix time in milliseconds, or none when the budget never refills.
+  record budget {
+    id: string,
+    unit: string,
+    effective: u64,
+    remaining: u64,
+    resets-at-ms: option<u64>,
+  }
+  /// Read-only. Returns the budgets of the calling side only. Cannot fail.
+  limits: func() -> list<budget>;
+}
+```
+
+### 5.42 self-describe
+
+S C. Grant: none. API page: [Self description](/pages/api-self-describe/).
+
+```text
+interface self-describe {
+  use ilium:types/ids@0.1.0.{plugin-id};
+  /// Grants lists only the grants that are granted now. A refused grant is never listed.
+  record self-description {
+    plugin-id: plugin-id,
+    version: string,
+    api: string,
+    host-version: string,
+    grants: list<string>,
+  }
+  /// Read-only. Named describe, because self is a reserved word in WIT. Cannot fail.
+  describe: func() -> self-description;
+}
+```
+
 
 ## 6. Package ilium:primitives
 
@@ -2429,6 +2473,8 @@ package ilium:server@0.1.0;
 world base {
   import ilium:host/log@0.1.0;
   import ilium:host/telemetry@0.1.0;
+  import ilium:host/self-limits@0.1.0;
+  import ilium:host/self-describe@0.1.0;
   import ilium:host/geocode@0.1.0;
   import ilium:host/clock@0.1.0;
   import ilium:host/timers@0.1.0;
@@ -2480,6 +2526,8 @@ package ilium:client@0.1.0;
 world base {
   import ilium:host/log@0.1.0;
   import ilium:host/telemetry@0.1.0;
+  import ilium:host/self-limits@0.1.0;
+  import ilium:host/self-describe@0.1.0;
   import ilium:host/gpu@0.1.0;
   import ilium:host/clock@0.1.0;
   import ilium:host/timers@0.1.0;

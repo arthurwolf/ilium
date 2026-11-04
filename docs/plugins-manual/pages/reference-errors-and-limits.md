@@ -441,6 +441,7 @@ Codes that are logged or refused outside the install pipeline of [Manifest schem
 |---|---|
 | `install.ok` | Logged when an install completes |
 | `migration.no-backup-failed` | An update installed with `--no-backup` fails in `migrate`. The previous version stays active and the data may be half migrated. Logged at level error |
+| `migration.cancelled` | A `migrate` call was still running when the server shutdown budget of 5 s ended (the backup stays in place and the next start retries under LIF-110), or when its project was closed (the bucket is restored from its backup). The call is cancelled with `cancelled`. See [Stop during a migration](/pages/guide-data-migration/#stop-during-a-migration) |
 | `plugin.blocked` | `ilium plugin enable <id>` on a blocked plugin without `--accept-risk` (USR-175) |
 | `registry.namespace-not-dormant` | A registry refuses to give a namespace to another publisher because it is not dormant, or the notice period is not over (PKG-656) |
 

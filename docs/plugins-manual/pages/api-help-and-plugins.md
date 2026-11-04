@@ -74,6 +74,10 @@ The record `plugin-info` has nineteen fields. The WIT in [Plugin lifecycle state
 | `enabled` | `bool` and `boolean` | `true` when the plugin is turned on. |
 | `failed` | `bool` and `boolean` | `true` when the host turned the plugin off after repeated failures. |
 
+### Reading your own state
+
+A plugin reads its own identity and grants with [Self description](/pages/api-self-describe/), and its remaining budgets with [Self limits](/pages/api-self-limits/). Both imports need no grant, so a plugin can show a "needs grant" state before it makes a call that would be refused.
+
 ### Worked example in Rust
 
 This client plugin adds a palette command. The command reads its own help topic and writes the first line to the plugin log. It needs `help.read`.

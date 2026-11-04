@@ -195,3 +195,10 @@ The user can change the grant at any time in Settings > Plugins > com.example.re
 - [agent.read-prompts](/pages/capability-agent-read-prompts/).
 - [Agent primitives](/pages/primitives-agent/).
 - [fs.read](/pages/capability-fs-read/).
+
+## Requirement statements
+
+A transcript holds what the user typed or pasted into an agent chat, so a token or password can be in it even when the user never meant to share it. The rules below make that risk visible in the review dialog and limit the one redaction the host can guarantee.
+
+- **[SEC-998]** The review dialog for `agent.transcript` MUST state that the text can contain secrets that the user typed or pasted, and, when the pane is not a project pane, MUST name the grant `agent.transcript` in its high-risk text.
+- **[SEC-999]** The host MUST replace each value equal to a current plugin secret ([SEC-241]) with `[redacted]` in the transcript text it returns to the plugin, and MUST NOT claim redaction for other secret-like text, such as a token the user pasted that is not a plugin secret.

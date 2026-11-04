@@ -98,11 +98,39 @@ The procedure for a takedown, in order:
 - **[PUB-046]** The abuse intake of PKG-705 MUST accept a report that names a plugin id, a version or a package `sha256`, and one rule id of `policy.json`. It MUST return a report id in the acknowledgement, and it MUST send the reporter the recorded decision (yank, takedown, quarantine, or none with a stated reason) with the index of its transparency log entry (proposed, owner to confirm).
 - **[PUB-049]** During the 24-hour decision window of PKG-705 the operator MAY quarantine the reported range through `quarantine.json`. When the decision is `none`, the quarantine MUST be withdrawn (EXT-059) within 24 hours of that decision (proposed, owner to confirm). When the decision is a takedown, the quarantine entry MUST be withdrawn in the same metadata change that adds the `blocked_ids` entry (proposed, owner to confirm).
 
+### Legal requests
+
+Court orders, subpoenas, preservation requests and requests from government bodies are handled under [Legal requests](/pages/publish-legal-requests/). The operator keeps each request and its outcome in the private record described there.
+
+### Review staff and quality audit
+
+A level B badge ([PKG-683](/pages/reference-registry/#policy)) is only as trustworthy as the people who decide it. The rules below apply to every level B decision.
+
+**[PUB-082]** A level B review MUST be recorded by a reviewer who has completed the review training named in the operator's private record and who has declared to the operator no financial or personal link to the publisher, and a refusal MUST be confirmed by a second reviewer before it takes effect.
+
+**[PUB-083]** Each quarter the registry operator MUST re-review at least 5 percent of that quarter's level B decisions, rounded up to a whole decision, by a reviewer who was not involved in the original decision, and MUST state the agreement rate of those re-reviews in the transparency report.
+
 ### Backups and retention
 
 Keep every published blob and every signed metadata document for as long as a lock file or a mirror might still need it. [Retention of published versions](/pages/reference-registry/#retention-of-published-versions-and-operator-backups) lists the rules. The operator's own backups of the registry follow the same rule: a backup holds signed files and never a publish token. The rule for a publisher's own backups is out of scope for this page.
 
 **[PUB-041]** The operator MUST back up the blob folder and the metadata folder together, so that a restore has a `snapshot.json` that matches its files. Test: restore a backup to an empty host and run the client checks of [Publisher workflow and version states](/pages/publish-publisher-workflow/) against it; every hash matches.
+
+### Account data and erasure
+
+The registry holds the verified contact address of each maintainer ([PKG-093](/pages/reference-registry/#policy)), the recovery data of each account, the sanctions screening record ([PUB-063](/pages/governance/)) and the access logs ([USR-956](/pages/reference-requirements-user-admin/)). The transparency log holds key fingerprints and publisher ids only. Data that the Ilium project holds about users is covered by USR-958 and is not covered here.
+
+**[PUB-078]** The registry operator MUST answer a written erasure request from a publisher account holder within 30 days, MUST erase the contact address, the display name and the recovery data of that account, and MUST keep the transparency log entries, which carry only key fingerprints and publisher ids.
+
+**[PUB-079]** The registry operator MUST state in its private record the retention period of account data, of the access logs and of each backup, and MUST delete an erased account's data from every backup no later than the first restore cycle that follows the erasure request.
+
+### Availability and outages
+
+Installs and updates depend on the official registry. The objective and the outage duties below let administrators plan around it.
+
+**[PUB-080]** The official registry operator MUST state a monthly availability objective of 99.5 percent for metadata and blob serving on the status page, and MUST post an outage notice on the status page within 1 hour of detecting an outage that lasts more than 15 minutes.
+
+**[PUB-081]** During an outage the client MUST keep using its cached signed metadata and its installed packages, and MUST show the time of the last successful refresh in `ilium plugin registry status`.
 
 ### Worked example: a weekly check
 

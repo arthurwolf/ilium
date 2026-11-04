@@ -509,7 +509,7 @@ The UTC day is the clock of the privacy log ([SEC-265]). The user can change eit
 - The call returns `quota-exceeded` at once. Nothing is sent to the provider, and the request is not counted.
 - `retry-after-ms` is set to the time until the next UTC day starts. Retry after that time, or after the user raises the limit.
 - The refusal counts as a quota hit in plugin health (see [Health and watchdog](/pages/reference-health-and-watchdog/)). It is a normal refusal, not a failure of the plugin side.
-- A plugin cannot read its remaining budget and cannot change its own limits. The manifest `limits` object does not contain a budget key.
+- A plugin can read its remaining daily token and request budget with `limits()`, see [Self limits](/pages/api-self-limits/). It cannot change its own limits. The manifest `limits` object does not contain a budget key.
 
 **What the user sees**
 

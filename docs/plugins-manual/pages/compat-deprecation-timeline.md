@@ -86,6 +86,13 @@ A release note for the marking minor is short. It names the item, the successor,
 
 - **[CMP-014]** A marking release note MUST contain the item name, the successor name, the removal minor and the packages it breaks, in that order, so that a reader can check the timeline without the source.
 
+## Deprecation register
+
+Each host and SDK release publishes a deprecation register. It is the one list of what is deprecated now, with the successor and the removal minor of each item, so that a plugin author or an operator can plan a removal without reading each changelog. The register is a page of this manual and a JSON file with the same rows. Each row gives the item, its kind (`sdk`, `cli`, `contract` or `unstable-feature`), its successor, its removal minor and the release that marked it. The `ilium plugin deprecations --json` command ([DEV-969](/pages/guide-deprecating-plugin-features/)) lists the rows that apply to the installed version.
+
+- **[CMP-024]** Each host and SDK release MUST publish a deprecation register, as a page of the manual and as a JSON file with the same content, listing every item deprecated at that release with its kind (`sdk`, `cli`, `contract` or `unstable-feature`), its successor, its removal minor and the release that marked it.
+- **[CMP-025]** The register MUST drop an item only in the release that removes it, and the release notes of that release MUST name the item exactly as the register does.
+
 ## Test
 
 - Build a package for `M + 1` that uses the item, install it on host `R` and check that the refusal code is the one of the ABI table and that the package is not partly installed.

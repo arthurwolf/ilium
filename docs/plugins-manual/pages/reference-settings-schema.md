@@ -586,6 +586,16 @@ Requirement ids for this page: [SET-001], [SET-002], [SET-003], [SET-004], [SET-
 
 Regex `pattern` values are limited per [SEC-046]; `secret` rows follow [SEC-242]. See [Secrets](/pages/reference-secrets/).
 
+### Host data option
+
+The host-wide data options are kept in `config.toml`, not in a plugin schema. Their defaults are listed here so that an implementer can check them.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `[data] encrypt_at_rest` | boolean | `false` (proposed, owner to confirm; see [SEC-958](/pages/reference-secrets/)) | Encrypts plugin data, snapshots, plugin logs and backup archives with a key in the OS keyring ([SEC-988](/pages/reference-secrets/)) |
+
+**[SEC-989]** The default of `[data] encrypt_at_rest` MUST be `false` until the owner records the decision on [Secrets](/pages/reference-secrets/), and this table MUST state the same default.
+
 
 ### Settings values after a schema change
 

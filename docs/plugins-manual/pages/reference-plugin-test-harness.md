@@ -8,7 +8,7 @@ permalink: /pages/reference-plugin-test-harness/
 
 This page defines what an author may rely on when the plugin test harness runs in CI: determinism, the fake clock, fake capability grants and the output of failures. The harness API is in [Test harness reference](/pages/reference-test-harness/). This page describes target behaviour; it does not claim the behaviour exists today.
 
-Requirement ids of this page are in the range `DEV-888` to `DEV-890`. The complete list is in [Requirements of the developer tooling lane](/pages/reference-requirements-dev-tooling/).
+This page owns the CI run contract of `ilium plugin test`: determinism, failure output, exit codes, the report file and run limits. The harness contract as a whole is owned by [Test harness reference](/pages/reference-test-harness/), which defines the API, the fakes, the modes and the golden rules. This page links to that owner and does not repeat it. The requirement ids defined on this page are DEV-061, DEV-062, DEV-063, DEV-888, DEV-889 and DEV-890, and the rules of the Owner and traceability section; each id is defined on one page only. The complete list is in [Requirements of the developer tooling lane](/pages/reference-requirements-dev-tooling/).
 
 ### Rules
 
@@ -23,6 +23,8 @@ Requirement ids of this page are in the range `DEV-888` to `DEV-890`. The comple
 - **[DEV-062]** A failed test MUST also print, after the host calls, the lines the plugin wrote with `log` during the case, as `logs()` returns them, at most 200 lines with level and message and without a wall-clock time; in JSONL they MUST be `log` records with `at` in fake milliseconds (proposed, owner to confirm).
 
 - **[DEV-061]** `test` on a project whose `tests/fixtures/` folder holds no `*.json` file, run without `--replay`, `--conformance` or `--coverage`, MUST exit 2 with `test.no-fixtures` before any case runs, so an empty test folder never produces a green CI step (proposed, owner to confirm).
+
+- **[DEV-197]** The `--host-contract` flag MUST be marked as decided, not proposed, in the command-line reference, on this page and in the backwards-compatibility matrix in the same release, and the matrix MUST NOT keep an open decision about how a cell selects its host version.
 
 ### Failure behaviour
 
@@ -44,6 +46,8 @@ A failed case does not stop the run. Every selected case runs in sorted fixture-
 
 ### Harness version and host fidelity
 
+The mode rules behind this section are defined on the [Test harness reference](/pages/reference-test-harness/) as [DEV-400], [DEV-401] and [DEV-933]. This section states only what a CI run reports and how it reacts to a mismatch.
+
 `harness_version` names the code that stood in for the host during a run. Its value depends on the mode of the harness ([Test harness reference](/pages/reference-test-harness/), [DEV-400], [DEV-401]):
 
 | Mode | `harness_version` is | Where the host behaviour comes from |
@@ -56,7 +60,7 @@ The value is `<source> <version>`, where `<source>` is `sdk-testing` or `cli-hos
 Behaviour of the embedded host:
 
 - The embedded host of CLI release X behaves as the host of release X for every limit of [Errors and limits](/pages/reference-errors-and-limits/), every error code and every renderer of the UI model. A test that passes on it proves the behaviour of release X and no other release.
-- `--host-contract <version>` selects the embedded contract of an older host (proposed, owner to confirm). The CLI ships the contracts of the host contract versions it can still emulate. `harness_version` then reads `cli-host <cli version> (contract <version>)`, so the report records both the CLI that ran and the contract that it emulated.
+- `--host-contract <version>` selects the embedded contract of an older host. The CLI ships the contracts of the host contract versions it can still emulate. `harness_version` then reads `cli-host <cli version> (contract <version>)`, so the report records both the CLI that ran and the contract that it emulated.
 - A version that the CLI does not embed fails before any case runs with `usage.host-contract-unavailable` and exit 2, as in [DEV-933]. The message lists the versions that the installed CLI embeds.
 - `--host-contract` applies to component mode. In native mode the flag exits 2 with `usage.host-contract-unavailable`, because the SDK `testing` module carries exactly one contract and a native run cannot emulate another.
 
@@ -76,7 +80,7 @@ Consequences for CI:
 - A pipeline that wants no drift MAY treat `test.harness-mismatch` as an error by checking the `warnings` field of the report. The harness has no flag that turns the warning into a failure.
 - Upgrading the SDK without the CLI, or the CLI without the SDK, is allowed inside one contract major. Across a major the run is refused, so a stale tool cannot report a pass against a host that it does not model.
 
-The mapping from each SDK `testing` version to the host contract versions that it matches is part of the release metadata of the SDK ([DEV-996]) and is repeated in the compatibility table of [SDK deprecation and removal](/pages/reference-sdk-deprecation/). The matching table for the CLI lists the contracts each CLI release embeds. Both are published with the release, and the CLI prints its own with `ilium plugin test --host-contract list` (proposed, owner to confirm).
+The mapping from each SDK `testing` version to the host contract versions that it matches is part of the release metadata of the SDK ([DEV-996]) and is repeated in the compatibility table of [SDK deprecation and removal](/pages/reference-sdk-deprecation/). The matching table for the CLI lists the contracts each CLI release embeds. Both are published with the release, and the CLI prints its own with `ilium plugin test --host-contract list`.
 
 ### Report file for CI
 
@@ -108,6 +112,12 @@ Parallel runs:
 - A CI pipeline may run several `ilium plugin test` processes at once, for example one per `--filter` set or one per project. Each process holds its own fake state ([DEV-428]), so the processes do not affect each other. Each process needs its own `--report` file.
 - Two processes MUST NOT run with `--update` on the same project, because both would rewrite the same golden files. CI never uses `--update` ([DEV-503]).
 - A CI host SHOULD run at most one harness process per CPU thread (proposed, owner to confirm). Extra processes slow every case, so a healthy plugin can fail with reason `timeout`.
+
+### Owner and traceability
+
+- **[DEV-223]** The test harness contract MUST have one owner page. The other page MUST keep only a summary and a link to the owner for each overlapping subject, and `_tools/check.py` MUST report any requirement ID that is defined on both pages.
+
+- **[DEV-224]** Each requirement ID of the harness MUST appear once in the requirement tables of the developer tooling reference, and the tables MUST be generated from the owner page bullets.
 
 ## See also
 

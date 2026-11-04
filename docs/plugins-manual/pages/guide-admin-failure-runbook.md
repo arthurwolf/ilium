@@ -22,13 +22,15 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 
 ### Triage by symptom
 
-| Symptom | Section | First command |
-|---|---|---|
-| A plugin traps, is slow, or shows `degraded` or `failed` | [Bad plugin](#bad-plugin) or [Watchdog timeouts](#watchdog-timeouts) | `ilium plugin status <id> --json` |
-| An update failed, or the plugin went back to an older version | [Failed update](#failed-update) | `ilium plugin status <id> --json` |
-| Ilium stops or restarts again and again at start | [Crash loop](#crash-loop) | `ilium --safe-mode=third-party` |
-| Requests from a plugin time out | [Watchdog timeouts](#watchdog-timeouts) | `ilium plugin status <id> --json` |
-| A publisher's signing key is known or suspected to be leaked | [Compromised signing key](#compromised-signing-key) | `ilium plugin trust list --json` |
+Each symptom has one severity level from the [operational severity scale](/pages/ops-incident-response/). Record that level in the incident record.
+
+| Symptom | Section | First command | Severity level |
+|---|---|---|---|
+| A plugin traps, is slow, or shows `degraded` or `failed` | [Bad plugin](#bad-plugin) or [Watchdog timeouts](#watchdog-timeouts) | `ilium plugin status <id> --json` | Level 3 |
+| An update failed, or the plugin went back to an older version | [Failed update](#failed-update) | `ilium plugin status <id> --json` | Level 3 |
+| Ilium stops or restarts again and again at start | [Crash loop](#crash-loop) | `ilium --safe-mode=third-party` | Level 2 |
+| Requests from a plugin time out | [Watchdog timeouts](#watchdog-timeouts) | `ilium plugin status <id> --json` | Level 3 |
+| A publisher's signing key is known or suspected to be leaked | [Compromised signing key](#compromised-signing-key) | `ilium plugin trust list --json` | Level 1 |
 
 ### Bad plugin
 
@@ -144,7 +146,7 @@ Audit events to look for: `grant-given`, `install`, `update`, `egress-host-first
 | Publisher silence before a blocklist entry | 30 days | [SEC-326](/pages/reference-security-response/) |
 | Emergency kill, server side (run on the machine) | 1 s after the command | [HST-517](#emergency-kill-switch-for-one-plugin) |
 | Emergency kill, each attached client | 5 s after the command | [HST-517](#emergency-kill-switch-for-one-plugin) |
-| Policy or blocklist change, running plugin | At the next server start; the policy is not reloaded in version 0.1.0 | [SEC-188](/pages/reference-admin-policy/) |
+| Policy or blocklist change, running plugin | At the next server start. A live reload that stops a running plugin within 10 seconds of the file change is proposed and not yet accepted by its owner; until then, the next start applies | [SEC-188](/pages/reference-admin-policy/) and [Stopping a blocked plugin now](/pages/reference-admin-policy/#stopping-a-blocked-plugin-now) |
 | Mirror sync to a machine without network | No interval is defined; `ilium plugin mirror sync` runs only when an administrator starts it | [PKG-410](/pages/reference-registry/) |
 | Bundle metadata on an air-gapped machine | `snapshot.json` should expire within 7 days; an expired bundle is refused unless `--offline` is given | [PKG-367, PKG-365](/pages/reference-registry/) |
 
@@ -237,6 +239,8 @@ Every section above tells you to "write it in the incident record". This section
 |---|---|---|
 | Incident id | One id from your change-record system, never reused. | Your change record. |
 | First noticed | Time `YYYY-MM-DD HH:mm:ss` with time zone, and how: user report, alert rule, the recovery page after the crash-loop guard, or an audit review. | Your own clock and the alert or ticket. |
+| Severity level | One level of the [operational severity scale](/pages/ops-incident-response/), taken from the triage table of this page, or a higher level if the impact is wider. | The triage table above. |
+| Acknowledged | Time `YYYY-MM-DD HH:mm:ss` with time zone when the named owner of the level accepted the incident, and the owner's name or role. | Your change record and the owner's reply. |
 | Machines | Each affected machine, with the host version from `ilium --version --verbose`. | The command on each machine. |
 | Plugins | Each plugin id with the installed version and the version before it. | `ilium plugin status <id> --json`. |
 | Audit sequence range | Per machine and user: first and last audit record of the incident, and the file it was exported to. Start at the first `install` or `update` of the affected version and stop at `plugin.killed`. | `ilium plugin audit --export <file>`, later checked with `--verify` against its anchor line ([SEC-449]). |
@@ -294,6 +298,7 @@ This section is target behaviour for the public plugin system. This section is f
 - [USR-960] An administrator MUST treat a support bundle as sensitive data and MUST send it outside the organisation only to the plugin's `security_contact` or the Ilium project contact, over a channel the organisation approves. Test: check the procedure against the recipient rule in the escalation path, and confirm the Open decisions row names the same recipients.
 - [USR-961] An administrator MUST keep a support bundle no longer than 90 days after the incident is closed (proposed, owner to confirm) and MUST delete every copy, including copies in tickets and mail, when that period ends. Test: keep a bundle copy past the period in a test ticket and assert that the retention row and the 14-day host cleanup of LIF-314 are both stated on the page.
 - [USR-962] Before a support bundle leaves the machine or the organisation, an administrator MUST read its `log.txt` and MUST NOT send the bundle while it holds personal data that the recipient is not entitled to receive. Test: give a fixture bundle with a personal name in `log.txt` to a reviewer and assert that the reviewer finds the procedure stops the transfer.
+- **[USR-966]** The incident record MUST store one severity level from the scale of [Operational incident response](/pages/ops-incident-response/), taken from the triage table of this page, and the time at which the owner of that level acknowledged the incident.
 
 ### Emergency kill switch
 

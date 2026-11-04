@@ -65,6 +65,8 @@ A **hash chain** links each record to the one before it by including the previou
 | `safe-mode` | The server started in safe mode |
 | `audit-reset` | The server recreated a deleted log file, with `prev_hash` of zeros |
 | `audit-dropped` | Records were dropped while the disk was full ([SEC-225]); written when space returns, with the count |
+| `advisory-acknowledged` | A user acknowledges a host advisory that names data loss or corruption, with the advisory id and the time ([USR-968] of [User troubleshooting](/pages/user-troubleshooting/)) |
+| `policy-reloaded` | A live reload of the system policy file changes the effective policy, with the file hash before and after ([Stopping a blocked plugin now](/pages/reference-admin-policy/#stopping-a-blocked-plugin-now)) |
 
 - **[SEC-096]** The kernel MUST write only `event` values listed in the catalogue of [SEC-222] or in a section of this page that extends it, and the catalogue MUST list every event the kernel can write, including `plugin-state-changed`, `crash-report`, `audit-torn`, `audit-retention-deleted`, the reasoned kill of [SEC-458] and the data-movement events, each with its trigger (proposed, owner to confirm).
 - **[SEC-131]** The kernel MUST write one `server-start` record at each server start, with `detail` holding the host version, the host API range and `prev=clean` or `prev=unclean` according to whether the previous run wrote `server-stop`, and one `server-stop` record at each orderly shutdown with `reason` set to `shutdown` or `kill-session`; both are added to the catalogue of [SEC-222] (proposed, owner to confirm).
@@ -154,6 +156,7 @@ Two pages gave two answers for where a crash record lives. [USR-229] says the se
 - A file is named `<kind>-<id>-<time>.json`. `<kind>` is `plugin`, `helper` or `host`. `<id>` is the plugin id, or `host` for a host crash. `<time>` is UTC `YYYYMMDDTHHMMSSZ`. If two records get the same name, the later one gets `-2`, `-3` and so on; no record overwrites another.
 - The content rules of [SEC-446] and [USR-227] apply: plugin id and version, side, reason, exit status, export name, host version and host frames, and no payloads, argument values, secrets or granted data. Core dumps are off ([SEC-445], [HST-519]); a dump an administrator enabled is never copied into this folder.
 - Each record written adds one `crash-report` audit record ([SEC-447], [SEC-222]) with `target` set to the file name.
+- **[OPS-235]** Every host crash record MUST contain the build id of the running server binary and the commit hash of its source. For host records these two fields extend the field list of [SEC-446], and the redaction test of SEC-446 still applies (proposed, owner to confirm).
 
 **Retention.** The rule is [SEC-955]: a record is deleted when more than 30 days old, and when more than 200 exist the oldest are deleted until 200 remain ([USR-228]). Both values are proposed, owner to confirm. The 14 days in [SEC-447] are superseded. `ilium plugin uninstall <id>`, with or without `--purge`, deletes every crash record of that plugin at once ([SEC-955]); `--keep-data` does not keep them. Host records (`host-host-<time>.json`) belong to no plugin and are removed only by age or count.
 
@@ -197,6 +200,19 @@ The catalogue of [SEC-222] covers installs, grants, consent, trust and block eve
 - If the audit file cannot be written, the command still completes and the record is queued and retried under [SEC-225]; `data-export` and `erase-data` records are not among the types dropped first.
 - If the process is killed after moving data and before the record is written, the next server start finds no record. The command prints the same facts on its standard output before it exits, so the operator has them; this gap is why the record is written before the command prints its final line where possible.
 - `--dry-run` and read-only listings (`data-report`) write `data-report` once but no record for a dry-run restore.
+
+## Integrity anchors
+
+A hash chain alone does not stop an attacker who can rebuild the whole file ([SEC-226]). Checkpoints add a signature that the file cannot produce by itself. The signing key is held in the secrets store ([SEC-241]), so an attacker with write access to `audit.jsonl` cannot re-sign a rebuilt chain without also reading that store.
+
+A checkpoint is a record with the event `checkpoint`, added to the catalogue of [SEC-222]. It carries `seq` (the last record it covers), `last_hash` (the hash of that record) and `signature`, an Ed25519 signature over the JSON Canonicalization Scheme form of the other fields. The server also writes one checkpoint at each start, so every run begins with a signed anchor for the records that came before it.
+
+- **[SEC-986]** The kernel MUST write a signed `checkpoint` record to `audit.jsonl` at least every 1,000 records and at each server start, carrying the last `seq`, the last hash and a signature made with a key held in the secrets store.
+- **[SEC-987]** `ilium plugin audit --verify` MUST check every checkpoint and MUST print `checkpoint-missing` or `checkpoint-invalid` with the first affected `seq` when a checkpoint is absent or fails verification, and it MUST exit with code 3.
+
+Test for [SEC-986]: start the server, write 2,500 records, and assert one signed checkpoint at the start and one at or after `seq` 1,000 and at or after `seq` 2,000. Test for [SEC-987]: delete the checkpoint that covers `seq` 1,000 and assert `checkpoint-missing 1000` with exit code 3; change one byte of a checkpoint signature and assert `checkpoint-invalid` with its `seq`.
+
+If the key does not exist at the first start, the kernel creates it in the secrets store before it writes the first checkpoint. If the secrets store cannot be used, the kernel queues checkpoints under [SEC-225] and reports `checkpoint-missing` until they are written.
 
 ## Requirement statements
 

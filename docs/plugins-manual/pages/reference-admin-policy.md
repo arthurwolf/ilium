@@ -129,6 +129,8 @@ keep_days = 365
 | `audit.sink`, `max_mib`, `keep_days` | | file, 64, 365 | See [Audit log](/pages/reference-audit-log/) |
 | `packages.blocked_versions` | list of `id@version` | none | Exact versions refused with `policy.version-denied` (proposed, owner to confirm; see [SEC-951]) |
 | `packages.pinned_versions` | table, id to version | none | The only version of that id that may be installed or run (proposed, owner to confirm; see [SEC-952]) |
+| `packages.min_review_level` | `A` or `B` | `A` | Install and update refuse a version whose review level is lower, with `policy.review-level-too-low` (proposed, owner to confirm; see [SEC-207]) |
+| `publishers.require_verified` | bool | `false` | `true` refuses install and update of a publisher whose domain is not verified, with `policy.publisher-unverified` (proposed, owner to confirm; see [SEC-208]) |
 
 ## Evaluation
 
@@ -191,6 +193,10 @@ Today a policy edit reaches a running server only at its next start ([SEC-188]).
 
 Test: deny the id of a running plugin in the system file, run `ilium plugin policy reload`, and assert within 60 seconds that the plugin is `disabled-by-policy`, that its host calls return `not-permitted` with reason `policy`, and that the audit log holds `policy-violation` and `plugin-state-changed`. Then remove the deny entry, reload, and assert that the plugin is enabled again without user action.
 
+**[OPS-231]** While the server runs, the host MUST detect a change of the system policy file within 10 seconds of the change. For each running plugin that the new effective policy blocks through `plugins.deny_ids`, `packages.allowed_tiers`, `packages.allow_third_party` or a publisher rule, the host MUST deactivate every running instance of that plugin within the times of [HST-517](/pages/reference-requirements-kernel-host/) after the detection, with the reason `policy` (proposed, owner to confirm).
+
+**[OPS-232]** Each live reload that changes the effective policy MUST write one audit record `policy-reloaded` that holds the SHA-256 hash of the system policy file before the change and after it (proposed, owner to confirm).
+
 ### Previewing a policy change
 
 `ilium plugin policy show` ([SEC-191]) prints the merged values, but not which installed plugins, grants or settings those values would change. The command below is a proposal (proposed, owner to confirm) that fills that gap. It is the preview step to run before the first ring of a rollout in [Administration](/pages/guide-administration/).
@@ -235,6 +241,10 @@ Test: write a candidate that denies one installed plugin id and one grant the pl
 **[SEC-951]** (proposed, owner to confirm) An entry of `packages.blocked_versions` has the form `<id>@<version>` with an exact version. A package whose id and version match an entry MUST be refused at install and update with `policy.version-denied`. An installed copy of a blocked version MUST be disabled at the next server start, with the notice `Disabled by your administrator` ([SEC-186]), and its data MUST be kept. The other versions of the same id are not affected. Test: block `example.pane-tools@2.0.0`, assert that 2.0.1 installs, that 2.0.0 is refused, and that an installed 2.0.0 is disabled at the next start.
 
 **[SEC-952]** (proposed, owner to confirm) An entry of `packages.pinned_versions` names one version for one id. Install and update of that id MUST install only the pinned version, and a different installed version MUST NOT run; the refusal code is `policy.version-pinned`. A pin never removes data. Test: pin `example.pane-tools` to 1.4.2, attempt an update to 2.0.1 and assert the refusal, then remove the pin and assert the update succeeds.
+
+**[SEC-207]** (proposed, owner to confirm) `packages.min_review_level` accepts `A` or `B`. Install and update MUST refuse a version whose `review_level` ([PKG-684]) is lower than the setting, with `policy.review-level-too-low`. The key checks installs and updates only and does not disable an installed copy.
+
+**[SEC-208]** (proposed, owner to confirm) When `publishers.require_verified` is `true`, install and update MUST refuse a publisher whose `publisher_verified` ([PKG-087]) is `false`, with `policy.publisher-unverified`. When the key is `false`, which is the default, the flag does not affect install.
 
 ### Audit retention and the storage ceiling
 

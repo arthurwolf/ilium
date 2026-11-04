@@ -108,6 +108,12 @@ The entry is named `signature` and holds a UTF-8 JSON document.
 | [PKG-215] | `publisher_id` follows the grammar below. `publisher` is a display name of 1 to 64 characters with no control and no bidirectional-override characters. |
 | [SEC-722] | Signing keys MUST be Ed25519 with a validity of at most 2 years (proposed, owner to confirm); the registry MUST refuse a publish signed with an expired key, and the CLI MUST warn from 60 days (proposed, owner to confirm) before expiry with a command to rotate. |
 
+### Publisher key custody
+
+A plain key file is a key that anyone who reads it can use. The rules below set a minimum custody level that the tooling checks. They do not replace the external signer of [Signing with a hardware token](#signing-with-a-hardware-token-or-an-external-signer), which is the stronger option.
+
+- **[SEC-994]** `ilium plugin sign` MUST refuse a `publisher.key` file that is readable by group or others or that has no passphrase, with `sign.key-permissions` or `sign.key-unprotected`, unless `--allow-plain-key` is given; when the flag is given, the run MUST write one audit line with the code `sign-plain-key` on standard error and MUST still sign.
+
 **Fingerprint display.** The stored form is the 64-character hex string. The display form groups it in 16 groups of 4 characters separated by single spaces, and the dialog splits it into two lines of 8 groups. [PKG-216] A dialog or prompt that asks the user to trust a key MUST show all 64 characters. It MUST NOT show a truncated fingerprint as the only identification. A short form (the first 8 characters) MAY appear next to the full form in lists.
 
 ### Signing with a hardware token or an external signer

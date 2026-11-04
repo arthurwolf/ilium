@@ -105,6 +105,16 @@ A registry takes down version 0.2.0 of `com.example.old-tools` at 09:40. The mir
 
 The mirror is within the 6-hour window of [PUB-022](#propagating-yanks-and-takedowns). Clients that refresh metadata after 12:15 move the matching installed copies to `disabled-blocked` ([PKG-403](/pages/reference-registry/#policy)).
 
+### Redistribution of paid and licensed plugins
+
+Some plugins are sold, or check a licence key, and their seller grants use under end-user terms ([Paid and licensed plugins](/pages/reference-registry/#paid-and-licensed-plugins)). A copy of such a plugin on a mirror is a second copy that the seller did not hand out. Copying the blob is not a licence to serve it. The registry marks these versions with `licensing: true` in the index.
+
+A sync therefore skips them by default. The operator decides per plugin whether to serve it, and only with the seller's permission on record.
+
+**[PKG-995]** (proposed, owner to confirm) A mirror operator MUST NOT serve a version whose `licensing` field is `true` unless the operator holds the seller's written permission to redistribute it. The operator MUST keep that permission in a private record of the operator, and the registry and the mirror MUST NOT publish it.
+
+**[PKG-996]** (proposed, owner to confirm) `ilium plugin mirror sync` MUST skip blobs whose `licensing` is `true` by default, and MUST copy them only when the flag `--include-licensed` is given. A sync that skips a blob MUST list the plugin id and version in its output, and the mirror MUST re-sign its `index.json` and `snapshot.json` as a partial mirror under [PKG-409].
+
 ### Edge cases
 
 - **The source changes its root key.** The mirror keeps the old root until the operator re-pins the key on purpose. A new root key on the source is a key rotation, and the procedure is in [Release key compromise](/pages/reference-release-key-compromise/) for the project key. For a third-party registry, follow that registry's notice.

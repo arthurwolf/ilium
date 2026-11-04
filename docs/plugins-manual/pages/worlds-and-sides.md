@@ -34,7 +34,7 @@ The table below is generated from section 9 of [WIT reference](/pages/reference-
 | Imports | Server | Client | Scene |
 |---|---|---|---|
 | `log`, `telemetry`, `clock`, `storage`, `codec`, `fs`, `http`, `jobs`, `geocode` | yes | yes | yes |
-| `timers`, `journal`, `tree`, `panes`, `intents-host`, `settings`, `process`, `inference`, `vector`, `sounds`, `topics`, `commands`, `services`, `catalogs`, `kernel-settings`, `client-requests`, `extensions`, `terminal`, `agent` | yes | yes | no |
+| `self-limits`, `self-describe`, `timers`, `journal`, `tree`, `panes`, `intents-host`, `settings`, `process`, `inference`, `vector`, `sounds`, `topics`, `commands`, `services`, `catalogs`, `kernel-settings`, `client-requests`, `extensions`, `terminal`, `agent` | yes | yes | no |
 | `cli`, `http-api`, `workspace`, `sessions` | yes | no | no |
 | `audio`, `media`, `location`, `gpu` | no | yes | yes |
 | `ui-host`, `keys`, `clipboard`, `help`, `plugins`, `keymap`, `editor`, `basic` | no | yes | no |

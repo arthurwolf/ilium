@@ -221,6 +221,8 @@ Each step fails with an exit code and, with `--json`, an `error` record. The tab
 
 - **[DEV-743]** A CI log MUST be enough to find the cause without a terminal. Every `error` record MUST carry `code`, `message` and, when known, `fix`.
 
+When the conformance step fails, read the `conformance` record whose `verdict` is `fail`. Its `remediation` field names the manifest key, SDK item or export that most often causes that case to fail. The full list of lines is in [Remediation by case](/pages/reference-conformance-suite/#remediation-by-case). Copy the line into the CI log summary so that the failure can be read without opening the report file.
+
 ## Matrix builds
 
 A plugin that supports two languages or two sides builds each in its own job so a failure names the part. The `build` command takes `--side`. A matrix over `side: [server, client]` runs `ilium plugin build --release --side ${{ matrix.side }}`, and a final job runs `pack` on the merged `dist/` folder. `pack` MUST refuse a `dist/` folder that misses a declared side with `pack.not-built`.

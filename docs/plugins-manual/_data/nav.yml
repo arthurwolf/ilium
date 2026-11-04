@@ -121,6 +121,12 @@
   url: /pages/api-services/
 - title: plugin to plugin
   url: /pages/api-plugin-to-plugin/
+- title: telemetry
+  url: /pages/api-telemetry/
+- title: self limits
+  url: /pages/api-self-limits/
+- title: self description
+  url: /pages/api-self-describe/
 - title: extension points
   url: /pages/api-extension-points/
 - title: settings
@@ -165,11 +171,11 @@
   url: /pages/capability-agent-signatures/
 - title: Always-granted capabilities
   url: /pages/capability-always-granted/
-- title: Capability: audio
+- title: "Capability: audio"
   url: /pages/capability-audio/
-- title: Capability: cli.contribute
+- title: "Capability: cli.contribute"
   url: /pages/capability-cli-contribute/
-- title: Capability: clipboard
+- title: "Capability: clipboard"
   url: /pages/capability-clipboard/
 - title: commands.invoke
   url: /pages/capability-commands-invoke/
@@ -179,39 +185,39 @@
   url: /pages/capability-editor-provide/
 - title: editor.read
   url: /pages/capability-editor-read/
-- title: Capability: fs.pick
+- title: "Capability: fs.pick"
   url: /pages/capability-fs-pick/
 - title: fs.read:<scope>
   url: /pages/capability-fs-read/
-- title: Capability: fs.watch
+- title: "Capability: fs.watch"
   url: /pages/capability-fs-watch/
-- title: Capability: fs.write
+- title: "Capability: fs.write"
   url: /pages/capability-fs-write/
-- title: Capability: help.read
+- title: "Capability: help.read"
   url: /pages/capability-help-read/
-- title: Capability: http
+- title: "Capability: http"
   url: /pages/capability-http/
-- title: Capability: http-api.route
+- title: "Capability: http-api.route"
   url: /pages/capability-http-api-route/
-- title: Capability: inference
+- title: "Capability: inference"
   url: /pages/capability-inference/
-- title: Capability: inference.provide
+- title: "Capability: inference.provide"
   url: /pages/capability-inference-provide/
-- title: Capability: jobs.run
+- title: "Capability: jobs.run"
   url: /pages/capability-jobs-run/
 - title: keys.intercept
   url: /pages/capability-keys-intercept/
-- title: Capability: location.observer
+- title: "Capability: location.observer"
   url: /pages/capability-location-observer/
-- title: Capability: media.video
+- title: "Capability: media.video"
   url: /pages/capability-media-video/
-- title: Capability: messages.peer
+- title: "Capability: messages.peer"
   url: /pages/capability-messages-peer/
-- title: Capability: extensions.provide
+- title: "Capability: extensions.provide"
   url: /pages/capability-extensions-provide/
-- title: Capability: extensions.contribute
+- title: "Capability: extensions.contribute"
   url: /pages/capability-extensions-contribute/
-- title: Capability: notify.desktop
+- title: "Capability: notify.desktop"
   url: /pages/capability-notify-desktop/
 - title: panes.create
   url: /pages/capability-panes-create/
@@ -221,15 +227,15 @@
   url: /pages/capability-panes-read/
 - title: panes.signal
   url: /pages/capability-panes-signal/
-- title: Capability: plugins.manage
+- title: "Capability: plugins.manage"
   url: /pages/capability-plugins-manage/
-- title: Capability: process.run
+- title: "Capability: process.run"
   url: /pages/capability-process-run/
-- title: Capability: services
+- title: "Capability: services"
   url: /pages/capability-services/
-- title: Capability: settings.read-all and settings.write-all
+- title: "Capability: settings.read-all and settings.write-all"
   url: /pages/capability-settings-all/
-- title: Capability: sound.play
+- title: "Capability: sound.play"
   url: /pages/capability-sound-play/
 - title: terminal.output-filter
   url: /pages/capability-terminal-output-filter/
@@ -239,7 +245,7 @@
   url: /pages/capability-terminal-read-screen/
 - title: terminal.write
   url: /pages/capability-terminal-write/
-- title: Capability: topics.subscribe
+- title: "Capability: topics.subscribe"
   url: /pages/capability-topics-subscribe/
 - title: tree.decorate
   url: /pages/capability-tree-decorate/
@@ -251,7 +257,7 @@
   url: /pages/capability-tree-write/
 - title: ui.panels
   url: /pages/capability-ui-panels/
-- title: Capability: workspace.manage
+- title: "Capability: workspace.manage"
   url: /pages/capability-workspace-manage/
 - title: Capability table
   url: /pages/reference-capabilities/
@@ -299,17 +305,17 @@
   url: /pages/tutorial-16-remember-a-counter/
 - title: 17. A help topic and a custom sound
   url: /pages/tutorial-17-help-and-sound/
-- title: 18. Offer an extension point: a link preview plugin
+- title: "18. Offer an extension point: a link preview plugin"
   url: /pages/tutorial-18-add-an-extension-point/
-- title: 19. Stop core actions with hooks: quiet hours
+- title: "19. Stop core actions with hooks: quiet hours"
   url: /pages/tutorial-19-stop-core-actions-with-hooks/
-- title: 20. Extend six core plugins from one package: a team pack
+- title: "20. Extend six core plugins from one package: a team pack"
   url: /pages/tutorial-20-extend-six-core-plugins/
-- title: 21. Replace a core plugin: Titles Lite
+- title: "21. Replace a core plugin: Titles Lite"
   url: /pages/tutorial-21-replace-a-core-plugin/
 - title: 22. A versioned service with fallbacks
   url: /pages/tutorial-22-versioned-service-with-fallbacks/
-- title: 23. Drive the fleet: a review swarm
+- title: "23. Drive the fleet: a review swarm"
   url: /pages/tutorial-23-review-swarm/
 - title: Extending Settings
   url: /pages/settings-extension/
@@ -503,6 +509,8 @@
   url: /pages/guide-ci-recipes/
 - title: "Compatibility and upgrades"
   url: /pages/guide-compatibility-and-upgrades/
+- title: "Support two host minors"
+  url: /pages/guide-supporting-two-host-minors/
 - title: "Guide, data migration"
   url: /pages/guide-data-migration/
 - title: "Enterprise deployment"
@@ -649,6 +657,8 @@
   url: /pages/reference-sandbox/
 - title: "Secrets"
   url: /pages/reference-secrets/
+- title: "Open security decisions"
+  url: /pages/reference-security-open-decisions/
 - title: "Security response"
   url: /pages/reference-security-response/
 - title: "Security testing"
@@ -715,6 +725,10 @@
   url: /pages/publish-mirror-runbook/
 - title: "Registry operator guide"
   url: /pages/publish-registry-operator-guide/
+- title: "Legal requests"
+  url: /pages/publish-legal-requests/
+- title: "Registry conformance"
+  url: /pages/publish-registry-conformance/
 - title: "Containing a malicious plugin"
   url: /pages/security-containment-states/
 - title: "Load and refusal decisions across host versions"
@@ -731,6 +745,8 @@
   url: /pages/ops-telemetry-consent/
 - title: "Crash isolation, health checks and the kill switch"
   url: /pages/ops-crash-isolation-health-and-kill-switch/
+- title: "Operational incident response"
+  url: /pages/ops-incident-response/
 - title: "Sizing memory and CPU"
   url: /pages/perf-sizing-memory-and-cpu/
 - title: "Power, battery and thermal behaviour"

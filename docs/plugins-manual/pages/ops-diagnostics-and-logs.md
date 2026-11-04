@@ -19,8 +19,9 @@ This page is the operator's procedure for reading plugin logs, building a diagno
 | Data | Where | Who can read it | Leaves the machine |
 |---|---|---|---|
 | Plugin log lines (written by the plugin and by the host) | `ilium plugin logs <id>` reads them | The user running Ilium | Only when someone copies the file |
-| Diagnostics log file (file logging on) | `/tmp/.ilium-<uid>/logs/<session-id>/` on Linux and macOS, `%LOCALAPPDATA%\ilium\logs` on Windows | The user running Ilium | Only when someone copies the file |
-| Diagnostics report | Built on demand by the `build-report` command | The user who built it | Only when the user attaches it |
+| Diagnostics log file (file logging on) | `/tmp/.ilium-<uid>/logs/<session-id>/` on Linux and macOS, `%LOCALAPPDATA%\ilium\logs` on Windows, or the folder set by `[diagnostics] log_dir` (OPS-226) | The user running Ilium | Only when someone copies the file |
+| Host log file (host-scope lines, file logging on or off) | `<state>/host/host.log` | The user running Ilium | Only when someone copies the file |
+| Diagnostics report | Built on demand by the `build-report` command, at the path given with `--out`, or in `<state>/reports/` when no path is given ([OPS-238]) | The user who built it | Only when the user attaches it |
 | Telemetry counters | In the process and the local log | The user running Ilium | Never (HST-350) |
 | Crash records | `<state>/crashes/` | The user running Ilium | Only by the export command |
 
@@ -39,6 +40,14 @@ The path rules of the log folder, including the `ILIUM_DEBUG_LOG_DIR` override a
 - **[OPS-009]** The report MUST be at most 262144 bytes in total, and each section MUST be at most 65536 bytes. A section that is larger MUST be cut to 65536 bytes and end with the line `[section truncated]`, and the report MUST say which section was cut. Test: a section plugin that returns 70000 bytes; assert the cut and the marker. (Proposed, owner to confirm: the marker text.)
 - **[OPS-010]** The default log threshold MUST be `info`. Entries at `debug` and `trace` MUST NOT appear in `ilium plugin logs` unless the threshold is raised for the plugin, and the threshold MUST return to `info` when the server restarts. Test: write one `debug` entry, read the log, raise the threshold, write again, and restart.
 - **[OPS-017]** The host MUST create `/tmp/.ilium-<uid>/` and its `logs/<session-id>/` folders with mode 0700 owned by the running user and each log file with mode 0600, MUST NOT follow a symbolic link at any of those paths, and MUST refuse to write the diagnostics log, showing `log directory not writable: <path>` instead, when the root folder exists with another owner, with a wider mode or as a link (proposed, owner to confirm). Test: pre-create `/tmp/.ilium-<uid>` as a symlink to a scratch folder, enable file logging, and assert the notice, no file in the scratch folder and the server still running; then remove the link, re-enable and `stat` the created folders and file for 0700 and 0600.
+- **[OPS-226]** The host MUST accept a diagnostics log folder inside the state folder, set with `[diagnostics] log_dir` in `config.toml`, and MUST use it in place of `/tmp/.ilium-<uid>/logs` when the key is set, with the modes of OPS-017. A path outside the state folder MUST be refused, the host MUST keep the default folder, and it MUST show a warning that names the key.
+- **[OPS-227]** When the server starts, the host MUST delete each diagnostics log file whose newest line is older than 30 days (proposed, owner to confirm), and MUST NOT delete the five newest files of the session.
+- **[OPS-228]** The host MUST write every line whose code starts with `host.` to `<state>/host/host.log`, whether or not diagnostics file logging is on, with mode 0600, and MUST keep at most four rotated files of 4 MiB each.
+- **[OPS-238]** `build-report` MUST write the report only to the path given with `--out <file>`, or, when no path is given, to `<state>/reports/` with folder mode 0700 and file mode 0600. It MUST NOT write the report into a plugin data folder (proposed, owner to confirm).
+- **[OPS-239]** `ilium plugin doctor` MUST list each saved report older than 30 days (proposed, owner to confirm) with its path and size, and MUST NOT delete it.
+- **[OPS-240]** The host MUST append one integrity record to a sidecar file named `<log file>.manifest.jsonl`, with mode 0600, after every 1,000 lines of a plugin log or a diagnostics log and at each rotation of that log. Each record holds the number of lines so far, the SHA-256 hash of the log file up to that line, and the time in `YYYY-MM-DD HH:mm:ss`. `ilium plugin logs --verify` MUST print `ok` when every record matches the log. Otherwise it MUST print `mismatch` with the log file name and the line count of the first record whose hash does not match, and MUST exit with code 1 (proposed, owner to confirm).
+- **[OPS-241]** A manifest record MUST NOT contain log text or any other field of a log line (proposed, owner to confirm).
+- **[OPS-229]** The host threshold for lines whose code starts with `host.` MUST default to `info`, MUST be set with `[diagnostics] host_level`, and a change MUST take effect without a restart, as OPS-002 requires for file logging.
 - **[OPS-018]** A diagnostics log file MUST NOT grow past 64 MiB. When the cap is reached the host MUST write one final line `[log cap reached, further lines dropped]`, MUST stop appending to that file for the rest of the server lifetime, MUST count the dropped lines, and MUST show the count in the diagnostics report (proposed, owner to confirm). Test: enable file logging, write lines until the file reaches the cap, and assert that the file ends with the marker line, that its size stays within 64 MiB plus one line after 1,000 more writes, and that the report shows the dropped count.
 
 ### Triage procedure
@@ -67,6 +76,8 @@ A plugin `example.kanban` shows `degraded` after a deploy. The operator follows 
 The log shows the deadline trap as the cause. The operator then reads the plugin's own version and the build of the deploy, not the Ilium logs. A report is not needed for this case, so nothing leaves the machine.
 
 ### Edge cases
+
+- **Lines after the last integrity record.** Lines written after the last record of [OPS-240] are not covered until the next record or rotation, so `ilium plugin logs --verify` cannot show an edit to them. Copy the log and its manifest together when you need evidence.
 
 - **The log folder is full.** Files are kept at five per session (OPS-001). A full disk is a host failure; the operator frees space in the state folder and does not delete the open log file.
 - **The server restarted during the incident.** Logs of the earlier server lifetime are in their own file. Read the file whose start time matches the incident, not the newest file.

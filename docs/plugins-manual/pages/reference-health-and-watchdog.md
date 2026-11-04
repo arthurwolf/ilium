@@ -170,6 +170,10 @@ The rules above fire on one plugin's counters. The conditions below take a whole
 | `lock.takeover` | `lock.takeover` log line ([HST-697]) | any takeover | Audit record with the old holder's pid and boot id, `ilium plugin alerts` | acknowledged by `ilium plugin alerts --ack`, or 24 hours |
 | `handles.rising` | session handle count against the limit of [HST-128] | above 80 percent of the limit for 5 minutes | Footer notice, audit record, `ilium plugin alerts` | below 70 percent for 5 minutes |
 | `recovery.completed` | `recovery.completed` log line with its count ([HST-679]) after a start in which the crash-loop guard changed level ([LIF-294], [LIF-980]) | once per such start | Footer notice, audit record, `ilium plugin alerts` | acknowledged, or 24 hours. It reports a past event and is not a fault |
+| `ceiling.rejected` | `ilium_host_ceiling_rejections_total`, any label `limit` ([HST-500] to [HST-511]) | 1 or more refusals in 10 minutes (proposed, owner to confirm) | Audit record, `ilium plugin alerts` | 10 minutes with no refusal |
+| `observability.dropped` | `ilium_host_observability_dropped_total`, any label `source`, and the `host.observability.dropped` line ([HST-643]) | 1 or more records dropped in 10 minutes (proposed, owner to confirm) | Footer notice, `ilium plugin alerts` | 10 minutes with no new drop |
+| `memory.pool.high` | `ilium_host_memory_pool_used_bytes` against `ilium_host_memory_pool_ceiling_bytes` ([HST-500]) | above 90 percent of the ceiling for 5 minutes (proposed, owner to confirm) | Footer notice, audit record, `ilium plugin alerts` | below 80 percent for 5 minutes |
+| `host.crash` | a new host crash record in `<state>/crashes/` | any new record | Audit record, `ilium plugin alerts` | acknowledged by `ilium plugin alerts --ack`, or 24 hours |
 
 Rules for these alerts. The wording of the rules is proposed:
 
@@ -180,6 +184,9 @@ Rules for these alerts. The wording of the rules is proposed:
 - Failure modes: if the audit log cannot be written, the alert still shows in the footer and in `ilium plugin alerts`, and `audit.dropped` fires. If the series cannot be read, the alert shows `no data` and is never reported as clear.
 
 Test for LIF-952 extended to host alerts: with the fixture host, block the loop three times, kill a helper three times, fill the volume to each step, overflow the audit queue, force two engine recycles, take over a stale lock, raise the handle count to 81 percent, and finish a recovery after a crash-loop level change. Assert that each alert fires at its threshold and not before, and clears under its clearing condition.
+
+- **[LIF-990]** An administrator who monitors the host MUST alert on each host row of the operator alert table at the threshold stated in its row, including the rows for loop stalls, ceiling rejections, disk pressure steps, dropped observability records, memory pool use and host crash records.
+- **[LIF-991]** A host alert MUST NOT be resolved because a counter fell after a restart, as LIF-954 requires for plugin alerts, and it MUST stay open until a sample taken after the restart shows its condition cleared.
 
 ### Edge cases
 
@@ -291,3 +298,5 @@ Target behaviour of the production plugin system.
 - **[LIF-956]** An operator alert MUST NOT be silenced by `ilium plugin mute <id>`, because that command mutes only the user notification of HST-641.
 - **[ABI-079]** Every ABI trap and every ABI refusal code MUST produce a log record with the stable fields `plugin`, `code` and `phase`.
 - **[ABI-080]** The host MUST expose a counter per ABI code, labelled by plugin id, so an operator can alert on ABI-class failures without parsing messages.
+- **[OPS-233]** `ilium plugin health --json` MUST print one JSON line per installed plugin with the fields `id`, `version`, `side`, `state`, `reason` and `restarts_10m`, and MUST keep the exit codes of [HST-617](/pages/reference-health-and-watchdog/). `state` is the health value of the first table, `reason` is the reason of its matching row or `null`, `side` is `server` or `client` when the matching row names a side and `none` otherwise, and `restarts_10m` is the number of restarts of the plugin's sides in the last 10 minutes, the window of [LIF-134](/pages/reference-health-and-watchdog/) (proposed, owner to confirm).
+- **[OPS-234]** The `--json` output of `ilium plugin health` MUST contain no log text and no plugin data, MUST write the fields of OPS-233 in that order on every line, and MUST keep the field names and their order across releases within one ABI major version (proposed, owner to confirm).

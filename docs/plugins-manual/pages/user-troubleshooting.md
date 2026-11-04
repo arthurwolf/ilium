@@ -210,6 +210,20 @@ If you think Ilium itself is at fault, for example a plugin could do something i
 | Two problems at once | Fix one, restart, then check again. Bisect finds one plugin at a time |
 | The registry cannot be written | The action fails with `io`, and the state stays as it was |
 
+## Advisories that may affect your data
+
+Some host defects lose or corrupt data without stopping Ilium. When the project publishes an advisory of that kind, Ilium shows it in two places until you acknowledge it.
+
+- The status bar shows a badge with the advisory id and the words `data may be affected`. This badge is separate from the security badge of an update advisory.
+- The Diagnostics tab shows a link to the advisory text.
+
+Read the advisory first. If it names your version, follow its steps to check your data. Acknowledging the advisory only records that you have read it; it does not repair anything.
+
+### Requirements
+
+- **[USR-967]** When the project publishes a host advisory that names data loss or corruption, the host MUST show the advisory id and the words `data may be affected` in the status bar until the user acknowledges it, and the Diagnostics tab MUST show the link to the advisory.
+- **[USR-968]** The acknowledgement MUST be recorded in the audit log as `advisory-acknowledged` with the advisory id and the time, as the audit log reference lists it.
+
 ## Host upgrade user experience requirements
 
 - [USR-254] When an Ilium upgrade makes an installed plugin API-incompatible, the host MUST keep the plugin installed, set its state to `Incompatible`, and not load it. Test: Upgrade to a host with a newer incompatible API and assert the state word and that the plugin is not running.

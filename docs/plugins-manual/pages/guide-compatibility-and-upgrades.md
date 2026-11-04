@@ -173,6 +173,8 @@ A plugin that needs another plugin declares it in `requires` with a range. The r
 
 A plugin MUST declare a `requires` range no wider than the versions it was tested with. [AUT-212]
 
+The tools enforce this rule from the test record. `ilium plugin build` writes into `dist/build.json` the host contract versions that passed `test --conformance` on the same component, and `ilium plugin pack` refuses a `requires` range that admits any other version. The exact keys and the refusal code are in the [Plugin command-line reference](/pages/reference-plugin-cli/).
+
 A plugin that provides a service or an extension point MUST raise the major version of the point when it changes the payload incompatibly, and MUST keep the old major working for as long as it lists the old major as supported. [AUT-213]
 
 ## Worked example: from 1.4.0 to 2.0.0

@@ -137,6 +137,24 @@ export const { lifecycle, handler, views, catalogProvider, tokenProvider } = def
 
 The Rust attribute takes `side` (`"server"`, `"client"` or `"scene"`, required) and `exports` (the manifest names). A listed export without its trait implementation is a compile error, and the struct must implement `Default`. In TypeScript, `definePlugin` takes `side` and the members you implement; the returned names are the interface names in camelCase, and the entry module must export exactly the names the manifest lists plus `lifecycle` and `handler`.
 
+## Host information and unstable features
+
+The host reports its api version, its build id, the unstable features it enables and the limits in effect through the `host-info` import ([ABI-119](/pages/reference-abi-evolution/)). The SDK wraps that import in one typed function, `hostInfo()`, which returns the same result type as the other host calls in [Calls, requests and errors](#calls-requests-and-errors). It never throws for a host error: the error is the result. The fields are `apiVersion`, `buildId`, `unstableFeatures` and `limits`, as in the [Rust SDK reference](/pages/rust-sdk/#host-information-and-unstable-features), whose requirements [API-217] and [API-218] also apply here.
+
+A plugin checks the feature name before it calls the feature, and runs its fallback when the name is absent:
+
+```ts
+import { hostInfo } from '@ilium/plugin-sdk';
+
+export function calendarEnabled(): boolean {
+  const info = hostInfo();
+  if (!info.ok) return false;
+  return info.value.unstableFeatures.includes('ui-calendar');
+}
+```
+
+The fallback is the plugin's own code path, for example a plain list in place of the calendar. Test it with the `testing` module: give the fake host an empty `unstableFeatures` list and assert that the plugin takes the fallback and makes no call to the feature.
+
 ## Modules, import paths and names
 
 Each WIT package maps to one Rust module and one TypeScript subpath. One rule covers every name: WIT kebab-case becomes snake_case for Rust functions, fields and modules, camelCase for TypeScript functions and fields, UpperCamelCase or PascalCase for types, and kebab-case strings for TypeScript variant tags and enum values.

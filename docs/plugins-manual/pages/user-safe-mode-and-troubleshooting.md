@@ -93,7 +93,7 @@ The crash-loop guard above covers only crashes during start. This section covers
 
 **What the host does.** The server installs a panic hook before it loads any plugin. On a panic the hook writes one **host crash record** to the crash folder, then exits with a non-zero status. The crash folder is the 0700 folder beside the audit directory, and the record has mode 0600 (SEC-447). A record holds only:
 
-- the Ilium version and build digest;
+- the Ilium version, the build id and the commit hash of the running server ([OPS-235](/pages/reference-audit-log/#crash-record-location-one-rule));
 - the operating system and architecture;
 - the name of the panicking thread;
 - the backtrace, as host frames only;
@@ -113,6 +113,7 @@ It holds the same kinds of fields as a plugin crash record (SEC-446): no plugin 
 - `ilium plugin crashes --host` lists every host crash record, newest first, one JSONL record per line with the time, version and path. Without `--host` the command lists plugin and helper records only.
 - Host crash records are deleted after 14 days (SEC-447). SEC-955 proposes 30 days and a limit of 200 records, and the owner is to align the two. Uninstalling a plugin never deletes host records, because they belong to no plugin.
 - Nothing is sent anywhere unless you run the explicit export command (SEC-447).
+- **[OPS-237]** `ilium plugin doctor` MUST print the build id of the last host crash on the same line as the time of that crash (proposed, owner to confirm).
 
 **In a bug report.** Attach the host crash record file named in the notice or in `ilium plugin crashes --host`, together with the output of `ilium plugin doctor`. Read the record first: it holds log lines, so remove anything you do not want to share. Report through the contact in [Security response](/pages/reference-security-response/) if you think the crash is a security fault. See also [Troubleshooting](/pages/user-troubleshooting/).
 

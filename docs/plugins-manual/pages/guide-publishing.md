@@ -195,6 +195,10 @@ The package has a `NOTICE` file next to `LICENSE`. For each bundled asset it giv
 
 **[PUB-068]** A use restriction in an asset licence, such as a limit to non-commercial use or to a field of use, MUST appear in `NOTICE` in the words of the licence text, and the README MUST state the restriction in plain words. A level B review MUST check each listed asset against the package by its SHA-256 and MUST record the number of assets checked in the review record as `assets_checked` (proposed, owner to confirm).
 
+**[PUB-084]** (proposed, owner to confirm) A version at any review level MUST carry a `NOTICE` entry, as [PUB-065] describes, for every bundled asset that is not code under the manifest `license`. This replaces the exemption of [PKG-682] for assets only: the SBOM and the licence notice stay optional at level A. The registry MUST refuse the publish with `registry.policy` and the detail `asset-notice-missing` when an asset has no entry.
+
+**[PUB-085]** (proposed, owner to confirm) A plugin that bundles code of another plugin MUST carry the licence text of that plugin in its `NOTICE`. The registry MUST refuse a publish whose `requires.plugins` names a plugin whose `license` is listed in `policy.json` as incompatible with the `license` of the publishing plugin, with `registry.policy` and the detail `licence-incompatible`.
+
 ### Edge cases
 
 - **An asset with no licence.** Treat it as not redistributable. Do not package it, and do not add it to `NOTICE` as if it had a licence.

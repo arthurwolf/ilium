@@ -12,7 +12,7 @@ Requirement ids of this page are in the range `DEV-840` to `DEV-845`. They are a
 
 ### You need
 
-- A plugin with at least one shipped release, or a host build for a second minor version. Today only `ilium:plugin@0.1.0` is released, so the rows for N-1 and N+1 have no builds yet. See [Open decisions](#open-decisions).
+- A plugin with at least one shipped release, or a host build for a second minor version. Today only `ilium:plugin@0.1.0` is released, so the rows for N-1 and N+1 have no builds yet. Each older minor is kept as described in [Host release verification](/pages/reference-host-release-verification/).
 - The fixture helpers of [Test harness](/pages/reference-test-harness/): `with_storage_snapshot` and `with_data_version`.
 - The pipeline order of [CI recipes](/pages/guide-ci-recipes/).
 
@@ -63,7 +63,7 @@ Each cell runs in a CI job that follows the five-step pipeline of [CI recipes](/
 | Cell kind | Job steps | What the job asserts |
 |---|---|---|
 | Load cell (`loads`) | Check, test with `--json`, then the fixtures of the cell | The package is active and not `refused-at-load` |
-| Refusal cell (`package.api-unsupported`) | The same steps as a load cell | The refusal code is `package.api-unsupported`, and the package never runs |
+| Refusal cell (`package.api-unsupported`) | Check with `--against <version>`, or test with `--host-contract <version>`, as the cell names | The refusal code is `package.api-unsupported` (or `manifest.api-version`), the command exits non-zero as the refusal rule below states, and the package never runs |
 | Migration cell | Test with `--json` on the snapshot of the cell | The result of Axis 2, read from `migration.skipped`, `restore.dropped-data-version` or `migration.data-newer` where it applies |
 
 ## Requirements
@@ -74,14 +74,19 @@ Each cell runs in a CI job that follows the five-step pipeline of [CI recipes](/
 - **[DEV-843]** For each release that stores data, the matrix MUST keep the storage snapshot of the previous `data_version`, and each migration cell MUST load it with `with_storage_snapshot` and `with_data_version`.
 - **[DEV-844]** Each migration cell MUST call `migrate` twice on the same snapshot and compare the two results, and each rollback cell MUST expect `migration.data-newer` and fail when the rollback succeeds.
 - **[DEV-845]** Each cell MUST run as a CI job in the order of the five pipeline steps, with `--json` on every command, and a job that exits with a non-zero code MUST fail the pipeline.
+- **[CMP-023]** Each refusal cell MUST name the command that observes the refusal, either `ilium plugin check --against <host-version>` or `ilium plugin test --host-contract <host-version>`, and that command MUST exit with a non-zero status for the refusal.
+- **[DEV-199]** The backwards-compatibility CI job MUST fail with the error `matrix.host-artifact-missing`, naming the host minor, when a host minor inside the window has no release artifact or source tag kept for it, and MUST NOT skip the cells that need that minor.
+
+## How each cell is run
+
+- A cell selects its host version with `--host-contract <version>` on `ilium plugin test`, or with `--against <version>` on `ilium plugin check`. The [plugin command-line reference](/pages/reference-plugin-cli/) defines both flags. The cell runs the contract that the installed CLI embeds for that version, as the [test harness contract](/pages/reference-plugin-test-harness/) defines.
+- A refusal is checked at install stage 3 by the rules of [ABI evolution](/pages/reference-abi-evolution/). The check and test commands report the same code and message, and the refusal cell names which of them it runs.
+- Each older host minor comes from the artifact or source tag that [Host release verification](/pages/reference-host-release-verification/) keeps for it.
 
 ## Open decisions
 
-1. **How a cell selects its host version.** The [plugin command-line reference](/pages/reference-plugin-cli/) lists no flag that names a host version for `ilium plugin test`. Choice A: install the older host build in each job, which needs the binary to be kept and found. Choice B: add a flag that selects a frozen contract snapshot, which is new CLI work. The consequence of A is that the matrix runs the real host; the consequence of B is that the matrix runs an adapter that is not the shipped binary.
-2. **Where a refusal is observed.** [ABI evolution](/pages/reference-abi-evolution/) says the refusal happens at install, at stage 3. The pages do not state whether `ilium plugin test` or `ilium plugin check` reports the same code. The choice decides which step of the pipeline a refusal cell asserts in.
-3. **Host builds for N-1 and N+1.** Only 0.1.0 is released, so the N-1 and N+1 rows have no build to run. The choice is whether the CI keeps a binary for each released minor or rebuilds old minors from source. Keeping binaries costs storage; rebuilding costs time and depends on the old toolchain.
-4. **Fixture naming and how many snapshots to keep.** The data-migration page shows `notes-v1.json` only. Choice: keep one snapshot per shipped `data_version`, or only the previous one that [AUT-208] requires. Keeping all of them costs repository size and tests more upgrade paths; keeping only the previous one matches the rule but leaves older upgrades untested.
-5. **How to assert that a newer case is not delivered.** [DEV-842] needs a visible signal. The pages do not name a record or log entry for a silent drop. Choice: the test plugin writes a marker for each event it receives. The consequence is that the marker is extra code in every fixture plugin.
+1. **Fixture naming and how many snapshots to keep.** The data-migration page shows `notes-v1.json` only. Choice: keep one snapshot per shipped `data_version`, or only the previous one that [AUT-208] requires. Keeping all of them costs repository size and tests more upgrade paths; keeping only the previous one matches the rule but leaves older upgrades untested.
+2. **How to assert that a newer case is not delivered.** [DEV-842] needs a visible signal. The pages do not name a record or log entry for a silent drop. Choice: the test plugin writes a marker for each event it receives. The consequence is that the marker is extra code in every fixture plugin.
 
 ## Edge cases
 

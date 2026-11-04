@@ -236,6 +236,13 @@ An answer the user gave to an unchanged grant is kept. New and widened grants st
 | Package re-signed with the same key, same version and same manifest | No change: `install.already-installed` warning, exit 0 ([LIF-072]) |
 | Same version, different manifest SHA-256 | `install` refuses with `package.version-reused` ([PKG-274]) |
 
+## Grant review cadence
+
+A grant stays until the user revokes it ([SEC-118]), so a plugin that was trusted for one purpose can keep a high-risk grant for years. The host therefore asks the user to look again at each long-lived high-risk grant. The age of a grant is counted from the decision time that the grant store records for it ([SEC-112]), and a re-grant after a revocation starts a new age.
+
+- **[SEC-996]** A high-risk grant that has been held for 365 days (proposed, owner to confirm) MUST appear in the Plugins screen with the badge `review due` and an audit line `grant-review-due`, once per plugin per start.
+- **[SEC-997]** Showing `review due` MUST NOT revoke or change the grant; the user answers with Keep, Revoke or Set expiry in the kernel-drawn dialog, and Set expiry stores the expiry of [SEC-717].
+
 ## Production additions: T2-security
 
 - **[SEC-717]** A grant MAY carry an expiry. `ilium plugin grant --until <timestamp>` MUST store it, the host MUST treat an expired grant as absent at the next call, write the audit line `grant-expired`, and show the grant as `expired` in the Plugins screen for 30 days (proposed, owner to confirm).

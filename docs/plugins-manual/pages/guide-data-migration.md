@@ -73,6 +73,13 @@ An interrupted migration (power loss, kill) leaves the registry entry `update.st
 
 - [LIF-110] At the next start the host MUST restore the backup, increment `update.attempts` in `installed.json` and run the update again from the beginning. The host MUST write `update.state: "migrating"` and the attempt count with fsync before it calls `migrate`. When `attempts` reaches 2 it MUST roll back with `migration.interrupted` and mark the candidate `skip`. Test: kill the process in the middle of `migrate` twice and assert the rollback and `skip`.
 
+### Stop during a migration
+
+A graceful stop is not a crash. A server stop gives the whole shutdown a budget of 5 s (`host.shutdown-timeout`, see [Errors and limits](/pages/reference-errors-and-limits/) and LIF-300), and a data migration may run for up to its deadline. The two rules below say what happens to the run when the server stops during it.
+
+- **[LIF-984]** A graceful server stop while `update.state` is `migrating` MUST let the running `migrate` call continue for the shutdown budget of 5 s. If the call returns within the budget, the host MUST apply its result under LIF-104 or LIF-108 before it exits. If the call does not return, the host MUST leave `update.state: "migrating"` and `update.attempts` as they are in `installed.json`, MUST NOT restore the backup and MUST NOT log `migration.failed`. The next start MUST treat the run as an interruption under LIF-110, so that the stop uses one of the two attempts.
+- **[LIF-985]** A `migrate` call that is still running when the 5 s shutdown budget ends MUST be cancelled with `cancelled`, and the host MUST log `migration.cancelled` with the plugin id and the bucket name. The host MUST NOT drop that call silently, as `host.shutdown-timeout` does for other plugins. The host MUST exit with status 0 only when the `migrating` state written before the call (LIF-110) is still in `installed.json` and the backup is still in place.
+
 ### Downgrade
 
 - [LIF-111] The host MUST refuse to activate a version whose `data_version` is lower than the stamp of any bucket in scope, with `migration.data-newer`. The user may run the command with `--restore-backup` (the host restores the backup taken before the update) or `--discard-data` (the host deletes the plugin's buckets and data directory). Test: roll back after a migration, with and without each flag. This is the same rule as [LIF-079](/pages/reference-install-update-uninstall/).
@@ -84,6 +91,8 @@ Each project session has its own server, and the package store and the global bu
 - [LIF-112] A migration that touches the global bucket or the data directory MUST hold the cross-process lock `plugins/locks/<id>.migrate.lock`. The other servers MUST first deactivate their old instances with `upgrade`, then wait for the lock for at most the migrate deadline plus 5 s, and then skip the migration when they find the stamp already new. Test: update with two servers, count calls to `migrate`.
 - [LIF-113] While the stamp of a global, project or session bucket is higher than the data version of a running instance, a `put`, `write-batch` or `remove` from that instance MUST return `conflict` with the message `stale-data-version`. Test: leave one server on the old version and write to the global, project and session buckets.
 - [LIF-114] A project bucket and a session bucket MUST be migrated by the session that opens them, each with its own backup. Test: open two projects after an update.
+- **[LIF-988]** A project or session bucket migration that starts when its project or session opens MUST run off the UI path, MUST show the project row in state `migrating` until it ends, and MUST NOT delay the first frame of the client (the 1,000 ms bound of LIF-059) or the use of other projects.
+- **[LIF-989]** The user MUST be able to close a project while its migration runs. The host MUST then let the call finish within its deadline, or cancel it with `cancelled` and log `migration.cancelled`; a cancelled call MUST restore the bucket from its own backup as LIF-108 does. The bucket stamp MUST be written only after a successful call (LIF-101), so the stamp and the data always agree, and the next open MUST run the migration again from the stamp it finds.
 
 ### Several keys at once, and durability
 
@@ -207,6 +216,13 @@ test('migrates v1 prefs and count', () => {
 
 Also test the failure path: feed a corrupt `prefs` value and assert that `migrate` returns an error and that the storage is unchanged. Because the batch is atomic, nothing is half written.
 
+### Migrations longer than one call, and large data
+
+A `migrate` call has one hard deadline (LIF-105), and the backup of LIF-107 covers the whole update. A plugin whose data takes longer than the deadline to convert, or whose data is larger than `migration_backup_mib`, follows the rules below.
+
+- **[LIF-982]** A `migrate` call that cannot finish before its deadline MUST be able to return `continue` with an opaque cursor. This is a new case of the result of `migrate` (proposed; the owner of reference-wit adds it, and the excerpt at the top of this page changes with it). The host MUST call `migrate(from, to)` again with the cursor until a call returns `done`. The deadline of LIF-105 applies to each call on its own, and each call MUST commit its own chunk atomically. A failed call, or an interruption between two chunks, MUST be handled for the whole run under LIF-108 or LIF-110, with the backup restored.
+- **[LIF-983]** When the data to back up exceeds `migration_backup_mib`, the update MUST stop with `migration.backup-too-large` before any data changes and MUST leave `update.state: "staged"`. The message MUST name three choices: raise `migration_backup_mib`; export the data with `ilium plugin data export <id> --out <file>` and then run the update with `--no-backup`; or run the update with `--no-backup` alone. The host MUST NOT run `migrate` until the user picks one.
+
 ### Edge cases
 
 | Situation | What happens |
@@ -221,6 +237,11 @@ Also test the failure path: feed a corrupt `prefs` value and assert that `migrat
 ### What the user sees
 
 An update shows a progress line `Updating data of Notes (2 of 5 steps)` in the CLI. In Settings > Plugins the row shows `migrating` while the call runs. A failure shows the toast `Update failed, rolled back` and the log line `migration.failed`.
+
+A step is one bucket or the data directory on the server side for which the update runs `migrate`. All the calls of one chunked run ([LIF-982](#migrations-longer-than-one-call-and-large-data)) belong to one step. Project and session buckets are not steps of the update: they migrate when their project or session opens, and their progress is shown in the project row ([LIF-988](#many-sessions-on-one-machine)). A client side runs its migration at its first attach and shows it on its own line.
+
+- **[LIF-986]** The unit of the `(done of total steps)` line of a data migration MUST be one step as defined above, and the total MUST be the number of server-side steps that the update will run for the global bucket and the data directory, known before the first call. A bucket whose stamp is already at `data_version` MUST NOT be counted.
+- **[LIF-987]** The CLI progress line, the Settings > Plugins row and the log MUST show the same counts for the same update. Each step MUST write one log line `migration.step` with the fields `done`, `total` and `bucket` (the bucket name, or `data` for the data directory) when the step starts, and the CLI and the row MUST show the same `done` and `total`.
 
 ### Data handover when a plugin changes id (fork, rename, publisher transfer)
 

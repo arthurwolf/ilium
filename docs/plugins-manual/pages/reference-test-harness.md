@@ -6,7 +6,7 @@ permalink: /pages/reference-test-harness/
 
 ## Test harness reference
 
-The test harness runs a plugin without Ilium. It stands in for the host: it delivers events, answers host calls, draws views into text and records everything the plugin sends. This page is the normative contract of the harness. The how-to is [Testing plugins](/pages/testing/). Unit tests for the harness itself are written from the rules on this page.
+The test harness runs a plugin without Ilium. It stands in for the host: it delivers events, answers host calls, draws views into text and records everything the plugin sends. This page is the normative contract of the harness and its owner: it defines the API, the fakes, the modes and the golden rules. The run contract of `ilium plugin test` (determinism, failure output, exit codes, the report file and run limits) is owned by [Test harness contract for CI](/pages/reference-plugin-test-harness/), which links here for the API. The how-to is [Testing plugins](/pages/testing/). Unit tests for the harness itself are written from the rules on this page.
 
 Terms:
 

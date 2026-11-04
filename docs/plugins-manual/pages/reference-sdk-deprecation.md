@@ -34,6 +34,8 @@ Decision needed: whether the two-minor minimum should match the rule for WIT fea
 
 - [API-084] Each SDK release MUST list every item it marks under a `Deprecated` heading of its changelog entry, and every item it removes under a `Removed` heading. Each entry MUST name the item, its successor and its removal minor. The headings use the Keep a Changelog section names.
 
+The changelog entries are the source of the deprecation register that each release publishes. The register, with the successor and the removal minor of every item still deprecated, is described in [Deprecation timeline and the window](/pages/compat-deprecation-timeline/#deprecation-register).
+
 ### Definitions
 
 - **SDK item:** a public function, type, builder, wrapper or export of `ilium-plugin-sdk` or `@ilium/plugin-sdk`. A WIT feature of the contract is not an SDK item.
@@ -94,6 +96,8 @@ The entry of 0.6.0 repeats the item under `### Removed`. The names here are illu
 - **[DEV-996]** An SDK release MUST declare in its metadata the lowest and highest host API minors its output loads on, and `ilium plugin build` MUST fail with `build.sdk-host-mismatch` when the manifest `api` falls outside that range.
 
 - **[DEV-997]** `ilium plugin check` MUST report each use of a deprecated SDK item in the plugin source as `lint.sdk-deprecated` (warning) naming the item and successor, and as an error when the SDK minor in use is the removal minor.
+
+The severity and fix of `lint.sdk-deprecated` are listed with every other lint code in the [lint catalogue](/pages/reference-check-and-lint-rules/#every-code-and-its-owner-page).
 
 
 ### See also

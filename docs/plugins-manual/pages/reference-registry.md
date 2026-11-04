@@ -254,6 +254,14 @@ A **namespace** is the set of plugin ids that start with a publisher id and a do
 
 - **[PKG-090]** `owner add` and `owner remove` ([PKG-819]) MUST send a notice to every maintainer of every owner publisher id, including the removed one, naming the actor's key fingerprint and the log entry index; within 1 hour of a removal a publish, yank or deprecate of that plugin id with a token of the removed publisher id MUST be refused with `registry.not-owner` (proposed, owner to confirm).
 
+**[PKG-993]** (proposed, owner to confirm) The registry MUST refuse at publish with `registry.name-reserved` any plugin id, display name or manifest `name` that contains `ilium`, `official`, `core` or `verified` as a separate word. Words are split at `-`, `_`, `.` and spaces, and compared without regard to case. The only exception is a publisher id of the form `user.<name>` whose maintainers are the maintainers of the `ilium` project.
+
+**[PKG-994]** (proposed, owner to confirm) The registry operator MUST list the four reserved words of [PKG-993] in `policy.json` ([PKG-086]), and MUST answer a refusal under [PKG-993] through the appeal path of [PKG-404] within 14 days.
+
+**[PKG-999]** (proposed, owner to confirm) A publisher MAY move a namespace to another registry by publishing a migration statement. The statement MUST be signed by a trusted key of the current owner and MUST name the root of the target registry and each plugin id moved. The source registry MUST record the statement as a `registry-move` transparency log entry.
+
+**[PKG-183]** (proposed, owner to confirm) The client MUST accept a source change for an id, as [PKG-813] describes, only when a migration statement of [PKG-999] covers that id. Before it accepts the change, the client MUST show the text of the statement and MUST wait for the user to confirm it.
+
 ## Publishing
 
 Publishing is the only part of the protocol that needs a server. The upload API is specified here so that one client works with any registry that follows it.
@@ -279,6 +287,15 @@ Publishing is the only part of the protocol that needs a server. The upload API 
 - **[PKG-048]** The `published_at` written into the countersignature object MUST equal the `published` field of that version in `plugins/<id>.json` and the `time` of the `publish` log entry whose `sha256` is the blob digest; a client that finds any difference MUST refuse the install with `trust.log-inconsistent` and keep the evidence for the audit log (proposed, owner to confirm).
 
 - **[PKG-092]** Yank, unyank, deprecate, unlist and owner-change requests MUST count toward the per-publisher quota of [PKG-400] and [PKG-704], and a request over the quota MUST be refused with `registry.rate-limited` and a `Retry-After` header without changing any metadata (proposed, owner to confirm).
+
+### Publisher account sign-in
+
+A publish token is a standing secret. Creating one, adding a maintainer, rotating a token or transferring a namespace therefore needs a stronger check than the password alone. The rules below extend [SEC-723] to these actions.
+
+- **[SEC-992]** A registry login that creates a publish token, adds a maintainer, rotates a token or transfers a namespace MUST require a second factor (TOTP or WebAuthn) in that login, and a session created by a password alone MUST be refused for these actions with `registry.second-factor-required`.
+- **[SEC-993]** A web or API session of a publisher account MUST expire 12 hours after its last second-factor check (proposed, owner to confirm), and the registry MUST answer a request with an expired session with `registry.session-expired`.
+
+The lifetime of a token and its scope are set by [PKG-968] (90 days, one publisher id) and its revocation by [PKG-970].
 
 ### Publish tokens
 
@@ -319,6 +336,22 @@ The token of [PKG-392] is a secret that authorises publishes. Its issue, expiry,
 
 - **[PKG-091]** A publisher id under a temporary or permanent ban ([Governance](/pages/governance/)) MUST be marked `suspended` in the signed metadata, every token of its maintainers MUST be revoked ([PKG-970]), and a publish, yank, unyank, deprecate, unlist, owner change or transfer under that id MUST be refused with `registry.publisher-suspended`; a suspension alone MUST NOT take down, yank or unlist any published version, and removal of a namespace is a whole-id takedown under [PKG-403] (proposed, owner to confirm).
 
+### Content classes
+
+Every version may declare a content class. The three classes are `general` (no content that the other two classes cover), `mature` (violence and depictions of self-harm) and `restricted` (sexual content for adults, weapons and gambling). `policy.json` lists the classes that the registry accepts. A client shows each class as a separate filter in the store, and a user can hide any class.
+
+- **[PKG-989]** The registry MUST refuse a plugin whose package or listing contains sexual content involving minors, with `registry.policy` and the detail `minors-content`. It MUST refuse any other sexual content unless the version declares the class `restricted` and `policy.json` lists that class.
+- **[PKG-990]** A manifest MAY declare a `content_class` with one of the values `general`, `mature` or `restricted`. The registry MUST refuse any other value with `registry.policy` and the detail `content-class-unknown`. An index entry MUST carry the class, and a version that declares no class MUST be listed as `general`. A client MUST let the user hide each class, and MUST NOT list a plugin of a hidden class in search results.
+
+### Static checks on every upload
+
+- **[PKG-991]** The registry MUST compare the grants, `http` hosts and environment variables that the static scan finds reachable in a component with the grants, `http` hosts and environment variables declared in its manifest. A reachable capability that the manifest does not declare MUST place the version in state `pending-review`, and the version MUST NOT appear in the metadata served to clients while it is held.
+- **[PKG-992]** The registry MUST list in `policy.json` each static check that runs on every upload. A check that fails or is inconclusive MUST place the version in level B review, and the version MUST stay at level A until a review record exists ([PKG-680]).
+
+### Level B reviewers
+
+Reviewer training, the independence rules and the quality audit of level B decisions are described in [Registry operator guide](/pages/publish-registry-operator-guide/#review-staff-and-quality-audit).
+
 ## Revocation
 
 Revocations travel in `revocations.json`. [PKG-407] A client MUST fetch it on every metadata refresh, and MUST apply `keys` to its trust store (status `revoked`, `added_by: registry` is not used for revocations) and `blocked_ids` to its installed plugins. The effects are those of [PKG-244] to [PKG-247] for keys and [PKG-403] for ids.
@@ -336,6 +369,8 @@ Revocations travel in `revocations.json`. [PKG-407] A client MUST fetch it on ev
 | [PKG-986] | Registry and mirror requests MUST verify TLS against the system trust roots plus, when the policy sets `[network] ca_bundle`, the bundle it names, as [SEC-077] requires. No `[plugins.registry]` setting may disable verification or add a trust root. |
 | [PKG-987] | A mirror with a certificate from an internal CA works when the administrator sets `[network] ca_bundle` ([Administrator policy](/pages/reference-admin-policy/)). A certificate failure MUST NOT be handled by skipping verification or by falling back to `http:` ([PKG-371]). The client reports it as `network` with reason `tls`, as [SEC-077] requires. |
 | [PKG-988] | A change of a mirror's TLS certificate under the same CA needs no client change. A change of CA needs the administrator to update `ca_bundle`. TLS never decides metadata trust: every document is still verified with the root keys of [PKG-411], so a certificate change on a mirror cannot replace them. |
+
+A private registry or mirror that is not run by the project can show whether it follows this page with the conformance suite in [Registry conformance](/pages/publish-registry-conformance/). The suite checks each rule of the metadata, publish and mirror sections of this page. A registry that fails any rule does not claim compatibility.
 
 ## Air-gapped installs
 

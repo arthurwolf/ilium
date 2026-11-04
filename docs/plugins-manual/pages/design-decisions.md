@@ -125,6 +125,16 @@ Nothing to install or grant. This page explains design choices and asks nothing 
 
 **Effect on authors.** A T2 or T3 plugin runs in the helper and sees only its granted folders. A `process.run:sh` grant is refused for T2 and T3 at install with `manifest.grant-tier`. On Windows and macOS, the install is refused with the message below. First-party T1 plugins run in-process on every platform. See the [Security model](/pages/security/).
 
+**Revisit trigger and acceptance criteria.** The refusal on Windows and macOS stays until a backend for that platform meets all of the following, and the decision is then revisited:
+
+- the escape test suite of [Security testing](/pages/reference-security-testing/) passes on that platform with no case failing or skipped;
+- the resource limits of [Sandbox reference](/pages/reference-sandbox/) (memory, process count, open files, CPU time) are enforced by the platform and tested;
+- the platform row of the table in [SEC-057](/pages/reference-sandbox/) changes from `No` to `Yes`, with the reason updated.
+
+**Decision owner.** The project owner decides when these criteria are met. The owner is not yet recorded, and the entry is listed in [Open security decisions](/pages/reference-security-open-decisions/).
+
+- **[SEC-205]** The design decision D5 MUST list the acceptance criteria for a macOS or Windows sandbox backend (the escape test suite, the resource limits and the SEC-057 table row) and the owner who decides on them, and it MUST name the revisit trigger as the completion of all three criteria.
+
 <figure>
 <svg viewBox="0 0 360 150" role="img" aria-label="Sandbox placement for each tier">
   <title>Where each tier runs</title>

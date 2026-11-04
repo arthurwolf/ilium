@@ -18,7 +18,7 @@ A note MUST contain these parts, each under its own heading, so that an author a
 
 | Heading | Content |
 | --- | --- |
-| `Removed and renamed` | One row per removed or renamed item: the old name, the successor (or the words `no successor`), the minor that marked it and the code change needed. Every item under `Removed` in the changelogs of the major's pre-releases appears here. |
+| `Removed and renamed` | One row per removed or renamed item: the old name, the successor (or the words `no successor`), the minor that marked it, the code change needed, and a `Kind` column that holds `mechanical` or `manual` (defined in the requirements below). Every item under `Removed` in the changelogs of the major's pre-releases appears here. |
 | `Manifest changes` | Every manifest key that is renamed, removed, added as required, or whose accepted values changed, with the old and new form and the error code an unchanged manifest produces. |
 | `New limits` | Each limit that is lowered or added, with the old value, the new value and the code of the refusal or trap ([ABI-058](/pages/reference-abi-major-versions/)). |
 | `Data version` | Whether stored data of a plugin built for the old major still reads under the new one, whether the plugin must ship a migration step, and the rule for a rollback (see [Data migration](/pages/guide-data-migration/)). |
@@ -37,7 +37,7 @@ A major host release is announced at least 6 months before its release date, wit
 
 `ilium plugin lint --fix` applies only rewrites that cannot change behaviour: a rename in the `Removed and renamed` table marked `mechanical` (the old name replaced by the successor with the same signature), and a manifest key rename from the `Manifest changes` table. Every other row is reported with its `lint.sdk-deprecated` or `manifest.*` code and left to the author. `--fix` prints each rewrite as a `diff` record and refuses to run on a working tree with uncommitted changes in the files it would edit.
 
-Decision needed: whether `lint --fix` is a flag of `lint` or a separate subcommand, and whether the `mechanical` marking is part of the note format or a separate machine-readable file shipped with the SDK. Default: a flag of `lint`, with the marking in the note's table plus a JSON file beside it, so the CLI never parses prose. The project owner decides, because the choice fixes the format that every later note must follow.
+`lint --fix` is a flag of `lint`, documented with its exit codes in the [Plugin command-line reference](/pages/reference-plugin-cli/). The `mechanical` marking is the `Kind` column of the `Removed and renamed` table of the note, so the CLI reads that table and no separate file. Every later note follows this format.
 
 #### Step list
 
@@ -64,6 +64,12 @@ While two host majors are both in their window, one release usually cannot serve
 | The source uses a removed item after upgrading | A compile error (Rust) or an import error (TypeScript); `lint --fix` fixes only `mechanical` rows. |
 | The manifest `api` is outside the host's window | `package.api-unsupported` at install. |
 | A matrix cell differs from its expected result | The release is blocked until the cell is fixed or its expectation is corrected with a reason. |
+
+### Requirements
+
+- **[DEV-209]** Each row of the `Removed and renamed` table MUST carry the marking `mechanical` or `manual` in its `Kind` column, and `lint --fix` MUST print one `diff` record for each line it rewrites and one `warning` record for each `manual` row whose lines it leaves unchanged.
+- **[DEV-221]** The release pipeline of each SDK major MUST run `upgrade-sdk --dry-run` and `lint --fix` on a fixture project that uses every row of the major's `Removed and renamed` table, and MUST fail when a `mechanical` row has no rewrite by `lint --fix`, or a `manual` row has no `lint.sdk-deprecated` finding.
+- **[DEV-222]** The fixture project and its expected output MUST be kept in the examples repository, and the [example plugins](/pages/guide-example-plugins/) page MUST name the command that runs the same check on a project of the author's own.
 
 ### See also
 

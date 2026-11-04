@@ -193,3 +193,10 @@ The user can change the grant at any time in Settings > Plugins > com.example.sc
 - [terminal.read-cells](/pages/capability-terminal-read-cells/).
 - [journal.read](/pages/capability-journal-read/) for host-recorded pane events.
 - [Security](/pages/security/).
+
+## Requirement statements
+
+Scrollback keeps everything printed in a terminal, including a token that a command echoed or a secret typed at a prompt. The rules below make that risk visible in the review dialog and limit the one redaction the host can guarantee.
+
+- **[SEC-203]** The review dialog for `terminal.history` MUST state that the text can contain secrets that the user typed or pasted, and, when the pane is not a project pane, MUST name the grant `terminal.history` in its high-risk text.
+- **[SEC-204]** The host MUST replace each value equal to a current plugin secret ([SEC-241]) with `[redacted]` in the scrollback text it returns to the plugin, and MUST NOT claim redaction for other secret-like text, such as a token printed by a command that is not a plugin secret.

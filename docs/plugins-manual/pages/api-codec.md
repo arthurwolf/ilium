@@ -6,7 +6,7 @@ permalink: /pages/api-codec/
 
 ## codec
 
-The `codec` import does the byte-level work that plugins need without shipping their own libraries. It inflates and deflates data, reads image sizes, decodes images to RGBA pixels, computes SHA-256 digests and rasterises text into a grey image. Every function is synchronous and runs in the host's native code, so a plugin never bundles a decoder and never pays for one in WebAssembly.
+The `codec` import does the byte-level work that plugins need without shipping their own libraries. It inflates and deflates data, reads image sizes, decodes images to RGBA pixels, computes SHA-256 and HMAC-SHA256 digests, compares two byte strings in constant time and rasterises text into a grey image. Every function is synchronous and runs in the host's native code, so a plugin never bundles a decoder and never pays for one in WebAssembly.
 
 `codec` does no input or output itself. A plugin gets its bytes from [fs](/pages/api-fs/) or [http](/pages/api-http/), passes them to `codec`, and writes the result to a pane or a file.
 
@@ -35,6 +35,8 @@ image-info: func(data: list<u8>) -> result<image-info, plugin-error>;
 decode-image: func(data: list<u8>, frame: u32, max-pixels: u32)
     -> result<decoded-image, plugin-error>;
 sha256: func(data: list<u8>) -> list<u8>;
+hmac-sha256: func(key: list<u8>, data: list<u8>) -> result<list<u8>, plugin-error>;
+constant-time-equal: func(a: list<u8>, b: list<u8>) -> bool;
 rasterize-text: func(request: raster-text) -> result<decoded-image, plugin-error>;
 ```
 
@@ -49,6 +51,8 @@ Names follow the SDK naming rules. In Rust the functions are snake_case and the 
 | `image-info` | `data` | `image-info` | Reads the width, height and frame count from the header. It does not decode any pixels. |
 | `decode-image` | `data`, `frame: u32`, `max-pixels: u32` | `decoded-image` | Decodes one frame, counted from 0, to 8-bit RGBA. Refused if the image has more pixels than `max-pixels`. |
 | `sha256` | `data` | 32 bytes | Returns the SHA-256 digest. It cannot fail, so it has no error channel. |
+| `hmac-sha256` | `key`, `data` | 32 bytes | Returns the HMAC-SHA256 message authentication code of `data` under `key`. The key may be 0 to 4 KiB. Refused with `invalid-argument` above that. |
+| `constant-time-equal` | `a`, `b` | `bool` | Returns `true` when `a` and `b` hold the same bytes. Returns `false` at once when the lengths differ. For two inputs of equal length the time does not depend on their content. It cannot fail, so it has no error channel. |
 | `rasterize-text` | `request: raster-text` | `decoded-image` | Draws text as white pixels. The alpha channel holds the ink tone: 0 is background, 255 is full ink. Text wraps at word boundaries to `max-width-px`. |
 
 Records:
@@ -67,7 +71,8 @@ The native crates behind the import are flate2, the image decoders, sha2 and cos
 
 | Limit | Value | Refused with |
 |---|---|---|
-| Input of any function except `sha256` | 16 MiB | `invalid-argument` |
+| Input of any function except `sha256` and `constant-time-equal` | 16 MiB | `invalid-argument` |
+| HMAC key of `hmac-sha256` | 4 KiB | `invalid-argument` |
 | `inflate` `max-output` | at most 64 MiB | `invalid-argument` |
 | Pixels in `decode-image` | `max-pixels`, and never more than 67,108,864 | `invalid-argument` above 67,108,864; `quota-exceeded` for an image over `max-pixels` |
 | `rasterize-text` text | 64 KiB | `invalid-argument` |
@@ -190,6 +195,37 @@ export function inflateAndHash(path: FsPath): { plain: Uint8Array; digest: Uint8
 }
 ```
 
+### Example 3: check a signed webhook
+
+A route that receives a webhook signs the body with a shared key and sends the MAC in a header. The plugin computes the MAC of the body and compares it with the header value in constant time. It never compares the two with `==`, because that stops at the first different byte.
+
+**Rust**
+
+```rust
+use ilium_plugin_sdk::host::codec;
+
+/// True when `signature` is the HMAC-SHA256 of `body` under `key`.
+fn signature_is_valid(key: &[u8], body: &[u8], signature: &[u8]) -> Result<bool, PluginError> {
+    let expected = codec::hmac_sha256(key, body)?;
+    Ok(codec::constant_time_equal(&expected, signature))
+}
+```
+
+**TypeScript**
+
+```ts
+import * as codec from '@ilium/plugin-sdk/host/codec';
+
+export function signatureIsValid(key: Uint8Array, body: Uint8Array, signature: Uint8Array): boolean {
+  const expected = codec.hmacSha256(key, body); // throws PluginError when the key is over 4 KiB
+  return codec.constantTimeEqual(expected, signature);
+}
+```
+
+<div class="warn">
+<p>Load the key from the plugin's own settings or secret store and never write it to the log. A signature check is only as strong as the key, so use a key that the sender and the plugin share and that the user has set.</p>
+</div>
+
 ### Where codec output goes
 
 The `codec` interface (`ilium:host/codec@0.1.0`) has several consumers of its output. A decoded image can be written to a `surface` widget with `write-surface`, drawn in a scene, or kept as a frame of a pre-rendered loop. `rasterize-text` returns a decoded image whose alpha channel holds the ink tone, ready for `write-surface`. A font that ships in the package is rasterized by the scene's `font` resource instead (see [scenes](/pages/api-scenes/)); `rasterize-text` is for text drawn with the host's default font. Video frames come from [media](/pages/api-media/), not from `codec`.
@@ -236,7 +272,8 @@ Illustrative, not generated. The numbers follow the 640 by 480 example above.
 
 | Code | Raised by | When |
 |---|---|---|
-| `invalid-argument` | every function except `sha256` | Input over 16 MiB. |
+| `invalid-argument` | every function except `sha256` and `constant-time-equal` | Input over 16 MiB. |
+| `invalid-argument` | `hmac-sha256` | Key over 4 KiB. |
 | `invalid-argument` | `inflate` | `max-output` over 64 MiB, or corrupt data. |
 | `quota-exceeded` | `inflate` | Output longer than `max-output`. |
 | `invalid-argument` | `deflate` | `level` over 9. |
@@ -308,3 +345,13 @@ The plugin supplies bytes and receives pixels. Every step between those two poin
 - [always-granted capabilities](/pages/capability-always-granted/) for the grant rules.
 - [errors and limits](/pages/reference-errors-and-limits/) for the error codes.
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for project setup.
+
+## Requirement statements
+
+- **[API-228]** The codec import MUST provide `hmac-sha256(key: list<u8>, data: list<u8>) -> result<list<u8>, plugin-error>`, returning the 32-byte MAC, and MUST refuse a key longer than 4 KiB with `invalid-argument`.
+
+Test: compute the HMAC-SHA256 of the RFC 4231 test case 1 key (20 bytes of `0x0b`) and data (`Hi There`) and assert the digest `b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7`; call it with a 4,097-byte key and assert `invalid-argument`.
+
+- **[API-229]** The codec import MUST provide `constant-time-equal(a: list<u8>, b: list<u8>) -> bool`, which MUST return false when the lengths differ and MUST take the same time for equal-length inputs whatever their content.
+
+Test: compare two equal-length inputs that differ in the first byte and then two that differ in the last byte, 100,000 calls each, and assert that the 99th percentile call time of the two sets differs by at most 10 %; assert `false` for inputs of different lengths.

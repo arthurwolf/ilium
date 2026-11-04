@@ -28,6 +28,7 @@ This page is the overview of the security rules and the entry point to the detai
 | [Secrets](/pages/reference-secrets/) | Storage and redaction of secrets |
 | [Extension security](/pages/reference-extension-security/) | Hooks, replacement, project trust |
 | [Security response](/pages/reference-security-response/) | Reporting, takedown, safe mode |
+| [Open security decisions](/pages/reference-security-open-decisions/) | Every security value still marked proposed, with its owner and due release |
 | [Security testing](/pages/reference-security-testing/) | Fuzzing and the test checklist |
 | [Plugin security and privacy for users](/pages/user-plugin-security-and-privacy/) | The end-user view |
 

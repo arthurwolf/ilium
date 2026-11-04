@@ -110,6 +110,12 @@ A release MUST be signed after the last `pack`, and the signed file MUST be the 
 
 The key fingerprint is the SHA-256 of the raw public key. Users see its short form (the first 8 digits, for example `3f2a 91c0`) in the trust dialog. The author SHOULD publish the full fingerprint on a channel separate from the download, such as the project page, so that a user can compare the two. [AUT-308]
 
+### Key custody
+
+`publisher.key` is the root of every signed release of your publisher id, so it needs more protection than a password file. Keep it encrypted with a passphrase, keep a backup offline, and sign only on a clean build machine ([SEC-174]). A key that is hardware-backed or held by an external signer ([Signing with an external signer](/pages/reference-signing-and-trust/)) is the strongest choice. `ilium plugin sign` refuses a plain key by default ([SEC-994](/pages/reference-signing-and-trust/)).
+
+- **[SEC-995]** The publishing guide states that a publisher key used for a registry package SHOULD be hardware-backed or passphrase-protected, and `ilium plugin doctor` MUST report the key custody it can detect for each `publisher.key` in the key folder as `custody hardware`, `custody passphrase` or `custody plain`.
+
 ### Lost, leaked or changed keys
 
 | Situation | What happens | What the author does |

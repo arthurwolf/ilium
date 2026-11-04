@@ -154,6 +154,15 @@ T1 plugins and the kernel are unaffected. The Plugins screen shows an installed 
 | macOS | Yes | No (decision D5) | No equivalent sandbox |
 | Windows | Yes | No (decision D5) | No equivalent sandbox |
 
+### Features unavailable on Windows and macOS
+
+No core feature needs a T2 or T3 plugin: the core plugins are T0 or T1 and run on every platform. The features listed below are therefore those of third-party plugins, and they are unavailable on Windows and macOS while [decision D5](/pages/design-decisions/) stands:
+
+- every T2 or T3 package, whatever its grants, including packages that use `process-run`, `process-long-lived` or a plugin-provided service ([Services](/pages/api-services/));
+- the `process.run` and `process.spawn` calls of any third-party plugin, which the helper confines on Linux only.
+
+- **[SEC-206]** This page MUST list every core feature that needs a T2 or T3 plugin, and it MUST state `none` when there is none; the install dialog on Windows and macOS MUST name each package it refused, with the code `sandbox.unavailable` and the package id and version.
+
 ## File scopes
 
 File access is the most common route to harm, so its rules are normative here. The rules apply inside the helper and to the kernel's own file functions for T1.

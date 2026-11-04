@@ -135,6 +135,33 @@ export const { lifecycle, handler, views, catalogProvider, tokenProvider } = def
 
 The Rust attribute takes `side` (`"server"`, `"client"` or `"scene"`, required) and `exports` (the manifest names). A listed export without its trait implementation is a compile error, and the struct must implement `Default`. In TypeScript, `definePlugin` takes `side` and the members you implement; the returned names are the interface names in camelCase, and the entry module must export exactly the names the manifest lists plus `lifecycle` and `handler`.
 
+## Host information and unstable features
+
+The host reports its api version, its build id, the unstable features it enables and the limits in effect through the `host-info` import ([ABI-119](/pages/reference-abi-evolution/)). The SDK wraps that import in one typed function, `host_info()`, so a plugin never calls the raw import. Its result has these fields:
+
+| Field | Rust `HostInfo` | TypeScript `hostInfo()` result |
+|---|---|---|
+| The api version of the host | `api_version` | `apiVersion` |
+| The build id of the host | `build_id` | `buildId` |
+| The unstable features that are enabled | `unstable_features` | `unstableFeatures` |
+| The limits in effect | `limits` | `limits` |
+
+A plugin that uses an unstable feature checks its name in `unstable_features` before the first call of that feature, and runs its own fallback when the name is absent. For example, a plugin that shows a calendar only when `ui-calendar` is enabled:
+
+```rust
+fn calendar_enabled() -> bool {
+    match host_info() {
+        Ok(info) => info.unstable_features.iter().any(|name| name == "ui-calendar"),
+        Err(_) => false,
+    }
+}
+```
+
+- **[API-217]** The Rust SDK MUST provide `host_info()` returning `Result<HostInfo, PluginError>` with the api version, build id, enabled unstable features and limits in effect, and the TypeScript SDK MUST provide `hostInfo()` with the same fields. Neither wrapper MUST panic or throw when the host returns an error for the import; each MUST return that error as its result.
+- **[API-218]** A plugin that calls an unstable feature MUST check the enabled-feature list from `host_info()` or `hostInfo()` before the first call of that feature, and MUST take its documented fallback path when the feature is absent. The SDK pages MUST show this check in Rust and in TypeScript, with a test that runs the fallback against a fake host that does not list the feature.
+
+The [TypeScript SDK reference](/pages/typescript-sdk/) shows the same pattern in TypeScript.
+
 ## Modules, import paths and names
 
 Each WIT package maps to one Rust module and one TypeScript subpath. One rule covers every name: WIT kebab-case becomes snake_case for Rust functions, fields and modules, camelCase for TypeScript functions and fields, UpperCamelCase or PascalCase for types, and kebab-case strings for TypeScript variant tags and enum values.

@@ -26,7 +26,7 @@ The operator adds one rule on top of these. An operator MUST NOT treat a restart
 
 ### Health states and the exit code of `ilium plugin health`
 
-`ilium plugin health` exits with the code of the worst state it finds ([HST-617]). Scripts MUST use this table and nothing else.
+`ilium plugin health` exits with the code of the worst state it finds ([HST-617]). Scripts MUST use this table and nothing else. For one JSON line per plugin, with the same exit codes, use `ilium plugin health --json` ([OPS-233](/pages/reference-health-and-watchdog/)).
 
 | Exit code | Meaning | Operator action |
 |---|---|---|

@@ -251,6 +251,10 @@ Contract: `ilium:plugin@0.1.0`.
 - [SEC-726] The registry MUST run automated static analysis on every upload (denied imports, oversize components, known malicious digests) and MUST hold a version that matches a rule in state `pending-review` for at most 72 h (proposed, owner to confirm), during which clients MUST NOT receive it in metadata.
 - [SEC-727] Release builds of the host and of every first-party plugin MUST be reproducible: two builds from the same tag on different machines MUST produce byte-identical artifacts, and the release job MUST publish the SBOM (CycloneDX) and the SLSA provenance attestation beside the artifact.
 
+## Upload checks
+
+The automated static analysis of [SEC-726](#production-additions-t2-security) covers denied imports, oversize components and known malicious digests. The registry also compares the grants, `http` hosts and environment variables that a component can reach with those its manifest declares, and it lists every check that runs on each upload in `policy.json`. The rules are in [Registry policy](/pages/reference-registry/#static-checks-on-every-upload). A version with an undeclared reachable capability is held in `pending-review`, and a failed or inconclusive check sends the version to level B review.
+
 ## Verified provenance
 
 The host shows `provenance.json` and `sbom.spdx.json` and does not trust them ([SEC-155]). This section adds an optional, stronger check. It runs only when the administrator turns it on or when the publisher has pinned a builder. The check adds a refusal condition. It never replaces the signature, the key pin of [SEC-142] or the grant review of [SEC-100]. The operator reads the policy at the next install or update, so a change does not touch an installed copy.

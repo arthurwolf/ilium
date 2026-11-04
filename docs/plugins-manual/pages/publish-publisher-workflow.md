@@ -99,6 +99,12 @@ A publisher, Ana, releases version 0.3.1 of `com.example.notes`. The first uploa
 
 Ana records the hash in her release notes and moves on. Had the hashes differed, she would bump the version to 0.3.2, because the live 0.3.1 cannot be replaced ([PUB-007](#failed-uploads)).
 
+### Accounts, second factor and token lifetime
+
+Publishing needs a registry account with a second factor enrolled ([SEC-723]). Creating a publish token, adding a maintainer, rotating a token or transferring a namespace also needs a second factor in the same login, and a session that was signed in with a password alone is refused for those actions ([SEC-992](/pages/reference-registry/#publisher-account-sign-in)). A session expires 12 hours after its last second-factor check ([SEC-993](/pages/reference-registry/#publisher-account-sign-in)).
+
+A publish token lasts 90 days and works for one publisher id only ([PKG-968](/pages/reference-registry/#publish-tokens)). Rotate it before it expires, and revoke it at once when it may have leaked ([PKG-970](/pages/reference-registry/#publish-tokens)). A publish made with a leaked token is listed for every maintainer ([PKG-971](/pages/reference-registry/#publish-tokens)).
+
 ### Edge cases
 
 - **Two publishers race for one version.** The first complete upload wins. The second receives `registry.version-exists` ([PKG-394](/pages/reference-registry/#publishing)).

@@ -44,6 +44,10 @@ trusted_keys = ["3f2a91c07b6d1e44a1b20c9e55d3f7a8b6c102e94d7798af13c56e0bd2f48a1
 
 The key in `trusted_keys` needs no user prompt. Everything else fails at install with `policy.publisher-denied`.
 
+### Require a review level and a verified publisher
+
+To make the registry's review level part of an install condition, set `min_review_level` to `"B"` in `[packages]`. A version that is only at level A is then refused with `policy.review-level-too-low` ([SEC-207](/pages/reference-admin-policy/#version-rules)). To accept only plugins whose publisher domain is verified, set `require_verified = true` in `[publishers]`. Other publishers are refused with `policy.publisher-unverified` ([SEC-208](/pages/reference-admin-policy/#version-rules)). Both keys act at install and update. An installed copy is not disabled by them. Both keys are described in the [Administrator policy reference](/pages/reference-admin-policy/).
+
 ### Block some high-risk grants
 
 ```toml
@@ -187,10 +191,12 @@ The two per-user caps have no default value in this manual. An unset key means n
 
 Ilium does not send plugin logs, trap or crash lines, or metrics to a fleet collector. The audit log is the only record that can leave a machine by itself ([SEC-228]). The rules below set the route for everything else. They are new and owner to confirm.
 
-- [HST-990] The host MUST NOT send plugin operational logs (`<state>/plugins/logs/`), host trap or crash lines, or `ilium plugin metrics` output to any network address, socket or remote service. The only remote route is the audit sink of [SEC-228], which carries audit records and nothing else.
-- [HST-991] `ilium plugin metrics` MUST write its Prometheus text to standard output only and MUST NOT open a listening socket. A fleet collector obtains the text by running the command from a job the administrator controls (for example a scheduled job that writes stdout to a file that the collector reads).
-- [HST-992] An administrator who copies plugin logs to another machine MUST keep the copy under owner-only modes (0600 for files, 0700 for folders), MUST NOT copy the trust store, grants, consents or plugin data folders, and MUST document the copy in the site's change record. A copy holds whatever the log files hold, so review it before sharing it outside the administrator's team.
-- [HST-993] The admin policy MUST NOT define a key that forwards plugin logs or metrics in this version. A future forwarding key needs its own requirement with a record format and a rate limit (proposed, owner to confirm).
+- **[HST-990]** The host MUST NOT send plugin operational logs (`<state>/plugins/logs/`), host trap or crash lines, or `ilium plugin metrics` output to any network address, socket or remote service. The only remote route is the audit sink of [SEC-228], which carries audit records and nothing else.
+- **[HST-991]** `ilium plugin metrics` MUST write its Prometheus text to standard output, or to the file named by `--out` as HST-996 requires, and MUST NOT open a listening socket. A fleet collector obtains the text by running the command from a job the administrator controls.
+- **[HST-992]** An administrator who copies plugin logs to another machine MUST keep the copy under owner-only modes (0600 for files, 0700 for folders), MUST NOT copy the trust store, grants, consents or plugin data folders, and MUST document the copy in the site's change record.
+- **[HST-993]** The admin policy MUST NOT define a key that forwards plugin logs or metrics, except the `[telemetry.forward]` table of HST-994. Any other forwarding key needs its own requirement with a record format and a rate limit (proposed, owner to confirm).
+- **[HST-994]** The admin policy MUST accept a `[telemetry.forward]` table with `mode` set to `off` (the default), `syslog` or `file`, and with `kinds` drawn only from `plugin-trap`, `plugin-crash`, `host-crash`, `host-scope-line` and `metrics`, and MUST refuse any other value at load and name the key in the notice.
+- **[HST-995]** Each forwarded record MUST carry the UTC time, the host version, the session id, and the plugin id and version when present; it MUST pass the redactor of HST-608 before it leaves the machine; and forwarding MUST be limited to 50 records per second per machine (proposed, owner to confirm), with each excess record counted in `ilium_host_observability_dropped_total{source="forward"}`.
 
 Crash loops and trap counts are visible only on the machine that produced them. To compare plugin state across machines, run `ilium plugin list --json --inventory` ([USR-341]); that output carries no crash or trap counts. For a single machine, `ilium plugin doctor --bundle` ([DEV-941]) packs the doctor records and the last log lines into one file.
 
@@ -390,10 +396,6 @@ The rules below keep the two apart. The examples name the systemd and launchd ke
 - **[HST-687]** A system-wide install MUST be stored read-only for users (owner root/administrator, no write for others), MUST be verified by `manifest.sha256` on each server start for each user, and MUST be loaded by many users concurrently without a per-user copy; compiled-component cache for it MUST be per user.
 - **[HST-688]** When two users open the same project folder, each user's session MUST keep its own grants, and project buckets MUST be stored per user (keyed by user id) or the host MUST refuse the second user with `project.owned-by-other-user`; a plugin MUST NOT be able to read the other user's project bucket. The `.ilium` folder permissions of 0700 MUST NOT be widened by the host.
 - **[HST-689]** The host MUST provide `ilium plugin admin purge-user <user>` (proposed, owner to confirm) for an administrator that deletes the plugin data, storage, grants, logs and cache of that user under the user's roots, requires `--yes`, writes a system audit entry and refuses a user with a running session server (`purge.user-active`).
-- **[HST-990]** The host MUST NOT send plugin operational logs (`<state>/plugins/logs/`), host trap or crash lines, or `ilium plugin metrics` output to any network address, socket or remote service. The only remote route is the audit sink of [SEC-228], which carries audit records and nothing else.
-- **[HST-991]** `ilium plugin metrics` MUST write its Prometheus text to standard output only and MUST NOT open a listening socket. A fleet collector obtains the text by running the command from a job the administrator controls.
-- **[HST-992]** An administrator who copies plugin logs to another machine MUST keep the copy under owner-only modes (0600 for files, 0700 for folders), MUST NOT copy the trust store, grants, consents or plugin data folders, and MUST document the copy in the site's change record.
-- **[HST-993]** The admin policy MUST NOT define a key that forwards plugin logs or metrics in this version. A future forwarding key needs its own requirement with a record format and a rate limit (proposed, owner to confirm).
 - **[PKG-980]** The administrator MUST produce `/etc/ilium/trust.json` from one source file under version control, in the format of Signing and trust, and MUST record the SHA-256 of the produced file in the change record for each push.
 - **[PKG-981]** A push MUST write the file as root with mode 0644, through a temporary file in `/etc/ilium/`, fsync and rename. A machine MUST NOT have the file edited in place. A file that another user can write is refused at load with `grants.unsafe-permissions`, as USR-207 describes.
 - **[PKG-982]** After each push, the administrator MUST run `ilium plugin trust list` on each machine and `ilium plugin doctor`. A trust store line that is not `ok`, or a key list that differs from the source file, MUST count as a failed push.

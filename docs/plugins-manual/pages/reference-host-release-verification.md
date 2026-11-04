@@ -23,6 +23,7 @@ Every release publishes one `SHA256SUMS` file beside the archives. The file list
 
 - [SEC-428] A release MUST publish a `SHA256SUMS` file that lists every release archive with its SHA-256 hash, one line per archive.
 - [SEC-429] A user who checks a download by hand MUST compare the archive's SHA-256 hash with the line in `SHA256SUMS` that carries the same archive name, and MUST run the attestation check before running the archive.
+- **[OPS-236]** Every release MUST publish the debug symbol files for the build id of each host binary it ships, next to `SHA256SUMS`, so that the frames of a host crash record can be resolved against that release (proposed, owner to confirm).
 
 ## Terms and formats
 
@@ -200,6 +201,10 @@ When the project starts to sign, the release notes name the signing identity, an
 
 Contract: `ilium:plugin@0.1.0`.
 
+## Older host minors for the compatibility matrix
+
+The [backwards-compatibility matrix](/pages/guide-backwards-compatibility-test-matrix/) runs a plugin against a host at N-1, N and N+1, so every host minor inside its support period must stay available to a test job. The release record names, for each minor, the copy the project keeps: the signed release archives of that minor, or the source tag with its locked dependency file and the `wit_hashes` of that minor. The location of each copy is listed in the support matrix named in [Release process](/pages/release-process/).
+
 ## Requirement statements
 
 - **[SEC-428]** Every release MUST publish a `SHA256SUMS` file that lists every release archive with its SHA-256 hash, one line per archive.
@@ -214,3 +219,4 @@ Contract: `ilium:plugin@0.1.0`.
 - **[SEC-960]** A site without GitHub access MUST run the attestation check of SEC-429 on a connected machine, against the same archive bytes that the site will receive, and MUST NOT carry the archive into the site until that check reports a verified attestation. The hash of the archive MUST be computed again on the offline site.
 - **[SEC-961]** A mirror of a host release MUST hold the five archives of the archive inventory and the `SHA256SUMS` of one release tag, with the file names and bytes unchanged. A mirror MUST NOT edit, rebuild or re-sign `SHA256SUMS`, and MUST NOT combine files from two release tags.
 - **[SEC-962]** Each offline verification MUST leave a written record with the release tag, the archive name, the SHA-256 hash, the time of the check in `YYYY-MM-DD HH:mm:ss`, the machine that ran the attestation check and the result. A record without the attestation result MUST NOT be used as proof that the archive is genuine.
+- **[DEV-198]** The release pipeline MUST keep, for every host minor inside its support period, either the signed release archives of that minor, or the source tag with its locked dependency file and the `wit_hashes` of that minor, and MUST publish the location of that copy in the support matrix.

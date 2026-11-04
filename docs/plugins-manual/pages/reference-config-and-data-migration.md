@@ -128,6 +128,7 @@ The tables below are the complete list of keys the kernel knows today (see the [
 | `[text_triggers]` | rule list | Text triggers | yes (server-owned) |
 | `[agent_setup]` | the global instruction file paths and the never-ask choices; the field names are those of the Setup tab in `src/docs/settings.md` | Agent setup | yes |
 | `[debug]` | `file_logging_enabled` | Kernel logger, Diagnostics | yes |
+| `[diagnostics]` | `log_dir` (folder inside the state folder, see [Diagnostics and logs](/pages/ops-diagnostics-and-logs/)), `host_level` (threshold of `host.` lines, default `info`) | Diagnostics, Kernel logger | `host_level` yes; `log_dir` at next server start |
 | `[api]` | `port` | Kernel HTTP listener | at next server start |
 | `[onboarding]` | guided-setup progress, no credentials | Settings | yes |
 
@@ -228,7 +229,8 @@ One mechanism stores plugin state in a session snapshot: the extension point `il
 | Worktrees | `<repo parent>/<main checkout name>.worktrees/<branch slug>` | Git worktree | Worktrees | Worktrees | From the template `{repo_parent}/{repo_name}.worktrees/{branch_slug}`; created by `new-pane --worktree` |
 | Chatroom | `<project>/CHATROOM.md` and `CHATROOM.archive.md` | Markdown | Chatroom | Chatroom | `/CHATROOM.md` and `/CHATROOM.archive.md` are added to `.gitignore` |
 | Boards | any `.md` path the user picks | Markdown | Kanban | Kanban | Every change is saved to the file |
-| Debug logs | `$ILIUM_DEBUG_LOG_DIR/…` | text | Kernel | Diagnostics | Five newest per session |
+| Debug logs | `$ILIUM_DEBUG_LOG_DIR/…`, or the folder of `[diagnostics] log_dir` | text | Kernel | Diagnostics | Five newest per session; files older than 30 days are deleted at start (OPS-227) |
+| Host log | `<state>/host/host.log` | text | Kernel | Diagnostics | Written whether or not file logging is on; four rotated files of 4 MiB (OPS-228) |
 | Plugin storage | `<data>/plugins/storage/<id>.db`, `<project>/.ilium/plugins/<id>.db` | key-value | the plugin | the plugin | See [Plugin files](/pages/reference-plugin-files/) |
 | Claude statusline registry | `<data>/claude-model-statusline-projects.json` | JSON | Agent detect (client side) | Agent detect | Holds session id, project path, model id |
 

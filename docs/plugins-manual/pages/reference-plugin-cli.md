@@ -251,6 +251,7 @@ The second form takes no directory or archive. It writes the manifest JSON Schem
 - **[DEV-071]** `check` on a project directory MUST validate the source manifest and the built components in `dist/`. A missing `dist/` for a declared side MUST be reported as `component.missing`, not as an error of the command.
 - **[DEV-072]** `check` on a `.iliumpkg` file MUST validate the archive as the install path does, without checking trust.
 - **[DEV-073]** `check` MUST exit with 3 when any finding has severity `error`.
+- **[CMP-022]** `check --against <host-version>` and `test --host-contract <host-version>` MUST report `package.api-unsupported` and `manifest.api-version` with the same code and message that install stage 3 reports, when the manifest `requires` range or the built component lies outside the selected host window. `check` MUST report the refusal as an `error` finding and exit 3, and `test` MUST refuse before any case runs and exit 1.
 
 - **[DEV-035]** The project MUST publish, for every host minor inside the current window and every minor still inside its support period, a headless host archive listed in that release's `SHA256SUMS`, and `ilium plugin check --against <host-version>` and `ilium plugin preflight --target <host-version>` MUST fetch and verify it from there or fail with `usage.host-unavailable` naming the version (proposed, owner to confirm).
 
@@ -258,18 +259,25 @@ The second form takes no directory or archive. It writes the manifest JSON Schem
 
 Reports advisory problems.
 
-`ilium plugin lint [<dir>] [--deny warnings] [--rule <id>]... [--json]`
+`ilium plugin lint [<dir>] [--deny warnings] [--rule <id>]... [--fix [--dry-run]] [--json]`
 
 - **[DEV-075]** `lint` MUST run offline and MUST report only `lint.*` rules.
 - **[DEV-076]** `--deny warnings` MUST turn every `warn` finding into an `error` for the exit code. Without it a `warn` finding returns 0.
 - **[DEV-077]** `--rule <id>` MUST restrict the run to the named rules. An unknown id MUST fail with `usage.invalid-value`.
 - **[DEV-078]** A suppressed finding MUST be printed with `suppressed: true` and MUST NOT count toward the exit code. Suppression is described in the rules page.
+- **[DEV-208]** `lint --fix [--dry-run]` MUST rewrite only the lines matched by rows of the `Removed and renamed` table of a migration note that carry the `mechanical` marking. It MUST exit 0 when every rewrite succeeds, and it MUST exit 1 with `lint.fix-dirty-tree` and change no file when a file it would edit has uncommitted changes. With `--dry-run` it MUST print the same records and write nothing.
+
+Every code that `lint` prints is listed, with its severity, whether `lint --fix` applies it and its owner page, in [Check and lint rules](/pages/reference-check-and-lint-rules/#every-code-and-its-owner-page). That table is the one lint catalogue.
+
+- **[DEV-234]** The lint section of the command reference MUST name one catalogue of every lint code, and the catalogue MUST give each code its severity, whether `lint --fix` can apply it and the page that owns the rule.
+
+- **[DEV-235]** `_tools/check.py` MUST fail when a lint code printed by the CLI is missing from the catalogue.
 
 ## test
 
 Runs fixtures against the plugin. The harness behind it is in [Test harness reference](/pages/reference-test-harness/). The fixture and expectation formats are in the same page.
 
-`ilium plugin test [<dir>] [--fixture <glob>]... [--expect <glob>] [--grants <list> | --grant-manifest] [--side <side>] [--component <file>] [--replay <file>] [--update] [--record <file>] [--seed <n>] [--conformance [--subject <subject>] [--case <id>]] [--coverage [--min-coverage <percent>]]`
+`ilium plugin test [<dir>] [--fixture <glob>]... [--expect <glob>] [--grants <list> | --grant-manifest] [--side <side>] [--component <file>] [--replay <file>] [--update] [--record <file>] [--seed <n>] [--host-contract <version>] [--conformance [--subject <subject>] [--case <id>]] [--coverage [--min-coverage <percent>]]`
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
@@ -283,6 +291,7 @@ Runs fixtures against the plugin. The harness behind it is in [Test harness refe
 | `--update` | switch | off | Writes missing or different expectation and golden files. |
 | `--record` | file | none | With `--fixture`, writes the replay file of the run and prints an `artifact` of kind `replay` ([DEV-088]). |
 | `--seed` | integer | 1 | The seed of the harness random source. |
+| `--host-contract` | version | The newest contract that the installed CLI embeds | Runs component mode on the embedded host contract of that version, so a plugin can be tested against an older host. The value `list` prints the embedded versions and exits 0. |
 | `--conformance` | switch | off | Runs the [conformance suite](/pages/reference-conformance-suite/) instead of the fixtures. `--subject` and `--case` narrow it. |
 | `--coverage` | switch | off | Also runs the project's own tests (`cargo test`, `bun test`) under a coverage tool and writes `.ilium/coverage/`. |
 | `--min-coverage` | percent | none | With `--coverage`, exit 3 when line coverage is lower. |
@@ -297,6 +306,7 @@ Runs fixtures against the plugin. The harness behind it is in [Test harness refe
 - **[DEV-087]** `test` MUST exit with 0 when every case passes, with 3 when a case fails or traps, and with 1 when a fixture cannot be read (`test.fixture-invalid`).
 - **[DEV-089]** `test` MUST NOT run the project's own unit tests. Those run with `cargo test` or `bun test` in native mode. `test --coverage` is the one case where the command starts them, and it MUST then print their exit status in the `summary`.
 - **[DEV-088]** `--record <file>` MAY be given with `--fixture`. It MUST write the replay file of the run and print an `artifact` of kind `replay`.
+- **[DEV-194]** The flag table of `test` MUST list `--host-contract <version>` with its type, default and meaning, and `test` MUST exit 2 with `usage.host-contract-unavailable` before any case runs when the version is not embedded in the installed CLI. The message MUST list the embedded versions.
 
 ## pack
 
@@ -312,6 +322,7 @@ Writes the `.iliumpkg` file.
 - **[DEV-100]** `pack` MUST NOT sign. The default output path is `dist/<id>-<version>.iliumpkg`, and the command prints one `artifact` of kind `package`.
 - **[DEV-101]** `pack` MUST fail with `package.size-limit` when the package is larger than 300 MiB (the package format cap, PKG-130), and MUST print a `warning` with the separate code `pack.size-cap` at 100 MiB. See `lint.package-size-near-cap`.
 - **[DEV-102]** `pack --out <file>` MUST refuse to overwrite a file that is not a package of the same id, with `pack.out-exists`.
+- **[AUT-956]** `pack` MUST refuse with `pack.requires-untested` and exit 1 when any host contract version that the manifest `requires` range admits is missing from `tested_hosts` in `dist/build.json`. The message MUST list every missing version.
 
 ## keygen, sign and trust
 
@@ -506,6 +517,7 @@ The build has fixed stages. Each stage has an input, an output and an error code
 - **[DEV-305]** The `input_hash` MUST be the SHA-256 over the sorted list of project source files, the lockfile, the manifest and the toolchain versions. An unchanged `input_hash` MUST reuse the cached component and set `cached` true.
 - **[DEV-306]** With a pinned toolchain and a locked dependency set, two builds of the same sources MUST produce byte-identical components. Without `--locked` the guarantee does not hold.
 - **[DEV-307]** The build cache MUST live in `<dir>/.ilium/cache/`. `target/` and `node_modules/` keep their usual places. A project `.gitignore` MUST list `dist/`, `.ilium/`, `target/` and `node_modules/`.
+- **[DEV-207]** `build` MUST write `dist/build.json` with the key `tested_hosts`, a list of the host contract versions for which a `test --conformance` run passed on the component with the same `component_sha256` as this build. Each passing `test --conformance` run MUST be recorded in `.ilium/conformance.json` with its contract version and component hash. `tested_hosts` MUST be an empty list when no such record exists.
 
 ## Error catalogue
 
@@ -551,6 +563,9 @@ These codes are in addition to the `manifest.*` codes of [Packages](/pages/packa
 | `package.size-limit` | The package is over 300 MiB | Remove assets | 1 |
 | `pack.size-cap` (warning) | The package is over 100 MiB | Remove assets | 0 |
 | `pack.out-exists` | `--out` names a different file | Choose another path | 1 |
+| `pack.requires-untested` | A host contract version admitted by `requires` is missing from `tested_hosts` | Run `test --conformance` on each listed version | 1 |
+| `lint.fix-dirty-tree` | `lint --fix` would edit a file with uncommitted changes | Commit or stash the file, then run again | 1 |
+| `usage.host-contract-unavailable` | `--host-contract` names a version the CLI does not embed | Run `test --host-contract list` and pick a listed version | 2 |
 | `sign.key-unreadable` | The key file does not parse | Check the file | 1 |
 | `sign.key-permissions` | The key is readable by others | `chmod 600` | 1 |
 | `sign.publisher-mismatch` | Manifest and key publishers differ | Fix one | 1 |

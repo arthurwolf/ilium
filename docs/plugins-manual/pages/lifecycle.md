@@ -179,6 +179,8 @@ The host calls the exports in response to events, views, commands and scene fram
 
 On server shutdown, the services stop first. Then the plugin host refuses new plugin submissions, which complete as `cancelled`. Each active plugin receives `deactivate(shutdown)` in reverse start order (consumers before the providers they require), and its returned bytes become its restore state. Pending requests are cancelled and instances are dropped. The final snapshot is written last, so no plugin intent can reach it after the writer stops.
 
+A plugin that is migrating its data when the server stops has its own rule. The migration call gets the same 5 s shutdown budget, and an unfinished migration keeps its backup and is treated as an interruption at the next start. See [Stop during a migration](/pages/guide-data-migration/#stop-during-a-migration).
+
 <figure>
 <svg viewBox="0 0 400 260" role="img" aria-label="Server start and shutdown sequence">
   <title>Server start and shutdown sequence</title>

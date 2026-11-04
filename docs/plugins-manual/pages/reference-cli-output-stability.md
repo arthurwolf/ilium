@@ -134,6 +134,8 @@ The rules below settle where the release notes of the command line live, which s
 
 - **[DEV-954]** The release pipeline MUST fail when a `Removed` entry names an item that no earlier `CHANGELOG.md` entry marked deprecated with that item's stop release equal to the release being built. (proposed, owner to confirm)
 
+The JSON file of the deprecation register is a published document of each command-line release, not a command output. Its fields follow the rules of this page: a field is added without a change of version, and a field is removed or changes meaning only in a minor release. The register names that removal under the item it affects. See [Deprecation timeline and the window](/pages/compat-deprecation-timeline/#deprecation-register).
+
 ## See also
 
 - [Plugin command-line reference](/pages/reference-plugin-cli/)

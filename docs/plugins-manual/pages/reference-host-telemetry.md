@@ -148,6 +148,8 @@ Target behaviour. An operator must be able to see how often a plugin traps witho
 
 The registry below lists every code the host writes to a log line, with its level, its meaning and the requirement that produces it. Only codes that start with `host.` match the pattern of HST-607. The other codes are listed as they stand today; their rename needs an owner decision before the first ABI release.
 
+Every line whose code starts with `host.` is also written to `<state>/host/host.log`, even when file logging is off, and its threshold is set with `[diagnostics] host_level`. The rules are in [Diagnostics and logs for operators](/pages/ops-diagnostics-and-logs/) (OPS-228 and OPS-229).
+
 | Code | Level | Meaning | Produced by |
 |---|---|---|---|
 | `host.trap` | error | A trap, with the trap code | HST-358 |
@@ -172,6 +174,10 @@ The registry below lists every code the host writes to a log line, with its leve
 - **[HST-610]** When tracing is on, a span MUST use the correlation id of HST-526 as `trace_id`, a span for a cross-plugin call MUST have the caller span as `parent_id`, and a span MUST be emitted exactly once per call, including calls that trap or time out.
 
 - **[HST-612]** The host MUST expose the counters of HST-354 in Prometheus text format at `ilium plugin metrics` (stdout) with metric names prefixed `ilium_plugin_`, labels `plugin`, `side` and `class` only, and MUST NOT serve them over any network socket.
+
+- **[HST-996]** `ilium plugin metrics --out <file>` MUST write the Prometheus text to a temporary file in the same folder, with mode 0600, and then rename it over `<file>` in one step, so that a reader sees either the old or the new complete text.
+
+- **[HST-997]** `ilium plugin metrics --out <file>` MUST exit with code 1 and MUST leave `<file>` unchanged when the server is not running, as the command does for standard output.
 
 - **[HST-613]** Metric label cardinality MUST be bounded: the labels MUST NOT include export names, event kinds beyond the 32 defined kinds, error messages or user data, and the host MUST cap the metric series at 64 per plugin side.
 
@@ -225,7 +231,7 @@ The counters above are keyed by plugin. Some incidents are not caused by a plugi
 | `ilium_host_disk_pressure_step` | gauge | step | Current disk-pressure step: 0 none, 1 caches evicted, 2 log writes reduced, 3 installs blocked ([HST-661]) |
 | `ilium_host_clients_attached` | gauge | count | Clients currently attached to this session server |
 
-The `limit` label of `ilium_host_ceiling_rejections_total` takes one value for each ceiling defined by [HST-500] to [HST-511] (for example `memory-pool`, `installed-plugins`, `active-sides`, `host-capacity`); the values are fixed by the host, so the label has at most 12 values. The `source` label of `ilium_host_observability_dropped_total` takes the values `audit-queue` (records dropped while the audit file could not be written, [SEC-225]), `log-queue` (the writer queue overflow of [HST-643], which is also the `host.observability.dropped` line) and `log-disk` (lines dropped under disk pressure, the number reported by the `log.dropped` line of [HST-663]). Each dropped record is counted exactly once, under the source that dropped it.
+The `limit` label of `ilium_host_ceiling_rejections_total` takes one value for each ceiling defined by [HST-500] to [HST-511] (for example `memory-pool`, `installed-plugins`, `active-sides`, `host-capacity`); the values are fixed by the host, so the label has at most 12 values. The `source` label of `ilium_host_observability_dropped_total` takes the values `audit-queue` (records dropped while the audit file could not be written, [SEC-225]), `log-queue` (the writer queue overflow of [HST-643], which is also the `host.observability.dropped` line), `log-disk` (lines dropped under disk pressure, the number reported by the `log.dropped` line of [HST-663]) and `forward` (records that the forwarding route of HST-995 could not send within its rate limit). Each dropped record is counted exactly once, under the source that dropped it.
 
 ### Retention and reset
 

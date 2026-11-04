@@ -63,7 +63,7 @@ One code of conduct applies to the repository, the issue tracker, pull requests,
 
 **Actions.** In increasing order: a private warning, a public warning, a temporary ban of 1 to 12 months, a permanent ban, and, for abuse through a plugin or a namespace, removal of the namespace from the registry. Removal is signed into the registry metadata and announced in the transparency log, and the host then disables the plugin the way [PKG-711] describes, keeping its data. A reclaimed or removed id follows [PKG-703].
 
-**Registry moderation.** Abusive plugin content (hateful text, harassment, doxxing) is reported to the same address, handled by the same people, and recorded in the same moderation record. Malware and security abuse go to the security team instead. Copyright, trademark and patent claims by a rights holder follow [Rights-holder claims](/pages/publish-rights-claims/).
+**Registry moderation.** Abusive plugin content (hateful text, harassment, doxxing) is reported to the same address, handled by the same people, and recorded in the same moderation record. Malware and security abuse go to the security team instead. Copyright, trademark and patent claims by a rights holder follow [Rights-holder claims](/pages/publish-rights-claims/). Court orders and requests from government bodies follow [Legal requests](/pages/publish-legal-requests/). The content classes that users can hide are defined in [Registry policy](/pages/reference-registry/#content-classes).
 
 **Appeal.** A person who is warned or banned may appeal within 30 days to a maintainer who took no part in the decision. The appeal result is final and is recorded. The record is kept privately, and a public log lists only the action type and date, never the reporter.
 
@@ -140,6 +140,8 @@ The MIT licence covers the code, not the name or logo. The reserved id prefixes 
 - A private or mirror registry may not call itself the official registry. It shows its own name and URL, and a client pins it by its own root key.
 - A release not built and signed by the project is not called an official Ilium release.
 - For any other use, such as a book, a talk or a product name, ask at the project address given on the repository page before you use the name or logo.
+
+The registry checks this rule at publish for plugin ids and display names. A name that uses `ilium`, `official`, `core` or `verified` as a separate word is refused unless the publisher id is a `user.` account of the project maintainers. The rule and its appeal path are in [Registry namespaces](/pages/reference-registry/#namespaces).
 
 ## See also
 

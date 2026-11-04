@@ -388,7 +388,8 @@ The catalogue in [Manifest schema and error catalogue](/pages/reference-manifest
 | `install.notify-failed` | A running server could not be told. | Remove the socket of a server. |
 | `install.no-previous` | There is no earlier version for a rollback. | Roll back a first install. |
 | `migration.data-newer` | The data is newer than the target supports. | See LIF-079. |
-| `migration.interrupted` | The migration was interrupted twice. | See LIF-110. |
+| `migration.interrupted` | The migration was interrupted twice. | See LIF-110 and [Stop during a migration](/pages/guide-data-migration/#stop-during-a-migration). |
+| `migration.backup-too-large` | The data to back up is larger than `migration_backup_mib`. The update stays staged. | Raise the cap, or export the data and pass `--no-backup`. See LIF-107 and [Migrations longer than one call, and large data](/pages/guide-data-migration/#migrations-longer-than-one-call-and-large-data). |
 | `rollback.no-backup` | The pre-update snapshot is gone. | See LIF-080. |
 | `update.rolled-back` | Warning: the candidate failed and the host returned. | See LIF-075. |
 

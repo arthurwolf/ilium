@@ -700,6 +700,16 @@ With the provider off, the same command shows the fallback.
 | `cancelled` | The provider restarted with a deferred call open | Show the fallback. Retry once if it is safe. |
 | Second provider idle | One provider per name | Pick the owner on the Surface view. |
 
+### Choosing a payload from the provider version
+
+The consumer should not guess which version the provider runs. The version of the registered provider, as described in [SVC-032](/pages/api-services/#versions-and-ranges), would tell it which payload to send. That read is proposed and is not in the 0.1 service surface yet, so this step shows its shape only.
+
+```json
+{ "service": "example.glossary/lookup", "version": "1.1.0" }
+```
+
+With that version, the consumer sends `lang` and `aliases` only when the version is `1.1.0` or later. When the version is `1.0.0`, it sends the 1.0 payload. When the version cannot be read, it shows the fallback text without calling.
+
 ### See also
 
 - [Services](/pages/api-services/) for the call API, the errors and the schema keywords.

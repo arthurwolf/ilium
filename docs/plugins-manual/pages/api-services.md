@@ -100,6 +100,14 @@ The `ServiceCall` and `ServiceReply` types and the `ServiceProvider` trait are i
 - A provider that is installed but not running is started by the call. The call waits up to the provider's activation deadline (`activate_deadline_ms`, 2 seconds by default at T2 and T3) and then waits for the reply. If the activation deadline passes first, the request fails with `timed-out`.
 - A provider that is not installed or is disabled returns `not-found` at once.
 
+### Versions and ranges
+
+A consumer names a service and a semver range in `requires.services`. The registry keeps one registered provider per name, and a second enabled plugin that declares the same name is never called ([The registry](/pages/services/#the-registry)). Each `provides` entry names one version, so the range is checked against the version of that one provider, by the rule of [SVC-006]. No choice between versions exists, so no highest-version rule applies and no error code is added for a range that no version satisfies. The consumer stays waiting for a compatible provider, as described in [Upgrading a provider](#upgrading-a-provider).
+
+- **[SVC-031]** A consumer's `requires.services` range MUST be checked against the version of the registered provider of the name by [SVC-006]. While no version of that provider satisfies the range, the consumer MUST stay waiting for a compatible provider, no provider method MUST run for its calls, and a call made in that state MUST complete as `not-found` with no partial reply.
+
+- **[SVC-032]** A consumer MUST be able to read the version of the registered provider of a name (proposed, owner to confirm; the 0.1 service surface of [reference WIT](/pages/reference-wit/) has no such call), and the fallback path of [Tutorial 22](/pages/tutorial-22-versioned-service-with-fallbacks/) MUST use that version to choose the 1.0 or the 1.1 payload.
+
 ### Upgrading a provider
 
 The kernel compares the version in each caller's `requires.services` entry with the version the provider lists in `provides`. A full version in `requires` means the minimum compatible version, a caret range: `com.example.titles/suggest@1.0.0` means `^1.0.0`. A short form such as `@1.0` or a range is refused with `manifest.service-version`. For a major of 0, the minor must be equal and the patch is ignored, so `@0.1.0` accepts 0.1.x only. The full rule is in [requirements: services](/pages/reference-requirements-services-topics/) and [dependency resolution](/pages/reference-dependency-resolution/#the-requires-object).

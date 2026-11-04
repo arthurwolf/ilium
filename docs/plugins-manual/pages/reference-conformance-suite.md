@@ -176,6 +176,7 @@ test('event budget holds', async () => {
 | `verdict` | string | `pass`, `fail` or `skip` |
 | `reason` | string | For `skip`, one of the reasons in DEV-613. For `fail`, the message. |
 | `duration_ms` | integer | Time the case took |
+| `remediation` | string | The remediation line of the case, from the table of [Remediation by case](#remediation-by-case). Printed on every case record. |
 
 - **[DEV-640]** A `fail` record MUST carry `expected` and `actual` fields that describe the difference, as strings of at most 200 characters.
 - **[DEV-641]** The `summary` record MUST list `passed`, `failed`, `skipped` and `duration_ms`. `passed` plus `failed` plus `skipped` MUST equal the number of case records.
@@ -287,3 +288,53 @@ A pipeline that must keep the old verdicts pins the catalogue with `--suite-vers
 | Report is not `ilium-conformance/1` | Refused at upload by a registry that requires reports; ignored elsewhere |
 | Report has a `fail` record and the registry requires a pass | Upload refused |
 | Suite version is not known to the host (newer than the host) | Badge shows the version text and `conformance: pass` or `fail` without `outdated` |
+
+### Remediation by case
+
+Every case has one remediation line. It names the manifest key, SDK item or export that most often causes the failure. A case whose subject is the host alone has no plugin fix; its line says so, and the fix is a host release.
+
+| Case | Remediation line |
+|---|---|
+| CONF-LIFE-01 | Export `activate` from the SDK entry point, and register event handlers only inside `activate`. |
+| CONF-LIFE-02 | Manifest `activate_deadline_ms` and the `activate` export: move slow setup out of `activate` or into a job so the call ends before the deadline. |
+| CONF-LIFE-03 | Host-only case: the host cuts `deactivate` at 500 ms. A failure is a host defect, not a plugin cause; report it with the output of `ilium version --json`. |
+| CONF-LIFE-04 | The `activate` export: return an error only after logging its cause, and return success once setup is complete. |
+| CONF-LIFE-05 | The `deactivate` export: accept all five delivered reasons, `shutdown`, `disabled`, `upgrade`, `revoked` and `granted`, and never branch on `crash-restart`, which is never delivered. |
+| CONF-EVT-01 | Host-only case: the host splits queued events into batches of at most 256. A failure is a host defect; report it with the suite version. |
+| CONF-EVT-02 | The `on-events` export: keep a batch of 256 events under 20 ms, and move heavy work into a job. |
+| CONF-EVT-03 | Host-only case: the host keeps the newest state of coalesced events. A failure is a host defect; report it with the suite version. |
+| CONF-EVT-04 | Host-only case: the host sends `events-dropped` when its queue is full. A failure is a host defect; report it with the suite version. |
+| CONF-EVT-05 | The manifest `capabilities` object: declare the grant that an event needs, or stop subscribing to the event. |
+| CONF-EVT-06 | The submission list returned by one handler call: return at most 256 submissions per call and split larger work across calls. |
+| CONF-EVT-07 | The submission batch of the SDK: check each submission before the batch is returned, because one invalid submission cancels the rest. |
+| CONF-EVT-08 | The `dedup-key` of a submission: give each submission a key that no other submission in the same 10 minutes uses. |
+| CONF-EVT-09 | The `dedup-key` of a submission: use only letters, digits and the characters `._:/-` in the key. |
+| CONF-EVT-10 | The `request-completed` event: handle it by the correlation id of the submission it answers. |
+| CONF-GRANT-01 | The manifest `capabilities` object: handle `not-permitted` as a normal result and show a fallback, because the user declined the grant. |
+| CONF-GRANT-02 | The call sites of a capability after revocation: stop calling a capability after `revoked`, and check the grant again before each use. |
+| CONF-GRANT-03 | The arguments of a grant in the manifest `capabilities` object: request the scope that the call uses, for example `fs.read:project`. |
+| CONF-GRANT-04 | The `grant_now` call and the manifest `capabilities` object: declare the grant in the manifest before calling `grant_now`, or remove the call. |
+| CONF-GRANT-05 | The manifest `capabilities` object: declare the capability whose functions the plugin calls, or remove those calls. |
+| CONF-VIEW-01 | The `render` export: keep each render at 80x24 under 10 ms by building the view from cached state. |
+| CONF-VIEW-02 | The `render` export: build the view only from its input, and remove clock, random and global reads from `render`. |
+| CONF-VIEW-03 | The tree returned by `render`: return at most 4,096 nodes per view and split a larger view into several panes. |
+| CONF-VIEW-04 | The action keys set by `render`: send only action keys that the same view sets in its own render. |
+| CONF-STORE-01 | Host-only case: a value written through the storage API survives a restart. A loss is a host defect; report it with the suite version. |
+| CONF-STORE-02 | The storage `put` call: keep each value at 1,048,576 bytes or less, and split larger data across keys. |
+| CONF-STORE-03 | The storage bucket: keep each bucket at 16 MiB or less, and remove old keys or move data to a second bucket. |
+| CONF-MEM-01 | Manifest `limits.memory_mib`: keep the plugin's memory use under the limit, which is 32 MiB by default, or raise the value within the ceiling of its tier. |
+| CONF-MEM-02 | Manifest `limits.memory_mib`: set a value of 128 or less for T2 and T3, because the host clamps a larger value and logs the clamp. |
+| CONF-RESTART-01 | The trap that stopped the plugin: fix it. The host restarts the plugin after 1 s; trap codes are in [Errors and limits](/pages/reference-errors-and-limits/). |
+| CONF-RESTART-02 | The repeated trap: fix it. The second restart within 10 minutes waits 5 s, so a second trap shows the same cause. |
+| CONF-RESTART-03 | The repeated trap: fix the cause of the third trap in 10 minutes. The host disables the plugin when the third trap comes. |
+| CONF-RESTART-04 | Host-only case: the window of old failures is counted by the host. A failure is a host defect; report it with the suite version. |
+| CONF-RESTART-05 | Host-only case: a lone old failure does not count toward the restart rule. A failure is a host defect; report it with the suite version. |
+| CONF-PKG-01 | The build of the package: remove timestamps and unordered file lists from the inputs, then pack the same build twice to check the bytes. |
+| CONF-PKG-02 | Manifest `api`: set it to `ilium:plugin@0.1.0` and rebuild with a CLI that embeds that contract. |
+| CONF-PKG-03 | Manifest `files` entries: rebuild after the last change, so that each `sha256` matches the bytes of its file. |
+| CONF-PKG-04 | Package signature: sign the package to install it above tier T3; an unsigned package installs only as T3 with the dev badge. |
+| CONF-PKG-05 | Manifest keys: remove the unknown key, because the manifest schema allows only the keys in the manifest reference. |
+
+- **[DEV-228]** Every case of the conformance suite MUST carry a remediation line naming the manifest key, SDK item or export that most often causes its failure, and `ilium plugin test --conformance` MUST print that line in the `remediation` field of every `conformance` case record.
+
+- **[DEV-229]** The release pipeline MUST fail when a case id has no remediation line.

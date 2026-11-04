@@ -118,6 +118,69 @@ A lint finding record:
 {"type":"lint","rule":"lint.settings-help-missing","severity":"warn","message":"settings row 'refresh_seconds' has no help id","file":"manifest.json","key_path":"/contributes/settings/0/schema/properties/refresh_seconds","fix":"add \"help\": \"<topic id from contributes.help>\" to the row","suppressed":false}
 ```
 
+### Every code and its owner page
+
+This table lists every `lint` code that the rules on this page or on other pages can print, with its severity, whether `lint --fix` applies it and the page that owns the rule. Rows for codes owned by other pages link to that page. Under [DEV-908], `lint --fix` applies a rule whose record carries a non-empty `fix` field. The column says Yes where the owner page shows such a record, and Not stated where no owner page has shown one yet (proposed, owner to confirm).
+
+| Code | Severity | `lint --fix` applies it (proposed, owner to confirm) | Owner page |
+|---|---|---|---|
+| `lint.activation-startup` | warn | Not stated | This page |
+| `lint.catalogue-behind` | info | Not stated | This page |
+| `lint.changelog-missing` | info | Not stated | This page |
+| `lint.contribution-near-cap` | info | Not stated | This page |
+| `lint.debug-info-in-release` | warn | Not stated | This page |
+| `lint.dedup-key-charset` | warn | Not stated | This page |
+| `lint.dependency-vulnerable` | by advisory severity | Not stated | [CI recipes](/pages/guide-ci-recipes/) |
+| `lint.deprecated-removed` | error | Not stated | [Deprecating plugin features](/pages/guide-deprecating-plugin-features/) |
+| `lint.deprecated-used` | warn | Not stated | [Deprecating plugin features](/pages/guide-deprecating-plugin-features/) |
+| `lint.deprecation-too-short` | error | Not stated | [Deprecating plugin features](/pages/guide-deprecating-plugin-features/) |
+| `lint.description-missing` | warn | Not stated | This page |
+| `lint.dirty-tree` | error | Not applicable (refusal code) | [Plugin command-line reference](/pages/reference-plugin-cli/) |
+| `lint.extension-point-undocumented` | warn | Not stated | This page |
+| `lint.extension-schema` | warn | Not stated | This page |
+| `lint.fix-dirty-tree` | error | Not applicable (refusal code) | [Plugin command-line reference](/pages/reference-plugin-cli/) |
+| `lint.grant-unexplained` | warn | Not stated | This page |
+| `lint.grant-unused` | warn | Not stated | This page |
+| `lint.help-link-broken` | warn | Not stated | This page |
+| `lint.help-title-mismatch` | warn | Not stated | This page |
+| `lint.help-topic-missing` | warn | Not stated | This page |
+| `lint.help-topic-too-large` | warn | Not stated | This page |
+| `lint.help-translation-orphan` | warn | Not stated | [Internationalisation](/pages/guide-internationalisation/) |
+| `lint.high-risk-grants` | info | Not stated | This page |
+| `lint.host-range-above-api` | warn | Not stated | This page |
+| `lint.host-range-below-api` | warn | Not stated | This page |
+| `lint.icon-name-unknown` | warn | Not stated | This page |
+| `lint.license-file-missing` | info | Not stated | This page |
+| `lint.license-missing` | info | Not stated | This page |
+| `lint.limit-above-ceiling` | warn | Not stated | This page |
+| `lint.notice-incomplete` | warn | Not stated | This page |
+| `lint.notice-missing` | warn | Not stated | This page |
+| `lint.package-size-near-cap` | warn | Not stated | This page |
+| `lint.provenance-mismatch` | error | Not stated | This page |
+| `lint.readme-missing` | info | Not stated | This page |
+| `lint.render-trap` | error | Not stated | This page |
+| `lint.rules-version-overridden` | info | Not stated | This page |
+| `lint.sbom-invalid` | error | Not stated | This page |
+| `lint.sdk-deprecated` | warn (error at the removal minor) | Not stated | [SDK deprecation and removal](/pages/reference-sdk-deprecation/) |
+| `lint.settings-help-missing` | warn | Yes | This page |
+| `lint.skipped` | info | Not stated | This page |
+| `lint.src-in-package` | info | Not stated | This page |
+| `lint.suppression-reason-missing` | error | Not stated | This page |
+| `lint.suppression-unknown` | error | Not stated | This page |
+| `lint.suppression-unused` | warn | Not stated | This page |
+| `lint.text-banned-verb` | warn | Not stated | [Writing user text](/pages/guide-writing-user-text/) |
+| `lint.text-case-mapped` | warn | Not stated | [Internationalisation](/pages/guide-internationalisation/) |
+| `lint.text-concatenated` | warn | Not stated | [Writing user text](/pages/guide-writing-user-text/) |
+| `lint.text-error-no-next-step` | warn | Not stated | [Writing user text](/pages/guide-writing-user-text/) |
+| `lint.text-exclamation` | warn | Not stated | [Writing user text](/pages/guide-writing-user-text/) |
+| `lint.text-final-period` | warn | Not stated | [Writing user text](/pages/guide-writing-user-text/) |
+| `lint.text-placeholder-unnamed` | warn | Not stated | [Writing user text](/pages/guide-writing-user-text/) |
+| `lint.text-plural-missing-other` | error | Not stated | [Writing user text](/pages/guide-writing-user-text/) |
+| `lint.text-title-case` | warn | Not stated | [Writing user text](/pages/guide-writing-user-text/) |
+| `lint.text-title-too-long` | warn | Not stated | [Writing user text](/pages/guide-writing-user-text/) |
+| `lint.unstable-feature` | warn | Not stated | This page |
+| `lint.widget-missing-key` | warn | Not stated | This page |
+
 ## Severity, deny and exit codes
 
 - **[DEV-225]** Plain `lint` MUST exit with 0 when only `warn` and `info` findings exist, and with 3 when an `error` finding exists.
