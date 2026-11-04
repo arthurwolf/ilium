@@ -2300,3 +2300,288 @@ async fn pane_output(stream: &mut SessionStream, tui: &PtySession, pane: NodeId,
         tui.screen_text()
     );
 }
+
+// These tests use the real candidate CLI and a private server. They qualify
+// the progress subscription boundary, not the Codex tool scheduler.
+struct ProgressWaitProcess {
+    child: tokio::process::Child,
+    stdout: tokio::io::BufReader<tokio::process::ChildStdout>,
+}
+
+fn progress_pane_command(sandbox: &Sandbox, pane: NodeId) -> tokio::process::Command {
+    let mut command = sandbox.command();
+    command
+        .env(ilium_ipc::pane_env::PANE_ID, pane.0.to_string())
+        .env(ilium_ipc::pane_env::SESSION_NAME, "default")
+        .env(
+            ilium_ipc::pane_env::SESSION_SOCKET,
+            ilium::session::socket_path_in(&sandbox.socket_dir, &sandbox.project, "default"),
+        );
+    command
+}
+
+fn progress_wait_process(sandbox: &Sandbox, pane: NodeId, args: &[&str]) -> ProgressWaitProcess {
+    let mut child = progress_pane_command(sandbox, pane)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = tokio::io::BufReader::new(child.stdout.take().unwrap());
+    ProgressWaitProcess { child, stdout }
+}
+
+async fn progress_registration(wait: &mut ProgressWaitProcess) -> u64 {
+    use tokio::io::AsyncBufReadExt;
+    let mut line = String::new();
+    tokio::time::timeout(TIMEOUT, wait.stdout.read_line(&mut line))
+        .await
+        .expect("progress registration acknowledgement")
+        .unwrap();
+    let record: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(record["type"], "progress_set", "{line}");
+    record["monitor_id"].as_u64().unwrap()
+}
+
+async fn progress_wait_result(wait: ProgressWaitProcess, exit: i32) -> serde_json::Value {
+    use tokio::io::AsyncReadExt;
+    let ProgressWaitProcess { child, mut stdout } = wait;
+    let output = tokio::time::timeout(TIMEOUT, child.wait_with_output())
+        .await
+        .expect("progress waiter must receive its real terminal outcome")
+        .unwrap();
+    let mut text = String::new();
+    stdout.read_to_string(&mut text).await.unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(exit),
+        "stdout: {text}; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records: Vec<serde_json::Value> = text
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(records.len(), 1, "one actionable result per wait: {text}");
+    let record = records.into_iter().next().unwrap();
+    assert_eq!(record["type"], "progress_wait");
+    assert_eq!(record["exit_code"], exit);
+    record
+}
+
+async fn progress_wait_is_pending(wait: &mut ProgressWaitProcess) {
+    // This bounds only the assertion that no result is ready. It is not a
+    // deadline passed to the CLI or a reason to settle a healthy monitor.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), wait.child.wait())
+            .await
+            .is_err(),
+        "healthy monitor must keep its waiter pending"
+    );
+}
+
+fn progress_fixture_report(path: &std::path::Path, job: &str, status: &str) {
+    let mut report = serde_json::json!({
+        "job_id": job,
+        "status": status,
+        "percent": if status == "running" { 25 } else { 100 },
+        "message": format!("Synthetic progress wait fixture {job}: {status}"),
+    });
+    if status == "error" {
+        report["error"] = "synthetic task failure".into();
+    }
+    progress_fixture_write(path, &report);
+}
+
+fn progress_fixture_write(path: &std::path::Path, report: &serde_json::Value) {
+    let next = path.with_extension("next");
+    std::fs::write(&next, serde_json::to_vec(report).unwrap()).unwrap();
+    std::fs::rename(next, path).unwrap();
+}
+
+fn progress_fixture_probe(path: &std::path::Path) -> String {
+    format!(
+        "cat '{}'",
+        path.display().to_string().replace('\'', "'\\''")
+    )
+}
+
+async fn progress_register(sandbox: &Sandbox, pane: NodeId, probe: &str) -> u64 {
+    let output = tokio::time::timeout(
+        TIMEOUT,
+        progress_pane_command(sandbox, pane)
+            .args([
+                "progress",
+                "set",
+                "--command",
+                probe,
+                "--interval-seconds",
+                "1",
+            ])
+            .output(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "progress set: {} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let record: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    record["monitor_id"].as_u64().unwrap()
+}
+
+async fn progress_fixture_pane(sandbox: &Sandbox) -> NodeId {
+    sandbox.cli(&["new-pane", "--", "cat"]).await;
+    let mut control = sandbox.connect().await;
+    tree(&mut control).await.pane_ids_in_tree_order()[0]
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn progress_wait_runtime_both_entry_points_correlate_real_outcomes() {
+    let sandbox = Sandbox::new();
+    let pane = progress_fixture_pane(&sandbox).await;
+    let mut interface = sandbox.connect().await;
+    tree(&mut interface).await;
+    let first_report = sandbox.project.join("first-progress.json");
+    let second_report = sandbox.project.join("second-progress.json");
+    progress_fixture_report(&first_report, "first-task", "running");
+    progress_fixture_report(&second_report, "second-task", "running");
+    let first_id = progress_register(&sandbox, pane, &progress_fixture_probe(&first_report)).await;
+    let mut first_wait =
+        progress_wait_process(&sandbox, pane, &["progress", "wait", &first_id.to_string()]);
+    let second_probe = progress_fixture_probe(&second_report);
+    let mut second_wait = progress_wait_process(
+        &sandbox,
+        pane,
+        &[
+            "progress",
+            "set",
+            "--command",
+            &second_probe,
+            "--interval-seconds",
+            "1",
+            "--wait",
+        ],
+    );
+    let second_id = progress_registration(&mut second_wait).await;
+    assert_ne!(first_id, second_id);
+    progress_wait_is_pending(&mut first_wait).await;
+    progress_wait_is_pending(&mut second_wait).await;
+
+    // The interface subscription receives changing progress independently
+    // while the blocking CLI processes still have no terminal result.
+    let mut progress: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&first_report).unwrap()).unwrap();
+    progress["percent"] = 50.into();
+    progress_fixture_write(&first_report, &progress);
+    event(
+        &mut interface,
+        "progress remains visible during a held wait",
+        |message| {
+            matches!(message, ServerEvent::PaneProgressChanged { pane_id, progress_monitors }
+            if *pane_id == pane && progress_monitors.iter().any(|progress|
+                progress.monitor_id == first_id && progress.report.percent == 50.0))
+        },
+    )
+    .await;
+    progress_wait_is_pending(&mut first_wait).await;
+
+    // Completing one task cannot release the waiter for a different monitor.
+    progress_fixture_report(&second_report, "second-task", "done");
+    let second = progress_wait_result(second_wait, 0).await;
+    assert_eq!(second["monitor_id"], second_id);
+    assert_eq!(second["outcome"], "done");
+    progress_wait_is_pending(&mut first_wait).await;
+    progress_fixture_report(&first_report, "first-task", "error");
+    let first = progress_wait_result(first_wait, 3).await;
+    assert_eq!(first["monitor_id"], first_id);
+    assert_eq!(first["outcome"], "error");
+
+    // A new observation of an already-settled monitor preserves the outcome
+    // and identity; it does not run the job or create a second monitor.
+    let replay = progress_wait_result(
+        progress_wait_process(&sandbox, pane, &["progress", "wait", &first_id.to_string()]),
+        3,
+    )
+    .await;
+    assert_eq!(replay["monitor_id"], first_id);
+    assert_eq!(replay["outcome"], "error");
+    let missing = progress_wait_result(
+        progress_wait_process(&sandbox, pane, &["wait", &u64::MAX.to_string()]),
+        5,
+    )
+    .await;
+    assert_eq!(missing["outcome"], "cleared");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn progress_wait_runtime_clear_probe_failure_and_waiter_reconnect() {
+    let sandbox = Sandbox::new();
+    let pane = progress_fixture_pane(&sandbox).await;
+    let report = sandbox.project.join("reconnect-progress.json");
+    progress_fixture_report(&report, "reconnect-task", "running");
+    let monitor = progress_register(&sandbox, pane, &progress_fixture_probe(&report)).await;
+    let mut interrupted =
+        progress_wait_process(&sandbox, pane, &["progress", "wait", &monitor.to_string()]);
+    progress_wait_is_pending(&mut interrupted).await;
+    interrupted.child.kill().await.unwrap();
+    interrupted.child.wait().await.unwrap();
+    drop(interrupted);
+
+    // Killing only the test-owned observation process leaves its monitor and
+    // task intact. A replacement connection observes the original monitor.
+    let mut reconnected =
+        progress_wait_process(&sandbox, pane, &["progress", "wait", &monitor.to_string()]);
+    progress_wait_is_pending(&mut reconnected).await;
+    progress_fixture_report(&report, "reconnect-task", "done");
+    let result = progress_wait_result(reconnected, 0).await;
+    assert_eq!(result["monitor_id"], monitor);
+    assert_eq!(result["progress"]["report"]["job_id"], "reconnect-task");
+
+    let clear_report = sandbox.project.join("clear-progress.json");
+    progress_fixture_report(&clear_report, "clear-task", "running");
+    let cleared_id =
+        progress_register(&sandbox, pane, &progress_fixture_probe(&clear_report)).await;
+    let mut cleared_wait = progress_wait_process(
+        &sandbox,
+        pane,
+        &["progress", "wait", &cleared_id.to_string()],
+    );
+    progress_wait_is_pending(&mut cleared_wait).await;
+    let clear = progress_pane_command(&sandbox, pane)
+        .args([
+            "progress",
+            "clear",
+            "--monitor-id",
+            &cleared_id.to_string(),
+            "--running",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(clear.status.success());
+    let cleared = progress_wait_result(cleared_wait, 5).await;
+    assert_eq!(cleared["outcome"], "cleared");
+
+    let failed_report = sandbox.project.join("failed-progress.json");
+    progress_fixture_report(&failed_report, "failed-probe-task", "running");
+    let failed_id =
+        progress_register(&sandbox, pane, &progress_fixture_probe(&failed_report)).await;
+    let mut failed_wait = progress_wait_process(
+        &sandbox,
+        pane,
+        &["progress", "wait", &failed_id.to_string()],
+    );
+    progress_wait_is_pending(&mut failed_wait).await;
+    // Three failed observations settle monitor health without inventing a
+    // task-success or task-error report.
+    std::fs::write(&failed_report, "invalid synthetic probe output").unwrap();
+    let failed = progress_wait_result(failed_wait, 4).await;
+    assert_eq!(failed["outcome"], "monitor-failed");
+    assert_eq!(failed["progress"]["report"]["status"], "running");
+}

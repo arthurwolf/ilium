@@ -29,7 +29,7 @@ Recorded demonstrations of Ilium. Each animated GIF is stored in [`assets/demos/
 - [Start a Codex agent from a TODO](#start-a-codex-agent-from-a-todo)
 - [Detach and reconnect while agents keep running](#detach-and-reconnect-while-agents-keep-running)
 - [Edit Markdown in a pane](#edit-markdown-in-a-pane)
-- [Coordinate Claude and Codex with Chatroom](#coordinate-claude-and-codex-with-chatroom)
+- [Coordinate local models with Chatroom](#coordinate-local-models-with-chatroom)
 - [Respond to confirmation prompts automatically](#respond-to-confirmation-prompts-automatically)
 - [Restore a saved session](#restore-a-saved-session)
 - [Run agents in their own worktrees](#run-agents-in-their-own-worktrees)
@@ -41,25 +41,25 @@ Recorded demonstrations of Ilium. Each animated GIF is stored in [`assets/demos/
 
 ![Three real Claude sessions demonstrate the attention queue: two wait for an answer or approval and one has unread output; setup is cut](../../assets/demos/27-attention-queue.gif)
 
-The attention queue collects questions, blocked goals, background-agent waits and unread completed turns. **Next: needs you** jumps to an agent; **[+]** opens the overview. The recording was re-recorded on 2026-10-31 with three real Claude (Haiku) sessions in a fictional museum project and instant detection: one asks which gallery to open, one waits for approval to write a file, and one finished with unread output. Keyboard shortcuts `Ctrl+B i` (jump) and `Ctrl+B O` (overview) drive it. Blocked goals and background-agent waits are not shown, and Codex is absent because its usage limit was reached. The long setup (boot, folder-trust prompts) is cut, three reading holds and three captions were added, and the status bar shows an unrelated naming-worker error. Explained in [Attention queue](attention-queue.md).
+The attention queue collects questions, blocked goals, background-agent waits and unread completed turns. **Next: needs you** jumps to an agent; **[+]** opens the overview. The recording was re-recorded on 2026-10-31 with three real Claude (Haiku) sessions in a fictional museum project and instant detection: one asks which gallery to open, one waits for approval to write a file, and one finished with unread output. Keyboard shortcuts `Ctrl+B i` (jump) and `Ctrl+B O` (overview) drive it. Blocked goals and background-agent waits are not shown, and Codex is absent because its usage limit was reached. The long setup (boot, folder-trust prompts) is cut, three reading holds and three captions were added, and the status bar is redacted to hide an unrelated restructuring error. Explained in [Attention queue](attention-queue.md).
 
 ## AI names agents and organizes the project tree
 
-![A scripted plan regroups current Ilium panes by topic; local fixtures provide no model inference](../../assets/demos/01-ai-tree.gif)
+![An earlier recording shows a scripted plan regrouping Ilium panes by topic; local fixtures provide no model inference](../../assets/demos/01-ai-tree.gif)
 
-A scripted plan regroups current Ilium panes by topic. Local fixture output supplies the plan; no model inference is made. Explained in [Titles and instructions](titles-and-instructions.md).
+This earlier recording shows a scripted plan regrouping Ilium panes by topic. Local fixture output supplies the plan; no model inference is made. Explained in [Titles and instructions](titles-and-instructions.md).
 
 ## Control Ilium and prompt agents with voice
 
-![Typed voice commands drive current Ilium through scripted local tools; no microphone or hosted inference is used](../../assets/demos/02-voice-control.gif)
+![Synthesized speech triggers three Ilium actions using local recognition and fixed keyword rules](../../assets/demos/02-voice-control.gif)
 
-Typed commands pass through a local loopback fixture to real Ilium tools and a real shell. Agent panes are local fixtures; no microphone or hosted inference is shown. Explained in [Voice](voice.md).
+Staged synthesized speech is recognized locally; a fixed keyword rule selects the Ilium tools. Pauses are shortened, and no live microphone or hosted inference is shown. Explained in [Voice](voice.md).
 
 ## Give agent panes automatic titles
 
-![Current Ilium applies an automatic title from a supplied local response fixture; the manually named Keep pane stays unchanged](../../assets/demos/03-contextual-titles.gif)
+![Ilium applies local fixture titles to agent and shell panes while the manually named Stamp desk stays unchanged](../../assets/demos/03-contextual-titles.gif)
 
-Current Ilium applies a supplied local response fixture as the automatic title; the manually named Keep pane stays unchanged. Explained in [Titles and instructions](titles-and-instructions.md).
+An isolated Ilium capture shows real title updates from deterministic local title responses; a stale proposal is rejected and a retry is applied. The Claude CLI uses a recognized model alias routed over loopback to local Qwen, with no provider call. The Codex-shaped process is a deterministic local agent fixture, and its transcript is seeded with the prompt subsequently typed. The manually named Stamp desk remains unchanged. Claude’s turn had not completed when recording ended. Setup and 57 seconds of model wait are cut; captions, arrows, highlights and reading holds are added. Explained in [Titles and instructions](titles-and-instructions.md).
 
 ## Transfer a terminal screen between panes
 
@@ -189,11 +189,11 @@ The client detaches and later reattaches while panes and agents keep running in 
 
 A staged Markdown note is edited and previewed in a pane, then read back from disk in a terminal. Automatic naming and restructuring are disabled for the recording. Explained in [Editors and boards](editors-and-boards.md).
 
-## Coordinate Claude and Codex with Chatroom
+## Coordinate local models with Chatroom
 
-![The current Ilium Chatroom displays locally scripted Claude and Codex messages; provider agents are not running](../../assets/demos/20-chatroom.gif)
+![Two local models generate messages that a script posts to Ilium Chatroom](../../assets/demos/20-chatroom.gif)
 
-The current-build Chatroom view shows two local simulation messages. Provider agents are not running. Explained in [Automation](automation.md).
+Two local models generate a planner message and a reviewer response in separate panes. A shell script posts both messages to an isolated Chatroom; the models do not call Chatroom tools autonomously. Waits are shortened. Explained in [Automation](automation.md).
 
 ## Respond to confirmation prompts automatically
 
@@ -217,13 +217,13 @@ The recording shows Ilium creating a real worktree through its native workflow i
 
 ![Real Claude and Codex sessions recall a fictional mascot after conversion in both directions](../../assets/demos/26-convert-session.gif)
 
-Real Claude and Codex sessions are converted in both directions and recall a fictional mascot from the conversation. Setup and an idle wait are cut, an account notice is redacted, and captions are added. The isolated capture disables automatic project restructuring and uses local title inference. Explained in [Session recovery](session-recovery.md).
+Real Claude and Codex sessions are converted in both directions and recall a fictional mascot from the conversation. Setup and an idle wait are cut, account notices are masked, and captions are added. The mask was corrected for the changed terminal layout; all 973 decoded frames and their durations were compared against the earlier recording outside the intended masks. The isolated capture disables automatic project restructuring and uses local title inference. Explained in [Session recovery](session-recovery.md).
 
 ## Queue access to a shared resource
 
-![Staged local fixture participants queue for, take and release a shared resource; captions are added and an account quota notice is masked](../../assets/demos/28-resource-queue.gif)
+![Two isolated projects queue for, take and release a shared resource in the full interface](../../assets/demos/28-resource-queue.gif)
 
-Two projects share an isolated demonstration resource through staged local fixture participants: one reserves it, the other queues, takes ownership after the first releases it, then releases it. No provider calls are made. The recording shows the full interface, with added captions and a masked account quota notice. Explained in [Resource queues](resource-queues.md).
+Two isolated projects share a demonstration resource through staged local fixture participants: one reserves it, the other queues, takes ownership after the first releases it, then releases it. No provider calls or hardware are used. The recording shows the full interface with added captions and redacted project paths. Explained in [Resource queues](resource-queues.md).
 
 ## Recording provenance and review limits
 
@@ -231,16 +231,16 @@ The gallery descriptions above state each recording’s subject and disclosed fi
 
 A coding agent inspected overview contact sheets for all 31 files. Those are sampled frames: they do not establish every action, provider identity, timing, outcome or complete visual acceptance. Recheck the asset hash and the affected evidence after any replacement or re-render.
 
-A coding agent also reviewed all 47 decoded Resource Queue frames, including the quota mask. That complete-frame review applies to SHA-256 `5f472a874559adeacc320cf5dc5b3aeb7c983104d7ed4c1522fc176b1a4d3d37`; if the GIF changes, the new file requires a fresh review. This review does not establish live provider calls or runtime behavior; the participants are staged local fixtures.
+A coding agent reviewed all 699 decoded frames of the Resource Queue replacement, SHA-256 `dc0b1a994610b6296ae3d66d6073e0a89bdaab2b1ae6b168904c38502fc784d2`. Isolated status readbacks identify distinct projects and record ownership, queueing, handoff and final release. The participants are local fixtures; the recording uses captions and path redactions and makes no provider calls.
 
 The original provider-transcript archive manifest records 102 distinct missing source paths for 97 session IDs (41 Claude and 56 Codex). All 102 exact indexed paths were absent when checked on 2026-11-03. This is an aggregate of the original manifest, not proof that no equivalent transcript exists elsewhere; no missing identifiers are reconstructed here.
 
 | Gallery GIF | Matching alias | Last asset change | SHA-256 |
 | --- | --- | --- | --- |
-| `27-attention-queue.gif` | None | 2026-10-31 | `9bf584f4598c743b781f03babfc3d6cc4c9d7d8025bab5bd4ac549ea426b6124` |
+| `27-attention-queue.gif` | None | 2026-11-04; status redacted | `3183c6674679e18b5e71a3351f8be2cf49c505609fa20854ef3dec33b5a622db` |
 | `01-ai-tree.gif` | `12-ai-tree.gif` | 2026-10-27 | `558d7155a707448a717944c832fab820bc619c705872c583ecd2600cd30f75c0` |
-| `02-voice-control.gif` | `22-voice-control.gif` | 2026-10-27 | `d427de55589e7100d26189678fc9adbcda1bfc91bfed44a83eaa52e3ae948661` |
-| `03-contextual-titles.gif` | `20-contextual-titles.gif` | 2026-10-27 | `280ce34ba90ccbf91833e1406a3e3c410442ba8ed9a3c8364555a61b061e225c` |
+| `02-voice-control.gif` | `22-voice-control.gif` | 2026-11-04 | `7ed711a6ab79ae358a1c419b094df7295e6de657ce0b462d7e7f982480295a02` |
+| `03-contextual-titles.gif` | `20-contextual-titles.gif` | 2026-11-03; working file updated | `d5d8e77bde43de31a88ebeea446beb5d18c0848ff248edafc2f3941f2a037ab7` |
 | `05-screen-transfer.gif` | `18-screen-transfer.gif` | 2026-10-30 | `d9c854388a166d96fb485b90ec52428ae6080d7b8f86603eb54be89d3dd0b367` |
 | `06-cost-and-stats.gif` | `23-cost-and-stats.gif` | 2026-10-30 | `ca7b9ffc5b58e6d9e67363ac92c68366a49b1068f62fcb88870184cd3e540c0f` |
 | `08-agent-activity.gif` | `01-agent-activity.gif` | 2026-10-30 | `75a43fd34483ac637cfc214c12c65abbca37353db2ae98a5c109a48d711331fd` |
@@ -262,20 +262,23 @@ The original provider-transcript archive manifest records 102 distinct missing s
 | `16-agent-from-line.gif` | `09-agent-from-line.gif` | 2026-10-30 | `77d3edb861067a3b15927494fa1f11d71876bd9c2541bc4472bdba2667574df3` |
 | `18-detach-reattach.gif` | `11-detach-reattach.gif` | 2026-10-30 | `5110603b06dc3dc8c856be745c8204924e0ea3e9c2278354ae2a821e6ca26139` |
 | `19-markdown-editor.gif` | `13-markdown-editor.gif` | 2026-10-30 | `c08e3ed6558b85a2769f714bb31db076a64b5934c4f4d316f6328127d7d9ccc5` |
-| `20-chatroom.gif` | `14-chatroom.gif` | 2026-10-27 | `b447ab06e8f1f479e229a5af5f4ca6f6ed08c8d892dec92f069e9446566b2840` |
+| `20-chatroom.gif` | `14-chatroom.gif` | 2026-11-04 | `3ca790df01af844540e81214da36d82fc5f2107a21f93202c9948471d78ee055` |
 | `21-text-triggers.gif` | `16-text-triggers.gif` | 2026-10-30 | `461bb2c548b75bc4226cc693b60619cc5be33084f3525bc7767f24774721d236` |
 | `23-snapshot-resume.gif` | `19-snapshot-resume.gif`, `24-agents-survive-reboots.gif` | 2026-10-26; working file updated | `7c24d61380e6c6bf49b23b0d45a209473590066be4eda305f9ef05db5eee1e78` |
 | `25-worktree-agent.gif` | None | 2026-10-31; working file updated | `491060abd123dbf8a9d069c204d23b98f52ffd9941d6be40361807509bc0f1f6` |
-| `26-convert-session.gif` | None | 2026-10-30 | `7e6eefd6057fc96b071bdb44d50184b6bb3119e3672234e9b6627c63f53e5ccd` |
-| `28-resource-queue.gif` | None | 2026-11-03; working file updated | `5f472a874559adeacc320cf5dc5b3aeb7c983104d7ed4c1522fc176b1a4d3d37` |
+| `26-convert-session.gif` | None | 2026-11-04; redaction corrected | `d66428fee7441b36c69eb28b933670e01252a429f3c509b63ad0b6073de0b89b` |
+| `28-resource-queue.gif` | None | 2026-11-04 | `dc0b1a994610b6296ae3d66d6073e0a89bdaab2b1ae6b168904c38502fc784d2` |
 
 The previous Snapshot Resume recording had a caption claiming both agents answered, but sampled frames showed only a Codex answer; it has been replaced. All seven decoded frames of the replacement snapshot and reboot fixture GIF were reviewed by the coding agent, SHA-256 `7c24d61380e6c6bf49b23b0d45a209473590066be4eda305f9ef05db5eee1e78`. The capture used an isolated Ilium server shutdown and relaunch and a local session fixture recovering a saved note; the reboot card is simulated, with no machine reboot or real provider. Idle cuts and caption holds are editorial. Recheck the hash and review if the file changes. The animation gallery is historical. All four decoded frames of the replacement Worktree Agent GIF were reviewed by the coding agent, SHA-256 `491060abd123dbf8a9d069c204d23b98f52ffd9941d6be40361807509bc0f1f6`; the native dialog, created branch, local fixture, captions and redaction are visible. This is visual evidence for that exact file; recheck the hash and review after any replacement. See the individual descriptions above for each capture’s other limits.
 
 The plugin manual has separately maintained copies, not listed as root aliases in the table. Its source pages reference `docs/plugins-manual/assets/demos/`; its fallback builder copies that directory into the served, generated `docs/plugins-manual/_site/assets/demos/`. On 2026-11-03, all 30 same-named GIFs in each manual directory matched their root assets by SHA-256 after the previously missing generated Attention Queue copy was restored. The recordings and their consumers have distinct provenance:
 
+- **Contextual Titles:** the manual source and generated GIF copies match the root fixture recording at SHA-256 `d5d8e77bde43de31a88ebeea446beb5d18c0848ff248edafc2f3941f2a037ab7`. Nine decoded contact sheets sampled every two seconds were independently reviewed; sampling does not inspect every frame.
 - **Prompt Queue:** the manual source and generated copies now match the root real-Claude recording. The source and generated scheduler descriptions disclose the staged names, cuts and reading holds.
 - **Snapshot Resume:** root and manual source and generated aliases now match the seven-frame reviewed fixture GIF. The earlier one-Claude review concerns a different recording.
 - **Agents Survive Reboots:** root and manual source and generated aliases now match the same reviewed fixture GIF as Snapshot Resume. The reboot card is simulated; the isolated Ilium server shutdown and relaunch are real.
 - **Worktree Agent:** the root, manual source and generated GIF copies match the native-workflow recording. A coding agent reviewed all four decoded frames of the hash identified above.
 
 The generated manual is served from `_site/`, so changing source alone does not update that output. No Resource Queue copy was found in either manual asset directory. Recheck copies and their descriptions together after replacements, preserving original recordings.
+
+The root Voice Control and Chatroom GIFs were replaced on 2026-11-04; separately generated plugin-manual assets may still show their earlier recordings. Rebuild and reconcile those copies before treating the manual as current.

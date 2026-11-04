@@ -57,21 +57,21 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Find the next agent that needs you</strong></p>
-<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Three real Claude sessions show two waiting questions and one unread completed turn in the attention queue, jumped to with Ctrl+B i and listed with Ctrl+B O; setup is cut, with reading holds" width="100%"></a></p>
+<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Three real Claude sessions show two waiting questions and one unread completed turn in the attention queue, jumped to with Ctrl+B i and listed with Ctrl+B O; setup is cut, with reading holds and a redacted status bar" width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>AI names agents and organizes the project tree</strong></p>
-<p><a href="assets/demos/01-ai-tree.gif?raw=true"><img src="assets/demos/01-ai-tree.gif" alt="Ilium names agent panes and organizes the project tree from local scripted fixture content; no provider request is made." width="100%"></a></p>
+<p><a href="assets/demos/01-ai-tree.gif?raw=true"><img src="assets/demos/01-ai-tree.gif" alt="Earlier recording: Ilium organizes the project tree using local scripted fixture content; no provider request is made." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Control Ilium and prompt agents with voice</strong></p>
-<p><a href="assets/demos/02-voice-control.gif?raw=true"><img src="assets/demos/02-voice-control.gif" alt="Typed voice input triggers Ilium actions and sends a prompt to a local fixture; no live microphone inference is shown." width="100%"></a></p>
+<p><a href="assets/demos/02-voice-control.gif?raw=true"><img src="assets/demos/02-voice-control.gif" alt="Synthesized speech triggers three Ilium actions using local recognition and fixed keyword rules; pauses are shortened." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Give agent panes automatic titles</strong></p>
-<p><a href="assets/demos/03-contextual-titles.gif?raw=true"><img src="assets/demos/03-contextual-titles.gif" alt="Current Ilium applies an automatic title from a supplied local response fixture; the manually named Keep pane stays unchanged." width="100%"></a></p>
+<p><a href="assets/demos/03-contextual-titles.gif?raw=true"><img src="assets/demos/03-contextual-titles.gif" alt="Ilium applies deterministic local fixture titles and preserves the manually named Stamp desk. Claude uses a local model through loopback; Codex is a fixture with a seeded prompt. A stale title is retried; setup and a wait are cut, with captions and holds. Claude’s turn is unfinished." width="100%"></a></p>
 </td>
 </tr>
 <tr>
@@ -180,8 +180,8 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <p><a href="assets/demos/19-markdown-editor.gif?raw=true"><img src="assets/demos/19-markdown-editor.gif" alt="Edit and preview a staged Markdown note in Ilium, then read the saved file in a terminal. Setup is cut; captions, pointer, arrows and holds are added." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
-<p><strong>Coordinate Claude and Codex with Chatroom</strong></p>
-<p><a href="assets/demos/20-chatroom.gif?raw=true"><img src="assets/demos/20-chatroom.gif" alt="The current Ilium Chatroom displays locally scripted Claude and Codex messages; provider agents are not running." width="100%"></a></p>
+<p><strong>Coordinate local models with Chatroom</strong></p>
+<p><a href="assets/demos/20-chatroom.gif?raw=true"><img src="assets/demos/20-chatroom.gif" alt="Two local models generate messages that a script posts to Ilium Chatroom; waits are shortened." width="100%"></a></p>
 </td>
 </tr>
 <tr>
@@ -207,7 +207,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Queue access to a shared resource</strong></p>
-<p><a href="assets/demos/28-resource-queue.gif?raw=true"><img src="assets/demos/28-resource-queue.gif" alt="Two staged local fixture participants reserve, queue for, take and release a shared resource in the full interface; no provider calls are made. Captions are added and an account quota notice is masked." width="100%"></a></p>
+<p><a href="assets/demos/28-resource-queue.gif?raw=true"><img src="assets/demos/28-resource-queue.gif" alt="Two isolated projects reserve, queue for, take and release a shared resource in the full interface; local fixtures, captions and path redactions are used." width="100%"></a></p>
 </td>
 <td width="50%" valign="top"></td>
 </tr>
