@@ -669,3 +669,7 @@ Side basis: `schedule-sources` is server because the server side owns the timers
 - [Core plugins](/pages/core-plugins/)
 - [Notifications](/pages/core-plugin-notifications/)
 - [Terminal](/pages/core-plugin-terminal/)
+
+## Production additions (round 3)
+
+- **[PRY-024]** When the wall clock steps backward by 1 hour or more, the scheduler MUST NOT run any job a second time for an occurrence it already ran, and when it steps forward past N occurrences of a job it MUST run that job at most once and record one 'missed N' entry in its run history.

@@ -456,3 +456,8 @@ Checked against `ilium:plugin@0.1.0`.
 - **[SVC-028]** A message channel MUST match [a-z0-9.-] and be at most 64 characters. A payload MUST be at most 1 MiB. Otherwise refused(invalid-argument).
 - **[SVC-029]** A message to an installed plugin that is not active MUST activate it and deliver after activate.
 - **[SVC-030]** When the receiver queue of a message is full and holds no drop-oldest event to evict, the message intent MUST complete refused(busy) and queue nothing, and the receiver MUST NOT be restarted. An accepted message MUST NOT be dropped.
+
+## Production additions (round 3)
+
+- **[PRY-009]** Messages published by one plugin to one topic are delivered to each subscriber in publish order, and a test publishing 1,000 numbered messages with a slow subscriber receives them with strictly increasing numbers and no reordering.
+- **[PRY-010]** A message whose handler traps is delivered at most once to that subscriber (never redelivered), the drop is counted in the topic's dropped-message counter, and the next message is still delivered to the restarted instance.

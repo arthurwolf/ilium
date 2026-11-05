@@ -459,3 +459,7 @@ Concurrency is not an error: a job past `concurrent_jobs` waits in the queue. A 
 - [Errors and limits](/pages/reference-errors-and-limits/) for the full code table.
 
 Checked against `ilium:plugin@0.1.0`.
+
+## Production additions (round 3)
+
+- **[PRY-011]** After the host resumes from a suspend longer than 60 seconds, job deadlines are measured on the monotonic clock excluding suspended time, so no job fails with a timeout error solely because of the suspend, and the test advances a fake suspend of 10 minutes to prove it.

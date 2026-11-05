@@ -117,3 +117,7 @@ A publish token lasts 90 days and works for one publisher id only ([PKG-968](/pa
 - [Yank, deprecate and takedown](/pages/publish-yank-deprecate-takedown/): how a published version is withdrawn without deleting it.
 - [Publisher key compromise](/pages/reference-registry-key-compromise/): what to do when the publish token or the signing key leaks.
 - [Registry operator guide](/pages/publish-registry-operator-guide/): the operator's side of the same steps.
+
+## Production additions (round 3)
+
+- **[PRY-036]** When two publish requests for the same plugin id and version are in flight, the registry MUST accept exactly one, MUST answer the other with HTTP 409 and error code `registry.version-exists`, and the stored blob hash MUST equal that of the accepted request.

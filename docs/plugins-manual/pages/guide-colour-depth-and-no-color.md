@@ -51,3 +51,7 @@ For each depth, look for three things. First, the colour escape sequences are go
 - **[PDT-014]** At monochrome depth the host MUST show the `danger` role as bold plus the literal prefix text the plugin supplied, never by colour alone.
 - **[PDT-015]** The harness MUST accept `--colour-depth 8|16|256|truecolor` for render checks and MUST refuse any other value with exit 2 and `usage.invalid-value`.
 - **[PDT-016]** `ilium plugin lint` MUST report `ui.colour-only-state` when two declared states of one widget differ only by a role colour.
+
+## Production additions (round 3)
+
+- **[PRY-032]** After downgrade to the 16-colour palette, any plugin-supplied foreground and background pair rendered together MUST have a contrast ratio of at least 4.5:1 (WCAG relative luminance), otherwise the host MUST substitute the theme foreground for that cell and record `ui.contrast-adjusted` once per plugin per session.

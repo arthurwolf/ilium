@@ -76,3 +76,7 @@ The stamp `contract: 0.1` says the facts were checked against contract 0.1. The 
 
 - [llms.txt and Markdown pages](/pages/agent-docs-llms-txt/)
 - [Project instruction files](/pages/agent-docs-project-files/)
+
+## Production additions (round 3)
+
+- **[PRY-002]** `ilium plugin lint` MUST emit warning `agent-kit.stale` naming the file when the `contract:` stamp in AGENTS.md is lower than the contract version of the installed host, and MUST emit no such warning when the stamps are equal.

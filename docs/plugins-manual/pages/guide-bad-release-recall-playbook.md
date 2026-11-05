@@ -57,3 +57,7 @@ A yank does not reach a bundle or a mirror that already holds a copy of the bad 
 - **[PDU-005]** The publisher MUST keep the previous good version downloadable so that `ilium plugin rollback <id>` has a target.
 - **[PDU-006]** The incident record MUST list every offline mirror and bundle the publisher knows of, because a yank does not reach a bundle already copied, and each MUST be marked refreshed or outstanding.
 - **[PDU-007]** The post-incident record MUST be written within 5 working days and MUST name the detection time, yank time, hotfix time and the number of installs affected.
+
+## Production additions (round 3)
+
+- **[PRY-030]** A host that is online MUST fetch a recall notice and disable the recalled version within 15 minutes of its publication, record audit event `recall.applied` with the plugin id and version, and `ilium plugin list --json` MUST show `recalled: true` for that version.

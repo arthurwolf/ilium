@@ -54,3 +54,5 @@ mod reference_conformance_claims;
 mod guide_plugin_test_strategy;
 #[path = "production_completeness/round2.rs"]
 mod round2;
+#[path = "production_completeness/round3.rs"]
+mod round3;

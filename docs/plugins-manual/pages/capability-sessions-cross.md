@@ -223,3 +223,7 @@ The user can change the grant at any time in Settings > Plugins > com.example.se
 ### Security
 
 Not available to T3 (`manifest.grant-tier`); see [Security](/pages/security/).
+
+## Production additions (round 3)
+
+- **[PRY-023]** A plugin may have at most 8 cross-session requests awaiting a reply at once, and the 9th submission returns refused(rate-limited) without being sent to the other session.

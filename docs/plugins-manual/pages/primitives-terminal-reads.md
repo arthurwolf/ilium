@@ -243,3 +243,7 @@ Nothing changes in the pane while a plugin reads it. A plugin that uses the read
 - [Terminal input](/pages/primitives-terminal-input/)
 - [Terminal pointer](/pages/primitives-terminal-pointer/)
 - [Errors and limits](/pages/reference-errors-and-limits/)
+
+## Production additions (round 3)
+
+- **[PRY-042]** The host MUST cap the total bytes held by one plugin's frozen snapshots at 64 MiB, and a `freeze-snapshot` call that would exceed it MUST return `quota-exceeded` without dropping existing snapshots.

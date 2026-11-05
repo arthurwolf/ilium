@@ -413,3 +413,7 @@ Dates already follow the language of the interface, because the host renders `ti
 The host knows the effective UI language, so it can format a number for the plugin without handing the plugin a locale. A plugin passes the raw value and the host chooses the decimal mark, the grouping and the percent form.
 
 - **[PRX-015]** The host MUST provide a `number` text node (or `ui.format-number`) that renders a value with the decimal mark, grouping and percent form of the effective UI language, a plugin MUST NOT hand-format a number shown to the user, the test host MUST render `1234.5` as `1.234,5` when `.locale("de")` is set, and `ilium plugin lint` MUST report a hand-built number string in a user-visible message.
+
+## Production additions (round 3)
+
+- **[PRY-033]** The host MUST provide `ui.format-date` that renders a Unix-millisecond value in the effective UI language and the user's time zone, the test host MUST render 2026-03-04T00:00Z as `04.03.2026` under `.locale("de")` and `.timezone("UTC")`, and `ilium plugin lint` MUST report a hand-built date string in a user-visible message.

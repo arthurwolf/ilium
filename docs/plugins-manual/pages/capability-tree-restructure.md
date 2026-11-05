@@ -198,3 +198,7 @@ The user can change the grant at any time in Settings > Plugins > com.example.or
 - [tree.read](/pages/capability-tree-read/).
 - [tree.attention](/pages/capability-tree-attention/).
 - [Tree](/pages/api-tree/).
+
+## Production additions (round 3)
+
+- **[PRY-022]** The host keeps the 32 most recent restructure undo tokens per plugin per session, and revert-restructure with an evicted token or a token from before a server restart returns refused(not-found).

@@ -178,3 +178,7 @@ Illustrative, not generated. A scene on a host without a graphics device: the ca
 - [codec](/pages/api-codec/) for decoding images before a kernel runs on them.
 - [jobs](/pages/api-jobs/) for work that is too heavy for a frame.
 - [Errors and limits](/pages/reference-errors-and-limits/) for the shared codes.
+
+## Production additions (round 3)
+
+- **[PRY-007]** gpu::run returns `invalid-argument` without running when `input.len()` differs from `width*height*4` or when `width*height` exceeds 16,777,216 pixels, and a kernel that has not finished after 2000 ms is abandoned and returns `timed-out`.

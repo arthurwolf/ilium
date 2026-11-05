@@ -88,3 +88,7 @@ Put the index address in the instruction file of the plugin project; the kit tem
 
 - [Providing the docs to agents](/pages/agent-docs/)
 - [Keeping the kit current](/pages/agent-docs-maintenance/)
+
+## Production additions (round 3)
+
+- **[PRY-003]** The manual build MUST exit non-zero, naming the slug, when any page lacks a front-matter description of 1 to 300 characters, or when llms.txt, llms-full.txt or any pages/<slug>.md contains an internal link whose target slug has no generated Markdown file.

@@ -302,3 +302,8 @@ Children get a rebuilt environment: `LD_PRELOAD`, `LD_LIBRARY_PATH` and `PATH` c
 ## Requirement statements
 
 - **[CAP-009]** A process.run grant with arguments, a wildcard or a relative path with a separator MUST fail with manifest.grant-program.
+
+## Production additions (round 3)
+
+- **[PRY-015]** On timeout, cancel or plugin deactivation the host MUST signal the whole process group of the spawned program (SIGKILL after a 2,000 ms SIGTERM grace), so a grandchild started by a shell wrapper is not running 3 seconds later.
+- **[PRY-016]** For a process.run grant that names a program, the host MUST skip relative PATH entries and entries writable by a user other than the owner, MUST resolve the program once per spawn to a canonical absolute path, and MUST refuse with not-found when only a skipped entry holds a match.

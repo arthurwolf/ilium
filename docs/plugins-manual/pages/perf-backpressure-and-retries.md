@@ -148,3 +148,7 @@ This is the pattern the rate limits expect. A plugin that retries each refused u
 - [Errors and limits](/pages/errors-and-limits/) for the error codes and their meaning.
 - [Queues and backpressure](/pages/reference-host-scheduling/#queues-and-backpressure) for the host's queue policies in full.
 - [Rate limits and retries](/pages/errors-and-limits/#rate-limits-and-retries) for the refused-submission outcome and the dedup key rules.
+
+## Production additions (round 3)
+
+- **[PRY-037]** After a failed registry fetch the host MUST retry at 30 s, 60 s, 120 s, 240 s and then every 900 s, each delay plus random jitter of up to 20 percent, MUST honour a larger Retry-After value, and MUST NOT make more than 1 request per registry per 10 s.

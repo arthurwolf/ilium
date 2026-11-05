@@ -242,3 +242,7 @@ const request = reverse({ lat: 38.72, lon: -9.14 });
 - [errors and limits](/pages/reference-errors-and-limits/) for the error codes that other imports use.
 
 Interface: `ilium:host/location@0.1.0`, part of `ilium:plugin@0.1.0`.
+
+## Production additions (round 3)
+
+- **[PRY-012]** Local-time values returned for a location use the IANA zone of that location, a test at 2026-03-29 01:30 Europe/Paris returns the correct post-DST offset (+02:00), and an unresolvable zone returns the not-available error rather than UTC.

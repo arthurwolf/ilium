@@ -125,3 +125,7 @@ A sync therefore skips them by default. The operator decides per plugin whether 
 
 - [Registry operator guide](/pages/publish-registry-operator-guide/): the source side of the same metadata.
 - [Yank, deprecate and takedown](/pages/publish-yank-deprecate-takedown/): what the mirror carries to users.
+
+## Production additions (round 3)
+
+- **[PRY-035]** A second `ilium plugin mirror sync` started while another holds the mirror's lock file MUST exit with code 75 and the line `mirror.sync-busy` within 1000 ms, MUST NOT modify any file in the mirror, and a lock whose owning process id is no longer running MUST be taken over.

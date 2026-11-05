@@ -52,3 +52,7 @@ The requirements do not fix an interval between bundles. The `expires` time of t
 - **[PDV-005]** A bundle carrying a revocation list newer than the stored one MUST apply it at import and write one `trust.key-revoked` audit record per newly revoked key.
 - **[PDV-006]** Import MUST write one `bundle-import` audit record with the bundle SHA-256, the member count and the result.
 - **[PDV-007]** Importing a bundle whose metadata version is older than the stored metadata version MUST be refused with reason `rollback` and exit code 3.
+
+## Production additions (round 3)
+
+- **[PRY-031]** Importing an air-gapped bundle MUST verify every entry hash before changing the local registry, MUST refuse a bundle larger than 4 GiB with `bundle.too-large`, and after an interrupted import (process killed at any point) the registry MUST equal its state from before the import started.

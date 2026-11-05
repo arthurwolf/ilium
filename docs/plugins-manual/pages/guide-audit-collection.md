@@ -56,3 +56,7 @@ Operators with many machines need to know how much audit data to expect before t
 The host also counts the audit bytes and records it writes and shows both counters in `ilium plugin metrics`. An operator compares these counters with the published bound to check the collector and disk budget.
 
 - **[PRX-014]** The manual MUST state a measured upper bound for audit bytes per plugin-hour on the reference workload, and the host MUST expose `ilium_audit_bytes_total` and `ilium_audit_records_total` in `ilium plugin metrics` so an operator can verify the collector and disk budget against that bound.
+
+## Production additions (round 3)
+
+- **[PRY-029]** While the syslog sink is unreachable the host MUST keep audit records in the local file, buffer at most 10000 unsent records in memory, drop the oldest beyond that, increment `ilium_audit_forward_dropped_total` per dropped record, and resume sending from the last acknowledged `seq` within 30 seconds of reconnect.

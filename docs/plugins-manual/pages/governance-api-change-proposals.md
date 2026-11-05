@@ -48,3 +48,7 @@ A proposal that is withdrawn or superseded needs no decision record, because onl
 - **[PDT-030]** The outcome MUST be exactly one of `accepted`, `rejected`, `withdrawn` or `superseded`, and an accepted proposal MUST create a `D<n>` entry on Design decisions within 7 days.
 - **[PDT-031]** A proposal MUST NOT change a contract in a patch release.
 - **[PDT-032]** A rejected proposal MUST record its reason and MUST NOT be reopened without new evidence cited in a `Reopened because` section.
+
+## Production additions (round 3)
+
+- **[PRY-043]** A proposal labelled `security-emergency` MAY shorten the comment period to 72 hours only if it names a CVE-style identifier, and the template check MUST fail with `governance.emergency-unjustified` when the label is present without one.

@@ -245,3 +245,7 @@ The package has a `NOTICE` file next to `LICENSE`. For each bundled asset it giv
 - **[PKG-508]** Authors SHOULD start new plugins on the `beta` channel with `--channel beta`, then publish a later version to `stable` once beta users report no problems.
 - **[PKG-685]** The publishing guide SHOULD list `sbom.json`, an SPDX `license` and a `LICENSE` or `NOTICE` file as the inputs for level B.
 - **[USR-177]** A publisher guide MUST state that key revocation or takedown blocks installed copies and how users leave the block.
+
+## Production additions (round 3)
+
+- **[PRY-034]** `ilium plugin publish` MUST reject a manifest with no `security_contact` field holding an https URL or an email address, and the registry MUST show the contact on the plugin page and MUST send a publisher notice within 24 hours of a reported vulnerability.

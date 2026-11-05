@@ -460,3 +460,7 @@ Failure modes: an unreadable file is skipped with one warning in the host log. A
 - **[AUT-503]** A plugin MUST work in `compact` density at 40 columns and in both icon modes, and MUST end every icon-only control with a text label that stays when icons are not drawn.
 - **[AUT-504]** A plugin MUST use the nine colour roles and avoid `rgb` and `indexed` colours, because only a role follows the theme.
 - **[CAP-884]** Turning off sound, desktop notices or toasts, or a failure of one channel, MUST leave the text signal of the same event unchanged; colour or sound alone MUST NOT carry a state.
+
+## Production additions (round 3)
+
+- **[PRY-005]** `ilium plugin lint` MUST report `ui.rgb-low-contrast` as a warning for every literal `rgb` or `indexed` colour in a style whose contrast ratio against the foreground and background tokens of each built-in theme is below 4.5:1, naming the theme and the measured ratio to one decimal.

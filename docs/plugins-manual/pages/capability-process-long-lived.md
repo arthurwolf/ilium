@@ -206,3 +206,7 @@ The user can change the grant at any time in Settings > Plugins > com.example.wa
 ### Security
 
 Long-lived children follow the same confinement as `process.run` ([SEC-032], [SEC-033]). See [Sandbox reference](/pages/reference-sandbox/).
+
+## Production additions (round 3)
+
+- **[PRY-017]** The host MUST refuse a spawn with busy and retryAfterMs 5000 when the same plugin has spawned the same program more than 5 times in 10 seconds, and MUST record one audit entry for the refusal burst rather than one per refused call.

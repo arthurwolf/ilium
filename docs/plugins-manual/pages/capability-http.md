@@ -296,3 +296,7 @@ Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).
 ### Security
 
 Address checks, redirects, TLS and the offline switch are defined in [Network egress](/pages/reference-network-egress/). Extra `not-permitted` reasons: `private-address`, `downgrade`, `reserved`, `offline`, `policy`.
+
+## Production additions (round 3)
+
+- **[PRY-013]** The host MUST count the 8 MiB response cap against decoded bytes, so a gzip response of 100 KiB that expands to 9 MiB completes as failed(quota-exceeded), and MUST stop decoding at the cap instead of buffering the full expansion.

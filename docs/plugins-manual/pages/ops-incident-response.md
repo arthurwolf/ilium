@@ -46,3 +46,7 @@ The acknowledgement clock starts when the incident is first noticed, which is th
 - [Security response](/pages/reference-security-response/) for vulnerability reports.
 - [Diagnostics and logs for operators](/pages/ops-diagnostics-and-logs/) for the logs that an incident needs.
 - [Telemetry and plugin health](/pages/reference-host-telemetry/) for the host series that show a host fault.
+
+## Production additions (round 3)
+
+- **[PRY-038]** An incident record MUST contain severity, start time in UTC, affected plugin ids, the action taken and the closing time, and `ilium plugin alerts` MUST re-raise an unacknowledged severity-1 alert every 15 minutes until it is acknowledged.

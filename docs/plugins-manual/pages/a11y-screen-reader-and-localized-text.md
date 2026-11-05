@@ -140,3 +140,7 @@ Set the language to `en-XA` and `[ui] screen_reader = true`, render the view at 
 - [Keyboard operation and focus](/pages/a11y-keyboard-and-focus/)
 - [Internationalisation](/pages/guide-internationalisation/)
 - [Test harness](/pages/reference-test-harness/)
+
+## Production additions (round 3)
+
+- **[PRY-004]** In linear mode the host MUST print at most 200 rows of a %list, table or tree-list per render, centred on the focused row, followed by one line of the form `rows <first> to <last> of <total>`, and a render of a 100000-row table MUST finish within the 10 ms view deadline of the plugin.

@@ -160,3 +160,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[LIF-146]** `ilium plugin stats` MUST print use, effective limit and source for memory, the execution bucket, storage and disk.
 - **[LIF-315]** On the reference machine, the host MUST activate a plugin within 200 ms at the 95th percentile and 1 s at the 99th percentile, and MUST support at least 64 active plugins per session without breaking those targets.
 - **[LIF-316]** When many plugins fail together, the host MUST start no more than 4 restarts at a time and MUST space the rest by the existing backoff, so that a restart storm MUST NOT hold more than one core for longer than 10 s. The host MUST publish the measured numbers in `ilium plugin top`.
+
+## Production additions (round 3)
+
+- **[PRY-041]** With a per-plugin disk quota of Q bytes and 8 concurrent writers each writing Q/4 bytes, the total persisted bytes MUST NOT exceed Q, exactly the writes that do not fit MUST return quota-exceeded, and no partial file remains after a failed write.

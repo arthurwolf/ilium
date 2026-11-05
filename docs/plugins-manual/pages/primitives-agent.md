@@ -403,3 +403,7 @@ Requirement ids for this page: [PRI-010], [PRI-011], [PRI-012], [PRI-013], [PRI-
 - **[PRI-012]** set-toolbar-state MUST return not-found for a button that is not the plugin own or a pane that does not exist, and not-permitted without the grant.
 - **[PRI-013]** agents() MUST return an empty list when agent.read is declined. view, session and last_prompt MUST return none.
 - **[PRI-015]** A pane MUST have no activity before its agent-identified event. A restored pane MUST report none.
+
+## Production additions (round 3)
+
+- **[PRY-044]** When the agent in a pane exits or is reclassified while a plugin request on it is pending, the host MUST complete that request within 1 second with `refused(agent-gone)` and MUST NOT deliver it to the next process in the pane.

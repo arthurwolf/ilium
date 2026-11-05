@@ -630,3 +630,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 - **[COR-084]** Audio and transcripts MUST NOT be published on a topic, sent in an event payload or exposed to another plugin; only the command id the transcript maps to MAY leave the plugin.
 - **[COR-105]** While a capture or a transcript is held, the plugin MUST keep the audio and transcript buffers out of core dumps and swap (locked, non-dumpable memory where the platform allows), and where it cannot, MUST say so in the diagnostics page.
 - **[COR-106]** Before the first capture with a remote provider, Settings MUST show the provider's data retention statement as configured in the provider entry, or the text "retention unknown", and the user MUST confirm it once per provider.
+
+## Production additions (round 3)
+
+- **[PRY-025]** The command 'voice: delete all recordings and transcripts' MUST, after one confirmation, remove every stored audio file and transcript of the voice plugin within 5 seconds, write one audit entry with the count of removed items and no content, and leave the voice settings unchanged.

@@ -122,3 +122,8 @@ Before you restore over live data, keep the state you have now. Take a new archi
 - **[HST-976]** For a single plugin's data in an archive up to 1 GiB (proposed, owner to confirm), the restore MUST complete within 15 minutes (proposed, owner to confirm) on the reference machine, timed from the first `restore` command to the final result line.
 - **[HST-977]** Deleting plugin data, with `ilium plugin uninstall <id> --purge` or the Delete data choice in the uninstall dialog, MUST NOT delete a whole-host archive or a single-plugin export that the administrator wrote elsewhere. The administrator MUST delete those copies separately when the data must be gone everywhere.
 - **[HST-978]** Before the administrator purges a plugin for a privacy request, the administrator MUST take an export or an archive of that plugin, so that the data can be restored if the request is withdrawn or wrongly scoped.
+
+## Production additions (round 3)
+
+- **[PRY-027]** `ilium plugin restore` and `--dry-run` MUST refuse an archive that contains two entries whose normalised paths are equal, or differ only in letter case, with error `restore.duplicate-entry`, exit non-zero, and leave every live file unchanged.
+- **[PRY-028]** `ilium plugin restore` MUST abort with `restore.expansion-limit` and roll back all written files when the total uncompressed size of the entries exceeds 64 times the archive size or the free space on the target volume, whichever is smaller.

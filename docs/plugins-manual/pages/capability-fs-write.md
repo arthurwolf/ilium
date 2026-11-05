@@ -344,3 +344,7 @@ The authoritative file scope table is in [Sandbox reference](/pages/reference-sa
 ## Requirement statements
 
 - **[CAP-008]** An fs scope that is unknown, or that does not accept the access, MUST fail with manifest.grant-scope: fs.write:package, fs.write:agent-sessions:<agent>, fs.write:agent-config:<agent>, fs.watch:agent-config:<agent>, and an absolute path without a path template.
+
+## Production additions (round 3)
+
+- **[PRY-014]** When a replace write runs out of disk space, fs.write MUST return io with message no-space, MUST leave the target file byte-identical to its prior content, and MUST delete the temporary sibling file before returning.

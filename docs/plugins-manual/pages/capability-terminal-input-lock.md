@@ -210,3 +210,9 @@ Requirement ids for this page: [PRI-004]. See the [requirements index](/pages/re
 ## Requirement statements
 
 - **[PRI-004]** Check order for send-input MUST be: capability, stage and size rules, if-current precondition, then the lock. A failed precondition MUST refuse the intent before any lock is taken.
+
+## Production additions (round 3)
+
+- **[PRY-018]** While a terminal.input-lock is held, the host queues at most 4,096 user key events per pane; the 4,097th key ends the lock early, delivers the queue in order, and records an audit entry with reason queue-overflow.
+- **[PRY-019]** While a terminal.input-lock is held, a user press of Ctrl+C or Escape releases the lock within 50 ms, delivers the queued keys in order, and makes the plugin's next unlock-input return ok without error.
+- **[PRY-020]** After a lock ends by reaching its 2,000 ms ceiling, a new lock-input call on the same pane by the same plugin within the next 1,000 ms returns refused(rate-limited) with retry-after-ms.

@@ -133,3 +133,7 @@ Proposed, owner to confirm: the host moves focus to the next focusable node in t
 - [Screen reader and localized text](/pages/a11y-screen-reader-and-localized-text/)
 - [Widget catalogue](/pages/widgets-index/)
 - [Test harness](/pages/reference-test-harness/)
+
+## Production additions (round 3)
+
+- **[PRY-006]** The host MUST honour at most 1 plugin focus request per view per second while the user has pressed a key in the last 2 seconds, MUST drop the excess requests, and MUST NOT move focus into a view of a different plugin than the one holding focus, counting each dropped request in `plugin.focus.dropped`.

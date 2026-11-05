@@ -123,3 +123,7 @@ A plugin's `on-events` handler filters a list of notes on every batch. The team 
 - [Sizing memory and CPU](/pages/perf-sizing-memory-and-cpu/) for the memory and bucket budgets that a timing must fit inside.
 - [Backpressure and retries](/pages/perf-backpressure-and-retries/) for what a plugin does when a timing is fine but a call is still refused.
 - [Performance budgets and benchmarks](/pages/reference-host-budgets/) for the host's own benchmarks.
+
+## Production additions (round 3)
+
+- **[PRY-039]** `ilium plugin bench` MUST exit with code 3 and print `bench.noisy` when the relative spread (max minus min divided by median) of its samples exceeds 25 percent, and MUST NOT compare such a run with a baseline.

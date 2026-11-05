@@ -366,3 +366,7 @@ The kernel's own loopback routes (see [Kernel and boot](/pages/reference-kernel-
 - [Errors and limits](/pages/reference-errors-and-limits/) for the shared error model.
 
 Checked against `ilium:plugin@0.1.0`.
+
+## Production additions (round 3)
+
+- **[PRY-008]** The loopback listener holds at most 32 in-flight requests per plugin and answers the 33rd with `503` and a `Retry-After` header without delivering an `http-called` event.

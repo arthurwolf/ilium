@@ -310,3 +310,7 @@ Detection does not depend on the language that Ilium shows.
 - **[COR-229]** At most one enabled plugin MAY replace a given core plugin id; enabling a second MUST be refused with core.replacement-conflict naming the current owner.
 - **[COR-230]** Core plugins MUST be versioned with the server build; at boot the server MUST refuse an installed override of a core plugin whose declared host ABI is incompatible, falling back to the bundled copy and logging core.abi-mismatch.
 - **[LIF-042]** An essential core plugin (see [Core plugins](/pages/core-plugins/)) MUST never be stopped by failure. Its third and later failures in a window MUST restart after 5 s and MUST raise the essential-failure banner.
+
+## Production additions (round 3)
+
+- **[PRY-026]** Each core plugin MUST ship an accessibility declaration (PRX-008) at the 'screen-reader, high contrast, reduced motion, 40 columns' level, and a release check MUST fail when any core plugin's fixture run emits an interactive element without an accessible name.

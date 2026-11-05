@@ -334,3 +334,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[ABI-070]** The host MUST pin the exact Wasmtime version and the Component Model canonical ABI revision it ships with, and MUST report both in `ilium plugin doctor` output.
 - **[ABI-071]** A runtime upgrade that changes canonical-ABI behaviour, trap behaviour or fuel accounting MUST NOT ship until the full ABI conformance corpus of ABI-073 passes on the new runtime.
 - **[ABI-072]** A runtime upgrade MUST list in the release notes every observable change in traps or refusal codes, and a change that alters a code MUST follow the removal rules of ABI-052.
+
+## Production additions (round 3)
+
+- **[PRY-040]** When a compile-cache entry fails deserialization or its hash check, the host MUST delete that entry, recompile the component from the verified package bytes, load the plugin successfully, and write one audit-log warning event naming the component hash, with no more than one recompile attempt per load.

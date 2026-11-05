@@ -103,3 +103,7 @@ generated-with: manual
 
 - [Providing the docs to agents](/pages/agent-docs/)
 - [Versioning](/pages/versioning/)
+
+## Production additions (round 3)
+
+- **[PRY-001]** When AGENTS.md, CLAUDE.md, .cursor/rules/ilium-plugin.mdc or .github/copilot-instructions.md already exists and differs from the kit file, the kit install command MUST leave it byte-identical, exit with code 1 and print the file name, unless --force is passed, in which case it MUST first copy the old file to <name>.bak.
