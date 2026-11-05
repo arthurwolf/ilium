@@ -866,7 +866,7 @@ static GRANTS: &[GrantInfo] = &[
         true,
         Low,
         &Tier::ALL,
-        &[Side::Server, Side::Client, Side::Scene],
+        &[Side::Server, Side::Client],
         None,
         &["ilium:host/extensions@0.1.0"]
     ),
