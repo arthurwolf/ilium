@@ -551,6 +551,7 @@ fn settings_snapshot(app: &App) -> Value {
             "ui.left_panel_unfocused_width", "ui.left_panel_focused_width",
             "ui.left_panel_minimum_terminal_width", "ui.tree_order",
             "ui.tree_row_management_controls", "ui.agent_identifier_mode", "ui.color_scheme", "ui.motion_level",
+            "ui.agent_monitoring_mode",
             "ui.sidebar_density", "ui.stable_glyphs", "ui.agent_debug_menu_enabled", "ui.task_progress_style", "ui.icons.<icon_key>",
             "terminal.scrollback_budget_mib", "terminal.engine_memory_budget_mib", "terminal.new_pane_directory",
             "terminal.smart_copy_light", "terminal.smart_copy_light_key",
@@ -603,6 +604,7 @@ fn settings_snapshot(app: &App) -> Value {
             "stable_glyphs": app.ui_settings.use_stable_glyphs,
             "agent_identifier_mode": app.ui_settings.agent_identifiers.mode.label(),
             "motion_level": app.ui_settings.motion_level.label(),
+            "agent_monitoring_mode": app.ui_settings.agent_monitoring_mode.key(),
             "sidebar_density": app.ui_settings.sidebar_density.label(),
             "task_progress_style": crate::icon_settings::task_progress_preset_index(
                 &app.ui_settings.icons.task_progress_frames

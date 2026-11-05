@@ -1285,6 +1285,8 @@ pub struct SettingsState {
     pub keyboard_picker: Option<Action>,
     /// Hover, threshold editing and the fine-tuning dialog of the Padding tab.
     pub padding: crate::padding_ui::PaddingUiState,
+    /// The Agent Monitoring display-mode card under the pointer.
+    pub agent_monitoring_hover: Option<crate::agent_monitoring::AgentMonitoringMode>,
     /// Horizontal chip cursor in the selected Triggers event. Zero is None;
     /// later positions follow that event's available action registry.
     pub trigger_action_cursor: usize,
@@ -1419,6 +1421,7 @@ impl SettingsState {
             icon_picker: None,
             keyboard_picker: None,
             padding: crate::padding_ui::PaddingUiState::default(),
+            agent_monitoring_hover: None,
             trigger_action_cursor: 0,
         }
     }
@@ -2401,6 +2404,9 @@ pub struct App {
     pub custom_status_rules: ilium_core::status_rule_expression::StatusRules,
     pub custom_status_screen_observations: crate::status_screen_observations::ScreenObservations,
     pub custom_status_rules_error: Option<String>,
+    /// What the tolerant loader changed (rules disabled, identifiers renamed,
+    /// entries it could not read); cleared once the user saves the rules.
+    pub custom_status_rules_load_issues: Vec<ilium_core::status_rule_expression::ValidationIssue>,
     pub custom_status_rules_editor: Option<crate::status_rules_editor::EditorState>,
     /// One wall-clock sample per maintenance tick keeps footer layout and drawing consistent.
     progress_display_now_unix_millis: u64,
@@ -3144,8 +3150,10 @@ impl App {
             ),
             ui_settings: UiSettings::default(),
             custom_status_rules: ilium_core::status_rule_expression::default_rules(),
-            custom_status_screen_observations: crate::status_screen_observations::ScreenObservations::default(),
+            custom_status_screen_observations:
+                crate::status_screen_observations::ScreenObservations::default(),
             custom_status_rules_error: None,
+            custom_status_rules_load_issues: Vec::new(),
             custom_status_rules_editor: None,
             progress_display_now_unix_millis: crate::scheduled_input::unix_millis_now(),
             keyboard_settings: KeyboardSettings::default(),
@@ -7272,21 +7280,36 @@ impl App {
         if let Some(error) = &self.custom_status_rules_error {
             return Err(format!("Cannot replace unreadable saved rules: {error}"));
         }
-        let errors = crate::config::validate_status_rules(&rules);
-        if !errors.is_empty() {
-            return Err(errors.join("; "));
+        let issues = crate::config::validate_status_rules(&rules);
+        if ilium_core::status_rule_expression::has_errors(&issues) {
+            return Err(ilium_core::status_rule_expression::error_summary(&issues));
         }
-        let directory = self.config_dir.clone().ok_or("The configuration directory is unavailable")?;
-        self.enqueue_configuration(
-            directory,
-            crate::filesystem::configuration::ConfigurationChange::StatusRules(Box::new(rules.clone())),
-            crate::filesystem::configurations::ConfigurationIntent::Plain { label: "custom status rules", success: None },
-        )?;
-        self.custom_status_rules = rules;
-        if !self.custom_status_screen_observations.watches_match(&self.custom_status_rules) {
+        // The validated edit takes effect in memory first: a refused write
+        // must not throw the user's change away, and the next successful save
+        // persists the current rules.
+        self.custom_status_rules = rules.clone();
+        if !self
+            .custom_status_screen_observations
+            .watches_match(&self.custom_status_rules)
+        {
             self.refresh_custom_status_screen_watches();
         }
         self.bump_tree_version();
+        let directory = self
+            .config_dir
+            .clone()
+            .ok_or("The configuration directory is unavailable")?;
+        self.enqueue_configuration(
+            directory,
+            crate::filesystem::configuration::ConfigurationChange::StatusRules(Box::new(rules)),
+            crate::filesystem::configurations::ConfigurationIntent::Plain {
+                label: "custom status rules",
+                success: None,
+            },
+        )?;
+        // The saved file now mirrors the rules in memory, so the loader's
+        // repair notes no longer describe it.
+        self.custom_status_rules_load_issues.clear();
         Ok(())
     }
 
@@ -7295,18 +7318,28 @@ impl App {
     /// a replaced terminal.
     pub(crate) fn refresh_custom_status_screen_watches(&mut self) {
         let had_watches = self.custom_status_screen_observations.has_watches();
-        let retry_pending = self.custom_status_screen_observations.retry_due(std::time::Instant::now());
-        let (revision, watches) = self.custom_status_screen_observations.replace_rules(&self.custom_status_rules);
+        let retry_pending = self
+            .custom_status_screen_observations
+            .retry_due(std::time::Instant::now());
+        let (revision, watches) = self
+            .custom_status_screen_observations
+            .replace_rules(&self.custom_status_rules);
         if had_watches || !watches.is_empty() || retry_pending {
-            let admitted = self.queue_request(ClientRequest::SetStatusScreenWatches { revision, watches });
-            self.custom_status_screen_observations.set_subscription_admitted(admitted);
+            let admitted =
+                self.queue_request(ClientRequest::SetStatusScreenWatches { revision, watches });
+            self.custom_status_screen_observations
+                .set_subscription_admitted(admitted);
         }
     }
 
     pub fn settings_adjust_agent_monitoring_mode(&mut self, direction: i32) {
         let modes = crate::agent_monitoring::AgentMonitoringMode::ALL;
-        let current = modes.iter().position(|mode| *mode == self.ui_settings.agent_monitoring_mode).unwrap_or(0);
-        let mode = modes[(current as i32 + direction.signum()).rem_euclid(modes.len() as i32) as usize];
+        let current = modes
+            .iter()
+            .position(|mode| *mode == self.ui_settings.agent_monitoring_mode)
+            .unwrap_or(0);
+        let mode =
+            modes[(current as i32 + direction.signum()).rem_euclid(modes.len() as i32) as usize];
         self.settings_set_agent_monitoring_mode(mode);
     }
 
@@ -7356,16 +7389,27 @@ impl App {
                 let policy = &mut ui.cache_keepalive;
                 match row {
                     AgentMonitoringRow::CacheKeepaliveEnabled => policy.enabled = !policy.enabled,
-                    AgentMonitoringRow::CacheKeepaliveMonitor => policy.on_monitor = !policy.on_monitor,
-                    AgentMonitoringRow::CacheKeepaliveCommand => policy.on_command = !policy.on_command,
-                    AgentMonitoringRow::CacheKeepaliveSubagent => policy.on_subagent = !policy.on_subagent,
-                    AgentMonitoringRow::CacheKeepaliveClaudeInterval | AgentMonitoringRow::CacheKeepaliveCodexInterval => {
+                    AgentMonitoringRow::CacheKeepaliveMonitor => {
+                        policy.on_monitor = !policy.on_monitor
+                    }
+                    AgentMonitoringRow::CacheKeepaliveCommand => {
+                        policy.on_command = !policy.on_command
+                    }
+                    AgentMonitoringRow::CacheKeepaliveSubagent => {
+                        policy.on_subagent = !policy.on_subagent
+                    }
+                    AgentMonitoringRow::CacheKeepaliveClaudeInterval
+                    | AgentMonitoringRow::CacheKeepaliveCodexInterval => {
                         let interval = if row == AgentMonitoringRow::CacheKeepaliveClaudeInterval {
                             &mut policy.claude_interval_minutes
                         } else {
                             &mut policy.codex_interval_minutes
                         };
-                        *interval = if direction < 0 { interval.saturating_sub(1).max(1) } else { interval.saturating_add(1).min(1440) };
+                        *interval = if direction < 0 {
+                            interval.saturating_sub(1).max(1)
+                        } else {
+                            interval.saturating_add(1).min(1440)
+                        };
                     }
                     _ => unreachable!(),
                 }
@@ -12145,23 +12189,30 @@ impl App {
         let mut requirements = AnimationRequirements::default();
 
         // Custom rules can animate even when the underlying agent is idle. The
-        // settings cards and the editor also render those rules as previews.
+        // settings cards and the editor render every rule as a preview, so
+        // they follow the whole rule set; the live tree wakes only for the
+        // animations its panes actually matched, so an idle tree stays quiet.
         let custom_preview_visible = matches!(&self.mode, Mode::Settings(settings)
             if settings.tab == SettingsTab::AgentMonitoring);
-        if custom_preview_visible
-            || self.ui_settings.agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Custom
-        {
-            if let Some(delay_millis) = crate::status_rule_visual::animation_frame_delay(
+        let custom_delay_millis = if custom_preview_visible {
+            crate::status_rule_visual::animation_frame_delay(
                 &self.custom_status_rules,
                 self.ui_settings.motion_level,
                 elapsed_ms,
-            ) {
-                requirements.is_active = true;
-                retain_minimum_delay(
-                    &mut requirements.next_semantic_delay,
-                    Duration::from_millis(delay_millis),
-                );
-            }
+            )
+        } else if self.ui_settings.agent_monitoring_mode
+            == crate::agent_monitoring::AgentMonitoringMode::Custom
+        {
+            crate::custom_status_live::animation_frame_delay(self, elapsed_ms)
+        } else {
+            None
+        };
+        if let Some(delay_millis) = custom_delay_millis {
+            requirements.is_active = true;
+            retain_minimum_delay(
+                &mut requirements.next_semantic_delay,
+                Duration::from_millis(delay_millis),
+            );
         }
 
         // An address search answers on its own thread; poll for it at 10 Hz.
@@ -12299,7 +12350,15 @@ impl App {
                 },
                 None => None,
             };
-            if let Some(frame_millis) = frame_millis.filter(|_| !motion_off) {
+            // In Custom mode the live tree shows the rules' visuals instead of
+            // these built-in icons, and their clock ran above; the preview
+            // cards still animate the built-in icons.
+            let built_in_icons_visible = custom_preview_visible
+                || self.ui_settings.agent_monitoring_mode
+                    != crate::agent_monitoring::AgentMonitoringMode::Custom;
+            if let Some(frame_millis) =
+                frame_millis.filter(|_| !motion_off && built_in_icons_visible)
+            {
                 requirements.is_active = true;
                 retain_minimum_delay(
                     &mut requirements.next_semantic_delay,
@@ -16914,7 +16973,10 @@ impl App {
             }
             SubmenuItemAction::CustomAgentAtWorktree(profile_id)
             | SubmenuItemAction::CustomAgentAtProjectRoot(profile_id) => {
-                let identity = self.custom_agents.profiles.iter()
+                let identity = self
+                    .custom_agents
+                    .profiles
+                    .iter()
                     .find(|profile| profile.id == profile_id)
                     .map(|profile| ilium_core::custom_agent::CustomAgentIdentity {
                         profile_id: profile.id.clone(),
@@ -16923,12 +16985,17 @@ impl App {
                 if let Some(identity) = identity {
                     if matches!(&item.action, SubmenuItemAction::CustomAgentAtWorktree(_)) {
                         self.start_context_agent_at_worktree(
-                            target, identity.base_provider, Some(identity),
+                            target,
+                            identity.base_provider,
+                            Some(identity),
                         );
                     } else {
                         self.start_context_agent_at_project_root(
                             target,
-                            ilium_ipc::NewPaneKind::CustomAgent { identity, initial_input: None },
+                            ilium_ipc::NewPaneKind::CustomAgent {
+                                identity,
+                                initial_input: None,
+                            },
                             profile_id,
                         );
                     }
@@ -17027,10 +17094,18 @@ impl App {
         let spec = ilium_ipc::WorkspaceCreateSpec::Existing { path };
         let request = match identity {
             Some(identity) => ClientRequest::CreateCustomAgentInWorkspace {
-                request_id, parent_group, identity, spec, initial_input: None,
+                request_id,
+                parent_group,
+                identity,
+                spec,
+                initial_input: None,
             },
             None => ClientRequest::CreateAgentInWorkspace {
-                request_id, parent_group, provider, spec, initial_input: None,
+                request_id,
+                parent_group,
+                provider,
+                spec,
+                initial_input: None,
             },
         };
         if self.queue_request(request) {
@@ -21901,11 +21976,20 @@ mod tests {
         app.config_dir = Some(config_dir.path().to_path_buf());
         assert!(!app.ui_settings.cache_keepalive.enabled);
         app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveEnabled, 1);
-        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveClaudeInterval, -1);
-        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveCodexInterval, 1);
+        app.settings_adjust_agent_monitoring_row(
+            AgentMonitoringRow::CacheKeepaliveClaudeInterval,
+            -1,
+        );
+        app.settings_adjust_agent_monitoring_row(
+            AgentMonitoringRow::CacheKeepaliveCodexInterval,
+            1,
+        );
         app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveMonitor, 1);
         app.settle_filesystem_for_test();
-        let policy = crate::config::load(config_dir.path()).unwrap().ui.cache_keepalive;
+        let policy = crate::config::load(config_dir.path())
+            .unwrap()
+            .ui
+            .cache_keepalive;
         assert!(policy.enabled);
         assert_eq!(policy.claude_interval_minutes, 54);
         assert_eq!(policy.codex_interval_minutes, 26);
@@ -26837,6 +26921,70 @@ mod tests {
 
         app.started_at = now - Duration::from_secs(60);
         assert_eq!(app.next_maintenance_delay(now), Duration::from_secs(1));
+        assert!(!app.has_active_animation());
+    }
+
+    #[test]
+    fn custom_mode_wakes_only_for_the_animations_its_panes_matched() {
+        use crate::agent_monitoring::AgentMonitoringMode;
+        use crate::config::MotionLevel;
+
+        let mut app = app();
+        let now = Instant::now();
+        app.started_at = now;
+        // Motion defaults to Reduced; the frame maths below assume Full.
+        app.ui_settings.motion_level = MotionLevel::Full;
+        let group_id = app.tree.add_group(ROOT_ID, "agents").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let set_status = |app: &mut App, goal| {
+            app.tree
+                .set_pane_status(
+                    pane_id,
+                    PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, goal),
+                )
+                .unwrap();
+        };
+
+        // Normal mode: the built-in working spinner keeps its clock.
+        set_status(&mut app, None);
+        assert!(app.animation_requirements(now).is_active);
+
+        // Custom mode, default rules: plain "working" is a static built-in
+        // icon, so the tree has nothing to redraw...
+        app.ui_settings.agent_monitoring_mode = AgentMonitoringMode::Custom;
+        let quiet = app.animation_requirements(now);
+        assert!(!quiet.is_active);
+        assert_eq!(quiet.next_semantic_delay, None);
+        assert_eq!(app.maintenance_schedule(now).delay, Duration::from_secs(1));
+
+        // ...until a pane matches the animated "working toward a goal" rule
+        // (a Braille spinner at 8 frames per second).
+        set_status(&mut app, Some(ilium_core::GoalState::Active));
+        let spinning = app.animation_requirements(now);
+        assert!(spinning.is_active);
+        assert_eq!(
+            spinning.next_semantic_delay,
+            Some(Duration::from_millis(125))
+        );
+        assert_eq!(
+            app.animation_requirements(now + Duration::from_millis(100))
+                .next_semantic_delay,
+            Some(Duration::from_millis(25))
+        );
+
+        // Reduced motion slows the same spinner to 2 frames per second.
+        app.ui_settings.motion_level = MotionLevel::Reduced;
+        assert_eq!(
+            app.animation_requirements(now).next_semantic_delay,
+            Some(Duration::from_millis(500))
+        );
+
+        // Motion Off freezes it: no wake at all.
+        app.ui_settings.motion_level = MotionLevel::Off;
+        assert!(!app.animation_requirements(now).is_active);
         assert!(!app.has_active_animation());
     }
 

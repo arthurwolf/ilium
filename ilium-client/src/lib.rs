@@ -37,6 +37,7 @@ pub mod agent_freeze;
 pub mod agent_from_line;
 pub mod agent_history_path;
 pub mod agent_monitoring;
+pub mod agent_monitoring_cards;
 pub mod agent_prompt_transcript;
 pub mod agent_toolbar;
 mod animation_hover;
@@ -78,6 +79,7 @@ pub mod cost_settings_ui;
 pub mod cost_tracker;
 pub mod custom_agent_editor;
 mod custom_agent_settings;
+pub(crate) mod custom_status_live;
 pub mod debug_logging;
 pub mod document_preparation;
 mod editor_capture_budget;
@@ -121,10 +123,6 @@ pub mod padding;
 pub mod padding_app;
 pub mod padding_dialog;
 pub mod padding_ui;
-pub mod selectable_cards;
-pub mod status_rule_visual;
-pub mod status_rules_editor;
-pub mod status_screen_observations;
 pub mod pane_title;
 pub mod paths;
 pub mod plugin_host;
@@ -163,6 +161,7 @@ pub mod screen_transfer;
 pub mod search_ui;
 pub mod search_workers;
 pub mod section_frame;
+pub mod selectable_cards;
 mod semantic_animation;
 pub mod session_conversion;
 mod session_goal_claude;
@@ -185,6 +184,10 @@ pub mod smart_copy;
 pub mod smart_copy_light;
 mod smart_copy_selection;
 mod startup_dialog;
+pub mod status_demo;
+pub mod status_rule_visual;
+pub mod status_rules_editor;
+pub mod status_screen_observations;
 /// Typed source custody returned when light-copy shutdown cannot finish.
 pub use smart_copy_selection::{
     RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
@@ -1159,7 +1162,10 @@ async fn run_inner(
     app.config_dir = config_dir;
     if let Some(directory) = app.config_dir.as_deref() {
         match crate::config::load_status_rules(directory) {
-            Ok(rules) => app.custom_status_rules = rules,
+            Ok(loaded) => {
+                app.custom_status_rules = loaded.rules;
+                app.custom_status_rules_load_issues = loaded.issues;
+            }
             Err(error) => app.custom_status_rules_error = Some(error.to_string()),
         }
     }

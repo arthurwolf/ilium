@@ -43,12 +43,11 @@ pub use protocol::{
     PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
     ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
-    StatusScreenObservation, StatusScreenWatch,
-    WorkspaceClosePolicy, WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition,
-    WorkspaceGitStatus, WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry,
-    WorkspaceInventoryOwner, WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy,
-    WorkspacePruneMode, WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget,
-    WorkspaceWorktreeFact,
+    StatusScreenObservation, StatusScreenWatch, WorkspaceClosePolicy, WorkspaceCreateSpec,
+    WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus, WorkspaceGitVersion,
+    WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
+    WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
+    WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget, WorkspaceWorktreeFact,
 };
 pub use startup::{
     clear_startup_progress, publish_startup_progress, read_startup_progress, startup_progress_path,
@@ -90,6 +89,7 @@ mod tests {
     use std::path::PathBuf;
 
     use ilium_core::{
+        status_rule_expression::{ScreenPattern, ScreenRegion},
         AgentActivity, AgentClass, BoardStorage, BuiltinAgentProvider, NodeId, PaneStatus,
         PromptQueueDelivery, SplitOrientation, Tree, TreeMoveDirection, ROOT_ID,
     };
@@ -715,6 +715,33 @@ mod tests {
             ClientRequest::QueryWorkspaceCloseOffer {
                 request_id: 86,
                 pane_id: NodeId(2),
+            },
+            // A populated subscription exercises every pattern option on the
+            // wire; the empty one is how a client cancels its watches.
+            ClientRequest::SetStatusScreenWatches {
+                revision: 1,
+                watches: vec![
+                    StatusScreenWatch {
+                        id: 0,
+                        pattern: ScreenPattern {
+                            pattern: "\\b(error|failed)\\b".to_string(),
+                            ignore_case: true,
+                            region: ScreenRegion::LastLines(5),
+                        },
+                    },
+                    StatusScreenWatch {
+                        id: 1,
+                        pattern: ScreenPattern {
+                            pattern: "^Done".to_string(),
+                            ignore_case: false,
+                            region: ScreenRegion::FirstLines(1),
+                        },
+                    },
+                ],
+            },
+            ClientRequest::SetStatusScreenWatches {
+                revision: 2,
+                watches: Vec::new(),
             },
         ]
     }

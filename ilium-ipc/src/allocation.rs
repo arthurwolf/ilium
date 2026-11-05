@@ -571,7 +571,9 @@ impl HeapBytes for crate::resource::ResourceReply {
 impl HeapBytes for ServerEvent {
     fn heap_bytes(&self) -> usize {
         match self {
-            Self::StatusScreenObserved(observation) => observation.matched.heap_bytes()
+            Self::StatusScreenObserved(observation) => observation
+                .matched
+                .heap_bytes()
                 .saturating_add(observation.unknown.heap_bytes()),
             Self::PaneRecentActivity { .. } => 0,
             Self::ResourceObservationFailed { message } => message.heap_bytes(),

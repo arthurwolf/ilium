@@ -1,5 +1,18 @@
 ### Added
 - Custom agent status icons with ordered rules, screen-text matching, configurable visuals and live and demo tree previews.
+- Custom status rules can test the task's time estimate (`eta-known`, `eta-below-minutes`), a frozen pane and the session's tracked spend (`session-cost-above`); every condition now carries a category, label and one-sentence explanation that the rule editor reads from one shared registry.
+- Custom status rules can explain themselves: the rule engine reports, per rule, which conditions held, failed or were not observed, and renders a one-line reason such as `Custom rule 3 "Goal paused": goal is paused AND NOT agent is working`.
+- A shared catalogue of thirty synthetic pane situations exercises every shipped default rule and every condition in the engine's tests.
+- The control API accepts `ui.agent_monitoring_mode` (`normal`, `attention`, `custom`) for get, set and adjust.
+- Hovering the status cell of a pane in Custom mode shows which rule chose the icon and why (`Why: Custom rule 3 "Goal paused": ...`), or why no rule matched, including how many rules depended on a fact that was not observed.
+- Seven Braille animation presets for custom status icons: `spinner`, `loop`, `dots`, `snake`, `bounce`, `pulse` and `bar-fill`.
 
 ### Changed
 - Agent Monitoring offers illustrated Normal, Attention and Custom display-mode choices.
+- Shipped default rules mark approval, failures and unread results bold and the idle rule dim; the disabled screen-text example shows a bold red `!`.
+- Loading `[status_rules]` keeps every readable rule: a broken rule is disabled with a reason, a duplicate identifier is renamed, an unreadable entry stays in `config.toml` untouched and survives later saves; only an unreadable file or a table of the wrong shape still blocks custom rules.
+- In Custom mode every pane row, including editors and boards, has exactly one three-cell status slot, so titles stay aligned and rules may target editors and boards; clicks and the blocking caution use that same slot.
+- In Custom mode the tree redraws only for animations that a pane actually matched (never for the built-in Normal-mode spinners or for enabled but unmatched animated rules), so an idle tree schedules no periodic redraws; Motion `Reduced` slows custom animations to 2 frames per second and `Off` freezes them.
+- Rule validation reports typed findings per rule (errors and warnings, including rules that an earlier rule makes unreachable) instead of one flat message, and a validated edit stays in memory even when the configuration write is refused.
+- The Agent Monitoring display-mode cards share one selectable-card component with the Padding and Left-panel sizing cards (equal widths, pointer hover, focus frame); they adapt from full demo trees to short demos, description-only and stacked cards as the terminal narrows, and the Configure button shows how many rules exist and are enabled while Attention-only rows say so when another mode is active.
+- The custom status-icon rules editor shows a Settings breadcrumb, numbered rules with a scrolling list (wheel, keyboard follows the selection), a Duplicate control, a twenty-step undo (`U` or `Ctrl+Z`), bracketed AND groups with a precedence legend, a screen-pattern region control (`L`: whole screen, first or last lines), a live "Matches N panes now" count, a plain-English reading of the selected rule, and a "Why this icon" box under the live tree that names the rule picking the focused pane's icon; the demo tree lists the engine's shared demo situations, an empty session shows guidance instead of a blank tree, and Esc steps back one column at a time while Backspace or Back returns to the page.

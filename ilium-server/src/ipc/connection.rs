@@ -354,33 +354,17 @@ where
 
         let request = decoded.view();
         if let ClientRequest::SetStatusScreenWatches { revision, watches } = request {
+            // Validated and replaced as a whole: a rejected set leaves the
+            // previous revision running, and an empty set spawns nothing.
             match crate::status_screen_watch::compile_wire(watches) {
                 Ok(compiled) => {
-                    screen_watches.abort_all();
-                    while screen_watches.try_join_next().is_some() {}
-                    if !compiled.is_empty() {
-                        let watch_state = Arc::clone(&state);
-                        let replies = direct_tx.clone();
-                        let revision = *revision;
-                        screen_watches.spawn(async move {
-                            let pane_ids: Vec<_> = watch_state.panes.read().await.keys().copied().collect();
-                            let watches = Arc::new(compiled);
-                            let (sender, mut receiver) = mpsc::channel(64);
-                            let mut panes = tokio::task::JoinSet::new();
-                            for pane_id in pane_ids {
-                                panes.spawn(crate::status_screen_watch::watch_pane(
-                                    Arc::clone(&watch_state), pane_id, revision,
-                                    Arc::clone(&watches), sender.clone(),
-                                ));
-                            }
-                            drop(sender);
-                            while let Some(observation) = receiver.recv().await {
-                                if replies.send(ServerEvent::StatusScreenObserved(observation)).await.is_err() {
-                                    break;
-                                }
-                            }
-                        });
-                    }
+                    crate::status_screen_watch::replace_revision(
+                        &mut screen_watches,
+                        Arc::clone(&state),
+                        *revision,
+                        compiled,
+                        direct_tx.clone(),
+                    );
                 }
                 Err(message) => {
                     let _ = direct_tx.send(ServerEvent::Error { message }).await;

@@ -150,10 +150,12 @@ pub fn decode_bounded_frame_with_storage<T: crate::BoundedMessage>(
     crate::bounded_decode::decode_bounded_with_storage(&frame.payload)
 }
 
-// Resource commands and the inserted ScreenPreview event require matching
-// peers. Reject older enum layouts before decoding any payload.
-// The tag must occupy only bits in FRAME_SCHEMA_MASK.
-const FRAME_SCHEMA_TAG: u32 = 0xD000_0000;
+// Resource commands, the inserted ScreenPreview event and the status
+// screen-watch request/event pair (`SetStatusScreenWatches` /
+// `StatusScreenObserved`) require matching peers. Reject older enum layouts
+// before decoding any payload, so a mismatch fails at attach instead of on
+// the first new message. The tag must occupy only bits in FRAME_SCHEMA_MASK.
+const FRAME_SCHEMA_TAG: u32 = 0xD800_0000;
 const FRAME_SCHEMA_MASK: u32 = 0xF800_0000;
 fn frame_length_word(length: u32) -> u32 {
     FRAME_SCHEMA_TAG | length
@@ -873,6 +875,15 @@ mod prompt_attempt_wire_tests {
         // ScreenPreview shifts the following enum discriminants; old peers
         // must be refused before those bytes can be interpreted as new events.
         assert!(frame_payload_length(0xC800_0000 | 16).is_err());
+    }
+    #[test]
+    fn pre_status_screen_watch_schema_is_rejected_before_decoding() {
+        // A peer without `SetStatusScreenWatches`/`StatusScreenObserved`
+        // would only fail lazily on the first such frame; the tag bump makes
+        // the mismatch visible at attach, before any payload is decoded.
+        assert!(frame_payload_length(0xD000_0000 | 16).is_err());
+        assert_eq!(frame_payload_length(frame_length_word(16)).unwrap(), 16);
+        assert_eq!(FRAME_SCHEMA_TAG & FRAME_SCHEMA_MASK, FRAME_SCHEMA_TAG);
     }
     #[test]
     fn declared_encoded_capacity_covers_real_growth_at_floor_and_doubling_boundaries() {

@@ -568,6 +568,16 @@ fn status_tooltip_content(
     else {
         return None;
     };
+    // Custom mode shows one status slot whose content comes from the user's
+    // rules, so its hover names the matched rule instead of a projection.
+    if app.ui_settings.agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Custom
+    {
+        match slot {
+            StatusSlot::Objective => return None,
+            StatusSlot::Now => return crate::custom_status_live::tooltip(app, node_id),
+            StatusSlot::Identity => {}
+        }
+    }
     let shell_output = app
         .terminal_activity
         .phase(node_id, app.started_at.elapsed().as_millis())
@@ -934,9 +944,9 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             agent_monitoring_mode: app.ui_settings.agent_monitoring_mode,
             attention_progress_reports: app.ui_settings.attention_progress_reports,
             custom_status_rules: Some(&app.custom_status_rules),
-                screen_observations: Some(&app.custom_status_screen_observations),
-                screen_pane_id: None,
-                icon_motion: app.ui_settings.motion_level,
+            screen_observations: Some(&app.custom_status_screen_observations),
+            screen_pane_id: None,
+            icon_motion: app.ui_settings.motion_level,
             attention_running_indicator: app.ui_settings.attention_running_indicator,
             show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
             frozen_panes: &app.frozen_panes,
