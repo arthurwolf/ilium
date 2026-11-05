@@ -730,3 +730,7 @@ Side basis: `ilium.core.titles/title-styles` is server because the style `instru
 Session record: `/home/arthur/.codex/sessions/2026/11/03/rollout-2026-11-03T00-28-23-01a19e97-b05d-7661-8fcb-b02eafa9ae17.jsonl`
 
 **Correction to “See it” above:** the current recording shows the manually named **Stamp desk**, not Keep, staying unchanged while Ilium applies automatic titles. The Claude CLI uses a model alias routed over loopback to local Qwen; no provider call is made. The Codex-shaped process and title responses are deterministic local fixtures, and the fixture transcript is seeded with the prompt later typed. A stale title proposal is rejected and retried. Claude’s turn is unfinished. Setup and 57 seconds of model wait are cut; captions, arrows, highlights and reading holds are added.
+
+## Production additions (round 4)
+
+- **[PRZ-016]** The Titles, Recap and Compaction plugins MUST remove every C0 and C1 control character and every ESC-initiated sequence from model output before storing, displaying or sending it, MUST truncate a title to 80 cells, and MUST NOT interpret any model output as a command, key sequence or request.

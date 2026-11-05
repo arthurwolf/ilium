@@ -137,3 +137,7 @@ Proposed, owner to confirm: the host moves focus to the next focusable node in t
 ## Production additions (round 3)
 
 - **[PRY-006]** The host MUST honour at most 1 plugin focus request per view per second while the user has pressed a key in the last 2 seconds, MUST drop the excess requests, and MUST NOT move focus into a view of a different plugin than the one holding focus, counting each dropped request in `plugin.focus.dropped`.
+
+## Production additions (round 4)
+
+- **[PRZ-003]** A toast or notice that carries an action MUST stay visible for at least 10 seconds or until the user dismisses it, MUST pause its countdown while it holds focus, and the host MUST keep the same action reachable from the notification history for at least 24 hours.

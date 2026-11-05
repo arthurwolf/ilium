@@ -721,3 +721,7 @@ The plugin owns both points below. The complete manifest holds the grants `exten
 - [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Editor](/pages/core-plugin-editor/), which edits the board file as text.
 - [Agent detection](/pages/core-plugin-agent-detect/), for the agents that tick the tasks off.
+
+## Production additions (round 4)
+
+- **[PRZ-019]** When the Kanban plugin cannot parse its board file, or the file exceeds 2 MiB, it MUST open the board read-only with an error notice naming the line of the first failure, MUST copy the file to '<name>.corrupt-<YYYYMMDD-HHMMSS>' once, and MUST NOT write the board until the user chooses Repair or Replace.

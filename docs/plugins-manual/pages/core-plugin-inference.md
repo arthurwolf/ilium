@@ -785,3 +785,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 - **[COR-950]** The Inference plugin MUST NOT write prompt text, reply text or screen text to its plugin log, the audit log or the privacy log.
 - **[COR-951]** Settings MUST show, for the selected provider, the data retention statement configured in its provider entry, or the text "retention unknown" when the entry has none, and MUST NOT imply that Ilium enforces that statement.
 - **[COR-952]** Before the first request to a remote provider, the user MUST confirm that provider's retention statement once, as COR-106 requires for the voice provider; a local provider needs no confirmation.
+
+## Production additions (round 4)
+
+- **[PRZ-018]** Before the Inference plugin sends text to a provider whose endpoint is not loopback, it MUST replace every match of the configured secret patterns (default set: AWS access key ids, 'ghp_' and 'sk-' tokens of 20 or more characters, and PEM private-key blocks) with '[redacted]', and MUST count the replacements in the request's audit record.

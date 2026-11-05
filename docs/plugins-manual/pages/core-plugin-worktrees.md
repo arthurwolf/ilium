@@ -515,3 +515,7 @@ Side basis: `before-remove` is server because the `remove` service that runs thi
 ### Security
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).
+
+## Production additions (round 4)
+
+- **[PRZ-015]** The Worktrees plugin MUST reject, with refused(invalid-ref) and before running any git command, a branch or base name that starts with '-', contains '..', a space, a control character, '~', '^', ':' or '\', or ends with '.lock', and MUST pass every remaining value to git after a '--' separator.

@@ -80,3 +80,7 @@ The stamp `contract: 0.1` says the facts were checked against contract 0.1. The 
 ## Production additions (round 3)
 
 - **[PRY-002]** `ilium plugin lint` MUST emit warning `agent-kit.stale` naming the file when the `contract:` stamp in AGENTS.md is lower than the contract version of the installed host, and MUST emit no such warning when the stamps are equal.
+
+## Production additions (round 4)
+
+- **[PRZ-001]** When the build runs with a public site URL configured, it MUST exit non-zero, naming the file, if llms.txt, llms-full.txt, any pages/<slug>.md or any file under agent-kit/ contains the string 127.0.0.1 or localhost, and MUST write every link in llms.txt with the configured site URL as its prefix.

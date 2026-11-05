@@ -159,3 +159,7 @@ The user can change the grant at any time in Settings > Plugins > com.example.gl
 - [Media](/pages/api-media/).
 - [media.video](/pages/capability-media-video/).
 - [Capabilities and grants](/pages/capabilities/).
+
+## Production additions (round 4)
+
+- **[PRZ-009]** A `gpu.run` call that exceeds 250 ms wall time is cancelled and returns `deadline-exceeded`, and a device loss during a call returns `unsupported` within 250 ms, with the scene falling back to its CPU path on the next frame.

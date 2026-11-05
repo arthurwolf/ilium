@@ -56,3 +56,5 @@ mod guide_plugin_test_strategy;
 mod round2;
 #[path = "production_completeness/round3.rs"]
 mod round3;
+#[path = "production_completeness/round4.rs"]
+mod round4;

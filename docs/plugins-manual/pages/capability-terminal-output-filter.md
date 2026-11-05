@@ -298,3 +298,7 @@ Checked against the API version `ilium:plugin@0.1.0`.
 ## Requirement statements
 
 - **[PRI-006]** A terminal output filter MUST accept at most rate_per_second matches per filter instance and pane. A match above the limit MUST be dropped and counted, not delivered.
+
+## Production additions (round 4)
+
+- **[PRZ-014]** The host MUST stop evaluating a plugin's output filters for a line after 2 ms of cumulative match time, MUST skip that plugin's filters for that line, and after 50 such overruns in 60 seconds MUST disable the filter with an audit entry whose reason is filter-budget.

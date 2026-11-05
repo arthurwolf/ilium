@@ -144,3 +144,7 @@ Set the language to `en-XA` and `[ui] screen_reader = true`, render the view at 
 ## Production additions (round 3)
 
 - **[PRY-004]** In linear mode the host MUST print at most 200 rows of a %list, table or tree-list per render, centred on the focused row, followed by one line of the form `rows <first> to <last> of <total>`, and a render of a 100000-row table MUST finish within the 10 ms view deadline of the plugin.
+
+## Production additions (round 4)
+
+- **[PRZ-002]** When the user changes the interface language while plugin views are open, the host MUST deliver locale-changed to each client plugin and MUST render every open plugin view again within 1 frame, and a test MUST assert that no label of the old language remains in the rendered rows after that frame.

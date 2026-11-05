@@ -337,3 +337,7 @@ Limits:
 - [errors and limits](/pages/reference-errors-and-limits/) for the full table of error codes.
 
 Checked against the API version `ilium:plugin@0.1.0`.
+
+## Production additions (round 4)
+
+- **[PRZ-011]** For a send-input with delivery pasted to a pane with DEC mode 2004 enabled, the host MUST remove every ESC [ 2 0 1 ~ sequence (bytes 1B 5B 32 30 31 7E) from text before wrapping it in the paste markers, so the byte stream written to the pane contains exactly one ESC[201~ at the end.

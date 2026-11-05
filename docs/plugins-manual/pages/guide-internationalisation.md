@@ -417,3 +417,8 @@ The host knows the effective UI language, so it can format a number for the plug
 ## Production additions (round 3)
 
 - **[PRY-033]** The host MUST provide `ui.format-date` that renders a Unix-millisecond value in the effective UI language and the user's time zone, the test host MUST render 2026-03-04T00:00Z as `04.03.2026` under `.locale("de")` and `.timezone("UTC")`, and `ilium plugin lint` MUST report a hand-built date string in a user-visible message.
+
+
+## Production additions (round 4)
+
+- **[PRZ-023]** The host MUST support ordinal plural messages selected by the CLDR ordinal rule of the active language, so that language `en` with count 1, 2, 3, 4 and 11 selects categories one, two, few, other and other, and a missing ordinal category MUST fall back to `other`.

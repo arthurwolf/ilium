@@ -107,3 +107,5 @@ generated-with: manual
 ## Production additions (round 3)
 
 - **[PRY-001]** When AGENTS.md, CLAUDE.md, .cursor/rules/ilium-plugin.mdc or .github/copilot-instructions.md already exists and differs from the kit file, the kit install command MUST leave it byte-identical, exit with code 1 and print the file name, unless --force is passed, in which case it MUST first copy the old file to <name>.bak.
+## Production additions (round 4)
+- **[PRZ-004]** The kit install and build commands MUST refuse, with exit code 1 naming the file and line, any kit file that matches a credential pattern (a bearer token, an AWS-style key id, a line holding password= or secret=) or an absolute path under /home/ or C:\Users\.

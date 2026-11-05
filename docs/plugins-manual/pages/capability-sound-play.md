@@ -254,3 +254,8 @@ Contract: `ilium:plugin@0.1.0`.
 
 - **[CAP-880]** Every `play-sound` for an event MUST be accompanied, in the same batch, by a visible text signal for that event; a batch with a `play-sound` and no visible signal for the event MUST be rejected by the plugin check with `a11y.sound-only`.
 - **[CAP-881]** `failed(io)`, `refused(rate-limited)` and a muted sound setting MUST NOT suppress or delay the paired visible signal.
+
+## Production additions (round 4)
+
+- **[PRZ-012]** Install MUST refuse with manifest.sound-length a sound file whose decoded duration exceeds 30 seconds or whose decoded PCM exceeds 16 MiB, and the check MUST read the header without fully decoding more than 16 MiB.
+- **[PRZ-013]** The client MUST mix at most 8 sounds at once across all plugins, and a ninth play-sound while 8 are playing MUST complete as refused(busy) without starting playback and without suppressing the paired visible signal.

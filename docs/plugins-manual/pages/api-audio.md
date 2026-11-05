@@ -325,3 +325,8 @@ A grant revoked while a stream is open makes its frames stop, and `not-permitted
 - [Rust SDK](/pages/rust-sdk/) and [TypeScript SDK](/pages/typescript-sdk/) for the generated names.
 - [Media](/pages/api-media/) for video decoding.
 - [Errors and limits](/pages/reference-errors-and-limits/) for the error codes.
+
+## Production additions (round 4)
+
+- **[PRZ-005]** While any plugin holds an open capture or loopback stream, the client footer MUST show a recording indicator naming the plugin within 1 s of open-capture or open-loopback returning, and MUST remove it within 1 s of the stream closing, being revoked, or the plugin deactivating.
+- **[PRZ-006]** A plugin MUST have at most 4 audio.play requests in flight at once, and the 5th call MUST return quota-exceeded without starting playback and without affecting the 4 requests already playing.

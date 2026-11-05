@@ -329,3 +329,7 @@ Contract: `ilium:host/clipboard`. The server side reaches it through client requ
 ### Security
 
 **[SEC-175]** Clipboard reads need the high-risk `clipboard.read` grant. See [Secrets](/pages/reference-secrets/).
+
+## Production additions (round 4)
+
+- **[PRZ-007]** The host MUST accept at most 1 clipboard write-text call per second per plugin outside a command or key handler the user triggered, MUST return rate-limited for a second call inside that second, and MUST leave the previous clipboard contents unchanged.

@@ -62,3 +62,8 @@ To test limits and movement, run the `maxlength` and cursor sequences described 
 - **[PDT-009]** A wide character MUST advance the cursor by two cells, and the harness MUST ship a fixture that checks this.
 - **[PDT-010]** An input `maxlength` MUST be counted in grapheme clusters, not bytes or code points.
 - **[PDT-011]** Cursor movement in a plugin text input MUST move exactly one grapheme cluster per Left or Right key press.
+
+## Production additions (round 4)
+
+- **[PRZ-021]** When a bracketed paste is truncated to 1,048,576 bytes, the host MUST cut at the last extended grapheme cluster boundary at or below that limit, so the delivered value is valid UTF-8 and ends with no partial cluster; a test pasting 1,048,575 ASCII bytes followed by a 4-byte emoji MUST deliver 1,048,575 bytes.
+- **[PRZ-022]** If no bracketed paste end marker arrives within 5 seconds of the last paste byte, the host MUST deliver the bytes received so far as one change event, leave paste mode, record one notice with code `input.paste-unterminated`, and handle the next keystroke as ordinary input.

@@ -634,3 +634,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 3)
 
 - **[PRY-025]** The command 'voice: delete all recordings and transcripts' MUST, after one confirmation, remove every stored audio file and transcript of the voice plugin within 5 seconds, write one audit entry with the count of removed items and no content, and leave the voice settings unchanged.
+
+## Production additions (round 4)
+
+- **[PRZ-017]** While the Voice plugin holds an open microphone it MUST show a status indicator labelled 'Listening' within 100 ms of the first captured frame, MUST stop capture and clear the indicator within 100 ms of focus loss, F8 key-up, client detach or a 60 s capture age, and MUST emit one audit record with the stop reason.

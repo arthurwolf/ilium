@@ -305,3 +305,7 @@ No first-party plugin requests `clipboard.read`.
 ### Security
 
 **[SEC-169]** Clipboard reads are high risk and are logged to the privacy log; a write never reads. See [Secrets](/pages/reference-secrets/).
+
+## Production additions (round 4)
+
+- **[PRZ-010]** When the operating system marks the clipboard content as concealed or password-manager sourced, `read-text` returns `not-permitted` with detail `concealed-content` even if `clipboard.read` is granted, and the audit log records the attempt.

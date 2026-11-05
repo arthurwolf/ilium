@@ -265,3 +265,7 @@ Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).
 ### Security
 
 Watch scopes follow the table in [Sandbox reference](/pages/reference-sandbox/) ([SEC-058]).
+
+## Production additions (round 4)
+
+- **[PRZ-008]** When the operating system refuses to create a watch because its own watch limit is exhausted, `watch` returns `quota-exceeded` with detail `os-watch-limit`, no `fs-changed` event is lost for already-active watches, and the server logs at most one `warn` line per 60 seconds naming the plugin id.
