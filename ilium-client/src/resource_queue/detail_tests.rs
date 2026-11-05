@@ -286,6 +286,7 @@ fn split_geometry_and_real_parents_survive_wait_attach_grouping_and_detach() {
     app.focus_pane(first);
     app.layout.pane_area = Rect::new(30, 1, 90, 39);
     app.ui_settings.progress_monitor_enabled = true;
+    app.ui_settings.resource_queue_grouping = false;
     app.resources.waits.clear();
     let before = app.pane_viewports();
     let tree = serde_json::to_vec(&app.tree).unwrap();
@@ -293,10 +294,33 @@ fn split_geometry_and_real_parents_survive_wait_attach_grouping_and_detach() {
     app.resources
         .waits
         .insert(first, ReservationId::from("reservation"));
-    app.ui_settings.resource_queue_grouping = false;
-    assert_eq!(before, app.pane_viewports());
-    app.resources.waits.clear();
+    let waiting = app.pane_viewports();
+    assert_eq!(waiting.len(), 2);
+    let before_first = before.iter().find(|view| view.pane_id == first).unwrap();
+    let waiting_first = waiting.iter().find(|view| view.pane_id == first).unwrap();
+    let before_second = before.iter().find(|view| view.pane_id == second).unwrap();
+    let waiting_second = waiting.iter().find(|view| view.pane_id == second).unwrap();
+    assert_eq!(before_first.content_area.height, 35);
+    assert!(before_first.progress_area.is_none());
+    assert!(before_first.progress_rule.is_none());
+    assert_eq!(waiting_first.progress_area.unwrap().height, 5);
+    assert_eq!(waiting_first.progress_rule.unwrap().height, 1);
+    let mut expected_first = *before_first;
+    expected_first.content_area.height = 29;
+    expected_first.progress_area = waiting_first.progress_area;
+    expected_first.progress_rule = waiting_first.progress_rule;
+    assert_eq!(*waiting_first, expected_first);
+    assert_eq!(before_second, waiting_second);
+    assert_eq!(app.tree.parent_of(first), Some(split));
+    assert_eq!(app.tree.parent_of(second), Some(split));
+    assert_eq!(serde_json::to_vec(&app.tree).unwrap(), tree);
     app.ui_settings.resource_queue_grouping = true;
+    assert_eq!(waiting, app.pane_viewports());
+    assert_eq!(serde_json::to_vec(&app.tree).unwrap(), tree);
+    app.ui_settings.resource_queue_grouping = false;
+    assert_eq!(waiting, app.pane_viewports());
+    assert_eq!(serde_json::to_vec(&app.tree).unwrap(), tree);
+    app.resources.waits.clear();
     assert_eq!(before, app.pane_viewports());
     assert_eq!(app.tree.parent_of(first), Some(split));
     assert_eq!(app.tree.parent_of(second), Some(split));

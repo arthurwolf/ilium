@@ -1552,7 +1552,29 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
     // dangling-link errors, which exact editors must never present as saved data.
     match std::fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(ClientConfig::default());
+            // Windows can report a missing child even when its parent is a file.
+            // Check the parent before treating this as a new configuration.
+            match std::fs::metadata(config_dir) {
+                Ok(metadata) if metadata.is_dir() => return Ok(ClientConfig::default()),
+                Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(ClientConfig::default());
+                }
+                Ok(_) => {
+                    return Err(ClientError::ConfigLoad {
+                        path,
+                        source: ConfigLoadError::Read(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "configuration parent is not a directory",
+                        )),
+                    });
+                }
+                Err(source) => {
+                    return Err(ClientError::ConfigLoad {
+                        path,
+                        source: ConfigLoadError::Read(source),
+                    });
+                }
+            }
         }
         Err(source) => {
             return Err(ClientError::ConfigLoad {
