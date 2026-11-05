@@ -831,3 +831,55 @@
   url: /pages/release-process/
 - title: "Support policy"
   url: /pages/support/
+- title: Pinning the SDK
+  url: /pages/guide-pinning-the-sdk/
+- title: Grant expiry
+  url: /pages/reference-grant-expiry/
+- title: Refusals and grant changes
+  url: /pages/api-grant-refusal-and-changes/
+- title: Grant audit records
+  url: /pages/reference-audit-grant-events/
+- title: Unattended grants
+  url: /pages/reference-grant-cli-unattended/
+- title: Helper orphans
+  url: /pages/reference-helper-orphan-and-server-death/
+- title: Out-of-band kill
+  url: /pages/ops-out-of-band-kill-and-stuck-server/
+- title: Limits matrix
+  url: /pages/reference-resource-limits-matrix/
+- title: Registry shutdown
+  url: /pages/publish-registry-shutdown-and-migration/
+- title: Reporting a plugin
+  url: /pages/user-reporting-a-plugin/
+- title: Air-gapped bundles
+  url: /pages/guide-air-gapped-transfer/
+- title: Config export/import
+  url: /pages/reference-config-export-import/
+- title: Policy compliance
+  url: /pages/guide-policy-compliance-reporting/
+- title: Audit collection
+  url: /pages/guide-audit-collection/
+- title: Recall playbook
+  url: /pages/guide-bad-release-recall-playbook/
+- title: Fleet bad release
+  url: /pages/ops-bad-release-fleet-response/
+- title: Bidirectional text
+  url: /pages/guide-bidirectional-text-and-control-characters/
+- title: Text input and IME
+  url: /pages/guide-text-input-and-composition/
+- title: Colour depth
+  url: /pages/guide-colour-depth-and-no-color/
+- title: Non-text panes
+  url: /pages/a11y-non-text-panes/
+- title: Language resolution
+  url: /pages/reference-language-resolution-and-coverage/
+- title: API change proposals
+  url: /pages/governance-api-change-proposals/
+- title: CI report formats
+  url: /pages/guide-ci-test-report-formats/
+- title: Conformance claims
+  url: /pages/reference-conformance-claims/
+- title: Test strategy
+  url: /pages/guide-plugin-test-strategy/
+- title: Production requirements (new pages)
+  url: /pages/reference-requirements-production-completeness/
