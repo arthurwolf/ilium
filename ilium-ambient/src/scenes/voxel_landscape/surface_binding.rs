@@ -44,6 +44,15 @@ use std::{
 
 const SCENE_BUDGET_BYTES: u64 = 1024 * 1024 * 1024;
 
+pub(super) fn configure_tile_compiler<P: super::assets::models::DefinitionProvider + ?Sized>(
+    compiler: &mut ModelCompiler<'_, P>,
+    immutable: bool,
+) {
+    if immutable {
+        compiler.enable_immutable_source_cache();
+    }
+}
+
 #[cfg(test)]
 #[path = "ground_boundary_regressions.rs"]
 mod ground_boundary_regressions;
@@ -1278,9 +1287,14 @@ fn prepare_world_from_sources(
     }
     // The additional full pack supplies only explicitly requested images. Its block
     // definitions must never change the selected pack's terrain geometry.
+    // Only verified immutable source layers may retain parsed definitions: live
+    // providers must continue to observe changes on every lookup.
+    let immutable = matches!(&sources.pack_owner, BindingPackOwner::InstalledNative(native) if native.immutable_definition_sources());
     let sources = DefinitionSources::new(&packs[..1], &[], Some(&compatibility))?;
     let mut compiler = ModelCompiler::new(&sources, limits, budget.clone())?;
     let mut original_compiler = ModelCompiler::new(&compatibility, limits, budget.clone())?;
+    configure_tile_compiler(&mut compiler, immutable);
+    configure_tile_compiler(&mut original_compiler, immutable);
     let collecting = collect_requests.is_some();
     let candidate_count = if supplied_tints.is_none() {
         binding_slot_count(&world, core, cancel)?
@@ -1819,7 +1833,7 @@ pub struct GeneratedViewportSession {
     tiles: Vec<(Region, Region)>,
     imports: Arc<ImportResult>,
     cached_tiles: Option<Vec<BoundTile>>,
-    region: Region,
+    plan: super::surface_viewport::TilePlan,
     scale: f32,
     size: [usize; 2],
     settings: VoxelLandscapeSettings,
@@ -1835,8 +1849,37 @@ impl GeneratedViewportSession {
         budget: ByteBudget,
         cancel: Cancel<'_>,
     ) -> Result<Self> {
+        let plan = super::surface_viewport::plan_tiles(
+            region,
+            &[super::surface_viewport::relative_camera(region)],
+            scale,
+            size,
+        )?;
+        Self::open_plan(
+            plan,
+            scale,
+            size,
+            settings,
+            reviewed_fallback,
+            budget,
+            cancel,
+        )
+    }
+
+    /// Opens the session for a pre-planned tile set, which may span the
+    /// cameras of a whole pan horizon so the session outlives small region
+    /// changes.
+    pub fn open_plan(
+        plan: super::surface_viewport::TilePlan,
+        scale: f32,
+        size: [usize; 2],
+        settings: &VoxelLandscapeSettings,
+        reviewed_fallback: Option<&VoxelLandscapeSettings>,
+        budget: ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self> {
         cancel.check()?;
-        let tiles = super::surface_viewport::visible_tiles(region, scale, size)?;
+        let tiles = plan.tiles.clone();
         let sources =
             BindingSources::open_with_budget(settings, reviewed_fallback, budget, cancel)?;
         let mut requests = BTreeMap::<ResourceId, TextureRequest>::new();
@@ -1868,7 +1911,7 @@ impl GeneratedViewportSession {
             tiles,
             imports,
             cached_tiles: None,
-            region,
+            plan,
             scale,
             size,
             settings: settings.clone(),
@@ -1884,7 +1927,7 @@ impl GeneratedViewportSession {
         settings: &VoxelLandscapeSettings,
         reviewed_fallback: Option<&VoxelLandscapeSettings>,
     ) -> bool {
-        self.region == region
+        super::surface_viewport::plan_covers(&self.plan, region, scale, size)
             && self.scale == scale
             && self.size == size
             && &self.settings == settings

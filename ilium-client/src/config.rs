@@ -1103,6 +1103,8 @@ pub struct UiSettings {
     pub last_prompt_max_lines: u8,
     /// Client-side presentation policy for pane activity and goal signals.
     pub agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
+    /// Policy for keeping a waiting agent's provider cache warm.
+    pub cache_keepalive: ilium_core::cache_keepalive::CacheKeepaliveSettings,
     /// Include progress outcomes and monitor failures in the Attention tree icon.
     /// Disabled by default so historical task failures do not hide agent activity.
     pub attention_progress_reports: bool,
@@ -1179,6 +1181,7 @@ impl Default for UiSettings {
             goal_toolbar_icon_enabled: true,
             last_prompt_max_lines: DEFAULT_LAST_PROMPT_MAX_LINES,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+            cache_keepalive: Default::default(),
             attention_running_indicator:
                 crate::agent_monitoring::AttentionRunningIndicator::default(),
             attention_progress_reports: false,
@@ -1314,6 +1317,7 @@ struct RawUiConfig {
     goal_toolbar_icon_enabled: Option<bool>,
     last_prompt_max_lines: Option<u8>,
     agent_monitoring_mode: Option<String>,
+    cache_keepalive: Option<ilium_core::cache_keepalive::CacheKeepaliveSettings>,
     agent_tree_model_icons: Option<bool>,
     attention_running_indicator: Option<String>,
     attention_progress_reports: Option<bool>,
@@ -1375,6 +1379,8 @@ struct RawThemeConfig {
 /// testable, mirroring `ilium_server::error::ConfigLoadError`.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigLoadError {
+    #[error("invalid custom status rules: {0}")]
+    InvalidStatusRules(String),
     #[error("invalid custom agent settings: {0}")]
     InvalidCustomAgents(ilium_core::custom_agent::ProfileValidationError),
     #[error("configuration is not valid TOML; values are omitted from this error")]
@@ -1437,7 +1443,7 @@ pub enum ConfigLoadError {
     )]
     InvalidAgentIdentifierMode(String),
     /// `ui.agent_monitoring_mode` is outside the closed display-mode set.
-    #[error("ui.agent_monitoring_mode = {0:?} must be \"normal\" or \"attention\"")]
+    #[error("ui.agent_monitoring_mode = {0:?} must be \"normal\", \"attention\" or \"custom\"")]
     InvalidAgentMonitoringMode(String),
     /// `ui.attention_running_indicator` is outside the closed indicator set.
     #[error(
@@ -1517,6 +1523,8 @@ impl From<toml::de::Error> for ConfigLoadError {
 /// [`save_ui_settings`].
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigSaveError {
+    #[error("invalid custom status rules: {0}")]
+    InvalidStatusRules(String),
     #[error("invalid custom agent settings: {0}")]
     InvalidCustomAgents(ilium_core::custom_agent::ProfileValidationError),
     #[error("configuration is not valid TOML; values are omitted from this error")]
@@ -1907,6 +1915,7 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             None => defaults.last_prompt_max_lines,
         },
         agent_monitoring_mode,
+        cache_keepalive: raw.cache_keepalive.unwrap_or_default(),
         attention_running_indicator,
         attention_progress_reports: raw
             .attention_progress_reports
@@ -2411,6 +2420,91 @@ pub fn save_terminal_settings(
     settings: &TerminalSettings,
 ) -> Result<(), ClientError> {
     save_table(config_dir, "terminal", terminal_settings_to_toml(settings))
+}
+
+/// Persist custom icon rules in their own global table while preserving every
+/// other configuration table. The caller keeps edits in memory on failure.
+pub(crate) fn validate_status_rules(rules: &ilium_core::status_rule_expression::StatusRules) -> Vec<String> {
+    use ilium_core::status_rule_expression::Condition;
+
+    let mut errors = ilium_core::status_rule_expression::validate(rules);
+    for rule in &rules.rules {
+        if let Err(error) = crate::status_rule_visual::validate_visual(&rule.then, 2) {
+            errors.push(format!("Rule {:?}: {error}", rule.name));
+        }
+        for term in rule.any_of.iter().flat_map(|group| &group.all_of) {
+            if let Condition::ScreenMatches(pattern) = &term.condition {
+                let result = regex::RegexBuilder::new(&pattern.pattern)
+                    .case_insensitive(pattern.ignore_case)
+                    .multi_line(true)
+                    .size_limit(1 << 20)
+                    .dfa_size_limit(1 << 20)
+                    .build();
+                if let Err(error) = result {
+                    errors.push(format!("Rule {:?} has an invalid screen pattern: {error}", rule.name));
+                }
+            }
+        }
+    }
+    if let Some(fallback) = &rules.fallback {
+        if let Err(error) = crate::status_rule_visual::validate_visual(fallback, 2) {
+            errors.push(format!("Fallback: {error}"));
+        }
+    }
+    errors
+}
+
+pub fn save_status_rules(
+    config_dir: &Path,
+    rules: &ilium_core::status_rule_expression::StatusRules,
+) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    let errors = validate_status_rules(rules);
+    if !errors.is_empty() {
+        return Err(ClientError::ConfigSave {
+            path,
+            source: Box::new(ConfigSaveError::InvalidStatusRules(errors.join("; "))),
+        });
+    }
+    let value = toml::Value::try_from(rules).map_err(|source| ClientError::ConfigSave {
+        path: path.clone(),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    save_table(config_dir, "status_rules", value)
+}
+
+/// Read the global status rules without creating a config file on first use.
+/// A malformed rules table is reported instead of replacing user-authored data.
+pub fn load_status_rules(
+    config_dir: &Path,
+) -> Result<ilium_core::status_rule_expression::StatusRules, ClientError> {
+    let path = config_dir.join("config.toml");
+    let contents = match read_config_text(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ilium_core::status_rule_expression::default_rules());
+        }
+        Err(source) => return Err(ClientError::ConfigLoad { path, source: ConfigLoadError::Read(source) }),
+    };
+    let document: toml::Value = toml::from_str(&contents).map_err(|_| ClientError::ConfigLoad {
+        path: path.clone(),
+        source: ConfigLoadError::PrivateConfigParse,
+    })?;
+    let Some(value) = document.get("status_rules") else {
+        return Ok(ilium_core::status_rule_expression::default_rules());
+    };
+    let rules: ilium_core::status_rule_expression::StatusRules = value.clone().try_into().map_err(|_| ClientError::ConfigLoad {
+        path: path.clone(),
+        source: ConfigLoadError::InvalidStatusRules("The status rules table has an unsupported format".to_owned()),
+    })?;
+    let issues = validate_status_rules(&rules);
+    if !issues.is_empty() {
+        return Err(ClientError::ConfigLoad {
+            path,
+            source: ConfigLoadError::InvalidStatusRules(issues.join("; ")),
+        });
+    }
+    Ok(rules)
 }
 
 pub fn save_git_settings(config_dir: &Path, settings: &GitSettings) -> Result<(), ClientError> {
@@ -3367,6 +3461,17 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         "agent_monitoring_mode".to_string(),
         toml::Value::String(ui.agent_monitoring_mode.key().to_string()),
     );
+    let keepalive = &ui.cache_keepalive;
+    table.insert("cache_keepalive".to_string(), toml::Value::Table(
+        toml::value::Table::from_iter([
+            ("enabled".to_string(), toml::Value::Boolean(keepalive.enabled)),
+            ("claude_interval_minutes".to_string(), toml::Value::Integer(i64::from(keepalive.claude_interval_minutes))),
+            ("codex_interval_minutes".to_string(), toml::Value::Integer(i64::from(keepalive.codex_interval_minutes))),
+            ("on_monitor".to_string(), toml::Value::Boolean(keepalive.on_monitor)),
+            ("on_command".to_string(), toml::Value::Boolean(keepalive.on_command)),
+            ("on_subagent".to_string(), toml::Value::Boolean(keepalive.on_subagent)),
+        ]),
+    ));
     table.insert(
         "attention_progress_reports".to_string(),
         toml::Value::Boolean(ui.attention_progress_reports),
@@ -3563,6 +3668,47 @@ fn keyboard_settings_to_toml(keyboard: &KeyboardSettings) -> toml::Value {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn invalid_custom_screen_pattern_does_not_overwrite_saved_rules() {
+        use super::*;
+        use ilium_core::status_rule_expression::{Condition, ScreenPattern, ScreenRegion};
+
+        let directory = scratch_dir();
+        let mut rules = ilium_core::status_rule_expression::default_rules();
+        save_status_rules(&directory, &rules).unwrap();
+        let original = std::fs::read(directory.join("config.toml")).unwrap();
+        let example = rules.rules.iter_mut().find(|rule| rule.id == "screen-error-example").unwrap();
+        example.any_of[0].all_of[0].condition = Condition::ScreenMatches(ScreenPattern {
+            pattern: "[".to_owned(),
+            ignore_case: false,
+            region: ScreenRegion::All,
+        });
+        assert!(save_status_rules(&directory, &rules).is_err());
+        assert_eq!(std::fs::read(directory.join("config.toml")).unwrap(), original);
+    }
+
+    #[test]
+    fn custom_status_rules_round_trip_and_preserve_other_settings() {
+        use super::*;
+        let directory = scratch_dir();
+        let rules = ilium_core::status_rule_expression::default_rules();
+        assert_eq!(load_status_rules(&directory).unwrap(), rules);
+        assert!(!directory.join("config.toml").exists());
+        std::fs::write(directory.join("config.toml"), "[ui]\nshow_context_menu_icons = false\n").unwrap();
+        save_status_rules(&directory, &rules).unwrap();
+        assert_eq!(load_status_rules(&directory).unwrap(), rules);
+        assert!(!load(&directory).unwrap().ui.show_context_menu_icons);
+    }
+
+    #[test]
+    fn malformed_custom_status_rules_are_reported_without_rewriting_the_file() {
+        use super::*;
+        let directory = scratch_dir();
+        let original = "[status_rules]\ndefaults_version = 1\nrules = [\"not a rule\"]\n";
+        std::fs::write(directory.join("config.toml"), original).unwrap();
+        assert!(load_status_rules(&directory).is_err());
+        assert_eq!(std::fs::read_to_string(directory.join("config.toml")).unwrap(), original);
+    }
+    #[test]
     fn oversized_custom_agent_configuration_is_rejected_without_overwriting_the_file() {
         use super::*;
         use ilium_core::custom_agent::{CustomAgentProfile, EnvironmentEntry};
@@ -3576,6 +3722,8 @@ mod tests {
                 name: "Work".into(),
                 icon: "★".into(),
                 base_provider: ilium_core::BuiltinAgentProvider::Claude,
+                command: String::new(),
+                arguments: String::new(),
                 environment: vec![EnvironmentEntry {
                     key: "TOKEN".into(),
                     value: "s".repeat(256 * 1024),
@@ -3604,6 +3752,8 @@ mod tests {
                 name: "Example".into(),
                 icon: "★".into(),
                 base_provider: ilium_core::BuiltinAgentProvider::Claude,
+                command: String::new(),
+                arguments: String::new(),
                 environment: vec![EnvironmentEntry {
                     key: "EXAMPLE_VALUE".into(),
                     value: "literal = 'text'\n☃".into(),
@@ -3643,6 +3793,8 @@ mod tests {
             name: id.into(),
             icon: "★".into(),
             base_provider: ilium_core::BuiltinAgentProvider::Claude,
+            command: String::new(),
+            arguments: String::new(),
             environment: Vec::new(),
         };
         let original = CustomAgentSettings {
@@ -5173,6 +5325,14 @@ mod tests {
             goal_toolbar_icon_enabled: true,
             last_prompt_max_lines: 7,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Attention,
+            cache_keepalive: ilium_core::cache_keepalive::CacheKeepaliveSettings {
+                enabled: true,
+                claude_interval_minutes: 4,
+                codex_interval_minutes: 17,
+                on_monitor: false,
+                on_command: true,
+                on_subagent: false,
+            },
             attention_progress_reports: false,
             agent_tree_model_icons: true,
             attention_running_indicator:
@@ -5196,6 +5356,18 @@ mod tests {
 
         let config = load(&dir).expect("saved config should load back");
         assert_eq!(config.ui, ui);
+    }
+
+    #[test]
+    fn cache_keepalive_partial_configuration_uses_disabled_defaults() {
+        let dir = scratch_dir();
+        std::fs::write(dir.join("config.toml"), "[ui.cache_keepalive]\ncodex_interval_minutes = 8\n")
+            .expect("write partial cache keep-alive settings");
+        let policy = load(&dir).expect("load partial settings").ui.cache_keepalive;
+        assert!(!policy.enabled);
+        assert_eq!(policy.codex_interval_minutes, 8);
+        assert_eq!(policy.claude_interval_minutes, 55);
+        assert!(policy.on_monitor);
     }
 
     #[test]

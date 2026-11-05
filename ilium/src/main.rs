@@ -40,7 +40,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clap::{parser::ValueSource, CommandFactory, FromArgMatches, Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use ilium::error::CliError;
 use ilium_core::BuiltinAgentProvider;
@@ -72,12 +72,6 @@ struct Cli {
     /// canonical project directory.
     #[arg(long, global = true, default_value = ".")]
     cwd: PathBuf,
-
-    /// True when `--cwd` was typed on the command line (not the `.` default).
-    /// An explicit project must never be overridden by the pane identity this
-    /// process inherited from the Ilium pane it happens to run in.
-    #[arg(skip)]
-    cwd_explicit: bool,
 
     /// Replace this project's running server before attaching while retaining
     /// its snapshot. Useful after installing a new server binary.
@@ -176,10 +170,6 @@ enum Command {
         /// Monitor to wait for; defaults to the pane's only running monitor
         /// (or its only monitor).
         monitor_id: Option<u64>,
-        /// Give up after this many seconds (exit 6). Omit to wait as long as
-        /// the task takes.
-        #[arg(long)]
-        timeout_seconds: Option<u64>,
     },
     /// Voice control from the command line: `voice say` types sentences into
     /// the running voice session as if they had been spoken. Output is JSONL.
@@ -305,10 +295,6 @@ enum ProgressCommand {
         /// the wait's status). The usual way to run a long task.
         #[arg(long)]
         wait: bool,
-        /// With --wait: give up after this many seconds (exit 6, task still
-        /// running). Omit to wait as long as the task takes.
-        #[arg(long, requires = "wait")]
-        timeout_seconds: Option<u64>,
         /// Clear every monitor of this pane (running ones included) before
         /// adding this one. Without it, `set` adds beside the others.
         #[arg(long)]
@@ -316,7 +302,7 @@ enum ProgressCommand {
     },
     /// Blocks until MONITOR_ID reports done or error, or the monitor fails or
     /// is cleared. Prints one JSONL line and exits 0 done, 3 task error, 4
-    /// monitor failed (outcome unknown), 5 cleared/no monitor, 6 timeout, 2
+    /// monitor failed (outcome unknown), 5 cleared/no monitor, 2
     /// when no ID was given and the pane has several candidate monitors.
     /// While this command is waiting, the result is returned here instead of
     /// being typed into the agent's prompt.
@@ -324,10 +310,6 @@ enum ProgressCommand {
         /// Monitor to wait for; defaults to the pane's only running monitor
         /// (or its only monitor).
         monitor_id: Option<u64>,
-        /// Give up after this many seconds (exit 6). Omit to wait as long as
-        /// the task takes.
-        #[arg(long)]
-        timeout_seconds: Option<u64>,
     },
     /// Claude Code `PreToolUse` hook (installed by Ilium into project
     /// `.claude/settings.local.json`). Reads the hook payload on stdin and,
@@ -389,8 +371,8 @@ fn main() -> ExitCode {
         }
     }
     let matches = Cli::command().get_matches();
-    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
-    cli.cwd_explicit = matches.value_source("cwd") == Some(ValueSource::CommandLine);
+    let explicit_cwd = matches.value_source("cwd") == Some(clap::parser::ValueSource::CommandLine);
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     if matches!(&cli.command, Some(Command::ClipboardHelper)) {
         return match ilium_client::terminal_clipboard::run_helper() {
             Ok(()) => ExitCode::SUCCESS,
@@ -455,11 +437,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    runtime.block_on(run_main(cli))
+    runtime.block_on(run_main(cli, explicit_cwd))
 }
 
-async fn run_main(cli: Cli) -> ExitCode {
-    let outcome = dispatch(cli).await;
+async fn run_main(cli: Cli, explicit_cwd: bool) -> ExitCode {
+    let outcome = dispatch(cli, explicit_cwd).await;
     if let Some(error) = outcome
         .as_ref()
         .err()
@@ -508,7 +490,7 @@ async fn process_logging_barrier(shutdown: bool) -> Result<(), ilium_logging::Lo
     .map_err(|_| ilium_logging::LoggingError::Deadline)?
 }
 
-async fn dispatch(cli: Cli) -> Result<(), CliError> {
+async fn dispatch(cli: Cli, explicit_cwd: bool) -> Result<(), CliError> {
     match cli.command {
         Some(Command::ClipboardHelper) => Err(CliError::ServerReportedError(
             "Clipboard helper must run before runtime startup".into(),
@@ -569,19 +551,10 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
             }
             _ => new_pane(&session_name, &cmd, &cli.cwd, keep_open).await,
         },
-        Some(Command::Resource(args)) => resource::run(args, &cli.cwd, cli.cwd_explicit).await,
+        Some(Command::Resource(args)) => resource::run(args, &cli.cwd, explicit_cwd).await,
         Some(Command::Chat { command }) => chat(command, &cli.cwd),
         Some(Command::Progress { command }) => progress(command).await,
-        Some(Command::Wait {
-            monitor_id,
-            timeout_seconds,
-        }) => {
-            progress(ProgressCommand::Wait {
-                monitor_id,
-                timeout_seconds,
-            })
-            .await
-        }
+        Some(Command::Wait { monitor_id }) => progress(ProgressCommand::Wait { monitor_id }).await,
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
         Some(Command::Panes(args)) => panes::panes(args, &cli.cwd).await,
         Some(Command::Recap(args)) => recap::recap(args, &cli.cwd).await,
@@ -862,20 +835,13 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
         }
     };
 
-    // Pending `--wait` after a successful `set`, as its timeout.
-    let mut wait_after_set: Option<Option<u64>> = None;
+    // Registration and waiting are separate: nonblocking `set` remains unchanged.
+    let mut wait_after_set = false;
     let (request, expected_response) = match command {
-        ProgressCommand::Wait {
-            monitor_id,
-            timeout_seconds,
-        } => {
-            let result = progress_wait::wait_for_monitor(
-                &mut connection,
-                identity.pane_id,
-                monitor_id,
-                timeout_seconds.map(Duration::from_secs),
-            )
-            .await;
+        ProgressCommand::Wait { monitor_id } => {
+            let result =
+                progress_wait::wait_for_monitor(&mut connection, identity.pane_id, monitor_id)
+                    .await;
             return finish_progress_wait(connection, identity.pane_id, request_id, result).await;
         }
         ProgressCommand::Check { command } => (
@@ -890,15 +856,12 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
             command,
             interval_seconds,
             wait,
-            timeout_seconds,
             replace,
         } => {
             if replace {
                 clear_all_before_replace(&mut connection, identity.pane_id, request_id).await?;
             }
-            if wait {
-                wait_after_set = Some(timeout_seconds);
-            }
+            wait_after_set = wait;
             (
                 ilium_ipc::ClientRequest::SetPaneProgressMonitor {
                     request_id,
@@ -963,13 +926,12 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
         _ => None,
     };
     let response = match (wait_after_set, accepted_monitor_id, response) {
-        (Some(timeout_seconds), Some(monitor_id), Ok(response)) => {
+        (true, Some(monitor_id), Ok(response)) => {
             print_progress_response(request_id, response)?;
             let result = progress_wait::wait_for_monitor(
                 &mut connection,
                 identity.pane_id,
                 Some(monitor_id),
-                timeout_seconds.map(Duration::from_secs),
             )
             .await;
             return finish_progress_wait(connection, identity.pane_id, request_id, result).await;
@@ -2264,7 +2226,24 @@ mod tests {
         pane_progress_json, progress_report_json, session, shell_join, workspace_provider,
         ChatCommand, Cli, Command, ProgressCommand,
     };
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn resource_project_selection_distinguishes_explicit_cwd_from_default() {
+        use clap::parser::ValueSource;
+
+        for arguments in [
+            vec!["ilium", "--cwd", ".", "resource", "list"],
+            vec!["ilium", "resource", "list", "--cwd=."],
+        ] {
+            let matches = Cli::command().try_get_matches_from(arguments).unwrap();
+            assert_eq!(matches.value_source("cwd"), Some(ValueSource::CommandLine));
+        }
+        let matches = Cli::command()
+            .try_get_matches_from(["ilium", "resource", "list"])
+            .unwrap();
+        assert_eq!(matches.value_source("cwd"), Some(ValueSource::DefaultValue));
+    }
 
     #[test]
     fn onboarding_flag_is_available_for_bare_and_named_interactive_attach() {
@@ -2576,6 +2555,28 @@ mod tests {
     }
 
     #[test]
+    fn logical_wait_deadlines_are_unsupported() {
+        for args in [
+            vec!["ilium", "wait", "7", "--timeout-seconds", "60"],
+            vec!["ilium", "progress", "wait", "7", "--timeout-seconds", "60"],
+            vec![
+                "ilium",
+                "progress",
+                "set",
+                "--command",
+                "/work/status --json",
+                "--wait",
+                "--timeout-seconds",
+                "60",
+            ],
+        ] {
+            let error = Cli::try_parse_from(args).expect_err("logical waits have no deadline");
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+            assert!(error.to_string().contains("--timeout-seconds"));
+        }
+    }
+
+    #[test]
     fn progress_set_defaults_to_one_second_interval() {
         let cli = Cli::try_parse_from([
             "ilium",
@@ -2593,7 +2594,6 @@ mod tests {
                     command,
                     interval_seconds: 1,
                     wait: false,
-                    timeout_seconds: None,
                     replace: false,
                 }
             }) if command == "/work/status --json"
@@ -2601,7 +2601,7 @@ mod tests {
     }
 
     #[test]
-    fn progress_set_can_wait_with_a_timeout_and_replace_on_purpose() {
+    fn progress_set_can_wait_and_replace_on_purpose() {
         let cli = Cli::try_parse_from([
             "ilium",
             "progress",
@@ -2609,8 +2609,6 @@ mod tests {
             "--command",
             "/work/status --json",
             "--wait",
-            "--timeout-seconds",
-            "540",
             "--replace",
         ])
         .unwrap();
@@ -2619,23 +2617,11 @@ mod tests {
             Some(Command::Progress {
                 command: ProgressCommand::Set {
                     wait: true,
-                    timeout_seconds: Some(540),
                     replace: true,
                     ..
                 }
             })
         ));
-        // A timeout only makes sense for a waiting set.
-        assert!(Cli::try_parse_from([
-            "ilium",
-            "progress",
-            "set",
-            "--command",
-            "/work/status --json",
-            "--timeout-seconds",
-            "540",
-        ])
-        .is_err());
     }
 
     #[test]
@@ -2644,21 +2630,15 @@ mod tests {
         assert!(matches!(
             current.command,
             Some(Command::Progress {
-                command: ProgressCommand::Wait {
-                    monitor_id: None,
-                    timeout_seconds: None
-                }
+                command: ProgressCommand::Wait { monitor_id: None }
             })
         ));
-        let exact =
-            Cli::try_parse_from(["ilium", "progress", "wait", "7", "--timeout-seconds", "60"])
-                .unwrap();
+        let exact = Cli::try_parse_from(["ilium", "progress", "wait", "7"]).unwrap();
         assert!(matches!(
             exact.command,
             Some(Command::Progress {
                 command: ProgressCommand::Wait {
-                    monitor_id: Some(7),
-                    timeout_seconds: Some(60)
+                    monitor_id: Some(7)
                 }
             })
         ));
@@ -2666,8 +2646,7 @@ mod tests {
         assert!(matches!(
             top_level.command,
             Some(Command::Wait {
-                monitor_id: Some(7),
-                timeout_seconds: None
+                monitor_id: Some(7)
             })
         ));
         assert!(Cli::try_parse_from(["ilium", "wait", "not-a-number"]).is_err());

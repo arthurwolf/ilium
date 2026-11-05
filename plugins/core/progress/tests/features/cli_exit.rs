@@ -1,9 +1,8 @@
 //! Exit status and outcome of `ilium progress set --wait` and `ilium progress wait`
 //! (progress-B01, progress-B02, F-060, F-059): 0 done, 2 usage or rejected, 3 task error,
-//! 4 monitor failed, 5 cleared or no monitor, 6 `--timeout-seconds` elapsed.
+//! 4 monitor failed, 5 cleared or no monitor. Healthy logical waits have no deadline.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use proptest::prelude::*;
 use serde_json::Value;
 
 use crate::common::*;
@@ -133,52 +132,46 @@ fn progress_b01_wait_on_a_pane_without_monitor_exits_five_with_outcome_no_monito
 
 /// REQ: progress-B01, progress-B02
 #[test]
-fn progress_b01_timeout_exits_six_with_outcome_still_running_and_keeps_the_monitor() {
+fn progress_b01_healthy_set_wait_survives_many_former_yield_boundaries() {
     let (mut host, pane) = host_with_pane();
-    let open = wait_open(&mut host, pane, &["--timeout-seconds", "3"]);
-    expect_probe(
-        &mut host,
-        PROBE,
-        &running(JOB, 10, "Exporting 412 sessions"),
-    );
-    tick(&mut host, 3);
+    let open = wait_open(&mut host, pane, &[]);
+    for step in 0..240 {
+        expect_probe(&mut host, PROBE, &running(JOB, step / 3, "Exporting"));
+        tick(&mut host, 5);
+        let run = open.read();
+        assert_eq!(run.exit, None, "healthy wait ended at step {step}");
+        assert!(!records(&run.stdout)
+            .iter()
+            .any(|record| record["type"] == "progress_wait"));
+    }
+    expect_probe(&mut host, PROBE, &done(JOB, "Finished"));
+    tick(&mut host, 5);
     let run = open.read();
-    assert_eq!(run.exit, Some(6));
-    let record = wait_record(&run);
-    assert_eq!(record["outcome"], "still-running");
-    assert_eq!(record["exit_code"], 6);
-    let snapshot = status(&mut host, pane);
-    assert_eq!(snapshot["monitor_count"], 1);
-    assert_eq!(snapshot["running"], true);
+    assert_eq!(run.exit, Some(0));
+    assert_eq!(wait_record(&run)["outcome"], "done");
 }
 
 /// REQ: progress-B01
 #[test]
-fn progress_b01_timeout_boundary_is_one_second_before_open_and_at_the_second_closed() {
-    let (mut host, pane) = host_with_pane();
-    let open = wait_open(&mut host, pane, &["--timeout-seconds", "4"]);
-    tick(&mut host, 3);
-    assert_eq!(
-        open.read().exit,
-        None,
-        "still waiting one second before the timeout"
-    );
-    tick(&mut host, 1);
-    assert_eq!(open.read().exit, Some(6));
-}
-
-proptest! {
-    // REQ: progress-B01, progress-B02
-    #[test]
-    fn progress_b01_timeout_of_n_seconds_ends_the_wait_exactly_at_n(seconds in 1u64..=20) {
+fn progress_b01_deadline_flags_are_rejected_by_both_wait_entry_points() {
+    for args in [
+        vec!["progress", "wait", "--timeout-seconds", "60"],
+        vec![
+            "progress",
+            "set",
+            "--command",
+            PROBE,
+            "--wait",
+            "--timeout-seconds",
+            "60",
+        ],
+    ] {
         let (mut host, pane) = host_with_pane();
-        let seconds_text = seconds.to_string();
-        let open = wait_open(&mut host, pane, &["--timeout-seconds", &seconds_text]);
-        host.process().allow_unexpected();
-        tick(&mut host, seconds - 1);
-        prop_assert_eq!(open.read().exit, None);
-        tick(&mut host, 1);
-        prop_assert_eq!(open.read().exit, Some(6));
+        let run = run_in_pane(&mut host, pane, &args);
+        assert_eq!(run.exit, Some(2));
+        assert!(!records(&run.stdout)
+            .iter()
+            .any(|record| record["type"] == "progress_wait"));
     }
 }
 
@@ -200,7 +193,7 @@ fn progress_b01_several_monitors_without_an_id_exit_two_monitor_ambiguous() {
 fn progress_b01_a_wait_without_an_id_picks_the_only_unsettled_monitor() {
     let (mut host, pane) = host_with_pane();
     let settled = register(&mut host, pane, "/opt/a.sh", &running("job-a", 0, "A"), &[]);
-    let _unsettled = register(
+    let unsettled = register(
         &mut host,
         pane,
         "/opt/b.sh",
@@ -209,19 +202,16 @@ fn progress_b01_a_wait_without_an_id_picks_the_only_unsettled_monitor() {
     );
     expect_probe(&mut host, "/opt/a.sh", &done("job-a", "A finished"));
     tick(&mut host, 1);
-    let open = start_in_pane(
-        &mut host,
-        pane,
-        &["progress", "wait", "--timeout-seconds", "1"],
-    );
-    host.process().allow_unexpected();
-    tick(&mut host, 1);
+    let open = start_in_pane(&mut host, pane, &["progress", "wait"]);
+    expect_probe(&mut host, "/opt/b.sh", &done("job-b", "B finished"));
+    tick(&mut host, 4);
     let record = wait_record(&open.read());
     assert_ne!(
         record["monitor_id"], settled,
         "the settled monitor is skipped"
     );
-    assert_eq!(record["outcome"], "still-running");
+    assert_eq!(record["monitor_id"], unsettled);
+    assert_eq!(record["outcome"], "done");
 }
 
 /// REQ: progress-B01
@@ -237,16 +227,12 @@ fn progress_b01_an_explicit_id_waits_for_that_monitor_among_several() {
         &[],
     );
     let id_text = first.to_string();
-    let open = start_in_pane(
-        &mut host,
-        pane,
-        &["progress", "wait", &id_text, "--timeout-seconds", "1"],
-    );
-    host.process().allow_unexpected();
+    let open = start_in_pane(&mut host, pane, &["progress", "wait", &id_text]);
+    expect_probe(&mut host, "/opt/a.sh", &done("job-a", "A finished"));
     tick(&mut host, 1);
     let record = wait_record(&open.read());
     assert_eq!(record["monitor_id"], first);
-    assert_eq!(record["outcome"], "still-running");
+    assert_eq!(record["outcome"], "done");
 }
 
 /// REQ: progress-B01, progress-B02

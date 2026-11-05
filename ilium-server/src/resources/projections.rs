@@ -242,6 +242,16 @@ fn write_project_config(
     let mapping = value
         .as_mapping_mut()
         .ok_or_else(|| err("projection", "Project settings must be a mapping"))?;
+    // Reconciling an unlinked project must remove stale resource projections,
+    // but a project that never had resources needs no new identity or settings.
+    if links.is_empty()
+        && !mapping.contains_key(serde_norway::Value::String("resources".into()))
+        && !mapping.contains_key(serde_norway::Value::String(
+            "resource synchronization".into(),
+        ))
+    {
+        return Ok(());
+    }
     mapping.insert(
         serde_norway::Value::String("resource_project_id".into()),
         serde_norway::to_value(super::identity::project_identity(project)?)

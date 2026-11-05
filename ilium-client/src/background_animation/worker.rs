@@ -93,6 +93,7 @@ pub struct SnapshotCell {
     pub article_is_continuation: bool,
     pub article_style: (bool, bool),
     pub article_background: Option<(u8, u8, u8)>,
+    pub image_background: Option<(u8, u8, u8)>,
     pub article_underline: bool,
 }
 
@@ -1903,6 +1904,14 @@ impl AnimationFrame {
                     article_is_continuation: self.article_is_continuation(x, y),
                     article_style: self.article_style(x, y),
                     article_background: None,
+                    image_background: image_background(
+                        color,
+                        scene_color,
+                        self.raster.image_coverage.get(
+                            usize::from(y) * usize::from(self.width) + usize::from(x),
+                        ).copied(),
+                        &request.settings.appearance,
+                    ),
                     article_underline: false,
                 });
             }
@@ -1947,6 +1956,28 @@ impl AnimationFrame {
     }
 }
 
+fn image_background(
+    styled: Option<(u8, u8, u8)>,
+    scene: Option<(u8, u8, u8)>,
+    coverage: Option<u8>,
+    appearance: &ilium_ambient::style::Appearance,
+) -> Option<(u8, u8, u8)> {
+    let coverage = coverage.filter(|coverage| *coverage > 0)?.min(8);
+    let (red, green, blue) = styled?;
+    // Monotone uses one ink color, so preserve image detail as ink intensity.
+    let tone = if appearance.mode == ilium_ambient::style::ColorMode::Monotone {
+        let (red, green, blue) = scene.unwrap_or((255, 255, 255));
+        let luma = (54 * u32::from(red) + 183 * u32::from(green) + 19 * u32::from(blue)) / 256;
+        if appearance.invert { 255 - luma } else { luma }
+    } else {
+        255
+    };
+    let dim = |channel: u8| {
+        (u32::from(channel) * u32::from(coverage) * tone / (16 * 255)) as u8
+    };
+    Some((dim(red), dim(green), dim(blue)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1965,6 +1996,21 @@ mod tests {
     // Serialize this module's service admissions, without making production
     // limits depend on the Rust test harness's chosen parallelism.
     static TEST_OWNER: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn image_background_monotone_preserves_image_tone_and_inversion() {
+        let mut look = ilium_ambient::style::Appearance::default();
+        look.mode = ilium_ambient::style::ColorMode::Monotone;
+        let ink = Some((240, 120, 60));
+        let dark = image_background(ink, Some((32, 32, 32)), Some(8), &look).unwrap();
+        let light = image_background(ink, Some((224, 224, 224)), Some(8), &look).unwrap();
+        assert!(dark.0 < light.0 && dark.1 < light.1 && dark.2 < light.2);
+        assert_eq!(image_background(ink, None, Some(0), &look), None);
+        look.invert = true;
+        assert_eq!(image_background(ink, Some((223, 223, 223)), Some(8), &look), Some(dark));
+        look.mode = ilium_ambient::style::ColorMode::Color;
+        assert_eq!(image_background(ink, Some((32, 32, 32)), Some(8), &look), Some((120, 60, 30)));
+    }
 
     #[test]
     fn parallel_fixture_services_keep_the_original_four_owner_limit() {

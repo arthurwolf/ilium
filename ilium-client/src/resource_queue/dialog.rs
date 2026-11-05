@@ -35,7 +35,9 @@ pub struct ResourceDialog {
     pub fields: Vec<String>,
     pub field: usize,
     pub submitted: bool,
+    pub submit_when_ready: bool,
     pub expected_revision: Option<u64>,
+    pub edit_baseline: Option<ResourceDefinition>,
     pub selected_resource: Option<ResourceId>,
     pub dirty_at: Option<std::time::Instant>,
     pub cursor: usize,
@@ -60,7 +62,9 @@ impl ResourceDialog {
             ],
             field: 0,
             submitted: false,
+            submit_when_ready: false,
             expected_revision: None,
+            edit_baseline: None,
             selected_resource: None,
             dirty_at: None,
             cursor: usize::MAX,
@@ -80,7 +84,9 @@ impl ResourceDialog {
             fields: vec![String::new(), String::new()],
             field: 0,
             submitted: false,
+            submit_when_ready: false,
             expected_revision: None,
+            edit_baseline: None,
             selected_resource: None,
             dirty_at: None,
             cursor: usize::MAX,
@@ -104,7 +110,9 @@ impl ResourceDialog {
             ],
             field: 0,
             submitted: false,
+            submit_when_ready: false,
             expected_revision: None,
+            edit_baseline: Some(definition.clone()),
             selected_resource: None,
             dirty_at: None,
             cursor: usize::MAX,
@@ -121,10 +129,12 @@ impl ResourceDialog {
                 command: Box::new(command),
                 token,
             },
-            fields: vec![String::new(), String::new()],
+            fields: vec![String::new()],
             field: 0,
             submitted: false,
+            submit_when_ready: false,
             expected_revision: None,
+            edit_baseline: None,
             selected_resource: None,
             dirty_at: None,
             cursor: usize::MAX,
@@ -188,10 +198,16 @@ impl ResourceDialog {
             DialogKind::Link { .. } => {
                 &["Search existing resources", "Local slug (blank uses title)"]
             }
-            DialogKind::Confirm { .. } => &[
-                "Type CONFIRM to proceed",
-                "Reason (required when taking back or confirming safe)",
-            ],
+            DialogKind::Confirm { ref command, .. } => match command.as_ref() {
+                ResourceCommand::Revoke { .. }
+                | ResourceCommand::CancelByUser { .. }
+                | ResourceCommand::ConfirmClear { .. }
+                | ResourceCommand::SetGate {
+                    gate: ResourceGate::Paused { .. } | ResourceGate::Unavailable { .. },
+                    ..
+                } => &["Reason (optional)"],
+                _ => &[],
+            },
             _ => &[
                 "Title",
                 "Local slug (create only)",
@@ -362,8 +378,12 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
                         insert(&mut dialog, "\n")
                     }
                     KeyCode::Enter => {
-                        if app.resources.pending.is_none() {
-                            match command(app, &dialog) {
+                        if app.resources.pending.is_some() {
+                            dialog.submit_when_ready = true;
+                            dialog.submitted = true;
+                        } else {
+                            match rebase_edit(app, &mut dialog).and_then(|()| command(app, &dialog))
+                            {
                                 Ok(command) => {
                                     let token = match &dialog.kind {
                                         DialogKind::Confirm { token, .. } => token.clone(),
@@ -551,32 +571,21 @@ pub(super) fn command(app: &App, dialog: &ResourceDialog) -> Result<ResourceComm
     }
 
     if let DialogKind::Confirm { command, .. } = &dialog.kind {
-        if dialog.fields[0] != "CONFIRM" {
-            return Err("Type CONFIRM to apply this revision-bound action".into());
-        }
         let mut command = *command.clone();
-        let reason = dialog.fields[1].trim();
-        match &mut command {
-            ResourceCommand::Revoke { reason: target, .. }
-            | ResourceCommand::CancelByUser { reason: target, .. }
-            | ResourceCommand::ConfirmClear { reason: target, .. } => {
-                if reason.is_empty() {
-                    return Err("Enter a reason for this recovery action".into());
-                }
-                *target = reason.into();
+        let reason = dialog.fields[0].trim();
+        if !reason.is_empty() {
+            match &mut command {
+                ResourceCommand::Revoke { reason: target, .. }
+                | ResourceCommand::CancelByUser { reason: target, .. }
+                | ResourceCommand::ConfirmClear { reason: target, .. } => *target = reason.into(),
+                ResourceCommand::SetGate {
+                    gate:
+                        ResourceGate::Paused { reason: target }
+                        | ResourceGate::Unavailable { reason: target },
+                    ..
+                } => *target = reason.into(),
+                _ => {}
             }
-            ResourceCommand::SetGate {
-                gate:
-                    ResourceGate::Paused { reason: target }
-                    | ResourceGate::Unavailable { reason: target },
-                ..
-            } => {
-                if reason.is_empty() {
-                    return Err("Enter a reason for changing resource availability".into());
-                }
-                *target = reason.into();
-            }
-            _ => {}
         }
         return Ok(command);
     }
@@ -986,6 +995,31 @@ mod tests {
     }
 }
 
+// Rebase only when the authoritative definition is unchanged; never overwrite
+// a concurrent metadata edit merely because another catalog revision arrived.
+fn rebase_edit(app: &App, dialog: &mut ResourceDialog) -> Result<(), String> {
+    let Some(baseline) = &dialog.edit_baseline else {
+        return Ok(());
+    };
+    let Some(catalog) = &app.resources.catalog else {
+        return Err("Resource catalog unavailable; reload before editing".into());
+    };
+    if catalog
+        .resources
+        .get(&baseline.id)
+        .map(|record| &record.definition)
+        != Some(baseline)
+    {
+        return Err("Resource metadata changed; reopen the editor before saving".into());
+    }
+    dialog.expected_revision = Some(
+        dialog
+            .expected_revision
+            .map_or(catalog.revision, |revision| revision.max(catalog.revision)),
+    );
+    Ok(())
+}
+
 pub(super) fn autosave(app: &mut App, now: std::time::Instant) -> bool {
     let Some(mut dialog) = app.resources.dialog.take() else {
         return false;
@@ -998,7 +1032,7 @@ pub(super) fn autosave(app: &mut App, now: std::time::Instant) -> bool {
         });
     if due {
         dialog.dirty_at = None;
-        match command(app, &dialog) {
+        match rebase_edit(app, &mut dialog).and_then(|()| command(app, &dialog)) {
             Ok(command) => {
                 app.resource_request_full(
                     dialog.project,
@@ -1058,7 +1092,7 @@ mod autosave_tests {
 mod recovery_and_link_tests {
     use super::*;
     #[test]
-    fn recovery_requires_authored_reason_and_preserves_action() {
+    fn recovery_accepts_confirmation_without_typing_and_preserves_optional_reason() {
         let mut app = App::new(
             "test".into(),
             std::path::PathBuf::from("/synthetic-resource-project"),
@@ -1071,11 +1105,12 @@ mod recovery_and_link_tests {
             },
             Some("token".into()),
         );
-        dialog.fields[0] = "CONFIRM".into();
-        assert!(command(&app, &dialog).unwrap_err().contains("reason"));
-        dialog.fields[1] = "Inspected fixture; no work remains".into();
         assert!(
-            matches!(command(&app,&dialog).unwrap(),ResourceCommand::ConfirmClear{reason,..} if reason==dialog.fields[1])
+            matches!(command(&app, &dialog).unwrap(), ResourceCommand::ConfirmClear { reason, .. } if reason == "placeholder")
+        );
+        dialog.fields[0] = "Inspected fixture; no work remains".into();
+        assert!(
+            matches!(command(&app, &dialog).unwrap(), ResourceCommand::ConfirmClear { reason, .. } if reason == "Inspected fixture; no work remains")
         );
         app.resources.dialog = Some(dialog);
         assert!(handle_event(

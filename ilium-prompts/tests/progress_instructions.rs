@@ -55,7 +55,6 @@ fn agents_are_told_to_block_with_the_wait_commands_instead_of_polling() {
     for required in [
         "ilium progress set --command '<probe>' --interval-seconds <n> --wait",
         "ilium progress wait <monitor_id>",
-        "--timeout-seconds",
         "never start a second one",
         "takes precedence over any general rule about sleep loops",
         "MUST use `--wait`",
@@ -72,7 +71,6 @@ fn every_wait_exit_status_is_named() {
         "3 task error",
         "4 monitor failed",
         "5 monitor replaced or cleared",
-        "6 `--timeout-seconds` elapsed",
     ] {
         assert!(text.contains(required), "missing {required}");
     }

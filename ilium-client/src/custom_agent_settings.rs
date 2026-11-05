@@ -32,6 +32,8 @@ fn text_field(editor: &mut CustomAgentEditor, row: EditorRow) -> Option<&mut Str
     match row {
         EditorRow::Name => Some(&mut editor.draft.name),
         EditorRow::Icon => Some(&mut editor.draft.icon),
+        EditorRow::Command => Some(&mut editor.draft.command),
+        EditorRow::Arguments => Some(&mut editor.draft.arguments),
         EditorRow::EnvironmentKey(index) => editor
             .draft
             .environment
@@ -155,6 +157,8 @@ pub(crate) fn handle(app: &mut App, state: &mut SettingsState, event: &Event) ->
                         ));
                     }
                     EditorRow::Name
+                    | EditorRow::Command
+                    | EditorRow::Arguments
                     | EditorRow::EnvironmentKey(_)
                     | EditorRow::EnvironmentValue(_) => {
                         if let Some(field) = text_field(editor, row) {
@@ -176,7 +180,12 @@ pub(crate) fn handle(app: &mut App, state: &mut SettingsState, event: &Event) ->
                     }
                     EditorRow::AddEnvironment => {
                         editor.add_environment_row();
-                        state.selected_row = 3 + (editor.draft.environment.len() - 1) * 3;
+                        let added = editor.draft.environment.len() - 1;
+                        state.selected_row = editor
+                            .rows()
+                            .iter()
+                            .position(|candidate| *candidate == EditorRow::EnvironmentKey(added))
+                            .unwrap_or(0);
                     }
                     EditorRow::RevealValues => editor.reveal_values = !editor.reveal_values,
                     EditorRow::Cancel => {
@@ -295,6 +304,23 @@ mod tests {
         assert_eq!(draft.id, identity.profile_id);
         assert_eq!(draft.base_provider, identity.base_provider);
         assert!(draft.environment.is_empty());
+    }
+
+    #[test]
+    fn command_and_arguments_rows_are_editable_text_fields() {
+        let mut app = App::new("test".into(), std::env::temp_dir());
+        let mut state = SettingsState::new();
+        state.custom_agent_editor = Some(CustomAgentEditor::new());
+        for (row, text) in [(3, "my_claude"), (4, "--yolo")] {
+            state.selected_row = row;
+            assert!(handle(&mut app, &mut state, &key(KeyCode::Enter)));
+            assert!(state.custom_agent_editing);
+            assert!(handle(&mut app, &mut state, &Event::Paste(text.into())));
+            assert!(handle(&mut app, &mut state, &key(KeyCode::Enter)));
+        }
+        let draft = &state.custom_agent_editor.as_ref().unwrap().draft;
+        assert_eq!(draft.command, "my_claude");
+        assert_eq!(draft.arguments, "--yolo");
     }
 
     #[test]

@@ -209,6 +209,7 @@ impl ProjectionRetention {
             | InitialStateSyncComplete
             | NodeActivityChanged { .. }
             | PaneRecentActivity { .. }
+            | StatusScreenObserved(_)
             | NodeFocusCheckpointChanged { .. }
             | SessionRecoveryAvailable { .. }
             | PanePromptSubmitted { .. }

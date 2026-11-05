@@ -1,0 +1,2026 @@
+--- /dev/null
++++ b/codex-rs/core/src/tools/handlers/ilium_wait.rs
+@@ -0,0 +1,236 @@
++//! Native Ilium waits bypass terminal snapshots and Code Mode cell yields.
++//!
++//! Only the logical lifetime differs from ordinary command execution. The
++//! unified-exec handler still owns sandboxing, approvals, cancellation and
++//! process/output custody; Ilium owns monitor progress and terminal outcomes.
++
++use crate::function_tool::FunctionCallError;
++use crate::sandboxing::SandboxPermissions;
++use crate::tools::context::ToolEnvironments;
++use crate::tools::context::ToolInvocation;
++use crate::tools::context::ToolOutput;
++use crate::tools::context::ToolPayload;
++use crate::tools::handlers::ExecCommandHandler;
++use crate::tools::handlers::ExecCommandHandlerOptions;
++use crate::tools::handlers::parse_arguments;
++use crate::tools::handlers::selected_executor;
++use crate::tools::handlers::shell_spec::CommandToolOptions;
++use crate::tools::handlers::shell_spec::create_exec_command_tool_with_environment_id;
++use crate::tools::registry::CoreToolRuntime;
++use crate::tools::registry::PostToolUsePayload;
++use crate::tools::registry::PreToolUsePayload;
++use crate::tools::registry::ToolExecutor;
++use crate::tools::registry::ToolTelemetryTags;
++use codex_protocol::models::AdditionalPermissionProfile;
++use codex_tools::JsonSchema;
++use codex_tools::ToolExposure;
++use codex_tools::ToolName;
++use codex_tools::ToolSpec;
++use codex_utils_path_uri::PathUri;
++use serde::Deserialize;
++use serde_json::json;
++
++pub(crate) struct IliumWaitHandler {
++    executor: ExecCommandHandler,
++    options: ExecCommandHandlerOptions,
++}
++
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct IliumWaitArgs {
++    monitor_id: Option<u64>,
++    probe_command: Option<String>,
++    interval_seconds: Option<u32>,
++    sandbox_permissions: Option<SandboxPermissions>,
++    additional_permissions: Option<AdditionalPermissionProfile>,
++    justification: Option<String>,
++    prefix_rule: Option<Vec<String>>,
++}
++
++impl IliumWaitHandler {
++    pub(crate) fn new(options: ExecCommandHandlerOptions) -> Self {
++        Self {
++            executor: ExecCommandHandler::unconditional_wait(options),
++            options,
++        }
++    }
++
++    /// Translate a narrow wait request before entering the existing command path.
++    fn execution_invocation(
++        &self,
++        invocation: &ToolInvocation,
++    ) -> Result<ToolInvocation, FunctionCallError> {
++        let environment = selected_executor(
++            &invocation.environments,
++            &invocation.step_context.environments,
++        )?;
++        if cfg!(windows) || environment.environment.is_remote() {
++            return Err(FunctionCallError::RespondToModel(
++                "ilium_wait requires the local POSIX environment containing the Ilium pane; remote and Windows execution are unsupported".to_string(),
++            ));
++        }
++        let ToolPayload::Function { arguments } = &invocation.payload else {
++            return Err(FunctionCallError::RespondToModel(
++                "ilium_wait requires function arguments".to_string(),
++            ));
++        };
++        let args: IliumWaitArgs = parse_arguments(arguments)?;
++        let command = match (args.monitor_id, args.probe_command) {
++            (Some(monitor_id), None) if args.interval_seconds.is_none() => {
++                format!("ilium progress wait {monitor_id}")
++            }
++            (None, Some(probe_command)) if !probe_command.trim().is_empty() => {
++                let interval = args.interval_seconds.unwrap_or(1);
++                if !(1..=86_400).contains(&interval) {
++                    return Err(FunctionCallError::RespondToModel(
++                        "interval_seconds must be between 1 and 86400".to_string(),
++                    ));
++                }
++                let quoted_probe = shlex::try_quote(&probe_command).map_err(|_| {
++                    FunctionCallError::RespondToModel(
++                        "probe_command cannot contain a NUL byte".to_string(),
++                    )
++                })?;
++                format!(
++                    "ilium progress set --command {quoted_probe} --interval-seconds {interval} --wait"
++                )
++            }
++            _ => {
++                return Err(FunctionCallError::RespondToModel(
++                    "provide exactly one of monitor_id or nonempty probe_command; interval_seconds is only valid with probe_command".to_string(),
++                ));
++            }
++        };
++        let mut execution = invocation.clone();
++        execution.payload = ToolPayload::Function {
++            arguments: json!({
++                "cmd": command,
++                "shell": "/bin/sh",
++                "login": false,
++                "tty": false,
++                "sandbox_permissions": args.sandbox_permissions,
++                "additional_permissions": args.additional_permissions,
++                "justification": args.justification,
++                "prefix_rule": args.prefix_rule,
++            })
++            .to_string(),
++        };
++        Ok(execution)
++    }
++}
++
++impl ToolExecutor<ToolInvocation> for IliumWaitHandler {
++    fn tool_name(&self) -> ToolName {
++        ToolName::plain("ilium_wait")
++    }
++
++    fn exposure(&self) -> ToolExposure {
++        // A nested Code Mode call would reintroduce its cell yield boundary.
++        ToolExposure::DirectModelOnly
++    }
++
++    fn spec(&self) -> ToolSpec {
++        let ToolSpec::Function(mut spec) = create_exec_command_tool_with_environment_id(
++            CommandToolOptions {
++                exec_permission_approvals_enabled: self.options.exec_permission_approvals_enabled,
++            },
++            false,
++            false,
++        ) else {
++            unreachable!("command tools have function schemas");
++        };
++        let properties = spec.parameters.properties.get_or_insert_default();
++        properties.retain(|name, _| {
++            matches!(
++                name.as_str(),
++                "sandbox_permissions" | "additional_permissions" | "justification" | "prefix_rule"
++            )
++        });
++        properties.insert(
++            "monitor_id".to_string(),
++            JsonSchema::number(Some(
++                "Exact existing Ilium monitor ID. Provide this or probe_command, never both."
++                    .to_string(),
++            )),
++        );
++        properties.insert(
++            "probe_command".to_string(),
++            JsonSchema::string(Some(
++                "Probe command to register with progress set --wait. Provide this or monitor_id, never both. Registration never replaces other monitors.".to_string(),
++            )),
++        );
++        properties.insert(
++            "interval_seconds".to_string(),
++            JsonSchema::number(Some(
++                "Probe interval from 1 to 86400 seconds; only with probe_command. Defaults to 1. This is not a wait deadline.".to_string(),
++            )),
++        );
++        spec.parameters.required = None;
++        spec.name = "ilium_wait".to_string();
++        spec.description = "Wait for one Ilium monitor without an elapsed-time deadline or periodic model wake-ups. Call this tool directly, outside functions.exec/Code Mode. Returns only the actual CLI outcome, interruption or meaningful execution failure. Progress remains visible in Ilium independently. Preserve monitor/job identity on failure; never start a duplicate job because observation was lost. Requires a local POSIX Ilium pane and an Ilium CLI supporting unconditional progress waits.".to_string();
++        spec.output_schema = None;
++        ToolSpec::Function(spec)
++    }
++
++    fn handle<'a>(&'a self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
++    where
++        ToolInvocation: 'a,
++    {
++        Box::pin(async move {
++            let execution = self.execution_invocation(&invocation)?;
++            self.executor.handle(execution).await
++        })
++    }
++}
++
++impl CoreToolRuntime for IliumWaitHandler {
++    fn environments_for_input(
++        &self,
++        invocation: &ToolInvocation,
++    ) -> Result<ToolEnvironments, FunctionCallError> {
++        self.executor.environments_for_input(invocation)
++    }
++
++    fn telemetry_tags(&self, invocation: &ToolInvocation) -> ToolTelemetryTags {
++        self.executor.telemetry_tags(invocation)
++    }
++
++    fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
++        self.execution_invocation(invocation)
++            .ok()
++            .and_then(|execution| self.executor.pre_tool_use_payload(&execution))
++    }
++
++    fn pre_tool_use_cwd(
++        &self,
++        invocation: &ToolInvocation,
++    ) -> Result<Option<PathUri>, FunctionCallError> {
++        let execution = self.execution_invocation(invocation)?;
++        self.executor.pre_tool_use_cwd(&execution)
++    }
++
++    fn with_updated_hook_input(
++        &self,
++        invocation: ToolInvocation,
++        updated_input: serde_json::Value,
++    ) -> Result<ToolInvocation, FunctionCallError> {
++        let execution = self.execution_invocation(&invocation)?;
++        let expected = self.executor.pre_tool_use_payload(&execution);
++        if expected.as_ref().map(|payload| &payload.tool_input) != Some(&updated_input) {
++            return Err(FunctionCallError::RespondToModel(
++                "ilium_wait cannot accept a hook rewrite that changes its narrow wait command; change the typed monitor/probe request instead".to_string(),
++            ));
++        }
++        Ok(invocation)
++    }
++
++    fn post_tool_use_payload(
++        &self,
++        invocation: &ToolInvocation,
++        result: &dyn ToolOutput,
++    ) -> Option<PostToolUsePayload> {
++        self.execution_invocation(invocation)
++            .ok()
++            .and_then(|execution| self.executor.post_tool_use_payload(&execution, result))
++    }
++}
+--- a/codex-rs/core/src/tools/handlers/mod.rs
++++ b/codex-rs/core/src/tools/handlers/mod.rs
+@@ -4,6 +4,7 @@
+ mod dynamic;
+ pub(crate) mod extension_tools;
+ mod get_context_remaining;
++mod ilium_wait;
+ pub(crate) mod get_context_remaining_spec;
+ mod list_available_plugins_to_install;
+ pub(crate) mod list_available_plugins_to_install_spec;
+@@ -63,6 +64,7 @@
+ pub use current_time::CurrentTimeHandler;
+ pub use dynamic::DynamicToolHandler;
+ pub use get_context_remaining::GetContextRemainingHandler;
++pub(crate) use ilium_wait::IliumWaitHandler;
+ pub use list_available_plugins_to_install::ListAvailablePluginsToInstallHandler;
+ pub use mcp::McpHandler;
+ pub(crate) use mcp::McpHandlerDefinition;
+--- a/codex-rs/core/src/tools/spec_plan.rs
++++ b/codex-rs/core/src/tools/spec_plan.rs
+@@ -14,6 +14,7 @@
+ use crate::tools::handlers::ExecCommandHandler;
+ use crate::tools::handlers::ExecCommandHandlerOptions;
+ use crate::tools::handlers::GetContextRemainingHandler;
++use crate::tools::handlers::IliumWaitHandler;
+ use crate::tools::handlers::ListAvailablePluginsToInstallHandler;
+ use crate::tools::handlers::ListMcpResourceTemplatesHandler;
+ use crate::tools::handlers::ListMcpResourcesHandler;
+@@ -1262,6 +1263,8 @@
+         include_environment_id,
+         include_windows_shell_guidance: should_include_windows_shell_guidance(context.environments),
+     };
++    // This direct-only native tool never enters a yielding Code Mode cell.
++    registry.add(IliumWaitHandler::new(options));
+     if features.enabled(Feature::UnifiedExec) {
+         registry.add(ExecCommandHandler::new(options));
+         registry.add(WriteStdinHandler);
+--- a/codex-rs/core/src/tools/handlers/unified_exec/preparation.rs
++++ b/codex-rs/core/src/tools/handlers/unified_exec/preparation.rs
+@@ -41,6 +41,8 @@
+ pub(crate) enum ExecCommandLifetime {
+     Interactive,
+     OneShot,
++    /// Dedicated Ilium observation: no execution or snapshot deadline.
++    UnconditionalWait,
+ }
+ 
+ /// Command details available before the live handler reserves a process.
+@@ -57,6 +59,7 @@
+     pub(crate) yield_time_ms: u64,
+     pub(crate) max_output_tokens: Option<usize>,
+     pub(crate) completion_timeout: Option<Duration>,
++    pub(crate) wait_until_complete: bool,
+ }
+ 
+ impl PreparedExecCommand {
+@@ -244,6 +247,10 @@
+                 .map_err(FunctionCallError::RespondToModel)?;
+         let completion_timeout = match lifetime {
+             ExecCommandLifetime::Interactive => None,
++            ExecCommandLifetime::UnconditionalWait => {
++                args.tty = false;
++                None
++            }
+             ExecCommandLifetime::OneShot => {
+                 args.tty = false;
+                 Some(Duration::from_millis(
+@@ -308,6 +315,7 @@
+             yield_time_ms: args.yield_time_ms,
+             max_output_tokens: args.max_output_tokens,
+             completion_timeout,
++            wait_until_complete: matches!(lifetime, ExecCommandLifetime::UnconditionalWait),
+             cwd,
+             tty: args.tty,
+             permissions,
+--- a/codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs
++++ b/codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs
+@@ -82,6 +82,14 @@
+         }
+     }
+ 
++    /// Used only by the narrow, direct-model Ilium wait tool.
++    pub(crate) fn unconditional_wait(options: ExecCommandHandlerOptions) -> Self {
++        Self {
++            options,
++            lifetime: ExecCommandLifetime::UnconditionalWait,
++        }
++    }
++
+     pub(crate) fn one_shot(options: ExecCommandHandlerOptions) -> Self {
+         Self {
+             options,
+@@ -104,7 +112,7 @@
+             self.options.include_windows_shell_guidance,
+         );
+         let mut spec = match self.lifetime {
+-            ExecCommandLifetime::Interactive => spec,
++            ExecCommandLifetime::Interactive | ExecCommandLifetime::UnconditionalWait => spec,
+             ExecCommandLifetime::OneShot => one_shot_exec_command_spec(spec),
+         };
+         if !self.options.allow_tty
+@@ -229,13 +237,15 @@
+             process_id,
+             network: context.step_context.turn.network.clone(),
+         };
+-        let result = match request.prepared.completion_timeout {
++        let result = if request.prepared.wait_until_complete {
++            UnifiedExecProcessManager::exec_command_to_completion(request, &context, None::<std::time::Duration>).await
++        } else { match request.prepared.completion_timeout {
+             Some(timeout) => {
+                 UnifiedExecProcessManager::exec_command_to_completion(request, &context, timeout)
+                     .await
+             }
+             None => manager.exec_command(request, &context).await,
+-        };
++        }};
+         match result {
+             Ok(response) => Ok(boxed_tool_output(response)),
+             Err(UnifiedExecError::SandboxDenied {
+--- a/codex-rs/core/src/unified_exec/process_manager.rs
++++ b/codex-rs/core/src/unified_exec/process_manager.rs
+@@ -652,20 +652,25 @@
+         // For the initial exec_command call, we both stream output to events
+         // (via start_streaming_output above) and collect a snapshot here for
+         // the tool response body.
+-        let wait = completion.as_ref().map_or_else(
+-            || Duration::from_millis(yield_time_ms),
+-            |completion| completion.timeout,
+-        );
+-        let deadline = start
+-            .checked_add(wait)
+-            .ok_or_else(|| UnifiedExecError::process_failed("timeout_ms is too large".into()))?;
+-        let collected_output = Self::collect_output_until_deadline(
++        let wait = completion.as_ref().and_then(|completion| completion.timeout)
++            .unwrap_or_else(|| Duration::from_millis(yield_time_ms));
++        // A dedicated Ilium wait observes the existing process until outcome.
++        // Snapshot durations remain unchanged for ordinary interactive commands.
++        let deadline = if prepared.wait_until_complete {
++            None
++        } else {
++            Some(start.checked_add(wait).ok_or_else(|| {
++                UnifiedExecError::process_failed("timeout_ms is too large".into())
++            })?)
++        };
++        let collected_output = Self::collect_output_with_deadline(
+             process.output_handles(),
+             Some(context.session.subscribe_elicitation_pause_state()),
+             deadline,
+         )
+         .await;
+         if let Some(completion) = completion.as_mut()
++            && completion.timeout.is_some()
+             && !process.has_exited()
+         {
+             completion.timed_out = true;
+@@ -1578,8 +1583,17 @@
+     )]
+     pub(super) async fn collect_output_until_deadline<const MAX_BYTES: usize>(
+         output: &OutputHandles<MAX_BYTES>,
++        pause_state: Option<watch::Receiver<bool>>,
++        deadline: Instant,
++    ) -> HeadTailBuffer<MAX_BYTES> {
++        Self::collect_output_with_deadline(output, pause_state, Some(deadline)).await
++    }
++
++    /// `None` is a genuinely pending observation, not an oversized timer.
++    async fn collect_output_with_deadline<const MAX_BYTES: usize>(
++        output: &OutputHandles<MAX_BYTES>,
+         mut pause_state: Option<watch::Receiver<bool>>,
+-        mut deadline: Instant,
++        mut deadline: Option<Instant>,
+     ) -> HeadTailBuffer<MAX_BYTES> {
+         const POST_EXIT_CLOSE_WAIT_CAP: Duration = Duration::from_millis(50);
+ 
+@@ -1625,15 +1639,15 @@
+                 if exit_signal_received && output_closed.load(Ordering::Acquire) {
+                     break StopReason::OutputClosed;
+                 }
+-                let remaining = deadline.saturating_duration_since(Instant::now());
+-                if remaining == Duration::ZERO {
++                let remaining = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
++                if remaining == Some(Duration::ZERO) {
+                     break StopReason::Deadline;
+                 }
+ 
+                 if exit_signal_received {
+                     let now = Instant::now();
+                     let close_wait_deadline = *post_exit_deadline
+-                        .get_or_insert_with(|| now + remaining.min(POST_EXIT_CLOSE_WAIT_CAP));
++                        .get_or_insert_with(|| now + remaining.map_or(POST_EXIT_CLOSE_WAIT_CAP, |remaining| remaining.min(POST_EXIT_CLOSE_WAIT_CAP)));
+                     let close_wait_remaining = close_wait_deadline.saturating_duration_since(now);
+                     if close_wait_remaining == Duration::ZERO {
+                         break StopReason::PostExitDeadline;
+@@ -1658,7 +1672,12 @@
+                 tokio::select! {
+                     _ = &mut notified => {}
+                     _ = &mut exit_notified => exit_signal_received = true,
+-                    _ = tokio::time::sleep(remaining) => break StopReason::Deadline,
++                    _ = async {
++                        match remaining {
++                            Some(remaining) => tokio::time::sleep(remaining).await,
++                            None => std::future::pending::<()>().await,
++                        }
++                    } => break StopReason::Deadline,
+                     _ = Self::wait_for_pause_change(pause_state.as_ref()) => {}
+                 }
+                 continue;
+@@ -1667,7 +1686,7 @@
+             collected.push_buffer(drained_output);
+ 
+             exit_signal_received |= cancellation_token.is_cancelled();
+-            if Instant::now() >= deadline {
++            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                 break StopReason::Deadline;
+             }
+         };
+@@ -1692,7 +1711,7 @@
+ 
+     async fn extend_deadlines_while_paused(
+         pause_state: &mut Option<watch::Receiver<bool>>,
+-        deadline: &mut Instant,
++        deadline: &mut Option<Instant>,
+         post_exit_deadline: &mut Option<Instant>,
+     ) {
+         let Some(receiver) = pause_state.as_mut() else {
+@@ -1710,7 +1729,9 @@
+         }
+ 
+         let paused_for = paused_at.elapsed();
+-        *deadline += paused_for;
++        if let Some(deadline) = deadline.as_mut() {
++            *deadline += paused_for;
++        }
+         if let Some(post_exit_deadline) = post_exit_deadline.as_mut() {
+             *post_exit_deadline += paused_for;
+         }
+--- a/codex-rs/core/src/unified_exec/oneshot.rs
++++ b/codex-rs/core/src/unified_exec/oneshot.rs
+@@ -19,7 +19,7 @@
+ use crate::tools::context::ExecCommandToolOutput;
+ 
+ pub(super) struct Completion<'a> {
+-    pub timeout: Duration,
++    pub timeout: Option<Duration>,
+     pub timed_out: bool,
+     pub process: &'a OnceLock<Arc<UnifiedExecProcess>>,
+ }
+@@ -41,8 +41,9 @@
+     pub(crate) async fn exec_command_to_completion(
+         request: ExecCommandRequest,
+         context: &UnifiedExecContext,
+-        timeout: Duration,
++        timeout: impl Into<Option<Duration>>,
+     ) -> Result<ExecCommandToolOutput, UnifiedExecError> {
++        let timeout = timeout.into();
+         let context = UnifiedExecContext::new(
+             Arc::clone(&context.session),
+             Arc::clone(&context.step_context),
+@@ -53,7 +54,7 @@
+         let task = async move {
+             let manager = &context.session.services.unified_exec_manager;
+             let process_id = request.process_id;
+-            if Instant::now().checked_add(timeout).is_none() {
++            if timeout.is_some_and(|timeout| Instant::now().checked_add(timeout).is_none()) {
+                 manager.release_process_id(process_id).await;
+                 return (
+                     Err(UnifiedExecError::process_failed(
+--- a/codex-rs/core/src/tools/runtimes/unified_exec.rs
++++ b/codex-rs/core/src/tools/runtimes/unified_exec.rs
+@@ -854,6 +854,7 @@
+             yield_time_ms: 10_000,
+             max_output_tokens: None,
+             completion_timeout: None,
++            wait_until_complete: false,
+         }
+     }
+ 
+
+diff --git a/codex-rs/Cargo.lock b/codex-rs/Cargo.lock
+--- a/codex-rs/Cargo.lock
++++ b/codex-rs/Cargo.lock
+@@ -287,7 +287,7 @@
+ 
+ [[package]]
+ name = "app_test_support"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -1888,7 +1888,7 @@
+ 
+ [[package]]
+ name = "codex-agent-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-core",
+@@ -1900,7 +1900,7 @@
+ 
+ [[package]]
+ name = "codex-agent-graph-store"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-state",
+@@ -1915,7 +1915,7 @@
+ 
+ [[package]]
+ name = "codex-agent-identity"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -1935,7 +1935,7 @@
+ 
+ [[package]]
+ name = "codex-agent-message-board-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -1958,7 +1958,7 @@
+ 
+ [[package]]
+ name = "codex-agent-message-board-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-extension-api",
+  "codex-message-board",
+@@ -1972,7 +1972,7 @@
+ 
+ [[package]]
+ name = "codex-agent-roles"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-config",
+  "codex-file-system",
+@@ -1985,7 +1985,7 @@
+ 
+ [[package]]
+ name = "codex-analytics"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-app-server-protocol",
+  "codex-git-utils",
+@@ -2008,7 +2008,7 @@
+ 
+ [[package]]
+ name = "codex-ansi-escape"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "ansi-to-tui",
+  "pretty_assertions",
+@@ -2019,7 +2019,7 @@
+ 
+ [[package]]
+ name = "codex-api"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "assert_matches",
+@@ -2057,7 +2057,7 @@
+ 
+ [[package]]
+ name = "codex-app-server"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -2174,7 +2174,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-app-server",
+  "codex-app-server-protocol",
+@@ -2202,7 +2202,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-daemon"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "blake3",
+@@ -2232,7 +2232,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-protocol"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-app-server-protocol-noop-macros",
+@@ -2266,11 +2266,11 @@
+ 
+ [[package]]
+ name = "codex-app-server-protocol-noop-macros"
+-version = "0.0.0"
++version = "0.166.0"
+ 
+ [[package]]
+ name = "codex-app-server-test-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2292,7 +2292,7 @@
+ 
+ [[package]]
+ name = "codex-app-server-transport"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "axum",
+  "base64 0.22.1",
+@@ -2335,7 +2335,7 @@
+ 
+ [[package]]
+ name = "codex-apply-patch"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+@@ -2355,7 +2355,7 @@
+ 
+ [[package]]
+ name = "codex-arg0"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-apply-patch",
+@@ -2378,7 +2378,7 @@
+ 
+ [[package]]
+ name = "codex-async-utils"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+  "rand 0.9.3",
+@@ -2388,7 +2388,7 @@
+ 
+ [[package]]
+ name = "codex-attachment-store"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+  "serde",
+@@ -2398,7 +2398,7 @@
+ 
+ [[package]]
+ name = "codex-aws-auth"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "aws-config",
+  "aws-credential-types",
+@@ -2424,7 +2424,7 @@
+ 
+ [[package]]
+ name = "codex-backend-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-api",
+@@ -2444,7 +2444,7 @@
+ 
+ [[package]]
+ name = "codex-backend-openapi-models"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "serde",
+  "serde_json",
+@@ -2453,7 +2453,7 @@
+ 
+ [[package]]
+ name = "codex-build-info"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-install-context",
+  "pretty_assertions",
+@@ -2466,7 +2466,7 @@
+ 
+ [[package]]
+ name = "codex-bwrap"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "cc",
+  "libc",
+@@ -2475,7 +2475,7 @@
+ 
+ [[package]]
+ name = "codex-chatgpt"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2497,7 +2497,7 @@
+ 
+ [[package]]
+ name = "codex-cli"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -2601,7 +2601,7 @@
+ 
+ [[package]]
+ name = "codex-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-http-client",
+  "eventsource-stream",
+@@ -2615,7 +2615,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "async-stream",
+@@ -2639,7 +2639,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-config"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "chrono",
+@@ -2667,7 +2667,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-tasks"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -2700,7 +2700,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-tasks-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -2715,7 +2715,7 @@
+ 
+ [[package]]
+ name = "codex-cloud-tasks-mock-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "chrono",
+  "codex-cloud-tasks-client",
+@@ -2724,7 +2724,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-code-mode-protocol",
+  "codex-http-client",
+@@ -2748,7 +2748,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode-host"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -2779,7 +2779,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode-protocol"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-protocol",
+  "glob",
+@@ -2797,7 +2797,7 @@
+ 
+ [[package]]
+ name = "codex-code-mode-runtime"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-code-mode-protocol",
+@@ -2816,11 +2816,11 @@
+ 
+ [[package]]
+ name = "codex-collaboration-mode-templates"
+-version = "0.0.0"
++version = "0.166.0"
+ 
+ [[package]]
+ name = "codex-config"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -2874,7 +2874,7 @@
+ 
+ [[package]]
+ name = "codex-config-schema"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -2883,7 +2883,7 @@
+ 
+ [[package]]
+ name = "codex-connectors"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -2905,7 +2905,7 @@
+ 
+ [[package]]
+ name = "codex-connectors-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-connectors",
+  "codex-core-plugins",
+@@ -2919,7 +2919,7 @@
+ 
+ [[package]]
+ name = "codex-context-fragments"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-protocol-test-support",
+@@ -2930,7 +2930,7 @@
+ 
+ [[package]]
+ name = "codex-core"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3080,7 +3080,7 @@
+ 
+ [[package]]
+ name = "codex-core-api"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-analytics",
+  "codex-app-server-protocol",
+@@ -3103,7 +3103,7 @@
+ 
+ [[package]]
+ name = "codex-core-plugin-common"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "semver",
+@@ -3114,7 +3114,7 @@
+ 
+ [[package]]
+ name = "codex-core-plugins"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3171,7 +3171,7 @@
+ 
+ [[package]]
+ name = "codex-diagnostics"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "libc",
+  "pretty_assertions",
+@@ -3179,7 +3179,7 @@
+ 
+ [[package]]
+ name = "codex-direct-tool-timing"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-utils-critical-path",
+  "pretty_assertions",
+@@ -3190,7 +3190,7 @@
+ 
+ [[package]]
+ name = "codex-exec"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",
+@@ -3243,7 +3243,7 @@
+ 
+ [[package]]
+ name = "codex-exec-server"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -3316,7 +3316,7 @@
+ 
+ [[package]]
+ name = "codex-exec-server-cli"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "assert_matches",
+@@ -3356,7 +3356,7 @@
+ 
+ [[package]]
+ name = "codex-exec-server-protocol"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-file-system",
+@@ -3374,7 +3374,7 @@
+ 
+ [[package]]
+ name = "codex-exec-server-test-support"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-exec-server",
+@@ -3389,7 +3389,7 @@
+ 
+ [[package]]
+ name = "codex-execpolicy"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -3407,7 +3407,7 @@
+ 
+ [[package]]
+ name = "codex-experimental-api-macros"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+@@ -3416,7 +3416,7 @@
+ 
+ [[package]]
+ name = "codex-extension-api"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-api",
+  "codex-config",
+@@ -3439,7 +3439,7 @@
+ 
+ [[package]]
+ name = "codex-extension-items"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "pretty_assertions",
+@@ -3451,7 +3451,7 @@
+ 
+ [[package]]
+ name = "codex-external-agent-migration"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "chrono",
+  "codex-analytics",
+@@ -3482,7 +3482,7 @@
+ 
+ [[package]]
+ name = "codex-features"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-network-proxy",
+  "codex-protocol",
+@@ -3496,7 +3496,7 @@
+ 
+ [[package]]
+ name = "codex-feedback"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "bytes",
+@@ -3524,7 +3524,7 @@
+ 
+ [[package]]
+ name = "codex-file-search"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -3540,7 +3540,7 @@
+ 
+ [[package]]
+ name = "codex-file-system"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "bytes",
+  "codex-protocol",
+@@ -3554,7 +3554,7 @@
+ 
+ [[package]]
+ name = "codex-file-watcher"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "notify",
+  "pretty_assertions",
+@@ -3565,7 +3565,7 @@
+ 
+ [[package]]
+ name = "codex-git-attribution"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-backend-client",
+  "codex-extension-api",
+@@ -3578,7 +3578,7 @@
+ 
+ [[package]]
+ name = "codex-git-utils"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3606,7 +3606,7 @@
+ 
+ [[package]]
+ name = "codex-goal-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -3631,7 +3631,7 @@
+ 
+ [[package]]
+ name = "codex-guardian-context"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-context-fragments",
+  "codex-history",
+@@ -3645,7 +3645,7 @@
+ 
+ [[package]]
+ name = "codex-guardian-reviewer"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-analytics",
+@@ -3681,7 +3681,7 @@
+ 
+ [[package]]
+ name = "codex-guardian-v2"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-analytics",
+@@ -3720,7 +3720,7 @@
+ 
+ [[package]]
+ name = "codex-guardian-v3"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-message-board",
+  "codex-protocol",
+@@ -3729,7 +3729,7 @@
+ 
+ [[package]]
+ name = "codex-history"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-protocol",
+@@ -3741,7 +3741,7 @@
+ 
+ [[package]]
+ name = "codex-history-notes-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-analytics",
+  "codex-client",
+@@ -3767,7 +3767,7 @@
+ 
+ [[package]]
+ name = "codex-home"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-extension-api",
+  "codex-utils-absolute-path",
+@@ -3779,7 +3779,7 @@
+ 
+ [[package]]
+ name = "codex-hooks"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "async-channel",
+@@ -3808,7 +3808,7 @@
+ 
+ [[package]]
+ name = "codex-http-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "bytes",
+  "codex-utils-cargo-bin",
+@@ -3848,7 +3848,7 @@
+ 
+ [[package]]
+ name = "codex-image-generation-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-api",
+@@ -3880,7 +3880,7 @@
+ 
+ [[package]]
+ name = "codex-install-context"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "codex-utils-home-dir",
+@@ -3893,7 +3893,7 @@
+ 
+ [[package]]
+ name = "codex-keyring-store"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "keyring",
+  "pretty_assertions",
+@@ -3904,7 +3904,7 @@
+ 
+ [[package]]
+ name = "codex-linux-sandbox"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "clap",
+  "codex-core",
+@@ -3933,7 +3933,7 @@
+ 
+ [[package]]
+ name = "codex-lmstudio"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-core",
+  "codex-http-client",
+@@ -3947,7 +3947,7 @@
+ 
+ [[package]]
+ name = "codex-login"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -3993,7 +3993,7 @@
+ 
+ [[package]]
+ name = "codex-mcp"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "arc-swap",
+@@ -4037,7 +4037,7 @@
+ 
+ [[package]]
+ name = "codex-mcp-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -4070,7 +4070,7 @@
+ 
+ [[package]]
+ name = "codex-memories-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-core",
+  "codex-extension-api",
+@@ -4092,7 +4092,7 @@
+ 
+ [[package]]
+ name = "codex-memories-read"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-shell-command",
+@@ -4102,7 +4102,7 @@
+ 
+ [[package]]
+ name = "codex-memories-write"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4139,7 +4139,7 @@
+ 
+ [[package]]
+ name = "codex-mermaid"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "insta",
+  "pretty_assertions",
+@@ -4148,7 +4148,7 @@
+ 
+ [[package]]
+ name = "codex-message-board"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "caseless",
+@@ -4171,7 +4171,7 @@
+ 
+ [[package]]
+ name = "codex-message-history"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-config",
+  "memchr",
+@@ -4185,7 +4185,7 @@
+ 
+ [[package]]
+ name = "codex-model-provider"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "chrono",
+@@ -4224,7 +4224,7 @@
+ 
+ [[package]]
+ name = "codex-model-provider-info"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-client",
+  "codex-http-client",
+@@ -4242,7 +4242,7 @@
+ 
+ [[package]]
+ name = "codex-models-manager"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "chrono",
+  "codex-http-client",
+@@ -4261,7 +4261,7 @@
+ 
+ [[package]]
+ name = "codex-multi-env-copy-file"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-config",
+@@ -4287,7 +4287,7 @@
+ 
+ [[package]]
+ name = "codex-mxc-sandbox"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-network-proxy",
+@@ -4308,7 +4308,7 @@
+ 
+ [[package]]
+ name = "codex-network-proxy"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "aws-credential-types",
+@@ -4359,7 +4359,7 @@
+ 
+ [[package]]
+ name = "codex-ollama"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "assert_matches",
+  "async-stream",
+@@ -4379,7 +4379,7 @@
+ 
+ [[package]]
+ name = "codex-otel"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "bytes",
+  "chrono",
+@@ -4418,7 +4418,7 @@
+ 
+ [[package]]
+ name = "codex-otel-trace-websocket"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -4429,7 +4429,7 @@
+ 
+ [[package]]
+ name = "codex-plugin"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-config",
+  "codex-core-plugin-common",
+@@ -4444,7 +4444,7 @@
+ 
+ [[package]]
+ name = "codex-plugin-host"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-utils-cargo-bin",
+  "codex-utils-process",
+@@ -4461,7 +4461,7 @@
+ 
+ [[package]]
+ name = "codex-process-hardening"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "libc",
+  "pretty_assertions",
+@@ -4469,7 +4469,7 @@
+ 
+ [[package]]
+ name = "codex-prompts"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-collaboration-mode-templates",
+@@ -4487,7 +4487,7 @@
+ 
+ [[package]]
+ name = "codex-protocol"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "chardetng",
+@@ -4533,14 +4533,14 @@
+ 
+ [[package]]
+ name = "codex-protocol-test-support"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-protocol",
+ ]
+ 
+ [[package]]
+ name = "codex-queue-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-core",
+@@ -4561,7 +4561,7 @@
+ 
+ [[package]]
+ name = "codex-realtime-webrtc"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-build-info",
+@@ -4580,7 +4580,7 @@
+ 
+ [[package]]
+ name = "codex-response-debug-context"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-api",
+@@ -4591,7 +4591,7 @@
+ 
+ [[package]]
+ name = "codex-responses-api-proxy"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "bytes",
+@@ -4615,7 +4615,7 @@
+ 
+ [[package]]
+ name = "codex-rmcp-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "axum",
+@@ -4666,7 +4666,7 @@
+ 
+ [[package]]
+ name = "codex-rollout"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4699,7 +4699,7 @@
+ 
+ [[package]]
+ name = "codex-rollout-trace"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-code-mode",
+@@ -4716,7 +4716,7 @@
+ 
+ [[package]]
+ name = "codex-runtime-agent-instance"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-agent-identity",
+@@ -4742,7 +4742,7 @@
+ 
+ [[package]]
+ name = "codex-sandboxing"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-mxc-sandbox",
+@@ -4770,7 +4770,7 @@
+ 
+ [[package]]
+ name = "codex-secrets"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "age",
+  "anyhow",
+@@ -4791,7 +4791,7 @@
+ 
+ [[package]]
+ name = "codex-shell-command"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -4814,7 +4814,7 @@
+ 
+ [[package]]
+ name = "codex-skills"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-shell-command",
+@@ -4831,7 +4831,7 @@
+ 
+ [[package]]
+ name = "codex-skills-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "assert_matches",
+  "blake3",
+@@ -4871,7 +4871,7 @@
+ 
+ [[package]]
+ name = "codex-state"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "chrono",
+@@ -4900,7 +4900,7 @@
+ 
+ [[package]]
+ name = "codex-stdio-to-uds"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-uds",
+@@ -4912,7 +4912,7 @@
+ 
+ [[package]]
+ name = "codex-tcp-tunnel"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "bytes",
+@@ -4933,7 +4933,7 @@
+ 
+ [[package]]
+ name = "codex-terminal-detection"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+  "tracing",
+@@ -4941,7 +4941,7 @@
+ 
+ [[package]]
+ name = "codex-test-binary-support"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-arg0",
+  "tempfile",
+@@ -4949,7 +4949,7 @@
+ 
+ [[package]]
+ name = "codex-thread-manager-sample"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "clap",
+@@ -4960,7 +4960,7 @@
+ 
+ [[package]]
+ name = "codex-thread-store"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "chrono",
+  "codex-app-server-protocol",
+@@ -4991,7 +4991,7 @@
+ 
+ [[package]]
+ name = "codex-tools"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "bitflags 2.13.1",
+  "codex-attachment-store",
+@@ -5017,7 +5017,7 @@
+ 
+ [[package]]
+ name = "codex-tui"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "app_test_support",
+@@ -5145,7 +5145,7 @@
+ 
+ [[package]]
+ name = "codex-uds"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "async-io",
+  "libc",
+@@ -5159,7 +5159,7 @@
+ 
+ [[package]]
+ name = "codex-user-verification"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "block2",
+@@ -5180,7 +5180,7 @@
+ 
+ [[package]]
+ name = "codex-utils-absolute-path"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "dirs",
+  "dunce",
+@@ -5194,14 +5194,14 @@
+ 
+ [[package]]
+ name = "codex-utils-approval-presets"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-protocol",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-audio"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-protocol",
+@@ -5215,7 +5215,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cache"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "lru",
+  "sha1 0.10.6",
+@@ -5224,7 +5224,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cargo-bin"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "assert_cmd",
+  "runfiles",
+@@ -5233,7 +5233,7 @@
+ 
+ [[package]]
+ name = "codex-utils-cli"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "clap",
+  "codex-protocol",
+@@ -5245,22 +5245,22 @@
+ 
+ [[package]]
+ name = "codex-utils-critical-path"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-elapsed"
+-version = "0.0.0"
++version = "0.166.0"
+ 
+ [[package]]
+ name = "codex-utils-fuzzy-match"
+-version = "0.0.0"
++version = "0.166.0"
+ 
+ [[package]]
+ name = "codex-utils-git-discovery"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-git-utils",
+  "codex-utils-absolute-path",
+@@ -5273,14 +5273,14 @@
+ 
+ [[package]]
+ name = "codex-utils-head-tail-buffer"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-home-dir"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "dirs",
+@@ -5290,7 +5290,7 @@
+ 
+ [[package]]
+ name = "codex-utils-image"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-utils-cache",
+@@ -5304,7 +5304,7 @@
+ 
+ [[package]]
+ name = "codex-utils-json-to-toml"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+  "serde_json",
+@@ -5313,7 +5313,7 @@
+ 
+ [[package]]
+ name = "codex-utils-oss"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-core",
+  "codex-lmstudio",
+@@ -5323,7 +5323,7 @@
+ 
+ [[package]]
+ name = "codex-utils-output-truncation"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-string",
+@@ -5333,7 +5333,7 @@
+ 
+ [[package]]
+ name = "codex-utils-path"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-utils-absolute-path",
+  "dunce",
+@@ -5344,7 +5344,7 @@
+ 
+ [[package]]
+ name = "codex-utils-path-uri"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "base64 0.22.1",
+  "codex-utils-absolute-path",
+@@ -5360,7 +5360,7 @@
+ 
+ [[package]]
+ name = "codex-utils-plugins"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-exec-server",
+  "codex-exec-server-protocol",
+@@ -5374,7 +5374,7 @@
+ 
+ [[package]]
+ name = "codex-utils-process"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+  "tokio",
+@@ -5382,7 +5382,7 @@
+ 
+ [[package]]
+ name = "codex-utils-pty"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-utils-cargo-bin",
+@@ -5401,7 +5401,7 @@
+ 
+ [[package]]
+ name = "codex-utils-readiness"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "assert_matches",
+  "thiserror 2.0.18",
+@@ -5411,7 +5411,7 @@
+ 
+ [[package]]
+ name = "codex-utils-redacted-string"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "schemars 0.8.22",
+  "serde",
+@@ -5419,14 +5419,14 @@
+ 
+ [[package]]
+ name = "codex-utils-rustls-provider"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "rustls",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-sandbox-summary"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-protocol",
+  "codex-utils-absolute-path",
+@@ -5436,7 +5436,7 @@
+ 
+ [[package]]
+ name = "codex-utils-sleep-inhibitor"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "core-foundation 0.9.4",
+  "libc",
+@@ -5446,14 +5446,14 @@
+ 
+ [[package]]
+ name = "codex-utils-stream-parser"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-utils-string"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+  "regex-lite",
+@@ -5463,14 +5463,14 @@
+ 
+ [[package]]
+ name = "codex-utils-template"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+ ]
+ 
+ [[package]]
+ name = "codex-v8-poc"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "pretty_assertions",
+  "v8",
+@@ -5478,7 +5478,7 @@
+ 
+ [[package]]
+ name = "codex-voice-host"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-install-context",
+@@ -5505,7 +5505,7 @@
+ 
+ [[package]]
+ name = "codex-web-search-extension"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-api",
+  "codex-core",
+@@ -5527,7 +5527,7 @@
+ 
+ [[package]]
+ name = "codex-websocket-auth"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -5546,7 +5546,7 @@
+ 
+ [[package]]
+ name = "codex-websocket-client"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-http-client",
+  "codex-utils-rustls-provider",
+@@ -5562,7 +5562,7 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
+@@ -5592,7 +5592,7 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox-service"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-cloud-config",
+@@ -5610,14 +5610,14 @@
+ 
+ [[package]]
+ name = "codex-windows-sandbox-test-support"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "dirs",
+ ]
+ 
+ [[package]]
+ name = "codex-workload-identity"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "codex-http-client",
+  "pretty_assertions",
+@@ -5632,7 +5632,7 @@
+ 
+ [[package]]
+ name = "codex-worktree"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "codex-git-utils",
+@@ -5885,7 +5885,7 @@
+ 
+ [[package]]
+ name = "core_test_support"
+-version = "0.0.0"
++version = "0.166.0"
+ dependencies = [
+  "anyhow",
+  "assert_cmd",

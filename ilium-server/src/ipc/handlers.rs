@@ -233,6 +233,8 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        // Connection-owned subscriptions are intercepted by the reader.
+        ClientRequest::SetStatusScreenWatches { .. } => false,
         ClientRequest::Resource {
             request_id,
             request,
@@ -1722,7 +1724,6 @@ async fn handle_attach(
         .await;
         return false;
     }
-    crate::resources::send_snapshot(state, direct_tx).await;
     loop {
         match state.recovery.attach_status().await {
             crate::recovery::AttachStatus::Pending { pane_count } => {
@@ -1835,7 +1836,7 @@ const TERMINAL_HISTORY_MAX_BYTES: usize = 1024 * 1024;
 enum TerminalOutputSynchronization<'a> {
     All,
     None,
-    RecoverAfter(&'a HashMap<NodeId, u64>),
+    RecoverAfter(&'a HashMap<NodeId, u64>, Option<&'a HashSet<NodeId>>),
 }
 
 #[derive(Clone)]
@@ -1874,7 +1875,10 @@ impl TerminalOutputSynchronization<'_> {
                 Err(error) => return Err(error),
             },
             Self::None => return Ok(None),
-            Self::RecoverAfter(delivered_sequences) => {
+            Self::RecoverAfter(delivered_sequences, visible_panes) => {
+                if visible_panes.is_some_and(|visible| !visible.contains(&pane_id)) {
+                    return Ok(None);
+                }
                 let after_sequence = delivered_sequences
                     .get(&pane_id)
                     .copied()
@@ -1911,7 +1915,7 @@ impl TerminalOutputSynchronization<'_> {
                 _ => None,
             },
             Self::None => None,
-            Self::RecoverAfter(_) => session
+            Self::RecoverAfter(_, _) => session
                 .try_output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)?
                 .map(|recovery| match recovery {
                     PtyOutputRecovery::Delta(chunk) => ServerEvent::ScreenUpdate {
@@ -1936,7 +1940,10 @@ impl TerminalOutputSynchronization<'_> {
                 None => Some(terminal_replay_event(pane_id, session.output_replay())),
             },
             Self::None => None,
-            Self::RecoverAfter(delivered_sequences) => {
+            Self::RecoverAfter(delivered_sequences, visible_panes) => {
+                if visible_panes.is_some_and(|visible| !visible.contains(&pane_id)) {
+                    return None;
+                }
                 let after_sequence = delivered_sequences
                     .get(&pane_id)
                     .copied()
@@ -1978,7 +1985,7 @@ pub(crate) async fn resynchronization_events(
 ) -> Vec<ServerEvent> {
     state_synchronization_events(
         state,
-        TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences),
+        TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences, None),
         false,
     )
     .await
@@ -1987,6 +1994,7 @@ pub(crate) async fn resynchronization_events(
 pub(crate) async fn admitted_resynchronization_events(
     state: &ServerState,
     delivered_terminal_sequences: &HashMap<NodeId, u64>,
+    visible_panes: Option<&HashSet<NodeId>>,
 ) -> Result<
     (
         Vec<ServerEvent>,
@@ -1996,7 +2004,7 @@ pub(crate) async fn admitted_resynchronization_events(
 > {
     admitted_state_synchronization_events(
         state,
-        TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences),
+        TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences, visible_panes),
         false,
         None,
     )
@@ -7938,7 +7946,7 @@ async fn submit_terminal_text_with_completion_locked(
     input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
     completion: Option<(u64, u64)>,
 ) -> Result<(), String> {
-    {
+    let pending_notice = {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
             return Err(format!("pane {pane_id:?} closed before text insertion"));
@@ -7946,12 +7954,45 @@ async fn submit_terminal_text_with_completion_locked(
         if !std::sync::Arc::ptr_eq(input_gate, &runtime.input_gate) {
             return Err(format!("pane {pane_id:?} changed before text insertion"));
         }
-    }
-    let body = terminal_text_body(state, pane_id, text).await?;
+        if matches!(
+            source,
+            PromptSubmissionSource::ProgressResult
+                | PromptSubmissionSource::QueuedPrompt
+                | PromptSubmissionSource::ScheduledInput
+                | PromptSubmissionSource::AskForUpdate
+        ) && !text.trim_start().starts_with('/')
+        {
+            runtime
+                .pending_resource_notice
+                .map(|notice| (runtime.agent_generation, notice))
+        } else {
+            None
+        }
+    };
+    let combined = pending_notice.map(|(_, (_, kind))| {
+        let notice = match kind {
+            crate::pane::ResourceInstructionNotice::Removed => "Shared resource bindings were removed; existing reservations still require explicit release or cancellation. Check `ilium resource status` before further use.",
+            crate::pane::ResourceInstructionNotice::Changed => "Shared resource instructions changed. Read the managed resource block before using shared hardware; reserve exclusively, wait once if queued, verify ownership and explicitly release after use. Estimates never clear ownership.",
+            crate::pane::ResourceInstructionNotice::Available => "Shared resource instructions apply. Read the managed resource block before using shared hardware; reserve exclusively, wait once if queued, verify ownership and explicitly release after use. Estimates never clear ownership.",
+        };
+        format!("{text}  [{notice} This reminder is from Ilium, not the user; no reply or acknowledgement is needed.]")
+    });
+    let body = terminal_text_body(state, pane_id, combined.as_deref().unwrap_or(text)).await?;
     submit_terminal_body_with_completion_locked(
         state, pane_id, &body, source, input_gate, completion,
     )
-    .await
+    .await?;
+    if let Some((generation, notice)) = pending_notice {
+        let mut panes = state.panes.write().await;
+        if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+            if runtime.agent_generation == generation
+                && runtime.pending_resource_notice == Some(notice)
+            {
+                runtime.pending_resource_notice = None;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Frames `text` for the pane's current terminal modes, read from the
@@ -12862,6 +12903,38 @@ mod tests {
         teardown_state_panes(&state);
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn held_progress_wait_survives_many_yield_boundaries_without_delivery() {
+        let (state, pane_id, _directory) = state_with_one_terminal_pane("progress-long-wait").await;
+        install_wait_test_monitor(&state, pane_id, 71).await;
+        let (reply, mut receiver) = DirectEventSender::channel(8);
+        handle_wait_pane_progress_monitor(&state, 710, pane_id, 71, &reply).await;
+
+        // Transport yield intervals do not own the logical wait lifetime.
+        // Cross 1,440 former 60-second boundaries without a terminal event.
+        for _ in 0..1_440 {
+            tokio::time::advance(Duration::from_secs(60)).await;
+            assert!(matches!(
+                receiver.try_recv(),
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            ));
+        }
+
+        let done = settle_wait_test_monitor(&state, pane_id, 71).await;
+        assert!(hand_outcome_to_progress_waiters(&state, pane_id, 71, &done).await);
+        let outcome = next_wait_reply(&mut receiver).await.expect("actual outcome");
+        assert_eq!(outcome.monitor_id, 71);
+        assert_eq!(outcome.progress, Some(done.clone()));
+        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Settled);
+        assert!(outcome.composer_notice_suppressed);
+        assert!(!hand_outcome_to_progress_waiters(&state, pane_id, 71, &done).await);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        teardown_state_panes(&state);
+    }
+
     fn persisted_running_progress_monitor(
         pane_id: NodeId,
         command: String,
@@ -14137,6 +14210,28 @@ mod tests {
             None,
             "a replaced pane owner must not broadcast its predecessor's output"
         );
+
+        // Lag repair for a viewport must not materialize hidden journals:
+        // doing so can exhaust the shared admission budget before filtering.
+        let visible = HashSet::from([missing_pane_id]);
+        let (visible_events, _admission) =
+            admitted_resynchronization_events(&state, &HashMap::new(), Some(&visible))
+                .await
+                .expect("visible-only lag recovery is admitted");
+        assert!(visible_events.iter().any(|event| matches!(event,
+            ServerEvent::ScreenUpdate { pane_id, .. }
+                | ServerEvent::TerminalReplay { pane_id, .. }
+                | ServerEvent::TerminalSnapshot { pane_id, .. }
+                if *pane_id == missing_pane_id)));
+        assert!(!visible_events.iter().any(|event| matches!(event,
+            ServerEvent::ScreenUpdate { pane_id, .. }
+                | ServerEvent::TerminalReplay { pane_id, .. }
+                | ServerEvent::TerminalSnapshot { pane_id, .. }
+                if *pane_id == current_pane_id)));
+        assert!(visible_events.iter().any(|event| matches!(event,
+            ServerEvent::PaneStateSnapshot { tree, .. }
+                if tree.get(missing_pane_id).is_some() && tree.get(current_pane_id).is_some())));
+        drop(_admission);
 
         let events = resynchronization_events(&state, &delivered_sequences).await;
         let terminal_events: Vec<&ServerEvent> = events

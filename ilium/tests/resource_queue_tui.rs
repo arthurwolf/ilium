@@ -131,9 +131,21 @@ impl Sandbox {
             log_paths.sort();
             excerpts.extend(log_paths.into_iter().filter_map(|path| {
                 let contents = std::fs::read_to_string(&path).ok()?;
+                let slow_resource_stages = contents
+                    .lines()
+                    .filter(|line| {
+                        line.contains("resource I/O stage is still waiting")
+                            || line.contains("resource worker diagnostic")
+                            || line.contains("resource request diagnostic")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 let excerpt = contents.chars().rev().take(12000).collect::<String>();
                 let excerpt = excerpt.chars().rev().collect::<String>();
-                Some(format!("--- {} ---\n{excerpt}", path.display()))
+                Some(format!(
+                    "--- {} ---\n{slow_resource_stages}\n{excerpt}",
+                    path.display()
+                ))
             }));
         }
         if excerpts.is_empty() {
@@ -188,6 +200,12 @@ impl Sandbox {
 }
 impl Drop for Sandbox {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!(
+                "isolated resource queue server diagnostics:\n{}",
+                self.server_log_excerpt()
+            );
+        }
         // Only this test's canonical project and private socket directory are
         // addressed. The user's installed binary and running server are unused.
         let mut command = std::process::Command::new(candidate_ilium_binary());
@@ -418,37 +436,48 @@ async fn rpc(
             std::sync::atomic::Ordering::Relaxed
         )
     ));
-    loop {
-        write_frame(
-            stream,
-            &ClientRequest::Resource {
-                request_id: 700,
-                request: request.clone(),
-            },
-        )
-        .await
-        .unwrap();
-        let ServerEvent::ResourceResult { result, .. } =
-            event(stream, "resource RPC response", |event| {
-                matches!(
-                    event,
-                    ServerEvent::ResourceResult {
-                        request_id: 700,
-                        ..
-                    }
-                )
-            })
+    let operation_label = format!("{:?}", request.operation);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            write_frame(
+                stream,
+                &ClientRequest::Resource {
+                    request_id: 700,
+                    request: request.clone(),
+                },
+            )
             .await
-        else {
-            unreachable!()
-        };
-        match result {
-            Err(error) if error.code == "busy" => {
-                tokio::time::sleep(Duration::from_millis(20)).await
+            .unwrap();
+            let ServerEvent::ResourceResult { result, .. } =
+                event(stream, "resource RPC response", |event| {
+                    matches!(
+                        event,
+                        ServerEvent::ResourceResult {
+                            request_id: 700,
+                            ..
+                        }
+                    )
+                })
+                .await
+            else {
+                unreachable!()
+            };
+            match result {
+                Err(error) if error.code == "busy" => {
+                    tokio::time::sleep(Duration::from_millis(20)).await
+                }
+                result => {
+                    return *result.unwrap_or_else(|error| {
+                        panic!("resource request {:?} failed: {error:?}", request.operation)
+                    });
+                }
             }
-            result => return *result.unwrap(),
         }
-    }
+    })
+    .await
+    .unwrap_or_else(|error| {
+        panic!("resource request {operation_label} exceeded its deadline: {error}")
+    })
 }
 async fn spawn_agent(
     stream: &mut SessionStream,
@@ -549,35 +578,97 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
         "resource grouping defaults on"
     );
     let witness_dimensions = sandbox.project.join("witness-terminal-size");
-    sandbox.cli(&["new-pane", "--", "sh", "-c",
+    let witness_script = sandbox.project.join("witness.sh");
+    std::fs::write(
+        &witness_script,
         r#"n=0; while IFS= read -r line; do n=$((n+1)); { printf '%s ' "$n"; stty size; } > "$1.next"; mv "$1.next" "$1"; printf '%s\n' "$line"; done"#,
-        "resource-size-witness", witness_dimensions.to_str().unwrap()]).await;
+    )
+    .unwrap();
+    let tui = sandbox.tui();
+    screen(&tui, "project").await;
     let mut control = sandbox.connect().await;
     let initial = tree(&mut control).await;
     let project = initial.project_ids()[0];
-    let original_pane = initial.pane_ids_in_tree_order()[0];
-    let tui = sandbox.tui();
+    let existing = initial.pane_ids_in_tree_order();
+    write_frame(
+        &mut control,
+        &ClientRequest::NewPane {
+            request_id: 700,
+            parent_group: project,
+            kind: NewPaneKind::Command(format!(
+                "sh {} {}",
+                witness_script.display(),
+                witness_dimensions.display()
+            )),
+            working_directory: NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .unwrap();
+    let created = event(&mut control, "terminal witness pane created", |event| {
+        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.pane_ids_in_tree_order().iter().any(|pane| !existing.contains(pane)))
+    })
+    .await;
+    let ServerEvent::TreeSnapshot(initial) = created else {
+        unreachable!()
+    };
+    let original_pane = *initial
+        .pane_ids_in_tree_order()
+        .iter()
+        .find(|pane| !existing.contains(pane))
+        .unwrap();
     assert_eq!(initial.get(project).unwrap().name, "project");
     screen(&tui, "project").await;
     click(&tui, "project", 2);
     screen(&tui, "New resource").await;
     click_menu_and_expect_form(&tui, "New resource", "Physical identity (optional)").await;
     screen(&tui, "[Submit]  [Cancel]").await;
-    tui.write(
-        b"Synthetic GPU\tgpu\tTerminal acceptance only\tExplicit release\t\ttest-device:tui\r",
-    )
-    .unwrap();
+    tui.write(b"Synthetic GPU\tgpu\tTerminal acceptance only\tExplicit release\t\ttest-device:tui")
+        .unwrap();
+    screen(&tui, "test-device:tui").await;
+    tui.write(b"\r").unwrap();
+    // A pending submission can temporarily hide the Submit button. Wait for
+    // the authoritative commit rather than mistaking that frame for success.
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    let mut form_statuses = Vec::new();
+    let catalog = loop {
+        let rendered = tui.screen_text();
+        let lines: Vec<_> = rendered.lines().collect();
+        if let Some(index) = lines.iter().position(|line| line.contains("[Submit]")) {
+            if let Some(line) = index.checked_sub(1).and_then(|index| lines.get(index)) {
+                if !form_statuses.iter().any(|status| status == line) {
+                    form_statuses.push((*line).to_owned());
+                }
+            }
+        }
+        let catalog = rpc(&mut control, project, None, ResourceOperation::Snapshot)
+            .await
+            .catalog;
+        if catalog.links.iter().any(|link| link.slug == "gpu") {
+            break catalog;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "created GPU slug missing from authoritative links: {:?}; form status history: {:?}; terminal:\n{}\nserver logs:\n{}",
+            catalog.links,
+            form_statuses,
+            tui.screen_text(),
+            sandbox.server_log_excerpt()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
     dialog_closed(&tui).await;
     screen(&tui, "Synthetic GPU").await;
-    // The canonical catalog, not appearance alone, proves dialog persistence.
-    let catalog = rpc(&mut control, project, None, ResourceOperation::Snapshot)
-        .await
-        .catalog;
     let resource_id = catalog
         .links
         .iter()
         .find(|link| link.slug == "gpu")
-        .unwrap()
+        .unwrap_or_else(|| {
+            panic!(
+                "created GPU slug missing from authoritative links: {:?}",
+                catalog.links
+            )
+        })
         .resource_id
         .clone();
     assert_eq!(
@@ -590,8 +681,22 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
     click(&tui, "Synthetic GPU", 0);
     screen(&tui, "No current owner or waiting reservations.").await;
     screen(&tui, "Enforced policy: exclusive").await;
-    tui.write(b"e").unwrap();
-    screen(&tui, "Local slug (create only)").await;
+    // The detail can render before its refresh finishes. Management actions
+    // are deliberately refused while that request is pending. Re-click the
+    // Edit action until its exact form appears; pointer retries cannot type
+    // accidental characters into a form that opened between rendered frames.
+    let open_edit_deadline = tokio::time::Instant::now() + TIMEOUT;
+    while !tui.screen_text().contains("Edit shared resource — global") {
+        assert!(
+            tokio::time::Instant::now() < open_edit_deadline,
+            "resource editor did not open: {}",
+            tui.screen_text()
+        );
+        if tui.screen_text().contains("[e Edit]") {
+            click(&tui, "[e Edit]", 0);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     tui.write(b" revised\r").unwrap();
     let edit_deadline = tokio::time::Instant::now() + TIMEOUT;
     loop {
@@ -606,7 +711,12 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
             "edited metadata did not persist: {}",
             tui.screen_text()
         );
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        // A busy result leaves the form open with the exact mutation retained.
+        // Retry that envelope as a user would, without changing its request key.
+        if tui.screen_text().contains("busy: Project identity is busy") {
+            tui.write(b"\x12").unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
     tui.write(b"\x1b").unwrap();
     dialog_closed(&tui).await;
@@ -636,30 +746,55 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
     click(&linked_tui, "Link existing resource", 0);
     screen(&linked_tui, "Search existing resources").await;
     screen(&linked_tui, "[Submit]  [Cancel]").await;
+    // The global catalog may still be loading when the picker first opens.
+    // A visible candidate proves there is a resource to select before Enter.
+    screen(&linked_tui, "▸ Synthetic GPU revised · gpu").await;
     linked_tui
         .write(b"Synthetic GPU revised\tshared-gpu\r")
         .unwrap();
-    dialog_closed(&linked_tui).await;
-    screen(&linked_tui, "Synthetic GPU revised").await;
     let mut linked_control = linked.connect().await;
     let linked_project = tree(&mut linked_control).await.project_ids()[0];
-    let shared = rpc(
-        &mut linked_control,
-        linked_project,
-        None,
-        ResourceOperation::Snapshot,
-    )
-    .await
-    .catalog;
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    let shared = loop {
+        let catalog = rpc(
+            &mut linked_control,
+            linked_project,
+            None,
+            ResourceOperation::Snapshot,
+        )
+        .await
+        .catalog;
+        if catalog
+            .links
+            .iter()
+            .any(|link| link.slug == "shared-gpu" && link.resource_id == resource_id)
+        {
+            break catalog;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "linked resource absent from authoritative snapshot: links={:?}; terminal:\n{}",
+            catalog.links,
+            linked_tui.screen_text()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    dialog_closed(&linked_tui).await;
+    screen(&linked_tui, "Synthetic GPU revised").await;
     assert_eq!(
         shared.resources.len(),
         1,
         "linking must not create another authority"
     );
-    assert!(shared
-        .links
-        .iter()
-        .any(|link| link.slug == "shared-gpu" && link.resource_id == resource_id));
+    assert!(
+        shared
+            .links
+            .iter()
+            .any(|link| link.slug == "shared-gpu" && link.resource_id == resource_id),
+        "linked resource absent from authoritative snapshot: links={:?}; terminal:\n{}",
+        shared.links,
+        linked_tui.screen_text()
+    );
     assert!(
         std::fs::read_to_string(linked.project.join(".ilium/config.yaml"))
             .unwrap()
@@ -789,21 +924,28 @@ async fn real_resource_dialog_queue_wait_and_display_only_grouping() {
     click(&tui, "QueueSplit", 0);
     tui.write(b"\x02wl").unwrap();
     screen(&tui, "InputWitness").await;
-    click(&tui, "InputWitness", 0);
+    // The witness is a split child; focus its visible terminal viewport, not
+    // a tree row that may disappear when the split is collapsed.
+    tui.write(b"\x1b[<0;80;10M\x1b[<0;80;10m").unwrap();
     tui.write(b"resource-input-witness\r").unwrap();
+    pane_output(&mut control, &tui, original_pane, "resource-input-witness").await;
     screen(&tui, "resource-input-witness").await;
     screen(&tui, "esc to interrupt").await;
     // Distinct input must reach the original second PTY, including while its
     // tree entry is a resource participant reference to a split child.
     click(&tui, "QueueWaiter", 0);
     tui.write(b"resource-agent-input-witness").unwrap();
-    pane_output(&mut control, waiter, "resource-agent-input-witness").await;
+    pane_output(&mut control, &tui, waiter, "resource-agent-input-witness").await;
     screen(&tui, "resource-agent-input-witness").await;
     let cat_position = locate(&tui, "resource-input-witness");
     let agent_position = locate(&tui, "resource-agent-input-witness");
     assert_ne!(cat_position, agent_position);
     let split_id = split.parent_of(waiter).unwrap();
-    let before_split = serde_json::to_value(split.get(split_id).unwrap()).unwrap();
+    // The click on QueueSplit above can change its expanded state. Capture the
+    // current authoritative tree immediately before testing the toggles.
+    let mut before_control = sandbox.connect().await;
+    let before_grouping = tree(&mut before_control).await;
+    let before_split = serde_json::to_value(before_grouping.get(split_id).unwrap()).unwrap();
     write_frame(
         &mut control,
         &ClientRequest::KeyInput {
@@ -1418,16 +1560,38 @@ async fn independent_candidate_server_processes_share_one_authoritative_catalog(
     let queued_id = queued["reservation_id"].as_str().unwrap();
     let waiting = blocking_wait(&second, queued_agent, queued_id);
     attached_wait(&mut second_control, queued_agent, queued_id).await;
-    first
-        .cli(&[
-            "resource",
-            "gate",
-            "board",
-            "unavailable",
-            "--reason",
-            "Synthetic alpha maintenance only",
-        ])
-        .await;
+    // Attaching the wait can advance the shared catalog after the CLI's
+    // guarded read. A revision conflict requires a fresh command/read, not
+    // replaying a stale confirmation or ignoring the requested gate.
+    let gate_deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        let output = first
+            .command()
+            .args([
+                "resource",
+                "gate",
+                "board",
+                "unavailable",
+                "--reason",
+                "Synthetic alpha maintenance only",
+            ])
+            .output()
+            .await
+            .unwrap();
+        if output.status.success() {
+            break;
+        }
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            result["code"], "revision_conflict",
+            "unexpected gate error: {result}"
+        );
+        assert!(
+            tokio::time::Instant::now() < gate_deadline,
+            "gate kept conflicting: {result}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
     let beta_retained = second
         .cli(&[
             "resource",
@@ -1838,10 +2002,7 @@ async fn interactive_recovery_rejects_stale_confirmation_and_preserves_other_wai
         .find(|claim| claim.id.0 == owner_id)
         .unwrap();
     assert_eq!(authoritative_owner.agent.pane_id, owner);
-    assert_eq!(
-        authoritative_owner.agent.label,
-        format!("Agent {}", owner.0)
-    );
+    assert_eq!(authoritative_owner.agent.label, "RecoveryOwner");
     // Recovery displays the durable invocation label, independently of a pane's
     // mutable UI name. Assert both the exact actor label and reservation ID.
     screen(
@@ -2107,9 +2268,10 @@ async fn candidate_daemon_crash_keeps_claim_occupied_while_synthetic_workload_su
     );
 }
 
-async fn pane_output(stream: &mut SessionStream, pane: NodeId, expected: &str) {
-    tokio::time::timeout(TIMEOUT, async {
-        let mut observed = String::new();
+async fn pane_output(stream: &mut SessionStream, tui: &PtySession, pane: NodeId, expected: &str) {
+    let mut observed = String::new();
+    let mut other = String::new();
+    let result = tokio::time::timeout(TIMEOUT, async {
         loop {
             let message: ServerEvent = read_frame(stream).await.unwrap();
             if let ServerEvent::ScreenUpdate { pane_id, bytes, .. } = message {
@@ -2122,10 +2284,304 @@ async fn pane_output(stream: &mut SessionStream, pane: NodeId, expected: &str) {
                         observed.len() < 1_048_576,
                         "bounded test output did not contain input witness"
                     );
+                } else if other.len() < 4096 {
+                    other.push_str(&format!(
+                        "{pane_id:?}: {}\n",
+                        String::from_utf8_lossy(&bytes)
+                    ));
                 }
             }
         }
     })
+    .await;
+    assert!(
+        result.is_ok(),
+        "input {expected:?} must reach split child {pane:?}; observed {observed:?}; other panes {other:?}; terminal:\n{}",
+        tui.screen_text()
+    );
+}
+
+// These tests use the real candidate CLI and a private server. They qualify
+// the progress subscription boundary, not the Codex tool scheduler.
+struct ProgressWaitProcess {
+    child: tokio::process::Child,
+    stdout: tokio::io::BufReader<tokio::process::ChildStdout>,
+}
+
+fn progress_pane_command(sandbox: &Sandbox, pane: NodeId) -> tokio::process::Command {
+    let mut command = sandbox.command();
+    command
+        .env(ilium_ipc::pane_env::PANE_ID, pane.0.to_string())
+        .env(ilium_ipc::pane_env::SESSION_NAME, "default")
+        .env(
+            ilium_ipc::pane_env::SESSION_SOCKET,
+            ilium::session::socket_path_in(&sandbox.socket_dir, &sandbox.project, "default"),
+        );
+    command
+}
+
+fn progress_wait_process(sandbox: &Sandbox, pane: NodeId, args: &[&str]) -> ProgressWaitProcess {
+    let mut child = progress_pane_command(sandbox, pane)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdout = tokio::io::BufReader::new(child.stdout.take().unwrap());
+    ProgressWaitProcess { child, stdout }
+}
+
+async fn progress_registration(wait: &mut ProgressWaitProcess) -> u64 {
+    use tokio::io::AsyncBufReadExt;
+    let mut line = String::new();
+    tokio::time::timeout(TIMEOUT, wait.stdout.read_line(&mut line))
+        .await
+        .expect("progress registration acknowledgement")
+        .unwrap();
+    let record: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(record["type"], "progress_set", "{line}");
+    record["monitor_id"].as_u64().unwrap()
+}
+
+async fn progress_wait_result(wait: ProgressWaitProcess, exit: i32) -> serde_json::Value {
+    use tokio::io::AsyncReadExt;
+    let ProgressWaitProcess { child, mut stdout } = wait;
+    let output = tokio::time::timeout(TIMEOUT, child.wait_with_output())
+        .await
+        .expect("progress waiter must receive its real terminal outcome")
+        .unwrap();
+    let mut text = String::new();
+    stdout.read_to_string(&mut text).await.unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(exit),
+        "stdout: {text}; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records: Vec<serde_json::Value> = text
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(records.len(), 1, "one actionable result per wait: {text}");
+    let record = records.into_iter().next().unwrap();
+    assert_eq!(record["type"], "progress_wait");
+    assert_eq!(record["exit_code"], exit);
+    record
+}
+
+async fn progress_wait_is_pending(wait: &mut ProgressWaitProcess) {
+    // This bounds only the assertion that no result is ready. It is not a
+    // deadline passed to the CLI or a reason to settle a healthy monitor.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), wait.child.wait())
+            .await
+            .is_err(),
+        "healthy monitor must keep its waiter pending"
+    );
+}
+
+fn progress_fixture_report(path: &std::path::Path, job: &str, status: &str) {
+    let mut report = serde_json::json!({
+        "job_id": job,
+        "status": status,
+        "percent": if status == "running" { 25 } else { 100 },
+        "message": format!("Synthetic progress wait fixture {job}: {status}"),
+    });
+    if status == "error" {
+        report["error"] = "synthetic task failure".into();
+    }
+    progress_fixture_write(path, &report);
+}
+
+fn progress_fixture_write(path: &std::path::Path, report: &serde_json::Value) {
+    let next = path.with_extension("next");
+    std::fs::write(&next, serde_json::to_vec(report).unwrap()).unwrap();
+    std::fs::rename(next, path).unwrap();
+}
+
+fn progress_fixture_probe(path: &std::path::Path) -> String {
+    format!(
+        "cat '{}'",
+        path.display().to_string().replace('\'', "'\\''")
+    )
+}
+
+async fn progress_register(sandbox: &Sandbox, pane: NodeId, probe: &str) -> u64 {
+    let output = tokio::time::timeout(
+        TIMEOUT,
+        progress_pane_command(sandbox, pane)
+            .args([
+                "progress",
+                "set",
+                "--command",
+                probe,
+                "--interval-seconds",
+                "1",
+            ])
+            .output(),
+    )
     .await
-    .expect("input must reach its original split child PTY");
+    .unwrap()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "progress set: {} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let record: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    record["monitor_id"].as_u64().unwrap()
+}
+
+async fn progress_fixture_pane(sandbox: &Sandbox) -> NodeId {
+    sandbox.cli(&["new-pane", "--", "cat"]).await;
+    let mut control = sandbox.connect().await;
+    tree(&mut control).await.pane_ids_in_tree_order()[0]
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn progress_wait_runtime_both_entry_points_correlate_real_outcomes() {
+    let sandbox = Sandbox::new();
+    let pane = progress_fixture_pane(&sandbox).await;
+    let mut interface = sandbox.connect().await;
+    tree(&mut interface).await;
+    let first_report = sandbox.project.join("first-progress.json");
+    let second_report = sandbox.project.join("second-progress.json");
+    progress_fixture_report(&first_report, "first-task", "running");
+    progress_fixture_report(&second_report, "second-task", "running");
+    let first_id = progress_register(&sandbox, pane, &progress_fixture_probe(&first_report)).await;
+    let mut first_wait =
+        progress_wait_process(&sandbox, pane, &["progress", "wait", &first_id.to_string()]);
+    let second_probe = progress_fixture_probe(&second_report);
+    let mut second_wait = progress_wait_process(
+        &sandbox,
+        pane,
+        &[
+            "progress",
+            "set",
+            "--command",
+            &second_probe,
+            "--interval-seconds",
+            "1",
+            "--wait",
+        ],
+    );
+    let second_id = progress_registration(&mut second_wait).await;
+    assert_ne!(first_id, second_id);
+    progress_wait_is_pending(&mut first_wait).await;
+    progress_wait_is_pending(&mut second_wait).await;
+
+    // The interface subscription receives changing progress independently
+    // while the blocking CLI processes still have no terminal result.
+    let mut progress: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&first_report).unwrap()).unwrap();
+    progress["percent"] = 50.into();
+    progress_fixture_write(&first_report, &progress);
+    event(
+        &mut interface,
+        "progress remains visible during a held wait",
+        |message| {
+            matches!(message, ServerEvent::PaneProgressChanged { pane_id, progress_monitors }
+            if *pane_id == pane && progress_monitors.iter().any(|progress|
+                progress.monitor_id == first_id && progress.report.percent == 50.0))
+        },
+    )
+    .await;
+    progress_wait_is_pending(&mut first_wait).await;
+
+    // Completing one task cannot release the waiter for a different monitor.
+    progress_fixture_report(&second_report, "second-task", "done");
+    let second = progress_wait_result(second_wait, 0).await;
+    assert_eq!(second["monitor_id"], second_id);
+    assert_eq!(second["outcome"], "done");
+    progress_wait_is_pending(&mut first_wait).await;
+    progress_fixture_report(&first_report, "first-task", "error");
+    let first = progress_wait_result(first_wait, 3).await;
+    assert_eq!(first["monitor_id"], first_id);
+    assert_eq!(first["outcome"], "error");
+
+    // A new observation of an already-settled monitor preserves the outcome
+    // and identity; it does not run the job or create a second monitor.
+    let replay = progress_wait_result(
+        progress_wait_process(&sandbox, pane, &["progress", "wait", &first_id.to_string()]),
+        3,
+    )
+    .await;
+    assert_eq!(replay["monitor_id"], first_id);
+    assert_eq!(replay["outcome"], "error");
+    let missing = progress_wait_result(
+        progress_wait_process(&sandbox, pane, &["wait", &u64::MAX.to_string()]),
+        5,
+    )
+    .await;
+    assert_eq!(missing["outcome"], "cleared");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn progress_wait_runtime_clear_probe_failure_and_waiter_reconnect() {
+    let sandbox = Sandbox::new();
+    let pane = progress_fixture_pane(&sandbox).await;
+    let report = sandbox.project.join("reconnect-progress.json");
+    progress_fixture_report(&report, "reconnect-task", "running");
+    let monitor = progress_register(&sandbox, pane, &progress_fixture_probe(&report)).await;
+    let mut interrupted =
+        progress_wait_process(&sandbox, pane, &["progress", "wait", &monitor.to_string()]);
+    progress_wait_is_pending(&mut interrupted).await;
+    interrupted.child.kill().await.unwrap();
+    interrupted.child.wait().await.unwrap();
+    drop(interrupted);
+
+    // Killing only the test-owned observation process leaves its monitor and
+    // task intact. A replacement connection observes the original monitor.
+    let mut reconnected =
+        progress_wait_process(&sandbox, pane, &["progress", "wait", &monitor.to_string()]);
+    progress_wait_is_pending(&mut reconnected).await;
+    progress_fixture_report(&report, "reconnect-task", "done");
+    let result = progress_wait_result(reconnected, 0).await;
+    assert_eq!(result["monitor_id"], monitor);
+    assert_eq!(result["progress"]["report"]["job_id"], "reconnect-task");
+
+    let clear_report = sandbox.project.join("clear-progress.json");
+    progress_fixture_report(&clear_report, "clear-task", "running");
+    let cleared_id =
+        progress_register(&sandbox, pane, &progress_fixture_probe(&clear_report)).await;
+    let mut cleared_wait = progress_wait_process(
+        &sandbox,
+        pane,
+        &["progress", "wait", &cleared_id.to_string()],
+    );
+    progress_wait_is_pending(&mut cleared_wait).await;
+    let clear = progress_pane_command(&sandbox, pane)
+        .args([
+            "progress",
+            "clear",
+            "--monitor-id",
+            &cleared_id.to_string(),
+            "--running",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(clear.status.success());
+    let cleared = progress_wait_result(cleared_wait, 5).await;
+    assert_eq!(cleared["outcome"], "cleared");
+
+    let failed_report = sandbox.project.join("failed-progress.json");
+    progress_fixture_report(&failed_report, "failed-probe-task", "running");
+    let failed_id =
+        progress_register(&sandbox, pane, &progress_fixture_probe(&failed_report)).await;
+    let mut failed_wait = progress_wait_process(
+        &sandbox,
+        pane,
+        &["progress", "wait", &failed_id.to_string()],
+    );
+    progress_wait_is_pending(&mut failed_wait).await;
+    // Three failed observations settle monitor health without inventing a
+    // task-success or task-error report.
+    std::fs::write(&failed_report, "invalid synthetic probe output").unwrap();
+    let failed = progress_wait_result(failed_wait, 4).await;
+    assert_eq!(failed["outcome"], "monitor-failed");
+    assert_eq!(failed["progress"]["report"]["status"], "running");
 }

@@ -729,6 +729,9 @@ impl AnimationSurface {
     pub fn article_background(&self, x: u16, y: u16) -> Option<(u8, u8, u8)> {
         self.display.as_ref()?.cell(x, y)?.article_background
     }
+    pub fn image_background(&self, x: u16, y: u16) -> Option<(u8, u8, u8)> {
+        self.display.as_ref()?.cell(x, y)?.image_background
+    }
     pub fn article_underline(&self, x: u16, y: u16) -> bool {
         self.display
             .as_ref()

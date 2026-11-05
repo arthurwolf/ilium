@@ -15,3 +15,8 @@ Observation health is separate from semantic activity: successful classification
 - Panes `Idle`/`Done`/`PlainShell` poll slow (~30–60s) — none of those change on their own between polls, no reason to burn CPU reading their screen buffer.
 - All intervals configurable in `~/.config/ilium/config.toml`.
 
+### Custom tree status rules
+
+Normal and Attention retain their existing projections. Custom evaluates the globally configured ordered rules against pane facts in `ilium-core`; the first enabled match selects one status visual. The client owns editing, persistence and terminal rendering. Flat expressions are represented as OR groups of AND terms, with negation attached to individual terms; an unknown observation never becomes a match through negation.
+
+Only the server owns the terminal parser. For enabled screen-pattern conditions, the client sends a bounded, connection-scoped watch set over IPC. The server compiles the patterns, observes each current visible grid and sends match identifiers or unknown results, rather than sending the grid for this feature. Screen generations and subscription revisions fence stale observations. Busy or oversized grids are unknown, and replacing a terminal or tree subscription invalidates prior answers. Watch tasks belong to the connection and are replaced or stopped with their subscription. Pattern count, length, compiled size and screen bytes are bounded. The client retries a watch request refused by its local queue and uses the production tree renderer for the live settings preview.

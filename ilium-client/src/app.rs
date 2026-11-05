@@ -947,6 +947,12 @@ pub enum AgentMonitoringRow {
     ProgressFillStyle,
     WorkingPollSeconds,
     IdlePollSeconds,
+    CacheKeepaliveEnabled,
+    CacheKeepaliveClaudeInterval,
+    CacheKeepaliveCodexInterval,
+    CacheKeepaliveMonitor,
+    CacheKeepaliveCommand,
+    CacheKeepaliveSubagent,
     CustomSignaturesHeading,
     CustomSignature(usize),
     AddCustomSignature,
@@ -966,6 +972,12 @@ impl AgentMonitoringRow {
             Self::ProgressFillStyle,
             Self::WorkingPollSeconds,
             Self::IdlePollSeconds,
+            Self::CacheKeepaliveEnabled,
+            Self::CacheKeepaliveClaudeInterval,
+            Self::CacheKeepaliveCodexInterval,
+            Self::CacheKeepaliveMonitor,
+            Self::CacheKeepaliveCommand,
+            Self::CacheKeepaliveSubagent,
             Self::CustomSignaturesHeading,
         ];
         rows.extend((0..custom_signature_count).map(Self::CustomSignature));
@@ -1477,6 +1489,10 @@ pub enum ContextMenuAction {
     ResourceMarkOffline,
     ResourceUnlink,
     ResourceDelete,
+    /// Participant-row section: act on one request in a resource's queue.
+    ResourceRequestShow,
+    ResourceRequestCancel,
+    ResourceRequestRelease,
     ChangeProjectFolder,
     /// Sets a durable bookmark on the context-menu target. The desired state
     /// is captured while the menu opens, making the server mutation idempotent
@@ -1539,6 +1555,8 @@ impl ContextMenuAction {
             Self::ResourceMarkOffline => (7, 3),
             Self::ResourceUnlink => (7, 4),
             Self::ResourceDelete => (7, 5),
+            Self::ResourceRequestShow => (7, 0),
+            Self::ResourceRequestCancel | Self::ResourceRequestRelease => (7, 4),
             Self::Worktree => (3, 0),
             Self::ManageWorktrees => (3, 1),
             Self::ChangeProjectFolder => (3, 2),
@@ -1602,7 +1620,10 @@ impl ContextMenuAction {
             | Self::ResourceResume
             | Self::ResourceMarkOffline
             | Self::ResourceUnlink
-            | Self::ResourceDelete => IconTarget::Project,
+            | Self::ResourceDelete
+            | Self::ResourceRequestShow
+            | Self::ResourceRequestCancel
+            | Self::ResourceRequestRelease => IconTarget::Project,
             Self::SetBookmark { .. } => IconTarget::Bookmark,
             Self::SetNodeLockedClosed { .. } => IconTarget::Lock,
             Self::Rename => IconTarget::RowRename,
@@ -1647,6 +1668,9 @@ impl ContextMenuAction {
             Self::ResourceMarkOffline => "Resource: mark hardware offline…".to_string(),
             Self::ResourceUnlink => "Resource: remove from this project…".to_string(),
             Self::ResourceDelete => "Resource: delete…".to_string(),
+            Self::ResourceRequestShow => "Request: show in the control panel".to_string(),
+            Self::ResourceRequestCancel => "Request: cancel this waiting request…".to_string(),
+            Self::ResourceRequestRelease => "Request: release (I am done using it)…".to_string(),
             Self::ChangeProjectFolder => "Change project folder\u{2026}".to_string(),
             Self::SetBookmark {
                 is_bookmarked: true,
@@ -1686,9 +1710,13 @@ impl ContextMenuAction {
 pub enum SubmenuItemAction {
     SetTreeOrder(TreeOrder),
     AgentHere(BuiltinAgentProvider),
+    AgentAtWorktree(BuiltinAgentProvider),
+    AgentAtProjectRoot(BuiltinAgentProvider),
     AgentInNewWorktree(BuiltinAgentProvider),
     AgentInExistingWorktree(BuiltinAgentProvider),
     CustomAgentHere(String),
+    CustomAgentAtWorktree(String),
+    CustomAgentAtProjectRoot(String),
     CustomAgentInWorktree(String, bool),
     CopyWorktreeBranch,
     CopyWorktreePath,
@@ -2188,9 +2216,11 @@ pub(crate) const FROZEN_DIALOG_BUTTON_LABEL: &str = "      [ Unfreeze agent ]   
 pub(crate) const UNFREEZING_AGENT_STATUS: &str = "Unfreezing agent…";
 
 /// Prompts of one agent session, read from its transcript off the UI thread.
+#[derive(Debug)]
 struct LastPromptBackfill {
     pane_id: NodeId,
     session_id: String,
+    binding: Arc<()>,
     /// `None` when the transcript could not be located or read; the read is
     /// then retried after [`LAST_PROMPT_BACKFILL_RETRY`].
     read: Option<(std::path::PathBuf, crate::transcript_context::PromptRead)>,
@@ -2201,6 +2231,8 @@ struct LastPromptBackfill {
 /// reach the server's `last_prompt`, so the transcript is the only source.
 struct PromptTail {
     session_id: String,
+    /// Identifies this particular binding, even if a session ID is reused.
+    binding: Arc<()>,
     /// Verified transcript, once located.
     path: Option<std::path::PathBuf>,
     /// Byte offset the next incremental read resumes at.
@@ -2224,6 +2256,7 @@ impl PromptTail {
     fn new(session_id: String, now: Instant) -> Self {
         Self {
             session_id,
+            binding: Arc::new(()),
             path: None,
             offset: 0,
             next_read_at: now,
@@ -2364,6 +2397,11 @@ pub struct App {
     /// actual values live here). See `apply_ui_settings`/
     /// `apply_and_persist_ui_settings`.
     pub ui_settings: UiSettings,
+    /// Global custom tree-icon rules and the optional editor for them.
+    pub custom_status_rules: ilium_core::status_rule_expression::StatusRules,
+    pub custom_status_screen_observations: crate::status_screen_observations::ScreenObservations,
+    pub custom_status_rules_error: Option<String>,
+    pub custom_status_rules_editor: Option<crate::status_rules_editor::EditorState>,
     /// One wall-clock sample per maintenance tick keeps footer layout and drawing consistent.
     progress_display_now_unix_millis: u64,
     /// This session's live shortcut-base setting. Input dispatch and every
@@ -3105,6 +3143,10 @@ impl App {
                 UiSettings::default().left_panel_sizing.unfocused_width,
             ),
             ui_settings: UiSettings::default(),
+            custom_status_rules: ilium_core::status_rule_expression::default_rules(),
+            custom_status_screen_observations: crate::status_screen_observations::ScreenObservations::default(),
+            custom_status_rules_error: None,
+            custom_status_rules_editor: None,
             progress_display_now_unix_millis: crate::scheduled_input::unix_millis_now(),
             keyboard_settings: KeyboardSettings::default(),
             keybindings: keymap::LEADER_BINDINGS.to_vec(),
@@ -5071,10 +5113,18 @@ impl App {
         }
     }
 
+    /// Retire the transcript cursor when the server changes its binding.
+    pub(crate) fn invalidate_last_prompt_transcript(&mut self, pane_id: NodeId, clear: bool) {
+        self.last_prompt_tails.remove(&pane_id);
+        if clear {
+            self.record_last_prompt(pane_id, None);
+        }
+    }
+
     /// Catches prompts that reached the tree without a live event (the
     /// initial snapshot) so they join the history.
-    pub(crate) fn sync_last_prompt_histories(&mut self) {
-        self.apply_last_prompt_backfills();
+    pub(crate) fn sync_last_prompt_histories(&mut self) -> bool {
+        let mut changed = self.apply_last_prompt_backfills();
         self.request_last_prompt_backfills();
         let missing: Vec<(NodeId, String)> = self
             .panes
@@ -5090,7 +5140,9 @@ impl App {
             .collect();
         for (pane_id, prompt) in missing {
             self.record_last_prompt(pane_id, Some(&prompt));
+            changed = true;
         }
+        changed
     }
 
     /// Starts a background read of the transcript of every agent pane whose
@@ -5130,6 +5182,7 @@ impl App {
                 continue;
             }
             tail.in_flight = true;
+            let binding = Arc::clone(&tail.binding);
             let known_path = tail.path.clone();
             let offset = tail.offset;
             let sender = self.last_prompt_backfill_sender.clone();
@@ -5162,6 +5215,7 @@ impl App {
                     let _ = sender.send(LastPromptBackfill {
                         pane_id,
                         session_id,
+                        binding,
                         read,
                     });
                 });
@@ -5174,14 +5228,30 @@ impl App {
         }
     }
 
-    fn apply_last_prompt_backfills(&mut self) {
+    fn apply_last_prompt_backfills(&mut self) -> bool {
+        let mut changed = false;
         while let Ok(backfill) = self.last_prompt_backfill_receiver.try_recv() {
             let now = Instant::now();
+            if self
+                .known_agent_history_context(backfill.pane_id)
+                .is_none_or(|(_, session_id, _)| session_id != backfill.session_id)
+            {
+                if let Some(tail) = self
+                    .last_prompt_tails
+                    .get_mut(&backfill.pane_id)
+                    .filter(|tail| Arc::ptr_eq(&tail.binding, &backfill.binding))
+                {
+                    tail.in_flight = false;
+                }
+                continue;
+            }
             let Some(tail) = self.last_prompt_tails.get_mut(&backfill.pane_id) else {
                 continue;
             };
             // A pane that moved to another session meanwhile is not this result's.
-            if tail.session_id != backfill.session_id {
+            if tail.session_id != backfill.session_id
+                || !Arc::ptr_eq(&tail.binding, &backfill.binding)
+            {
                 continue;
             }
             tail.in_flight = false;
@@ -5196,6 +5266,8 @@ impl App {
                 .last_prompt_history
                 .entry(backfill.pane_id)
                 .or_default();
+            let previously_displayed = history.displayed().map(str::to_owned);
+            let previous_visibility = history.visibility();
             if read.replace {
                 history.backfill(&read.prompts);
             } else {
@@ -5203,7 +5275,10 @@ impl App {
                     history.record(prompt);
                 }
             }
+            changed |= previously_displayed.as_deref() != history.displayed()
+                || previous_visibility != history.visibility();
         }
+        changed
     }
 
     /// Which banner-toolbar navigation buttons have somewhere to go.
@@ -7188,12 +7263,50 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Validate and queue an ordered configuration write before applying a
+    /// ruleset. A failed read must not silently replace the saved rules.
+    pub(crate) fn settings_save_custom_status_rules(
+        &mut self,
+        rules: ilium_core::status_rule_expression::StatusRules,
+    ) -> Result<(), String> {
+        if let Some(error) = &self.custom_status_rules_error {
+            return Err(format!("Cannot replace unreadable saved rules: {error}"));
+        }
+        let errors = crate::config::validate_status_rules(&rules);
+        if !errors.is_empty() {
+            return Err(errors.join("; "));
+        }
+        let directory = self.config_dir.clone().ok_or("The configuration directory is unavailable")?;
+        self.enqueue_configuration(
+            directory,
+            crate::filesystem::configuration::ConfigurationChange::StatusRules(Box::new(rules.clone())),
+            crate::filesystem::configurations::ConfigurationIntent::Plain { label: "custom status rules", success: None },
+        )?;
+        self.custom_status_rules = rules;
+        if !self.custom_status_screen_observations.watches_match(&self.custom_status_rules) {
+            self.refresh_custom_status_screen_watches();
+        }
+        self.bump_tree_version();
+        Ok(())
+    }
+
+    /// A new revision invalidates results before the replacement reaches the
+    /// server, so late observations cannot be attributed to edited rules or
+    /// a replaced terminal.
+    pub(crate) fn refresh_custom_status_screen_watches(&mut self) {
+        let had_watches = self.custom_status_screen_observations.has_watches();
+        let retry_pending = self.custom_status_screen_observations.retry_due(std::time::Instant::now());
+        let (revision, watches) = self.custom_status_screen_observations.replace_rules(&self.custom_status_rules);
+        if had_watches || !watches.is_empty() || retry_pending {
+            let admitted = self.queue_request(ClientRequest::SetStatusScreenWatches { revision, watches });
+            self.custom_status_screen_observations.set_subscription_admitted(admitted);
+        }
+    }
+
     pub fn settings_adjust_agent_monitoring_mode(&mut self, direction: i32) {
-        let mode = if direction < 0 {
-            crate::agent_monitoring::AgentMonitoringMode::Normal
-        } else {
-            crate::agent_monitoring::AgentMonitoringMode::Attention
-        };
+        let modes = crate::agent_monitoring::AgentMonitoringMode::ALL;
+        let current = modes.iter().position(|mode| *mode == self.ui_settings.agent_monitoring_mode).unwrap_or(0);
+        let mode = modes[(current as i32 + direction.signum()).rem_euclid(modes.len() as i32) as usize];
         self.settings_set_agent_monitoring_mode(mode);
     }
 
@@ -7232,6 +7345,31 @@ impl App {
             }
             AgentMonitoringRow::ProgressFillStyle => {
                 self.settings_adjust_progress_fill_style(direction)
+            }
+            AgentMonitoringRow::CacheKeepaliveEnabled
+            | AgentMonitoringRow::CacheKeepaliveClaudeInterval
+            | AgentMonitoringRow::CacheKeepaliveCodexInterval
+            | AgentMonitoringRow::CacheKeepaliveMonitor
+            | AgentMonitoringRow::CacheKeepaliveCommand
+            | AgentMonitoringRow::CacheKeepaliveSubagent => {
+                let mut ui = self.ui_settings.clone();
+                let policy = &mut ui.cache_keepalive;
+                match row {
+                    AgentMonitoringRow::CacheKeepaliveEnabled => policy.enabled = !policy.enabled,
+                    AgentMonitoringRow::CacheKeepaliveMonitor => policy.on_monitor = !policy.on_monitor,
+                    AgentMonitoringRow::CacheKeepaliveCommand => policy.on_command = !policy.on_command,
+                    AgentMonitoringRow::CacheKeepaliveSubagent => policy.on_subagent = !policy.on_subagent,
+                    AgentMonitoringRow::CacheKeepaliveClaudeInterval | AgentMonitoringRow::CacheKeepaliveCodexInterval => {
+                        let interval = if row == AgentMonitoringRow::CacheKeepaliveClaudeInterval {
+                            &mut policy.claude_interval_minutes
+                        } else {
+                            &mut policy.codex_interval_minutes
+                        };
+                        *interval = if direction < 0 { interval.saturating_sub(1).max(1) } else { interval.saturating_add(1).min(1440) };
+                    }
+                    _ => unreachable!(),
+                }
+                self.apply_and_persist_ui_settings(ui);
             }
             AgentMonitoringRow::WorkingPollSeconds | AgentMonitoringRow::IdlePollSeconds => {
                 let Some(mut settings) = self.agent_detection_settings.clone() else {
@@ -12006,6 +12144,26 @@ impl App {
         let motion_off = self.ui_settings.motion_level == crate::config::MotionLevel::Off;
         let mut requirements = AnimationRequirements::default();
 
+        // Custom rules can animate even when the underlying agent is idle. The
+        // settings cards and the editor also render those rules as previews.
+        let custom_preview_visible = matches!(&self.mode, Mode::Settings(settings)
+            if settings.tab == SettingsTab::AgentMonitoring);
+        if custom_preview_visible
+            || self.ui_settings.agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Custom
+        {
+            if let Some(delay_millis) = crate::status_rule_visual::animation_frame_delay(
+                &self.custom_status_rules,
+                self.ui_settings.motion_level,
+                elapsed_ms,
+            ) {
+                requirements.is_active = true;
+                retain_minimum_delay(
+                    &mut requirements.next_semantic_delay,
+                    Duration::from_millis(delay_millis),
+                );
+            }
+        }
+
         // An address search answers on its own thread; poll for it at 10 Hz.
         if let Mode::LocationPicker(picker) = &self.mode {
             if picker.is_searching() {
@@ -14919,6 +15077,27 @@ impl App {
     /// clamped inside the screen.
     pub fn open_context_menu(&mut self, target: NodeId, column: u16, row: u16) {
         let mut actions = self.context_actions_for(target);
+        if let Some((_, resource_id, reservation_id)) = self.resources.context_participant.clone() {
+            let state = self.resources.record(&resource_id).and_then(|record| {
+                record
+                    .reservations
+                    .iter()
+                    .find(|claim| claim.id == reservation_id)
+                    .map(|claim| claim.state.clone())
+            });
+            let mut section = vec![ContextMenuAction::ResourceRequestShow];
+            match state {
+                Some(ilium_core::resource_queue::ReservationState::Queued) => {
+                    section.push(ContextMenuAction::ResourceRequestCancel);
+                }
+                Some(ilium_core::resource_queue::ReservationState::Owned) => {
+                    section.push(ContextMenuAction::ResourceRequestRelease);
+                }
+                _ => {}
+            }
+            section.extend(actions);
+            actions = section;
+        }
         if let Some(resource_id) = self.resources.context_resource.clone() {
             let paused = self.resources.record(&resource_id).is_some_and(|record| {
                 !matches!(record.gate, ilium_core::resource_queue::ResourceGate::Open)
@@ -16505,13 +16684,31 @@ impl App {
                     .unwrap_or(0),
             ),
             ContextMenuAction::NewAgent(provider) => {
-                let mut items = vec![
-                    SubmenuItem {
+                let in_worktree = self.tree.worktree_container_for_node(menu.target).is_some();
+                let mut items = if in_worktree {
+                    vec![
+                        SubmenuItem {
+                            action: SubmenuItemAction::AgentAtWorktree(provider),
+                            label: "In this worktree".into(),
+                            disabled_reason: None,
+                            disabled_reason_retention: None,
+                        },
+                        SubmenuItem {
+                            action: SubmenuItemAction::AgentAtProjectRoot(provider),
+                            label: "At project root".into(),
+                            disabled_reason: None,
+                            disabled_reason_retention: None,
+                        },
+                    ]
+                } else {
+                    vec![SubmenuItem {
                         action: SubmenuItemAction::AgentHere(provider),
-                        label: "Here".to_string(),
+                        label: "Here".into(),
                         disabled_reason: None,
                         disabled_reason_retention: None,
-                    },
+                    }]
+                };
+                items.extend([
                     SubmenuItem {
                         action: SubmenuItemAction::AgentInNewWorktree(provider),
                         label: "In new worktree…".to_string(),
@@ -16524,18 +16721,31 @@ impl App {
                         disabled_reason: None,
                         disabled_reason_retention: None,
                     },
-                ];
+                ]);
                 for profile in self
                     .custom_agents
                     .profiles
                     .iter()
                     .filter(|profile| profile.base_provider == provider)
                 {
-                    for (action, location) in [
-                        (
+                    let mut locations = if in_worktree {
+                        vec![
+                            (
+                                SubmenuItemAction::CustomAgentAtWorktree(profile.id.clone()),
+                                "in this worktree",
+                            ),
+                            (
+                                SubmenuItemAction::CustomAgentAtProjectRoot(profile.id.clone()),
+                                "at project root",
+                            ),
+                        ]
+                    } else {
+                        vec![(
                             SubmenuItemAction::CustomAgentHere(profile.id.clone()),
                             "here",
-                        ),
+                        )]
+                    };
+                    locations.extend([
                         (
                             SubmenuItemAction::CustomAgentInWorktree(profile.id.clone(), false),
                             "in new worktree…",
@@ -16544,7 +16754,8 @@ impl App {
                             SubmenuItemAction::CustomAgentInWorktree(profile.id.clone(), true),
                             "in existing worktree…",
                         ),
-                    ] {
+                    ]);
+                    for (action, location) in locations {
                         items.push(SubmenuItem {
                             action,
                             label: format!("{} {}: {location}", profile.icon, profile.name),
@@ -16557,8 +16768,10 @@ impl App {
                     items,
                     match self.git_settings.default_where {
                         crate::config::GitDefaultWhere::Here => 0,
-                        crate::config::GitDefaultWhere::NewWorktree => 1,
-                        crate::config::GitDefaultWhere::ExistingWorktree => 2,
+                        crate::config::GitDefaultWhere::NewWorktree => 1 + usize::from(in_worktree),
+                        crate::config::GitDefaultWhere::ExistingWorktree => {
+                            2 + usize::from(in_worktree)
+                        }
                     },
                 )
             }
@@ -16689,6 +16902,40 @@ impl App {
             SubmenuItemAction::AgentHere(provider) => {
                 self.action_new_command_pane(provider.command_line());
             }
+            SubmenuItemAction::AgentAtWorktree(provider) => {
+                self.start_context_agent_at_worktree(target, provider, None);
+            }
+            SubmenuItemAction::AgentAtProjectRoot(provider) => {
+                self.start_context_agent_at_project_root(
+                    target,
+                    ilium_ipc::NewPaneKind::Command(provider.command_line().into()),
+                    provider.command_line().into(),
+                );
+            }
+            SubmenuItemAction::CustomAgentAtWorktree(profile_id)
+            | SubmenuItemAction::CustomAgentAtProjectRoot(profile_id) => {
+                let identity = self.custom_agents.profiles.iter()
+                    .find(|profile| profile.id == profile_id)
+                    .map(|profile| ilium_core::custom_agent::CustomAgentIdentity {
+                        profile_id: profile.id.clone(),
+                        base_provider: profile.base_provider,
+                    });
+                if let Some(identity) = identity {
+                    if matches!(&item.action, SubmenuItemAction::CustomAgentAtWorktree(_)) {
+                        self.start_context_agent_at_worktree(
+                            target, identity.base_provider, Some(identity),
+                        );
+                    } else {
+                        self.start_context_agent_at_project_root(
+                            target,
+                            ilium_ipc::NewPaneKind::CustomAgent { identity, initial_input: None },
+                            profile_id,
+                        );
+                    }
+                } else {
+                    self.status_message = Some("The custom agent profile no longer exists".into());
+                }
+            }
             SubmenuItemAction::AgentInNewWorktree(provider) => {
                 self.open_create_agent_workspace_dialog(provider, target, false)
             }
@@ -16750,6 +16997,62 @@ impl App {
         }
         if matches!(self.mode, Mode::ContextMenu(_)) {
             self.mode = Mode::Normal;
+        }
+    }
+
+    fn start_context_agent_at_worktree(
+        &mut self,
+        target: NodeId,
+        provider: BuiltinAgentProvider,
+        identity: Option<ilium_core::custom_agent::CustomAgentIdentity>,
+    ) {
+        let Some(worktree) = self.tree.worktree_container_for_node(target) else {
+            self.status_message = Some("The selected worktree is no longer available".into());
+            return;
+        };
+        let Some(path) = self.tree.get(worktree).and_then(|node| match &node.kind {
+            NodeKind::Container(container) => match &container.kind {
+                ilium_core::ContainerKind::Worktree { worktree_root, .. } => {
+                    Some(worktree_root.clone())
+                }
+                _ => None,
+            },
+            _ => None,
+        }) else {
+            self.status_message = Some("The selected worktree is no longer available".into());
+            return;
+        };
+        let parent_group = self.tree.project_ancestor(worktree).unwrap_or(ROOT_ID);
+        let request_id = self.next_workspace_request_id();
+        let spec = ilium_ipc::WorkspaceCreateSpec::Existing { path };
+        let request = match identity {
+            Some(identity) => ClientRequest::CreateCustomAgentInWorkspace {
+                request_id, parent_group, identity, spec, initial_input: None,
+            },
+            None => ClientRequest::CreateAgentInWorkspace {
+                request_id, parent_group, provider, spec, initial_input: None,
+            },
+        };
+        if self.queue_request(request) {
+            self.active_workspace_create_request_id = Some(request_id);
+            self.status_message = Some("Starting agent in worktree…".into());
+        }
+    }
+
+    fn start_context_agent_at_project_root(
+        &mut self,
+        target: NodeId,
+        kind: ilium_ipc::NewPaneKind,
+        title: String,
+    ) {
+        let parent_group = self.tree.project_ancestor(target).unwrap_or(ROOT_ID);
+        if self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
+            parent_group,
+            kind,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        }) {
+            self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, title);
         }
     }
 
@@ -17297,7 +17600,12 @@ impl App {
             | ContextMenuAction::ResourceResume
             | ContextMenuAction::ResourceMarkOffline
             | ContextMenuAction::ResourceUnlink
-            | ContextMenuAction::ResourceDelete => self.run_resource_context_action(target, action),
+            | ContextMenuAction::ResourceDelete
+            | ContextMenuAction::ResourceRequestShow
+            | ContextMenuAction::ResourceRequestCancel
+            | ContextMenuAction::ResourceRequestRelease => {
+                self.run_resource_context_action(target, action)
+            }
             ContextMenuAction::ChangeProjectFolder => self.action_change_project_folder(target),
             ContextMenuAction::SetBookmark { is_bookmarked } => {
                 self.request_set_node_bookmarked(target, is_bookmarked);
@@ -21166,6 +21474,126 @@ mod tests {
     }
 
     #[test]
+    fn prompt_read_from_cleared_session_cannot_restore_old_history() {
+        let mut app = app();
+        let pane_id = NodeId(7);
+        let mut tail = PromptTail::new("old-session".into(), Instant::now());
+        tail.in_flight = true;
+        let binding = Arc::clone(&tail.binding);
+        app.last_prompt_tails.insert(pane_id, tail);
+        app.last_prompt_backfill_sender
+            .send(LastPromptBackfill {
+                pane_id,
+                session_id: "old-session".into(),
+                binding,
+                read: Some((
+                    PathBuf::from("/synthetic/transcript.jsonl"),
+                    crate::transcript_context::PromptRead {
+                        prompts: vec!["previous session prompt".into()],
+                        next_offset: 1,
+                        replace: true,
+                    },
+                )),
+            })
+            .unwrap();
+
+        // The session binding was cleared while the transcript read ran.
+        app.apply_last_prompt_backfills();
+        assert!(!app.last_prompt_history.contains_key(&pane_id));
+        assert!(!app.last_prompt_tails[&pane_id].in_flight);
+    }
+
+    #[test]
+    fn prompt_read_from_replaced_binding_cannot_update_same_session() {
+        let mut app = app();
+        let group = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "claude", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(
+                    AgentClass::Claude,
+                    ilium_core::AgentActivity::Working,
+                    None,
+                ),
+            )
+            .unwrap();
+        app.agent_session_ids.insert(pane_id, "session".into());
+        let old = PromptTail::new("session".into(), Instant::now());
+        let binding = Arc::clone(&old.binding);
+        app.last_prompt_tails
+            .insert(pane_id, PromptTail::new("session".into(), Instant::now()));
+        app.last_prompt_backfill_sender
+            .send(LastPromptBackfill {
+                pane_id,
+                session_id: "session".into(),
+                binding,
+                read: Some((
+                    PathBuf::from("/synthetic/transcript.jsonl"),
+                    crate::transcript_context::PromptRead {
+                        prompts: vec!["stale prompt".into()],
+                        next_offset: 1,
+                        replace: true,
+                    },
+                )),
+            })
+            .unwrap();
+
+        app.apply_last_prompt_backfills();
+        assert!(!app.last_prompt_history.contains_key(&pane_id));
+    }
+
+    #[test]
+    fn transcript_prompt_update_requests_redraw_without_geometry_change() {
+        let mut app = app();
+        let group = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "claude", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(
+                    AgentClass::Claude,
+                    ilium_core::AgentActivity::Working,
+                    None,
+                ),
+            )
+            .unwrap();
+        app.agent_session_ids.insert(pane_id, "session".into());
+        let now = Instant::now();
+        let mut workers =
+            crate::search_workers::SearchWorkers::new(crate::execution::test_client());
+        crate::tick::on_tick(&mut app, now, false, &mut workers);
+        assert!(!crate::tick::on_tick(&mut app, now, false, &mut workers));
+        let tail = PromptTail::new("session".into(), now);
+        let binding = Arc::clone(&tail.binding);
+        app.last_prompt_tails.insert(pane_id, tail);
+        app.last_prompt_backfill_sender
+            .send(LastPromptBackfill {
+                pane_id,
+                session_id: "session".into(),
+                binding,
+                read: Some((
+                    PathBuf::from("/synthetic/transcript.jsonl"),
+                    crate::transcript_context::PromptRead {
+                        prompts: vec!["new prompt".into()],
+                        next_offset: 1,
+                        replace: true,
+                    },
+                )),
+            })
+            .unwrap();
+
+        assert!(crate::tick::on_tick(&mut app, now, false, &mut workers));
+        assert_eq!(app.display_last_agent_prompt(pane_id), Some("new prompt"));
+    }
+
+    #[test]
     fn custom_toolbar_keyboard_launches_selected_identity_without_environment_payload() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         use ilium_core::custom_agent::{CustomAgentProfile, EnvironmentEntry};
@@ -21177,6 +21605,8 @@ mod tests {
                 name: id.into(),
                 icon: "✦".into(),
                 base_provider: BuiltinAgentProvider::Claude,
+                command: String::new(),
+                arguments: String::new(),
                 environment: vec![EnvironmentEntry {
                     key: "TOKEN".into(),
                     value: "private-sentinel".into(),
@@ -21528,6 +21958,26 @@ mod tests {
                 .ui
                 .agent_tree_model_icons
         );
+    }
+
+    #[test]
+    fn cache_keepalive_settings_adjust_and_persist_independently() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+        assert!(!app.ui_settings.cache_keepalive.enabled);
+        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveEnabled, 1);
+        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveClaudeInterval, -1);
+        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveCodexInterval, 1);
+        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveMonitor, 1);
+        app.settle_filesystem_for_test();
+        let policy = crate::config::load(config_dir.path()).unwrap().ui.cache_keepalive;
+        assert!(policy.enabled);
+        assert_eq!(policy.claude_interval_minutes, 54);
+        assert_eq!(policy.codex_interval_minutes, 26);
+        assert!(!policy.on_monitor);
+        assert!(policy.on_command);
+        assert!(policy.on_subagent);
     }
 
     #[test]

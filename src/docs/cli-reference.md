@@ -279,9 +279,9 @@ ilium chat context --limit 40
 
 ```sh
 ilium progress check  --command '<probe>'
-ilium progress set    --command '<probe>' [--interval-seconds <n>] [--wait [--timeout-seconds <n>]] [--replace]
-ilium progress wait   [<monitor_id>] [--timeout-seconds <n>]
-ilium wait            [<monitor_id>] [--timeout-seconds <n>]
+ilium progress set    --command '<probe>' [--interval-seconds <n>] [--wait] [--replace]
+ilium progress wait   [<monitor_id>]
+ilium wait            [<monitor_id>]
 ilium progress status
 ilium progress clear  [--monitor-id <id> [--running] | --all]
 ```
@@ -336,7 +336,6 @@ Validates the probe, then atomically adds a monitor to this pane, and waits for 
 | `--command <probe>` | required | The probe command line. |
 | `--interval-seconds <n>` | 1 | How often the probe re-runs, from 1 to 86400 (24 hours). |
 | `--wait` | off | After the acknowledgement line, block like `ilium progress wait <monitor_id>` and print its `progress_wait` line. |
-| `--timeout-seconds <n>` | none | With `--wait`: stop waiting after this many seconds (exit 6). Agents should leave it out and give the command their tool's longest wait instead. |
 | `--replace` | off | Clear every monitor of this pane first. Use only on purpose. |
 
 ```sh
@@ -351,12 +350,11 @@ Keep the `monitor_id`. After this, do not poll: the server watches the task and 
 
 ### progress wait
 
-Blocks until one monitor settles, then prints one `progress_wait` record and exits with a status an agent can act on. `ilium wait` is the same command. This is the normal way for an agent to wait: one blocking command instead of ending its turn or polling.
+Blocks until one monitor settles, then prints one `progress_wait` record and exits with a status an agent can act on. There is no elapsed-time deadline; the removed deadline flag is rejected as unsupported. Task, monitor/connection failure, clear/replacement and interruption remain terminal conditions. `ilium wait` is the same command. This is the normal way for an agent to wait: one blocking command instead of ending its turn or polling.
 
 | Argument | Meaning |
 | --- | --- |
 | `<monitor_id>` | The monitor to wait for. Optional when the pane has exactly one monitor; with several, the command refuses with `monitor-ambiguous` (exit 2) and lists their IDs in `monitor_ids`. |
-| `--timeout-seconds <n>` | Stop waiting after this many seconds. The monitor keeps running; run the same command again to keep waiting. |
 
 ```text
 {"type":"progress_wait","pane_id":12,"monitor_id":3,"outcome":"done","exit_code":0,"waited_seconds":412,"composer_notice":"suppressed","next":"...","progress":{...}}
@@ -369,7 +367,6 @@ Blocks until one monitor settles, then prints one `progress_wait` record and exi
 | 3 | `error` | The task reported `error`. |
 | 4 | `monitor-failed` | The probe stopped working; the task outcome is unknown, so check the task directly. |
 | 5 | `cleared`, `no-monitor` | The monitor was cleared while waiting, or does not exist. |
-| 6 | `still-running` | `--timeout-seconds` elapsed. |
 
 While a wait is held, the server hands the outcome to it instead of typing a notification into the agent's prompt (`composer_notice` is `suppressed`). If the wait is killed first, the typed notification still arrives; `may-also-arrive` means a typed message about the same monitor is a duplicate.
 
@@ -421,7 +418,7 @@ probe='cat /tmp/tests.status.json'
 # 3. Validate, then register and block until the task settles.
 ilium progress check --command "$probe"
 # Run it with the longest wait your tool allows (in Claude Code, as a background
-# command); no --timeout-seconds, so it returns only when the task ends.
+# command). The logical wait has no elapsed-time deadline.
 ilium progress set   --command "$probe" --interval-seconds 5 --wait
 
 # 4. After handling the result:
@@ -801,7 +798,7 @@ ilium --reset-session new-session scratch
 
 ## Shared resource queues
 
-`ilium resource` (alias `ilium ressource`) coordinates exclusive access across linked projects on this machine. Commands connect to an existing project server; they never start or restart one. Use `--project PATH` and optionally `--session NAME` to select it. Agent operations infer the current pane or accept `--agent PANE` / `--agent SESSION/PANE`.
+`ilium resource` (alias `ilium ressource`) coordinates exclusive access across linked projects on this machine. Commands connect to an existing project server; they never start or restart one. Use `--project PATH` or the global `--cwd PATH` to select a project and optionally `--session NAME` to select its session. An explicit project directory takes precedence over an inherited pane connection; when selecting a project explicitly, supply `--agent PANE` or `--agent SESSION/PANE` for agent operations. Without an explicit project or session, commands can infer the current pane.
 
 | Command | Result |
 |---|---|

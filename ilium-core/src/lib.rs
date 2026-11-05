@@ -15,9 +15,11 @@ pub mod resource_queue;
 pub use allocation::AllocationSize;
 pub mod agent_recovery;
 pub mod animation_recommendation;
+pub mod cache_keepalive;
 pub mod custom_agent;
 pub mod option_compatible_list;
 pub mod progress_timing;
+pub mod status_rule_expression;
 pub use progress_timing::{
     EtaEstimate, ProgressCheck, ProgressCheckOutcome, ProgressRate, ProgressSample, ProgressTiming,
 };

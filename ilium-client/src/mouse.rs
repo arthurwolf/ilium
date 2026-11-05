@@ -1308,11 +1308,22 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                 .map(|hit| hit.id)
                 .unwrap_or(ROOT_ID);
             app.resources.context_resource = None;
+            app.resources.context_participant = None;
             if let Some(target) = app.resources.rows.targets.get(&selected_target).cloned() {
                 if let crate::resource_queue::ResourceRowTarget::Resource { resource_id, .. } =
                     &target
                 {
                     app.resources.context_resource = Some(resource_id.clone());
+                }
+                if let crate::resource_queue::ResourceRowTarget::Participant {
+                    project_id,
+                    resource_id,
+                    reservation_id,
+                    ..
+                } = &target
+                {
+                    app.resources.context_participant =
+                        Some((*project_id, resource_id.clone(), reservation_id.clone()));
                 }
                 let target = match target {
                     crate::resource_queue::ResourceRowTarget::Participant {
@@ -2502,6 +2513,186 @@ fn select_settings_pointer_tab(
 /// module doc comment for the shared layout/hit-test functions this
 /// reproduces no arithmetic of its own from.
 fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mouse: MouseEvent) {
+    if state.tab == crate::app::SettingsTab::AgentMonitoring && app.custom_status_rules_editor.is_some() {
+        // A value draft is modal: accepting another control here could save
+        // an unrelated edit while leaving the draft attached to a new rule.
+        if app.custom_status_rules_editor.as_ref().is_some_and(|editor| editor.parameter_draft.is_some()) {
+            app.mode = Mode::Settings(Box::new(state));
+            return;
+        }
+        let content = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state).content_area;
+        let desired = app.ui_settings.left_panel_sizing.resolved_width(app.layout.screen_area.width, true);
+        let column = app.custom_status_rules_editor.as_ref().map_or(crate::status_rules_editor::EditorColumn::Rules, |editor| editor.column);
+        let regions = crate::status_rules_editor::layout_for_column(content, desired, column);
+        let position = Position::new(mouse.column, mouse.row);
+        if regions.preview.contains(position) {
+            if let Some(editor) = &mut app.custom_status_rules_editor {
+                if editor.preview_tab == crate::status_rules_editor::PreviewTab::Demo {
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => editor.scroll_demo(-1),
+                        MouseEventKind::ScrollDown => editor.scroll_demo(1),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if crate::status_rules_editor::reset_rule_button(regions.rules).is_some_and(|rect| rect.contains(position)) {
+                if let Some(mut editor) = app.custom_status_rules_editor.take() {
+                    if editor.confirm_reset {
+                        match app.settings_save_custom_status_rules(ilium_core::status_rule_expression::default_rules()) {
+                            Ok(()) => editor = crate::status_rules_editor::EditorState::new(&app.custom_status_rules),
+                            Err(error) => { editor.confirm_reset = false; editor.save_error = Some(error); }
+                        }
+                    } else {
+                        editor.confirm_reset = true;
+                    }
+                    app.custom_status_rules_editor = Some(editor);
+                }
+            } else if app.custom_status_rules_editor.as_ref().is_some_and(|editor| editor.confirm_reset) {
+                if let Some(editor) = &mut app.custom_status_rules_editor { editor.confirm_reset = false; }
+            } else if regions.back.contains(position) {
+                app.custom_status_rules_editor = None;
+            } else if let Some((column, _)) = crate::status_rules_editor::section_tabs(content)
+                .into_iter().find(|(_, rect)| rect.contains(position))
+            {
+                if let Some(editor) = &mut app.custom_status_rules_editor {
+                    editor.column = column;
+                }
+            } else if crate::status_rules_editor::add_rule_button(regions.rules).is_some_and(|rect| rect.contains(position)) {
+                if let Some(mut editor) = app.custom_status_rules_editor.take() {
+                    let previous = editor.clone();
+                    let mut rules = app.custom_status_rules.clone();
+                    if editor.add_rule(&mut rules) {
+                        if let Err(error) = app.settings_save_custom_status_rules(rules) {
+                            editor = previous;
+                            editor.save_error = Some(error);
+                        } else {
+                            editor.column = crate::status_rules_editor::EditorColumn::ConditionAndVisual;
+                            editor.save_error = None;
+                        }
+                    }
+                    app.custom_status_rules_editor = Some(editor);
+                }
+            } else if let Some((tab, _)) = crate::status_rules_editor::preview_tabs(regions.preview)
+                .into_iter().find(|(_, rect)| rect.contains(position)) {
+                if let Some(editor) = &mut app.custom_status_rules_editor {
+                    editor.column = crate::status_rules_editor::EditorColumn::Preview;
+                    editor.preview_tab = tab;
+                }
+            } else if regions.editor.contains(position) && position.y > regions.editor.y
+                && position.y < regions.editor.bottom().saturating_sub(1)
+            {
+                if let Some(mut editor) = app.custom_status_rules_editor.take() {
+                    let offset = usize::from(position.y - regions.editor.y - 1);
+                    let mut rules = app.custom_status_rules.clone();
+                    let count = editor.expression(&rules).map_or(0, |(terms, _)| terms.len());
+                    let (first, visible) = crate::status_rules_editor::condition_window(&editor, regions.editor, count);
+                    let index = first + offset;
+                    if offset < visible {
+                        editor.column = crate::status_rules_editor::EditorColumn::ConditionAndVisual;
+                        editor.selected_condition = index;
+                        let previous = editor.clone();
+                        use crate::status_rules_editor::{ConditionAction, DraftTarget};
+                        let action = crate::status_rules_editor::condition_action_at(regions.editor, position.y, position)
+                            .filter(|action| *action != ConditionAction::Case || {
+                                editor.expression(&rules).ok().and_then(|(terms, _)| terms.get(index).cloned())
+                                    .is_some_and(|term| matches!(term.condition, ilium_core::status_rule_expression::Condition::ScreenMatches(_)))
+                            });
+                        let change = match action {
+                            Some(ConditionAction::Previous) => editor.cycle_condition(&mut rules, -1),
+                            Some(ConditionAction::Next) => editor.cycle_condition(&mut rules, 1),
+                            Some(ConditionAction::Not) => editor.negate_condition(&mut rules),
+                            Some(ConditionAction::Connector) => editor.toggle_connector(&mut rules),
+                            Some(ConditionAction::Add) => editor.add_condition(&mut rules),
+                            Some(ConditionAction::Delete) => editor.remove_condition(&mut rules),
+                            Some(ConditionAction::Case) => editor.toggle_screen_case(&mut rules),
+                            Some(ConditionAction::Edit) => {
+                                editor.draft_target = DraftTarget::Condition;
+                                editor.parameter_draft = editor.parameter(&rules);
+                                Ok(())
+                            }
+                            None => Ok(()),
+                        };
+                        match change {
+                            Err(error) => editor.save_error = Some(error.to_owned()),
+                            Ok(()) if action.is_some() && action != Some(ConditionAction::Edit) => {
+                                if let Err(error) = app.settings_save_custom_status_rules(rules) {
+                                    editor = previous;
+                                    editor.save_error = Some(error);
+                                } else { editor.save_error = None; }
+                            }
+                            Ok(()) => {}
+                        }
+                    } else if let Some(action) = crate::status_rules_editor::visual_action_at(regions.editor, visible, position) {
+                        use crate::status_rules_editor::{DraftTarget, VisualAction};
+                        editor.column = crate::status_rules_editor::EditorColumn::ConditionAndVisual;
+                        let previous = editor.clone();
+                        let changed = match action {
+                            VisualAction::Type => editor.cycle_visual(&mut rules),
+                            VisualAction::Value => {
+                                editor.draft_target = DraftTarget::Visual;
+                                editor.parameter_draft = editor.visual_value(&rules);
+                                false
+                            }
+                            VisualAction::Colour => {
+                                editor.draft_target = DraftTarget::Colour;
+                                editor.parameter_draft = editor.selected_rule.and_then(|index| rules.rules.get(index)).map(|rule| rule.then.style.color.clone().unwrap_or_default());
+                                false
+                            }
+                            VisualAction::Bold => editor.toggle_weight(&mut rules, true),
+                            VisualAction::Dim => editor.toggle_weight(&mut rules, false),
+                            VisualAction::Slower => editor.adjust_animation_speed(&mut rules, -1),
+                            VisualAction::Faster => editor.adjust_animation_speed(&mut rules, 1),
+                            VisualAction::PingPong => editor.toggle_ping_pong(&mut rules),
+                        };
+                        if changed {
+                            if let Err(error) = app.settings_save_custom_status_rules(rules) {
+                                editor = previous;
+                                editor.save_error = Some(error);
+                            } else { editor.save_error = None; }
+                        }
+                    }
+                    app.custom_status_rules_editor = Some(editor);
+                }
+            } else if regions.rules.contains(position) && position.y > regions.rules.y {
+                let first = app.custom_status_rules_editor.as_ref().map_or(0, |editor| crate::status_rules_editor::first_visible_rule(editor, regions.rules.height));
+                let index = first + usize::from((position.y - regions.rules.y - 1) / 3);
+                if index < app.custom_status_rules.rules.len() {
+                    if let Some(mut editor) = app.custom_status_rules_editor.take() {
+                        editor.selected_rule = Some(index);
+                        editor.selected_condition = 0;
+                        editor.column = crate::status_rules_editor::EditorColumn::Rules;
+                        let previous = editor.clone();
+                        let mut rules = app.custom_status_rules.clone();
+                        let row = regions.rules.y.saturating_add(1).saturating_add(((index - first) as u16).saturating_mul(3));
+                        let action = crate::status_rules_editor::rule_action_at(regions.rules, row, position);
+                        use crate::status_rules_editor::RuleAction;
+                        let changed = match action {
+                            Some(RuleAction::Toggle) => editor.toggle_selected(&mut rules),
+                            Some(RuleAction::Up) => editor.move_selected(&mut rules, -1),
+                            Some(RuleAction::Down) => editor.move_selected(&mut rules, 1),
+                            Some(RuleAction::Delete) => editor.delete_selected(&mut rules),
+                            Some(RuleAction::Edit) => { editor.column = crate::status_rules_editor::EditorColumn::ConditionAndVisual; false },
+                            Some(RuleAction::Rename) => { editor.draft_target = crate::status_rules_editor::DraftTarget::RuleName; editor.parameter_draft = rules.rules.get(index).map(|rule| rule.name.clone()); false },
+                            None => false,
+                        };
+                        if changed {
+                            if let Err(error) = app.settings_save_custom_status_rules(rules) {
+                                editor = previous;
+                                editor.save_error = Some(error);
+                            } else {
+                                editor.save_error = None;
+                            }
+                        }
+                        app.custom_status_rules_editor = Some(editor);
+                    }
+                }
+            }
+        }
+        app.mode = Mode::Settings(Box::new(state));
+        return;
+    }
     if state.tree_layout_editor.is_some() {
         let layout =
             crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
@@ -3501,17 +3692,18 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             + 1,
                         |editor| editor.rows().len(),
                     );
-                    if let Some(index) = line.checked_sub(4).filter(|index| *index < count) {
+                    let view = crate::settings_ui::custom_agent_view(app, &state);
+                    if let Some(index) = view
+                        .row_lines
+                        .iter()
+                        .position(|row_line| *row_line == line)
+                        .filter(|index| *index < count)
+                    {
                         state.selected_row = index;
                         let delete_start = if state.custom_agent_editor.is_none() {
                             app.custom_agents.profiles.get(index).map(|profile| {
-                                let prefix = format!(
-                                    "› {} {}  ({:?}, {} variables)  ",
-                                    profile.icon,
-                                    profile.name,
-                                    profile.base_provider,
-                                    profile.environment.len()
-                                );
+                                let prefix =
+                                    crate::settings_ui::custom_agent_list_prefix(profile, true);
                                 unicode_width::UnicodeWidthStr::width(prefix.as_str())
                             })
                         } else {
@@ -3588,6 +3780,12 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     app,
                 ) {
                     match hit {
+                        crate::settings_ui::AgentMonitoringContentHit::Mode(mode) => {
+                            app.settings_set_agent_monitoring_mode(mode);
+                        }
+                        crate::settings_ui::AgentMonitoringContentHit::Configure => {
+                            app.custom_status_rules_editor = Some(crate::status_rules_editor::EditorState::new(&app.custom_status_rules));
+                        }
                         crate::settings_ui::AgentMonitoringContentHit::Row { row, direction } => {
                             let rows = crate::settings_ui::agent_monitoring_rows(app);
                             state.selected_row = rows
@@ -3608,7 +3806,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                                     crate::app::AgentMonitoringRow::AddCustomSignature => {
                                         app.settings_begin_custom_agent_signature();
                                     }
-                                    crate::app::AgentMonitoringRow::ModelIcons => {
+                                    crate::app::AgentMonitoringRow::ModelIcons
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveEnabled
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveClaudeInterval
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveCodexInterval
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveMonitor
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveCommand
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveSubagent => {
                                         app.settings_adjust_agent_monitoring_row(row, 1);
                                     }
                                     crate::app::AgentMonitoringRow::StatusIcon(target) => {

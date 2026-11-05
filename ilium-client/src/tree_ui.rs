@@ -524,8 +524,9 @@ impl PaintedTreeRows {
             if hit.line != 0 || !blocked.contains(&hit.id) {
                 continue;
             }
-            let attention =
-                self.monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Attention;
+            let attention = matches!(self.monitoring_mode,
+                crate::agent_monitoring::AgentMonitoringMode::Attention
+                    | crate::agent_monitoring::AgentMonitoringMode::Custom);
             let has_objective = self
                 .values
                 .iter()
@@ -698,7 +699,9 @@ impl PaintedTreeRows {
         let objective = label.saturating_add(OBJECTIVE_SLOT_OFFSET);
         // Attention uses one shared status column. Tooltip ownership still
         // follows the selected signal, rather than its former column.
-        if self.monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Attention {
+        if matches!(self.monitoring_mode,
+            crate::agent_monitoring::AgentMonitoringMode::Attention
+                | crate::agent_monitoring::AgentMonitoringMode::Custom) {
             if (label..objective).contains(&position.x) {
                 return Some((
                     hit.id,
@@ -826,6 +829,10 @@ pub struct TreeRenderOptions<'a> {
     pub use_stable_glyphs: bool,
     pub agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
     pub attention_progress_reports: bool,
+    pub custom_status_rules: Option<&'a ilium_core::status_rule_expression::StatusRules>,
+    pub screen_observations: Option<&'a crate::status_screen_observations::ScreenObservations>,
+    pub screen_pane_id: Option<NodeId>,
+    pub icon_motion: crate::config::MotionLevel,
     pub attention_running_indicator: crate::agent_monitoring::AttentionRunningIndicator,
     /// Whether persisted LLM-suggested title icons should be rendered.
     pub show_inferred_title_icons: bool,
@@ -936,6 +943,10 @@ struct TreeItemBuildContext<'a> {
     use_stable_glyphs: bool,
     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
     attention_progress_reports: bool,
+    custom_status_rules: Option<&'a ilium_core::status_rule_expression::StatusRules>,
+    screen_observations: Option<&'a crate::status_screen_observations::ScreenObservations>,
+    screen_pane_id: Option<NodeId>,
+    icon_motion: crate::config::MotionLevel,
     attention_running_indicator: crate::agent_monitoring::AttentionRunningIndicator,
     show_inferred_title_icons: bool,
     panel_width: u16,
@@ -1461,10 +1472,19 @@ fn build_item(
                     use_stable_glyphs: context.use_stable_glyphs,
                     agent_monitoring_mode: context.agent_monitoring_mode,
                     attention_progress_reports: context.attention_progress_reports,
+                    custom_status_rules: context.custom_status_rules,
+                    screen_observations: context.screen_observations,
+                    screen_pane_id: Some(context.screen_pane_id.unwrap_or(node.id)),
+                    icon_motion: context.icon_motion,
+                    activity_stale: crate::status_icons::detection_activity_stale(
+                        status,
+                        context.detection_evidence.and_then(|evidence| evidence.get(&node.id)),
+                        context.current_unix_millis,
+                    ),
                     attention_running_indicator: context.attention_running_indicator,
                 },
             );
-            let label = if context.detection_evidence.is_some_and(|evidence| {
+            let label = if context.agent_monitoring_mode != crate::agent_monitoring::AgentMonitoringMode::Custom && context.detection_evidence.is_some_and(|evidence| {
                 crate::status_icons::detection_freshness_warning(
                     status,
                     evidence.get(&node.id),
@@ -1979,6 +1999,11 @@ struct PaneLabelContext<'a> {
     use_stable_glyphs: bool,
     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
     attention_progress_reports: bool,
+    custom_status_rules: Option<&'a ilium_core::status_rule_expression::StatusRules>,
+    screen_observations: Option<&'a crate::status_screen_observations::ScreenObservations>,
+    screen_pane_id: Option<NodeId>,
+    icon_motion: crate::config::MotionLevel,
+    activity_stale: Option<bool>,
     attention_running_indicator: crate::agent_monitoring::AttentionRunningIndicator,
 }
 
@@ -2012,6 +2037,11 @@ fn pane_label_with_icons(
         use_stable_glyphs,
         agent_monitoring_mode,
         attention_progress_reports,
+        custom_status_rules,
+        screen_observations,
+        screen_pane_id,
+        icon_motion,
+        activity_stale,
         attention_running_indicator,
     } = context;
 
@@ -2173,7 +2203,30 @@ fn pane_label_with_icons(
     };
     let objective =
         crate::status_icons::objective_span(signals.objective, icons, use_stable_glyphs);
-    if agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Attention {
+    if agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Custom
+        && !matches!(status, PaneStatus::Editor { .. } | PaneStatus::Board)
+    {
+        let custom = custom_status_rules.map_or_else(
+            || Span::raw(""),
+            |rules| crate::status_rule_visual::status_span(crate::status_rule_visual::StatusSpanContext {
+                rules,
+                status,
+                progress,
+                scheduled_input: has_scheduled_input,
+                shell_output: terminal_activity_phase.map(shell_output_phase),
+                activity_stale,
+                screen_matches: &|pattern| match (screen_observations, screen_pane_id) {
+                    (Some(observations), Some(pane_id)) => observations.observe(pane_id, pattern),
+                    _ => ilium_core::status_rule_expression::Observation::Unknown,
+                },
+                icons,
+                use_stable_glyphs,
+                elapsed_millis: u64::try_from(elapsed_ms).unwrap_or(u64::MAX),
+                motion: icon_motion,
+            }),
+        );
+        attention_row_label(identity, Span::raw(""), custom, text)
+    } else if agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Attention {
         attention_row_label(identity, objective, now, text)
     } else {
         status_row_label(identity, objective, now, text)
@@ -2182,7 +2235,7 @@ fn pane_label_with_icons(
 
 /// One-cell-wide activity glyphs are padded by `status_row_label`, so every
 /// variant here stays within `NOW_COLUMN_WIDTH`.
-fn attention_running_span(
+pub(crate) fn attention_running_span(
     indicator: crate::agent_monitoring::AttentionRunningIndicator,
     icons: &IconSettings,
     elapsed_ms: u128,
@@ -2258,6 +2311,11 @@ fn pane_label(
             agent_model: None,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             attention_progress_reports: true,
+            custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
+            activity_stale: None,
             attention_running_indicator:
                 crate::agent_monitoring::AttentionRunningIndicator::default(),
         },
@@ -3059,6 +3117,10 @@ impl TreeItemCache {
                     use_stable_glyphs: false,
                     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                     attention_progress_reports: true,
+                    custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                     attention_running_indicator:
                         crate::agent_monitoring::AttentionRunningIndicator::default(),
                     show_inferred_title_icons: false,
@@ -3167,6 +3229,10 @@ pub(crate) fn render(
             use_stable_glyphs: options.use_stable_glyphs,
             agent_monitoring_mode: options.agent_monitoring_mode,
             attention_progress_reports: options.attention_progress_reports,
+            custom_status_rules: options.custom_status_rules,
+            screen_observations: options.screen_observations,
+            screen_pane_id: options.screen_pane_id,
+            icon_motion: options.icon_motion,
             attention_running_indicator: options.attention_running_indicator,
             show_inferred_title_icons: options.show_inferred_title_icons,
             panel_width: list_area(area).width.saturating_add(2),
@@ -3237,6 +3303,10 @@ pub(crate) fn render(
                 use_stable_glyphs: options.use_stable_glyphs,
                 agent_monitoring_mode: options.agent_monitoring_mode,
                 attention_progress_reports: options.attention_progress_reports,
+                custom_status_rules: options.custom_status_rules,
+            screen_observations: options.screen_observations,
+            screen_pane_id: options.screen_pane_id,
+            icon_motion: options.icon_motion,
                 attention_running_indicator: options.attention_running_indicator,
                 show_inferred_title_icons: options.show_inferred_title_icons,
                 frozen_panes: &HashSet::new(),
@@ -3828,6 +3898,8 @@ mod tests {
                 name: format!("Agent {index}"),
                 icon: "✦".into(),
                 base_provider: BuiltinAgentProvider::Claude,
+                command: String::new(),
+                arguments: String::new(),
                 environment: Vec::new(),
             })
             .collect();
@@ -4136,6 +4208,11 @@ mod tests {
                         use_stable_glyphs: stable,
                         agent_monitoring_mode: mode,
                         attention_progress_reports: true,
+                        custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
+            activity_stale: None,
                         attention_running_indicator: AttentionRunningIndicator::Off,
                     },
                 );
@@ -4297,6 +4374,11 @@ mod tests {
                     use_stable_glyphs,
                     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                     attention_progress_reports: true,
+                    custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
+            activity_stale: None,
                     attention_running_indicator:
                         crate::agent_monitoring::AttentionRunningIndicator::default(),
                 },
@@ -4486,6 +4568,10 @@ mod tests {
                             |input| input.mode,
                         ),
                         attention_progress_reports: true,
+                        custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
@@ -5093,6 +5179,11 @@ mod tests {
                     use_stable_glyphs: false,
                     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                     attention_progress_reports: true,
+                    custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
+            activity_stale: None,
                     attention_running_indicator:
                         crate::agent_monitoring::AttentionRunningIndicator::default(),
                 },
@@ -5150,6 +5241,11 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
+            activity_stale: None,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
             },
@@ -5180,6 +5276,11 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
+            activity_stale: None,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
             },
@@ -5403,6 +5504,11 @@ mod tests {
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                         attention_progress_reports: true,
+                        custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
+            activity_stale: None,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                     },
@@ -5428,6 +5534,11 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
+            activity_stale: None,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
             },
@@ -5614,6 +5725,11 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
+            activity_stale: None,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
             },
@@ -5730,6 +5846,10 @@ mod tests {
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                         attention_progress_reports: true,
+                        custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
@@ -5794,6 +5914,10 @@ mod tests {
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                         attention_progress_reports: true,
+                        custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
@@ -5886,6 +6010,10 @@ mod tests {
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                         attention_progress_reports: true,
+                        custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
@@ -6729,6 +6857,10 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
@@ -6892,6 +7024,10 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
@@ -6936,6 +7072,10 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
@@ -6980,6 +7120,10 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
@@ -7047,6 +7191,10 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
@@ -7179,6 +7327,11 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
+            activity_stale: None,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
             },
@@ -7307,6 +7460,10 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
@@ -7610,6 +7767,10 @@ mod tests {
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 attention_progress_reports: true,
+                custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
@@ -7878,6 +8039,10 @@ mod cost_indicator_tests {
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                         attention_progress_reports: true,
+                        custom_status_rules: None,
+            screen_observations: None,
+            screen_pane_id: None,
+            icon_motion: crate::config::MotionLevel::Full,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,

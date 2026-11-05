@@ -88,6 +88,8 @@ async fn custom_agent_real_pty_preserves_literal_environment_for_both_providers(
             name: id.into(),
             icon: "✦".into(),
             base_provider,
+            command: String::new(),
+            arguments: String::new(),
             environment: vec![
                 EnvironmentEntry {
                     key: "PROFILE_TAG".into(),

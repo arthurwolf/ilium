@@ -225,6 +225,7 @@ impl AmbientHost {
             hosted.scene = Box::new(MessageScene(format!("Scene failed: {message}")));
             frame.raster.dots.fill(0.0);
             frame.raster.owner_ids.fill(0);
+            frame.raster.image_coverage.clear();
             frame.cell_colors.fill([0; 3]);
         }
     }

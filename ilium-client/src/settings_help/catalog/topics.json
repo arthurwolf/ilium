@@ -1,5 +1,15 @@
 [
   {
+    "id": "CACHE-01",
+    "title": "Agent cache keep-alive",
+    "explanation": "Configure cache refresh during selected waits, with separate intervals for Claude and Codex.",
+    "specimen": "Cache keep-alive: Off\nClaude ping interval: 55 min\nCodex ping interval: 25 min\nWhile a monitor is running: On\nWhile waiting for a command: On\nWhile waiting for a subagent: On",
+    "states": "Disabled by default. Enable the policy and choose one or more wait conditions and the interval for each agent type.",
+    "frames": ["Cache keep-alive: Off\nClaude ping interval: 55 min\nCodex ping interval: 25 min"],
+    "motion": "None.",
+    "caveat": "Provider refresh is not available yet; these settings cannot send pings. Cache lifetime and savings are not guaranteed."
+  },
+  {
     "id": "TOOLBAR-01",
     "title": "Tree toolbar",
     "explanation": "Arrange the tree toolbar and choose how long a terminal remains active after its last output.",
@@ -22,11 +32,11 @@
   {
     "id": "AM-01",
     "title": "Display mode",
-    "explanation": "“Show objective and current-activity statuses separately in Normal mode, or emphasize the highest-priority signal in Attention mode while keeping agent identity separate.”",
+    "explanation": "Show objective and activity separately in Normal mode, a priority signal in Attention mode, or an icon selected by your own ordered rules in Custom mode. Agent identity stays separate.",
     "specimen": "Use a paused-goal fixture that is also waiting for user approval:\n\nNORMAL\nObjective    Current activity   Identity   Title\n[P] paused   [?] approval       Codex      parser\n\nATTENTION\nSelected signal                Identity   Title\n[?] approval                   Codex      parser\n\nThe paused goal still exists; it is not cleared.\n\nThese are semantic enlargements of the actual tree row, not additional permanent columns. Add a compact priority caption:\n\napproval > failed monitor > task error\n> non-active goal > unread successful task\n> unread completed turn",
-    "states": "Normal and Attention, with identical underlying evidence. The selected mode appears in the shared selector and + opens both options. Attention changes which signal is presented, not the goal, approval state, identity, or title. By default, Progress reports in Attention is Off: approval, stopped goals and unread agent turns take priority, followed by the selected running indicator. The failure-first caption applies only when Progress reports in Attention is On.",
+    "states": "Normal, Attention and Custom use the same underlying evidence. Attention chooses its priority signal; Custom uses the first enabled matching rule. Select Custom and open its configuration to edit, reorder and preview rules. By default, Progress reports in Attention is Off; its setting affects Attention mode.",
     "motion": "None; paired stills make suppression versus deletion clear.",
-    "caveat": "Use the actual selector for ties and cases without the listed priority signals; those fallback details are not supplied. On narrow terminals, stack the two mode specimens rather than merging the independent regions.",
+    "caveat": "Changing the displayed icon does not change the underlying agent state. Custom rules are evaluated in order, with AND before OR; unavailable evidence does not match.",
     "frames": [
       "NORMAL\nObjective: paused goal\nActivity:  waiting approval\n",
       "ATTENTION\nPriority signal: waiting approval\nObjective remains paused\n"

@@ -36,6 +36,8 @@ pub struct Raster {
     /// Zero means no authenticated scene owner. A model renderer may set a
     /// frame-local id only for a dot whose exact saved state supplied its ink.
     pub owner_ids: Vec<u32>,
+    /// Covered source pixels per 2x4 terminal cell; empty for non-image scenes.
+    pub image_coverage: Vec<u8>,
 }
 
 impl Raster {
@@ -46,6 +48,7 @@ impl Raster {
         self.dots.fill(0.0);
         self.owner_ids.resize(width * height, 0);
         self.owner_ids.fill(0);
+        self.image_coverage.clear();
     }
 
     /// Conservative single-owner dot write. Ties erase provenance; unresolved

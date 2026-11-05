@@ -43,6 +43,7 @@ pub use protocol::{
     PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
     ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
+    StatusScreenObservation, StatusScreenWatch,
     WorkspaceClosePolicy, WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition,
     WorkspaceGitStatus, WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry,
     WorkspaceInventoryOwner, WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy,
@@ -898,6 +899,13 @@ mod tests {
                 revision: 7,
                 age_millis: 1234,
             },
+            ServerEvent::StatusScreenObserved(StatusScreenObservation {
+                pane_id: NodeId(2),
+                revision: 8,
+                screen_generation: 42,
+                matched: vec![1, 3],
+                unknown: vec![2],
+            }),
             ServerEvent::NodeFocusCheckpointChanged {
                 node_id: NodeId(2),
                 activity_revision: 7,

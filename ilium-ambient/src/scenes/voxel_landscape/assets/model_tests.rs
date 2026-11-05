@@ -94,6 +94,7 @@ fn mutable_provider_reloads_changed_blockstate_and_resets_model_cache_per_tile()
         };
         let mut compiler =
             ModelCompiler::new(&switching, Limits::default(), budget.clone()).unwrap();
+        super::super::surface_binding::configure_tile_compiler(&mut compiler, false);
         let state = BlockState::new(ResourceId::parse("test:live").unwrap(), []).unwrap();
         let first = compiler
             .compile_state(&state, [0, 64, 0], 17, cancel)
@@ -187,7 +188,7 @@ fn retained_compiler_reads_each_definition_once_but_selects_each_anchor_and_seed
             model_reads: Cell::new(0),
         };
         let mut compiler = ModelCompiler::new(&counted, Limits::default(), budget.clone()).unwrap();
-        compiler.enable_immutable_source_cache();
+        super::super::surface_binding::configure_tile_compiler(&mut compiler, true);
         let mut selected = std::collections::BTreeSet::new();
         let mut seed_changes_choice = false;
         let mut origin = None;

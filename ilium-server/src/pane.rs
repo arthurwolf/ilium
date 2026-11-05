@@ -212,6 +212,18 @@ pub struct ProgressMonitorRuntimeState {
     pub result_delivery: ProgressDeliveryState,
 }
 
+/// Process-bound inputs for an off-lock cache-wait observation. Possession
+/// of this snapshot alone does not authorize a provider request: its caller
+/// must recheck the process and the pane binding immediately before use.
+pub(crate) struct CacheWaitSource {
+    pub generation: u64,
+    pub process: AgentProcessKey,
+    pub process_identity: Arc<ilium_platform::process_control::PtyProcessIdentity>,
+    pub session_id: String,
+    pub transcript_path: PathBuf,
+    pub monitor_running: bool,
+}
+
 impl ProgressMonitorRuntimeState {
     /// The task reported done/error, or the monitor itself failed.
     pub fn is_settled(&self) -> bool {
@@ -305,6 +317,13 @@ impl TerminalOrigin {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResourceInstructionNotice {
+    Available,
+    Changed,
+    Removed,
+}
+
 /// One live pty-backed terminal pane: the pty session itself, what it was
 /// spawned to run, this pane's adaptive detection schedule, and the
 /// background task that forwards its raw output bytes to attached clients.
@@ -395,6 +414,10 @@ pub struct TerminalPaneRuntime {
     /// owner. Keep across child replacements; detection prunes exact old births.
     pub agent_launcher_ancestors: Vec<AgentProcessKey>,
     pub agent_generation: u64,
+    /// Coalesced resource-instruction change for this invocation. The serial
+    /// fences clearing a delivery against a newer concurrently observed change.
+    pub(crate) pending_resource_notice: Option<(u64, ResourceInstructionNotice)>,
+    pub(crate) resource_notice_serial: u64,
     /// At most one actor and one coalescing mailbox for detection follow-ups.
     detection_effects: Option<crate::detection_effects::DetectionEffects>,
     pub(crate) detection_completion: crate::detection_effects::CompletionEpoch,
@@ -509,6 +532,8 @@ impl TerminalPaneRuntime {
             agent_process_key: None,
             agent_launcher_ancestors: Vec::new(),
             agent_generation: 0,
+            pending_resource_notice: None,
+            resource_notice_serial: 0,
             detection_effects: None,
             detection_completion: crate::detection_effects::CompletionEpoch::default(),
             agent_input_available: false,
@@ -572,6 +597,7 @@ impl TerminalPaneRuntime {
             .ok_or("agent invocation generation exhausted")?;
         let replaced = self.agent_process_key.is_some();
         self.agent_generation = next;
+        self.pending_resource_notice = None;
         self.agent_process_key = Some(key);
         self.agent_input_available = false;
         self.agent_input_cancel
@@ -805,6 +831,42 @@ impl TerminalPaneRuntime {
     /// Every monitor registered on this pane, in registration order.
     pub fn progress_monitors(&self) -> impl Iterator<Item = &ProgressMonitorRuntimeState> {
         self.progress_monitors.iter().map(|slot| &slot.state)
+    }
+
+    /// Read only facts already established by agent detection. A monitor may
+    /// run independently of an agent wait, so its state stays a separate fact.
+    pub(crate) fn cache_wait_source(&self) -> Option<CacheWaitSource> {
+        let process = self.agent_process_key.as_ref()?;
+        if self.is_session_identity_invalidated
+            || self.verified_agent_exit.is_some()
+            || self.session_agent_class.as_ref() != Some(&process.class)
+            || self.session_process_id != Some(process.process_id)
+            || self.session_process_started_at_unix_seconds != Some(process.started_at_unix_seconds)
+            || !matches!(process.class, AgentClass::Claude | AgentClass::Codex)
+        {
+            return None;
+        }
+        Some(CacheWaitSource {
+            generation: self.agent_generation,
+            process: process.clone(),
+            process_identity: self.session_process_identity.clone()?,
+            session_id: self.session_id.clone()?,
+            transcript_path: self.session_transcript_path.clone()?,
+            monitor_running: self.progress_monitors().any(|monitor| !monitor.is_settled()),
+        })
+    }
+
+    /// Recheck after I/O; a resumed session or replaced process cannot reuse
+    /// evidence collected for its predecessor. Monitor liveness is returned
+    /// afresh by `cache_wait_source`, never trusted from an earlier snapshot.
+    pub(crate) fn cache_wait_source_is_current(&self, source: &CacheWaitSource) -> bool {
+        self.cache_wait_source().is_some_and(|current| {
+            current.generation == source.generation
+                && current.process == source.process
+                && Arc::ptr_eq(&current.process_identity, &source.process_identity)
+                && current.session_id == source.session_id
+                && current.transcript_path == source.transcript_path
+        })
     }
 
     pub fn progress_monitor(&self, monitor_id: u64) -> Option<&ProgressMonitorRuntimeState> {
@@ -1643,7 +1705,7 @@ pub(crate) fn spawn_terminal_session_with_environment(
     cwd: &Path,
     identity: &PaneIdentityEnv<'_>,
     quota: &ilium_execution::QuotaGroup,
-    environment: &[ilium_core::custom_agent::EnvironmentEntry],
+    custom_launch: Option<&ilium_core::custom_agent::ResolvedCustomAgentLaunch>,
 ) -> Result<SpawnedTerminalSession, PtyError> {
     let (shell, command_flag) = shell_command();
     let launch_plan = terminal_launch_plan(origin, |session_id| {
@@ -1651,7 +1713,14 @@ pub(crate) fn spawn_terminal_session_with_environment(
             ilium_agent_session::claude_transcript_path(base.home_dir(), cwd, session_id).is_file()
         })
     });
-    let command = match launch_plan.command_line {
+    // A profile may swap the program word and add arguments; the plan's session
+    // identity is unaffected because only the leading word is rewritten.
+    let command_line = match (launch_plan.command_line, custom_launch) {
+        (Some(line), Some(launch)) => Some(launch.customize_command_line(&line)),
+        (line, _) => line,
+    };
+    let environment = custom_launch.map_or(&[][..], |launch| launch.environment.as_slice());
+    let command = match command_line {
         None => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS),
         Some(command_line) => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS)
             .arg(command_flag)
@@ -1699,6 +1768,7 @@ mod tests {
             None,
             Duration::from_secs(1),
         );
+        assert!(runtime.cache_wait_source().is_none());
         let identity = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 123,
@@ -1708,6 +1778,9 @@ mod tests {
             process_tree_depth: 1,
         };
         runtime.agent_process_key = Some(agent_process_key(&identity));
+        // Process classification without a verified session and transcript is
+        // insufficient to authorize cache-wait evidence.
+        assert!(runtime.cache_wait_source().is_none());
         runtime.detection_schedule.cached_identity = Some(identity);
         runtime.agent_input_available = true;
         let status =

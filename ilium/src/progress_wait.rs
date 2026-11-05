@@ -28,7 +28,6 @@ pub(crate) const EXIT_TASK_DONE: u8 = 0;
 pub(crate) const EXIT_TASK_ERROR: u8 = 3;
 pub(crate) const EXIT_MONITOR_FAILED: u8 = 4;
 pub(crate) const EXIT_MONITOR_ENDED: u8 = 5;
-pub(crate) const EXIT_WAIT_TIMED_OUT: u8 = 6;
 
 /// How often the wait double-checks the monitor through a status request.
 const LIVENESS_CHECK_INTERVAL: Duration = Duration::from_secs(15);
@@ -51,7 +50,6 @@ pub(crate) enum WaitReportEnd {
     Settled,
     Cleared,
     NoMonitor,
-    TimedOut,
 }
 
 /// Why `wait` without a monitor ID could not choose one.
@@ -123,7 +121,6 @@ impl WaitReport {
             },
             WaitReportEnd::Cleared => "cleared",
             WaitReportEnd::NoMonitor => "no-monitor",
-            WaitReportEnd::TimedOut => "still-running",
         }
     }
 
@@ -132,7 +129,6 @@ impl WaitReport {
             "done" => EXIT_TASK_DONE,
             "error" => EXIT_TASK_ERROR,
             "monitor-failed" => EXIT_MONITOR_FAILED,
-            "still-running" => EXIT_WAIT_TIMED_OUT,
             _ => EXIT_MONITOR_ENDED,
         }
     }
@@ -163,10 +159,7 @@ impl WaitReport {
                 "The monitor was cleared, or is not registered on this pane. Check `ilium \
                  progress status`."
             }
-            "no-monitor" => {
-                "This pane has no progress monitor. Register one with `ilium progress set`."
-            }
-            _ => "The task is still running. Run the same wait command again to keep waiting.",
+            _ => "This pane has no progress monitor. Register one with `ilium progress set`.",
         }
     }
 
@@ -253,7 +246,6 @@ pub(crate) async fn wait_for_monitor(
     connection: &mut Connection,
     pane_id: NodeId,
     monitor_id: Option<u64>,
-    timeout: Option<Duration>,
 ) -> Result<Result<WaitReport, AmbiguousMonitor>, CliError> {
     let started = Instant::now();
     let report = |monitor_id, end, progress, composer_notice_suppressed| WaitReport {
@@ -285,20 +277,10 @@ pub(crate) async fn wait_for_monitor(
     )
     .await?;
 
-    let deadline = timeout.map(|timeout| tokio::time::Instant::now() + timeout);
     let mut next_check = tokio::time::Instant::now() + LIVENESS_CHECK_INTERVAL;
     let mut status_request_id = None;
     let mut settled_from_status: Option<PaneProgress> = None;
-    // The latest report seen by a liveness check, returned on a timeout so the
-    // caller sees how far the task got without a separate status request.
-    let mut last_seen: Option<PaneProgress> = None;
     loop {
-        let timeout_sleep = async {
-            match deadline {
-                Some(deadline) => tokio::time::sleep_until(deadline).await,
-                None => std::future::pending().await,
-            }
-        };
         tokio::select! {
             event = connection.events.recv() => {
                 let Some(event) = event else {
@@ -366,7 +348,7 @@ pub(crate) async fn wait_for_monitor(
                                 settled_from_status = Some(progress);
                                 next_check = tokio::time::Instant::now() + SETTLED_REPLY_GRACE;
                             }
-                            Some(progress) => last_seen = Some(progress),
+                            Some(_) => {}
                         }
                     }
                     _ => {}
@@ -381,14 +363,6 @@ pub(crate) async fn wait_for_monitor(
                 .await?;
                 status_request_id = Some(request_id);
                 next_check = tokio::time::Instant::now() + LIVENESS_CHECK_INTERVAL;
-            }
-            () = timeout_sleep => {
-                return Ok(Ok(report(
-                    Some(monitor_id),
-                    WaitReportEnd::TimedOut,
-                    last_seen,
-                    false,
-                )));
             }
         }
     }
@@ -474,11 +448,7 @@ mod tests {
                 "{next}"
             );
         }
-        for end in [
-            WaitReportEnd::Cleared,
-            WaitReportEnd::NoMonitor,
-            WaitReportEnd::TimedOut,
-        ] {
+        for end in [WaitReportEnd::Cleared, WaitReportEnd::NoMonitor] {
             assert!(!report(end, None).next_step().contains("progress clear"));
         }
     }
