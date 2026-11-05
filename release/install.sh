@@ -119,6 +119,10 @@ case "$kernel/$architecture" in
     *) fail "Unsupported target; supported: Linux/x86_64, Linux/aarch64, Darwin/aarch64, Darwin/x86_64" ;;
 esac
 # END GENERATED POSIX TARGETS
+# BEGIN GENERATED PREVIEW PINS
+preview_version=0.1.1-linux.1
+preview_pins='ilium-linux-aarch64.tar.gz=1e9b4656ea537fd369950a3e32853a3e8714cdafd076aaf188f1568204bb1746 ilium-linux-x86_64.tar.gz=c84bcc0279e2339ae02d5e9dfaebe00ca0e0dea9eea8759f1e26358f96d91e26'
+# END GENERATED PREVIEW PINS
 if [ "$target_os" = linux ]; then
     libc_identity=$(getconf GNU_LIBC_VERSION 2>/dev/null) || fail "Linux release requires glibc; musl or unverified libc is unsupported"
     case "$libc_identity" in 'glibc '[0-9]*.[0-9]*) ;; *) fail "Linux release requires glibc; musl or unverified libc is unsupported" ;; esac
@@ -344,11 +348,11 @@ if [ -z "$version" ]; then
     resolution=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fLsS --connect-timeout 15 --max-time 300 -o /dev/null -w '%{http_code} %{url_effective}' "$origin/latest" 2> "$work/download-error") || {
         # Only a definite missing stable release selects the published preview.
         # Network errors, authorization failures and rate limits never downgrade.
-        case "$resolution" in '404 '*) version=0.1.1-linux.1 ;; *) fail "Cannot resolve latest stable release" ;; esac
+        case "$resolution" in '404 '*) version=$preview_version ;; *) fail "Cannot resolve latest stable release" ;; esac
     }
     if [ -z "$version" ]; then
         case "$resolution" in
-            "200 $origin"|"200 $origin/") version=0.1.1-linux.1 ;;
+            "200 $origin"|"200 $origin/") version=$preview_version ;;
             "200 $origin/tag/v"*) version=${resolution#"200 $origin/tag/v"} ;;
             *) fail "Latest release redirect is not the expected tagged origin" ;;
         esac
@@ -356,12 +360,17 @@ if [ -z "$version" ]; then
     valid_version "$version" || fail "Latest release tag is not a safe version"
     requested_version=$version
 fi
-if [ "$version" = 0.1.1-linux.1 ]; then
-    # This historical preview predates AVAILABILITY and has six package-format
-    # checksums rather than the native archive inventory. Pin its sole native
-    # archive directly; future releases use the normal manifest contract.
-    [ "$archive_name" = ilium-linux-x86_64.tar.gz ] || fail "This platform is not ready yet for the requested release"
-    expected=c84bcc0279e2339ae02d5e9dfaebe00ca0e0dea9eea8759f1e26358f96d91e26
+if [ "$version" = "$preview_version" ]; then
+    # This historical preview predates AVAILABILITY and has package-format
+    # checksums rather than the native archive inventory. Each native archive is
+    # pinned in the generated table above (release/linux-preview-pins.json);
+    # an archive without a pin is never guessed or fetched from the release.
+    expected=
+    for pin in $preview_pins; do
+        [ "${pin%%=*}" = "$archive_name" ] && expected=${pin#*=}
+    done
+    [ -n "$expected" ] || fail "This platform is not ready yet for the requested release"
+    [ "${#expected}" -eq 64 ] && [ -z "$(printf '%s' "$expected" | tr -d '0-9a-f')" ] || fail "Malformed pinned preview checksum"
 else
 download "$origin/download/v$version/SHA256SUMS" "$work/SHA256SUMS"
 stage=checksum

@@ -59,6 +59,10 @@ evidence. A passing job must identify the Package page and immutable manifest
 digest. These contracts do not claim that a package is already publicly
 available; actual tagged workflow execution and public readback remain required.
 
+## Preview archive pins
+
+When no stable release exists the hosted `install.sh` falls back to the preview tag in `release/linux-preview-pins.json` and installs only archives pinned there (x86_64 and ARM64). Never type a hash by hand: after the ARM64 file is published, run `generate-preview-pins ... --checksums <published SHA256SUMS> --output release/install.sh` so every pin must equal the published record, then `--check`. A preview archive without a pin fails with "not ready yet".
+
 ## Source checks
 
 Run from the repository root with Python 3.11 or newer:
@@ -66,6 +70,7 @@ Run from the repository root with Python 3.11 or newer:
 ```sh
 python release/scripts/release_tool.py targets --manifest release/targets.toml
 python release/scripts/release_tool.py generate-posix-table --manifest release/targets.toml --installer release/install.sh --check
+python release/scripts/release_tool.py generate-preview-pins --manifest release/targets.toml --installer release/install.sh --pins release/linux-preview-pins.json --check
 python release/scripts/release_tool.py generate-windows-table --manifest release/targets.toml --installer release/install.ps1 --check
 python -m unittest discover -s release/tests -p 'test_*.py'
 ```
@@ -216,7 +221,7 @@ Format decisions:
 - **Snap** is `snap pack` of a hand-written `snap.yaml` with `confinement: classic` (Ilium spawns
   host shells and agents and reads the host process tree). Classic confinement needs
   Snap Store review, so the asset installs only with `snap install --dangerous --classic`.
-- **Flatpak** is an OSTree bundle of the payload on `org.freedesktop.Platform//24.08`.
+- **Flatpak** is an OSTree bundle of the payload on `org.freedesktop.Platform//25.08`.
   Its initial trusted CLI forwards the whole application to the host from the
   exact running deployment. Panes, server, helper and native process detection
   then use the host interfaces; Flatpak itself is a distribution wrapper, not
@@ -263,6 +268,12 @@ Flatpak documents as arbitrary host-command authority. This is deliberate for a
 terminal multiplexer that spawns host agents; it must be reviewed as such, not
 represented as Flatpak confinement. The existing host helper retains bounded
 binary pipes, Bubblewrap, its owned cgroup and post-bootstrap syscall seal.
+Because the payload therefore runs with the *host's* dynamic loader, the Flatpak
+runtime's own `libasound.so.2` is never used: the host needs the same reviewed
+system libraries as the tarball (`SYSTEM_LIBRARIES` in `build_linux_packages.py`,
+including ALSA). A minimal host or test guest without `libasound2` fails with
+`libasound.so.2: cannot open shared object file`; offline guest inputs must
+include the pinned `libasound2` and `libasound2-data` packages.
 `flatpak-spawn --watch-bus` is only an additional lifetime hint: upstream source
 retries without it on `INVALID_ARGS`, so it is not an ownership certificate.
 The native Flatpak gate must prove PTY and stdio behavior, exact three-binary

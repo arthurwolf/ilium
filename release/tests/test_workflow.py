@@ -304,6 +304,21 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('pty_tui_smoke', arguments[separator + 1:])
         self.assertNotIn('host_runtime', arguments)
 
+    def test_arm64_preview_scope_is_explicit_and_target_bound(self):
+        profile = 'linux-arm64-preview'
+        target = 'aarch64-unknown-linux-gnu'
+        scope = pipeline.native_workspace_scope(profile, target)
+        self.assertEqual(scope, ['--workspace', '--exclude', 'ilium-plugin-*'])
+        for command in (pipeline.native_clippy_command(profile, target),
+                        pipeline.native_test_command(profile, target, ['--lib'])):
+            self.assertEqual(command[3:6], scope)
+            self.assertIn(target, command)
+        for other in ('x86_64-unknown-linux-gnu', 'aarch64-apple-darwin'):
+            with self.subTest(target=other), self.assertRaises(ValueError):
+                pipeline.native_workspace_scope(profile, other)
+        with self.assertRaises(ValueError):
+            pipeline.native_test_command(profile, target, ['--test', '*'])
+
     def test_preview_integration_scope_fails_closed_on_empty_or_invalid_workspace(self):
         for metadata in ({'workspace_members': [], 'packages': []},
                          {'workspace_members': ['missing'], 'packages': []}):

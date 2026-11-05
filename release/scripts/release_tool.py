@@ -494,6 +494,63 @@ def generate_posix_table(arguments):
     emit({"type": "result", "command": "generate-posix-table", "state": "passed", "installer": str(arguments.installer.resolve()), "output": str(arguments.output.resolve()) if arguments.output else None, "sha256": digest(updated.encode()), "targets": sum(row["os"] != "windows" for row in targets)})
 
 
+PREVIEW_PINS_START = "# BEGIN GENERATED PREVIEW PINS"
+PREVIEW_PINS_END = "# END GENERATED PREVIEW PINS"
+
+
+def load_preview_pins(pins_path, targets, checksums_path=None):
+    """Validate the preview pin file; the installer never trusts an unvalidated hash.
+
+    Only Linux archives named by targets.toml may be pinned. When a published
+    SHA256SUMS is supplied, every pin must equal that file's record, so a hash
+    always originates from release output rather than being typed by hand.
+    """
+    record = json.loads(pins_path.read_text(encoding="utf-8"))
+    version, archives = record.get("version"), record.get("archives")
+    if set(record) != {"version", "archives"} or not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?", version):
+        raise ReleaseError("preview pins need exactly a safe version and an archives map")
+    linux_archives = {row["archive"] for row in targets if row["os"] == "linux"}
+    if not isinstance(archives, dict) or not archives:
+        raise ReleaseError("preview pins need at least one archive")
+    for name, value in archives.items():
+        if name not in linux_archives:
+            raise ReleaseError(f"preview pin {name} is not an approved Linux archive")
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ReleaseError(f"preview pin for {name} is not a lowercase SHA-256")
+    if checksums_path is not None:
+        published = {}
+        for line in checksums_path.read_text(encoding="ascii").splitlines():
+            match = re.fullmatch(r"([0-9a-f]{64})  (\S+)", line)
+            if match:
+                published[match.group(2)] = match.group(1)
+        for name, value in archives.items():
+            if published.get(name) != value:
+                raise ReleaseError(f"preview pin for {name} differs from the published checksum file")
+    return version, dict(sorted(archives.items()))
+
+
+def preview_pins_block(version, archives):
+    pins = " ".join(f"{name}={value}" for name, value in archives.items())
+    return "\n".join([PREVIEW_PINS_START, f"preview_version={version}", f"preview_pins='{pins}'", PREVIEW_PINS_END])
+
+
+def generate_preview_pins(arguments):
+    targets = load_targets(arguments.manifest)
+    version, archives = load_preview_pins(arguments.pins, targets, arguments.checksums)
+    original = arguments.installer.read_text(encoding="utf-8")
+    if original.count(PREVIEW_PINS_START) != 1 or original.count(PREVIEW_PINS_END) != 1:
+        raise ReleaseError("installer must contain exactly one generated preview pin block")
+    before, remainder = original.split(PREVIEW_PINS_START)
+    _, after = remainder.split(PREVIEW_PINS_END)
+    updated = before + preview_pins_block(version, archives) + after
+    if arguments.check:
+        if updated != original:
+            raise ReleaseError("generated preview pins differ from the pin file")
+    else:
+        arguments.output.write_text(updated, encoding="utf-8")
+    emit({"type": "result", "command": "generate-preview-pins", "state": "passed", "installer": str(arguments.installer.resolve()), "sha256": digest(updated.encode()), "pinned": sorted(archives)})
+
+
 WINDOWS_TABLE_START = "# BEGIN GENERATED WINDOWS TARGETS"
 WINDOWS_TABLE_END = "# END GENERATED WINDOWS TARGETS"
 
@@ -538,6 +595,14 @@ def build_parser():
     posix_mode = posix_parser.add_mutually_exclusive_group(required=True)
     posix_mode.add_argument("--check", action="store_true")
     posix_mode.add_argument("--output", type=Path, help="explicit generated output path")
+    pins_parser = subcommands.add_parser("generate-preview-pins", allow_abbrev=False)
+    pins_parser.add_argument("--manifest", type=Path, required=True)
+    pins_parser.add_argument("--installer", type=Path, required=True)
+    pins_parser.add_argument("--pins", type=Path, required=True, help="release/linux-preview-pins.json")
+    pins_parser.add_argument("--checksums", type=Path, help="published SHA256SUMS every pin must match")
+    pins_mode = pins_parser.add_mutually_exclusive_group(required=True)
+    pins_mode.add_argument("--check", action="store_true")
+    pins_mode.add_argument("--output", type=Path, help="explicit generated output path")
     windows_parser = subcommands.add_parser("generate-windows-table", allow_abbrev=False)
     windows_parser.add_argument("--manifest", type=Path, required=True)
     windows_parser.add_argument("--installer", type=Path, required=True)
@@ -578,6 +643,8 @@ def main(argv=None):
             package(arguments)
         elif arguments.command == "generate-posix-table":
             generate_posix_table(arguments)
+        elif arguments.command == "generate-preview-pins":
+            generate_preview_pins(arguments)
         elif arguments.command == "generate-windows-table":
             generate_windows_table(arguments)
         elif arguments.command == "build-pages":

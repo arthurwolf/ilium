@@ -19,6 +19,14 @@ import release_tool
 
 
 class LinuxTarballTests(unittest.TestCase):
+    def test_preview_architecture_binds_target_and_profile(self):
+        self.assertEqual(gate.preview_architecture('x86_64'),
+                         ('x86_64-unknown-linux-gnu', 'linux-x86-preview'))
+        self.assertEqual(gate.preview_architecture('aarch64'),
+                         ('aarch64-unknown-linux-gnu', 'linux-arm64-preview'))
+        with self.assertRaises(release_tool.ReleaseError):
+            gate.preview_architecture('armv7')
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='synthetic-linux-tarball-')
         self.addCleanup(self.temporary.cleanup)
@@ -122,6 +130,28 @@ class LinuxTarballTests(unittest.TestCase):
         self.assertEqual(inputs.content, self.content)
         self.assertEqual(inputs.runtime_files, self.runtime_files)
         self.assertEqual(inputs.embedding_binding['model_files'], self.model_files)
+
+    def test_arm64_inputs_require_arm64_receipts_and_archive(self):
+        self.arguments.arch = 'aarch64'
+        target_name, profile = gate.preview_architecture(self.arguments.arch)
+        target = release_tool.selected_target(self.source / 'release/targets.toml', target_name)
+        self.audit.update(target=target_name, arch='aarch64',
+                          native_identity={'system': 'Linux', 'machine': 'aarch64', 'runner': target['runner']})
+        self.write_json(self.native / 'native-audit.json', self.audit)
+        self.runtime['target'] = target_name
+        self.write_json(self.native / 'runtime-inventory.json', self.runtime)
+        self.harness['target'] = target_name
+        release_tool.write_archive(self.native / target['archive'], target, self.content)
+        (self.native / 'SHA256SUMS').write_text(gate.sha(self.native / target['archive']) + '  ' + target['archive'] + '\n')
+        self.bridge.update(target=target_name, qualification_profile=profile, native_identity=self.audit['native_identity'])
+        for key, name in (('archive', target['archive']), ('native_audit', 'native-audit.json'),
+                          ('runtime_inventory', 'runtime-inventory.json')):
+            self.bridge[key] = {'path': '/synthetic-original-build/' + name, 'sha256': gate.sha(self.native / name)}
+        self.freeze_receipts()
+        self.assertEqual(self.validate().target['rust_target'], target_name)
+        self.arguments.arch = 'x86_64'
+        with self.assertRaises(release_tool.ReleaseError):
+            self.validate()
 
     def test_bridge_identity_and_source_mismatches_reject(self):
         changes = {'schema': 2, 'state': 'failed', 'publication_allowed': False,
@@ -456,6 +486,10 @@ class LinuxTarballBaselineTests(unittest.TestCase):
                     identity = gate.baseline_identity(unit)
                     self.assertEqual(identity['cgroup'], parent)
                     self.assertEqual(manager_query.call_args.args[0][:3], ['/usr/bin/systemctl', 'show', unit])
+                    with patch.object(gate.platform, 'machine', return_value='aarch64'):
+                        self.assertEqual(gate.baseline_identity(unit, 'aarch64')['machine'], 'aarch64')
+                        with self.assertRaises(release_tool.ReleaseError):
+                            gate.baseline_identity(unit, 'x86_64')
                 else:
                     with self.assertRaises(release_tool.ReleaseError):
                         gate.baseline_identity(unit)

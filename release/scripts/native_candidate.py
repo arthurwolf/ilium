@@ -208,11 +208,13 @@ def build(arguments):
     identity = native_identity(target, arguments.runner_identity)
     version = workspace_version(arguments.workspace, arguments.tag)
     profile = getattr(arguments, 'qualification_profile', 'full')
-    require(profile in ('full', 'linux-x86-preview'), 'Unknown native qualification profile')
-    if profile == 'linux-x86-preview':
-        require(arguments.target == 'x86_64-unknown-linux-gnu' and
+    preview_targets = {'linux-x86-preview': 'x86_64-unknown-linux-gnu',
+                       'linux-arm64-preview': 'aarch64-unknown-linux-gnu'}
+    require(profile == 'full' or profile in preview_targets, 'Unknown native qualification profile')
+    if profile in preview_targets:
+        require(arguments.target == preview_targets[profile] and
                 re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-linux\.[0-9]+', arguments.tag),
-                'Linux preview profile requires a Linux x86-64 target and preview tag')
+                'Linux preview profile requires its matching target and preview tag')
     require(arguments.output_directory.is_absolute() and not arguments.output_directory.exists(), 'Output must be a new absolute owned directory')
     require(arguments.build_directory.is_absolute() and arguments.build_directory.is_dir() and not arguments.build_directory.is_symlink(), 'Explicit native build directory required')
     require(arguments.output_directory.resolve() not in [arguments.workspace.parent.resolve(), arguments.build_directory.resolve()], 'Output collides with build/workspace')
@@ -295,7 +297,7 @@ def build(arguments):
 
 def parser():
     result = JsonArgumentParser(description=__doc__, allow_abbrev=False)
-    result.add_argument('--qualification-profile', choices=('full', 'linux-x86-preview'), default='full')
+    result.add_argument('--qualification-profile', choices=('full', 'linux-x86-preview', 'linux-arm64-preview'), default='full')
     for name in ('manifest', 'workspace', 'build-directory', 'output-directory', 'dependency-inventory', 'ort-source-archive', 'model-directory'):
         result.add_argument('--' + name, type=Path, required=True)
     for name in ('tag', 'target', 'runner-identity'):

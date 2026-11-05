@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Verify and publish the Linux x86_64 preview release from qualified artifacts.
+"""Verify and publish the Linux preview release from qualified artifacts.
 
 The qualification run that produced the artifacts must already have passed on
 the exact commit; this script re-checks the bytes, builds one checksum inventory,
 and publishes a prerelease that never becomes the latest release. `dry-run`
 performs every local check and prints the plan without any GitHub write.
+
+`publish` creates the x86_64 release and refuses to overwrite an existing one.
+`append-aarch64` (and its writeless `append-aarch64-dry-run`) adds the verified
+ARM64 assets to that already published release: it never replaces or deletes an
+asset, refuses when any ARM64 asset already exists, and rewrites only
+`SHA256SUMS`, keeping every existing line byte for byte and appending the new ones.
 """
 
 import argparse
@@ -21,6 +27,13 @@ TARBALL = 'ilium-linux-x86_64.tar.gz'
 PACKAGES = ('ilium-linux-x86_64.deb', 'ilium-linux-x86_64.rpm', 'ilium-linux-x86_64.AppImage',
             'ilium-linux-x86_64.flatpak', 'ilium-linux-x86_64.snap')
 ASSETS = (TARBALL,) + PACKAGES
+AARCH64_TARBALL = 'ilium-linux-aarch64.tar.gz'
+# Verified ARM64 formats must all be present; the rest are uploaded only when qualified.
+AARCH64_REQUIRED_PACKAGES = ('ilium-linux-aarch64.deb', 'ilium-linux-aarch64.AppImage')
+AARCH64_OPTIONAL_PACKAGES = ('ilium-linux-aarch64.rpm', 'ilium-linux-aarch64.flatpak', 'ilium-linux-aarch64.snap')
+AARCH64_ASSETS = (AARCH64_TARBALL,) + AARCH64_REQUIRED_PACKAGES + AARCH64_OPTIONAL_PACKAGES
+SUMS_NAME = 'SHA256SUMS'
+SUMS_LINE = re.compile(r'([0-9a-f]{64})  ([A-Za-z0-9._-]+)')
 NOTES = """Linux x86_64 development preview `{tag}`.
 
 Assets: `{assets}`, plus `SHA256SUMS` listing every file above.
@@ -113,9 +126,116 @@ def publish(files, inventory, commit, repository, work):
                       'url': final.get('html_url'), 'assets': sorted(local)}))
 
 
+def verify_aarch64_inventory(native_dir, packages_dir, tag):
+    """Locate and byte-check the ARM64 set; returns {asset name: path} for the assets present."""
+    if tag != PREVIEW_TAG:
+        fail(f'refusing tag {tag!r}; only {PREVIEW_TAG} may be extended here')
+    files = {AARCH64_TARBALL: locate(native_dir, AARCH64_TARBALL)}
+    native_sums = list(native_dir.rglob(SUMS_NAME))
+    if native_sums:  # A native checksum file, when present, must describe exactly the tarball.
+        if len(native_sums) != 1 or native_sums[0].read_text(encoding='ascii') != f'{sha256(files[AARCH64_TARBALL])}  {AARCH64_TARBALL}\n':
+            fail('native SHA256SUMS does not match the qualified ARM64 tarball bytes')
+    for name in AARCH64_REQUIRED_PACKAGES:
+        files[name] = locate(packages_dir, name)
+    for name in AARCH64_OPTIONAL_PACKAGES:
+        if any(path.is_file() for path in packages_dir.rglob(name)):
+            files[name] = locate(packages_dir, name)
+    for name, path in files.items():
+        if path.stat().st_size == 0:
+            fail(f'{name} is empty')
+    return files
+
+
+def merge_checksums(existing_text, files):
+    """Append ARM64 lines to the published SHA256SUMS, leaving every existing line untouched."""
+    lines = existing_text.splitlines()
+    names = []
+    for line in lines:
+        match = SUMS_LINE.fullmatch(line)
+        if match is None:
+            fail('published SHA256SUMS contains a malformed line')
+        names.append(match[2])
+    if len(set(names)) != len(names):
+        fail('published SHA256SUMS contains a duplicate entry')
+    clash = sorted(set(names) & set(files))
+    if clash:
+        fail('published SHA256SUMS already lists ' + ', '.join(clash) + '; refusing to overwrite')
+    missing = sorted(set(ASSETS) - set(names))
+    if missing:
+        fail('published SHA256SUMS lacks x86_64 entries ' + ', '.join(missing))
+    return ''.join(line + '\n' for line in lines) + ''.join(f'{sha256(files[name])}  {name}\n' for name in AARCH64_ASSETS if name in files)
+
+
+def release_for_tag(repository):
+    rows = [row for row in github(['--paginate', f'repos/{repository}/releases']) if row.get('tag_name') == PREVIEW_TAG]
+    if len(rows) != 1:
+        fail(f'expected exactly one release for {PREVIEW_TAG}, found {len(rows)}')
+    release = rows[0]
+    if release.get('draft') or not release.get('prerelease'):
+        fail('the preview release must be a published prerelease before ARM64 assets are added')
+    return release
+
+
+def append_plan(files, release, existing_sums_text):
+    """Pure decision step shared by dry-run and upload: validates, returns the merged checksum text."""
+    remote_names = {row['name'] for row in release.get('assets', [])}
+    clash = sorted(remote_names & set(files))
+    if clash:
+        fail('release already holds ' + ', '.join(clash) + '; refusing to overwrite')
+    return merge_checksums(existing_sums_text, files)
+
+
+def download_sums(release, work):
+    row = next((row for row in release.get('assets', []) if row['name'] == SUMS_NAME), None)
+    if row is None:
+        fail('the published release has no SHA256SUMS')
+    target = work / 'published'
+    target.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['gh', 'release', 'download', PREVIEW_TAG, '--repo', os.environ['GITHUB_REPOSITORY'],
+                    '--pattern', SUMS_NAME, '--dir', str(target), '--clobber'], check=True)
+    return (target / SUMS_NAME).read_text(encoding='ascii')
+
+
+def append_aarch64(files, repository, work, dry_run):
+    release = release_for_tag(repository)
+    existing = download_sums(release, work)
+    merged = append_plan(files, release, existing)
+    x86_before = {row['name']: row.get('digest', '') for row in release['assets'] if row['name'] in ASSETS}
+    if dry_run:
+        return merged, sorted(files)
+    sums_path = work / SUMS_NAME
+    sums_path.write_text(merged, encoding='ascii')
+    # New assets are uploaded without --clobber so an existing asset can never be replaced;
+    # only SHA256SUMS is clobbered, and only after the new assets are in place.
+    subprocess.run(['gh', 'release', 'upload', PREVIEW_TAG, '--repo', repository, *map(str, files.values())], check=True)
+    subprocess.run(['gh', 'release', 'upload', PREVIEW_TAG, '--repo', repository, '--clobber', str(sums_path)], check=True)
+    readback = github([f'repos/{repository}/releases/{release["id"]}'])
+    remote = {row['name']: row.get('digest', '') for row in readback.get('assets', [])}
+    for name, path in files.items():
+        if remote.get(name) != 'sha256:' + sha256(path):
+            fail(f'uploaded {name} digest {remote.get(name)!r} differs from local')
+    if remote.get(SUMS_NAME) != 'sha256:' + sha256(sums_path):
+        fail('uploaded SHA256SUMS digest differs from the merged inventory')
+    for name, digest in x86_before.items():
+        if remote.get(name) != digest:
+            fail(f'x86_64 asset {name} changed during the ARM64 upload')
+    return merged, sorted(files)
+
+
+def run_append(arguments):
+    dry_run = arguments.mode.endswith('dry-run')
+    files = verify_aarch64_inventory(arguments.native_directory, arguments.packages_directory, arguments.tag)
+    repository = os.environ.get('GITHUB_REPOSITORY') or fail('GITHUB_REPOSITORY is not set')
+    merged, assets = append_aarch64(files, repository, arguments.work, dry_run)
+    print(json.dumps({'type': 'result', 'command': 'publish-linux-preview', 'state': 'append-dry-run-passed' if dry_run else 'append-passed',
+                      'tag': arguments.tag, 'commit': arguments.commit, 'assets': assets}))
+    print(merged, end='')
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('mode', choices=['dry-run', 'publish'])
+    parser.add_argument('mode', choices=['dry-run', 'publish', 'append-aarch64-dry-run', 'append-aarch64'])
     parser.add_argument('--tag', required=True)
     parser.add_argument('--commit', required=True, help='full 40-character commit the qualification passed on')
     parser.add_argument('--native-directory', type=Path, required=True)
@@ -125,6 +245,8 @@ def main(argv=None):
     if not re.fullmatch(r'[0-9a-f]{40}', arguments.commit):
         fail('commit must be a full lowercase 40-character SHA')
     arguments.work.mkdir(parents=True, exist_ok=True)
+    if arguments.mode.startswith('append-aarch64'):
+        return run_append(arguments)
     files, inventory = verify_inventory(arguments.native_directory, arguments.packages_directory, arguments.tag)
     if arguments.mode == 'dry-run':
         print(json.dumps({'type': 'result', 'command': 'publish-linux-preview', 'state': 'dry-run-passed',

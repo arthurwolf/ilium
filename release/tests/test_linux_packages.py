@@ -233,8 +233,16 @@ class RenderTests(unittest.TestCase):
 
     def test_flatpak_metadata_pins_the_runtime(self):
         metadata = packages.flatpak_metadata('aarch64')
-        self.assertIn('runtime=org.freedesktop.Platform/aarch64/24.08', metadata)
+        self.assertIn('runtime=org.freedesktop.Platform/aarch64/25.08', metadata)
         self.assertIn('command=ilium', metadata)
+
+    def test_flatpak_payload_runs_on_the_host_so_alsa_is_a_host_requirement(self):
+        # The wrapper hands the CLI to the host loader (flatpak-spawn --host), so the
+        # runtime's libasound is never searched; the library must stay a reviewed
+        # system dependency and must not be silently assumed to come from the runtime.
+        self.assertEqual(packages.SYSTEM_LIBRARIES['libasound.so.2'], 'alsa')
+        self.assertIn('alsa', packages.DEB_PACKAGES)
+        self.assertIn('org.freedesktop.Flatpak=talk', packages.flatpak_metadata('aarch64'))
 
     def test_desktop_entry_and_metainfo_are_complete(self):
         entry = packages.desktop_entry()

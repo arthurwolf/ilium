@@ -30,6 +30,10 @@ import smoke_installed_animation as animation_gate
 TAG = 'v0.1.1-linux.1'
 TARGET = 'x86_64-unknown-linux-gnu'
 PROFILE = 'linux-x86-preview'
+PREVIEW_ARCHITECTURES = {
+    'x86_64': (TARGET, PROFILE),
+    'aarch64': ('aarch64-unknown-linux-gnu', 'linux-arm64-preview'),
+}
 PTY_TESTS = (
     'attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_help_keystroke',
     'right_click_restart_reloads_only_the_client_and_preserves_the_server',
@@ -51,6 +55,11 @@ ISOLATED_KEYS = {
 }
 require = install_gate.require
 sha = install_gate.sha
+
+
+def preview_architecture(arch: str) -> tuple[str, str]:
+    require(arch in PREVIEW_ARCHITECTURES, 'Unsupported Linux preview architecture')
+    return PREVIEW_ARCHITECTURES[arch]
 
 
 def plain(path: Path) -> Path:
@@ -92,12 +101,13 @@ def source_snapshot(source: Path, commit: str) -> dict[str, str]:
     return result
 
 
-def baseline_identity(unit: str) -> dict:
+def baseline_identity(unit: str, arch: str = 'x86_64') -> dict:
+    preview_architecture(arch)
     require(sys.version_info[:2] == (3, 11), 'Direct tarball acceptance requires Python 3.11')
     identity = platform.freedesktop_os_release()
-    require(platform.system() == 'Linux' and platform.machine() == 'x86_64'
+    require(platform.system() == 'Linux' and platform.machine() == arch
             and identity.get('ID') == 'ubuntu' and identity.get('VERSION_ID') == '22.04',
-            'Direct tarball acceptance requires disposable Ubuntu 22.04 x86_64')
+            'Direct tarball acceptance requires disposable Ubuntu 22.04 ' + arch)
     require(os.geteuid() != 0, 'Installed acceptance must run as the delegated unprivileged account')
     require(re.fullmatch(r'ilium-preview-direct-[0-9a-f]{32}\.service', unit) is not None,
             'A fresh direct-tarball unit identity is required')
@@ -151,21 +161,22 @@ def bound_reference(native: Path, reference: object, name: str) -> str:
 
 
 def validate_inputs(arguments: argparse.Namespace, source: Path, native: Path) -> SimpleNamespace:
+    target_name, profile = preview_architecture(getattr(arguments, 'arch', 'x86_64'))
     require(arguments.tag == TAG, 'This gate accepts only the first Linux preview tag')
     for value in (arguments.expected_bridge_sha256, arguments.expected_harness_sha256):
         require(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value), 'Expected receipt SHA-256 is required')
     bridge_path, harness_path = native / 'native-candidate-receipt.json', native / 'native-test-harness.json'
     require(sha(plain(bridge_path)) == arguments.expected_bridge_sha256, 'Native bridge receipt differs from download binding')
     require(sha(plain(harness_path)) == arguments.expected_harness_sha256, 'Native harness receipt differs from download binding')
-    target = release_tool.selected_target(source / 'release/targets.toml', TARGET)
+    target = release_tool.selected_target(source / 'release/targets.toml', target_name)
     version = release_tool.workspace_version(source / 'Cargo.toml', arguments.tag)
     audit_path = plain(native / 'native-audit.json')
     audit = release_tool.audit_receipt(audit_path, target, version, arguments.tag)
     bridge, harness = release_tool.read_json(bridge_path), release_tool.read_json(harness_path)
     require(bridge.get('schema') == 1 and bridge.get('state') == 'passed'
             and bridge.get('publication_allowed') is True
-            and bridge.get('qualification_profile') == PROFILE
-            and bridge.get('target') == TARGET and bridge.get('tag') == arguments.tag
+            and bridge.get('qualification_profile') == profile
+            and bridge.get('target') == target_name and bridge.get('tag') == arguments.tag
             and bridge.get('workspace_sha256') == sha(source / 'Cargo.toml')
             and bridge.get('lock_sha256') == sha(source / 'Cargo.lock')
             and bridge.get('embedding_model_register_sha256') == sha(source / 'release/embedding-model.json')
@@ -185,7 +196,7 @@ def validate_inputs(arguments: argparse.Namespace, source: Path, native: Path) -
         bound_reference(native, bridge.get(key), name)
     runtime = release_tool.read_json(native / 'runtime-inventory.json')
     require(runtime.get('schema') == 1 and runtime.get('state') == 'reviewed'
-            and runtime.get('publication_allowed') is True and runtime.get('target') == TARGET
+            and runtime.get('publication_allowed') is True and runtime.get('target') == target_name
             and isinstance(runtime.get('files'), list) and bool(runtime['files']), 'Native runtime identity differs')
     runtime_files = {}
     for item in runtime['files']:
@@ -199,7 +210,7 @@ def validate_inputs(arguments: argparse.Namespace, source: Path, native: Path) -
     require(set(runtime_files) == set(audit['files']) - fixed, 'Runtime inventory omits or adds audited members')
     require(set(harness) == {'schema', 'target', 'tag', 'version', 'filename', 'path', 'sha256',
                              'runtime_files', 'source_commit', 'evidence_files'}
-            and harness['schema'] == 1 and harness['target'] == TARGET
+            and harness['schema'] == 1 and harness['target'] == target_name
             and harness['tag'] == arguments.tag and harness['version'] == version
             and harness['source_commit'] == arguments.commit
             and harness['filename'] == 'native-test-binary'
@@ -295,7 +306,7 @@ def execute_acceptance(source: Path, output: Path, state: Path, pair: Path,
     animation = animation_gate.smoke(SimpleNamespace(
         workspace=source / 'Cargo.toml', root=pair, manifest=source / 'release/targets.toml',
         audit=inputs.audit_path, output=output / 'installed-animation.json',
-        os='linux', arch='x86_64', tag=tag, format='archive'), environment=environment)
+        os='linux', arch=inputs.target['arch'], tag=tag, format='archive'), environment=environment)
     embedding = install_gate.run_installed_embedding(inputs.embedding_arguments, inputs.target, pair,
                                                     inputs.embedding_binding, output, environment)
     require(embedding['executable_path'] == str(pair / 'ilium')
@@ -324,6 +335,8 @@ def execute_acceptance(source: Path, output: Path, state: Path, pair: Path,
 
 
 def qualify(arguments: argparse.Namespace) -> dict:
+    arch = getattr(arguments, 'arch', 'x86_64')
+    target_name, profile = preview_architecture(arch)
     source, native, output = arguments.source, arguments.native_directory, arguments.output
     require(all(path.is_absolute() for path in (source, native, output)), 'Acceptance paths must be absolute')
     require(source.is_dir() and not source.is_symlink() and native.is_dir() and not native.is_symlink(),
@@ -333,7 +346,7 @@ def qualify(arguments: argparse.Namespace) -> dict:
     output = output.parent.resolve(strict=True) / output.name
     require(not any(output.is_relative_to(root) or root.is_relative_to(output) for root in (source, native)),
             'Output must not overlap source or native inputs')
-    baseline = baseline_identity(arguments.unit)
+    baseline = baseline_identity(arguments.unit, arch)
     sources = source_snapshot(source, arguments.commit)
     native_files = install_gate.evidence_inventory(native)
     inputs = validate_inputs(arguments, source, native)
@@ -384,7 +397,7 @@ def qualify(arguments: argparse.Namespace) -> dict:
     receipt = {'schema': 1, 'scope': 'manual-direct-tarball-acceptance',
                'state': 'failed' if errors else 'passed', 'publication_allowed': False,
                'tag': arguments.tag, 'version': inputs.version, 'commit': arguments.commit,
-               'target': TARGET, 'qualification_profile': PROFILE, 'baseline': baseline,
+               'target': target_name, 'qualification_profile': profile, 'baseline': baseline,
                'source_files': sources, 'native_input_files': native_files,
                'native_bridge_sha256': arguments.expected_bridge_sha256,
                'native_harness_sha256': arguments.expected_harness_sha256,
@@ -404,6 +417,7 @@ def qualify(arguments: argparse.Namespace) -> dict:
 
 def parser(argv: list[str] | None = None) -> argparse.Namespace:
     argument = release_tool.JsonArgumentParser(description=__doc__, allow_abbrev=False)
+    argument.add_argument('--arch', choices=tuple(PREVIEW_ARCHITECTURES), default='x86_64')
     for name in ('source', 'native-directory', 'output'):
         argument.add_argument('--' + name, type=Path, required=True)
     for name in ('commit', 'tag', 'expected-bridge-sha256', 'expected-harness-sha256', 'unit'):

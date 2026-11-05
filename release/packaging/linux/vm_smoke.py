@@ -6,7 +6,10 @@ real FUSE mount, so these formats cannot be tested in a container and must never
 be installed on a developer machine. This boots a throw-away copy-on-write overlay
 of a SHA256-verified Ubuntu cloud image, copies the packages and smoke scripts in,
 runs `smoke_linux_packages.py host` over SSH, copies the logs back and powers the
-machine off. The base image is never modified. Stdout is JSONL.
+machine off. The base image is never modified. Stdout is JSONL. ARM64 guests
+need AAVMF firmware; select --accelerator tcg when the host is not ARM64.
+Execution metadata distinguishes emulation from hardware acceleration, which
+alone does not establish the physical host architecture.
 
     vm_smoke.py --packages DIR --audit-report FILE --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work DIR --log DIR [--image FILE] [--accelerator kvm|tcg]
 """
@@ -15,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import platform
 from pathlib import Path
 import secrets
 import shlex  # Quote each guest argument before sending it through SSH's shell.
@@ -32,6 +36,9 @@ import release_tool
 
 IMAGE_URL = 'https://cloud-images.ubuntu.com/releases/22.04/release/'
 IMAGE_NAME = 'ubuntu-22.04-server-cloudimg-amd64.img'
+ARM64_IMAGE_NAME = 'ubuntu-22.04-server-cloudimg-arm64.img'
+ARM64_FIRMWARE = Path('/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd')
+ARM64_VARIABLES = Path('/usr/share/AAVMF/AAVMF_VARS.fd')
 SSH_OPTIONS = ['-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'LogLevel=ERROR', '-o', 'ConnectTimeout=5']
 USER_DATA = '''#cloud-config
 users:
@@ -92,13 +99,13 @@ def guest_manifest_command(manifest):
     return shlex.join(['python3', '-c', code, json.dumps(manifest, sort_keys=True)])
 
 
-def verified_image(path):
+def verified_image(path, image_name=IMAGE_NAME):
     """The base image must match the published SHA256SUMS before it is booted."""
     with urllib.request.urlopen(IMAGE_URL + 'SHA256SUMS', timeout=60) as response:
         lines = response.read().decode().splitlines()
-    expected = next(line.split()[0] for line in lines if line.split()[-1].lstrip('*') == IMAGE_NAME)
+    expected = next(line.split()[0] for line in lines if line.split()[-1].lstrip('*') == image_name)
     if not Path(path).is_file():
-        with urllib.request.urlopen(IMAGE_URL + IMAGE_NAME, timeout=60) as response, Path(path).open('wb') as target:
+        with urllib.request.urlopen(IMAGE_URL + image_name, timeout=60) as response, Path(path).open('wb') as target:
             shutil.copyfileobj(response, target)
     actual = sha256(path)
     if actual != expected:
@@ -152,6 +159,30 @@ def stop_owned_vm(process, port, key):
             process.wait(timeout=10)
 
 
+def guest_configuration(architecture, accelerator, work, *, host_machine=None):
+    """Describe the VM platform without inferring native hardware from its guest."""
+    host = host_machine or platform.machine()
+    aliases = {'x86_64': {'x86_64', 'AMD64'}, 'aarch64': {'aarch64', 'arm64'}}
+    if architecture not in aliases or accelerator not in {'tcg', 'kvm'}:
+        raise ValueError('unsupported VM architecture or acceleration')
+    if accelerator == 'kvm' and host not in aliases[architecture]:
+        raise ValueError('KVM requires matching host and guest architectures')
+    acceleration = ['-enable-kvm', '-cpu', 'host'] if accelerator == 'kvm' else ['-accel', 'tcg,thread=multi', '-cpu', 'max']
+    result = {'execution': 'emulated' if accelerator == 'tcg' else 'hardware-accelerated',
+              'host_machine': host, 'arguments': acceleration}
+    if architecture == 'x86_64':
+        result.update(image=IMAGE_NAME, binary='qemu-system-x86_64')
+    else:
+        variables = Path(work) / 'firmware-vars.fd'
+        result.update(image=ARM64_IMAGE_NAME, binary='qemu-system-aarch64',
+                      firmware_variables_source=ARM64_VARIABLES,
+                      firmware_variables=variables,
+                      arguments=['-machine', 'virt', *acceleration,
+                                 '-drive', 'if=pflash,format=raw,readonly=on,file=' + str(ARM64_FIRMWARE),
+                                 '-drive', 'if=pflash,format=raw,file=' + str(variables)])
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument('--native-directory', type=Path)
@@ -159,7 +190,7 @@ def main(argv=None):
     parser.add_argument('--audit-report', type=Path, required=True)
     parser.add_argument('--workspace', type=Path, required=True)
     parser.add_argument('--manifest', type=Path, required=True)
-    parser.add_argument('--arch', default='x86_64', choices=['x86_64'])
+    parser.add_argument('--arch', default='x86_64', choices=['x86_64', 'aarch64'])
     parser.add_argument('--work', type=Path, required=True)
     parser.add_argument('--log', type=Path, required=True)
     parser.add_argument('--image', type=Path)
@@ -173,10 +204,19 @@ def main(argv=None):
     except ValueError as error:  # Preserve argparse's normal invalid-option behavior.
         parser.error(str(error))  # Exit before keys, transfers or QEMU exist.
     work, log = arguments.work.resolve(), arguments.log.resolve()
+    try:
+        guest = guest_configuration(arguments.arch, arguments.accelerator, work)
+    except ValueError as error:
+        parser.error(str(error))
     work.mkdir(parents=True)
     log.mkdir(parents=True, exist_ok=True)
-    base = arguments.image.resolve() if arguments.image else work / IMAGE_NAME
-    emit('progress', stage='image', sha256=verified_image(base))
+    base = arguments.image.resolve() if arguments.image else work / guest['image']
+    image_sha = verified_image(base) if arguments.arch == 'x86_64' else verified_image(base, guest['image'])
+    emit('progress', stage='image', sha256=image_sha, architecture=arguments.arch,
+         execution=guest['execution'], host_machine=guest['host_machine'])
+    if arguments.arch == 'aarch64':
+        with guest['firmware_variables_source'].open('rb') as source, guest['firmware_variables'].open('xb') as target:
+            shutil.copyfileobj(source, target)
     key = work / 'key'
     run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', key], check=True)
     (work / 'user-data').write_text(USER_DATA.format(key=(work / 'key.pub').read_text().strip()), encoding='utf-8')
@@ -184,8 +224,7 @@ def main(argv=None):
     run(['cloud-localds', work / 'seed.img', work / 'user-data', work / 'meta-data'], check=True)
     run(['qemu-img', 'create', '-q', '-f', 'qcow2', '-F', 'qcow2' if base.suffix == '.qcow2' else 'qcow2', '-b', base, work / 'overlay.qcow2', '30G'], check=True)
     port = 20000 + secrets.randbelow(20000)
-    acceleration = ['-enable-kvm', '-cpu', 'host'] if arguments.accelerator == 'kvm' else ['-accel', 'tcg,thread=multi', '-cpu', 'max']
-    command = ['qemu-system-x86_64', *acceleration, '-smp', arguments.cpus, '-m', arguments.memory, '-display', 'none',
+    command = [guest['binary'], *guest['arguments'], '-smp', arguments.cpus, '-m', arguments.memory, '-display', 'none',
                '-drive', 'file=%s,if=virtio' % (work / 'overlay.qcow2'), '-drive', 'file=%s,if=virtio,format=raw' % (work / 'seed.img'),
                '-nic', 'user,hostfwd=tcp:127.0.0.1:%d-:22' % port]
     qemu_log = (log / 'vm-qemu.log').open('x')
@@ -304,7 +343,21 @@ def main(argv=None):
                 if copied.returncode != 0:  # Missing required diagnostic evidence cannot qualify the VM run.
                     emit('error', message='host diagnostics copy failed: ' + copied.stderr[-500:])  # Surface the transfer failure alongside native output.
                     failed = 1  # Never overwrite a prior smoke failure with successful cleanup.
-        emit('result', command='vm-smoke', state='failed' if failed else 'passed', log=str(log))
+        # The guest's uname cannot reveal QEMU emulation. Retain host-side
+        # execution context and bind it to this run's exact guest results.
+        evidence = {'schema': 1, 'state': 'failed' if failed else 'passed',
+                    'guest_architecture': arguments.arch, 'host_machine': guest['host_machine'],
+                    'execution': guest['execution'], 'accelerator': arguments.accelerator,
+                    'image_sha256': image_sha, 'formats': requested,
+                    'input_manifest_sha256': sha256(log / 'vm-inputs-manifest.json'),
+                    'host_results_sha256': sha256(log / 'vm-host.jsonl')}
+        evidence_path = log / 'vm-execution.json'
+        with evidence_path.open('x', encoding='utf-8') as output:
+            json.dump(evidence, output, sort_keys=True, indent=2)
+            output.write('\n')
+        emit('result', command='vm-smoke', state=evidence['state'], log=str(log),
+             architecture=arguments.arch, execution=guest['execution'], host_machine=guest['host_machine'],
+             execution_evidence_sha256=sha256(evidence_path))
         return failed
     finally:
         try:

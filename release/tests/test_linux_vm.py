@@ -2,6 +2,7 @@
 from pathlib import Path
 from contextlib import redirect_stderr, redirect_stdout  # Keep synthetic command diagnostics out of the test runner's output.
 import io  # Capture expected parser errors and synthetic guest output.
+import hashlib
 import os  # Skip guest-path fixtures on Windows hosts.
 import json  # Read retained applicability evidence as structured data.
 import shlex  # Assert actual guest argv rather than command substrings.
@@ -101,6 +102,23 @@ class ProcessOwnershipTests(unittest.TestCase):
                           'Flatpak lookup must survive lifecycle HOME/XDG isolation')
 
 
+class Arm64GuestConfigurationTests(unittest.TestCase):
+    def test_arm64_tcg_uses_arm_firmware_and_labels_emulation(self):
+        self.assertTrue(hasattr(vm_smoke, 'guest_configuration'))
+        configuration = vm_smoke.guest_configuration('aarch64', 'tcg', Path('/work'), host_machine='x86_64')
+        self.assertEqual(configuration['image'], 'ubuntu-22.04-server-cloudimg-arm64.img')
+        self.assertEqual(configuration['execution'], 'emulated')
+        self.assertEqual(configuration['binary'], 'qemu-system-aarch64')
+        self.assertIn('virt', configuration['arguments'])
+        self.assertIn('if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd', configuration['arguments'])
+        self.assertIn('if=pflash,format=raw,file=/work/firmware-vars.fd', configuration['arguments'])
+
+    def test_cross_architecture_kvm_is_rejected(self):
+        self.assertTrue(hasattr(vm_smoke, 'guest_configuration'))
+        with self.assertRaises(ValueError):
+            vm_smoke.guest_configuration('aarch64', 'kvm', Path('/work'), host_machine='x86_64')
+
+
 class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with safe mocked transports and an owned synthetic child.
     def test_vm_guest_matches_declared_x86_64_linux_baseline(self):
         targets = tomllib.loads((ROOT / 'release/targets.toml').read_text(encoding='utf-8'))['target']
@@ -118,7 +136,7 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
                         'The disposable guest must provide the real decoder and user-session bus before qualification')
 
 
-    def run_vm(self, formats=None, statuses=None, upload_failure=None, diagnostics_failure=False, prepare_failure=False, host_timeout=False, readiness_timeouts=0, destination_exists=False, hash_mismatch=False, accelerator=None):  # Keep all fixture state in temporary data.
+    def run_vm(self, formats=None, statuses=None, upload_failure=None, diagnostics_failure=False, prepare_failure=False, host_timeout=False, readiness_timeouts=0, destination_exists=False, hash_mismatch=False, accelerator=None, architecture=None):  # Keep all fixture state in temporary data.
         statuses = statuses or {}  # Unspecified required stages complete successfully.
         commands, guest_commands, events = [], [], []  # Retain observable adapter calls and JSONL emissions.
         process = Mock(pid=424242)  # Model only the child returned by this test's Popen adapter.
@@ -160,11 +178,15 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
             (root / 'packages with spaces').mkdir()
             (root / 'packages with spaces/fixture.deb').write_bytes(b'labelled synthetic package')
             arguments = ['--packages', str(root / 'packages with spaces'), *fixture_input_arguments(root), '--work', str(root / 'work'), '--log', str(root / 'log')]  # Include whitespace and every required acceptance input.
+            firmware = root / 'firmware-vars-source.fd'
+            firmware.write_bytes(b'fixture firmware')
+            if architecture is not None:
+                arguments += ['--arch', architecture]
             if formats is not None:  # Exercise default formatting when the option is absent.
                 arguments += ['--formats', formats]  # Pass caller spelling without fixture normalization.
             if accelerator is not None:  # Exercise both hosted-runner and hardware-accelerated launch modes.
                 arguments += ['--accelerator', accelerator]  # Keep the requested emulator mode explicit.
-            with patch.object(vm_smoke, 'verified_image', return_value='fixture-hash'), patch.object(vm_smoke, 'run', side_effect=run), patch.object(vm_smoke, 'ssh', side_effect=ssh), patch.object(vm_smoke.time, 'sleep'), patch.object(vm_smoke.subprocess, 'Popen', return_value=process), patch.object(vm_smoke, 'emit', side_effect=lambda kind, **values: events.append({'type': kind, **values})), redirect_stdout(io.StringIO()):  # Mock every native or network boundary.
+            with patch.object(vm_smoke, 'ARM64_VARIABLES', firmware), patch.object(vm_smoke, 'verified_image', return_value='fixture-hash'), patch.object(vm_smoke, 'run', side_effect=run), patch.object(vm_smoke, 'ssh', side_effect=ssh), patch.object(vm_smoke.time, 'sleep'), patch.object(vm_smoke.subprocess, 'Popen', return_value=process), patch.object(vm_smoke, 'emit', side_effect=lambda kind, **values: events.append({'type': kind, **values})), redirect_stdout(io.StringIO()):  # Mock every native or network boundary.
                 result = vm_smoke.main(arguments)  # Execute the production main path and real owned-child teardown.
                 self.last_qemu_command = [str(part) for part in vm_smoke.subprocess.Popen.call_args.args[0]]  # Retain the actual mocked guest process argv.
             self.last_user_data = (root / 'work/user-data').read_text(encoding='utf-8')  # Inspect the actual cloud-init input handed to cloud-localds.
@@ -173,6 +195,19 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
         process.terminate.assert_not_called()  # Graceful synthetic shutdown must not trigger signals.
         process.kill.assert_not_called()  # Never substitute a process-name or saved-PID kill.
         return result, guest_commands, commands, logs, events  # Return only observations from the real orchestration path.
+
+    def test_arm64_tcg_reaches_the_guest_smoke_with_explicit_emulation_evidence(self):
+        result, guest, _commands, logs, events = self.run_vm(accelerator='tcg', architecture='aarch64')
+        self.assertEqual(result, 0)
+        self.assertEqual(self.last_qemu_command[0], 'qemu-system-aarch64')
+        self.assertTrue(all(command[command.index('--arch') + 1] == 'aarch64' for command in guest))
+        self.assertEqual(events[-1]['architecture'], 'aarch64')
+        self.assertEqual(events[-1]['execution'], 'emulated')
+        evidence = json.loads(logs['vm-execution.json'])
+        self.assertEqual(evidence['execution'], 'emulated')
+        self.assertEqual(evidence['guest_architecture'], 'aarch64')
+        self.assertEqual(evidence['host_machine'], events[-1]['host_machine'])
+        self.assertEqual(evidence['host_results_sha256'], hashlib.sha256(logs['vm-host.jsonl'].encode()).hexdigest())
 
     def test_actual_cloud_init_keeps_decoder_bus_and_independent_vm_host_gates(self):  # Read generated boot input and actual guest argv through safe adapters.
         required = {'python3', 'python3-tomli', 'bubblewrap', 'ffmpeg', 'dbus-user-session', 'flatpak', 'squashfs-tools', 'libfuse2', 'fuse3', 'rpm', 'rpm2cpio', 'cpio', 'snapd'}  # Preserve every original prerequisite and both required additions.
@@ -316,6 +351,8 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
             self.assertEqual(set(mapped), {'/home/tester/repo/release/scripts/space name.py'})
             local_manifest = {str(file): next(iter(mapped.values()))}
             command = shlex.split(vm_smoke.guest_manifest_command(local_manifest))
+            self.assertEqual(command[0], 'python3')
+            command[0] = sys.executable  # The ni-build sandbox exposes its pinned interpreter under its full name.
             verified = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(verified.returncode, 0)
             self.assertEqual(json.loads(verified.stdout)['mismatches'], [])
