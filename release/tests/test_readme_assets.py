@@ -42,6 +42,12 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
             )
             preview = {"ilium-linux-x86_64.tar.gz", "SHA256SUMS"}
             preview.update(build_linux_packages.package_names("x86_64"))
+            # Linux ARM64 links the four formats verified in the emulated guest;
+            # rpm and Snap stay "coming soon".
+            preview.update({
+                "ilium-linux-aarch64.tar.gz", "ilium-linux-aarch64.deb",
+                "ilium-linux-aarch64.AppImage", "ilium-linux-aarch64.flatpak",
+            })
             self.assertEqual(set(pinned), preview)
             self.assertEqual(len(pinned), len(preview), "duplicate preview links")
             self.assertEqual(LATEST_DOWNLOAD.findall(readme), [])
@@ -54,10 +60,10 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
                 "v0.1.1-linux.1/" + name for name in preview
             }
             self.assertEqual(all_downloads, allowed, "unexpected download channel")
-            for system in ("Linux ARM64", "macOS Apple Silicon", "macOS Intel",
-                           "Windows x86_64"):
-                self.assertRegex(readme, rf"(?m)^\| {re.escape(system)} \| \*\*Not yet available\*\* \|$")
-            self.assertIn("Hosted installers are not yet available for this preview", readme)
+            self.assertRegex(readme, r"(?m)^\| Linux ARM64 \(4 of 6 available and verified;")
+            for system in ("macOS Apple Silicon", "macOS Intel", "Windows x86_64"):
+                self.assertRegex(readme, rf"(?m)^\| {re.escape(system)} \| .*\*\*\(coming soon; not yet available\)\*\* \|$")
+            self.assertIn("two of six Linux ARM64 formats (rpm, Snap)", readme)
             return
         actual = set(LATEST_DOWNLOAD.findall(readme))
 
