@@ -48,3 +48,11 @@ The minimum alert set has four events. Each of the events `policy-violation`, `s
 - **[PDV-024]** Each syslog message MUST be one JSON object of at most 8192 bytes, and a record exceeding that MUST be truncated in `detail` only, with `truncated: true` added.
 - **[PDV-025]** The documented minimum alert set MUST include records with event `policy-violation`, `signature-failure`, `blocklist-hit` and `integrity-failure`.
 - **[PDV-026]** Collectors MUST order records by `seq`, never by `ts`, because the host clock may move backwards.
+
+## Production additions (round 2)
+
+Operators with many machines need to know how much audit data to expect before they size syslog sinks, disks and collectors. The manual therefore publishes a measured upper bound for audit bytes per plugin-hour, taken on the reference workload.
+
+The host also counts the audit bytes and records it writes and shows both counters in `ilium plugin metrics`. An operator compares these counters with the published bound to check the collector and disk budget.
+
+- **[PRX-014]** The manual MUST state a measured upper bound for audit bytes per plugin-hour on the reference workload, and the host MUST expose `ilium_audit_bytes_total` and `ilium_audit_records_total` in `ilium plugin metrics` so an operator can verify the collector and disk budget against that bound.

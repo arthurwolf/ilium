@@ -117,3 +117,11 @@ Requirement ids for this page: [API-082], [API-083], [API-084], [API-085], [API-
 - **[API-085]** A release that marks an SDK item MUST already ship its successor, so that an author can move in the same release. An item with no successor MUST say so in its note instead.
 - **[API-086]** The release that removes an SDK item MUST be the minor named in its mark, MUST NOT be a patch release, and MUST NOT change the signature or behaviour of any other item.
 - **[API-087]** The host MUST NOT write a `deprecated` record, a log line or a refusal for an SDK deprecation.
+
+## Production additions (round 2)
+
+An SDK release line is the series of releases of one SDK major and minor, published as the Rust crate and the TypeScript package together. When a successor line ships, the older line does not stop being supported at once: it keeps receiving security fixes for a documented support window.
+
+A fix release names the SDK versions it affects and the version that fixes them. It states this in its release notes and in the advisory feed, so that tooling can read it. An author who pins an SDK line can then see when staying pinned becomes unsafe, because `ilium plugin check` reports `lint.sdk-unsupported` once the pinned line is outside its window.
+
+- **[PRX-011]** Every SDK release line (`ilium-plugin-sdk` and `@ilium/plugin-sdk`) MUST receive security fixes for the documented support window after its successor ships; a fix release MUST name the affected SDK versions and the fixed version in its release notes and in the advisory feed, so that `ilium plugin check` flags a plugin pinned to an SDK line outside its window with `lint.sdk-unsupported`.

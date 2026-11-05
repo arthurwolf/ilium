@@ -154,3 +154,12 @@ The timestamp is fresh. The root has time left. The operator writes the result i
 - [Registry reference](/pages/reference-registry/): metadata layout, client error codes and the policy.
 - [Signing and trust](/pages/reference-signing-and-trust/): key roles, trust tiers and revocation.
 - [Yank, deprecate and takedown](/pages/publish-yank-deprecate-takedown/): the publisher-side actions that the operator sees in the log.
+
+## Production additions (round 2)
+
+A registry that requires an SBOM cannot rely on the publisher's client to scan it, because client flags can be skipped by a modified or old client. The registry therefore matches every SBOM component against its own advisory database at publish time. A signed VEX statement is the only way for a publisher to override an unreviewed Critical advisory. The refusal gives the publisher what is needed to fix the package.
+
+The registry holds the signed transparency log, the metadata and the blobs, and losing them breaks client trust. The operator keeps a second copy in a separate failure domain and proves each quarter that it can be restored. A restored log must match the lost one byte for byte, so checkpoints and consistency proofs issued earlier still verify.
+
+- **[PRX-005]** A registry that requires an SBOM MUST, on its own side and regardless of client flags, match every SBOM component against its advisory database and MUST refuse the publish with `registry.known-vulnerable` when a component has an unreviewed Critical advisory, unless the publisher attaches a signed VEX statement marking the advisory `not_affected`; the refusal MUST name the component, the advisory id and the fixed version.
+- **[PRX-006]** A registry operator MUST keep a copy of the signed transparency log, all metadata documents and all blobs in a second failure domain with a recovery point of at most 1 hour, MUST run a restore drill at least once per quarter, and a restored log MUST be byte-identical to the lost one so that every previously issued checkpoint and consistency proof still verifies.

@@ -1207,3 +1207,12 @@ Requirement ids for this section: [DEV-897], [DEV-962], [DEV-964], [DEV-966], [D
 
 Checked against the API version `ilium:plugin@0.1.0`.
 
+
+
+## Production additions (round 2)
+
+A Rust component that is too large starts slowly and takes longer to install. The Rust template therefore ships a size-focused release profile and a post-link optimisation step, so authors get a small component without extra work.
+
+The build also tells the author when the result is still too big. It measures the optimised component and compares it with a documented threshold, so the warning shows both numbers.
+
+- **[PRX-009]** The Rust template MUST ship a release profile (`opt-level = "s"`, `lto = true`, `codegen-units = 1`, `strip = true`) and a documented post-link optimisation step, and `ilium plugin build` MUST warn `build.component-large` when the optimised component exceeds the documented size threshold, naming the measured size and the threshold.

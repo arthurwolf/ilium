@@ -462,3 +462,11 @@ Risk marks follow [SEC-280]; replacement rules are [SEC-300] to [SEC-306] in [Ex
 - **[EXT-051]** A replacement's points item MUST match only with the same kind, the same mode and the same major version, and a services item only with the same method names and major version. Otherwise manifest.replaces-surface-incomplete MUST name the item and the reason. The surface MUST be checked again at each enable and after each Ilium update; an enabled replacement that no longer covers it MUST be turned off, the built-in plugin MUST come back and a notice MUST name the missing items.
 - **[EXT-053]** Several installed packages MAY replace one core plugin, and at most one MUST be enabled. Enabling another MUST ask the user and turn the previous replacement off. A replaces list with its own id or an id twice MUST fail with manifest.replaces-cycle, and more than 4 ids with manifest.schema.
 - **[LIF-273]** A replacement disabled by failure MUST re-enable the replaced core plugin with a visible notice.
+
+## Production additions (round 2)
+
+### Queued work at a core plugin swap
+
+When a core plugin is disabled, replaced or rolled back, work that the old owner had accepted but not yet run is still owed to the user. Queued prompts, pending notices, scheduled sends and running monitors must not be lost, and they must not run twice. The host therefore moves each unrun item to the new owner exactly once. A hook chain that was in progress at the swap is not restarted on the new owner, because its earlier steps already ran; it fails with a named error instead.
+
+- **[PRX-003]** On disable, replacement or rollback of a core plugin, the host MUST hand every queued item that the old owner had not yet run (queued prompts, pending notices, scheduled sends, running monitors) to the new owner exactly once, MUST NOT run any item on both the old and the new owner, and MUST fail a hook chain that was in progress at the swap with `core.owner-changed` instead of restarting it on the new owner.

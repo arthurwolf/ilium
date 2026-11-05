@@ -442,3 +442,11 @@ Side basis: `ilium.core.sessions/before-restore` is server, granted in the serve
 ## Requirement statements
 
 - **[EXT-056]** A snapshot reply over max_bytes MUST be dropped, logged snapshot.section-too-large and not stored. restore MUST be called after before-restore completes and before panes respawn, with 2 s per call.
+
+## Production additions (round 2)
+
+A saved session can contain a pane whose kind is owned by a plugin that is currently off, replaced or removed by policy. The host must not drop such a pane or discard what it stored, because the user would lose layout and state just by toggling a plugin.
+
+Instead the host restores a placeholder in the same tree position and carries the stored state through every later snapshot without changing it. When an owner for the kind becomes active again, the real pane replaces the placeholder with its original state.
+
+- **[PRX-004]** When a snapshot contains a pane whose kind has no active owner, the host MUST restore it as a placeholder pane that keeps its tree position and stored state byte for byte, MUST write that state back unchanged in later snapshots, and MUST restore the real pane when an owner for the kind becomes active.

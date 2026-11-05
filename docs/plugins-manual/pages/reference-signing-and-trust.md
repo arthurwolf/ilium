@@ -471,3 +471,12 @@ Nothing in the first case uses `signed_at`. A tool may print it, but a test MUST
 - **[SEC-459]** The host MUST accept signature and digest algorithms only from a closed, versioned allow-list compiled into the binary, MUST treat an unknown algorithm in a key, signature or digest entry as a verification failure rather than a skip, MUST refuse a retired algorithm for any metadata or package issued after the registry marks it retired, and MUST announce a new algorithm in signed registry metadata at least one release before it is required, accepting dual signatures during the overlap and writing an audit event whenever a deprecated algorithm is still used.
 - **[SEC-721]** \| The host MUST detect modification of the trust store and the grant file between reads by comparing a keyed MAC (key kept in the user's OS secret store, falling back to a 0600 file) and, on mismatch, MUST refuse T2 and T3 plugins with `trust.store-tampered`, preserve the file as `.tampered-<timestamp>` and tell the user. \|
 - **[SEC-722]** \| Signing keys MUST be Ed25519 with a validity of at most 2 years (proposed, owner to confirm); the registry MUST refuse a publish signed with an expired key, and the CLI MUST warn from 60 days (proposed, owner to confirm) before expiry with a command to rotate. \|
+
+
+## Production additions (round 2)
+
+Signature algorithms are not permanent. A cryptographic break or a better scheme will eventually force a change, and installed packages must stay verifiable through that change. This section fixes the notice period and the behaviour of the host and the registry during and after a migration.
+
+The host verifies both the old and the new algorithm during the announced period, so no package is stranded. After retirement the registry stops accepting new publishes signed only with the retired algorithm, while the host keeps verifying packages already installed and warns the user.
+
+- **[PRX-010]** Adding or retiring a signature algorithm MUST be announced at least 12 months before enforcement; during that period the host MUST verify both algorithms; after retirement the registry MUST refuse new publishes signed only with the retired algorithm while the host still verifies already-installed packages signed with it and shows a warning naming the algorithm.

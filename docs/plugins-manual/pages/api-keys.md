@@ -542,3 +542,12 @@ The log lines are written by the plugin; the text is an illustration of the form
 - [manifest reference](/pages/reference-manifest/) for the `keybindings` and `panels` contributions and the chord grammar.
 
 Checked against `ilium:plugin@0.1.0`.
+
+
+## Production additions (round 2)
+
+A default chord is the key combination a plugin ships for a command before the user remaps anything. Chords built from shifted punctuation, `ctrl+plus` or Ctrl+Alt are hard or impossible to press on German, French and Nordic layouts, and many keyboards send AltGr as Ctrl+Alt. The default must therefore use keys that exist unshifted on the US, German and French layouts.
+
+A chord is never the only route to a command. Every command also appears in the command palette, so a user whose layout cannot produce the chord still reaches it. `ilium plugin lint` warns about risky default chords before the plugin is published.
+
+- **[PRX-007]** A plugin's default chord for a command MUST be reachable without AltGr or dead keys on the US, German and French layouts, every command MUST also be reachable through the command palette so that a default chord is never the only route, and `ilium plugin lint` MUST warn on a default chord made from shifted punctuation, `ctrl+plus` or Ctrl+Alt.

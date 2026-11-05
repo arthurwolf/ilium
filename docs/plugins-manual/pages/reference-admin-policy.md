@@ -358,3 +358,11 @@ Contract: `ilium:plugin@0.1.0`.
 ## Requirement statements
 
 - **[PKG-987]** A mirror with a certificate from an internal CA works when the administrator sets `[network] ca_bundle` ([Administrator policy](/pages/reference-admin-policy/)). A certificate failure MUST NOT be handled by skipping verification or by falling back to `http:` ([PKG-371]). The client reports it as `network` with reason `tls`, as [SEC-077] requires.
+
+## Production additions (round 2)
+
+A managed fleet needs accessibility settings that a launcher flag cannot undo. A key listed in `settings.locked` is already read-only in Settings. This addition places the locked value above the command-line flag and the environment variable, so a user or script cannot turn off a screen reader or high contrast that an administrator pinned.
+
+The Settings page shows the locked value together with the policy source that set it. The attach log records that a lock was applied.
+
+- **[PRX-012]** A key in `settings.locked` MUST take precedence over the matching CLI flag and environment variable (`--screen-reader`, `--contrast`, `--reduced-motion`, `ILIUM_SCREEN_READER`, and their siblings), the locked value MUST be shown with its source in Settings, and a test with a policy that locks `[ui] contrast = "high"` and a run with `--contrast normal` MUST end with the effective value `high` and the line `settings.locked` in the attach log.

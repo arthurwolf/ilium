@@ -52,3 +52,5 @@ mod guide_ci_test_report_formats;
 mod reference_conformance_claims;
 #[path = "production_completeness/guide-plugin-test-strategy.rs"]
 mod guide_plugin_test_strategy;
+#[path = "production_completeness/round2.rs"]
+mod round2;

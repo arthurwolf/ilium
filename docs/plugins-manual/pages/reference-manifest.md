@@ -878,3 +878,11 @@ Security keys: `data_use` ([SEC-267]), `security_contact` ([SEC-268]) and the di
 - **[PKG-707]** The host MUST validate localized fields with the limits of the unlocalized ones (name at most 64 characters, description at most 500, alt text at most 200, counted in Unicode scalar values), MUST refuse control characters and bidirectional override characters, and MUST reject a violation with `manifest.listing-invalid` naming the locale and the field.
 - **[ABI-006]** The optional exports a component has MUST equal the optional exports its manifest lists.
 - **[ABI-018]** Required exports (lifecycle, handler, renderer) MUST NOT be listed in the manifest exports.
+
+## Production additions (round 2)
+
+A plugin can say how well it works for people who rely on assistive settings. The manifest carries an optional `accessibility` table that names a conformance level for screen-reader mode, high contrast, reduced motion, 40-column compact use and the supported languages.
+
+A claim is only useful if it can be audited. `ilium plugin check` runs the plugin's fixtures on the test host and fails the plugin when a declared level is not met. The registry listing and `ilium plugin info` show the declaration, or the text `no accessibility declaration` when there is none, so operators can choose plugins by accessibility support.
+
+- **[PRX-008]** A manifest SHOULD carry an `accessibility` table naming the conformance level for screen-reader mode, high contrast, reduced motion, 40-column compact use and the supported languages; `ilium plugin check` MUST fail a plugin whose declaration claims a level that its fixture run on the test host does not meet; and the registry listing and `ilium plugin info` MUST show the declaration or the text `no accessibility declaration`.

@@ -473,3 +473,11 @@ Checked against `ilium:plugin@0.1.0`.
 - **[COR-956]** A provider that must change the major of a service name while callers on the old major still run MUST keep the old major under its old name as a second `provides` entry, MUST give the new major its own name, and MUST NOT carry two majors under one name.
 - **[COR-957]** The old entry of a service name MUST keep its implementation and its declared version unchanged until the window ends, the window MUST end no earlier than 90 days after the release that added the new name (proposed, owner to confirm), and the release that removes the old entry MUST state the removal date in its release notes.
 - **[COR-958]** A caller that can use either major MUST list both names in `requires.services`, MUST hold a `services.use:` grant for each, MUST call the new name first, and MUST call the old name only when the new name returns `not-found` or `unsupported`; a `not-permitted` or `invalid-argument` result MUST NOT start the fallback.
+
+## Production additions (round 2)
+
+A service provider often holds grants that its callers lack, such as file reads or network access. If a caller could hand the provider a path, URL or handle and have the provider act with its own grants, the caller would gain authority it was never given. This is the confused deputy problem, and the host closes it in three places.
+
+The host never treats caller-supplied input as the caller's authority. Replies that carry file or network content are labelled with the grant they were read under, so the host can refuse delivery to a caller without that grant. `ilium plugin check` warns the author when a service method lets caller input choose a granted resource.
+
+- **[PRX-002]** A service provider MUST NOT widen the caller's authority: the host MUST NOT pass a caller-supplied path, URL or handle to a provider as the caller's authority, a provider's reply that carries file or network content MUST be labelled with the grant it was read under so the host can refuse delivery to a caller that lacks that grant, and `ilium plugin check` MUST warn when a provider's service method lets caller input select a granted fs or net resource.

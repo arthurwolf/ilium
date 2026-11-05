@@ -643,3 +643,12 @@ Side basis: `ilium.core.notifications/channels` is server because the `notify` s
 ### Security
 
 Risk marks of this plugin's extension points follow the corrected table in [Extension security](/pages/reference-extension-security/) ([SEC-293]).
+
+
+## Production additions (round 2)
+
+When the agent-detect or notifications plugin crashes and restarts, panes may finish work or ask for approval during the outage. After reclassification the state moves from unknown to done or awaiting-approval, and without a rule no notice would be raised for it.
+
+The host raises one catch-up notice per affected pane and skips any notice already delivered for the same pane and state. It records the count in the notice log so a user can read back what was missed after an unattended run.
+
+- **[PRX-013]** After `ilium.core.agent-detect` or `ilium.core.notifications` restarts following a crash, the host MUST raise exactly one catch-up notice for each pane whose activity changed to done or awaiting-approval during the outage, deduplicated against notices already delivered for the same pane and state, and MUST write `notify.catch-up` with the count to the notice log.

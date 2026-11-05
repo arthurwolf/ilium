@@ -405,3 +405,11 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[AUT-625]** The release candidate MUST pass the `en-XA` pseudo-locale check of USR-316 over every host dialog and every view of a bundled core plugin, and an `i18n.layout-overflow` finding MUST block the release. The check runs in CI on each release candidate (proposed, owner to confirm).
 - **[USR-239]** A replacement MUST keep every command id and every settings tab id of the core plugin it replaces, with the same spelling, and MUST NOT translate them.
 - **[USR-240]** A replacement that takes over a settings tab, a command or a notice MUST supply the title and notice text of that item itself, and the built-in English text returns only when the replacement is turned off.
+
+## Production additions (round 2)
+
+Dates already follow the language of the interface, because the host renders `timestamp` and `relative-time` text nodes itself. Numbers had no such node, so one release in several languages could show different decimal marks inside a single interface.
+
+The host knows the effective UI language, so it can format a number for the plugin without handing the plugin a locale. A plugin passes the raw value and the host chooses the decimal mark, the grouping and the percent form.
+
+- **[PRX-015]** The host MUST provide a `number` text node (or `ui.format-number`) that renders a value with the decimal mark, grouping and percent form of the effective UI language, a plugin MUST NOT hand-format a number shown to the user, the test host MUST render `1234.5` as `1.234,5` when `.locale("de")` is set, and `ilium plugin lint` MUST report a hand-built number string in a user-visible message.
