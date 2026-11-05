@@ -5,7 +5,7 @@ use ilium_core::status_rule_expression::{
     VisualStyle, from_line, to_line,
 };
 use ratatui::layout::Rect;
-use ratatui::{Frame, style::{Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Paragraph}};
+use ratatui::{Frame, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Paragraph}};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum PreviewTab {
@@ -16,7 +16,7 @@ pub enum PreviewTab {
 
 const DEMO_SCENARIOS: [&str; 10] = [
     "Working · goal active", "Needs approval", "Idle · goal paused", "Waiting for subagents",
-    "Idle · no goal", "Idle · task 50%", "Idle · task failed", "Idle · monitor failed",
+    "Idle · no goal", "Working · task 50%", "Idle · task failed", "Idle · monitor failed",
     "Idle · task done unread", "Idle · turn done unread",
 ];
 
@@ -134,7 +134,7 @@ pub fn section_tabs(area: Rect) -> [(EditorColumn, Rect); 3] {
 }
 
 pub fn first_visible_rule(state: &EditorState, height: u16) -> usize {
-    let visible = usize::from(height.saturating_sub(2) / 2).max(1);
+    let visible = usize::from(height.saturating_sub(2) / 3).max(1);
     state.selected_rule.unwrap_or(0).saturating_sub(visible - 1)
 }
 
@@ -164,7 +164,9 @@ pub fn layout(area: Rect, desired_tree_width: u16) -> EditorLayout {
     let minimum_rules = 20u16;
     let preview_width = desired_tree_width.min(available.saturating_sub(minimum_editor + minimum_rules));
     let rest = available.saturating_sub(preview_width);
-    let rules_width = (rest / 2).max(minimum_rules.min(rest));
+    let preferred_rules = (u32::from(rest) * 55 / 100) as u16;
+    let rules_width = preferred_rules.max(minimum_rules.min(rest))
+        .min(rest.saturating_sub(minimum_editor.min(rest)));
     let editor_width = rest.saturating_sub(rules_width);
     let rules = Rect::new(area.x, content_y, rules_width, content_height);
     let editor = Rect::new(rules.right().saturating_add(u16::from(gaps > 0)), content_y, editor_width, content_height);
@@ -578,6 +580,7 @@ fn visual_label(visual: &VisualKind) -> String {
     }
 }
 
+#[cfg(test)]
 fn rule_summary(rule: &Rule<Condition, StatusVisual>) -> String {
     let Ok((terms, connectors)) = to_line(&rule.any_of) else { return "Invalid conditions".into(); };
     let mut summary = String::from("IF ");
@@ -591,6 +594,44 @@ fn rule_summary(rule: &Rule<Condition, StatusVisual>) -> String {
     summary.push_str(" THEN ");
     summary.push_str(&visual_label(&rule.then.kind));
     summary
+}
+
+fn rule_summary_line(rule: &Rule<Condition, StatusVisual>, width: u16, app: &crate::app::App) -> Line<'static> {
+    let keyword = Style::new().fg(Color::White).add_modifier(Modifier::BOLD);
+    let condition = Style::new().fg(Color::Cyan);
+    let mut visual = crate::status_rule_visual::visual_span(
+        &rule.then, &app.ui_settings.icons, app.ui_settings.use_stable_glyphs,
+        u64::try_from(app.started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+        app.ui_settings.motion_level, Some(50.0),
+    );
+    if visual.content.is_empty() {
+        visual = Span::styled("∅", Style::new().fg(Color::DarkGray));
+    }
+    let budget = usize::from(width).saturating_sub(6 + visual.width());
+    let mut spans = Vec::new();
+    let mut used = 0usize;
+    let mut add = |text: String, style: Style| {
+        let remaining = budget.saturating_sub(used);
+        let mut clipped = String::new();
+        for ch in text.chars() {
+            let cells = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            if used + cells > budget { break; }
+            clipped.push(ch);
+            used += cells;
+        }
+        if remaining > 0 && !clipped.is_empty() { spans.push(Span::styled(clipped, style)); }
+    };
+    add("IF ".into(), keyword);
+    if let Ok((terms, connectors)) = to_line(&rule.any_of) {
+        for (index, term) in terms.iter().enumerate() {
+            if index > 0 { add(if connectors[index - 1] == Connector::And { " AND " } else { " OR " }.into(), keyword); }
+            if term.negated { add("NOT ".into(), Style::new().fg(Color::LightRed).add_modifier(Modifier::BOLD)); }
+            add(condition_label(&term.condition), condition);
+        }
+    }
+    spans.push(Span::styled(" THEN ", keyword));
+    spans.push(visual);
+    Line::from(spans)
 }
 
 /// Paint the editor using the same geometry used by pointer hit tests.
@@ -609,12 +650,13 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, app: &crate::app::App, state: &
     }
     let mut lines = Vec::new();
     let first = first_visible_rule(state, regions.rules.height);
-    let visible = usize::from(regions.rules.height.saturating_sub(2) / 2).max(1);
+    let visible = usize::from(regions.rules.height.saturating_sub(2) / 3).max(1);
     for (index, rule) in app.custom_status_rules.rules.iter().enumerate().skip(first).take(visible) {
         let marker = if rule.enabled { "●" } else { "○" };
         let style = if state.selected_rule == Some(index) { crate::theme::selected_style().add_modifier(Modifier::BOLD) } else { Style::new() };
         lines.push(Line::from(Span::styled(format!("{marker} {}", rule.name), style)));
-        lines.push(Line::from(Span::styled(rule_summary(rule), style.add_modifier(Modifier::DIM))));
+        lines.push(rule_summary_line(rule, regions.rules.width.saturating_sub(2), app));
+        lines.push(Line::from(""));
     }
     frame.render_widget(Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Rules ")), regions.rules);
     if let Some(button) = add_rule_button(regions.rules) {
@@ -624,10 +666,16 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, app: &crate::app::App, state: &
         frame.render_widget(Paragraph::new(if state.confirm_reset { "Confirm" } else { "Reset  " }).style(crate::theme::selected_style()), button);
     }
     for (offset, rule) in app.custom_status_rules.rules.iter().skip(first).take(visible).enumerate() {
-        let row = regions.rules.y.saturating_add(1).saturating_add((offset as u16).saturating_mul(2));
+        let row = regions.rules.y.saturating_add(1).saturating_add((offset as u16).saturating_mul(3));
         if let Some(rect) = rule_actions(regions.rules, row) {
             let enabled = if rule.enabled { "●" } else { "○" };
-            frame.render_widget(Paragraph::new(format!("{enabled}↑↓✎×N")), rect);
+            frame.render_widget(Paragraph::new(Line::from(vec![
+                Span::styled(enabled, Style::new().fg(Color::Green)),
+                Span::styled("↑↓", Style::new().fg(Color::Cyan)),
+                Span::styled("✎", Style::new().fg(Color::Yellow)),
+                Span::styled("×", Style::new().fg(Color::LightRed)),
+                Span::styled("N", Style::new().fg(Color::Magenta)),
+            ])), rect);
         }
     }
     let mut details = Vec::new();
@@ -636,21 +684,31 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, app: &crate::app::App, state: &
             let (first, visible) = condition_window(state, regions.editor, terms.len());
             for (index, term) in terms.iter().enumerate().skip(first).take(visible) {
                 let prefix = if index == 0 { "IF" } else if connectors[index - 1] == Connector::And { "AND" } else { "OR" };
-                let text = format!("{prefix} {}{}", if term.negated { "NOT " } else { "" }, condition_label(&term.condition));
-                let style = if state.column == EditorColumn::ConditionAndVisual && state.selected_condition == index { crate::theme::selected_style() } else { Style::new() };
-                details.push(Line::from(Span::styled(text, style)));
+                let selected = state.column == EditorColumn::ConditionAndVisual && state.selected_condition == index;
+                let background = if selected { crate::theme::selected_style() } else { Style::new() };
+                let keyword = background.fg(Color::White).add_modifier(Modifier::BOLD);
+                let mut spans = vec![Span::styled(format!("{prefix} "), keyword)];
+                if term.negated {
+                    spans.push(Span::styled("NOT ", background.fg(Color::LightRed).add_modifier(Modifier::BOLD)));
+                }
+                spans.push(Span::styled(condition_label(&term.condition), background.fg(Color::Cyan)));
+                details.push(Line::from(spans));
             }
         }
-        details.push(Line::from(format!("THEN {}", visual_label(&rule.then.kind))));
+        details.push(Line::from(vec![Span::styled("THEN ", Style::new().fg(Color::White).add_modifier(Modifier::BOLD)),
+            crate::status_rule_visual::visual_span(&rule.then, &app.ui_settings.icons,
+                app.ui_settings.use_stable_glyphs, u64::try_from(app.started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+                app.ui_settings.motion_level, Some(50.0)),
+            Span::styled(format!("  {}", visual_label(&rule.then.kind)), Style::new().fg(Color::Cyan))]));
         details.push(Line::from(""));
         if let Some(draft) = &state.parameter_draft { details.push(Line::from(format!("Value: {draft}▏  Enter saves · Esc cancels"))); }
         if let Some(error) = &state.save_error { details.push(Line::from(format!("Save failed: {error}"))); }
         details.push(Line::from("Tab changes column · Esc back"));
         if state.column == EditorColumn::ConditionAndVisual {
-            details.push(Line::from("↑/↓ condition · ←/→ type"));
-            details.push(Line::from("A add · Delete remove · N NOT · O AND/OR · E edit value · I case"));
-            details.push(Line::from("V visual type · G glyph/frames · C colour · B bold · D dim"));
-            details.push(Line::from("+/− speed · P ping-pong"));
+            details.push(Line::from("‹ › condition   ¬ NOT   ∨ AND/OR"));
+            details.push(Line::from("+ add   × remove   ✎ edit   i case"));
+            details.push(Line::from("V type  G icon  C colour  B bold"));
+            details.push(Line::from("D dim  −/+ speed  P ping-pong"));
         } else {
             details.push(Line::from("A add · N rename · Space enable · Delete remove"));
             details.push(Line::from("Ctrl+↑/↓ reorder · U undo · R reset"));
@@ -665,11 +723,17 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, app: &crate::app::App, state: &
             let row = regions.editor.y.saturating_add(1).saturating_add(offset as u16);
             if let Some(rect) = condition_actions(regions.editor, row) {
                 let controls = if matches!(&term.condition, Condition::ScreenMatches(_)) { "‹›¬∨+×✎i" } else { "‹›¬∨+×✎ " };
-                frame.render_widget(Paragraph::new(controls), rect);
+                frame.render_widget(Paragraph::new(controls).style(Style::new().fg(Color::Cyan)), rect);
             }
         }
         if let Some(rect) = visual_actions(regions.editor, visible) {
-            frame.render_widget(Paragraph::new("V G C B D - + P").style(crate::theme::selected_style()), rect);
+            let buttons = ["V", "G", "C", "B", "D", "−", "+", "P"];
+            let mut spans = Vec::new();
+            for (index, button) in buttons.into_iter().enumerate() {
+                if index > 0 { spans.push(Span::raw(" ")); }
+                spans.push(Span::styled(button, crate::theme::selected_style().add_modifier(Modifier::BOLD)));
+            }
+            frame.render_widget(Paragraph::new(Line::from(spans)), rect);
         }
     }
     for (tab, rect) in preview_tabs(regions.preview) {

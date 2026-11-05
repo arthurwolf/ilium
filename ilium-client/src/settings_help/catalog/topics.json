@@ -1,5 +1,15 @@
 [
   {
+    "id": "CACHE-01",
+    "title": "Agent cache keep-alive",
+    "explanation": "Configure cache refresh during selected waits, with separate intervals for Claude and Codex.",
+    "specimen": "Cache keep-alive: Off\nClaude ping interval: 55 min\nCodex ping interval: 25 min\nWhile a monitor is running: On\nWhile waiting for a command: On\nWhile waiting for a subagent: On",
+    "states": "Disabled by default. Enable the policy and choose one or more wait conditions and the interval for each agent type.",
+    "frames": ["Cache keep-alive: Off\nClaude ping interval: 55 min\nCodex ping interval: 25 min"],
+    "motion": "None.",
+    "caveat": "Provider refresh is not available yet; these settings cannot send pings. Cache lifetime and savings are not guaranteed."
+  },
+  {
     "id": "TOOLBAR-01",
     "title": "Tree toolbar",
     "explanation": "Arrange the tree toolbar and choose how long a terminal remains active after its last output.",

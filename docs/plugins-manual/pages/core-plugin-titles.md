@@ -21,7 +21,7 @@ Ilium keeps one rule about names: a title that you typed by hand is never replac
 
 ### See it
 
-<figure><img src="/assets/demos/03-contextual-titles.gif" alt="A terminal gains an inferred title while the manually named Keep pane stays unchanged" loading="lazy"><figcaption>Current Ilium applies an automatic title from a supplied local response fixture. The manually named Keep pane stays unchanged.</figcaption></figure>
+<figure><img src="/assets/demos/03-contextual-titles.gif" alt="Ilium applies fixture-generated titles while the manually named Stamp desk remains unchanged" loading="lazy"><figcaption>Ilium applies deterministic local title responses while preserving the manually named Stamp desk. Claude uses a local model through loopback; Codex is a local fixture with a seeded prompt. A stale title proposal is retried, setup and model wait are cut, and Claude's turn is unfinished.</figcaption></figure>
 
 <figure><img src="/assets/demos/01-ai-tree.gif" alt="A scripted plan regroups current Ilium panes by topic" loading="lazy"><figcaption>A scripted plan is applied to current Ilium, then the same panes are visited after thematic grouping. Local agent fixtures; no model inference.</figcaption></figure>
 
@@ -578,3 +578,12 @@ A package adds this entry in its manifest. It needs no code.
 - [Core plugins](/pages/core-plugins/)
 - [Inference providers](/pages/core-plugin-inference/), which supplies the model
 - [Contract overview](/pages/getting-started-overview/)
+
+
+### Correction: Contextual Titles recording
+
+**Coordinator instruction (not a user quotation):** Correct the Contextual Titles caption and document its fixture and local-model limitations.
+
+Session record: `/home/arthur/.codex/sessions/2026/11/03/rollout-2026-11-03T00-28-23-01a19e97-b05d-7661-8fcb-b02eafa9ae17.jsonl`
+
+**Correction to “See it” above:** the current recording shows the manually named **Stamp desk**, not Keep, staying unchanged while Ilium applies automatic titles. The Claude CLI uses a model alias routed over loopback to local Qwen; no provider call is made. The Codex-shaped process and title responses are deterministic local fixtures, and the fixture transcript is seeded with the prompt later typed. A stale title proposal is rejected and retried. Claude’s turn is unfinished. Setup and 57 seconds of model wait are cut; captions, arrows, highlights and reading holds are added.

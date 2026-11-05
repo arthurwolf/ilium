@@ -156,7 +156,7 @@ impl Scene for LighthouseScene {
         let aspect = frame.raster.aspect();
         let horizon = settings.horizon as f32 / 100.0;
         let source_x = settings.location as f32 / 100.0;
-        let source_y = horizon - 0.12;
+        let source_y = horizon - 0.20;
         let direction =
             (time * settings.speed as f32 / 350.0).sin() * (settings.sweep as f32).to_radians();
         let spread = (settings.beam_width as f32).to_radians();
@@ -168,15 +168,22 @@ impl Scene for LighthouseScene {
             let angle = dy.atan2(forward);
             let light = (1.0 - ((angle - direction).abs() / spread).powi(2)).max(0.0);
             let distance = (dx * dx + dy * dy).sqrt();
-            let beam = light * 0.24 / (1.0 + distance * 2.0);
-            // A tapered tower, cap and island cut sky ink out of their silhouette.
-            let tower_width = 0.007 + ((y - source_y) / 0.12).clamp(0.0, 1.0) * 0.009;
+            let beam = light * 0.48 / (1.0 + distance * 2.0);
+            // Keep a dark center while outlining the tower against a dark terminal.
+            let tower_width = 0.018 + ((y - source_y) / 0.20).clamp(0.0, 1.0) * 0.012;
             let tower = y >= source_y && y <= horizon && (x - source_x).abs() < tower_width;
             let roof = y >= source_y - 0.018 && y < source_y && (x - source_x).abs() < 0.023;
             let island = y >= horizon
                 && y < horizon + 0.04
                 && (x - source_x).abs() < 0.07 * (1.0 - (y - horizon) / 0.04);
-            if tower || roof || island {
+            if tower {
+                return if (x - source_x).abs() >= 0.007 {
+                    0.85
+                } else {
+                    0.0
+                };
+            }
+            if roof || island {
                 return 0.0;
             }
             if y < horizon {
@@ -254,6 +261,35 @@ mod tests {
             render(changed, 80, 24, 9),
             render(LighthouseSettings::default(), 80, 24, 9)
         );
+    }
+
+    #[test]
+    fn tower_has_visible_structure_even_without_water_glints() {
+        for location in [18, 50, 82] {
+            for seconds in [0, 9, 20] {
+                let settings = LighthouseSettings {
+                    location,
+                    water_glints: 0,
+                    ..Default::default()
+                };
+                let dots = render(settings, 100, 30, seconds);
+                let lit = dots
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, value)| {
+                        let x = ((*index % 200) as f32 + 0.5) / 200.0;
+                        let y = ((*index / 200) as f32 + 0.5) / 120.0;
+                        (x - location as f32 / 100.0).abs() < 0.015
+                            && (0.46..0.54).contains(&y)
+                            && **value >= 0.25
+                    })
+                    .count();
+                assert!(
+                    lit >= 4,
+                    "tower must have visible structure at location {location} and time {seconds}, found {lit}"
+                );
+            }
+        }
     }
 
     #[test]

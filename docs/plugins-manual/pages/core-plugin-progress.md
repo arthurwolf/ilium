@@ -48,18 +48,20 @@ Progress monitors let a long task show how far it is. An agent or a script regis
 <figcaption>Rendered at 80 columns or fewer. Illustrative. Each record is one line on a real terminal; it is wrapped here, and the text of <code>next</code> and the nested <code>progress</code> object are cut. The registration record comes first. The final <code>progress_wait</code> record ends the wait and the exit status is 0 for done.</figcaption>
 </figure>
 
+Logical waits have no elapsed-time deadline. The removed `--timeout-seconds` wait flag is unsupported. A terminal or outer-tool yield is not a task outcome; keeping the model suspended across those boundaries requires agent runtime integration.
+
 ### Behaviour contract
 
 Field order and names equal the baseline; extra fields are not allowed. The records are:
 
 - `progress_set`: `{"type":"progress_set","request_id":<n>,"pane_id":<n>,"monitor_id":<n>,"progress":{"monitor_id":<n>,"report":{...},"monitor_health":{"state":"..."},"last_observed_unix_millis":<n>}}`
-- `progress_wait`: `{"type":"progress_wait","pane_id":<n>,"monitor_id":<n>,"outcome":"done|error|monitor-failed|cleared|no-monitor|still-running","exit_code":<n>,"waited_seconds":<n>,"composer_notice":"suppressed|may-also-arrive|none","next":"...","progress":{...}}`
+- `progress_wait`: `{"type":"progress_wait","pane_id":<n>,"monitor_id":<n>,"outcome":"done|error|monitor-failed|cleared|no-monitor","exit_code":<n>,"waited_seconds":<n>,"composer_notice":"suppressed|may-also-arrive|none","next":"...","progress":{...}}`
 
 | Id | Rule | Exact value or text | Baseline source |
 |---|---|---|---|
-| progress-B01 | Exit status of `progress set --wait` and `progress wait` | 0 done, 2 usage or rejected (for example `monitor-ambiguous`), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared, 6 `--timeout-seconds` elapsed while the task is still running (`outcome` `still-running`) | `src/docs/cli-reference.md#progress-wait` |
-| progress-B02 | `outcome` for each exit | 0 `done`, 3 `error`, 4 `monitor-failed`, 5 `cleared` or `no-monitor`, 6 `still-running` | `src/docs/cli-reference.md#progress-wait` |
-| progress-B03 | Text of `next` | `done`: "The task finished. Verify its output, then continue." `error`: "The task reported failure. Inspect its log or error, fix, and retry." `monitor-failed`: "The probe stopped working, so the task outcome is unknown. Check the task directly; do not assume success." `cleared`: "The monitor was cleared, or is not registered on this pane. Check `ilium progress status`." `no-monitor`: "This pane has no progress monitor. Register one with `ilium progress set`." `still-running`: "The task is still running. Run the same wait command again to keep waiting." A settled outcome adds " When you have handled it, remove this monitor with `ilium progress clear --monitor-id <id>`." | `ilium/src/progress_wait.rs` |
+| progress-B01 | Exit status of `progress set --wait` and `progress wait` | 0 done, 2 usage or rejected (for example `monitor-ambiguous`), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared | `src/docs/cli-reference.md#progress-wait` |
+| progress-B02 | `outcome` for each exit | 0 `done`, 3 `error`, 4 `monitor-failed`, 5 `cleared` or `no-monitor` | `src/docs/cli-reference.md#progress-wait` |
+| progress-B03 | Text of `next` | `done`: "The task finished. Verify its output, then continue." `error`: "The task reported failure. Inspect its log or error, fix, and retry." `monitor-failed`: "The probe stopped working, so the task outcome is unknown. Check the task directly; do not assume success." `cleared`: "The monitor was cleared, or is not registered on this pane. Check `ilium progress status`." `no-monitor`: "This pane has no progress monitor. Register one with `ilium progress set`." A settled outcome adds " When you have handled it, remove this monitor with `ilium progress clear --monitor-id <id>`." | `ilium/src/progress_wait.rs` |
 | progress-B04 | `composer_notice` | `suppressed` while a wait takes the outcome, `may-also-arrive` for a settled outcome without a wait, `none` otherwise | `src/docs/cli-reference.md#progress-wait` |
 | progress-B05 | Monitors per pane | At most 8. The 9th live monitor is rejected with code `too-many-monitors`. A settled monitor whose outcome was delivered makes room | `src/docs/cli-reference.md#progress-set` |
 | progress-B06 | `--interval-seconds` | Default 1, range 1 to 86400 | `src/docs/cli-reference.md#progress-set` |

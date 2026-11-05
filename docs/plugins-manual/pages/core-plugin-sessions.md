@@ -21,9 +21,9 @@ The snapshot files, the rolling backups, the ordered event journal and the `iliu
 
 ### See it
 
-<figure><img src="/assets/demos/19-snapshot-resume.gif" alt="After a restart the panes return and an agent resumes its previous session" loading="lazy"><figcaption>The snapshot restores the layout and an agent pane resumes with its verified session id.</figcaption></figure>
+<figure><img src="/assets/demos/19-snapshot-resume.gif" alt="An isolated Ilium server shuts down and relaunches; a local session fixture recovers a saved note" loading="lazy"><figcaption>An isolated Ilium server actually shuts down and relaunches, and a local session fixture recovers a saved note. No real provider is used. Idle waits are cut and caption holds are added.</figcaption></figure>
 
-<figure><img src="/assets/demos/24-agents-survive-reboots.gif" alt="Agents come back after the machine restarts" loading="lazy"><figcaption>Agents come back after the machine restarts, with their scrollback kept.</figcaption></figure>
+<figure><img src="/assets/demos/24-agents-survive-reboots.gif" alt="A simulated reboot card precedes an isolated Ilium server shutdown and relaunch; a local fixture recovers a saved note" loading="lazy"><figcaption>The reboot card is simulated and editorial; no machine reboot or real provider is used. The isolated Ilium server shutdown and relaunch are real. Idle waits are cut and caption holds are added.</figcaption></figure>
 
 <figure><img src="/assets/demos/11-detach-reattach.gif" alt="The user detaches the client and reattaches to find the panes still running" loading="lazy"><figcaption>Detach leaves the panes running. Reattach shows the current screen.</figcaption></figure>
 

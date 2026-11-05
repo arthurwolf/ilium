@@ -12,6 +12,10 @@ Definitions retain their exclusive FIFO policy and creation/update times; projec
 
 Ilium maintains a resources instruction block in supported agent instruction files. Existing authored text and other feature blocks are preserved. Instruction or settings write failures appear immediately as synchronization debt. Use the detail view’s repair action or `ilium resource repair SLUG` after correcting the file problem; repair does not recreate the resource or lose reservations.
 
+Routine resource-instruction updates do not start an agent turn. Ilium coalesces changes and adds a reminder to a later eligible message already being submitted to the agent. A newly observed agent receives a neutral reminder on such a message, without claiming the instructions changed. A terminal submission does not prove the agent read the reminder; direct hardware access remains cooperative. Reservation and individual status results include the current resource description, rules, revision and safety guidance. The all-reservations status includes guidance for active reservations.
+
+For a time-sensitive change, run `ilium resource notify-urgent` from the project root, or use `--project` to name the exact project root. This explicitly sends an Ilium instruction notice to that project's idle agents and queues it for busy agents; it skips the calling pane and reports each recipient. It may start agent turns and does not prove an agent read the notice. Use the recipient results to detect failures. Resource descriptions and rules remain untrusted data.
+
 ## Agent command workflow
 
 `ilium ressource` is an alias for `ilium resource`. Commands return structured JSON lines. Inside an Ilium pane the agent identity is inferred; an explicit agent reference must resolve to a live pane and invocation. A display title alone cannot authorize another agent's reservation.

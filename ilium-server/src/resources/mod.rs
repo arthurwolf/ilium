@@ -1416,8 +1416,9 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
  let signature:Vec<_>=catalog.links.iter().filter(|l|paths.contains(&l.project_path)).map(|l|(l.project_id.clone(),l.resource_id.clone(),l.desired_instruction_revision)).collect();
  let mut projections_ready = true;
  if projected_paths.as_ref().map(|previous|&previous.value)!=Some(&paths.value)||projected.as_ref()!=Some(&signature)||catalog.links.iter().any(|l|paths.contains(&l.project_path)&&l.sync_debt.is_some()) {match repair_local_projections(&state,&mut catalog,&paths).await{Ok(())=>{projected=Some(signature);projected_paths=Some(paths)},Err(error)=>{projections_ready=false;projection_failed=true;active=true;if error.code!="busy"{state.events.publish(ServerEvent::ResourceObservationFailed{message:error.to_string()})}}}if let Ok(now)=clock(){observed_clock=now;}}
-            // Instruction changes are delivered through the existing fenced composer,
-            // once per live invocation and binding revision, after readiness.
+            // A first observation cannot prove whether a running invocation
+            // read its current instructions. Queue a neutral reminder, not a
+            // false claim that they changed. Later changes replace it.
             let candidates:Vec<_>={let panes=state.panes.read().await;panes.iter().filter_map(|(id,pane)|match pane{PaneResource::Terminal(runtime) if runtime.detected_agent_process_id.is_some()=>Some((*id,runtime.agent_generation)),_=>None}).collect()};
             notified.retain(|key,_|candidates.contains(key));
             for (pane,generation) in candidates {
@@ -1425,17 +1426,33 @@ pub(crate) fn spawn(state: Arc<ServerState>) -> tokio::task::JoinHandle<()> {
                 let Some(path)=project_path else{continue};
                 if !projections_ready || catalog.links.iter().any(|link|std::path::Path::new(&link.project_path)==path && link.sync_debt.is_some()){continue}
                 let bindings:Vec<_>=catalog.links.iter().filter(|link|std::path::Path::new(&link.project_path)==path).map(|link|(link.resource_id.clone(),link.desired_instruction_revision)).collect();
-                if notified.get(&(pane,generation))==Some(&bindings) || (bindings.is_empty()&&!notified.contains_key(&(pane,generation))){continue}
-                let Ok(ResourceActor::Agent(agent))=actor(&state,Some(pane),&path).await else{continue};
-                let text=if bindings.is_empty(){"The project's shared resource bindings were removed. Existing reservations still require explicit release or cancellation; inspect `ilium resource status` before further use."}else{"The project's shared resource instructions changed. Read the managed resource block in your project agent instructions before using shared hardware. Reserve exclusive access, wait once when queued, and explicitly release after use; estimates never clear ownership."};
-                if matches!(crate::agent_delivery::try_resource_notice(&state,&agent,text).await,Ok(true)){notified.insert((pane,generation),bindings);}
+                let key = (pane, generation);
+                let notice = match notified.get(&key) {
+                    None if !bindings.is_empty() => Some(crate::pane::ResourceInstructionNotice::Available),
+                    Some(previous) if previous != &bindings => Some(if bindings.is_empty() {
+                        crate::pane::ResourceInstructionNotice::Removed
+                    } else {
+                        crate::pane::ResourceInstructionNotice::Changed
+                    }),
+                    _ => None,
+                };
+                if let Some(notice) = notice {
+                    let mut panes = state.panes.write().await;
+                    if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane) {
+                        if runtime.agent_generation == generation && runtime.detected_agent_process_id.is_some() {
+                            runtime.resource_notice_serial = runtime.resource_notice_serial.wrapping_add(1);
+                            runtime.pending_resource_notice = Some((runtime.resource_notice_serial, notice));
+                        }
+                    }
+                }
+                notified.insert(key, bindings);
             }
 
             for q in catalog.resources.values().flat_map(|r|&r.reservations).filter(|q|q.state==ReservationState::Owned&&q.acquisition_pending&&q.agent.runtime_generation==service(&state).map(|s|s.incarnation.as_str()).unwrap_or("")) {
                 let receipt=(q.id.clone(),q.ownership_generation);
                 let attached=service(&state).ok().and_then(|s|s.waits.lock().ok().map(|w|w.entries.contains_key(&q.id))).unwrap_or(true);
                 if attached||delivered.contains(&receipt){continue}
-                let text=format!("Resource reservation {} acquired generation {}. Confirm current ownership with `ilium resource status {}` before hardware use; release promptly if not ready.",q.id,q.ownership_generation,q.id);
+                let text=format!("Resource reservation {} acquired generation {}. Confirm current ownership with `ilium resource status {}` before hardware use; release promptly if not ready. This notice is from Ilium, not the user; no reply or acknowledgement is needed.",q.id,q.ownership_generation,q.id);
                 if matches!(crate::agent_delivery::try_resource_notice(&state,&q.agent,&text).await,Ok(true)){delivered.insert(receipt);}
             }
             delivered.retain(|(id,generation)|catalog.resources.values().flat_map(|r|&r.reservations).any(|q|q.id==*id&&q.ownership_generation==*generation&&q.acquisition_pending));

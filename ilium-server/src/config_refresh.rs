@@ -14,6 +14,7 @@ pub(crate) struct Refresh {
     pub(crate) settings: ilium_sound::SoundSettings,
     pub(crate) notifications: NotificationsConfig,
     pub(crate) backups_enabled: bool,
+    pub(crate) cache_keepalive: ilium_core::cache_keepalive::CacheKeepaliveSettings,
 }
 impl Job for RefreshJob {
     type Output = Option<Refresh>;
@@ -45,6 +46,7 @@ impl Job for RefreshJob {
             settings: config.sound,
             notifications: config.notifications,
             backups_enabled: config.session_backups_enabled,
+            cache_keepalive: config.cache_keepalive,
         }))
     }
 }

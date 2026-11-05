@@ -648,7 +648,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         }
         SettingsTab::Icons => unreachable!("Icons returns before the standard settings match"),
     }
-    render_number_controls(frame, layout.content_area, app, state);
+    if state.tab != SettingsTab::AgentMonitoring || app.custom_status_rules_editor.is_none() {
+        render_number_controls(frame, layout.content_area, app, state);
+    }
     if state.tab == SettingsTab::Keyboard {
         for field in crate::value_keyboard::KeyboardPrefix::ALL {
             if let Some(control) =
@@ -671,7 +673,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             }
         }
     }
-    render_settings_help_anchors(frame, &layout, app, state);
+    if state.tab != SettingsTab::AgentMonitoring || app.custom_status_rules_editor.is_none() {
+        render_settings_help_anchors(frame, &layout, app, state);
+    }
     if state.tab == SettingsTab::Optimization {
         // The Apply confirmation covers the whole screen, help rail included.
         crate::compaction_ui::render_modal(frame, area, app);
@@ -1097,6 +1101,12 @@ pub fn settings_help_anchors(
                     crate::app::AgentMonitoringRow::ModelIcons => "AM-24".to_owned(),
                     crate::app::AgentMonitoringRow::WorkingPollSeconds => "AM-02".to_owned(),
                     crate::app::AgentMonitoringRow::IdlePollSeconds => "AM-03".to_owned(),
+                    crate::app::AgentMonitoringRow::CacheKeepaliveEnabled
+                    | crate::app::AgentMonitoringRow::CacheKeepaliveClaudeInterval
+                    | crate::app::AgentMonitoringRow::CacheKeepaliveCodexInterval
+                    | crate::app::AgentMonitoringRow::CacheKeepaliveMonitor
+                    | crate::app::AgentMonitoringRow::CacheKeepaliveCommand
+                    | crate::app::AgentMonitoringRow::CacheKeepaliveSubagent => "CACHE-01".to_owned(),
                     crate::app::AgentMonitoringRow::CustomSignaturesHeading
                     | crate::app::AgentMonitoringRow::CustomSignature(_)
                     | crate::app::AgentMonitoringRow::AddCustomSignature => "AM-04".to_owned(),
@@ -6551,14 +6561,49 @@ struct AgentMonitoringView {
     configure_line: Option<u16>,
 }
 
-pub(crate) fn monitoring_preview_span(app: &App, mode: crate::agent_monitoring::AgentMonitoringMode, index: usize) -> Span<'static> {
+// Demo screens are synthetic, but use the same regex options and region semantics
+// as the server. Cache compiled expressions so animation redraws stay cheap.
+fn monitoring_demo_screen_match(index: usize, pattern: &ilium_core::status_rule_expression::ScreenPattern) -> ilium_core::status_rule_expression::Observation {
+    use ilium_core::status_rule_expression::{Observation, ScreenRegion};
+    use std::{cell::RefCell, collections::HashMap};
+    thread_local! {
+        static EXPRESSIONS: RefCell<HashMap<(String, bool), Option<regex::Regex>>> = RefCell::new(HashMap::new());
+    }
+    let screens = [
+        "Working on project\nImplementing changes", "Approval required\nWaiting for permission",
+        "Goal paused\nWaiting for input", "Waiting for subagents\nCoordinating work",
+        "Idle\nReady for input", "Working\nTask progress: 50%",
+        "Task error\nCommand failed", "Monitor lost\nUnable to read task status",
+        "Task complete\nReady for review", "Finished\nUnread result",
+    ];
+    let Some(screen) = screens.get(index) else { return Observation::Unknown; };
+    let lines: Vec<_> = screen.lines().collect();
+    let selected = match pattern.region {
+        ScreenRegion::All => (*screen).to_owned(),
+        ScreenRegion::FirstLines(count) => lines[..usize::from(count).min(lines.len())].join("\n"),
+        ScreenRegion::LastLines(count) => lines[lines.len().saturating_sub(usize::from(count))..].join("\n"),
+    };
+    EXPRESSIONS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= 128 && !cache.contains_key(&(pattern.pattern.clone(), pattern.ignore_case)) { cache.clear(); }
+        let expression = cache.entry((pattern.pattern.clone(), pattern.ignore_case)).or_insert_with(|| {
+            if pattern.pattern.chars().count() > 256 { return None; }
+            regex::RegexBuilder::new(&pattern.pattern).case_insensitive(pattern.ignore_case).multi_line(true)
+                .size_limit(1 << 20).dfa_size_limit(1 << 20).build().ok()
+        });
+        match expression { Some(regex) if regex.is_match(&selected) => Observation::True, Some(_) => Observation::False, None => Observation::Unknown }
+    })
+}
+
+fn monitoring_preview_spans(app: &App, mode: crate::agent_monitoring::AgentMonitoringMode, index: usize) -> Vec<Span<'static>> {
     use ilium_core::{AgentClass, AgentState, AgentTurn, GoalState, PaneProgress, PaneStatus, ProgressAttention, ProgressMonitorHealth, ProgressTaskReport, ProgressTaskStatus};
     let (turn, goal) = match index {
         0 => (AgentTurn::Working, Some(GoalState::Active)),
-        1 => (AgentTurn::WaitingApproval, None),
+        1 => (AgentTurn::WaitingApproval, Some(GoalState::Active)),
         2 => (AgentTurn::Idle, Some(GoalState::Paused)),
-        3 => (AgentTurn::WaitingSubagents, None),
-        5..=9 => (AgentTurn::Idle, None),
+        3 => (AgentTurn::WaitingSubagents, Some(GoalState::Active)),
+        5 => (AgentTurn::Working, None),
+        6..=9 => (AgentTurn::Idle, None),
         _ => (AgentTurn::Idle, None),
     };
     let status = PaneStatus::Agent(AgentState { class: AgentClass::Claude, turn, goal, completion_unread: index == 9 });
@@ -6580,22 +6625,36 @@ pub(crate) fn monitoring_preview_span(app: &App, mode: crate::agent_monitoring::
     let icons = &app.ui_settings.icons;
     let elapsed_ms = app.started_at.elapsed().as_millis();
     if mode == crate::agent_monitoring::AgentMonitoringMode::Custom {
-        return crate::status_rule_visual::status_span(crate::status_rule_visual::StatusSpanContext {
+        return vec![crate::status_rule_visual::status_span(crate::status_rule_visual::StatusSpanContext {
             rules: &app.custom_status_rules, status: &status, progress: &progress, scheduled_input: false,
             shell_output: None, activity_stale: None,
-            screen_matches: &|_| ilium_core::status_rule_expression::Observation::Unknown,
+            screen_matches: &|pattern| monitoring_demo_screen_match(index, pattern),
             icons, use_stable_glyphs: app.ui_settings.use_stable_glyphs,
             elapsed_millis: u64::try_from(elapsed_ms).unwrap_or(u64::MAX), motion: app.ui_settings.motion_level,
-        });
+        })];
     }
     let signals = crate::agent_monitoring::displayed_pane_signals(mode, app.ui_settings.attention_progress_reports,
         app.ui_settings.attention_running_indicator, &status, &progress, false, None);
     let objective = crate::status_icons::objective_span(signals.objective, icons, app.ui_settings.use_stable_glyphs);
     let now_elapsed = if app.ui_settings.motion_level == crate::config::MotionLevel::Off { 0 } else { elapsed_ms };
-    let now = crate::status_icons::now_span(signals.now, icons, now_elapsed, app.ui_settings.use_stable_glyphs);
+    let now = if mode == crate::agent_monitoring::AgentMonitoringMode::Attention
+        && signals.now == ilium_core::NowSignal::Working {
+        crate::tree_ui::attention_running_span(app.ui_settings.attention_running_indicator, icons, now_elapsed, app.ui_settings.use_stable_glyphs)
+    } else {
+        crate::status_icons::now_span(signals.now, icons, now_elapsed, app.ui_settings.use_stable_glyphs)
+    };
     if mode == crate::agent_monitoring::AgentMonitoringMode::Normal {
-        Span::raw(format!("{} {}", objective.content, now.content))
-    } else if objective.content.is_empty() { now } else { objective }
+        vec![objective, Span::raw(" "), now]
+    } else if objective.content.is_empty() { vec![now] } else { vec![objective] }
+}
+
+pub(crate) fn monitoring_preview_span(app: &App, mode: crate::agent_monitoring::AgentMonitoringMode, index: usize) -> Span<'static> {
+    let mut spans = monitoring_preview_spans(app, mode, index);
+    if spans.len() == 1 {
+        spans.remove(0)
+    } else {
+        Span::raw(spans.into_iter().map(|span| span.content.into_owned()).collect::<String>())
+    }
 }
 
 pub(crate) fn monitoring_card_preview(app: &App, mode: crate::agent_monitoring::AgentMonitoringMode, index: usize) -> String {
@@ -6623,6 +6682,12 @@ fn monitoring_row_label(row: crate::app::AgentMonitoringRow) -> String {
         Row::ProgressFillStyle => "Progress fill style".to_string(),
         Row::WorkingPollSeconds => "Working poll interval".to_string(),
         Row::IdlePollSeconds => "Idle poll interval".to_string(),
+        Row::CacheKeepaliveEnabled => "Cache keep-alive".to_string(),
+        Row::CacheKeepaliveClaudeInterval => "Claude ping interval".to_string(),
+        Row::CacheKeepaliveCodexInterval => "Codex ping interval".to_string(),
+        Row::CacheKeepaliveMonitor => "While a monitor is running".to_string(),
+        Row::CacheKeepaliveCommand => "While waiting for a command".to_string(),
+        Row::CacheKeepaliveSubagent => "While waiting for a subagent".to_string(),
         Row::CustomSignaturesHeading => "Custom agent signatures".to_string(),
         Row::CustomSignature(index) => format!("Signature {}", index + 1),
         Row::AddCustomSignature => "Add custom signature".to_string(),
@@ -6649,6 +6714,12 @@ fn monitoring_row_value(row: crate::app::AgentMonitoringRow, app: &App) -> Strin
             .to_string(),
         Row::AttentionProgressReports => on_off(app.ui_settings.attention_progress_reports),
         Row::ModelIcons => on_off(app.ui_settings.agent_tree_model_icons),
+        Row::CacheKeepaliveEnabled => on_off(app.ui_settings.cache_keepalive.enabled),
+        Row::CacheKeepaliveClaudeInterval => format!("{} min", app.ui_settings.cache_keepalive.claude_interval_minutes),
+        Row::CacheKeepaliveCodexInterval => format!("{} min", app.ui_settings.cache_keepalive.codex_interval_minutes),
+        Row::CacheKeepaliveMonitor => on_off(app.ui_settings.cache_keepalive.on_monitor),
+        Row::CacheKeepaliveCommand => on_off(app.ui_settings.cache_keepalive.on_command),
+        Row::CacheKeepaliveSubagent => on_off(app.ui_settings.cache_keepalive.on_subagent),
         Row::ProgressMonitor => on_off(app.ui_settings.progress_monitor_enabled),
         Row::ProgressMonitorMaxLines => format!("{} lines", app.ui_settings.progress_max_lines),
         Row::CompletedProgressHideAfter => {
@@ -6753,9 +6824,9 @@ fn agent_monitoring_view(
     if content_width >= 48 {
         use crate::agent_monitoring::AgentMonitoringMode;
         let first_line = view.lines.len() as u16;
-        let cards = crate::selectable_cards::layout(Rect::new(0, first_line, content_width, 11), 3, 1);
+        let cards = crate::selectable_cards::layout(Rect::new(0, first_line, content_width, 16), 3, 1);
         let modes = AgentMonitoringMode::ALL;
-        for line in 0..11 {
+        for line in 0..16 {
             let mut spans = Vec::new();
             for (index, area) in cards.iter().enumerate() {
                 if index > 0 { spans.push(Span::raw(" ")); }
@@ -6763,9 +6834,29 @@ fn agent_monitoring_view(
                 let selected = app.ui_settings.agent_monitoring_mode == mode;
                 let inner = usize::from(area.width.saturating_sub(2));
                 let border = crate::selectable_cards::border_style(selected, false);
-                if line == 0 || line == 10 {
+                if line == 0 || line == 15 {
                     let (left, right) = if line == 0 { ('┌', '┐') } else { ('└', '┘') };
                     spans.push(Span::styled(format!("{left}{}{right}", "─".repeat(inner)), border));
+                    continue;
+                }
+                if (5..=14).contains(&line) {
+                    let names = ["Working", "Approval", "Paused", "Waiting", "Idle", "Progress", "Task error", "Monitor lost", "Task done", "Unread"];
+                    let index = (line - 5) as usize;
+                    let preview = monitoring_preview_spans(app, mode, index);
+                    let prefix = truncate_icon_text(" ├ ", inner);
+                    let mut remaining = inner.saturating_sub(UnicodeWidthStr::width(prefix.as_str()));
+                    spans.push(Span::styled("│", border));
+                    spans.push(Span::raw(prefix));
+                    for icon in preview {
+                        let glyph = truncate_icon_text(icon.content.as_ref(), remaining);
+                        remaining = remaining.saturating_sub(UnicodeWidthStr::width(glyph.as_str()));
+                        spans.push(Span::styled(glyph, icon.style));
+                    }
+                    let name = truncate_icon_text(&format!(" {}", names[index]), remaining);
+                    remaining = remaining.saturating_sub(UnicodeWidthStr::width(name.as_str()));
+                    spans.push(Span::raw(name));
+                    spans.push(Span::raw(" ".repeat(remaining)));
+                    spans.push(Span::styled("│", border));
                     continue;
                 }
                 let content = match line {
@@ -6776,11 +6867,6 @@ fn agent_monitoring_view(
                         AgentMonitoringMode::Custom => " Your ordered rules".to_owned(),
                     },
                     4 => " Demo project".to_owned(),
-                    5..=9 => {
-                        let names = ["Working", "Approval", "Paused", "Waiting", "Idle"];
-                        let i = line - 5;
-                        format!(" ├ {} {}", monitoring_card_preview(app, mode, i), names[i])
-                    }
                     _ => String::new(),
                 };
                 let content = truncate_icon_text(&content, inner);
@@ -6825,6 +6911,12 @@ fn agent_monitoring_view(
     }
     let rows = agent_monitoring_rows(app);
     for (index, row) in rows.into_iter().enumerate() {
+        if row == crate::app::AgentMonitoringRow::CacheKeepaliveEnabled {
+            view.lines.push(Line::from(""));
+            view.lines.push(Line::from(Span::styled("Cache keep-alive", Style::new().add_modifier(Modifier::BOLD))));
+            view.lines.push(Line::from(Span::styled("Refresh cached agent context during long waits to reduce later input cost.", Style::new().add_modifier(Modifier::DIM))));
+            view.lines.push(Line::from(Span::styled("Provider refresh is not available yet; these settings cannot send pings.", Style::new().fg(Color::Yellow))));
+        }
         if row == crate::app::AgentMonitoringRow::CustomSignaturesHeading {
             view.lines.push(Line::from(""));
         }
@@ -9086,6 +9178,22 @@ mod tests {
         assert_eq!(monitoring_row_value(model_icon_row, &app), "[○ OFF]");
         app.ui_settings.agent_tree_model_icons = true;
         assert_eq!(monitoring_row_value(model_icon_row, &app), "[ON  ●]");
+    }
+
+    #[test]
+    fn cache_keepalive_controls_explain_unavailable_provider_refresh() {
+        use crate::app::AgentMonitoringRow as Row;
+        let app = App::new("cache-policy-test".to_string(), std::env::temp_dir());
+        let view = agent_monitoring_view(&app, 0, 120);
+        let rendered = view.lines.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n");
+        assert!(rendered.contains("Refresh cached agent context"));
+        assert!(rendered.contains("Provider refresh is not available yet"));
+        for row in [Row::CacheKeepaliveEnabled, Row::CacheKeepaliveClaudeInterval,
+            Row::CacheKeepaliveCodexInterval, Row::CacheKeepaliveMonitor,
+            Row::CacheKeepaliveCommand, Row::CacheKeepaliveSubagent] {
+            assert!(view.row_lines.iter().any(|(candidate, _)| *candidate == row));
+        }
+        assert_eq!(monitoring_row_value(Row::CacheKeepaliveEnabled, &app), "[○ OFF]");
     }
 
     fn sizing_text(view: &AppearanceView) -> String {

@@ -156,11 +156,24 @@ pub fn status_span(context: StatusSpanContext<'_>) -> Span<'static> {
         .map(|rule| &rule.then)
         .or(rules.fallback.as_ref());
     let Some(visual) = visual else { return Span::raw(""); };
+    visual_span(visual, icons, use_stable_glyphs, elapsed_millis, motion,
+        representative_progress(progress).filter(|monitor| monitor.has_measurable_progress()).map(|monitor| monitor.report.percent))
+}
+
+/// Render the same visual in the rules editor and in the live tree.
+pub(crate) fn visual_span(
+    visual: &StatusVisual,
+    icons: &crate::icon_settings::IconSettings,
+    use_stable_glyphs: bool,
+    elapsed_millis: u64,
+    motion: MotionLevel,
+    progress_percent: Option<f32>,
+) -> Span<'static> {
     let glyph = match &visual.kind {
         VisualKind::BuiltIn(key) => crate::icon_settings::IconTarget::ALL.into_iter()
             .find(|target| target.key() == key)
             .map(|target| icons.glyph_for_display(target, use_stable_glyphs).to_owned()),
-        kind => frame(kind, elapsed_millis, motion, representative_progress(progress).filter(|monitor| monitor.has_measurable_progress()).map(|monitor| monitor.report.percent)).map(str::to_owned),
+        kind => frame(kind, elapsed_millis, motion, progress_percent).map(str::to_owned),
     };
     let mut style = Style::new();
     style = match visual.style.color.as_deref() {

@@ -1690,8 +1690,34 @@ async fn catalog_io_progresses_with_retained_general_results() {
 
 #[cfg(target_os = "linux")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resource_instructions_do_not_wake_a_new_idle_agent() {
+    let fixture = fixture(None).await;
+    drop(create(&fixture).await);
+    let (pane, transcript) = composer_fixture(&fixture).await;
+    let mut observed = service(&fixture.state).unwrap().changed.subscribe();
+    let observer = spawn(Arc::clone(&fixture.state));
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        for _ in 0..3 {
+            resource_snapshot_when_admitted(&fixture).await;
+            observed.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("resource observer did not complete its initial observations");
+    observer.abort();
+    let _ = observer.await;
+    let submitted = std::fs::read_to_string(&transcript).unwrap_or_default();
+    close_composer(&fixture, pane).await;
+    assert!(
+        submitted.is_empty(),
+        "initial resource projection must not wake an idle agent: {submitted}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn instruction_notices_follow_metadata_revisions_without_queue_churn() {
-    const NOTICE: &str = "The project's shared resource instructions changed.";
+    const NOTICE: &str = "Shared resource instructions changed.";
     async fn notice_count(transcript: &std::path::Path, expected: usize) {
         let mut recheck = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
@@ -1718,9 +1744,12 @@ async fn instruction_notices_follow_metadata_revisions_without_queue_churn() {
     let instructions = fixture.directory.path().join("CLAUDE.md");
     let mut observed = service(&fixture.state).unwrap().changed.subscribe();
     let mut observer = OwnedObserver(spawn(Arc::clone(&fixture.state)));
-    let mut stage = "waiting for the enablement notice";
+    let mut stage = "waiting for the initial projection";
     let result = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        notice_count(&transcript, 1).await;
+        for _ in 0..3 {
+            resource_snapshot_when_admitted(&fixture).await;
+            observed.changed().await.unwrap();
+        }
         let original = std::fs::read(&instructions).unwrap();
         let original_modified = std::fs::metadata(&instructions)
             .unwrap()
@@ -1741,10 +1770,10 @@ async fn instruction_notices_follow_metadata_revisions_without_queue_churn() {
         );
         assert_eq!(
             std::fs::read_to_string(&transcript)
-                .unwrap()
+                .unwrap_or_default()
                 .matches(NOTICE)
                 .count(),
-            1
+            0
         );
 
         stage = "changing resource metadata";
@@ -1764,13 +1793,66 @@ async fn instruction_notices_follow_metadata_revisions_without_queue_churn() {
                 Err(error) => panic!("metadata edit failed: {error}"),
             }
         }
-        stage = "waiting for exactly one metadata-change notice";
-        notice_count(&transcript, 2).await;
+        stage = "waiting for the changed projection without waking the agent";
+        for _ in 0..3 {
+            resource_snapshot_when_admitted(&fixture).await;
+            observed.changed().await.unwrap();
+        }
+        assert!(std::fs::read_to_string(&transcript)
+            .unwrap_or_default()
+            .is_empty());
+        let mut latest = definition();
+        latest.description = "Revised synthetic GPU instructions".into();
+        latest.rules = "Latest advisory rules; release after cleanup".into();
+        let edit = request(&fixture, ResourceCommand::Edit { definition: latest });
+        loop {
+            match execute(&fixture.state, edit.clone()).await {
+                Ok(reply) => {
+                    drop(reply);
+                    break;
+                }
+                Err(error) if error.code == "admission" && error.message.contains("Busy") => {
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Err(error) => panic!("second metadata edit failed: {error}"),
+            }
+        }
+        for _ in 0..3 {
+            resource_snapshot_when_admitted(&fixture).await;
+            observed.changed().await.unwrap();
+        }
+        assert!(std::fs::read_to_string(&transcript)
+            .unwrap_or_default()
+            .is_empty());
+        assert!(
+            crate::ipc::handlers::submit_terminal_text(
+                &fixture.state,
+                pane,
+                "unsafe\nmultiline notification",
+                ilium_ipc::PromptSubmissionSource::ProgressResult,
+            )
+            .await
+            .is_err(),
+            "the fixture does not support bracketed paste"
+        );
+        crate::ipc::handlers::submit_terminal_text(
+            &fixture.state,
+            pane,
+            "An existing notification",
+            ilium_ipc::PromptSubmissionSource::ProgressResult,
+        )
+        .await
+        .unwrap();
+        notice_count(&transcript, 1).await;
+        let delivered = std::fs::read_to_string(&transcript).unwrap();
+        assert!(delivered.contains("An existing notification"));
+        assert!(delivered.contains("from Ilium, not the user"));
+        assert!(delivered.contains("no reply or acknowledgement"));
         let revised = std::fs::read(&instructions).unwrap();
         assert_ne!(revised, original);
         let revised_text = std::str::from_utf8(&revised).unwrap();
         assert!(revised_text.contains("Revised synthetic GPU instructions"));
-        assert!(revised_text.contains("Revised advisory rules; release after cleanup"));
+        assert!(revised_text.contains("Latest advisory rules; release after cleanup"));
         assert_eq!(
             revised_text
                 .matches("<!-- ilium-agent-feature: resources")
@@ -1848,7 +1930,7 @@ async fn instruction_notices_follow_metadata_revisions_without_queue_churn() {
                 .unwrap()
                 .matches(NOTICE)
                 .count(),
-            2
+            1
         );
     })
     .await;

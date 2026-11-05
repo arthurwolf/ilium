@@ -57,7 +57,7 @@ fn doc_progress_b01_exit_statuses_match_the_cli_reference_table() {
     let value = &row("progress-B01")[2];
     assert_eq!(
         value,
-        "0 done, 2 usage or rejected (for example `monitor-ambiguous`), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared, 6 `--timeout-seconds` elapsed while the task is still running (`outcome` `still-running`)"
+        "0 done, 2 usage or rejected (for example `monitor-ambiguous`), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared"
     );
     let reference = user_doc("cli-reference.md");
     for line in [
@@ -65,7 +65,6 @@ fn doc_progress_b01_exit_statuses_match_the_cli_reference_table() {
         "| 3 | `error` | The task reported `error`. |",
         "| 4 | `monitor-failed` |",
         "| 5 | `cleared`, `no-monitor` |",
-        "| 6 | `still-running` | `--timeout-seconds` elapsed. |",
     ] {
         assert!(reference.contains(line), "{line}");
     }
@@ -76,13 +75,13 @@ fn doc_progress_b01_exit_statuses_match_the_cli_reference_table() {
 fn doc_progress_b02_outcome_per_exit_is_the_documented_mapping() {
     assert_eq!(
         row("progress-B02")[2],
-        "0 `done`, 3 `error`, 4 `monitor-failed`, 5 `cleared` or `no-monitor`, 6 `still-running`"
+        "0 `done`, 3 `error`, 4 `monitor-failed`, 5 `cleared` or `no-monitor`"
     );
 }
 
 /// REQ: progress-B03
 #[test]
-fn doc_progress_b03_the_next_texts_are_the_six_documented_sentences() {
+fn doc_progress_b03_the_next_texts_are_the_documented_sentences() {
     let value = &row("progress-B03")[2];
     for text in [
         "The task finished. Verify its output, then continue.",
@@ -90,7 +89,6 @@ fn doc_progress_b03_the_next_texts_are_the_six_documented_sentences() {
         "The probe stopped working, so the task outcome is unknown. Check the task directly; do not assume success.",
         "The monitor was cleared, or is not registered on this pane. Check `ilium progress status`.",
         "This pane has no progress monitor. Register one with `ilium progress set`.",
-        "The task is still running. Run the same wait command again to keep waiting.",
         " When you have handled it, remove this monitor with `ilium progress clear --monitor-id <id>`.",
     ] {
         assert!(value.contains(text), "{text}");
@@ -299,7 +297,7 @@ fn doc_060_record_shapes_name_their_fields_in_the_documented_order() {
         "{\"type\":\"progress_set\",\"request_id\":<n>,\"pane_id\":<n>,\"monitor_id\":<n>,\"progress\":{\"monitor_id\":<n>,\"report\":{...},\"monitor_health\":{\"state\":\"...\"},\"last_observed_unix_millis\":<n>}}"
     ));
     assert!(page.contains(
-        "{\"type\":\"progress_wait\",\"pane_id\":<n>,\"monitor_id\":<n>,\"outcome\":\"done|error|monitor-failed|cleared|no-monitor|still-running\",\"exit_code\":<n>,\"waited_seconds\":<n>,\"composer_notice\":\"suppressed|may-also-arrive|none\",\"next\":\"...\",\"progress\":{...}}"
+        "{\"type\":\"progress_wait\",\"pane_id\":<n>,\"monitor_id\":<n>,\"outcome\":\"done|error|monitor-failed|cleared|no-monitor\",\"exit_code\":<n>,\"waited_seconds\":<n>,\"composer_notice\":\"suppressed|may-also-arrive|none\",\"next\":\"...\",\"progress\":{...}}"
     ));
 }
 
@@ -307,8 +305,8 @@ fn doc_060_record_shapes_name_their_fields_in_the_documented_order() {
 #[test]
 fn doc_108_cli_reference_lists_the_wait_alias_with_the_same_arguments() {
     let reference = user_doc("cli-reference.md");
-    assert!(reference.contains("ilium progress wait   [<monitor_id>] [--timeout-seconds <n>]"));
-    assert!(reference.contains("ilium wait            [<monitor_id>] [--timeout-seconds <n>]"));
+    assert!(reference.contains("ilium progress wait   [<monitor_id>]"));
+    assert!(reference.contains("ilium wait            [<monitor_id>]"));
 }
 
 /// REQ: F-059
