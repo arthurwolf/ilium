@@ -31,8 +31,16 @@ pub enum ConvertError {
         bytes: u64,
         maximum: u64,
     },
+    #[error("the source transcript {} changed while it was being converted; run the conversion again once the session is idle", path.display())]
+    SourceChanged { path: PathBuf },
     #[error("the source transcript {} holds no conversation that can be converted", path.display())]
     EmptyConversation { path: PathBuf },
+    #[error("not enough free disk space in {}: the converted transcript may need up to {required} bytes but only {available} bytes are available", directory.display())]
+    InsufficientDiskSpace {
+        directory: PathBuf,
+        required: u64,
+        available: u64,
+    },
     #[error("cannot write the converted transcript {}: {error}", path.display())]
     TargetWrite {
         path: PathBuf,

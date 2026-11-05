@@ -5,24 +5,34 @@
 //! JSON object per line with `uuid`/`parentUuid` chaining, one content block
 //! per assistant line, and every `tool_use` answered by a `tool_result` in the
 //! very next line so the replayed history is accepted by the Anthropic API.
+//!
+//! Nothing here holds the transcript in memory. This module owns the shape of
+//! one line ([`ClaudeLineEmitter`]) and the Codex -> Claude tool mapping;
+//! [`transcript_passes`] turns a stream of source items into lines in two
+//! passes; [`file_writer`] streams those lines into the final file through a
+//! temporary one; [`validation`] re-reads the written file line by line.
 
-use std::collections::{HashMap, HashSet};
-use std::io::Write;
-use std::path::{Path, PathBuf};
+mod file_writer;
+mod transcript_passes;
+mod validation;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Map, Value};
 
-use crate::codex_rollout::{SourceItem, ToolArguments};
+use crate::codex_rollout::{BoundedToolOutput, ToolArguments};
 use crate::error::ConvertError;
+use crate::MAX_TOOL_RESULT_CHARS;
+
+pub(crate) use file_writer::TranscriptFileWriter;
+pub(crate) use transcript_passes::{
+    ConversationFacts, RolloutOutputSource, TranscriptAssembler, TranscriptTarget,
+};
+pub(crate) use validation::validate_transcript;
 
 /// Claude Code version stamped on written lines (the one verified to resume).
 pub(crate) const CLAUDE_CODE_VERSION: &str = "2.1.285";
 /// Any valid model string works for replay; this is the one used when verifying.
 const PLACEHOLDER_MODEL: &str = "claude-haiku-4-5-20251001";
-/// Tool results longer than this are cut so one command dump cannot dominate
-/// the replayed context.
-pub(crate) const MAX_TOOL_RESULT_CHARS: usize = 30_000;
 const MISSING_RESULT_TEXT: &str = ilium_prompts::conversion::MISSING_RESULT;
 const EMPTY_RESULT_TEXT: &str = ilium_prompts::conversion::EMPTY_RESULT;
 const SYNTHETIC_FIRST_PROMPT: &str = ilium_prompts::conversion::SYNTHETIC_FIRST_PROMPT;
@@ -37,41 +47,79 @@ const SHELL_TOOL_NAMES: [&str; 6] = [
     "unified_exec",
 ];
 
-pub(crate) struct BuildInput<'a> {
-    pub(crate) items: &'a [SourceItem],
-    pub(crate) session_id: &'a str,
-    pub(crate) cwd: &'a str,
-    pub(crate) git_branch: Option<&'a str>,
-    /// Used for any line whose source item has no usable timestamp.
-    pub(crate) fallback_timestamp: DateTime<Utc>,
+/// Where the generated identifiers (line uuids, message ids, tool-use ids)
+/// come from. Production draws random v4 UUIDs; tests draw a fixed sequence
+/// so two conversions of the same source can be compared byte for byte.
+pub(crate) trait IdentifierSource {
+    fn next_uuid(&mut self) -> uuid::Uuid;
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct BuiltTranscript {
-    /// Serialized JSON lines, without trailing newlines.
-    pub(crate) lines: Vec<String>,
-    /// Source items that became part of the transcript.
-    pub(crate) converted_items: usize,
-    /// Source items skipped here: orphan or duplicate outputs.
-    pub(crate) dropped_items: usize,
-    pub(crate) tool_calls: usize,
-    pub(crate) synthesized_results: usize,
-    pub(crate) truncated_results: usize,
-    pub(crate) synthesized_first_prompt: bool,
+/// The production [`IdentifierSource`].
+pub(crate) struct RandomIdentifiers;
+
+impl IdentifierSource for RandomIdentifiers {
+    fn next_uuid(&mut self) -> uuid::Uuid {
+        uuid::Uuid::new_v4()
+    }
 }
 
-struct LineBuilder<'a> {
+/// Receives finished transcript lines (without trailing newline) one at a
+/// time, so the emitter never has to retain them.
+pub(crate) trait LineSink {
+    fn write_line(&mut self, line: &str) -> Result<(), ConvertError>;
+}
+
+impl LineSink for Vec<String> {
+    fn write_line(&mut self, line: &str) -> Result<(), ConvertError> {
+        self.push(line.to_string());
+        Ok(())
+    }
+}
+
+/// Emits Claude Code lines in order, maintaining the `parentUuid` chain and
+/// the "last known timestamp" that lines without a source timestamp inherit.
+pub(crate) struct ClaudeLineEmitter<'a> {
     session_id: &'a str,
     cwd: &'a str,
     git_branch: Option<&'a str>,
     previous_uuid: Option<String>,
     last_timestamp: String,
-    lines: Vec<String>,
+    identifiers: &'a mut dyn IdentifierSource,
+    sink: &'a mut dyn LineSink,
 }
 
-impl LineBuilder<'_> {
-    fn push_message(&mut self, role: &str, timestamp: Option<&str>, message: Value) {
-        let uuid = uuid::Uuid::new_v4().to_string();
+impl<'a> ClaudeLineEmitter<'a> {
+    /// `initial_timestamp` is what the first line carries when its source
+    /// item has none (the first source timestamp, so a placeholder line never
+    /// post-dates the lines after it).
+    pub(crate) fn new(
+        target: &TranscriptTarget<'a>,
+        initial_timestamp: String,
+        identifiers: &'a mut dyn IdentifierSource,
+        sink: &'a mut dyn LineSink,
+    ) -> Self {
+        Self {
+            session_id: target.session_id,
+            cwd: target.cwd,
+            git_branch: target.git_branch,
+            previous_uuid: None,
+            last_timestamp: initial_timestamp,
+            identifiers,
+            sink,
+        }
+    }
+
+    fn next_uuid(&mut self) -> uuid::Uuid {
+        self.identifiers.next_uuid()
+    }
+
+    fn push_message(
+        &mut self,
+        role: &str,
+        timestamp: Option<&str>,
+        message: Value,
+    ) -> Result<(), ConvertError> {
+        let uuid = self.next_uuid().to_string();
         if let Some(timestamp) = timestamp {
             self.last_timestamp = timestamp.to_string();
         }
@@ -91,15 +139,24 @@ impl LineBuilder<'_> {
         }
         line.insert("message".into(), message);
         self.previous_uuid = Some(uuid);
-        self.lines.push(Value::Object(line).to_string());
+        self.sink.write_line(&Value::Object(line).to_string())
     }
 
-    fn push_user_text(&mut self, timestamp: Option<&str>, text: &str) {
-        self.push_message("user", timestamp, json!({"role": "user", "content": text}));
+    pub(crate) fn push_user_text(
+        &mut self,
+        timestamp: Option<&str>,
+        text: &str,
+    ) -> Result<(), ConvertError> {
+        self.push_message("user", timestamp, json!({"role": "user", "content": text}))
     }
 
-    fn push_assistant_blocks(&mut self, timestamp: Option<&str>, block: Value, stop_reason: &str) {
-        let message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
+    pub(crate) fn push_assistant_blocks(
+        &mut self,
+        timestamp: Option<&str>,
+        block: Value,
+        stop_reason: &str,
+    ) -> Result<(), ConvertError> {
+        let message_id = format!("msg_{}", self.next_uuid().simple());
         self.push_message(
             "assistant",
             timestamp,
@@ -112,16 +169,16 @@ impl LineBuilder<'_> {
                 "stop_reason": stop_reason,
                 "stop_sequence": null,
             }),
-        );
+        )
     }
 
-    fn push_tool_result(
+    pub(crate) fn push_tool_result(
         &mut self,
         timestamp: Option<&str>,
         tool_use_id: &str,
         text: &str,
         is_error: bool,
-    ) {
+    ) -> Result<(), ConvertError> {
         self.push_message(
             "user",
             timestamp,
@@ -131,7 +188,21 @@ impl LineBuilder<'_> {
                 "content": text,
                 "is_error": is_error,
             }]}),
-        );
+        )
+    }
+
+    /// `ai-title` is how Claude Code labels a session in its resume picker; it
+    /// sits outside the uuid chain, exactly as in real transcripts.
+    pub(crate) fn push_title(&mut self, title: &str) -> Result<(), ConvertError> {
+        self.sink.write_line(
+            &json!({"type": "ai-title", "aiTitle": title, "sessionId": self.session_id})
+                .to_string(),
+        )
+    }
+
+    /// A fresh `toolu_` id for the next `tool_use` block.
+    pub(crate) fn next_tool_use_id(&mut self) -> String {
+        format!("toolu_{}", self.next_uuid().simple())
     }
 }
 
@@ -145,177 +216,27 @@ pub(crate) fn normalize_timestamp(raw: Option<&str>) -> Option<String> {
     )
 }
 
-/// Builds the transcript lines. Pure apart from UUID generation.
-pub(crate) fn build_transcript(input: &BuildInput<'_>) -> BuiltTranscript {
-    let mut built = BuiltTranscript::default();
-
-    // Outputs are matched to calls by id wherever they sit, because parallel
-    // calls can answer out of order. The first output for an id wins.
-    let call_ids: HashSet<&str> = input
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            SourceItem::ToolCall { call_id, .. } => Some(call_id.as_str()),
-            _ => None,
-        })
-        .collect();
-    let mut outputs: HashMap<&str, (&str, bool)> = HashMap::new();
-    for item in input.items {
-        let SourceItem::ToolOutput {
-            call_id,
-            text,
-            is_error,
-        } = item
-        else {
-            continue;
-        };
-        if call_ids.contains(call_id.as_str()) && !outputs.contains_key(call_id.as_str()) {
-            outputs.insert(call_id.as_str(), (text.as_str(), *is_error));
-        } else {
-            // Orphan output (no call) or a repeated answer to one call.
-            built.dropped_items += 1;
-        }
-    }
-
-    let mut builder = LineBuilder {
-        session_id: input.session_id,
-        cwd: input.cwd,
-        git_branch: input.git_branch,
-        previous_uuid: None,
-        // Seeded from the first source timestamp so a placeholder first line
-        // never post-dates the lines after it.
-        last_timestamp: first_source_timestamp(input.items).unwrap_or_else(|| {
-            input
-                .fallback_timestamp
-                .to_rfc3339_opts(SecondsFormat::Millis, true)
-        }),
-        lines: Vec::new(),
-    };
-
-    let first_is_user = input
-        .items
-        .iter()
-        .find(|item| !matches!(item, SourceItem::ToolOutput { .. }))
-        .is_some_and(|item| matches!(item, SourceItem::UserText { .. }));
-    if !first_is_user && !input.items.is_empty() {
-        builder.push_user_text(None, SYNTHETIC_FIRST_PROMPT);
-        built.synthesized_first_prompt = true;
-    }
-
-    let mut answered: HashSet<&str> = HashSet::new();
-    for item in input.items {
-        match item {
-            SourceItem::UserText { text, timestamp } => {
-                let timestamp = normalize_timestamp(timestamp.as_deref());
-                builder.push_user_text(timestamp.as_deref(), text);
-                built.converted_items += 1;
-            }
-            SourceItem::AssistantText { text, timestamp } => {
-                let timestamp = normalize_timestamp(timestamp.as_deref());
-                builder.push_assistant_blocks(
-                    timestamp.as_deref(),
-                    json!({"type": "text", "text": text}),
-                    "end_turn",
-                );
-                built.converted_items += 1;
-            }
-            SourceItem::ToolCall {
-                call_id,
-                name,
-                arguments,
-                timestamp,
-            } => {
-                let timestamp = normalize_timestamp(timestamp.as_deref());
-                let (tool_name, tool_input) = claude_tool_use(name, arguments);
-                let tool_use_id = format!("toolu_{}", uuid::Uuid::new_v4().simple());
-                builder.push_assistant_blocks(
-                    timestamp.as_deref(),
-                    json!({
-                        "type": "tool_use",
-                        "id": tool_use_id,
-                        "name": tool_name,
-                        "input": tool_input,
-                    }),
-                    "tool_use",
-                );
-                built.tool_calls += 1;
-                built.converted_items += 1;
-
-                // Only the first call with a given id receives the output.
-                let output = answered
-                    .insert(call_id.as_str())
-                    .then(|| outputs.get(call_id.as_str()))
-                    .flatten();
-                match output {
-                    Some((text, is_error)) => {
-                        let (text, truncated) = bounded_result_text(text);
-                        built.truncated_results += usize::from(truncated);
-                        builder.push_tool_result(
-                            timestamp.as_deref(),
-                            &tool_use_id,
-                            &text,
-                            *is_error,
-                        );
-                        built.converted_items += 1;
-                    }
-                    None => {
-                        builder.push_tool_result(
-                            timestamp.as_deref(),
-                            &tool_use_id,
-                            MISSING_RESULT_TEXT,
-                            false,
-                        );
-                        built.synthesized_results += 1;
-                    }
-                }
-            }
-            // Consumed when their call was emitted; orphans were counted above.
-            SourceItem::ToolOutput { .. } => {}
-        }
-    }
-
-    // `ai-title` is how Claude Code labels a session in its resume picker; it
-    // sits outside the uuid chain, exactly as in real transcripts.
-    if let Some(title) = first_prompt_title(input.items) {
-        builder.lines.push(
-            json!({"type": "ai-title", "aiTitle": title, "sessionId": input.session_id})
-                .to_string(),
-        );
-    }
-    built.lines = builder.lines;
-    built
-}
-
-fn first_source_timestamp(items: &[SourceItem]) -> Option<String> {
-    items.iter().find_map(|item| match item {
-        SourceItem::UserText { timestamp, .. }
-        | SourceItem::AssistantText { timestamp, .. }
-        | SourceItem::ToolCall { timestamp, .. } => normalize_timestamp(timestamp.as_deref()),
-        SourceItem::ToolOutput { .. } => None,
-    })
-}
-
-fn first_prompt_title(items: &[SourceItem]) -> Option<String> {
-    let text = items.iter().find_map(|item| match item {
-        SourceItem::UserText { text, .. } => Some(text.as_str()),
-        _ => None,
-    })?;
+/// The session title Claude Code shows for a prompt: its first non-empty
+/// line, cut to [`MAX_TITLE_CHARS`].
+fn title_from_prompt(text: &str) -> Option<String> {
     let line = text.lines().map(str::trim).find(|line| !line.is_empty())?;
     Some(line.chars().take(MAX_TITLE_CHARS).collect())
 }
 
-fn bounded_result_text(text: &str) -> (String, bool) {
-    if text.trim().is_empty() {
+/// The result text to replay. The parser already cut the output at
+/// [`MAX_TOOL_RESULT_CHARS`]; this adds the marker that says how much of the
+/// complete output is missing.
+fn bounded_result_text(output: &BoundedToolOutput) -> (String, bool) {
+    if output.is_blank() {
         return (EMPTY_RESULT_TEXT.to_string(), false);
     }
-    let total = text.chars().count();
-    if total <= MAX_TOOL_RESULT_CHARS {
-        return (text.to_string(), false);
+    if !output.truncated {
+        return (output.text.clone(), false);
     }
-    let mut kept: String = text.chars().take(MAX_TOOL_RESULT_CHARS).collect();
+    let mut kept = output.text.clone();
     kept.push_str(&ilium_prompts::render_value(
         "conversion/truncated-result",
-        &serde_json::json!({"v0": (total - MAX_TOOL_RESULT_CHARS).to_string()}),
+        &serde_json::json!({"v0": (output.original_chars - MAX_TOOL_RESULT_CHARS).to_string()}),
     ));
     (kept, true)
 }
@@ -441,153 +362,23 @@ fn generic_input(arguments: &ToolArguments) -> Value {
     }
 }
 
-/// What [`validate_transcript`] learned about a transcript.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct TranscriptSummary {
-    pub(crate) message_lines: usize,
-    pub(crate) tool_uses: usize,
-}
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::IdentifierSource;
 
-/// Checks the invariants Claude Code and the Anthropic API depend on: a
-/// first user message, an unbroken `parentUuid` chain, one session id, and a
-/// `tool_result` immediately after every `tool_use` with the same id.
-pub(crate) fn validate_transcript(
-    content: &str,
-    session_id: &str,
-) -> Result<TranscriptSummary, String> {
-    let mut summary = TranscriptSummary::default();
-    let mut previous_uuid: Option<String> = None;
-    let mut pending_tool_use: Option<String> = None;
-    for (index, raw) in content.lines().enumerate() {
-        let number = index + 1;
-        let line: Value =
-            serde_json::from_str(raw).map_err(|error| format!("line {number}: {error}"))?;
-        let kind = line.get("type").and_then(Value::as_str).unwrap_or("");
-        if kind != "user" && kind != "assistant" {
-            continue;
-        }
-        if line.get("sessionId").and_then(Value::as_str) != Some(session_id) {
-            return Err(format!("line {number}: wrong sessionId"));
-        }
-        let uuid = line
-            .get("uuid")
-            .and_then(Value::as_str)
-            .ok_or_else(|| format!("line {number}: missing uuid"))?;
-        let parent = line.get("parentUuid").and_then(Value::as_str);
-        if parent != previous_uuid.as_deref() {
-            return Err(format!("line {number}: parentUuid does not chain"));
-        }
-        if summary.message_lines == 0 && kind != "user" {
-            return Err("first message is not a user message".to_string());
-        }
-        let blocks = line
-            .pointer("/message/content")
-            .and_then(Value::as_array)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        if let Some(expected) = pending_tool_use.take() {
-            let answers = blocks.iter().any(|block| {
-                block.get("type").and_then(Value::as_str) == Some("tool_result")
-                    && block.get("tool_use_id").and_then(Value::as_str) == Some(expected.as_str())
-            });
-            if kind != "user" || !answers {
-                return Err(format!(
-                    "line {number}: tool_use {expected} is not answered"
-                ));
-            }
-        }
-        for block in blocks {
-            if block.get("type").and_then(Value::as_str) == Some("tool_use") {
-                let id = block
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| format!("line {number}: tool_use without id"))?;
-                pending_tool_use = Some(id.to_string());
-                summary.tool_uses += 1;
-            }
-        }
-        previous_uuid = Some(uuid.to_string());
-        summary.message_lines += 1;
+    /// Hands out `00000000-0000-0000-0000-000000000001`, `...0002`, ... so a
+    /// conversion is reproducible.
+    #[derive(Debug, Default)]
+    pub(crate) struct SequentialIdentifiers {
+        issued: u128,
     }
-    if let Some(unanswered) = pending_tool_use {
-        return Err(format!("the final tool_use {unanswered} is not answered"));
-    }
-    if summary.message_lines == 0 {
-        return Err("no message lines".to_string());
-    }
-    Ok(summary)
-}
 
-/// Writes `lines` to `<directory>/<session_id>.jsonl` via a temp file in the
-/// same directory and a rename, so a half-written transcript never appears
-/// under its final name. `should_cancel` is consulted right before the
-/// rename; on cancellation or any error the temp file is removed.
-pub(crate) fn write_atomically(
-    directory: &Path,
-    session_id: &str,
-    lines: &[String],
-    should_cancel: &dyn Fn() -> bool,
-) -> Result<PathBuf, ConvertError> {
-    let serialized_bytes = serialized_bytes(lines);
-    if serialized_bytes > crate::MAX_TRANSCRIPT_BYTES {
-        return Err(ConvertError::FileTooLarge {
-            path: directory.join(format!("{session_id}.jsonl")),
-            bytes: serialized_bytes,
-            maximum: crate::MAX_TRANSCRIPT_BYTES,
-        });
-    }
-    let final_path = directory.join(format!("{session_id}.jsonl"));
-    let temporary_path = directory.join(format!(".{session_id}.jsonl.tmp"));
-    let write_error = |path: &Path, error: std::io::Error| ConvertError::TargetWrite {
-        path: path.to_path_buf(),
-        error,
-    };
-
-    let directory_existed = directory.is_dir();
-    ilium_platform::secure_fs::create_private_directory(directory)
-        .map_err(|error| write_error(directory, error))?;
-
-    let outcome =
-        write_temporary(&temporary_path, lines).map_err(|e| write_error(&temporary_path, e));
-    let outcome = outcome.and_then(|()| {
-        if should_cancel() {
-            return Err(ConvertError::Cancelled);
-        }
-        std::fs::rename(&temporary_path, &final_path).map_err(|e| write_error(&final_path, e))
-    });
-    if outcome.is_err() {
-        // Best effort: the temp file is ours and never matches `*.jsonl`.
-        let _ = std::fs::remove_file(&temporary_path);
-        if !directory_existed {
-            // Non-recursive: only succeeds if the directory is still empty.
-            let _ = std::fs::remove_dir(directory);
+    impl IdentifierSource for SequentialIdentifiers {
+        fn next_uuid(&mut self) -> uuid::Uuid {
+            self.issued += 1;
+            uuid::Uuid::from_u128(self.issued)
         }
     }
-    outcome.map(|()| final_path)
-}
-
-fn serialized_bytes(lines: &[String]) -> u64 {
-    lines
-        .iter()
-        .try_fold(0u64, |total, line| {
-            total.checked_add(line.len() as u64)?.checked_add(1)
-        })
-        .unwrap_or(u64::MAX)
-}
-
-fn write_temporary(path: &Path, lines: &[String]) -> std::io::Result<()> {
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
-    ilium_platform::secure_fs::restrict_open_file_to_owner(&file)?;
-    let mut writer = std::io::BufWriter::new(file);
-    for line in lines {
-        writer.write_all(line.as_bytes())?;
-        writer.write_all(b"\n")?;
-    }
-    writer.flush()?;
-    writer.get_ref().sync_all()
 }
 
 #[cfg(test)]
@@ -599,12 +390,6 @@ mod tests {
         assert_eq!(sanitize_tool_name("mcp__a.b/c d"), "mcp__a_b_c_d");
         assert_eq!(sanitize_tool_name(""), "tool");
         assert_eq!(sanitize_tool_name(&"x".repeat(100)).len(), 64);
-    }
-
-    #[test]
-    fn serialized_size_includes_newlines_and_detects_overflow() {
-        assert_eq!(serialized_bytes(&["abc".into(), "x".into()]), 6);
-        assert_eq!(serialized_bytes(&[String::new()]), 1);
     }
 
     #[test]
@@ -630,9 +415,73 @@ mod tests {
 
     #[test]
     fn long_results_are_truncated_with_a_marker() {
-        let text = "x".repeat(MAX_TOOL_RESULT_CHARS + 10);
-        let (bounded, truncated) = bounded_result_text(&text);
+        let output = crate::codex_rollout::flatten_output(&Value::String(
+            "x".repeat(MAX_TOOL_RESULT_CHARS + 10),
+        ));
+        let (bounded, truncated) = bounded_result_text(&output);
         assert!(truncated);
+        assert!(bounded.starts_with(&"x".repeat(MAX_TOOL_RESULT_CHARS)));
         assert!(bounded.contains("10 more characters"));
+    }
+
+    #[test]
+    fn titles_take_the_first_non_empty_line_cut_to_the_limit() {
+        assert_eq!(
+            title_from_prompt("\n   \n  hello world \nsecond").as_deref(),
+            Some("hello world")
+        );
+        assert_eq!(title_from_prompt("  \n\t"), None);
+        let long = "é".repeat(MAX_TITLE_CHARS + 5);
+        assert_eq!(
+            title_from_prompt(&long).map(|title| title.chars().count()),
+            Some(MAX_TITLE_CHARS)
+        );
+    }
+
+    #[test]
+    fn emitted_lines_chain_uuids_and_inherit_the_last_timestamp() {
+        let mut identifiers = test_support::SequentialIdentifiers::default();
+        let mut lines: Vec<String> = Vec::new();
+        let target = TranscriptTarget {
+            session_id: "s",
+            cwd: "/work",
+            git_branch: Some("main"),
+            fallback_timestamp: Utc::now(),
+        };
+        let mut emitter = ClaudeLineEmitter::new(
+            &target,
+            "2026-01-01T00:00:00.000Z".to_string(),
+            &mut identifiers,
+            &mut lines,
+        );
+        emitter.push_user_text(None, "hi").unwrap();
+        emitter
+            .push_assistant_blocks(
+                Some("2026-01-01T00:00:05.000Z"),
+                json!({"type": "text", "text": "yo"}),
+                "end_turn",
+            )
+            .unwrap();
+        emitter.push_user_text(None, "again").unwrap();
+        emitter.push_title("hi").unwrap();
+        let parsed: Vec<Value> = lines
+            .iter()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(parsed[0]["parentUuid"], Value::Null);
+        assert_eq!(parsed[0]["uuid"], "00000000-0000-0000-0000-000000000001");
+        assert_eq!(parsed[0]["timestamp"], "2026-01-01T00:00:00.000Z");
+        assert_eq!(parsed[0]["gitBranch"], "main");
+        assert_eq!(parsed[1]["parentUuid"], parsed[0]["uuid"]);
+        assert_eq!(
+            parsed[1]["message"]["id"],
+            "msg_00000000000000000000000000000002"
+        );
+        assert_eq!(parsed[1]["uuid"], "00000000-0000-0000-0000-000000000003");
+        assert_eq!(parsed[1]["timestamp"], "2026-01-01T00:00:05.000Z");
+        assert_eq!(parsed[2]["timestamp"], "2026-01-01T00:00:05.000Z");
+        assert_eq!(parsed[3]["type"], "ai-title");
+        assert_eq!(parsed[3]["sessionId"], "s");
+        assert_eq!(parsed[3].get("uuid"), None);
     }
 }
