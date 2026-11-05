@@ -146,3 +146,66 @@ fn req_sec_168_dropping_the_media_row_from_the_boundary_table_is_detected_b() {
         );
     }
 }
+
+/// The single manual paragraph that starts with `prefix`, read from the threat model page.
+fn threat_model_paragraph(prefix: &str) -> String {
+    page("reference-threat-model.md")
+        .lines()
+        .find(|line| line.starts_with(prefix))
+        .unwrap_or_else(|| panic!("reference-threat-model.md must contain a paragraph starting with {prefix:?}"))
+        .to_owned()
+}
+
+/// REQ: SEC-160
+#[test]
+fn req_sec_160_data_read_list_names_content_delivering_grants_a() {
+    let data_read = threat_model_paragraph("Read grants of normal risk expose private data:");
+    for grant in ["editor.read", "terminal.output-filter", "fs.watch:"] {
+        assert!(
+            data_read.contains(grant),
+            "SEC-160: the data-read list of SEC-004 must contain {grant}; list: {data_read}"
+        );
+    }
+}
+
+/// REQ: SEC-160
+#[test]
+fn req_sec_160_data_read_list_excludes_package_data_and_cache_scopes_b() {
+    let data_read = threat_model_paragraph("Read grants of normal risk expose private data:");
+    for scope in ["fs.read:package", "fs.read:data", "fs.read:cache"] {
+        assert!(
+            !data_read.contains(scope),
+            "SEC-160: the fs.read scopes package, data and cache are not part of the data-read list; found {scope} in: {data_read}"
+        );
+    }
+}
+
+/// REQ: SEC-161
+#[test]
+fn req_sec_161_egress_list_names_open_external_location_inference_and_http_api_a() {
+    let egress = threat_model_paragraph("Egress grants of normal risk move data off the machine:");
+    for grant in [
+        "open-external",
+        "location.geocode",
+        "inference.embed",
+        "http-api.route",
+    ] {
+        assert!(
+            egress.contains(grant),
+            "SEC-161: the egress list of SEC-004 must contain {grant}; list: {egress}"
+        );
+    }
+}
+
+/// REQ: SEC-161
+#[test]
+fn req_sec_161_egress_additions_are_written_as_grant_tokens_b() {
+    let egress = threat_model_paragraph("Egress grants of normal risk move data off the machine:");
+    for grant in ["open-external", "location.geocode", "inference.embed", "http-api.route"] {
+        let token = format!("`{grant}`");
+        assert!(
+            egress.contains(&token),
+            "SEC-161: the egress list must name {token} as a grant token, not prose; list: {egress}"
+        );
+    }
+}
