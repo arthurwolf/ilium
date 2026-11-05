@@ -154,13 +154,12 @@ fn pub_085_publish_requiring_a_licence_incompatible_plugin_is_refused() {
 }
 
 /// REQ: CMP-022
-///
-/// The rig writes a tier 3 package with no `requires` range (no entry point sets one yet), so
-/// this test fails until the rig can build a package whose range excludes the selected host
-/// version. The assertions cover the documented codes, exit statuses and the refusal before any
-/// case runs.
 #[test]
 fn cmp_022_check_and_test_refuse_out_of_window_host_with_install_codes() {
+    // The rig writes a tier 3 package with no `requires` range (no entry point sets one yet), so
+    // this test fails until the rig can build a package whose range excludes the selected host
+    // version. The assertions cover the documented codes, exit statuses and the refusal before any
+    // case runs.
     let rig = OpsRig::new();
     let spec = PackageSpec::new("com.example.cmp022", "1.0.0").tier(3);
     let path = rig.write_package(&spec);
