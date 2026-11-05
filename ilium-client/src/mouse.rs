@@ -3806,7 +3806,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                                     crate::app::AgentMonitoringRow::AddCustomSignature => {
                                         app.settings_begin_custom_agent_signature();
                                     }
-                                    crate::app::AgentMonitoringRow::ModelIcons => {
+                                    crate::app::AgentMonitoringRow::ModelIcons
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveEnabled
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveClaudeInterval
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveCodexInterval
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveMonitor
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveCommand
+                                    | crate::app::AgentMonitoringRow::CacheKeepaliveSubagent => {
                                         app.settings_adjust_agent_monitoring_row(row, 1);
                                     }
                                     crate::app::AgentMonitoringRow::StatusIcon(target) => {

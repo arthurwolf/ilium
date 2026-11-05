@@ -1103,6 +1103,8 @@ pub struct UiSettings {
     pub last_prompt_max_lines: u8,
     /// Client-side presentation policy for pane activity and goal signals.
     pub agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
+    /// Policy for keeping a waiting agent's provider cache warm.
+    pub cache_keepalive: ilium_core::cache_keepalive::CacheKeepaliveSettings,
     /// Include progress outcomes and monitor failures in the Attention tree icon.
     /// Disabled by default so historical task failures do not hide agent activity.
     pub attention_progress_reports: bool,
@@ -1179,6 +1181,7 @@ impl Default for UiSettings {
             goal_toolbar_icon_enabled: true,
             last_prompt_max_lines: DEFAULT_LAST_PROMPT_MAX_LINES,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+            cache_keepalive: Default::default(),
             attention_running_indicator:
                 crate::agent_monitoring::AttentionRunningIndicator::default(),
             attention_progress_reports: false,
@@ -1314,6 +1317,7 @@ struct RawUiConfig {
     goal_toolbar_icon_enabled: Option<bool>,
     last_prompt_max_lines: Option<u8>,
     agent_monitoring_mode: Option<String>,
+    cache_keepalive: Option<ilium_core::cache_keepalive::CacheKeepaliveSettings>,
     agent_tree_model_icons: Option<bool>,
     attention_running_indicator: Option<String>,
     attention_progress_reports: Option<bool>,
@@ -1889,6 +1893,7 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             None => defaults.last_prompt_max_lines,
         },
         agent_monitoring_mode,
+        cache_keepalive: raw.cache_keepalive.unwrap_or_default(),
         attention_running_indicator,
         attention_progress_reports: raw
             .attention_progress_reports
@@ -3434,6 +3439,17 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         "agent_monitoring_mode".to_string(),
         toml::Value::String(ui.agent_monitoring_mode.key().to_string()),
     );
+    let keepalive = &ui.cache_keepalive;
+    table.insert("cache_keepalive".to_string(), toml::Value::Table(
+        toml::value::Table::from_iter([
+            ("enabled".to_string(), toml::Value::Boolean(keepalive.enabled)),
+            ("claude_interval_minutes".to_string(), toml::Value::Integer(i64::from(keepalive.claude_interval_minutes))),
+            ("codex_interval_minutes".to_string(), toml::Value::Integer(i64::from(keepalive.codex_interval_minutes))),
+            ("on_monitor".to_string(), toml::Value::Boolean(keepalive.on_monitor)),
+            ("on_command".to_string(), toml::Value::Boolean(keepalive.on_command)),
+            ("on_subagent".to_string(), toml::Value::Boolean(keepalive.on_subagent)),
+        ]),
+    ));
     table.insert(
         "attention_progress_reports".to_string(),
         toml::Value::Boolean(ui.attention_progress_reports),
@@ -5287,6 +5303,14 @@ mod tests {
             goal_toolbar_icon_enabled: true,
             last_prompt_max_lines: 7,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Attention,
+            cache_keepalive: ilium_core::cache_keepalive::CacheKeepaliveSettings {
+                enabled: true,
+                claude_interval_minutes: 4,
+                codex_interval_minutes: 17,
+                on_monitor: false,
+                on_command: true,
+                on_subagent: false,
+            },
             attention_progress_reports: false,
             agent_tree_model_icons: true,
             attention_running_indicator:
@@ -5310,6 +5334,18 @@ mod tests {
 
         let config = load(&dir).expect("saved config should load back");
         assert_eq!(config.ui, ui);
+    }
+
+    #[test]
+    fn cache_keepalive_partial_configuration_uses_disabled_defaults() {
+        let dir = scratch_dir();
+        std::fs::write(dir.join("config.toml"), "[ui.cache_keepalive]\ncodex_interval_minutes = 8\n")
+            .expect("write partial cache keep-alive settings");
+        let policy = load(&dir).expect("load partial settings").ui.cache_keepalive;
+        assert!(!policy.enabled);
+        assert_eq!(policy.codex_interval_minutes, 8);
+        assert_eq!(policy.claude_interval_minutes, 55);
+        assert!(policy.on_monitor);
     }
 
     #[test]

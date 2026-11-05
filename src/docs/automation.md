@@ -235,8 +235,8 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 | Command | Purpose | Output `type` |
 | --- | --- | --- |
 | `ilium progress check --command '<probe>'` | Run the probe once through the server and validate it. Installs nothing. | `progress_check` |
-| `ilium progress set --command '<probe>' [--interval-seconds N] [--wait [--timeout-seconds S]] [--replace]` | Validate, then atomically add a monitor to this pane. Waits for a server acknowledgement that contains the monitor id and the accepted first report. With `--wait`, then blocks exactly like `ilium progress wait` and prints a second line. Other monitors of the pane keep running; `--replace` clears all of them first. | `progress_set` (then `progress_wait`) |
-| `ilium progress wait [MONITOR_ID] [--timeout-seconds S]` | Block until the monitor reports `done` or `error`, fails or is cleared. Without an id it picks the pane's only unsettled monitor (else its only monitor) and refuses with `monitor-ambiguous` (exit 2) when there are several. `ilium wait` is the same command. | `progress_wait` |
+| `ilium progress set --command '<probe>' [--interval-seconds N] [--wait] [--replace]` | Validate, then atomically add a monitor to this pane. Waits for a server acknowledgement that contains the monitor id and the accepted first report. With `--wait`, then blocks exactly like `ilium progress wait` and prints a second line. Other monitors of the pane keep running; `--replace` clears all of them first. | `progress_set` (then `progress_wait`) |
+| `ilium progress wait [MONITOR_ID]` | Block until the monitor reports `done` or `error`, fails or is cleared. Without an id it picks the pane's only unsettled monitor (else its only monitor) and refuses with `monitor-ambiguous` (exit 2) when there are several. `ilium wait` is the same command. | `progress_wait` |
 | `ilium progress status` | Every monitor of this pane: registration, latest report and monitor health (`monitor_count`, `running`, `monitors`). | `progress_status` |
 | `ilium progress clear [--monitor-id ID \| --all]` | Stop a monitor and clear its retained progress. With `--monitor-id`, only that exact monitor, refused with `monitor-running` while its task still runs unless `--running` is given. Without it, the pane's only monitor; with several, it refuses with `monitor-ambiguous` unless `--all` is given. | (clear result) |
 
@@ -251,13 +251,12 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 | 3 | `error` | The task reported `error`; the record carries the error text. |
 | 4 | `monitor-failed` | The probe stopped working, so the task outcome is unknown. |
 | 5 | `cleared`, `no-monitor` | The monitor was cleared (also by `set --replace`), monitoring was switched off, or the pane has no monitor. |
-| 6 | `still-running` | `--timeout-seconds` elapsed. Run the same command again to keep waiting. |
 | 2 | (`progress_rejected`, code `monitor-ambiguous`) | No id was given and the pane has several monitors; the record lists their ids in `monitor_ids`. |
 | 1 | (failure record) | The command could not reach the server or the connection broke. |
 
 The record also carries `composer_notice`: `suppressed` means the server did not, and will not, type a result message for this monitor, because this command delivered it. `may-also-arrive` means a message was already typed (or may be) and is a duplicate of this record. If the wait command is killed or the agent stops it, the server falls back to typing the message, so nothing is lost.
 
-Without `--timeout-seconds` the command waits as long as the job takes, which is what agents should use: one wait that ends only when the task ends. Agent tools that limit a command's run time should run it with their longest wait (Claude Code: as a background command; Codex: `yield_time_ms` equal to `background_terminal_max_timeout`) instead of looping on short timeouts.
+Logical waits have no elapsed-time deadline and reject the removed deadline flag as unsupported. They remain pending until a task outcome, monitor/connection failure, clear/replacement, or interruption. Agent tools that yield while a command remains running must retain the same terminal handle. A terminal or outer-tool yield is not completion; preventing model inference at those boundaries requires support from the agent runtime and is not established by the CLI alone.
 
 The usual way to run a long job is one command that registers the monitor and waits for it:
 

@@ -200,7 +200,7 @@ Conditions can use detected agent and goal states, progress monitor and attentio
 
 For panes with multiple monitors, the selected monitored task and progress conditions refer to Ilium's representative monitor. Separate **any monitored task** and **any monitor has failed** conditions inspect all registered monitors; they are false when there are none. Conditions joined with AND are independent: two separate **any** conditions can be satisfied by different monitors.
 
-Each rule can select a static symbol, a Braille animation, an animation made from symbol frames, or frames driven by monitored progress. Colour and bold or dim styling are configurable. The application's motion setting also controls animated rule visuals. The editor offers Live tree and Demo tree previews; the latter uses example states rather than your agents. If no rule matches, the default rules configuration leaves the custom status slot empty.
+Each rule can select a static symbol, a Braille animation, an animation made from symbol frames, or frames driven by monitored progress. Colour and bold or dim styling are configurable. The application's motion setting also controls animated rule visuals. The editor offers Live tree and Demo tree previews; the latter uses example states and synthetic screen text rather than your agents. Screen regexp results in the demo therefore reflect those examples, while the Live tree uses the actual visible screens. If no rule matches, the default rules configuration leaves the custom status slot empty.
 
 ## The `/goal` badge
 

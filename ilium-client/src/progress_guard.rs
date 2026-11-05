@@ -31,7 +31,7 @@ const LONG_FOREGROUND_MILLISECONDS: u64 = 180_000;
 /// Bounded hook input; Claude Code sends one small JSON object.
 const MAX_INPUT_BYTES: u64 = 1024 * 1024;
 
-pub const REFUSAL: &str = "Ilium: this pane requires a progress monitor for commands that may run 3 minutes or more; do not run them in the foreground. Start the command detached (setsid -f, output to a log), write a probe, run 'ilium progress check --command <probe>', then 'ilium progress set --command <probe> --interval-seconds <n> --wait' as a background Bash command, without --timeout-seconds. If this command is short, rerun it with a Bash timeout of at most 180000.";
+pub const REFUSAL: &str = "Ilium: this pane requires a progress monitor for commands that may run 3 minutes or more; do not run them in the foreground. Start the command detached (setsid -f, output to a log), write a probe, run 'ilium progress check --command <probe>', then 'ilium progress set --command <probe> --interval-seconds <n> --wait' as a background Bash command; the logical wait has no elapsed-time deadline. If this command is short, rerun it with a Bash timeout of at most 180000.";
 
 pub const BACKGROUND_REMINDER: &str = "Ilium: if this background command may run 3 minutes or more, Claude Code's completion notice is not enough; also write a probe and run 'ilium progress set --command <probe> --interval-seconds <n> --wait' as a background Bash command so the user sees its progress. Servers and short commands need nothing.";
 

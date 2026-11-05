@@ -2,7 +2,7 @@
 
 Voice control lets you drive Ilium and prompt your agents by speaking. A live conversation with OpenAI's Realtime model listens to you, decides which Ilium action you meant (focus a pane, create an agent, type text into a terminal, search, change a setting and more), carries it out, and answers in a synthetic voice. You can also type sentences into the same conversation from the command line with `ilium voice say`. This page covers setup, the F8 key, every voice setting, what the assistant can do, how confirmations protect you from mistakes, typed input and its JSONL output, and troubleshooting audio.
 
-Demo: [voice commands trigger Ilium actions and send a prompt to Claude](../../assets/demos/02-voice-control.gif).
+Demo: [staged synthesized speech triggers Ilium actions](../../assets/demos/02-voice-control.gif), using local recognition and fixed keyword rules rather than a live microphone or hosted inference.
 
 ## Contents
 

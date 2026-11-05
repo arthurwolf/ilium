@@ -1,0 +1,25 @@
+# Native Codex integration for Ilium waits
+
+The patch targets Codex 0.166.0, upstream commit `6ff1e1ca3b30fc8b914720681fcf5fe62e95f856` ([release source](https://github.com/openai/codex/tree/rust-v0.166.0)). It belongs to this Ilium integration; the upstream release is unchanged. Apply from the upstream repository root.
+
+## Contract
+
+The native `ilium_wait` tool uses `DirectModelOnly` exposure. It stays outside Code Mode, including CodeModeOnly configurations, and does not pass through either a terminal snapshot tool or an outer execution cell. The existing sandbox, command approval, shell hooks, process ownership, streaming output and cancellation machinery remain responsible for execution.
+
+Provide exactly one of `monitor_id` or `probe_command`. An existing monitor is observed with `ilium progress wait`; a probe is registered with `ilium progress set --wait`. `interval_seconds` configures probe frequency only. Unknown fields are rejected, including timeout/deadline/yield controls. Normal nonblocking `ilium progress set` remains available. Remote and Windows environments are explicitly unsupported; the tool requires the local POSIX environment of the Ilium pane.
+
+A new internal execution lifetime collects output with **no logical deadline**. Ordinary interactive terminal snapshots and bounded one-shot commands retain their existing behavior. Cancellation terminates only the wait command's exact process handle; it does not restart or duplicate the monitored job. Ilium's result records retain done, task-error, monitor-failed and cleared distinctions, plus composer duplicate-delivery information. A lost observer must reconnect to the same monitor/job rather than starting another job.
+
+## Build and delivery
+
+The normal build route is the remote `ni-build` dispatcher. For this delivery, the user explicitly authorized an exceptional local build and requested parallel local/remote compilation, installing the first successful result. The initial `--locked` build was refused because the upstream release lockfile required normalization in this Cargo workspace. The offline compile reached application crates but its RAM-backed cache exceeded the job memory limit. The shared cache then refused capacity without starting Cargo; no other owner was disturbed. The isolated no-cache remote attempt reached final executable compilation but its compiler service ended without a Cargo result or published artifact. Its failed receipt is retained. Package the upstream `codex-rs/vendor/bubblewrap/LICENSE` symlink as its same-tree `COPYING` contents for the dispatcher's explicit symlink policy.
+
+The successful local command used Rust 1.95.0: `cargo build --release -p codex-cli --bin codex --jobs 4 --message-format=json-render-diagnostics`, under desktop-safe background scheduling. Compiler wrappers were disabled only for that explicitly authorized process; global configuration is unchanged. Cargo normalized 170 workspace-package versions from 0.0.0 to 0.166.0 and their dependency references. All 1,308 source-backed external package records are unchanged. The patch includes this exact lockfile delta alongside the eight feature source files.
+
+Install only the successful receipt's hash-matching `release/codex` artifact through `tools/install-from-receipt.py --bin codex`, with its returned target directory and the existing native Codex binary directory supplied explicitly. This atomically replaces the binary on disk, preserves `.prev` and records the receipt beside it. It does not restart an existing Codex invocation or Ilium server. New Codex invocations load the tool; existing invocations retain their previous executable/tool catalog. An upstream package update may replace the patched artifact and requires rebasing this integration.
+
+For the explicitly authorized local exception, no remote receipt was fabricated and the receipt-only installer was not weakened. The exact successful artifact was hash-checked and atomically installed at `/home/arthur/.bun/install/global/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex`. Its SHA-256 is `a368ed3e93d4cae88d5d1f388ac43fe7c4af6a1cf6ed8eecc1039a61d943b74d`. Adjacent `codex.build.json` records honest local provenance, source hashes and command; adjacent `codex.prev-unconditional-wait-20261104` preserves the original binary. This build targets GNU/Linux on the local host; the package-selected directory retains its upstream musl name. Launcher paths are unchanged. Installation was verified by hash readback without executing Codex or testing the feature. No existing session was restarted.
+
+## Acceptance status
+
+The user explicitly requested implementation, compilation and deployment **without feature tests** on 2026-11-03. No runtime acceptance, zero-inference measurement, reconnect/interruption matrix, usage reduction or subscription-limit claim follows from compilation or installation. Those checks are user-led. The current hosted `functions.exec` implementation has not been positively identified with upstream Code Mode; the native tool avoids it rather than claiming to modify that external wrapper.
