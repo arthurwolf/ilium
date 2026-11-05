@@ -41,25 +41,25 @@ Recorded demonstrations of Ilium. Each animated GIF is stored in [`assets/demos/
 
 ![Three real Claude sessions demonstrate the attention queue: two wait for an answer or approval and one has unread output; setup is cut](../../assets/demos/27-attention-queue.gif)
 
-The attention queue collects questions, blocked goals, background-agent waits and unread completed turns. **Next: needs you** jumps to an agent; **[+]** opens the overview. The recording was re-recorded on 2026-10-31 with three real Claude (Haiku) sessions in a fictional museum project and instant detection: one asks which gallery to open, one waits for approval to write a file, and one finished with unread output. Keyboard shortcuts `Ctrl+B i` (jump) and `Ctrl+B O` (overview) drive it. Blocked goals and background-agent waits are not shown, and Codex is absent because its usage limit was reached. The long setup (boot, folder-trust prompts) is cut, three reading holds and three captions were added, and the status bar is redacted to hide an unrelated restructuring error. Explained in [Attention queue](attention-queue.md).
+The attention queue collects questions, blocked goals, background-agent waits and unread completed turns. **Next: needs you** jumps to an agent; **[+]** opens the overview. The recording was re-recorded on 2026-10-31 with three real Claude (Haiku) sessions in a fictional museum project and instant detection: one asks which gallery to open, one waits for approval to write a file, and one finished with unread output. Keyboard shortcuts `Ctrl+B i` (jump) and `Ctrl+B O` (overview) drive it. Blocked goals and background-agent waits are not shown, and Codex is absent because its usage limit was reached. The long setup (boot, folder-trust prompts) is cut, three reading holds and three captions were added, and the status bar is redacted to hide an unrelated restructuring error. On 2026-11-05 a frame-level edit blanked a two-line header (account plan name and a partial working path) in two 50 ms frames, and the `Ctrl+B O` caption now shows only while the overview is open. A decoded-frame comparison confirms that exactly those 80 of 795 frames changed, and nothing else. A real wall-clock time ("done 2:02 AM") remains visible in a short stretch. Explained in [Attention queue](attention-queue.md).
 
 ## AI names agents and organizes the project tree
 
 ![An earlier recording shows a scripted plan regrouping Ilium panes by topic; local fixtures provide no model inference](../../assets/demos/01-ai-tree.gif)
 
-This earlier recording shows a scripted plan regrouping Ilium panes by topic. Local fixture output supplies the plan; no model inference is made. Explained in [Titles and instructions](titles-and-instructions.md).
+This earlier recording shows a scripted plan regrouping Ilium panes by topic. Local fixture output supplies the plan; no model inference is made. Historical (2026-10-27). Its status bar shows "Restructuring projects ... skipped" and an internal scratch project name, which contradicts the scripted-demo captions; it is not a clean demonstration. A re-record needs a local model that answers the 15.6k-token restructure request within the fixed 45 s timeout and also retitles agents; none was available (the 12 GB RTX 3060 models were too slow, the RTX 3090 was in use, and a paid gateway take was not made). Explained in [Titles and instructions](titles-and-instructions.md).
 
 ## Control Ilium and prompt agents with voice
 
 ![Synthesized speech triggers three Ilium actions using local recognition and fixed keyword rules](../../assets/demos/02-voice-control.gif)
 
-Staged synthesized speech is recognized locally; a fixed keyword rule selects the Ilium tools. Pauses are shortened, and no live microphone or hosted inference is shown. Explained in [Voice](voice.md).
+Staged synthesized speech is recognized locally; a fixed keyword rule selects the Ilium tools. Pauses are shortened, and no live microphone, hosted model or OpenAI Realtime inference is shown, and it does not show general speech understanding. On 2026-11-05 a one-frame (100 ms) overlap of two captions was removed. Captions still lead or trail their actions by up to about 3 s, and a shortened local scratch path (`/media/a/tmp/ivc1/project`) is visible in the pane. A real Realtime take is not recorded: it needs the user's paid API credential and explicit spending approval (`tools/voice_capture_client_preflight.py` has the gated paid mode). Explained in [Voice](voice.md).
 
 ## Give agent panes automatic titles
 
 ![Ilium applies local fixture titles to agent and shell panes while the manually named Stamp desk stays unchanged](../../assets/demos/03-contextual-titles.gif)
 
-An isolated Ilium capture shows real title updates from deterministic local title responses; a stale proposal is rejected and a retry is applied. The Claude CLI uses a recognized model alias routed over loopback to local Qwen, with no provider call. The Codex-shaped process is a deterministic local agent fixture, and its transcript is seeded with the prompt subsequently typed. The manually named Stamp desk remains unchanged. Claude’s turn had not completed when recording ended. Setup and 57 seconds of model wait are cut; captions, arrows, highlights and reading holds are added. Explained in [Titles and instructions](titles-and-instructions.md).
+An isolated Ilium capture shows real title updates from deterministic local title responses; a stale proposal is rejected and a retry is applied. The Claude CLI uses a recognized model alias routed over loopback to local Qwen, with no provider call. The Codex-shaped process is a deterministic local agent fixture, and its transcript is seeded with the prompt subsequently typed. The manually named Stamp desk remains unchanged. Claude’s turn had not completed when recording ended. Setup and 57 seconds of model wait are cut; captions, arrows, highlights and reading holds are added. Review limits: 24 of 1,345 distinct frames were viewed and the sensitive-text scan did not complete; a partly redacted scratch path (`/.../data/tmp/worlds/birch-court`) is visible in the Claude banner, and one caption ("Stale title rejected; retry applied") was seen over a frame that does not show the retry. A fresh Claude capture was not made; agent identification failed under machine load on 2026-10-31 and the cause is undiagnosed (the wrapper process names match detection). Explained in [Titles and instructions](titles-and-instructions.md).
 
 ## Transfer a terminal screen between panes
 
@@ -97,19 +97,19 @@ Smart Copy uses local inference to select and paste a code from real Codex outpu
 
 Prompts queued for an agent are delivered one by one as each of its turns finishes. Explained in [Automation](automation.md).
 
-Disclosure: this is a current-build recording of a real Claude (Haiku) agent in an isolated lane; the agent's file output is real. The idle wait before the first prompt and part of the first turn's idle time are cut, and short reading holds are added, as shown by the loop clock. Names in the tree (`Exam University`, `Exam TA`) are staged. The readback that proves FIFO delivery (server log, Claude transcript and the driver key log: separate turns 2.75 s and 1.82 s after each previous turn ended, no key typed after the second Enqueue) was adjusted for this take to ignore the shell line that launches the agent, which the server log also records as a submitted prompt; the rest of its checks are unchanged. Earlier versions of this GIF used a synthetic Codex-shaped fixture.
+Disclosure: this is a current-build recording of a real Claude (Haiku) agent in an isolated lane; the agent's file output is real. The idle wait before the first prompt and part of the first turn's idle time are cut, and short reading holds are added, as shown by the loop clock. Names in the tree (`Exam University`, `Exam TA`) are staged. The readback that proves FIFO delivery (server log, Claude transcript and the driver key log: separate turns 2.75 s and 1.82 s after each previous turn ended, no key typed after the second Enqueue) was adjusted for this take to ignore the shell line that launches the agent, which the server log also records as a submitted prompt; the rest of its checks are unchanged. Earlier versions of this GIF used a synthetic Codex-shaped fixture. Review limit (2026-11-05): 93 of 1,297 distinct frames were viewed at thumbnail size and the keyword scan did not complete, so no full-frame review is recorded; nothing sensitive was seen in the sampled frames.
 
 ## Get results from background tasks
 
-![A real Claude agent monitors a ten-card task and receives its completed result](../../assets/demos/14-progress-monitor.gif)
+[Historical recording of a real Claude agent monitoring a ten-card task (link only)](../../assets/demos/14-progress-monitor.gif)
 
-Ilium tracks the task and delivers the completed result to a real Claude agent. Setup is cut and an account notice is redacted. Explained in [Automation](automation.md).
+Ilium tracks the task and delivers the completed result to a real Claude agent. Setup is cut and an account notice is redacted. Historical and not embedded: a scan found local scratch-path text in some frames (for example in a `python3` command line) and no full-frame review was made. Explained in [Automation](automation.md).
 
 ## Search agents, files, and terminals
 
-![Find agents, files, and terminals, then jump to a match](../../assets/demos/17-workspace-search.gif)
+[Historical recording of workspace search across agents, files and terminals (link only)](../../assets/demos/17-workspace-search.gif)
 
-Workspace search finds agents, files and terminal contents and jumps to the chosen match. This recording uses real Claude and Codex agents, cuts setup and adds reading holds; automatic restructuring is disabled in the isolated demo. Explained in [Panes and layout](panes-and-layout.md).
+Workspace search finds agents, files and terminal contents and jumps to the chosen match. This recording uses real Claude and Codex agents, cuts setup and adds reading holds; automatic restructuring is disabled in the isolated demo. Historical and not embedded: a scan found a local scratch path in the search results and no full-frame review was made. Explained in [Panes and layout](panes-and-layout.md).
 
 ## See live agent goals in the project tree
 
@@ -121,19 +121,19 @@ A real Codex goal changes from active to paused and back beside the agent in the
 
 ![A simulated reboot card precedes an isolated Ilium server shutdown and relaunch; a local fixture recovers a saved note](../../assets/demos/24-agents-survive-reboots.gif)
 
-An isolated Ilium server actually shuts down and relaunches, and a local session fixture recovers a saved note. The reboot card is simulated and editorial; no machine reboot or real provider is used. Idle waits are cut and caption holds are added. Explained in [Session recovery](session-recovery.md).
+An isolated Ilium server actually shuts down and relaunches, and a local session fixture recovers a saved note. The reboot card is simulated and editorial; no machine reboot or real provider is used. Idle waits are cut and caption holds are added. The PlainShell snapshot-resume fix (commit `61653978`, unit-tested) is in source and a fresh release builds, but this GIF is not real provider recovery footage and was not re-recorded; that needs the user's Claude and Codex quota. Explained in [Session recovery](session-recovery.md).
 
 ## Choose an animation, then watch it play
 
 ![Historical animation gallery from an earlier Ilium build; current-build Voxel preview remains visually unqualified](../../assets/demos/26-animations.gif)
 
-The current-pinned replacement has not passed visual review: the ready Voxel scene still appears as a faint dot field, even with color enabled and pattern contrast at 200%. This historical asset remains until that scene is recognizable. Explained in [Animations](animations.md).
+Historical (recorded 2026-10-26 on an older build, SHA-256 `7705e61f...1431`, 60 scenes, 275 s). Current-build re-recording was attempted but no candidate passed review: Clouds, Fireflies, Dithered Waves and other faint scenes stayed unreadable, and Voxel terrain with the 2026-11 streaming fix (commit `d7f7947e`) was not verified on a gallery. The asset itself has defects: the animation fills only the top-left of a 1824x1225 canvas, the full-screen hint overprints attribution text, and several scenes are blank or noisy. The rejected candidates are unrecovered and unpublished (receipt `2bd9e46ec7dc49628fb5ad4609e1a427`). A re-record needs a Clouds and Fireflies renderer fix and a multi-hour isolated capture. Explained in [Animations](animations.md).
 
 ## Schedule input for a pane
 
 ![Ilium schedules input for a real Claude agent and a shell](../../assets/demos/04-scheduled-input.gif)
 
-Ilium sends scheduled input to a real Claude agent and an echo-only terminal fixture in separate takes. Setup is cut, reading holds are added, and local paths are redacted. Explained in [Automation](automation.md).
+Ilium sends scheduled input to a real Claude agent and an echo-only terminal fixture in separate takes. Setup is cut, reading holds are added, and local paths are redacted. On 2026-11-05 the captions were retimed by a caption-strip-only edit: the caption no longer changes while the dialog is open, the "agent receives the prompt" caption starts when the prompt first appears, and two captions that would have lasted 100 ms were removed. A decoded comparison confirms only the caption strip changed in the final 37-frame retiming. The first take still has a near-static hold of about 17 s, and the Claude header shows a plan label (not an account notice or quota). Explained in [Automation](automation.md).
 
 ## Set interface and board preferences
 
@@ -193,7 +193,7 @@ A staged Markdown note is edited and previewed in a pane, then read back from di
 
 ![Two local models generate messages that a script posts to Ilium Chatroom](../../assets/demos/20-chatroom.gif)
 
-Two local models generate a planner message and a reviewer response in separate panes. A shell script posts both messages to an isolated Chatroom; the models do not call Chatroom tools autonomously. Waits are shortened. Explained in [Automation](automation.md).
+Two local models generate a planner message and a reviewer response in separate panes. A shell script posts both messages to an isolated Chatroom; the models do not call Chatroom tools autonomously. Waits are shortened. A shell prompt showing the local username and host name is visible in some frames. Explained in [Automation](automation.md).
 
 ## Respond to confirmation prompts automatically
 
@@ -211,13 +211,13 @@ This recording shows an actual isolated Ilium server shutdown and relaunch, foll
 
 ![Ilium creates a worktree through its native workflow and starts a local fixture in an isolated demo project](../../assets/demos/25-worktree-agent.gif)
 
-The recording shows Ilium creating a real worktree through its native workflow in an isolated demo project and starting a local fixture instead of a provider agent. Terminal states are held, captions are added, and a path is redacted. A coding agent reviewed all four decoded frames. Explained in [Worktrees](worktrees.md).
+The recording shows Ilium creating a real worktree through its native workflow in an isolated demo project and starting a local fixture instead of a provider agent. Terminal states are held, captions are added, and a path is redacted. A second coding agent reviewed all four decoded frames (2026-11-05) and found no sensitive text. The creation step is not shown and the caption says the path is redacted although none is shown. Explained in [Worktrees](worktrees.md).
 
 ## Convert a session between Claude and Codex
 
-![Real Claude and Codex sessions recall a fictional mascot after conversion in both directions](../../assets/demos/26-convert-session.gif)
+[Historical recording of Claude and Codex session conversion (link only)](../../assets/demos/26-convert-session.gif)
 
-Real Claude and Codex sessions are converted in both directions and recall a fictional mascot from the conversation. Setup and an idle wait are cut, account notices are masked, and captions are added. The mask was corrected for the changed terminal layout; all 973 decoded frames and their durations were compared against the earlier recording outside the intended masks. The isolated capture disables automatic project restructuring and uses local title inference. Explained in [Session recovery](session-recovery.md).
+Real Claude and Codex sessions are converted in both directions and recall a fictional mascot from the conversation. Setup and an idle wait are cut, account notices are masked, and captions are added. Historical and not embedded: a review on 2026-11-05 found that local scratch paths (including the username), a plan label and a session id remain visible, so the "account notices are masked" statement covers notices only, not paths. The mask was corrected for the changed terminal layout; all 973 decoded frames and their durations were compared against the earlier recording outside the intended masks. The isolated capture disables automatic project restructuring and uses local title inference. Explained in [Session recovery](session-recovery.md).
 
 ## Queue access to a shared resource
 
@@ -237,9 +237,9 @@ The original provider-transcript archive manifest records 102 distinct missing s
 
 | Gallery GIF | Matching alias | Last asset change | SHA-256 |
 | --- | --- | --- | --- |
-| `27-attention-queue.gif` | None | 2026-11-04; status redacted | `3183c6674679e18b5e71a3351f8be2cf49c505609fa20854ef3dec33b5a622db` |
+| `27-attention-queue.gif` | None | 2026-11-05; header blanked, caption retimed | `5188351cabc92c73313d1c9f07906c645b5735b2732e1fcf87e9532e678b669f` |
 | `01-ai-tree.gif` | `12-ai-tree.gif` | 2026-10-27 | `558d7155a707448a717944c832fab820bc619c705872c583ecd2600cd30f75c0` |
-| `02-voice-control.gif` | `22-voice-control.gif` | 2026-11-04 | `7ed711a6ab79ae358a1c419b094df7295e6de657ce0b462d7e7f982480295a02` |
+| `02-voice-control.gif` | `22-voice-control.gif` | 2026-11-05; caption overlap removed | `bf1669861f61b59120fc661636b700ec5e6b866fca8cde5aa3eef44303f25ef7` |
 | `03-contextual-titles.gif` | `20-contextual-titles.gif` | 2026-11-03; working file updated | `d5d8e77bde43de31a88ebeea446beb5d18c0848ff248edafc2f3941f2a037ab7` |
 | `05-screen-transfer.gif` | `18-screen-transfer.gif` | 2026-10-30 | `d9c854388a166d96fb485b90ec52428ae6080d7b8f86603eb54be89d3dd0b367` |
 | `06-cost-and-stats.gif` | `23-cost-and-stats.gif` | 2026-10-30 | `ca7b9ffc5b58e6d9e67363ac92c68366a49b1068f62fcb88870184cd3e540c0f` |
@@ -252,7 +252,7 @@ The original provider-transcript archive manifest records 102 distinct missing s
 | `22-goal-indicators.gif` | `17-goal-indicators.gif` | 2026-10-30 | `f57dc9d67fcb85ddd7a21b41019ea6189e5c4f153a61105bb01a0d20da7ff3fa` |
 | `24-agents-survive-reboots.gif` | `19-snapshot-resume.gif`, `23-snapshot-resume.gif` | 2026-10-26; working file updated | `7c24d61380e6c6bf49b23b0d45a209473590066be4eda305f9ef05db5eee1e78` |
 | `26-animations.gif` | None | 2026-10-27 | `7705e61f2e3f4c38d78a4a9cd76df42ed9126d0ce20077d4ad3371a22d201431` |
-| `04-scheduled-input.gif` | `15-scheduled-input.gif` | 2026-10-30 | `4be59a9b4076f7b35a129711e5c7f3a3937538d68cf938ecfd26944d1c20d6c7` |
+| `04-scheduled-input.gif` | `15-scheduled-input.gif` | 2026-11-05; captions retimed | `96e52edeabae056a1acfbebc6b4384ab8ab313acc651288e891b108dcb4ed65a` |
 | `07a-settings-tour-a.gif` | `21-settings-tour-a.gif` | 2026-10-30 | `0c078fe5aca220e48c713299b4a0b77deb2fa223a7474689b5473c3de2cecb9e` |
 | `07b-settings-tour-b.gif` | `21-settings-tour-b.gif` | 2026-10-30 | `9b086a03958d279cf0ff2afbeee56de77554d7f63b3a5c49b7508c24f7aa8ce4` |
 | `07c-settings-tour-c.gif` | `21-settings-tour-c.gif` | 2026-10-30 | `2e2dc667df60c22be106ee78956c4bfe1b960220990a0bd02bbefdb111b3e136` |
@@ -282,3 +282,26 @@ The plugin manual has separately maintained copies, not listed as root aliases i
 The generated manual is served from `_site/`, so changing source alone does not update that output. No Resource Queue copy was found in either manual asset directory. Recheck copies and their descriptions together after replacements, preserving original recordings.
 
 The root Voice Control and Chatroom GIFs were replaced on 2026-11-04; separately generated plugin-manual assets may still show their earlier recordings. Rebuild and reconcile those copies before treating the manual as current.
+
+## Refresh status, 2026-11-05
+
+Status of each gallery GIF after the 2026-11-05 review pass. "Refreshed" means re-recorded or edited on the current build with review evidence; "historical" means not refreshed, with the reason. Coverage is stated as frames viewed; sampled coverage is not a full review. The 102 missing original provider-session paths remain unrecovered and are not reconstructed.
+
+| GIF | Status | Review evidence and limits |
+| --- | --- | --- |
+| 25 Worktree Agent | Refreshed (fixture) | All 4 distinct frames viewed by an independent reviewer; no sensitive text. |
+| 28 Resource Queue | Refreshed (fixtures) | All 699 frames via 35 distinct frames; a garbled reservation id appears in frames 147-262. |
+| 27 Attention Queue | Refreshed, edited 2026-11-05 | All 795 frames viewed before the edit; two sensitive frames and a late caption fixed and verified by decoded comparison; the edited file was not re-reviewed in full. |
+| 20/14 Chatroom | Refreshed (scripted posts) | 12 of 19 contact sheets viewed; local username and host name visible in some frames. |
+| 02/22 Voice Control | Refreshed (staged synthesized speech) | All 31 stored frames viewed; caption lead and lag up to about 3 s remain; real Realtime take blocked on paid approval. |
+| 04/15 Scheduled Input | Refreshed, captions retimed | All 293 stored frames viewed before the final retiming, which is verified by decoded comparison only; small caption lags and long static holds remain. |
+| 23/19 Snapshot Resume, 24 Agents Survive Reboots | Refreshed as an isolated-server fixture (2026-11-03) | All 7 frames viewed; not provider footage; simulated reboot card. |
+| 13/06 Prompt Queue | Refreshed 2026-10-31 (real Claude) | 93 of 1,297 distinct frames viewed; keyword scan incomplete; full review owed. |
+| 03/20 Contextual Titles | Refreshed fixture (2026-11-03) | 24 of 1,345 distinct frames viewed; scan incomplete; partial scratch path visible. |
+| 01/12 AI Tree | Historical | Status bar shows a skip message and a scratch project name; no local model could serve a re-record. |
+| 26 Animations | Historical | Not re-recorded; sampled frames fail legibility and layout. |
+| 26 Convert Session | Historical, not embedded | Scratch paths with the username, a plan label and a session id are visible; 330 distinct frames OCR-scanned, about 12 viewed. |
+| 14/07 Progress Monitor, 17/10 Workspace Search | Historical, not embedded | A scan found local scratch-path text; frames not viewed. |
+| Other gallery GIFs (settings tours, Pane Tree, Mixed Splits, Smart Copy, Screen Transfer, Cost and Stats, Agent Activity, Ask for Update, Kanban, Agent from Line, Detach and Reattach, Markdown Editor, Text Triggers, Goal Indicators) | Retained from 2026-10-30, not independently reviewed in this pass | Only overview sampling exists; Pane Tree has a caption that outlasts its action; no full-frame review is claimed. |
+
+`14-chatroom-limit-preview.gif` is an orphan file from 2026-09-27 that no page references; it was not reviewed. Blockers: real Voice Control, Snapshot Resume and Agents Survive Reboots recordings need the user's paid OpenAI Realtime credential or Claude and Codex quota; the Animations gallery needs a Clouds and Fireflies renderer fix and a long isolated capture; AI Tree needs a local model that meets the 45 s restructure timeout.

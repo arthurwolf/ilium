@@ -57,17 +57,17 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Find the next agent that needs you</strong></p>
-<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Three real Claude sessions show two waiting questions and one unread completed turn in the attention queue, jumped to with Ctrl+B i and listed with Ctrl+B O; setup is cut, with reading holds and a redacted status bar" width="100%"></a></p>
+<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Three real Claude sessions show two waiting questions and one unread completed turn in the attention queue, jumped to with Ctrl+B i and listed with Ctrl+B O; setup is cut, with reading holds, a redacted status bar and two frames with a blanked header line" width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>AI names agents and organizes the project tree</strong></p>
-<p><a href="assets/demos/01-ai-tree.gif?raw=true"><img src="assets/demos/01-ai-tree.gif" alt="Earlier recording: Ilium organizes the project tree using local scripted fixture content; no provider request is made." width="100%"></a></p>
+<p><a href="assets/demos/01-ai-tree.gif?raw=true"><img src="assets/demos/01-ai-tree.gif" alt="Historical recording (2026-10-27): Ilium organizes the project tree using local scripted fixture content; no provider request is made. Its status bar shows a failure-looking message from an earlier take." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Control Ilium and prompt agents with voice</strong></p>
-<p><a href="assets/demos/02-voice-control.gif?raw=true"><img src="assets/demos/02-voice-control.gif" alt="Synthesized speech triggers three Ilium actions using local recognition and fixed keyword rules; pauses are shortened." width="100%"></a></p>
+<p><a href="assets/demos/02-voice-control.gif?raw=true"><img src="assets/demos/02-voice-control.gif" alt="Staged synthesized speech triggers three Ilium actions using local recognition and fixed keyword rules; pauses are shortened. No live microphone or hosted model; a shortened local scratch path is visible in the pane." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Give agent panes automatic titles</strong></p>
@@ -101,17 +101,17 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Queue prompts for an agent</strong></p>
-<p><a href="assets/demos/13-prompt-queue.gif?raw=true"><img src="assets/demos/13-prompt-queue.gif" alt="Queue two prompts for a real Claude agent; Ilium sends each one after the previous turn ends, in order." width="100%"></a></p>
+<p><a href="assets/demos/13-prompt-queue.gif?raw=true"><img src="assets/demos/13-prompt-queue.gif" alt="Queue two prompts for a real Claude agent; Ilium sends each one after the previous turn ends, in order. Idle waits are cut; only a sampled review was completed." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Get results from background tasks</strong></p>
-<p><a href="assets/demos/14-progress-monitor.gif?raw=true"><img src="assets/demos/14-progress-monitor.gif" alt="A real Claude agent monitors a ten-card task and receives its completed result. Setup is cut and an account notice is redacted." width="100%"></a></p>
+<p><a href="assets/demos/14-progress-monitor.gif?raw=true">Historical recording, not embedded: a scan found local scratch-path text in some frames and no full review was made (see the demo gallery). A real Claude agent monitors a ten-card task.</a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Search agents, files, and terminals</strong></p>
-<p><a href="assets/demos/17-workspace-search.gif?raw=true"><img src="assets/demos/17-workspace-search.gif" alt="Search real agent output, a shell history, and an open file, then jump to matches. Setup is cut and reading holds are added; automatic restructuring is disabled." width="100%"></a></p>
+<p><a href="assets/demos/17-workspace-search.gif?raw=true">Historical recording, not embedded: a scan found local scratch-path text in some frames and no full review was made (see the demo gallery). Searches real agent output, a shell history and a file.</a></p>
 </td>
 </tr>
 <tr>
@@ -131,7 +131,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Schedule input for a pane</strong></p>
-<p><a href="assets/demos/04-scheduled-input.gif?raw=true"><img src="assets/demos/04-scheduled-input.gif" alt="Schedule input for a real Claude agent and a local terminal fixture in separate takes; setup is cut, reading holds are added, and local paths are redacted." width="100%"></a></p>
+<p><a href="assets/demos/04-scheduled-input.gif?raw=true"><img src="assets/demos/04-scheduled-input.gif" alt="Schedule input for a real Claude agent and a local terminal fixture in separate takes; setup is cut, reading holds are added, local paths are redacted, and captions were retimed to their actions." width="100%"></a></p>
 </td>
 </tr>
 <tr>
@@ -181,7 +181,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Coordinate local models with Chatroom</strong></p>
-<p><a href="assets/demos/20-chatroom.gif?raw=true"><img src="assets/demos/20-chatroom.gif" alt="Two local models generate messages that a script posts to Ilium Chatroom; waits are shortened." width="100%"></a></p>
+<p><a href="assets/demos/20-chatroom.gif?raw=true"><img src="assets/demos/20-chatroom.gif" alt="Two local models generate messages that a script posts to Ilium Chatroom; waits are shortened. A shell prompt with the local username and host name is visible." width="100%"></a></p>
 </td>
 </tr>
 <tr>
@@ -201,7 +201,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Convert a session between Claude and Codex</strong></p>
-<p><a href="assets/demos/26-convert-session.gif?raw=true"><img src="assets/demos/26-convert-session.gif" alt="Real Claude and Codex sessions recall a fictional mascot after conversion in both directions. Setup and idle wait are cut; an account notice is redacted." width="100%"></a></p>
+<p><a href="assets/demos/26-convert-session.gif?raw=true">Historical recording, not embedded: local scratch paths and a plan label are visible in its frames (see the demo gallery). Real Claude and Codex sessions recall a fictional mascot after conversion in both directions.</a></p>
 </td>
 </tr>
 <tr>
