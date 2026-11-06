@@ -4,7 +4,6 @@ from pathlib import Path
 import hashlib
 import re
 import sys
-import tomllib
 import unittest
 
 
@@ -34,45 +33,35 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
         expected.update(build_windows_installers.INSTALLER_NAMES)
 
         readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
-        version = tomllib.loads((PROJECT_ROOT / "Cargo.toml").read_text())[
-            "workspace"
-        ]["package"]["version"]
-        if version == "0.1.1-linux.1":
-            # The initial Linux preview must never resolve through stable latest.
-            pinned = re.findall(
-                r"https://github\.com/arthurwolf/ilium/releases/download/"
-                r"v0\.1\.1-linux\.1/([^\s)]+)", readme,
-            )
-            preview = {"ilium-linux-x86_64.tar.gz", "SHA256SUMS"}
-            preview.update(build_linux_packages.package_names("x86_64"))
-            self.assertEqual(set(pinned), preview)
-            self.assertEqual(len(pinned), len(preview), "duplicate preview links")
-            self.assertEqual(set(LATEST_DOWNLOAD.findall(readme)),
-                             set(build_windows_installers.INSTALLER_NAMES) |
-                             {"ilium-windows-x86_64.zip"})
+        if "Linux preview: [v0.1.1-linux.3]" in readme:
+            # The published documentation can remain on the preview while the
+            # workspace is prepared for the next, not-yet-published release.
+            base = "https://github.com/arthurwolf/ilium/releases/download/"
+            # One combined prerelease carries both architectures; ARM64 rpm and Snap stay "coming soon".
+            preview = {
+                "v0.1.1-linux.3": {
+                    "ilium-linux-x86_64.tar.gz", "SHA256SUMS", *build_linux_packages.package_names("x86_64"),
+                    "ilium-linux-aarch64.tar.gz", "ilium-linux-aarch64.deb",
+                    "ilium-linux-aarch64.AppImage", "ilium-linux-aarch64.flatpak",
+                },
+            }
+            for tag, names in preview.items():
+                pinned = re.findall(re.escape(base + tag + "/") + r"([^\s)]+)", readme)
+                self.assertEqual(set(pinned), names, tag)
+                self.assertEqual(len(pinned), len(names), "duplicate preview links in " + tag)
+            self.assertEqual(LATEST_DOWNLOAD.findall(readme), [])
             all_downloads = set(re.findall(
                 r"https://github\.com/arthurwolf/ilium/releases/"
                 r"(?:latest/download|download/[^/\s)]+)/[^\s)]+", readme,
             ))
-            allowed = {
-                "https://github.com/arthurwolf/ilium/releases/download/"
-                "v0.1.1-linux.1/" + name for name in preview
-            } | {
-                "https://github.com/arthurwolf/ilium/releases/latest/download/" + name
-                for name in (*build_windows_installers.INSTALLER_NAMES,
-                             "ilium-windows-x86_64.zip")
-            }
+            allowed = {base + tag + "/" + name for tag, names in preview.items() for name in names}
             self.assertEqual(all_downloads, allowed, "unexpected download channel")
-            for line in readme.splitlines():
-                if LATEST_DOWNLOAD.search(line):
-                    self.assertIn("not ready", line.lower())
-            for system in ("Linux ARM64", "macOS Apple Silicon", "macOS Intel",
-                           "Windows x86_64"):
-                self.assertRegex(readme, rf"(?m)^\| {re.escape(system)} \| \*\*Not ready\*\* \|$")
-            self.assertIn("Hosted installers are not ready for this preview", readme)
-            return
-        if version.startswith("0.1.1-linux."):
-            # Later Linux previews pin their own tag; the README links are checked by the publisher tests.
+            self.assertNotIn("v0.1.1-linux.1/", readme)
+            self.assertNotIn("v0.1.1-linux.2/", readme)
+            self.assertRegex(readme, r"(?m)^\| Linux ARM64 \(4 of 6 available and verified;")
+            for system in ("macOS Apple Silicon", "macOS Intel", "Windows x86_64"):
+                self.assertRegex(readme, rf"(?m)^\| {re.escape(system)} \| .*\*\*\(coming soon; not yet available\)\*\* \|$")
+            self.assertIn("two of six Linux ARM64 formats (rpm, Snap)", readme)
             return
         actual = set(LATEST_DOWNLOAD.findall(readme))
 
