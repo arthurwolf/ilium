@@ -163,17 +163,17 @@ class PosixInstallTests(unittest.TestCase):
                 self.assertEqual(len(requests), 2)
                 self.assertTrue(requests[-1].endswith("/v0.1.1-linux.1/ilium-linux-x86_64.tar.gz"))
 
-    def test_committed_pins_have_no_arm64_entry_so_arm64_is_not_ready(self):
-        # The committed pin file carries x86_64 only until the linux.2 ARM64 checksums are published.
+    def test_committed_pins_offer_arm64_from_the_linux_2_preview(self):
+        # The committed pin file pins ARM64 to the separate 0.1.1-linux.2 prerelease.
         for architecture in ("aarch64", "arm64"):
             with self.subTest(architecture=architecture):
                 log = self.downloads / "requests.jsonl"
                 log.unlink(missing_ok=True)
                 result = self.invoke(env={"FIXTURE_DOWNLOAD_FAILURE": "no-stable", "FIXTURE_ARCH": architecture})
-                self.failure(result, "download")
-                self.assertIn("not ready yet", result.stderr)
+                self.failure(result, "download")  # No preview archive in the fixture.
                 requests = [json.loads(line)["url"] for line in log.read_text().splitlines()]
-                self.assertEqual(len(requests), 1)  # Only the latest-release lookup; no archive is guessed.
+                self.assertEqual(len(requests), 2)
+                self.assertTrue(requests[-1].endswith("/v0.1.1-linux.2/ilium-linux-aarch64.tar.gz"))
 
     def test_missing_stable_does_not_offer_preview_on_unpinned_platforms(self):
         for architecture in ("arm64", "x86_64"):
@@ -273,8 +273,8 @@ class PosixInstallTests(unittest.TestCase):
         pins = ROOT / "release/linux-preview-pins.json"
         result = self.run_pin_tool(pins)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout)["pinned"], ["ilium-linux-x86_64.tar.gz"])
-        self.assertEqual(json.loads(result.stdout)["versions"], ["0.1.1-linux.1"])
+        self.assertEqual(json.loads(result.stdout)["pinned"], ["ilium-linux-aarch64.tar.gz", "ilium-linux-x86_64.tar.gz"])
+        self.assertEqual(json.loads(result.stdout)["versions"], ["0.1.1-linux.1", "0.1.1-linux.2"])
         good = json.loads(pins.read_text())
         x86 = self.X86
         entry = good["archives"][x86]
@@ -300,10 +300,14 @@ class PosixInstallTests(unittest.TestCase):
         self.assertNotEqual(self.run_pin_tool(drift).returncode, 0)  # Installer block no longer matches.
         sums = self.root / "SHA256SUMS"
         sums.write_text(f"{entry['sha256']}  {x86}\n")
-        self.assertEqual(self.run_pin_tool(pins, [(entry["version"], sums)]).returncode, 0)
-        self.assertNotEqual(self.run_pin_tool(pins, [("0.1.1-linux.9", sums)]).returncode, 0)  # No checksum file for the pinned version.
+        arm_entry = good["archives"][self.ARM]
+        arm_sums = self.root / "arm-SHA256SUMS"
+        arm_sums.write_text(f"{arm_entry['sha256']}  {self.ARM}\n")
+        both = [(entry["version"], sums), (arm_entry["version"], arm_sums)]
+        self.assertEqual(self.run_pin_tool(pins, both).returncode, 0)
+        self.assertNotEqual(self.run_pin_tool(pins, [("0.1.1-linux.9", sums), both[1]]).returncode, 0)  # No checksum file for the pinned version.
         sums.write_text(f"{'0' * 64}  {x86}\n")
-        self.assertNotEqual(self.run_pin_tool(pins, [(entry["version"], sums)]).returncode, 0)  # Pin differs from the published checksum.
+        self.assertNotEqual(self.run_pin_tool(pins, both).returncode, 0)  # Pin differs from the published checksum.
 
     def test_pin_tool_validates_each_versions_checksum_file_separately(self):
         arm_sums, x86_sums = self.root / "arm.sums", self.root / "x86.sums"

@@ -3,6 +3,10 @@
     "ilium-linux-x86_64.tar.gz": {
       "version": "0.1.1-linux.1",
       "sha256": "c84bcc0279e2339ae02d5e9dfaebe00ca0e0dea9eea8759f1e26358f96d91e26"
+    },
+    "ilium-linux-aarch64.tar.gz": {
+      "version": "0.1.1-linux.2",
+      "sha256": "68f273a4142c80652f1d08aa2091025696435160d3f44b4102a9c505c0f13fde"
     }
   }
 }
