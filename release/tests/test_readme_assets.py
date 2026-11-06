@@ -36,30 +36,29 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
         if "Linux x86_64 preview: [v0.1.1-linux.1]" in readme:
             # The published documentation can remain on the preview while the
             # workspace is prepared for the next, not-yet-published release.
-            pinned = re.findall(
-                r"https://github\.com/arthurwolf/ilium/releases/download/"
-                r"v0\.1\.1-linux\.1/([^\s)]+)", readme,
-            )
-            preview = {"ilium-linux-x86_64.tar.gz", "SHA256SUMS"}
-            preview.update(build_linux_packages.package_names("x86_64"))
-            # Linux ARM64 links the four formats verified in the emulated guest;
-            # rpm and Snap stay "coming soon".
-            preview.update({
-                "ilium-linux-aarch64.tar.gz", "ilium-linux-aarch64.deb",
-                "ilium-linux-aarch64.AppImage", "ilium-linux-aarch64.flatpak",
-            })
-            self.assertEqual(set(pinned), preview)
-            self.assertEqual(len(pinned), len(preview), "duplicate preview links")
+            base = "https://github.com/arthurwolf/ilium/releases/download/"
+            # x86_64 lives in the immutable first preview; ARM64 (four formats verified in an
+            # emulated guest) lives in its own second preview. rpm and Snap stay "coming soon".
+            preview = {
+                "v0.1.1-linux.1": {"ilium-linux-x86_64.tar.gz", "SHA256SUMS", *build_linux_packages.package_names("x86_64")},
+                "v0.1.1-linux.2": {
+                    "SHA256SUMS", "ilium-linux-aarch64.tar.gz", "ilium-linux-aarch64.deb",
+                    "ilium-linux-aarch64.AppImage", "ilium-linux-aarch64.flatpak",
+                },
+            }
+            for tag, names in preview.items():
+                pinned = re.findall(re.escape(base + tag + "/") + r"([^\s)]+)", readme)
+                self.assertEqual(set(pinned), names, tag)
+                self.assertEqual(len(pinned), len(names), "duplicate preview links in " + tag)
             self.assertEqual(LATEST_DOWNLOAD.findall(readme), [])
             all_downloads = set(re.findall(
                 r"https://github\.com/arthurwolf/ilium/releases/"
                 r"(?:latest/download|download/[^/\s)]+)/[^\s)]+", readme,
             ))
-            allowed = {
-                "https://github.com/arthurwolf/ilium/releases/download/"
-                "v0.1.1-linux.1/" + name for name in preview
-            }
+            allowed = {base + tag + "/" + name for tag, names in preview.items() for name in names}
             self.assertEqual(all_downloads, allowed, "unexpected download channel")
+            self.assertNotIn("v0.1.1-linux.1/ilium-linux-aarch64", readme)
+            self.assertNotIn("v0.1.1-linux.2/ilium-linux-x86_64", readme)
             self.assertRegex(readme, r"(?m)^\| Linux ARM64 \(4 of 6 available and verified;")
             for system in ("macOS Apple Silicon", "macOS Intel", "Windows x86_64"):
                 self.assertRegex(readme, rf"(?m)^\| {re.escape(system)} \| .*\*\*\(coming soon; not yet available\)\*\* \|$")

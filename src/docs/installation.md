@@ -108,7 +108,7 @@ Download packages from [GitHub Releases](https://github.com/arthurwolf/ilium/rel
 
 Every portable archive contains the client (`ilium`), the server (`ilium-server`), the animation helper, the two bundled `.iliumanim` animations and runtime libraries. Keep them together. The helper and animations live beside the client; moving only `ilium` prevents bundled animation discovery. Add the extracted package directory to `PATH`, then run `ilium` in your project.
 
-Download the archive and [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/SHA256SUMS) from the same release, and [verify the checksum](#verifying-checksums) before extracting.
+Download the archive and `SHA256SUMS` from the same release, and [verify the checksum](#verifying-checksums) before extracting. Linux x86_64 downloads and their [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/SHA256SUMS) are in `v0.1.1-linux.1`; Linux ARM64 downloads and their [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.2/SHA256SUMS) are in the separate `v0.1.1-linux.2` prerelease, because a published release cannot gain assets.
 
 ## Linux packages
 
@@ -117,7 +117,7 @@ Download the archive and [`SHA256SUMS`](https://github.com/arthurwolf/ilium/rele
 Choose your architecture:
 
 - Intel/AMD: [`ilium-linux-x86_64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.tar.gz)
-- ARM64 (emulated-guest evidence only, link live after publication): [`ilium-linux-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-aarch64.tar.gz)
+- ARM64 (emulated-guest evidence only, link live after publication): [`ilium-linux-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.2/ilium-linux-aarch64.tar.gz)
 
 1. Download the archive and `SHA256SUMS` into one directory.
 2. Verify: `sha256sum --ignore-missing --check SHA256SUMS`. Confirm your archive reports `OK`.
@@ -127,7 +127,7 @@ Choose your architecture:
 
 ### deb package
 
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.deb) · [aarch64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-aarch64.deb) (emulated-guest evidence; live after publication).
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.deb) · [aarch64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.2/ilium-linux-aarch64.deb) (emulated-guest evidence; live after publication).
 
 1. Verify the checksum.
 2. Install on Debian, Ubuntu or Mint: `sudo apt install ./ilium-linux-x86_64.deb`.
@@ -145,7 +145,7 @@ Same layout as the deb, with the same Bubblewrap dependency.
 
 ### AppImage
 
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.AppImage) · [aarch64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-aarch64.AppImage) (emulated-guest evidence; live after publication).
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.AppImage) · [aarch64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.2/ilium-linux-aarch64.AppImage) (emulated-guest evidence; live after publication).
 
 1. Verify the checksum.
 2. `chmod +x ilium-linux-x86_64.AppImage`
@@ -164,7 +164,7 @@ The snap uses classic confinement, so it is not on the Snap Store. Commands: `il
 
 ### Flatpak bundle
 
-Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.flatpak) · [aarch64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-aarch64.flatpak) (emulated-guest evidence; live after publication; the host needs `libasound2`, as for the tarball).
+Download: [x86_64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.flatpak) · [aarch64](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.2/ilium-linux-aarch64.flatpak) (emulated-guest evidence; live after publication; the host needs `libasound2`, as for the tarball).
 
 1. Verify the checksum.
 2. `flatpak install --user ilium-linux-x86_64.flatpak`
