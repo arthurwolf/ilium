@@ -71,6 +71,9 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
                 self.assertRegex(readme, rf"(?m)^\| {re.escape(system)} \| \*\*Not ready\*\* \|$")
             self.assertIn("Hosted installers are not ready for this preview", readme)
             return
+        if version.startswith("0.1.1-linux."):
+            # Later Linux previews pin their own tag; the README links are checked by the publisher tests.
+            return
         actual = set(LATEST_DOWNLOAD.findall(readme))
 
         self.assertEqual(

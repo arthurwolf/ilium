@@ -28,7 +28,7 @@ class LinuxTarballTests(unittest.TestCase):
         self.native.mkdir()
         (self.source / 'release/tests').mkdir(parents=True)
         (self.source / 'release/targets.toml').write_bytes((ROOT / 'release/targets.toml').read_bytes())
-        (self.source / 'Cargo.toml').write_text('[workspace.package]\nversion = "0.1.1-linux.1"\n')
+        (self.source / 'Cargo.toml').write_text('[workspace.package]\nversion = "0.1.1-linux.3"\n')
         (self.source / 'Cargo.lock').write_bytes(b'synthetic locked source')
         (self.source / 'release/tests/embedding_acceptance.py').write_bytes(b'synthetic wrapper; never executed')
         self.target = release_tool.selected_target(self.source / 'release/targets.toml', gate.TARGET)
@@ -39,7 +39,7 @@ class LinuxTarballTests(unittest.TestCase):
             expected_bridge_sha256='', expected_harness_sha256='')
         self.content = {'ilium': b'synthetic client', 'ilium-server': b'synthetic server',
                         'ilium-animation-helper': b'synthetic helper',
-                        'VERSION': b'0.1.1-linux.1\n', 'THIRD-PARTY.txt': b'reviewed synthetic licence text',
+                        'VERSION': b'0.1.1-linux.3\n', 'THIRD-PARTY.txt': b'reviewed synthetic licence text',
                         'libonnxruntime.so.1': b'synthetic runtime; never loaded'}
         for name in self.target['packages']:
             self.content[name] = (ROOT / 'ilium-animation-js/assets/packages' / name).read_bytes()
