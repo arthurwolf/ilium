@@ -1,0 +1,2 @@
+### Fixed
+- Demo gallery: the Cost and Stats, Screen Transfer, Agent Activity, Kanban, Ask for Update and Settings tour C recordings had their private text (scratch paths containing the local username, an unredacted login notice, title-inference error text) masked in place, frame by frame; every unmasked frame was verified identical to the original and the masked rows are filled with the surrounding background colour.
