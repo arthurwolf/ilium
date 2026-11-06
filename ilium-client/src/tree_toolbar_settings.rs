@@ -12,11 +12,37 @@ use ratatui::{
     Frame,
 };
 
+/// Ids of every custom agent profile, in profile order.
+fn profile_ids(app: &App) -> Vec<String> {
+    app.custom_agents
+        .profiles
+        .iter()
+        .map(|profile| profile.id.clone())
+        .collect()
+}
+
+/// Glyph and label for a layout entry; custom agents use their profile's
+/// own icon and name so they read like any other toolbar button.
+fn entry_label(app: &App, index: usize, entry: &crate::tree_toolbar_layout::TreeToolbarEntry) -> String {
+    let action = crate::tree_ui::toolbar_action_for(index, entry);
+    if let crate::tree_toolbar_layout::TreeToolbarEntry::CustomAgent(id) = entry {
+        return match app.custom_agents.profiles.iter().find(|p| &p.id == id) {
+            Some(profile) => format!("{}  {}", profile.icon, profile.name),
+            None => format!("?  {id} (missing profile)"),
+        };
+    }
+    format!(
+        "{}  {}",
+        action.glyph(&app.ui_settings.icons),
+        action.description()
+    )
+}
+
 fn change(app: &mut App, state: &mut SettingsState, key: KeyEvent) -> bool {
     let mut ui = app.ui_settings.clone();
     let len = ui.tree_toolbar_layout.entries.len();
     if let Some(selected) = state.toolbar_picker {
-        let available: Vec<_> = ui.tree_toolbar_layout.available().collect();
+        let available = ui.tree_toolbar_layout.available(&profile_ids(app));
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => state.toolbar_picker = None,
             KeyCode::Up => state.toolbar_picker = Some(selected.saturating_sub(1)),
@@ -25,7 +51,7 @@ fn change(app: &mut App, state: &mut SettingsState, key: KeyEvent) -> bool {
             }
             KeyCode::Enter => {
                 if let Some(entry) = available.get(selected) {
-                    ui.tree_toolbar_layout.entries.push(*entry);
+                    ui.tree_toolbar_layout.entries.push(entry.clone());
                     state.selected_row = ui.tree_toolbar_layout.entries.len() - 1;
                     app.apply_and_persist_ui_settings(ui);
                 }
@@ -130,12 +156,7 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, app: &App, state: &SettingsStat
     let first = first_visible(state, available_height);
     for row in first..(entries.len() + 2).min(first + available_height) {
         let text = if row < entries.len() {
-            let action = TreeToolbarAction::from(entries[row]);
-            format!(
-                "{}  {}",
-                action.glyph(&app.ui_settings.icons),
-                action.description()
-            )
+            entry_label(app, row, &entries[row])
         } else if row == entries.len() {
             "+  Add button".to_owned()
         } else {
@@ -194,14 +215,26 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, app: &App, state: &SettingsStat
         };
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                format!(" {} ", action.glyph(&app.ui_settings.icons)),
+                format!(
+                    " {} ",
+                    action
+                        .custom_profile_id(&app.ui_settings.tree_toolbar_layout)
+                        .and_then(|id| app.custom_agents.profiles.iter().find(|p| p.id == id))
+                        .map_or_else(
+                            || action.glyph(&app.ui_settings.icons).to_owned(),
+                            |profile| profile.icon.clone()
+                        )
+                ),
                 style,
             ))),
             rect,
         );
     }
     if let Some(selected) = state.toolbar_picker {
-        let available: Vec<_> = app.ui_settings.tree_toolbar_layout.available().collect();
+        let available = app
+            .ui_settings
+            .tree_toolbar_layout
+            .available(&profile_ids(app));
         let width = area.width.min(48);
         let height = area.height.min((available.len() as u16).saturating_add(3));
         let popup = Rect::new(
@@ -224,13 +257,8 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, app: &App, state: &SettingsStat
             .skip(start)
             .take(usize::from(height.saturating_sub(1)))
         {
-            let action = TreeToolbarAction::from(*entry);
             choices.push(Line::from(Span::styled(
-                format!(
-                    "{}  {}",
-                    action.glyph(&app.ui_settings.icons),
-                    action.description()
-                ),
+                entry_label(app, index, entry),
                 if index == selected {
                     Style::default()
                         .fg(Color::Cyan)
@@ -261,7 +289,10 @@ pub fn handle_mouse(app: &mut App, state: &mut SettingsState, area: Rect, mouse:
         return;
     }
     if let Some(selected) = state.toolbar_picker {
-        let available: Vec<_> = app.ui_settings.tree_toolbar_layout.available().collect();
+        let available = app
+            .ui_settings
+            .tree_toolbar_layout
+            .available(&profile_ids(app));
         let width = area.width.min(48);
         let height = area.height.min((available.len() as u16).saturating_add(3));
         let popup = Rect::new(
@@ -332,7 +363,7 @@ mod tests {
     fn keyboard_removes_readds_and_reorders_buttons() {
         let mut app = App::new("toolbar settings test".to_owned(), std::env::temp_dir());
         let mut state = SettingsState::default();
-        let original = app.ui_settings.tree_toolbar_layout.entries[0];
+        let original = app.ui_settings.tree_toolbar_layout.entries[0].clone();
         assert!(handle_key(
             &mut app,
             &mut state,
@@ -395,6 +426,7 @@ mod tests {
     fn preview_uses_the_same_positions_as_the_tree_toolbar() {
         let layout = TreeToolbarLayout {
             entries: vec![TreeToolbarEntry::Settings, TreeToolbarEntry::ActivityFilter],
+            ..Default::default()
         };
         let strip = Rect::new(3, 4, 20, 1);
         let buttons = crate::tree_ui::configured_toolbar_rects_in_strip(strip, &layout);
@@ -402,5 +434,45 @@ mod tests {
         assert_eq!(buttons[0].0, TreeToolbarAction::Settings);
         assert_eq!(buttons[1].0, TreeToolbarAction::ActivityFilter);
         assert!(buttons[0].1.right() <= buttons[1].1.x);
+    }
+
+    #[test]
+    fn custom_agents_are_orderable_toolbar_entries_in_the_single_button_row() {
+        use ilium_core::custom_agent::CustomAgentProfile;
+        let mut app = App::new("toolbar settings test".to_owned(), std::env::temp_dir());
+        app.custom_agents.profiles.push(CustomAgentProfile {
+            id: "mine".into(),
+            name: "My agent".into(),
+            icon: "✦".into(),
+            base_provider: ilium_core::BuiltinAgentProvider::Claude,
+            command: String::new(),
+            arguments: String::new(),
+            environment: Vec::new(),
+        });
+        app.reconcile_toolbar_custom_agents();
+        let layout = app.ui_settings.tree_toolbar_layout.clone();
+        let index = layout
+            .entries
+            .iter()
+            .position(|entry| *entry == TreeToolbarEntry::CustomAgent("mine".into()))
+            .expect("custom agent is a layout entry");
+        assert!(layout.entries.ends_with(&TreeToolbarLayout::ANCHORED_SUFFIX));
+        let strip = Rect::new(0, 0, 80, 2);
+        let buttons = crate::tree_ui::configured_toolbar_rects_in_strip(strip, &layout);
+        let (_, rect) = buttons
+            .iter()
+            .find(|(action, _)| *action == TreeToolbarAction::CustomAgent(index))
+            .expect("custom agent button is laid out");
+        assert_eq!(rect.y, 0, "custom agent sits on the one icon row");
+        // It reorders like any other entry.
+        let mut state = SettingsState {
+            selected_row: index,
+            ..Default::default()
+        };
+        handle_key(&mut app, &mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT));
+        assert_eq!(
+            app.ui_settings.tree_toolbar_layout.entries[index - 1],
+            TreeToolbarEntry::CustomAgent("mine".into())
+        );
     }
 }
