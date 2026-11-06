@@ -27,7 +27,7 @@ import release_tool
 import native_install as install_gate
 import smoke_installed_animation as animation_gate
 
-TAG = 'v0.1.1-linux.1'
+TAG = 'v0.1.1-linux.3'
 TARGET = 'x86_64-unknown-linux-gnu'
 PROFILE = 'linux-x86-preview'
 PTY_TESTS = (

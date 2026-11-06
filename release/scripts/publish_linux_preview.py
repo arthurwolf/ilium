@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-PREVIEW_TAG = 'v0.1.1-linux.1'
+PREVIEW_TAG = 'v0.1.1-linux.3'
 TARBALL = 'ilium-linux-x86_64.tar.gz'
 PACKAGES = ('ilium-linux-x86_64.deb', 'ilium-linux-x86_64.rpm', 'ilium-linux-x86_64.AppImage',
             'ilium-linux-x86_64.flatpak', 'ilium-linux-x86_64.snap')

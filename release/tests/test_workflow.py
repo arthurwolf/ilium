@@ -319,8 +319,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(workflow['permissions']['contents'], 'read')
         caller = self.workflow['jobs']['linux-preview']
         self.assertEqual(caller['uses'], './.github/workflows/linux-preview.yml')
-        self.assertEqual(caller['if'], "github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.1'")
-        self.assertEqual(self.workflow['jobs']['source']['if'], "github.event_name != 'workflow_dispatch' || inputs.release_tag != 'v0.1.1-linux.1'")
+        self.assertEqual(caller['if'], "github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'")
+        self.assertEqual(self.workflow['jobs']['source']['if'], "github.event_name != 'workflow_dispatch' || inputs.release_tag != 'v0.1.1-linux.3'")
         self.assertEqual(caller['permissions']['contents'], 'read')
         jobs = workflow['jobs']
         native = jobs['native']

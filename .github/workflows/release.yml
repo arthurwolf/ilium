@@ -16,7 +16,7 @@ name: Native release and installation
         required: false
         type: string
       publish_linux_preview:
-        description: Publish the verified Linux preview prerelease (only with release_tag v0.1.1-linux.1)
+        description: Publish the verified Linux preview prerelease (only with release_tag v0.1.1-linux.3)
         required: false
         default: false
         type: boolean
@@ -35,7 +35,7 @@ env:
   PYTHONDONTWRITEBYTECODE: '1'
 jobs:
   linux-preview:
-    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.1'
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'
     permissions:
       contents: read
     uses: ./.github/workflows/linux-preview.yml
@@ -45,7 +45,7 @@ jobs:
     # Dry-run unless publish_linux_preview is set; publication needs every qualification job green.
     needs:
     - linux-preview
-    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.1'
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -70,7 +70,7 @@ jobs:
         set -o pipefail
         python release/scripts/publish_linux_preview.py "$PUBLISH_LINUX_PREVIEW" --tag "${{ inputs.release_tag }}" --commit "${{ github.sha }}" --native-directory preview-native --packages-directory preview-packages --work "$RUNNER_TEMP/preview-publish"
   source:
-    if: github.event_name != 'workflow_dispatch' || inputs.release_tag != 'v0.1.1-linux.1'
+    if: github.event_name != 'workflow_dispatch' || inputs.release_tag != 'v0.1.1-linux.3'
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:
