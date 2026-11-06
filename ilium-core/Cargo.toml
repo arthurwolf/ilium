@@ -9,3 +9,7 @@ repository.workspace = true
 [dependencies]
 thiserror = "2"
 serde = { version = "1.0.228", features = ["derive"] }
+
+[dev-dependencies]
+# Test-only: the status-rule registry tests round-trip every condition through the config format.
+toml = "0.8.23"

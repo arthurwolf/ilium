@@ -210,6 +210,7 @@ impl ProjectionRetention {
             | NodeActivityChanged { .. }
             | PaneRecentActivity { .. }
             | StatusScreenObserved(_)
+            | StatusScreenWatchesRejected(_)
             | NodeFocusCheckpointChanged { .. }
             | SessionRecoveryAvailable { .. }
             | PanePromptSubmitted { .. }

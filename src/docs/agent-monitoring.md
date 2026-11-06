@@ -8,7 +8,7 @@ Contents:
 - [Supported agent CLIs](#supported-agent-clis)
 - [The three icon slots in the tree](#the-three-icon-slots-in-the-tree)
 - [Status indicators and their defaults](#status-indicators-and-their-defaults)
-- [Normal mode and Attention mode](#normal-mode-and-attention-mode)
+- [Display modes](#display-modes)
 - [Custom status rules](#custom-status-rules)
 - [The `/goal` badge](#the-goal-badge)
 - [Progress monitors and progress displays](#progress-monitors-and-progress-displays)
@@ -159,12 +159,15 @@ Notes:
 
 A monitored task's progress icon is drawn from a family of frames. **Settings -> Agent Monitoring -> Progress fill style** offers Braille, Blocks, Moons and Quarters. For a custom family set `[ui].task_progress_frames` to a list of 2 to 13 printable frames, all one cell wide or all two cells wide.
 
-## Normal mode and Attention mode
+## Display modes
 
 **Settings -> Agent Monitoring -> Display mode** (`[ui].agent_monitoring_mode`, `"normal"`, `"attention"` or `"custom"`; default `normal`).
 
 - **Normal** shows the objective and now slots side by side.
 - **Attention** shows one status icon: the highest-priority signal. Agent identity stays separate. The underlying evidence is unchanged, so a paused goal that is also waiting for approval is still paused; Attention just shows the approval.
+- **Custom** shows one status icon chosen by your own ordered rules; the first matching rule wins and nothing else is shown in that slot. Rules, conditions, the shipped defaults and the editor are documented in [Custom status icons](custom-status-icons.md). Custom is a client-side mode: it is not a plugin display mode, so the agent-detect plugin's Attention filter does not apply to it.
+
+  **Settings -> Agent Monitoring -> Blocking errors in Custom mode** (`[ui].blocking_error_display`, `"rules-only"`, `"overlay"` or `"second-icon"`; default `rules-only`) chooses how a retained blocking error appears in Custom mode. *Rules only* draws nothing extra: the shipped "Blocking error" rule and the `blocking-error` and `session-error` conditions decide, so rule order applies. *Overlay* paints the yellow caution triangle over the rule's icon regardless of order. *Second icon* keeps the rule's icon and adds a one-cell error slot to its right, with a tooltip and click target. A session-wide error marks only the session row, not every pane. The setting has no effect in Normal or Attention mode.
 
 Attention priority, highest first:
 
@@ -191,6 +194,8 @@ When nothing in that list applies and the agent is simply working, Attention wou
 Normal mode ignores this setting and always shows the working animation.
 
 ## Custom status rules
+
+This is the short version; the full condition list, default rules, icon kinds, editor keys and troubleshooting are on the [Custom status icons](custom-status-icons.md) page.
 
 Select **Custom** in Agent Monitoring and open **Configure custom icons** to choose the status shown beside each agent. Custom displays one status icon, separate from the agent identity. Rules are global and are saved as you edit them; they apply to all projects.
 

@@ -28,7 +28,7 @@ fn feature_030_monitoring_mode_defaults_to_normal() {
 
 /// REQ: F-030
 #[test]
-fn feature_030_monitoring_mode_accepts_normal_and_attention() {
+fn feature_030_monitoring_mode_accepts_normal_attention_and_custom() {
     let mut host = client_host();
     host.settings()
         .set("ui.agent_monitoring_mode", json!("attention"))
@@ -36,6 +36,13 @@ fn feature_030_monitoring_mode_accepts_normal_and_attention() {
     assert_eq!(
         host.settings().get("ui.agent_monitoring_mode"),
         Some(json!("attention"))
+    );
+    host.settings()
+        .set("ui.agent_monitoring_mode", json!("custom"))
+        .expect("custom");
+    assert_eq!(
+        host.settings().get("ui.agent_monitoring_mode"),
+        Some(json!("custom"))
     );
     host.settings()
         .set("ui.agent_monitoring_mode", json!("normal"))
@@ -52,7 +59,9 @@ fn feature_030_monitoring_mode_outside_the_closed_set_is_invalid_argument() {
     let mut host = client_host();
     let message = rejected(&mut host, "ui.agent_monitoring_mode", json!("loud"));
     assert!(
-        message.contains("ui.agent_monitoring_mode = \"loud\" must be \"normal\" or \"attention\""),
+        message.contains(
+            "ui.agent_monitoring_mode = \"loud\" must be \"normal\", \"attention\" or \"custom\""
+        ),
         "{message}"
     );
 }

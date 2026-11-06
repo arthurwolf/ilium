@@ -439,6 +439,90 @@ fn cancelling_during_the_write_step_leaves_no_partial_transcript() {
 }
 
 #[test]
+fn a_source_that_changes_between_the_passes_is_refused() {
+    let workspace = Workspace::new();
+    let rollout = workspace.write_rollout(FIXTURE);
+    let cancel = AtomicBool::new(false);
+    let error = convert_session(&workspace.request(), &cancel, &mut |event| {
+        // The scan (step 2) is over; a new line lands before the write starts.
+        if matches!(event, ConversionEvent::Step { index: 4, .. }) {
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&rollout)
+                .unwrap();
+            std::io::Write::write_all(
+                &mut file,
+                br#"{"timestamp":"2026-09-30T10:00:09.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"late"}]}}"#,
+            )
+            .unwrap();
+        }
+    })
+    .unwrap_err();
+    assert!(
+        matches!(error, ConvertError::SourceChanged { .. }),
+        "{error}"
+    );
+    assert!(
+        !workspace.claude_project_dir().exists(),
+        "nothing is written for a source that changed"
+    );
+}
+
+#[test]
+fn the_fixture_conversion_is_byte_identical_to_the_golden_transcript() {
+    // Ids and timestamps are fixed by replacing the random ones with their
+    // order of appearance, so the comparison covers every other byte.
+    let workspace = Workspace::new();
+    workspace.write_rollout(FIXTURE);
+    let cancel = AtomicBool::new(false);
+    let outcome = convert_session(&workspace.request(), &cancel, &mut |_| {}).unwrap();
+    let written = std::fs::read_to_string(&outcome.target_transcript_path).unwrap();
+    let golden = include_str!("fixtures/codex_rollout_sample.claude.jsonl");
+    let project = workspace.project.to_string_lossy().replace('\\', "\\\\");
+    assert_eq!(
+        normalize_identifiers(&written.replace(&project, "/work")),
+        normalize_identifiers(golden),
+    );
+}
+
+/// Replaces every uuid-shaped identifier (session id, line uuids, `msg_` and
+/// `toolu_` ids) with a per-run sequence number so two transcripts of the
+/// same conversation compare equal.
+fn normalize_identifiers(transcript: &str) -> String {
+    let mut seen: Vec<String> = Vec::new();
+    let mut output = String::with_capacity(transcript.len());
+    let mut rest = transcript;
+    while let Some(start) = rest.find(|c: char| c.is_ascii_hexdigit()) {
+        output.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let run: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_hexdigit() || *c == '-')
+            .collect();
+        let is_uuid = run.len() == 36 && run.matches('-').count() == 4;
+        let is_simple = run.len() == 32 && !run.contains('-');
+        if is_uuid || is_simple {
+            let key = run.replace('-', "");
+            let index = match seen.iter().position(|known| *known == key) {
+                Some(index) => index,
+                None => {
+                    seen.push(key);
+                    seen.len() - 1
+                }
+            };
+            output.push_str(&format!("<id{index}>"));
+            rest = &rest[run.len()..];
+        } else {
+            let (head, tail) = rest.split_at(run.len().max(1));
+            output.push_str(head);
+            rest = tail;
+        }
+    }
+    output.push_str(rest);
+    output
+}
+
+#[test]
 fn a_rollout_of_only_orphan_outputs_is_an_empty_conversation() {
     let workspace = Workspace::new();
     let orphan_only: String = FIXTURE

@@ -209,6 +209,17 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             }
             ensure_reached(app.ui_settings.motion_level == target)?;
         }
+        "ui.agent_monitoring_mode" => {
+            let requested = string(&value)?;
+            let target = crate::agent_monitoring::AgentMonitoringMode::parse(&normalized(requested))
+                .ok_or_else(|| {
+                    format!(
+                        "ui.agent_monitoring_mode must be one of normal, attention or custom, not {requested:?}"
+                    )
+                })?;
+            app.settings_set_agent_monitoring_mode(target);
+            ensure_reached(app.ui_settings.agent_monitoring_mode == target)?;
+        }
         "ui.sidebar_density" => {
             let target = parse_sidebar_density(string(&value)?)?;
             for _ in 0..3 {
@@ -846,6 +857,7 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "ui.tree_row_management_controls" => app.settings_toggle_tree_row_management_controls(),
         "ui.agent_identifier_mode" => app.settings_adjust_agent_identifier_mode(direction),
         "ui.motion_level" => app.settings_adjust_row(AppearanceRow::MotionLevel, direction),
+        "ui.agent_monitoring_mode" => app.settings_adjust_agent_monitoring_mode(direction),
         "ui.sidebar_density" => app.settings_adjust_row(AppearanceRow::SidebarDensity, direction),
         "ui.task_progress_style" => {
             app.settings_adjust_row(AppearanceRow::ProgressFillStyle, direction)
@@ -1278,6 +1290,32 @@ mod tests {
             .unwrap()
             .contains(&json!("sound.events.task_succeeded")));
         assert!(set_setting(&mut app, "ui.task_progress_style", json!("unknown")).is_err());
+        set_setting(&mut app, "ui.agent_monitoring_mode", json!("Custom")).unwrap();
+        assert_eq!(
+            app.ui_settings.agent_monitoring_mode,
+            crate::agent_monitoring::AgentMonitoringMode::Custom
+        );
+        let snapshot =
+            super::super::snapshot::capture(&app, StateDetail::Compact, &Default::default())
+                .unwrap();
+        assert_eq!(snapshot.settings["ui"]["agent_monitoring_mode"], "custom");
+        assert!(snapshot.settings["writable_path_patterns"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("ui.agent_monitoring_mode")));
+        adjust_setting(&mut app, "ui.agent_monitoring_mode", 1).unwrap();
+        assert_eq!(
+            app.ui_settings.agent_monitoring_mode,
+            crate::agent_monitoring::AgentMonitoringMode::Normal,
+            "adjusting past the last mode wraps around"
+        );
+        adjust_setting(&mut app, "ui.agent_monitoring_mode", -1).unwrap();
+        assert_eq!(
+            app.ui_settings.agent_monitoring_mode,
+            crate::agent_monitoring::AgentMonitoringMode::Custom
+        );
+        assert!(set_setting(&mut app, "ui.agent_monitoring_mode", json!("loud")).is_err());
+        assert!(set_setting(&mut app, "ui.agent_monitoring_mode", json!(3)).is_err());
         set_setting(&mut app, "voice.confirm_terminal_submissions", json!(true)).unwrap();
         assert!(app.voice_settings.confirm_terminal_submissions);
         set_setting(

@@ -170,6 +170,20 @@ fn manifest_050_declares_the_attention_display_mode_that_hides_unmarked_rows() {
     );
 }
 
+/// REQ: F-030
+#[test]
+fn manifest_050_leaves_the_client_owned_custom_mode_out_of_the_display_modes() {
+    let manifest = manifest();
+    let modes = manifest["contributes"]["display_modes"]
+        .as_array()
+        .expect("display modes");
+    let ids: Vec<&str> = modes
+        .iter()
+        .filter_map(|mode| mode["id"].as_str())
+        .collect();
+    assert_eq!(ids, ["attention"]);
+}
+
 /// REQ: COR-050
 #[test]
 fn manifest_050_decoration_slot_priority_orders_activity_above_goal() {
