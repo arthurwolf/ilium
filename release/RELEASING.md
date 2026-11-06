@@ -635,3 +635,17 @@ Do not print secrets. Proposed, built, audited, uploaded, published and publicly
 installed are distinct states. Advertise the commands in the installation guide (src/docs/installation.md) only after all
 five native literal-command receipts pass. Preserve the existing demo gallery
 and inference/privacy text when updating the installation guide (src/docs/installation.md).
+
+## Combined Linux preview (v0.1.1-linux.3)
+
+`v0.1.1-linux.3` carries Linux x86_64 and Linux ARM64 in one prerelease because a
+published GitHub release cannot gain assets. The x86_64 files come from the
+`release.yml` dispatch (dry-run publish); the ARM64 files come from the emulated
+guest pipeline. Run `publish_linux_preview.py` with `--native-directory`,
+`--packages-directory` and `--aarch64-directory`: it re-hashes every file, checks
+that all embedded versions equal the tag, publishes one `SHA256SUMS` over all ten
+files, and only accepts the pinned release commit. After publication, regenerate
+`release/linux-preview-pins.json` from the published `SHA256SUMS` with
+`release_tool.py generate-preview-pins --checksums 0.1.1-linux.3=<file>`, then
+re-run the suite. ARM64 evidence is emulated QEMU only, and rpm and Snap stay
+"coming soon" for ARM64.
