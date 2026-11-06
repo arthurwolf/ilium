@@ -151,10 +151,10 @@ pub fn decode_bounded_frame_with_storage<T: crate::BoundedMessage>(
 }
 
 // Resource commands, the inserted ScreenPreview event and the status
-// screen-watch request/event pair (`SetStatusScreenWatches` /
-// `StatusScreenObserved`) require matching peers. Reject older enum layouts
-// before decoding any payload, so a mismatch fails at attach instead of on
-// the first new message. The tag must occupy only bits in FRAME_SCHEMA_MASK.
+// screen-watch request/events (`SetStatusScreenWatches` /
+// `StatusScreenObserved` / `StatusScreenWatchesRejected`) require matching
+// peers. Reject older enum layouts before decoding any payload, so a
+// mismatch fails at attach instead of on the first new message. The tag must occupy only bits in FRAME_SCHEMA_MASK.
 const FRAME_SCHEMA_TAG: u32 = 0xD800_0000;
 const FRAME_SCHEMA_MASK: u32 = 0xF800_0000;
 fn frame_length_word(length: u32) -> u32 {

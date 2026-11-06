@@ -6,6 +6,22 @@
 //! the server through this path, and an unobservable screen is reported as
 //! `unknown`, never as a negative match.
 //!
+//! Text and regions: the matched text is `vt100`'s visible contents -- rows
+//! with trailing blanks trimmed, soft-wrapped rows joined with their
+//! continuation (so a wrapped message still matches whole), trailing blank
+//! rows dropped. `FirstLines(n)` / `LastLines(n)` count those logical lines,
+//! so "last line" is the last printed line, not a blank row at the bottom.
+//! No scrollback is ever read.
+//!
+//! Cost and cadence: a pane is evaluated when its screen changes, at most
+//! once per `EVALUATION_FLOOR` (50 ms), plus a `BUSY_RETRY_DELAY` retry when
+//! the parser lock was busy; an idle pane costs nothing. Each evaluation is
+//! bounded by `MAX_SCREEN_WATCHES` linear-time regexes over at most
+//! `MAX_SCREEN_BYTES` of text, and only changed answers are sent. Watches are
+//! per connection, so two attached clients with watches do the work twice.
+//! This is deliberately more responsive than the detection loop's adaptive
+//! poll; ARCHITECTURE.md records the deviation.
+//!
 //! Lifetimes: one `JoinSet` per connection owns the current revision's
 //! observer task; replacing the revision aborts the previous one, and closing
 //! the connection drops the set. Panes created after a subscription are
@@ -17,7 +33,7 @@ use std::sync::Arc;
 
 use ilium_core::status_rule_expression::ScreenRegion;
 use ilium_core::NodeId;
-use ilium_ipc::{ServerEvent, StatusScreenObservation};
+use ilium_ipc::{ServerEvent, StatusScreenObservation, StatusScreenWatchRejection};
 use regex::{Regex, RegexBuilder};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -30,10 +46,15 @@ use crate::state::ServerState;
 /// collection; change all three together.
 pub const MAX_SCREEN_WATCHES: usize = 16;
 pub const MAX_PATTERN_CHARACTERS: usize = 256;
-/// Largest visible grid (UTF-8 bytes) still evaluated; larger screens are
+/// Largest visible text (UTF-8 bytes, after vt100 trims trailing blanks of
+/// each row and trailing blank rows) still evaluated; larger screens are
 /// reported as unknown rather than truncated, because truncation could hide
 /// the very evidence a pattern looks for.
 pub const MAX_SCREEN_BYTES: usize = 64 * 1024;
+/// Largest grid (rows x columns) whose cells are scanned at all. It bounds
+/// the preflight scan, not the text: a 600 x 400 pane on a large monitor is
+/// still evaluated when its text fits `MAX_SCREEN_BYTES`.
+pub const MAX_SCREEN_CELLS: usize = 256 * 1024;
 /// Compiled-program and lazy-DFA memory ceilings per pattern; `regex` is a
 /// linear-time engine, so these bound memory, not matching time.
 const REGEX_SIZE_LIMIT_BYTES: usize = 1024 * 1024;
@@ -65,13 +86,54 @@ impl From<&ilium_ipc::StatusScreenWatch> for ScreenWatchSpec {
     }
 }
 
+/// Why a watch set was refused. `watch_id` names the offending watch when
+/// the refusal is about one pattern and is `None` for set-wide limits, so the
+/// client can show the error next to the rule that caused it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScreenWatchError {
+    pub watch_id: Option<u16>,
+    pub message: String,
+}
+
+impl ScreenWatchError {
+    fn set_wide(message: String) -> Self {
+        Self {
+            watch_id: None,
+            message,
+        }
+    }
+
+    fn for_watch(watch_id: u16, message: String) -> Self {
+        Self {
+            watch_id: Some(watch_id),
+            message,
+        }
+    }
+
+    /// The typed wire rejection for the refused revision.
+    pub fn into_rejection(self, revision: u64) -> StatusScreenWatchRejection {
+        StatusScreenWatchRejection {
+            revision,
+            watch_id: self.watch_id,
+            message: self.message,
+        }
+    }
+}
+
+fn too_many_watches() -> ScreenWatchError {
+    ScreenWatchError::set_wide(format!(
+        "At most {MAX_SCREEN_WATCHES} screen watches are allowed"
+    ))
+}
+
 /// Validate a connection's entire watch set before replacing its previous
 /// subscription, so an invalid pattern cannot leave a partial subscription.
-pub fn compile_wire(watches: &[ilium_ipc::StatusScreenWatch]) -> Result<Vec<ScreenWatch>, String> {
+pub fn compile_wire(
+    watches: &[ilium_ipc::StatusScreenWatch],
+) -> Result<Vec<ScreenWatch>, ScreenWatchError> {
+    // Checked before converting so an oversized set costs no allocation.
     if watches.len() > MAX_SCREEN_WATCHES {
-        return Err(format!(
-            "At most {MAX_SCREEN_WATCHES} screen watches are allowed"
-        ));
+        return Err(too_many_watches());
     }
     let specs: Vec<_> = watches.iter().map(ScreenWatchSpec::from).collect();
     compile(&specs)
@@ -84,23 +146,27 @@ pub struct ScreenWatch {
     region: ScreenRegion,
 }
 
-pub fn compile(watches: &[ScreenWatchSpec]) -> Result<Vec<ScreenWatch>, String> {
+pub fn compile(watches: &[ScreenWatchSpec]) -> Result<Vec<ScreenWatch>, ScreenWatchError> {
     if watches.len() > MAX_SCREEN_WATCHES {
-        return Err(format!(
-            "At most {MAX_SCREEN_WATCHES} screen watches are allowed"
-        ));
+        return Err(too_many_watches());
     }
     let mut ids = std::collections::HashSet::new();
     watches
         .iter()
         .map(|watch| {
             if !ids.insert(watch.id) {
-                return Err(format!("Duplicate screen watch identifier {}", watch.id));
+                return Err(ScreenWatchError::for_watch(
+                    watch.id,
+                    format!("Duplicate screen watch identifier {}", watch.id),
+                ));
             }
             if watch.pattern.chars().count() > MAX_PATTERN_CHARACTERS {
-                return Err(format!(
-                    "Screen watch {} exceeds the pattern length limit",
-                    watch.id
+                return Err(ScreenWatchError::for_watch(
+                    watch.id,
+                    format!(
+                        "Screen watch {} exceeds the {MAX_PATTERN_CHARACTERS}-character pattern limit",
+                        watch.id
+                    ),
                 ));
             }
             let regex = RegexBuilder::new(&watch.pattern)
@@ -109,7 +175,12 @@ pub fn compile(watches: &[ScreenWatchSpec]) -> Result<Vec<ScreenWatch>, String> 
                 .size_limit(REGEX_SIZE_LIMIT_BYTES)
                 .dfa_size_limit(REGEX_SIZE_LIMIT_BYTES)
                 .build()
-                .map_err(|error| format!("Invalid screen watch {}: {error}", watch.id))?;
+                .map_err(|error| {
+                    ScreenWatchError::for_watch(
+                        watch.id,
+                        format!("Invalid screen watch {}: {error}", watch.id),
+                    )
+                })?;
             Ok(ScreenWatch {
                 id: watch.id,
                 regex,
@@ -161,7 +232,7 @@ pub fn observe_screen(
     last_generation: u64,
     watches: &[ScreenWatch],
 ) -> (StatusScreenObservation, bool) {
-    let snapshot = reader.try_text_with_generation_and_limit(MAX_SCREEN_BYTES);
+    let snapshot = reader.try_text_with_generation_and_limits(MAX_SCREEN_CELLS, MAX_SCREEN_BYTES);
     let busy = snapshot.is_none();
     let (screen_generation, matches) = match snapshot {
         Some((generation, Ok(text))) => (generation, matching_ids(watches, &text)),
@@ -410,6 +481,55 @@ mod tests {
             matching_ids(&watches, &"x".repeat(super::MAX_SCREEN_BYTES + 1)),
             None
         );
+    }
+
+    #[test]
+    fn refusals_name_the_offending_watch_or_the_whole_set() {
+        let error = compile(&[
+            spec(2, "fine", false, ScreenRegion::All),
+            spec(7, "(", false, ScreenRegion::All),
+        ])
+        .expect_err("an unclosed group cannot compile");
+        assert_eq!(error.watch_id, Some(7));
+        assert!(error.message.contains("Invalid screen watch 7"));
+
+        let long_pattern = "a".repeat(super::MAX_PATTERN_CHARACTERS + 1);
+        let error = compile(&[spec(3, &long_pattern, false, ScreenRegion::All)])
+            .expect_err("too long");
+        assert_eq!(error.watch_id, Some(3));
+
+        let duplicate = spec(4, "ok", false, ScreenRegion::All);
+        let error = compile(&[duplicate.clone(), duplicate]).expect_err("duplicate id");
+        assert_eq!(error.watch_id, Some(4));
+
+        let too_many: Vec<_> = (0..=super::MAX_SCREEN_WATCHES as u16)
+            .map(|id| spec(id, "x", false, ScreenRegion::All))
+            .collect();
+        let error = compile(&too_many).expect_err("too many watches");
+        assert_eq!(error.watch_id, None);
+
+        let rejection = error.into_rejection(12);
+        assert_eq!(rejection.revision, 12);
+        assert_eq!(rejection.watch_id, None);
+        assert!(rejection.message.contains("16"));
+    }
+
+    #[test]
+    fn regions_count_logical_lines_so_soft_wraps_do_not_split_a_match() {
+        // `vt100` joins a soft-wrapped row with its continuation and drops
+        // trailing blank rows; the observer matches that logical text, so a
+        // wrapped message still matches whole and the last line is the last
+        // printed one, not a blank row at the bottom of the grid.
+        let mut parser = vt100::Parser::new(4, 10, 0);
+        parser.process(b"first\r\nERROR: build failed");
+        let text = parser.screen().contents();
+        let watches = compile(&[
+            spec(1, "build failed", false, ScreenRegion::LastLines(1)),
+            spec(2, "first", false, ScreenRegion::FirstLines(1)),
+            spec(3, "first", false, ScreenRegion::LastLines(1)),
+        ])
+        .expect("valid patterns");
+        assert_eq!(matching_ids(&watches, &text), Some(vec![1, 2]));
     }
 
     #[test]

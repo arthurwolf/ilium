@@ -3,16 +3,20 @@
 
 use super::{
     AllOf, Condition, ConditionTerm, PaneKind, Rule, ScreenPattern, ScreenRegion, StatusRules,
-    StatusVisual, VisualKind, VisualStyle,
+    StatusVisual, VisualKind, VisualStyle, STATUS_RULES_SCHEMA_VERSION,
 };
 use crate::{AgentTurn, GoalState, ProgressTaskStatus};
 
 /// Version of the shipped rule set, stored with saved rules so a later Ilium
 /// can offer new defaults without overwriting edits.
-pub const DEFAULTS_VERSION: u32 = 1;
+pub const DEFAULTS_VERSION: u32 = 2;
 
 /// Identifier of the disabled example rule that shows the screen condition.
 pub const SCREEN_EXAMPLE_RULE_ID: &str = "screen-error-example";
+
+/// Rules whose icon pulses: the two "look at me now" situations of the plan
+/// (rows 1 and 10).
+const PULSING_RULE_IDS: [&str; 2] = ["approval", "completion-unread"];
 
 #[derive(Clone, Copy)]
 enum Weight {
@@ -86,6 +90,15 @@ pub fn default_rules() -> StatusRules {
             vec![yes(Condition::PaneKind(PaneKind::AgentUnavailable))],
         ),
         rule(
+            "blocking-error",
+            "Blocking error",
+            // The warning glyph, the same built-in the monitor-lost rule uses.
+            built_in("monitor_failed"),
+            "danger",
+            Regular,
+            vec![yes(Condition::BlockingError)],
+        ),
+        rule(
             "task-failed",
             "Task failed",
             built_in("task_error"),
@@ -155,6 +168,23 @@ pub fn default_rules() -> StatusRules {
             "accent",
             Bold,
             vec![yes(Condition::CompletionUnread), not(Condition::Parked)],
+        ),
+        // Plan row 11 asks the parked progress icon to turn to the warning
+        // colour while the monitor is degraded. Colour is a rule's visual, so
+        // that tint is its own rule directly above the calm one.
+        rule(
+            "parked-progress-unsteady",
+            "Parked, task monitor unsteady",
+            VisualKind::ProgressFrames {
+                frames: frames(&["🌑", "🌒", "🌓", "🌔", "🌕"]),
+            },
+            "warning",
+            Regular,
+            vec![
+                yes(Condition::Parked),
+                yes(Condition::ProgressMeasurable),
+                yes(Condition::MonitorDegraded),
+            ],
         ),
         rule(
             "parked-progress",
@@ -286,11 +316,13 @@ pub fn default_rules() -> StatusRules {
                     color: Some(entry.color.to_owned()),
                     bold: matches!(entry.weight, Weight::Bold),
                     dim: matches!(entry.weight, Weight::Dim),
+                    pulse: PULSING_RULE_IDS.contains(&entry.id),
                 },
             },
         })
         .collect();
     StatusRules {
+        version: STATUS_RULES_SCHEMA_VERSION,
         defaults_version: DEFAULTS_VERSION,
         rules,
         fallback: None,
@@ -305,7 +337,7 @@ mod tests {
     #[test]
     fn defaults_have_unique_valid_ids_and_the_screen_example_is_disabled() {
         let rules = default_rules();
-        assert_eq!(rules.rules.len(), 22);
+        assert_eq!(rules.rules.len(), 24);
         assert!(rules.fallback.is_none());
         assert!(
             validate(&rules).is_empty(),
@@ -328,8 +360,14 @@ mod tests {
             .iter()
             .position(|rule| rule.id == "idle")
             .unwrap();
-        assert_eq!(idle_index, 20, "idle is rule 21 of the plan");
-        assert_eq!(example_index, 21, "the disabled example is rule 22, last");
+        assert_eq!(
+            idle_index, 22,
+            "idle is rule 22 of the plan, after the split row 11 and the blocking-error rule"
+        );
+        assert_eq!(
+            example_index, 23,
+            "the disabled example (plan rule 23) is last"
+        );
         assert_eq!(
             rules.rules.first().map(|rule| rule.id.as_str()),
             Some("approval")
@@ -384,7 +422,7 @@ mod tests {
             .filter(|rule| !rule.then.style.bold && !rule.then.style.dim)
             .map(|rule| rule.id.as_str())
             .collect();
-        assert_eq!(plain.len(), 15, "{plain:?}");
+        assert_eq!(plain.len(), 16, "{plain:?}");
     }
 
     #[test]
@@ -409,5 +447,25 @@ mod tests {
             matches!(kind("shell-busy"), VisualKind::BrailleAnimation { preset, frames_per_second: 8 } if preset == "loop")
         );
         assert!(matches!(kind(SCREEN_EXAMPLE_RULE_ID), VisualKind::Glyph(glyph) if glyph == "!"));
+        assert_eq!(kind("parked-progress-unsteady"), kind("parked-progress"));
+    }
+
+    #[test]
+    fn only_the_look_at_me_now_rules_pulse_and_the_unsteady_monitor_is_tinted() {
+        let rules = default_rules();
+        let pulsing: Vec<&str> = rules
+            .rules
+            .iter()
+            .filter(|rule| rule.then.style.pulse)
+            .map(|rule| rule.id.as_str())
+            .collect();
+        assert_eq!(pulsing, ["approval", "completion-unread"]);
+        let position = |id: &str| rules.rules.iter().position(|rule| rule.id == id).unwrap();
+        assert_eq!(
+            position("parked-progress-unsteady") + 1,
+            position("parked-progress")
+        );
+        let tint = &rules.rules[position("parked-progress-unsteady")].then.style;
+        assert_eq!(tint.color.as_deref(), Some("warning"));
     }
 }

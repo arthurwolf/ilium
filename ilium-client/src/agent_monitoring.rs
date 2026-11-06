@@ -376,6 +376,18 @@ mod tests {
     }
 
     #[test]
+    fn every_mode_round_trips_through_its_key_and_parse_ignores_case() {
+        for mode in AgentMonitoringMode::ALL {
+            assert_eq!(AgentMonitoringMode::parse(mode.key()), Some(mode));
+        }
+        assert_eq!(
+            AgentMonitoringMode::parse(" Custom "),
+            Some(AgentMonitoringMode::Custom)
+        );
+        assert_eq!(AgentMonitoringMode::parse("customised"), None);
+    }
+
+    #[test]
     fn attention_prioritizes_approval_over_monitor_and_goal_errors() {
         let mut monitor = progress(ProgressTaskStatus::Running, true);
         monitor.monitor_health = ProgressMonitorHealth::Failed {

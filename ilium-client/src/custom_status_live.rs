@@ -1,23 +1,24 @@
 //! Custom status rules evaluated against one live pane from the client's
 //! retained state.
 //!
-//! The tree renderer (`tree_ui::pane_label_with_icons`) evaluates the rules
-//! from its render context and cannot see `App`. Two consumers need the same
-//! verdict outside a render pass: the hover tooltip of the single Custom
-//! status slot (which rule won and why) and the redraw scheduler (which
-//! animations are actually on screen). Both derive the pane facts here, with
-//! the same shared helpers the renderer uses (`shell_output_phase`,
-//! `detection_activity_stale`, `supplementary_facts`), so the two paths cannot
-//! disagree about a fact.
+//! This module owns the one definition of a live pane's client-side rule
+//! facts ([`client_pane_facts`]): activity freshness, frozen screen, spend,
+//! keyboard focus, retained blocking errors and the node's own fields. Three
+//! consumers evaluate the rules and must agree on every fact: the tree renderer
+//! (`tree_ui::pane_label_with_icons`, which sees a render context and not
+//! `App`), the hover tooltip of the single Custom status slot and the redraw
+//! scheduler (both through [`with_pane_facts`]), and the rules editor's
+//! inspector. A new client fact is added here once.
 
 use ilium_core::status_rule_expression::{
     explain_all, first_match, why, Observation, PaneFacts, RuleOutcome, StatusVisual,
+    SupplementaryFacts,
 };
-use ilium_core::{NodeId, NodeKind};
+use ilium_core::{Node, NodeId, NodeKind, PaneStatus};
 
 use crate::app::App;
 use crate::status_icons::TooltipContent;
-use crate::status_rule_visual::{next_frame_delay, supplementary_facts, visual_description};
+use crate::status_rule_visual::{next_frame_delay, visual_description, ProgressCue};
 
 /// Every rule's outcome for one pane, plus the winner the tree shows.
 pub(crate) struct LivePaneVerdict<'a> {
@@ -29,10 +30,117 @@ pub(crate) struct LivePaneVerdict<'a> {
     pub visual: Option<&'a StatusVisual>,
 }
 
-/// Build the pane's facts once and hand them to `consumer`. `None` when the
-/// node is not a pane. The screen closure defers to the connection-scoped
-/// observations, which answer `Unknown` for an unwatched pane.
-fn with_pane_facts<T>(
+/// Where the user is looking: the tree cursor and the terminals on screen in
+/// the right panel. Captured once per render so every pane row reads the
+/// same view.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct PaneViewFacts {
+    /// The tree row under the cursor (`App::selected_node_id`).
+    pub selected_node_id: Option<NodeId>,
+    /// The right panel's terminals (`App::displayed_pane_slots`).
+    pub displayed_panes: [Option<NodeId>; 4],
+}
+
+impl PaneViewFacts {
+    pub(crate) fn from_app(app: &App) -> Self {
+        Self {
+            selected_node_id: app.selected_node_id(),
+            displayed_panes: app.displayed_pane_slots(),
+        }
+    }
+}
+
+/// The client state a pane's rule facts are derived from, passed explicitly
+/// so the tree renderer (render context) and the `App`-based consumers feed
+/// the same derivation.
+pub(crate) struct ClientPaneFactSources<'a> {
+    /// The pane's tree node; supplies the bookmark and the prompt queue.
+    pub node: &'a Node,
+    /// The status the rules are evaluated against (the node's own status).
+    pub status: &'a PaneStatus,
+    /// Whether the user froze the pane's agent screen.
+    pub frozen: bool,
+    /// The agent session's spend in US dollars, when the cost tracker has it.
+    pub session_cost_usd: Option<f64>,
+    /// Fraction (0..=1) of the context window in use, when the cost tracker
+    /// has read it from the transcript.
+    pub context_fill: Option<f64>,
+    /// The pane whose terminal holds keyboard focus (`App::focused_pane_id`).
+    pub focused_pane_id: Option<NodeId>,
+    /// The server's latest detection evidence for this pane, if any.
+    pub detection_evidence: Option<&'a ilium_ipc::PaneDetectionEvidence>,
+    /// Wall clock used to age the detection evidence.
+    pub current_unix_millis: u64,
+    /// Whether a retained blocking error targets exactly this pane
+    /// (`App::pane_has_blocking_error`); `None` when not observed.
+    pub blocking_error: Option<bool>,
+    /// Whether the session has a retained session-level error
+    /// (`App::session_has_blocking_error`); `None` when not observed.
+    pub session_error: Option<bool>,
+    /// The tree cursor and on-screen terminals; `None` when the caller has
+    /// no view (previews, geometry-only renders), which leaves the
+    /// `pane-selected` and `pane-visible` conditions unknown.
+    pub view: Option<PaneViewFacts>,
+}
+
+/// The client-derived part of a pane's rule facts. The pane status, progress
+/// monitors, scheduled input, shell output phase and screen matches come
+/// straight from retained state and need no derivation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct ClientPaneFacts {
+    /// `None` when freshness was not observed, so stale rules stay unknown.
+    pub activity_stale: Option<bool>,
+    pub supplementary: SupplementaryFacts,
+}
+
+/// Derive the client facts every rule consumer uses. Spend is rounded to
+/// whole cents (negative spend reads as zero); a missing spend stays unknown.
+pub(crate) fn client_pane_facts(sources: ClientPaneFactSources<'_>) -> ClientPaneFacts {
+    let ClientPaneFactSources {
+        node,
+        status,
+        frozen,
+        session_cost_usd,
+        context_fill,
+        focused_pane_id,
+        detection_evidence,
+        current_unix_millis,
+        blocking_error,
+        session_error,
+        view,
+    } = sources;
+    let supplementary = SupplementaryFacts {
+        frozen: Some(frozen),
+        // Rounding then clamping keeps the cast in range for any real spend.
+        session_cost_cents: session_cost_usd.map(|usd| (usd * 100.0).round().max(0.0) as u64),
+        focused: Some(focused_pane_id == Some(node.id)),
+        blocking_error,
+        session_error,
+        selected: view.map(|view| view.selected_node_id == Some(node.id)),
+        visible: view.map(|view| view.displayed_panes.contains(&Some(node.id))),
+        // Clamped to the window and rounded to tenths of a percent; a
+        // non-finite fill (corrupt transcript figures) stays unknown.
+        context_permille: context_fill
+            .filter(|fill| fill.is_finite())
+            .map(|fill| (fill.clamp(0.0, 1.0) * 1000.0).round() as u16),
+        ..SupplementaryFacts::default()
+    }
+    .with_node(node);
+    ClientPaneFacts {
+        activity_stale: crate::status_icons::detection_activity_stale(
+            status,
+            detection_evidence,
+            current_unix_millis,
+        ),
+        supplementary,
+    }
+}
+
+/// Build the pane's facts from `App` once and hand them to `consumer`.
+/// `None` when the node is not a pane. The screen closure defers to the
+/// connection-scoped observations, which answer `Unknown` for an unwatched
+/// pane.
+pub(crate) fn with_pane_facts<T>(
     app: &App,
     node_id: NodeId,
     consumer: impl FnOnce(&PaneFacts<'_>) -> T,
@@ -51,19 +159,21 @@ fn with_pane_facts<T>(
         .terminal_activity
         .phase(node_id, app.started_at.elapsed().as_millis())
         .map(crate::tree_ui::shell_output_phase);
-    let activity_stale = crate::status_icons::detection_activity_stale(
+    let cost_overlay = app.cost_tracker.overlay();
+    let pane_cost = cost_overlay.details.get(&node_id);
+    let client = client_pane_facts(ClientPaneFactSources {
+        node,
         status,
-        app.pane_detection_evidence.get(&node_id),
-        crate::scheduled_input::unix_millis_now(),
-    );
-    let supplementary = supplementary_facts(
-        app.frozen_panes.contains(&node_id),
-        app.cost_tracker
-            .overlay()
-            .details
-            .get(&node_id)
-            .map(|cost| cost.usd),
-    );
+        frozen: app.frozen_panes.contains(&node_id),
+        session_cost_usd: pane_cost.map(|cost| cost.usd),
+        context_fill: pane_cost.and_then(|cost| cost.context_fill),
+        focused_pane_id: app.focused_pane_id(),
+        detection_evidence: app.pane_detection_evidence.get(&node_id),
+        current_unix_millis: crate::scheduled_input::unix_millis_now(),
+        blocking_error: Some(app.pane_has_blocking_error(node_id)),
+        session_error: Some(app.session_has_blocking_error()),
+        view: Some(PaneViewFacts::from_app(app)),
+    });
     let observations = &app.custom_status_screen_observations;
     let screen_matches = |pattern: &_| observations.observe(node_id, pattern);
     let facts = PaneFacts {
@@ -71,21 +181,24 @@ fn with_pane_facts<T>(
         progress: progress_monitors,
         scheduled_input: scheduled_input.is_some(),
         shell_output,
-        activity_stale,
-        supplementary,
+        activity_stale: client.activity_stale,
+        supplementary: client.supplementary,
         screen_matches: &screen_matches,
     };
     Some(consumer(&facts))
 }
 
-/// The visual the tree shows for this pane, without explaining it. Cheap
-/// enough for the redraw scheduler to call on every maintenance tick.
-pub(crate) fn winning_visual(app: &App, node_id: NodeId) -> Option<&StatusVisual> {
+/// The visual the tree shows for this pane, without explaining it, with the
+/// pane's progress cue (unmeasured progress frames pulse, measured ones do
+/// not). Cheap enough for the redraw scheduler to call on every maintenance
+/// tick.
+pub(crate) fn winning_visual(app: &App, node_id: NodeId) -> Option<(&StatusVisual, ProgressCue)> {
     let rules = &app.custom_status_rules;
     with_pane_facts(app, node_id, |facts| {
         first_match(&rules.rules, |condition| condition.observe(facts))
             .map(|rule| &rule.then)
             .or(rules.fallback.as_ref())
+            .map(|visual| (visual, ProgressCue::from_monitors(facts.progress)))
     })
     .flatten()
 }
@@ -178,7 +291,7 @@ pub(crate) fn animation_frame_delay(app: &App, elapsed_millis: u128) -> Option<u
     if motion == crate::config::MotionLevel::Off {
         return None;
     }
-    let visuals: Vec<&StatusVisual> = app
+    let visuals: Vec<(&StatusVisual, ProgressCue)> = app
         .tree
         .panes()
         .filter_map(|node| winning_visual(app, node.id))
@@ -222,7 +335,7 @@ mod tests {
         let index = verdict.rule_index.unwrap();
         assert_eq!(app.custom_status_rules.rules[index].id, "approval");
         assert_eq!(
-            winning_visual(&app, pane_id),
+            winning_visual(&app, pane_id).map(|(visual, _)| visual),
             Some(&app.custom_status_rules.rules[index].then)
         );
         let hover = tooltip(&app, pane_id).unwrap();
@@ -284,6 +397,155 @@ mod tests {
     }
 
     #[test]
+    fn client_facts_cover_focus_spend_node_fields_and_unknown_freshness() {
+        use super::{client_pane_facts, ClientPaneFactSources};
+
+        let (app, pane_id) = app_with_pane(PaneStatus::PlainShell);
+        let node = app.tree.get(pane_id).unwrap();
+        let sources = |focused_pane_id, session_cost_usd| ClientPaneFactSources {
+            node,
+            status: &PaneStatus::PlainShell,
+            frozen: true,
+            session_cost_usd,
+            context_fill: None,
+            focused_pane_id,
+            detection_evidence: None,
+            current_unix_millis: 1_000,
+            blocking_error: Some(true),
+            session_error: None,
+            view: None,
+        };
+        let facts = client_pane_facts(sources(Some(pane_id), Some(1.2349)));
+        assert_eq!(facts.supplementary.focused, Some(true));
+        assert_eq!(facts.supplementary.frozen, Some(true));
+        assert_eq!(facts.supplementary.session_cost_cents, Some(123));
+        assert_eq!(facts.supplementary.bookmarked, Some(false));
+        assert_eq!(facts.supplementary.queued_prompts, Some(0));
+        // Error facts are copied through unchanged; unobserved stays None.
+        assert_eq!(facts.supplementary.blocking_error, Some(true));
+        assert_eq!(facts.supplementary.session_error, None);
+        // No detection evidence: freshness stays unknown, never "fresh".
+        assert_eq!(facts.activity_stale, None);
+        // Focus elsewhere or on no pane at all is an observed false.
+        let elsewhere = client_pane_facts(sources(Some(NodeId(999_999)), Some(-0.4)));
+        assert_eq!(elsewhere.supplementary.focused, Some(false));
+        assert_eq!(elsewhere.supplementary.session_cost_cents, Some(0));
+        let unfocused = client_pane_facts(sources(None, None));
+        assert_eq!(unfocused.supplementary.focused, Some(false));
+        assert_eq!(unfocused.supplementary.session_cost_cents, None);
+        // Without a view and a context figure, those facts stay unknown.
+        assert_eq!(unfocused.supplementary.selected, None);
+        assert_eq!(unfocused.supplementary.visible, None);
+        assert_eq!(unfocused.supplementary.context_permille, None);
+        assert_eq!(unfocused.supplementary.prompt_queue_held, Some(false));
+    }
+
+    #[test]
+    fn client_facts_read_selection_visibility_and_context_fill() {
+        use super::{client_pane_facts, ClientPaneFactSources, PaneViewFacts};
+
+        let (app, pane_id) = app_with_pane(PaneStatus::PlainShell);
+        let node = app.tree.get(pane_id).unwrap();
+        let sources = |view, context_fill| ClientPaneFactSources {
+            node,
+            status: &PaneStatus::PlainShell,
+            frozen: false,
+            session_cost_usd: None,
+            context_fill,
+            focused_pane_id: None,
+            detection_evidence: None,
+            current_unix_millis: 1_000,
+            blocking_error: None,
+            session_error: None,
+            view: Some(view),
+        };
+        let other = NodeId(999_999);
+        let looking = PaneViewFacts {
+            selected_node_id: Some(pane_id),
+            displayed_panes: [Some(other), Some(pane_id), None, None],
+        };
+        let facts = client_pane_facts(sources(looking, Some(0.8004)));
+        assert_eq!(facts.supplementary.selected, Some(true));
+        assert_eq!(facts.supplementary.visible, Some(true));
+        assert_eq!(facts.supplementary.context_permille, Some(800));
+
+        // Nothing selected and an empty right panel are observed falses.
+        let away = client_pane_facts(sources(PaneViewFacts::default(), Some(1.7)));
+        assert_eq!(away.supplementary.selected, Some(false));
+        assert_eq!(away.supplementary.visible, Some(false));
+        // A fill above the window is clamped; a corrupt one stays unknown.
+        assert_eq!(away.supplementary.context_permille, Some(1000));
+        let corrupt = client_pane_facts(sources(PaneViewFacts::default(), Some(f64::NAN)));
+        assert_eq!(corrupt.supplementary.context_permille, None);
+        let negative = client_pane_facts(sources(PaneViewFacts::default(), Some(-0.2)));
+        assert_eq!(negative.supplementary.context_permille, Some(0));
+    }
+
+    #[test]
+    fn live_facts_observe_the_tree_cursor_and_the_right_panel() {
+        use ilium_core::status_rule_expression::Observation;
+
+        let (mut app, pane_id) = app_with_pane(PaneStatus::PlainShell);
+        let observe = |app: &App| {
+            super::with_pane_facts(app, pane_id, |facts| {
+                (
+                    Condition::PaneSelected.observe(facts),
+                    Condition::PaneVisible.observe(facts),
+                )
+            })
+        };
+        // The live builder always observes the view: an empty right panel
+        // is a known false, never unknown.
+        app.right_panel_target = crate::app::RightPanelTarget::Empty;
+        let (_, visible) = observe(&app).unwrap();
+        assert_eq!(visible, Observation::False);
+
+        app.select_node(pane_id);
+        app.right_panel_target = crate::app::RightPanelTarget::Pane { pane_id };
+        assert_eq!(
+            observe(&app),
+            Some((Observation::True, Observation::True))
+        );
+    }
+
+    #[test]
+    fn live_facts_observe_focus_as_false_while_the_tree_has_focus() {
+        use ilium_core::status_rule_expression::Observation;
+
+        let (mut app, pane_id) = app_with_pane(PaneStatus::PlainShell);
+        app.focus = crate::app::FocusTarget::Tree;
+        assert_eq!(app.focused_pane_id(), None);
+        let observed =
+            super::with_pane_facts(&app, pane_id, |facts| Condition::PaneFocused.observe(facts));
+        assert_eq!(observed, Some(Observation::False));
+    }
+
+    #[test]
+    fn live_facts_separate_pane_errors_from_session_errors() {
+        use ilium_core::status_rule_expression::Observation;
+
+        let (mut app, pane_id) = app_with_pane(PaneStatus::PlainShell);
+        let observe = |app: &App| {
+            super::with_pane_facts(app, pane_id, |facts| {
+                (
+                    Condition::BlockingError.observe(facts),
+                    Condition::SessionError.observe(facts),
+                )
+            })
+        };
+        assert_eq!(observe(&app), Some((Observation::False, Observation::False)));
+        // A session-level error is a session fact, never this pane's error.
+        app.replace_blocking_errors(vec![ilium_ipc::BlockingError {
+            node_id: None,
+            operation: "session".to_owned(),
+            message: "snapshot write failed".to_owned(),
+        }]);
+        assert_eq!(observe(&app), Some((Observation::False, Observation::True)));
+        app.record_local_blocking_error(pane_id, "Send input", "pipe closed");
+        assert_eq!(observe(&app), Some((Observation::True, Observation::True)));
+    }
+
+    #[test]
     fn non_pane_nodes_have_no_verdict() {
         let (app, _) = app_with_pane(PaneStatus::PlainShell);
         assert!(evaluate(&app, ROOT_ID).is_none());
@@ -319,6 +581,29 @@ mod tests {
         app.ui_settings.motion_level = MotionLevel::Reduced;
         assert_eq!(animation_frame_delay(&app, 0), Some(500));
         app.ui_settings.motion_level = MotionLevel::Off;
+        assert_eq!(animation_frame_delay(&app, 0), None);
+    }
+
+    #[test]
+    fn a_matched_pulsing_rule_wakes_the_clock_at_the_pulse_rate() {
+        let (mut app, _) = app_with_pane(PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::WaitingApproval,
+            None,
+        ));
+        // The shipped approval rule is a static built-in icon that pulses.
+        app.ui_settings.motion_level = MotionLevel::Full;
+        assert_eq!(animation_frame_delay(&app, 0), Some(500));
+        assert_eq!(animation_frame_delay(&app, 600), Some(400));
+        app.ui_settings.motion_level = MotionLevel::Reduced;
+        assert_eq!(animation_frame_delay(&app, 0), Some(1_000));
+        app.ui_settings.motion_level = MotionLevel::Off;
+        assert_eq!(animation_frame_delay(&app, 0), None);
+        // Without the pulse the same icon needs no redraws at all.
+        for rule in &mut app.custom_status_rules.rules {
+            rule.then.style.pulse = false;
+        }
+        app.ui_settings.motion_level = MotionLevel::Full;
         assert_eq!(animation_frame_delay(&app, 0), None);
     }
 

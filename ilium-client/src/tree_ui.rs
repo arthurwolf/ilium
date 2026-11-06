@@ -133,12 +133,21 @@ pub enum TreeToolbarAction {
     /// on one new pane, the same reason `Settings` is anchored separately.
     Restructure,
     Settings,
+    /// A custom agent button. Carries the entry's index in the toolbar
+    /// layout (stable for one frame, like a hit index); the layout entry holds
+    /// the profile id. Custom agents are ordinary toolbar entries.
+    CustomAgent(usize),
 }
 
 impl TreeToolbarAction {
-    /// One distinct bit per button, for the compact pending-spinner set.
+    /// One distinct bit per built-in button, for the compact pending-spinner
+    /// set. Custom agents track their pending state by profile id instead.
     pub(crate) fn pending_bit(self) -> u16 {
+        if matches!(self, Self::CustomAgent(_)) {
+            return 0;
+        }
         1 << match self {
+            Self::CustomAgent(_) => unreachable!("handled above"),
             Self::Search => 0,
             Self::Shell => 1,
             Self::Agent(BuiltinAgentProvider::Claude) => 2,
@@ -153,6 +162,20 @@ impl TreeToolbarAction {
             Self::Restructure => 11,
             Self::Settings => 12,
             Self::ActivityFilter => 13,
+        }
+    }
+
+    /// The profile id of a custom agent button within `layout`.
+    pub(crate) fn custom_profile_id(
+        self,
+        layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+    ) -> Option<&str> {
+        let Self::CustomAgent(index) = self else {
+            return None;
+        };
+        match layout.entries.get(index)? {
+            crate::tree_toolbar_layout::TreeToolbarEntry::CustomAgent(id) => Some(id),
+            _ => None,
         }
     }
 
@@ -193,6 +216,8 @@ impl TreeToolbarAction {
             Self::Restructure => icons.glyph(IconTarget::ToolbarRestructure),
             Self::Settings => icons.glyph(IconTarget::ToolbarSettings),
             Self::ActivityFilter => "👁",
+            // The profile's own icon is drawn by the caller.
+            Self::CustomAgent(_) => "✦",
         }
     }
 
@@ -216,6 +241,7 @@ impl TreeToolbarAction {
             Self::Restructure => Color::Yellow,
             Self::Settings => Color::Gray,
             Self::ActivityFilter => Color::Cyan,
+            Self::CustomAgent(_) => Color::Cyan,
         }
     }
 
@@ -235,6 +261,7 @@ impl TreeToolbarAction {
             Self::Restructure => "restructure with AI",
             Self::Settings => "settings",
             Self::ActivityFilter => "show or hide inactive terminals",
+            Self::CustomAgent(_) => "custom agent",
         }
     }
 }
@@ -413,6 +440,9 @@ pub(crate) struct PaintedTreeRows {
     rows: Vec<(TreeNodeHit, u16)>,
     monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
     layout_slots: Option<TreeRowSlots>,
+    /// Custom-mode error presentation for this frame; decides whether the
+    /// Second icon cell exists for painting and hit testing.
+    blocking_error_display: crate::config::BlockingErrorDisplay,
     values: Vec<PaintedRowValues>,
     cost_option: crate::cost_settings::DisplayOption,
     selected_node: Option<NodeId>,
@@ -438,6 +468,7 @@ impl PaintedTreeRows {
             rows: vec![(TreeNodeHit { id, row, line: 0 }, 2)],
             monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             layout_slots: None,
+            blocking_error_display: Default::default(),
             values: vec![PaintedRowValues {
                 node_id: id,
                 status: [None, None, None],
@@ -496,6 +527,9 @@ impl PaintedTreeRows {
             rows,
             monitoring_mode: options.agent_monitoring_mode,
             layout_slots: None,
+            blocking_error_display: options
+                .blocking_errors
+                .map_or_else(Default::default, |errors| errors.custom_display),
             values: Vec::new(),
             cost_option: options
                 .cost
@@ -598,6 +632,66 @@ impl PaintedTreeRows {
             );
         }
     }
+    /// The Custom-mode Second icon cell of `node_id`'s row, when this frame
+    /// reserves one: `CUSTOM_ERROR_CELL_OFFSET` cells into the widened custom
+    /// status slot (see `CUSTOM_SECOND_ICON_SLOT_WIDTH`). Painting and
+    /// `status_at` both use this, so the glyph and its hit target share one
+    /// geometry. `None` when the mode is not Custom + Second icon, or when a
+    /// custom row layout hides (or squeezes out) the Activity slot.
+    fn second_error_column(&self, node_id: NodeId, label: u16) -> Option<u16> {
+        if self.monitoring_mode != crate::agent_monitoring::AgentMonitoringMode::Custom
+            || self.blocking_error_display != crate::config::BlockingErrorDisplay::SecondIcon
+        {
+            return None;
+        }
+        let start = match &self.layout_slots {
+            Some(rows) => {
+                let (_, start, _) = rows.get(&node_id)?.iter().find(|(element, _, width)| {
+                    *element == TreeRowElement::Activity && *width > CUSTOM_ERROR_CELL_OFFSET
+                })?;
+                u16::try_from(*start).unwrap_or(u16::MAX)
+            }
+            // Custom has no objective slot, so the custom icon starts right
+            // after the identity column.
+            None => OBJECTIVE_SLOT_OFFSET,
+        };
+        Some(
+            label
+                .saturating_add(start)
+                .saturating_add(CUSTOM_ERROR_CELL_OFFSET as u16),
+        )
+    }
+    /// Custom mode + Second icon: paints the warning glyph into each
+    /// blocked pane's reserved error cell, leaving the rule-chosen icon
+    /// untouched. Returns the blocked panes that have no such cell this
+    /// frame (Activity hidden by a custom row layout), so the caller can
+    /// still show their error with the overlay instead of hiding it.
+    pub(crate) fn paint_second_error_icons(
+        &self,
+        frame: &mut Frame,
+        blocked: &HashSet<NodeId>,
+        use_stable_glyphs: bool,
+    ) -> HashSet<NodeId> {
+        let glyph = if use_stable_glyphs { "!" } else { "⚠" };
+        let mut without_cell = HashSet::new();
+        for (hit, label) in &self.rows {
+            if hit.line != 0 || !blocked.contains(&hit.id) {
+                continue;
+            }
+            let Some(column) = self.second_error_column(hit.id, *label) else {
+                without_cell.insert(hit.id);
+                continue;
+            };
+            if column >= self.list.right() || hit.row >= self.list.bottom() {
+                continue;
+            }
+            frame.render_widget(
+                Paragraph::new(Span::styled(glyph, Style::new().fg(Color::Yellow))),
+                Rect::new(column, hit.row, 1, 1),
+            );
+        }
+        without_cell
+    }
     pub(crate) fn cost_card_target(
         &self,
         hovered: Option<TreeNodeHit>,
@@ -686,6 +780,22 @@ impl PaintedTreeRows {
             return None;
         }
         let label = self.rows.iter().find(|(row, _)| row.row == position.y)?.1;
+        // Custom mode's Second icon cell carries the error tooltip in the
+        // otherwise unused Objective slot (Custom never shows an objective
+        // icon); the rest of the custom slot keeps the winning-rule tooltip.
+        if let Some(column) = self.second_error_column(hit.id, label) {
+            let has_error = self
+                .values
+                .iter()
+                .any(|value| value.node_id == hit.id && value.status[1].is_some());
+            if has_error && position.x == column {
+                return Some((
+                    hit.id,
+                    StatusSlot::Objective,
+                    Position::new(column, position.y),
+                ));
+            }
+        }
         if let Some(layout) = &self.layout_slots {
             let slots = layout.get(&hit.id)?;
             for &(element, start, width) in slots {
@@ -811,7 +921,6 @@ pub struct TreeRenderOptions<'a> {
     pub toolbar_layout: &'a crate::tree_toolbar_layout::TreeToolbarLayout,
     pub custom_toolbar_profiles: Option<&'a [ilium_core::custom_agent::CustomAgentProfile]>,
     pub custom_toolbar_selected: Option<&'a str>,
-    pub custom_toolbar_hovered: Option<&'a str>,
     pub custom_toolbar_pending: Option<&'a HashSet<String>>,
     pub custom_agent_labels: Option<&'a HashMap<NodeId, (String, String)>>,
     pub focused: bool,
@@ -883,6 +992,13 @@ pub struct TreeRenderOptions<'a> {
     pub resources: Option<&'a crate::resource_queue::ResourceUi>,
     pub panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
     pub frozen_panes: &'a HashSet<NodeId>,
+    /// Retained blocking-error facts for the custom status rules; `None`
+    /// leaves the `blocking-error` and `session-error` conditions unknown
+    /// (geometry-only builders, previews, tests).
+    pub blocking_errors: Option<&'a crate::blocking_errors::BlockingErrorFacts>,
+    /// The tree cursor and on-screen terminals for the custom status rules;
+    /// `None` leaves `pane-selected` and `pane-visible` unknown.
+    pub pane_view: Option<crate::custom_status_live::PaneViewFacts>,
 }
 
 /// One frame owns both composed spans and the geometry retained for hit testing.
@@ -989,6 +1105,8 @@ struct TreeItemBuildContext<'a> {
     resources: Option<&'a crate::resource_queue::ResourceUi>,
     panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
     frozen_panes: &'a HashSet<NodeId>,
+    blocking_errors: Option<&'a crate::blocking_errors::BlockingErrorFacts>,
+    pane_view: Option<crate::custom_status_live::PaneViewFacts>,
 }
 
 /// Builds the full recursive `TreeItem` tree from the root group's
@@ -1484,6 +1602,28 @@ fn build_item(
             );
             let is_frozen = context.frozen_panes.contains(&node.id);
             let display_name = title_with_frozen_agent(display_name, is_frozen, context.icons);
+            // Custom rules read the same derived facts as the hover tooltip
+            // and the rules inspector (`custom_status_live`).
+            let pane_cost = context.cost.and_then(|cost| cost.details.get(&node.id));
+            let client_facts = crate::custom_status_live::client_pane_facts(
+                crate::custom_status_live::ClientPaneFactSources {
+                    node,
+                    status,
+                    frozen: is_frozen,
+                    session_cost_usd: pane_cost.map(|cost| cost.usd),
+                    context_fill: pane_cost.and_then(|cost| cost.context_fill),
+                    focused_pane_id: context.focused_pane_id,
+                    detection_evidence: context
+                        .detection_evidence
+                        .and_then(|evidence| evidence.get(&node.id)),
+                    current_unix_millis: context.current_unix_millis,
+                    blocking_error: context
+                        .blocking_errors
+                        .map(|errors| errors.pane_has_error(node.id)),
+                    session_error: context.blocking_errors.map(|errors| errors.session),
+                    view: context.pane_view,
+                },
+            );
             let label = pane_label_with_icons(
                 status,
                 &display_name,
@@ -1503,23 +1643,11 @@ fn build_item(
                     agent_monitoring_mode: context.agent_monitoring_mode,
                     attention_progress_reports: context.attention_progress_reports,
                     custom_status_rules: context.custom_status_rules,
-                    supplementary: crate::status_rule_visual::supplementary_facts(
-                        is_frozen,
-                        context
-                            .cost
-                            .and_then(|cost| cost.details.get(&node.id))
-                            .map(|cost| cost.usd),
-                    ),
+                    supplementary: client_facts.supplementary,
                     screen_observations: context.screen_observations,
                     screen_pane_id: Some(context.screen_pane_id.unwrap_or(node.id)),
                     icon_motion: context.icon_motion,
-                    activity_stale: crate::status_icons::detection_activity_stale(
-                        status,
-                        context
-                            .detection_evidence
-                            .and_then(|evidence| evidence.get(&node.id)),
-                        context.current_unix_millis,
-                    ),
+                    activity_stale: client_facts.activity_stale,
                     attention_running_indicator: context.attention_running_indicator,
                 },
             );
@@ -1546,6 +1674,23 @@ fn build_item(
                 } else {
                     status_row_label(identity, objective, now, text)
                 }
+            } else {
+                label
+            };
+            // Custom mode + Second icon reserves the error cell on every pane
+            // row (see `CUSTOM_SECOND_ICON_SLOT_WIDTH`); the glyph itself is
+            // painted afterwards by `PaintedTreeRows::paint_second_error_icons`
+            // so the rule-chosen icon in this span is never replaced.
+            let label = if context.agent_monitoring_mode
+                == crate::agent_monitoring::AgentMonitoringMode::Custom
+                && context.blocking_errors.is_some_and(|errors| {
+                    errors.custom_display == crate::config::BlockingErrorDisplay::SecondIcon
+                }) {
+                let mut label = label;
+                if let Some(custom) = label.spans.get_mut(2) {
+                    *custom = fixed_width_icon_span(custom.clone(), CUSTOM_SECOND_ICON_SLOT_WIDTH);
+                }
+                label
             } else {
                 label
             };
@@ -2539,6 +2684,15 @@ fn elide_middle(text: &str, max_width: usize) -> String {
 /// Terminal-cell offset of the long-term slot within a row label, measured
 /// from the label's first cell (after sidebar-density padding).
 pub(crate) const OBJECTIVE_SLOT_OFFSET: u16 = NODE_ICON_COLUMN_WIDTH as u16;
+/// Custom mode + Second icon: the custom status slot grows by one cell so a
+/// blocking-error glyph fits right of the (up to two-cell) rule icon while
+/// the separating cell before the title stays blank. Every pane row gets the
+/// wider slot, error or not, so titles stay aligned.
+pub(crate) const CUSTOM_SECOND_ICON_SLOT_WIDTH: usize =
+    crate::status_icons::OBJECTIVE_COLUMN_WIDTH + 1;
+/// Where the error glyph sits inside that widened slot: right after the
+/// two cells the rule icon may occupy.
+pub(crate) const CUSTOM_ERROR_CELL_OFFSET: usize = 2;
 /// Terminal-cell offset of the right-now slot within a row label.
 pub(crate) const NOW_SLOT_OFFSET: u16 =
     (NODE_ICON_COLUMN_WIDTH + crate::status_icons::OBJECTIVE_COLUMN_WIDTH) as u16;
@@ -2713,42 +2867,6 @@ pub fn toolbar_area(area: Rect) -> Rect {
     vertical_sections(area)[2]
 }
 
-/// A transient hit target; activation resolves the index to its stable profile ID.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CustomToolbarHit {
-    Previous,
-    Profile(usize),
-    Next,
-}
-
-/// A scrolling second toolbar row keeps all profiles reachable in narrow trees.
-pub(crate) fn custom_toolbar_buttons(
-    area: Rect,
-    profiles: &[ilium_core::custom_agent::CustomAgentProfile],
-    selected: Option<&str>,
-) -> Vec<(CustomToolbarHit, Rect)> {
-    let toolbar = toolbar_area(area);
-    if profiles.is_empty() || toolbar.height < 2 || toolbar.width < 7 {
-        return Vec::new();
-    }
-    let y = toolbar.y + 1;
-    let selected = selected
-        .and_then(|id| profiles.iter().position(|profile| profile.id == id))
-        .unwrap_or(0);
-    let capacity = usize::from((toolbar.width - 4) / 3).max(1);
-    let start = selected.saturating_sub(capacity - 1);
-    let mut buttons = vec![(CustomToolbarHit::Previous, Rect::new(toolbar.x, y, 2, 1))];
-    for index in start..profiles.len().min(start + capacity) {
-        let x = toolbar.x + 2 + u16::try_from(index - start).unwrap_or(0) * 3;
-        buttons.push((CustomToolbarHit::Profile(index), Rect::new(x, y, 3, 1)));
-    }
-    buttons.push((
-        CustomToolbarHit::Next,
-        Rect::new(toolbar.right() - 2, y, 2, 1),
-    ));
-    buttons
-}
-
 /// Returns the toolbar action at a terminal coordinate, if any.
 pub fn toolbar_action_at(area: Rect, position: Position) -> Option<TreeToolbarAction> {
     toolbar_button_rects(area)
@@ -2793,25 +2911,28 @@ pub fn toolbar_button_rects(area: Rect) -> Vec<(TreeToolbarAction, Rect)> {
     buttons
 }
 
-impl From<crate::tree_toolbar_layout::TreeToolbarEntry> for TreeToolbarAction {
-    fn from(entry: crate::tree_toolbar_layout::TreeToolbarEntry) -> Self {
-        use crate::tree_toolbar_layout::TreeToolbarEntry as Entry;
-        match entry {
-            Entry::Search => Self::Search,
-            Entry::Project => Self::Project,
-            Entry::Shell => Self::Shell,
-            Entry::Claude => Self::Agent(BuiltinAgentProvider::Claude),
-            Entry::Codex => Self::Agent(BuiltinAgentProvider::Codex),
-            Entry::Antigravity => Self::Agent(BuiltinAgentProvider::Antigravity),
-            Entry::Editor => Self::Editor,
-            Entry::Board => Self::Board,
-            Entry::Group => Self::Group,
-            Entry::Split => Self::Split,
-            Entry::Folder => Self::Folder,
-            Entry::ActivityFilter => Self::ActivityFilter,
-            Entry::Restructure => Self::Restructure,
-            Entry::Settings => Self::Settings,
-        }
+/// Maps the layout entry at `index` to its toolbar action.
+pub(crate) fn toolbar_action_for(
+    index: usize,
+    entry: &crate::tree_toolbar_layout::TreeToolbarEntry,
+) -> TreeToolbarAction {
+    use crate::tree_toolbar_layout::TreeToolbarEntry as Entry;
+    match entry {
+        Entry::Search => TreeToolbarAction::Search,
+        Entry::Project => TreeToolbarAction::Project,
+        Entry::Shell => TreeToolbarAction::Shell,
+        Entry::Claude => TreeToolbarAction::Agent(BuiltinAgentProvider::Claude),
+        Entry::Codex => TreeToolbarAction::Agent(BuiltinAgentProvider::Codex),
+        Entry::Antigravity => TreeToolbarAction::Agent(BuiltinAgentProvider::Antigravity),
+        Entry::Editor => TreeToolbarAction::Editor,
+        Entry::Board => TreeToolbarAction::Board,
+        Entry::Group => TreeToolbarAction::Group,
+        Entry::Split => TreeToolbarAction::Split,
+        Entry::Folder => TreeToolbarAction::Folder,
+        Entry::ActivityFilter => TreeToolbarAction::ActivityFilter,
+        Entry::Restructure => TreeToolbarAction::Restructure,
+        Entry::Settings => TreeToolbarAction::Settings,
+        Entry::CustomAgent(_) => TreeToolbarAction::CustomAgent(index),
     }
 }
 
@@ -2829,12 +2950,11 @@ pub(crate) fn configured_toolbar_rects_in_strip(
     toolbar: Rect,
     layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
 ) -> Vec<(TreeToolbarAction, Rect)> {
-    use crate::tree_toolbar_layout::TreeToolbarEntry as Entry;
     let visible_width = TOOLBAR_BUTTON_WIDTH - 1;
     if toolbar.width < visible_width {
         return Vec::new();
     }
-    let suffix = [Entry::ActivityFilter, Entry::Restructure, Entry::Settings];
+    let suffix = crate::tree_toolbar_layout::TreeToolbarLayout::ANCHORED_SUFFIX;
     let anchored = layout.entries.ends_with(&suffix);
     let left_count = if anchored {
         layout.entries.len() - suffix.len()
@@ -2856,12 +2976,13 @@ pub(crate) fn configured_toolbar_rects_in_strip(
             break;
         }
         buttons.push((
-            (*entry).into(),
+            toolbar_action_for(index, entry),
             Rect::new(x, toolbar.y, visible_width, toolbar.height),
         ));
     }
     if anchored {
-        for (index, entry) in suffix.into_iter().rev().enumerate() {
+        for (index, entry) in suffix.iter().rev().enumerate() {
+            let entry_index = layout.entries.len() - 1 - index;
             let offset =
                 visible_width.saturating_add((index as u16).saturating_mul(TOOLBAR_BUTTON_WIDTH));
             if offset > toolbar.width {
@@ -2869,7 +2990,7 @@ pub(crate) fn configured_toolbar_rects_in_strip(
             }
             let x = toolbar.right().saturating_sub(offset);
             buttons.push((
-                entry.into(),
+                toolbar_action_for(entry_index, entry),
                 Rect::new(x, toolbar.y, visible_width, toolbar.height),
             ));
         }
@@ -3179,6 +3300,8 @@ impl TreeItemCache {
                         crate::agent_monitoring::AttentionRunningIndicator::default(),
                     show_inferred_title_icons: false,
                     frozen_panes: &HashSet::new(),
+                    blocking_errors: None,
+                    pane_view: None,
                     panel_width: 0,
                     opened_paths,
                     sidebar_files,
@@ -3297,6 +3420,8 @@ pub(crate) fn render(
             resources: options.resources,
             panes: options.panes,
             frozen_panes: options.frozen_panes,
+            blocking_errors: options.blocking_errors,
+            pane_view: options.pane_view,
         },
     );
     let mut title = sidebar_title(
@@ -3366,6 +3491,8 @@ pub(crate) fn render(
                 attention_running_indicator: options.attention_running_indicator,
                 show_inferred_title_icons: options.show_inferred_title_icons,
                 frozen_panes: &HashSet::new(),
+                blocking_errors: options.blocking_errors,
+                pane_view: options.pane_view,
                 panel_width: list_area(area).width.saturating_add(2),
                 opened_paths: state.opened(),
                 sidebar_files: options.sidebar_files,
@@ -3482,66 +3609,13 @@ pub(crate) fn render(
             options.hover.toolbar_action,
             options.hover.pending_toolbar,
             options.terminal_activity_elapsed_ms,
-            options.icons,
+            ToolbarPaintContext {
+                icons: options.icons,
+                profiles: options.custom_toolbar_profiles.unwrap_or(&[]),
+                selected: options.custom_toolbar_selected,
+                pending: options.custom_toolbar_pending,
+            },
         );
-        if let Some(profiles) = options
-            .custom_toolbar_profiles
-            .filter(|profiles| !profiles.is_empty())
-        {
-            let toolbar = toolbar_area(area);
-            if toolbar.height >= 2 {
-                frame.render_widget(
-                    Paragraph::new(" ".repeat(usize::from(toolbar.width))),
-                    Rect::new(toolbar.x, toolbar.y + 1, toolbar.width, 1),
-                );
-            }
-            for (hit, button) in
-                custom_toolbar_buttons(area, profiles, options.custom_toolbar_selected)
-            {
-                let (text, selected) = match hit {
-                    CustomToolbarHit::Previous => ("‹".to_string(), false),
-                    CustomToolbarHit::Next => ("›".to_string(), false),
-                    CustomToolbarHit::Profile(index) => {
-                        let profile = &profiles[index];
-                        let pending = options
-                            .custom_toolbar_pending
-                            .is_some_and(|ids| ids.contains(&profile.id));
-                        let glyph = if pending {
-                            SPINNER_FRAMES[(options.terminal_activity_elapsed_ms / SPINNER_FRAME_MS)
-                                as usize
-                                % SPINNER_FRAMES.len()]
-                            .to_string()
-                        } else {
-                            profile.icon.clone()
-                        };
-                        (
-                            glyph,
-                            options.custom_toolbar_selected == Some(profile.id.as_str()),
-                        )
-                    }
-                };
-                let style = if selected {
-                    theme::selected_style()
-                } else {
-                    Style::new().fg(Color::Cyan)
-                };
-                frame.render_widget(
-                    Paragraph::new(Span::styled(format!(" {text}"), style)),
-                    button,
-                );
-            }
-            if let Some(profile) = options
-                .custom_toolbar_hovered
-                .and_then(|id| profiles.iter().find(|profile| profile.id == id))
-            {
-                let caption = Rect::new(toolbar.x, toolbar.y, toolbar.width, 1);
-                frame.render_widget(
-                    Paragraph::new(format!(" {} {}", profile.icon, profile.name))
-                        .style(Style::new().fg(Color::Cyan)),
-                    caption,
-                );
-            }
-        }
     }
     painted
 }
@@ -3891,6 +3965,15 @@ fn draw_row_actions(
     );
 }
 
+/// Glyph settings plus the custom-agent data the toolbar needs to paint its buttons.
+#[derive(Clone, Copy)]
+struct ToolbarPaintContext<'a> {
+    icons: &'a IconSettings,
+    profiles: &'a [ilium_core::custom_agent::CustomAgentProfile],
+    selected: Option<&'a str>,
+    pending: Option<&'a HashSet<String>>,
+}
+
 /// Draws the five creation buttons plus a caption row naming whichever one
 /// the pointer currently sits over. Every button keeps its own accent color
 /// at all times (so the five read as distinct actions on sight, not one
@@ -3903,7 +3986,7 @@ fn draw_toolbar(
     hovered: Option<TreeToolbarAction>,
     pending: u16,
     spinner_elapsed_ms: u128,
-    icons: &IconSettings,
+    custom: ToolbarPaintContext<'_>,
 ) {
     let (layout, filter_active) = layout_and_filter;
     let toolbar = toolbar_area(area);
@@ -3911,7 +3994,14 @@ fn draw_toolbar(
 
     for (action, button_area) in configured_toolbar_button_rects(area, layout) {
         let is_hovered = hovered == Some(action);
-        let style = if is_hovered || (filter_active && action == TreeToolbarAction::ActivityFilter)
+        let custom_profile = action
+            .custom_profile_id(layout)
+            .and_then(|id| custom.profiles.iter().find(|profile| profile.id == id));
+        let custom_selected = custom_profile
+            .is_some_and(|profile| custom.selected == Some(profile.id.as_str()));
+        let style = if is_hovered
+            || custom_selected
+            || (filter_active && action == TreeToolbarAction::ActivityFilter)
         {
             Style::new()
                 .fg(theme::accent_fg())
@@ -3920,20 +4010,33 @@ fn draw_toolbar(
         } else {
             Style::new().fg(action.accent())
         };
-        let glyph = if pending & action.pending_bit() != 0 {
+        let custom_pending = custom_profile.is_some_and(|profile| {
+            custom.pending.is_some_and(|ids| ids.contains(&profile.id))
+        });
+        let glyph = if pending & action.pending_bit() != 0 || custom_pending {
             let frame_index =
                 (spinner_elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
             SPINNER_FRAMES[frame_index].to_string()
+        } else if let Some(profile) = custom_profile {
+            profile.icon.clone()
         } else {
-            action.glyph(icons).to_string()
+            action.glyph(custom.icons).to_string()
         };
         let button = Paragraph::new(Line::from(Span::styled(format!(" {glyph} "), style)));
         frame.render_widget(button, button_area);
     }
 
     if let Some(action) = hovered {
+        let description = match action.custom_profile_id(layout) {
+            Some(id) => custom
+                .profiles
+                .iter()
+                .find(|profile| profile.id == id)
+                .map_or_else(|| action.description().to_owned(), |profile| profile.name.clone()),
+            None => action.description().to_owned(),
+        };
         let caption = Paragraph::new(Line::from(Span::styled(
-            format!(" {}", action.description()),
+            format!(" {description}"),
             Style::new()
                 .fg(action.accent())
                 .add_modifier(Modifier::BOLD),
@@ -3944,41 +4047,6 @@ fn draw_toolbar(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn custom_toolbar_scrolls_to_each_stable_profile_in_a_narrow_tree() {
-        use ilium_core::custom_agent::CustomAgentProfile;
-        use ilium_core::BuiltinAgentProvider;
-        let profiles: Vec<_> = (0..24)
-            .map(|index| CustomAgentProfile {
-                id: format!("profile-{index}"),
-                name: format!("Agent {index}"),
-                icon: "✦".into(),
-                base_provider: BuiltinAgentProvider::Claude,
-                command: String::new(),
-                arguments: String::new(),
-                environment: Vec::new(),
-            })
-            .collect();
-        let area = ratatui::layout::Rect::new(0, 0, 16, 12);
-        for (index, profile) in profiles.iter().enumerate() {
-            let buttons = super::custom_toolbar_buttons(area, &profiles, Some(&profile.id));
-            assert!(buttons
-                .iter()
-                .any(|(hit, _)| *hit == super::CustomToolbarHit::Profile(index)));
-            assert!(buttons
-                .iter()
-                .any(|(hit, _)| *hit == super::CustomToolbarHit::Previous));
-            assert!(buttons
-                .iter()
-                .any(|(hit, _)| *hit == super::CustomToolbarHit::Next));
-            for (position, (_, first)) in buttons.iter().enumerate() {
-                for (_, second) in buttons.iter().skip(position + 1) {
-                    assert!(first.intersection(*second).is_empty());
-                }
-            }
-        }
-    }
-
     #[test]
     fn custom_tree_row_layout_blocking_warning_is_clipped_and_keeps_tooltip() {
         use crate::status_icons::{StatusSlot, TooltipContent};
@@ -4003,6 +4071,7 @@ mod tests {
                 )],
                 monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
                 layout_slots: Some(HashMap::from([(ROOT_ID, vec![(element, 6, 1)])])),
+                blocking_error_display: Default::default(),
                 values: vec![PaintedRowValues {
                     node_id: ROOT_ID,
                     status: [None, None, Some(error.clone())],
@@ -4060,6 +4129,7 @@ mod tests {
                     )],
                     monitoring_mode: mode,
                     layout_slots: None,
+                    blocking_error_display: Default::default(),
                     values: vec![PaintedRowValues {
                         node_id: ROOT_ID,
                         status: [
@@ -4144,7 +4214,12 @@ mod tests {
                         None,
                         pending,
                         elapsed_ms,
-                        &IconSettings::default(),
+                        ToolbarPaintContext {
+                            icons: &IconSettings::default(),
+                            profiles: &[],
+                            selected: None,
+                            pending: None,
+                        },
                     )
                 })
                 .unwrap();
@@ -4196,6 +4271,7 @@ mod tests {
             rows: vec![(first, 4), (second, 5)],
             monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             layout_slots: None,
+            blocking_error_display: Default::default(),
             values: Vec::new(),
             action: Some((first, strip, actions)),
             cost_option: Default::default(),
@@ -4425,9 +4501,7 @@ mod tests {
                 false,
                 0,
                 crate::config::MotionLevel::Full,
-                ilium_core::representative_progress(&situation.progress)
-                    .filter(|monitor| monitor.has_measurable_progress())
-                    .map(|monitor| monitor.report.percent),
+                crate::status_rule_visual::ProgressCue::from_monitors(&situation.progress),
             );
             assert_eq!(
                 custom_slot_glyph(&line),
@@ -4473,6 +4547,7 @@ mod tests {
         // Visual kinds the defaults do not ship, including two-cell frames
         // and a deliberately hidden icon, through a one-rule set.
         let one_rule = |kind: VisualKind| StatusRules {
+            version: rules.version,
             defaults_version: rules.defaults_version,
             rules: vec![Rule {
                 id: "always".to_owned(),
@@ -4490,6 +4565,7 @@ mod tests {
                         color: Some("#ff8800".to_owned()),
                         bold: true,
                         dim: false,
+                        pulse: false,
                     },
                 },
             }],
@@ -4533,6 +4609,121 @@ mod tests {
             if !expected_glyph.is_empty() {
                 assert_eq!(line.spans[2].style.fg, Some(Color::Rgb(0xff, 0x88, 0x00)));
                 assert!(line.spans[2].style.add_modifier.contains(Modifier::BOLD));
+            }
+        }
+    }
+
+    /// Every default visual (enabled or not), every frame family and every
+    /// Braille preset keeps the title at one offset on every frame and pulse
+    /// phase, at every motion level, with measured, unmeasured and unsteady
+    /// progress monitors.
+    #[test]
+    fn custom_mode_keeps_every_default_visual_aligned_on_every_frame_and_motion_level() {
+        use crate::config::MotionLevel;
+        use crate::status_rule_visual::{BRAILLE_PRESETS, FRAME_FAMILIES};
+        use ilium_core::status_rule_expression::{
+            default_rules, demo_situations, AllOf, Condition, ConditionTerm, Rule, StatusRules,
+            StatusVisual, VisualKind, VisualStyle,
+        };
+
+        let defaults = default_rules();
+        let mut visuals: Vec<(String, StatusVisual)> = defaults
+            .rules
+            .iter()
+            .map(|rule| (rule.id.clone(), rule.then.clone()))
+            .chain(
+                defaults
+                    .fallback
+                    .iter()
+                    .map(|visual| ("fallback".to_owned(), visual.clone())),
+            )
+            .collect();
+        let pulsing = VisualStyle {
+            color: Some("accent".to_owned()),
+            bold: true,
+            dim: false,
+            pulse: true,
+        };
+        visuals.extend(FRAME_FAMILIES.iter().map(|family| {
+            (
+                family.name.to_owned(),
+                StatusVisual {
+                    kind: family.visual_kind(),
+                    style: pulsing.clone(),
+                },
+            )
+        }));
+        visuals.extend(BRAILLE_PRESETS.iter().map(|(name, _)| {
+            (
+                (*name).to_owned(),
+                StatusVisual {
+                    kind: VisualKind::BrailleAnimation {
+                        preset: (*name).to_owned(),
+                        frames_per_second: 8,
+                    },
+                    style: pulsing.clone(),
+                },
+            )
+        }));
+
+        // Pane situations: no monitor (unmeasured), every demo monitor, and a
+        // degraded copy of the first one.
+        let mut situations = vec![bare_situation(PaneStatus::Editor { dirty: true })];
+        situations.extend(
+            demo_situations()
+                .into_iter()
+                .filter(|situation| !situation.progress.is_empty()),
+        );
+        assert!(situations.len() > 1, "the demos include progress monitors");
+        let mut degraded = situations[1].clone();
+        for monitor in &mut degraded.progress {
+            monitor.monitor_health = ilium_core::ProgressMonitorHealth::Degraded {
+                consecutive_failures: 1,
+                last_error: "probe timed out".to_owned(),
+            };
+        }
+        situations.push(degraded);
+
+        for (name, visual) in &visuals {
+            let rules = StatusRules {
+                version: defaults.version,
+                defaults_version: defaults.defaults_version,
+                rules: vec![Rule {
+                    id: "always".to_owned(),
+                    name: "Always".to_owned(),
+                    enabled: true,
+                    any_of: vec![AllOf {
+                        all_of: vec![ConditionTerm {
+                            condition: Condition::Always,
+                            negated: false,
+                        }],
+                    }],
+                    then: visual.clone(),
+                }],
+                fallback: None,
+            };
+            for situation in &situations {
+                for motion in [MotionLevel::Full, MotionLevel::Reduced, MotionLevel::Off] {
+                    // Two seconds in 125 ms steps covers every frame of an
+                    // 8 frames per second preset and both pulse phases.
+                    for elapsed_ms in (0..=2_000).step_by(125) {
+                        let line = custom_pane_label(situation, &rules, elapsed_ms, motion);
+                        let context = format!(
+                            "{name} in {} at {elapsed_ms} ms, {motion:?}",
+                            situation.name
+                        );
+                        assert_custom_title_offset(&line, &context);
+                        let glyph = custom_slot_glyph(&line);
+                        if matches!(visual.kind, VisualKind::Hidden) {
+                            assert_eq!(glyph, "", "{context}");
+                        } else {
+                            assert!(
+                                (1..=2).contains(&UnicodeWidthStr::width(glyph.as_str())),
+                                "{context}: {glyph:?}"
+                            );
+                        }
+                    }
+                }
             }
         }
     }
@@ -4597,6 +4788,7 @@ mod tests {
             )],
             monitoring_mode: AgentMonitoringMode::Custom,
             layout_slots: None,
+            blocking_error_display: Default::default(),
             values: vec![PaintedRowValues {
                 node_id: ROOT_ID,
                 status: [None, Some(tooltip.clone()), now],
@@ -4946,7 +5138,6 @@ mod tests {
                         toolbar_layout: &Default::default(),
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
-                        custom_toolbar_hovered: None,
                         custom_toolbar_pending: None,
                         custom_agent_labels: None,
                         focused: false,
@@ -4985,6 +5176,8 @@ mod tests {
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
                         frozen_panes: &HashSet::new(),
+                        blocking_errors: None,
+                        pane_view: None,
                         cost: None,
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
@@ -6233,7 +6426,6 @@ mod tests {
                         toolbar_layout: &Default::default(),
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
-                        custom_toolbar_hovered: None,
                         custom_toolbar_pending: None,
                         custom_agent_labels: None,
                         focused: false,
@@ -6269,6 +6461,8 @@ mod tests {
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
                         frozen_panes: &HashSet::new(),
+                        blocking_errors: None,
+                        pane_view: None,
                         cost: None,
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
@@ -6301,7 +6495,6 @@ mod tests {
                         toolbar_layout: &Default::default(),
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
-                        custom_toolbar_hovered: None,
                         custom_toolbar_pending: None,
                         custom_agent_labels: None,
                         focused: false,
@@ -6337,6 +6530,8 @@ mod tests {
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
                         frozen_panes: &HashSet::new(),
+                        blocking_errors: None,
+                        pane_view: None,
                         cost: None,
                         hover: TreeHoverState {
                             node: Some(TreeNodeHit {
@@ -6397,7 +6592,6 @@ mod tests {
                         toolbar_layout: &Default::default(),
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
-                        custom_toolbar_hovered: None,
                         custom_toolbar_pending: None,
                         custom_agent_labels: None,
                         focused: false,
@@ -6433,6 +6627,8 @@ mod tests {
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
                         frozen_panes: &HashSet::new(),
+                        blocking_errors: None,
+                        pane_view: None,
                         cost: None,
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
@@ -7281,6 +7477,8 @@ mod tests {
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
                 frozen_panes: &HashSet::new(),
+                blocking_errors: None,
+                pane_view: None,
                 panel_width: area.width,
                 opened_paths: state.opened(),
                 sidebar_files: &Default::default(),
@@ -7449,6 +7647,8 @@ mod tests {
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
                 frozen_panes: &HashSet::new(),
+                blocking_errors: None,
+                pane_view: None,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
@@ -7498,6 +7698,8 @@ mod tests {
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
                 frozen_panes: &HashSet::new(),
+                blocking_errors: None,
+                pane_view: None,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
@@ -7547,6 +7749,8 @@ mod tests {
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
                 frozen_panes: &HashSet::new(),
+                blocking_errors: None,
+                pane_view: None,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
@@ -7619,6 +7823,8 @@ mod tests {
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
                 frozen_panes: &HashSet::new(),
+                blocking_errors: None,
+                pane_view: None,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
@@ -7890,6 +8096,8 @@ mod tests {
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
                 frozen_panes: &HashSet::new(),
+                blocking_errors: None,
+                pane_view: None,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
@@ -8198,6 +8406,8 @@ mod tests {
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
                 frozen_panes: &HashSet::new(),
+                blocking_errors: None,
+                pane_view: None,
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
@@ -8434,7 +8644,6 @@ mod cost_indicator_tests {
                         toolbar_layout: &Default::default(),
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
-                        custom_toolbar_hovered: None,
                         custom_toolbar_pending: None,
                         custom_agent_labels: None,
                         focused: false,
@@ -8470,6 +8679,8 @@ mod cost_indicator_tests {
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
                         frozen_panes: &HashSet::new(),
+                        blocking_errors: None,
+                        pane_view: None,
                         cost,
                         hover,
                         sidebar_files: &Default::default(),

@@ -1117,6 +1117,7 @@ pub fn settings_help_anchors(
                     crate::app::AgentMonitoringRow::Mode => "AM-01".to_owned(),
                     crate::app::AgentMonitoringRow::AttentionRunningIndicator => "AM-22".to_owned(),
                     crate::app::AgentMonitoringRow::AttentionProgressReports => "AM-25".to_owned(),
+                    crate::app::AgentMonitoringRow::BlockingErrorDisplay => "AM-31".to_owned(),
                     crate::app::AgentMonitoringRow::ModelIcons => "AM-24".to_owned(),
                     crate::app::AgentMonitoringRow::WorkingPollSeconds => "AM-02".to_owned(),
                     crate::app::AgentMonitoringRow::IdlePollSeconds => "AM-03".to_owned(),
@@ -2400,6 +2401,7 @@ pub(crate) fn render_live_tree_preview(
     for path in app.tree_state.opened() {
         preview_tree_state.open(path.clone());
     }
+    let blocking_error_facts = app.blocking_error_facts();
     let agent_models = app.current_tree_models();
     crate::tree_ui::render(
         frame,
@@ -2411,7 +2413,6 @@ pub(crate) fn render_live_tree_preview(
             toolbar_layout: &app.ui_settings.tree_toolbar_layout,
             custom_toolbar_profiles: None,
             custom_toolbar_selected: None,
-            custom_toolbar_hovered: None,
             custom_toolbar_pending: None,
             custom_agent_labels: None,
             focused: false,
@@ -2451,6 +2452,8 @@ pub(crate) fn render_live_tree_preview(
             attention_running_indicator: app.ui_settings.attention_running_indicator,
             show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
             frozen_panes: &app.frozen_panes,
+            blocking_errors: Some(&blocking_error_facts),
+            pane_view: Some(crate::custom_status_live::PaneViewFacts::from_app(app)),
             cost: None,
             hover: crate::tree_ui::TreeHoverState::default(),
             sidebar_files: &Default::default(),
@@ -6599,6 +6602,7 @@ fn monitoring_row_label(row: crate::app::AgentMonitoringRow) -> String {
         Row::Mode => "Display mode".to_string(),
         Row::AttentionRunningIndicator => "Attention running indicator".to_string(),
         Row::AttentionProgressReports => "Progress reports in Attention".to_string(),
+        Row::BlockingErrorDisplay => "Blocking errors in Custom mode".to_string(),
         Row::ModelIcons => "Use model icons in the tree".to_string(),
         Row::ProgressMonitor => "Progress monitoring".to_string(),
         Row::ProgressMonitorMaxLines => "Progress footer lines".to_string(),
@@ -6637,6 +6641,7 @@ fn monitoring_row_value(row: crate::app::AgentMonitoringRow, app: &App) -> Strin
             .label()
             .to_string(),
         Row::AttentionProgressReports => on_off(app.ui_settings.attention_progress_reports),
+        Row::BlockingErrorDisplay => app.ui_settings.blocking_error_display.label().to_string(),
         Row::ModelIcons => on_off(app.ui_settings.agent_tree_model_icons),
         Row::CacheKeepaliveEnabled => on_off(app.ui_settings.cache_keepalive.enabled),
         Row::CacheKeepaliveClaudeInterval => format!(
@@ -6709,7 +6714,8 @@ fn monitoring_setting_line(
     let content_width = content_width.saturating_sub(ROW_LEFT_INSET + 4);
     let control_start = (content_width / 2).max(label_width + 2);
     let padding = usize::from(control_start.saturating_sub(label_width));
-    let attention_only = attention_only_row(row, app);
+    let custom_only = custom_only_row(row, app);
+    let attention_only = attention_only_row(row, app) || custom_only;
     let style = if selected {
         theme::selected_style().add_modifier(Modifier::BOLD)
     } else if attention_only {
@@ -6730,7 +6736,14 @@ fn monitoring_setting_line(
     ];
     if attention_only {
         spans.push(Span::styled(
-            format!("  · {ATTENTION_ONLY_NOTE}"),
+            format!(
+                "  · {}",
+                if custom_only {
+                    CUSTOM_ONLY_NOTE
+                } else {
+                    ATTENTION_ONLY_NOTE
+                }
+            ),
             Style::new().add_modifier(Modifier::DIM),
         ));
     }
@@ -6739,6 +6752,17 @@ fn monitoring_setting_line(
 
 /// Note shown beside rows that only take effect in Attention mode.
 pub(crate) const ATTENTION_ONLY_NOTE: &str = "Attention only";
+
+/// Note shown beside rows that only take effect in Custom mode.
+pub(crate) const CUSTOM_ONLY_NOTE: &str = "Custom only";
+
+/// The blocking-error display choice only changes Custom mode; like the
+/// Attention rows it stays editable but dimmed while another mode is active.
+fn custom_only_row(row: crate::app::AgentMonitoringRow, app: &App) -> bool {
+    row == crate::app::AgentMonitoringRow::BlockingErrorDisplay
+        && app.ui_settings.agent_monitoring_mode
+            != crate::agent_monitoring::AgentMonitoringMode::Custom
+}
 
 /// Rows that configure Attention mode stay editable in every mode but are
 /// dimmed, with a note, while another mode is active.

@@ -575,6 +575,7 @@ impl HeapBytes for ServerEvent {
                 .matched
                 .heap_bytes()
                 .saturating_add(observation.unknown.heap_bytes()),
+            Self::StatusScreenWatchesRejected(rejection) => rejection.message.heap_bytes(),
             Self::PaneRecentActivity { .. } => 0,
             Self::ResourceObservationFailed { message } => message.heap_bytes(),
             Self::ResourceSnapshot {

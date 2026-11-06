@@ -1,15 +1,15 @@
 //! Live-session facts for the rules editor: which rule picks the focused
 //! pane's icon and why, and how many panes a rule matches right now.
 //!
-//! Facts are assembled exactly as the tree renderer assembles them for the
-//! status column (`tree_ui`), so the explanation never disagrees with the
-//! icon the tree shows. The evaluation itself is `ilium_core`'s
+//! Facts come from `custom_status_live::with_pane_facts`, the builder the
+//! tree renderer's status column also derives from, so the explanation never
+//! disagrees with the icon the tree shows. The evaluation itself is `ilium_core`'s
 //! `explain_all`/`why`; this module only gathers client-side observations.
 
 use ilium_core::status_rule_expression::{
-    explain_all, why, Condition, Observation, PaneFacts, Rule, RuleOutcome, StatusVisual,
+    explain_all, why, Condition, Rule, RuleOutcome, StatusVisual,
 };
-use ilium_core::{Node, NodeId, NodeKind};
+use ilium_core::{Node, NodeId};
 
 use crate::app::App;
 
@@ -87,49 +87,34 @@ pub fn matching_pane_count(app: &App, rule: &Rule<Condition, StatusVisual>) -> u
         .count()
 }
 
-/// Gather the pane's facts the way the tree renderer does and evaluate
-/// `rules` against them.
+/// For each configured rule, how many panes it currently decides (the
+/// first enabled match), so the list can show what each rule is doing now.
+pub fn winning_pane_counts(app: &App) -> Vec<usize> {
+    let rules = &app.custom_status_rules.rules;
+    let mut counts = vec![0; rules.len()];
+    for node in app.tree.panes() {
+        let winner = outcomes_for_rules(app, node, rules).and_then(|outcomes| {
+            outcomes
+                .iter()
+                .position(|outcome| outcome.enabled && outcome.matched)
+        });
+        if let Some(count) = winner.and_then(|index| counts.get_mut(index)) {
+            *count += 1;
+        }
+    }
+    counts
+}
+
+/// Evaluate `rules` against the pane's facts, gathered by the same builder
+/// the tree renderer and the hover tooltip use.
 fn outcomes_for_rules(
     app: &App,
     node: &Node,
     rules: &[Rule<Condition, StatusVisual>],
 ) -> Option<Vec<RuleOutcome>> {
-    let NodeKind::Pane {
-        status,
-        scheduled_input,
-        progress_monitors,
-        ..
-    } = &node.kind
-    else {
-        return None;
-    };
-    let now_unix_millis = crate::scheduled_input::unix_millis_now();
-    let elapsed_ms = app.started_at.elapsed().as_millis();
-    let shell_output = app
-        .terminal_activity
-        .phase(node.id, elapsed_ms)
-        .map(crate::tree_ui::shell_output_phase);
-    let overlay = app.cost_tracker.overlay();
-    let facts = PaneFacts {
-        status,
-        progress: progress_monitors,
-        scheduled_input: scheduled_input.is_some(),
-        shell_output,
-        activity_stale: crate::status_icons::detection_activity_stale(
-            status,
-            app.pane_detection_evidence.get(&node.id),
-            now_unix_millis,
-        ),
-        supplementary: crate::status_rule_visual::supplementary_facts(
-            app.frozen_panes.contains(&node.id),
-            overlay.details.get(&node.id).map(|cost| cost.usd),
-        ),
-        screen_matches: &|pattern| -> Observation {
-            app.custom_status_screen_observations
-                .observe(node.id, pattern)
-        },
-    };
-    Some(explain_all(rules, |condition| condition.observe(&facts)))
+    crate::custom_status_live::with_pane_facts(app, node.id, |facts| {
+        explain_all(rules, |condition| condition.observe(facts))
+    })
 }
 
 #[cfg(test)]

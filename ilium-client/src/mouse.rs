@@ -1210,57 +1210,6 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         return;
     }
 
-    if app.tree_toolbar_hovered || app.focus == crate::app::FocusTarget::Tree {
-        let hit = tree_ui::custom_toolbar_buttons(
-            app.layout.tree_area,
-            &app.custom_agents.profiles,
-            app.custom_toolbar_selected.as_deref(),
-        )
-        .into_iter()
-        .find_map(|(hit, area)| area.contains(position).then_some(hit));
-        if let Some(hit) = hit {
-            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
-                if let tree_ui::CustomToolbarHit::Profile(index) = hit {
-                    let profile = &app.custom_agents.profiles[index];
-                    let identity = ilium_core::custom_agent::CustomAgentIdentity {
-                        profile_id: profile.id.clone(),
-                        base_provider: profile.base_provider,
-                    };
-                    let target = app
-                        .selected_node_id()
-                        .or_else(|| app.active_pane_id())
-                        .unwrap_or(ilium_core::ROOT_ID);
-                    app.open_create_agent_workspace_dialog(identity.base_provider, target, false);
-                    if let Mode::CreateAgentWorkspace(state) = &mut app.mode {
-                        state.custom_agent = Some(identity);
-                    }
-                }
-                return;
-            }
-            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                match hit {
-                    tree_ui::CustomToolbarHit::Previous => app.step_custom_toolbar(-1),
-                    tree_ui::CustomToolbarHit::Next => app.step_custom_toolbar(1),
-                    tree_ui::CustomToolbarHit::Profile(index) => {
-                        let id = app.custom_agents.profiles[index].id.clone();
-                        app.custom_toolbar_selected = Some(id.clone());
-                        app.action_new_custom_agent(&id);
-                    }
-                }
-            }
-            return;
-        }
-        let toolbar = tree_ui::toolbar_area(app.layout.tree_area);
-        if !app.custom_agents.profiles.is_empty()
-            && toolbar.height >= 2
-            && position.y == toolbar.y + 1
-            && position.x >= toolbar.x
-            && position.x < toolbar.right()
-        {
-            return;
-        }
-    }
-
     if let Some(action) = app.emitted_tree_toolbar_at(position) {
         if let TreeToolbarAction::Agent(provider) = action {
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
@@ -1275,6 +1224,31 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                 }
                 return;
             }
+        }
+        if let Some(profile) = action
+            .custom_profile_id(&app.ui_settings.tree_toolbar_layout)
+            .and_then(|id| app.custom_agents.profiles.iter().find(|p| p.id == id))
+            .cloned()
+        {
+            if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
+                let identity = ilium_core::custom_agent::CustomAgentIdentity {
+                    profile_id: profile.id.clone(),
+                    base_provider: profile.base_provider,
+                };
+                let target = app
+                    .selected_node_id()
+                    .or_else(|| app.active_pane_id())
+                    .unwrap_or(ilium_core::ROOT_ID);
+                app.open_create_agent_workspace_dialog(identity.base_provider, target, false);
+                if let Mode::CreateAgentWorkspace(state) = &mut app.mode {
+                    state.custom_agent = Some(identity);
+                }
+            } else if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                app.last_tree_click = None;
+                app.custom_toolbar_selected = Some(profile.id.clone());
+                app.action_new_custom_agent(&profile.id);
+            }
+            return;
         }
         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             app.last_tree_click = None;
@@ -1486,23 +1460,6 @@ const TREE_DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
 /// Updates the two independent hover affordances (row hit + toolbar) from
 /// the pointer's current tree-panel-relative position.
 fn update_tree_hover(app: &mut App, position: Position) {
-    app.custom_toolbar_hovered = tree_ui::custom_toolbar_buttons(
-        app.layout.tree_area,
-        &app.custom_agents.profiles,
-        app.custom_toolbar_selected.as_deref(),
-    )
-    .into_iter()
-    .find_map(|(hit, area)| {
-        if !area.contains(position) {
-            return None;
-        }
-        match hit {
-            tree_ui::CustomToolbarHit::Profile(index) => {
-                Some(app.custom_agents.profiles[index].id.clone())
-            }
-            _ => None,
-        }
-    });
     let previous_branch = app
         .hovered_tree_node
         .filter(|hit| hit.line == 1)
@@ -1661,6 +1618,8 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
             app.action_open_search();
             return;
         }
+        // Custom agents launch from the click handler, which owns the profile lookup.
+        TreeToolbarAction::CustomAgent(_) => return,
         TreeToolbarAction::Group => {
             let preselected = app.create_group_preselect_target();
             app.open_create_group_dialog(preselected);
@@ -2528,7 +2487,12 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         }
         let settings_layout =
             crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
-        let content = settings_layout.content_area;
+        // The renderer draws the editor under the tab's instructions panel;
+        // hit-test the same rectangle.
+        let mut content = settings_layout.content_area;
+        let instructions = crate::settings_ui::instructions_panel_height(app, state.tab, content);
+        content.y = content.y.saturating_add(instructions);
+        content.height = content.height.saturating_sub(instructions);
         let desired = app
             .ui_settings
             .left_panel_sizing
@@ -2542,6 +2506,10 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         let regions = crate::status_rules_editor::layout_for_column(content, desired, column);
         let position = Position::new(mouse.column, mouse.row);
         let rule_count = app.custom_status_rules.rules.len();
+        if crate::status_rules_editor::pointer::picker_event(app, mouse.kind, position, &regions) {
+            app.mode = Mode::Settings(Box::new(state));
+            return;
+        }
         if regions.rules.contains(position) {
             if let Some(editor) = &mut app.custom_status_rules_editor {
                 match mouse.kind {
@@ -2624,18 +2592,9 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             } else if crate::status_rules_editor::add_rule_button(regions.rules)
                 .is_some_and(|rect| rect.contains(position))
             {
-                if let Some(mut editor) = app.custom_status_rules_editor.take() {
-                    let previous = editor.clone();
-                    let mut rules = app.custom_status_rules.clone();
-                    if editor.add_rule(&mut rules) {
-                        editor.save_rules(app, previous, rules);
-                        if editor.save_error.is_none() {
-                            editor.column =
-                                crate::status_rules_editor::EditorColumn::ConditionAndVisual;
-                            editor.keep_selected_visible(regions.rules.height);
-                        }
-                    }
-                    app.custom_status_rules_editor = Some(editor);
+                // "+ Add" offers the templates; choosing one adds the rule.
+                if let Some(editor) = &mut app.custom_status_rules_editor {
+                    editor.picker = Some(crate::status_rules_editor::picker::Picker::templates());
                 }
             } else if let Some((tab, _)) = crate::status_rules_editor::preview_tabs(regions.preview)
                 .into_iter()
@@ -2683,11 +2642,16 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             Some(ConditionAction::Delete) => editor.remove_condition(&mut rules),
                             Some(ConditionAction::Case) => editor.toggle_screen_case(&mut rules),
                             Some(ConditionAction::Region) => editor.cycle_screen_region(&mut rules),
-                            Some(ConditionAction::Edit) => {
-                                editor.draft_target = DraftTarget::Condition;
-                                editor.parameter_draft = editor.parameter(&rules);
-                                Ok(())
-                            }
+                            // ✎ types a value, or offers the grouped list
+                            // when the condition has nothing to type.
+                            Some(ConditionAction::Edit) => match editor.parameter(&rules) {
+                                Some(value) => {
+                                    editor.draft_target = DraftTarget::Condition;
+                                    editor.parameter_draft = Some(value);
+                                    Ok(())
+                                }
+                                None => editor.open_condition_picker(&rules),
+                            },
                             None => Ok(()),
                         };
                         match change {
@@ -2715,10 +2679,12 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             }
                             VisualAction::Colour => {
                                 editor.draft_target = DraftTarget::Colour;
-                                editor.parameter_draft = editor
-                                    .selected_rule
-                                    .and_then(|index| rules.rules.get(index))
-                                    .map(|rule| rule.then.style.color.clone().unwrap_or_default());
+                                editor.parameter_draft = Some(
+                                    editor
+                                        .visual(&rules)
+                                        .and_then(|visual| visual.style.color.clone())
+                                        .unwrap_or_default(),
+                                );
                                 false
                             }
                             VisualAction::Bold => editor.toggle_weight(&mut rules, true),
@@ -2732,6 +2698,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         }
                     }
                     app.custom_status_rules_editor = Some(editor);
+                }
+            } else if regions.rules.contains(position)
+                && crate::status_rules_editor::fallback_row(regions.rules) == Some(position.y)
+            {
+                if let Some(editor) = &mut app.custom_status_rules_editor {
+                    editor.select_fallback();
+                    editor.column = crate::status_rules_editor::EditorColumn::Rules;
                 }
             } else if regions.rules.contains(position) && position.y > regions.rules.y {
                 let hit = app.custom_status_rules_editor.as_ref().and_then(|editor| {
@@ -2751,6 +2724,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 if let Some((index, first)) = hit {
                     if let Some(mut editor) = app.custom_status_rules_editor.take() {
                         editor.selected_rule = Some(index);
+                        editor.fallback_selected = false;
                         editor.selected_condition = 0;
                         editor.column = crate::status_rules_editor::EditorColumn::Rules;
                         let previous = editor.clone();
@@ -7476,6 +7450,8 @@ mod agent_monitoring_icon_control_tests {
         );
 
         // A condition control acts on the first condition of the selected rule.
+        // The open editor owns the content area, so measure it again.
+        let content = content_layout(&app, &state).content_area;
         let desired = app
             .ui_settings
             .left_panel_sizing
@@ -7492,7 +7468,14 @@ mod agent_monitoring_icon_control_tests {
         state = click(&mut app, state, Position::new(controls.x + 2, controls.y));
         assert_ne!(
             app.custom_status_rules.rules[0].any_of[0].all_of[0].negated,
-            negated_before
+            negated_before,
+            "NOT click at {controls:?} in {:?}: {:?}",
+            regions,
+            app.custom_status_rules_editor.as_ref().map(|editor| (
+                &editor.save_error,
+                editor.column,
+                editor.selected_condition
+            ))
         );
         let editor = app.custom_status_rules_editor.as_ref().unwrap();
         assert_eq!(

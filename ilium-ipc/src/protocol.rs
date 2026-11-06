@@ -61,6 +61,18 @@ pub struct StatusScreenObservation {
     pub unknown: Vec<u16>,
 }
 
+/// The server refused a whole `SetStatusScreenWatches` revision. Every watch
+/// of that revision stays `Unknown` (never a negative match) on the client;
+/// `watch_id` names the offending watch when the refusal is about one watch
+/// (invalid pattern, pattern length, duplicate identifier) and is `None` for
+/// set-wide limits such as the watch count.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusScreenWatchRejection {
+    pub revision: u64,
+    pub watch_id: Option<u16>,
+    pub message: String,
+}
+
 /// One process-name substring and the agent class assigned when it matches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CustomAgentSignature {
@@ -1771,4 +1783,7 @@ pub enum ServerEvent {
     /// Connection-local screen pattern results; terminal contents never leave
     /// the server as part of this event.
     StatusScreenObserved(StatusScreenObservation),
+    /// A `SetStatusScreenWatches` revision was refused as a whole; appended
+    /// to preserve earlier event discriminants.
+    StatusScreenWatchesRejected(StatusScreenWatchRejection),
 }

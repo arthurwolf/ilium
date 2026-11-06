@@ -43,7 +43,7 @@ pub use protocol::{
     PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
     ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
-    StatusScreenObservation, StatusScreenWatch, WorkspaceClosePolicy, WorkspaceCreateSpec,
+    StatusScreenObservation, StatusScreenWatch, StatusScreenWatchRejection, WorkspaceClosePolicy, WorkspaceCreateSpec,
     WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus, WorkspaceGitVersion,
     WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
     WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
@@ -932,6 +932,16 @@ mod tests {
                 screen_generation: 42,
                 matched: vec![1, 3],
                 unknown: vec![2],
+            }),
+            ServerEvent::StatusScreenWatchesRejected(StatusScreenWatchRejection {
+                revision: 9,
+                watch_id: Some(4),
+                message: "Invalid screen watch 4: unclosed group".into(),
+            }),
+            ServerEvent::StatusScreenWatchesRejected(StatusScreenWatchRejection {
+                revision: 10,
+                watch_id: None,
+                message: "At most 16 screen watches are allowed".into(),
             }),
             ServerEvent::NodeFocusCheckpointChanged {
                 node_id: NodeId(2),

@@ -63,6 +63,44 @@ pub struct Theme {
     pub border_focused: Color,
     /// Border color for a panel that does not.
     pub border_unfocused: Color,
+    /// Foregrounds for the semantic status tones custom status rules name.
+    pub status_tones: StatusTones,
+}
+
+/// Foreground colours for the named theme slots of custom status rules
+/// (`danger`, `warning`, `success`, `info`, `muted`; `accent` is
+/// [`Theme::accent_bg`]). The dark preset keeps the terminal's own ANSI
+/// colours; the light preset uses darker values that keep contrast against a
+/// light background.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusTones {
+    pub danger: Color,
+    pub warning: Color,
+    pub success: Color,
+    pub info: Color,
+    pub muted: Color,
+}
+
+impl StatusTones {
+    pub const fn dark() -> Self {
+        Self {
+            danger: Color::Red,
+            warning: Color::Yellow,
+            success: Color::Green,
+            info: Color::Cyan,
+            muted: Color::DarkGray,
+        }
+    }
+
+    pub const fn light() -> Self {
+        Self {
+            danger: Color::Rgb(0xb4, 0x23, 0x18),
+            warning: Color::Rgb(0x8a, 0x5a, 0x00),
+            success: Color::Rgb(0x2b, 0x7a, 0x0b),
+            info: Color::Rgb(0x0b, 0x6e, 0x99),
+            muted: Color::Rgb(0x6b, 0x72, 0x80),
+        }
+    }
 }
 
 impl Default for Theme {
@@ -79,6 +117,7 @@ impl Theme {
             accent_fg: Color::Rgb(0x1a, 0x1b, 0x26),
             border_focused: Color::Cyan,
             border_unfocused: Color::DarkGray,
+            status_tones: StatusTones::dark(),
         }
     }
 
@@ -94,6 +133,7 @@ impl Theme {
             accent_fg: Color::Rgb(0x1a, 0x1b, 0x26),
             border_focused: Color::Rgb(0x3b, 0x5b, 0xdb),
             border_unfocused: Color::Rgb(0x8a, 0x8f, 0x98),
+            status_tones: StatusTones::light(),
         }
     }
 
@@ -186,6 +226,11 @@ pub fn accent_bg() -> Color {
 /// comment for why this is exposed as a plain `Color` getter too.
 pub fn accent_fg() -> Color {
     current().accent_fg
+}
+
+/// The effective semantic status tones, for custom status rule colours.
+pub fn status_tones() -> StatusTones {
+    current().status_tones
 }
 
 /// Border color/weight for a panel, brighter and bold when `focused`.

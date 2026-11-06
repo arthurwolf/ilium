@@ -280,7 +280,7 @@ async fn status_screen_watch_follows_a_live_pane_through_match_change_and_close(
 }
 
 #[tokio::test]
-async fn status_screen_watch_refuses_an_invalid_pattern_without_replacing_the_previous_revision() {
+async fn status_screen_watch_refusal_is_a_typed_event_naming_the_revision_and_watch() {
     let mut server = TestServer::start("screen-watch-invalid").await;
     let mut client = server.connect().await;
     write_frame(
@@ -294,30 +294,67 @@ async fn status_screen_watch_refuses_an_invalid_pattern_without_replacing_the_pr
     .expect("write Attach request");
     read_initial_state(&mut client, Duration::from_secs(5)).await;
 
+    // One valid watch plus one that cannot compile: the whole revision is
+    // refused, and the typed event names the revision and the bad watch.
     subscribe(
         &mut client,
         1,
-        vec![StatusScreenWatch {
-            id: 0,
-            pattern: ScreenPattern {
-                pattern: "(unclosed".to_string(),
-                ignore_case: false,
-                region: ScreenRegion::All,
+        vec![
+            StatusScreenWatch {
+                id: 0,
+                pattern: ScreenPattern {
+                    pattern: "ok".to_string(),
+                    ignore_case: false,
+                    region: ScreenRegion::All,
+                },
             },
-        }],
+            StatusScreenWatch {
+                id: 5,
+                pattern: ScreenPattern {
+                    pattern: "(unclosed".to_string(),
+                    ignore_case: false,
+                    region: ScreenRegion::All,
+                },
+            },
+        ],
     )
     .await;
     let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::Error { .. })
+        matches!(event, ServerEvent::StatusScreenWatchesRejected(_))
     })
     .await;
-    let ServerEvent::Error { message } = event else {
-        unreachable!("predicate only matches Error");
+    let ServerEvent::StatusScreenWatchesRejected(rejection) = event else {
+        unreachable!("predicate only matches StatusScreenWatchesRejected");
     };
+    assert_eq!(rejection.revision, 1);
+    assert_eq!(rejection.watch_id, Some(5));
     assert!(
-        message.contains("Invalid screen watch 0"),
-        "the rejection names the offending watch: {message}"
+        rejection.message.contains("Invalid screen watch 5"),
+        "the rejection explains the offending watch: {}",
+        rejection.message
     );
+
+    // A set-wide limit is refused without a watch identifier.
+    let too_many: Vec<_> = (0..=16u16)
+        .map(|id| StatusScreenWatch {
+            id,
+            pattern: ScreenPattern {
+                pattern: "x".to_string(),
+                ignore_case: false,
+                region: ScreenRegion::All,
+            },
+        })
+        .collect();
+    subscribe(&mut client, 2, too_many).await;
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::StatusScreenWatchesRejected(_))
+    })
+    .await;
+    let ServerEvent::StatusScreenWatchesRejected(rejection) = event else {
+        unreachable!("predicate only matches StatusScreenWatchesRejected");
+    };
+    assert_eq!(rejection.revision, 2);
+    assert_eq!(rejection.watch_id, None);
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await

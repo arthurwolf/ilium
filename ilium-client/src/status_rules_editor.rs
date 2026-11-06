@@ -14,9 +14,14 @@
 //!   the keyboard selection visible.
 
 mod inspector;
+pub(crate) mod keyboard;
+pub mod picker;
+pub(crate) mod pointer;
+pub mod templates;
 
 pub use inspector::{
-    focused_pane_explanation, matching_pane_count, pane_explanation, PaneExplanation,
+    focused_pane_explanation, matching_pane_count, pane_explanation, winning_pane_counts,
+    PaneExplanation,
 };
 
 use ilium_core::status_rule_expression::{
@@ -27,7 +32,7 @@ use ratatui::layout::Rect;
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Padding, Paragraph},
     Frame,
 };
 
@@ -46,6 +51,12 @@ pub const MINIMUM_EDITOR_WIDTH: u16 = 25;
 pub const SINGLE_COLUMN_BELOW: u16 = 68;
 /// Rows per rule in the list: name, summary, spacer.
 pub const RULE_ROWS: u16 = 3;
+/// Rows pinned under the list for the "no rule matches" fallback: a
+/// divider and the fallback row itself.
+pub const FALLBACK_ROWS: u16 = 2;
+/// Blank cells between each column's border and its text, so content never
+/// touches the frame (CLAUDE.md "Settings tabs design and aeration").
+pub const INNER_MARGIN: u16 = 1;
 /// Most recent rule lists kept for undo.
 pub const UNDO_DEPTH: usize = 20;
 /// Breadcrumb shown when the heading row is wide enough for it.
@@ -135,10 +146,15 @@ pub fn visual_actions(area: Rect, condition_count: usize) -> Option<Rect> {
         .y
         .saturating_add(2)
         .saturating_add(condition_count as u16);
-    if area.width < 17 || row >= area.bottom().saturating_sub(1) {
+    if area.width < 17 + 2 * INNER_MARGIN || row >= area.bottom().saturating_sub(1) {
         return None;
     }
-    Some(Rect::new(area.x.saturating_add(1), row, 15, 1))
+    Some(Rect::new(
+        area.x.saturating_add(1 + INNER_MARGIN),
+        row,
+        15,
+        1,
+    ))
 }
 
 pub fn visual_action_at(
@@ -166,10 +182,16 @@ pub fn visual_action_at(
 /// Nine one-cell controls at the end of a condition row:
 /// `‹ › ¬ ∨ + × ✎ i ≡` (the last two only for screen patterns).
 pub fn condition_actions(area: Rect, row: u16) -> Option<Rect> {
-    if area.width < 20 || row <= area.y || row >= area.bottom().saturating_sub(1) {
+    if area.width < 20 + 2 * INNER_MARGIN || row <= area.y || row >= area.bottom().saturating_sub(1)
+    {
         return None;
     }
-    Some(Rect::new(area.right().saturating_sub(10), row, 9, 1))
+    Some(Rect::new(
+        area.right().saturating_sub(10 + INNER_MARGIN),
+        row,
+        9,
+        1,
+    ))
 }
 
 pub fn condition_action_at(
@@ -213,10 +235,23 @@ pub fn reset_rule_button(area: Rect) -> Option<Rect> {
 /// (`● ↑ ↓ ✎ ⧉ × N`). Returning no rectangle on compact or clipped rows
 /// keeps borders and other targets inert.
 pub fn rule_actions(area: Rect, row: u16) -> Option<Rect> {
-    if area.width < 17 || row <= area.y || row >= area.bottom().saturating_sub(1) {
+    if area.width < 17 + 2 * INNER_MARGIN || row <= area.y || row >= area.bottom().saturating_sub(1)
+    {
         return None;
     }
-    Some(Rect::new(area.right().saturating_sub(8), row, 7, 1))
+    Some(Rect::new(
+        area.right().saturating_sub(8 + INNER_MARGIN),
+        row,
+        7,
+        1,
+    ))
+}
+
+/// The screen row of the pinned "no rule matches" fallback (the last row
+/// inside the rules column), `None` when the column is too short to show
+/// it beside at least one rule.
+pub fn fallback_row(area: Rect) -> Option<u16> {
+    (area.height >= 2 + RULE_ROWS + FALLBACK_ROWS).then(|| area.bottom().saturating_sub(2))
 }
 
 pub fn rule_action_at(
@@ -264,9 +299,15 @@ pub fn section_tabs(area: Rect) -> [(EditorColumn, Rect); 3] {
     ]
 }
 
-/// Rules that fit inside a list of `height` rows (borders excluded).
+/// Rules that fit inside a list of `height` rows (borders and, when it is
+/// shown, the pinned fallback excluded).
 pub fn visible_rule_rows(height: u16) -> usize {
-    usize::from(height.saturating_sub(2) / RULE_ROWS).max(1)
+    let fallback = if height >= 2 + RULE_ROWS + FALLBACK_ROWS {
+        FALLBACK_ROWS
+    } else {
+        0
+    };
+    usize::from(height.saturating_sub(2 + fallback) / RULE_ROWS).max(1)
 }
 
 /// The first rule shown: the wheel position, clamped so the list never
@@ -294,6 +335,11 @@ pub fn rule_at_row(state: &EditorState, area: Rect, count: usize, row: u16) -> O
 /// Keep the selected condition visible and reserve rows for the visual
 /// controls and any active draft or error message.
 pub fn condition_window(state: &EditorState, area: Rect, count: usize) -> (usize, usize) {
+    // The fallback has one fixed "WHEN no rule matches" row instead of
+    // conditions, so its icon controls sit where a one-condition rule's do.
+    if state.fallback_selected {
+        return (0, usize::from(area.height > 4));
+    }
     let message_rows =
         usize::from(state.parameter_draft.is_some()) + usize::from(state.save_error.is_some());
     let available = usize::from(area.height.saturating_sub(4)).saturating_sub(message_rows);
@@ -355,6 +401,21 @@ pub fn layout(area: Rect, desired_tree_width: u16) -> EditorLayout {
     }
 }
 
+/// Where an open condition or template list is drawn: over the widest
+/// visible column, the condition column on ties, so it is never squeezed
+/// into a narrow rules list.
+pub fn picker_area(regions: &EditorLayout) -> Rect {
+    [regions.rules, regions.preview]
+        .into_iter()
+        .fold(regions.editor, |widest, candidate| {
+            if candidate.width > widest.width {
+                candidate
+            } else {
+                widest
+            }
+        })
+}
+
 /// On very narrow terminals present one selectable column at a time instead
 /// of giving the preview zero cells or placing pointer targets off-screen.
 pub fn layout_for_column(
@@ -401,13 +462,20 @@ pub struct EditorState {
     pub selected_condition: usize,
     /// A deleted rule is kept for the session's undo action.
     pub deleted: Option<(usize, Rule<Condition, StatusVisual>)>,
-    /// Rule lists as they were before each saved change, newest last, at
-    /// most [`UNDO_DEPTH`] deep.
-    pub history: Vec<Vec<Rule<Condition, StatusVisual>>>,
+    /// Rulesets (rules and fallback) as they were before each saved
+    /// change, newest last, at most [`UNDO_DEPTH`] deep.
+    pub history: Vec<StatusRules>,
+    /// The message line under the editor: a refused edit's reason or a
+    /// write problem. A refused edit never changes the rules.
     pub save_error: Option<String>,
     pub confirm_reset: bool,
     pub parameter_draft: Option<String>,
     pub draft_target: DraftTarget,
+    /// The pinned "no rule matches" row is selected instead of a rule;
+    /// visual edits then change `StatusRules::fallback`.
+    pub fallback_selected: bool,
+    /// The condition or template picker drawn over a column, when open.
+    pub picker: Option<picker::Picker>,
 }
 
 impl EditorState {
@@ -425,6 +493,101 @@ impl EditorState {
             confirm_reset: false,
             parameter_draft: None,
             draft_target: DraftTarget::Condition,
+            fallback_selected: false,
+            picker: None,
+        }
+    }
+
+    /// The selected rule's index, `None` while the fallback row is selected
+    /// or the selection is out of range.
+    fn rule_index(&self, rules: &StatusRules) -> Option<usize> {
+        self.selected_rule
+            .filter(|index| !self.fallback_selected && *index < rules.rules.len())
+    }
+
+    /// The visual the designer edits: the fallback's (created blank on
+    /// first edit) or the selected rule's.
+    fn visual_mut<'a>(&self, rules: &'a mut StatusRules) -> Option<&'a mut StatusVisual> {
+        if self.fallback_selected {
+            return Some(rules.fallback.get_or_insert_with(|| StatusVisual {
+                kind: VisualKind::Hidden,
+                style: VisualStyle::default(),
+            }));
+        }
+        let index = self.rule_index(rules)?;
+        rules.rules.get_mut(index).map(|rule| &mut rule.then)
+    }
+
+    /// The visual the designer shows, see [`Self::visual_mut`].
+    pub fn visual<'a>(&self, rules: &'a StatusRules) -> Option<&'a StatusVisual> {
+        if self.fallback_selected {
+            return rules.fallback.as_ref();
+        }
+        rules
+            .rules
+            .get(self.rule_index(rules)?)
+            .map(|rule| &rule.then)
+    }
+
+    /// Select the pinned fallback row.
+    pub fn select_fallback(&mut self) {
+        self.fallback_selected = true;
+        self.selected_condition = 0;
+    }
+
+    /// Open the condition picker on the selected condition.
+    pub fn open_condition_picker(&mut self, rules: &StatusRules) -> Result<(), &'static str> {
+        let (terms, _) = self.expression(rules)?;
+        let current = terms
+            .get(self.selected_condition)
+            .map(|term| &term.condition);
+        self.picker = Some(picker::Picker::conditions(current));
+        Ok(())
+    }
+
+    /// Replace the selected condition with a catalogue entry, keeping the
+    /// current parameter (pattern, percentage...) when the entry is the
+    /// same kind of condition, and keeping its NOT.
+    pub fn set_condition(
+        &self,
+        rules: &mut StatusRules,
+        condition: Condition,
+    ) -> Result<(), &'static str> {
+        let (mut terms, connectors) = self.expression(rules)?;
+        let term = terms
+            .get_mut(self.selected_condition)
+            .ok_or("Select a condition")?;
+        if !picker::same_entry(&term.condition, &condition) {
+            term.condition = condition;
+        }
+        self.replace_expression(rules, terms, &connectors)
+    }
+
+    /// Apply the open picker's highlighted entry and close it. Returns
+    /// whether `rules` changed; an error keeps the picker closed and the
+    /// rules untouched.
+    pub fn choose_from_picker(&mut self, rules: &mut StatusRules) -> Result<bool, String> {
+        let Some(open) = self.picker.take() else {
+            return Ok(false);
+        };
+        match open.chosen().cloned() {
+            None => Ok(false),
+            Some(picker::PickerChoice::Condition(condition)) => {
+                self.set_condition(rules, condition)?;
+                Ok(true)
+            }
+            Some(picker::PickerChoice::Template(index)) => {
+                let template = templates::templates()
+                    .get(index)
+                    .ok_or("Unknown template")?;
+                if !self.add_rule_from(rules, template) {
+                    return Err(format!(
+                        "At most {} rules",
+                        ilium_core::status_rule_expression::MAXIMUM_RULES
+                    ));
+                }
+                Ok(true)
+            }
         }
     }
 
@@ -469,24 +632,25 @@ impl EditorState {
     /// Select by index (clamped) and keep the selection visible.
     pub fn select_rule(&mut self, index: usize, count: usize, height: u16) {
         self.selected_rule = (count > 0).then(|| index.min(count - 1));
+        self.fallback_selected = false;
         self.selected_condition = 0;
         self.keep_selected_visible(height);
     }
 
-    /// Remember the rule list as it was before a saved change.
-    pub fn record_history(&mut self, before: Vec<Rule<Condition, StatusVisual>>) {
+    /// Remember the ruleset as it was before a saved change.
+    pub fn record_history(&mut self, before: StatusRules) {
         if self.history.len() >= UNDO_DEPTH {
             self.history.remove(0);
         }
         self.history.push(before);
     }
 
-    /// Restore the most recent recorded list; falls back to the last
+    /// Restore the most recent recorded ruleset; falls back to the last
     /// deleted rule when nothing newer was recorded.
     pub fn undo(&mut self, rules: &mut StatusRules) -> bool {
         match self.history.pop() {
             Some(before) => {
-                rules.rules = before;
+                *rules = before;
                 self.selected_rule = self
                     .selected_rule
                     .map(|index| index.min(rules.rules.len().saturating_sub(1)))
@@ -497,13 +661,15 @@ impl EditorState {
         }
     }
 
-    /// Save `rules`, recording the previous list for undo; on failure the
-    /// editor returns to `previous` and shows the error.
+    /// Save `rules`, recording the previous ruleset for undo; on failure the
+    /// editor returns to `previous` and shows the error. After a success
+    /// the message line keeps any lasting write problem (a failed write
+    /// being retried, or no configuration folder) instead of hiding it.
     pub fn save_rules(&mut self, app: &mut crate::app::App, previous: Self, rules: StatusRules) {
-        let before = app.custom_status_rules.rules.clone();
+        let before = app.custom_status_rules.clone();
         match app.settings_save_custom_status_rules(rules) {
             Ok(()) => {
-                self.save_error = None;
+                self.save_error = app.custom_status_rules_write_error.clone();
                 self.record_history(before);
             }
             Err(error) => {
@@ -519,10 +685,7 @@ impl EditorState {
         if rules.rules.len() >= 64 {
             return false;
         }
-        let Some(index) = self
-            .selected_rule
-            .filter(|index| *index < rules.rules.len())
-        else {
+        let Some(index) = self.rule_index(rules) else {
             return false;
         };
         let mut copy = rules.rules[index].clone();
@@ -567,10 +730,7 @@ impl EditorState {
     }
 
     pub fn move_selected(&mut self, rules: &mut StatusRules, direction: i32) -> bool {
-        let Some(index) = self
-            .selected_rule
-            .filter(|index| *index < rules.rules.len())
-        else {
+        let Some(index) = self.rule_index(rules) else {
             return false;
         };
         let destination = if direction < 0 {
@@ -591,10 +751,7 @@ impl EditorState {
     }
 
     pub fn delete_selected(&mut self, rules: &mut StatusRules) -> bool {
-        let Some(index) = self
-            .selected_rule
-            .filter(|index| *index < rules.rules.len())
-        else {
+        let Some(index) = self.rule_index(rules) else {
             return false;
         };
         self.deleted = Some((index, rules.rules.remove(index)));
@@ -637,12 +794,31 @@ impl EditorState {
             },
         });
         self.selected_rule = Some(rules.rules.len() - 1);
+        self.fallback_selected = false;
+        true
+    }
+
+    /// Append a rule built from a template, select it and its first
+    /// condition. Refused at the rule limit.
+    pub fn add_rule_from(
+        &mut self,
+        rules: &mut StatusRules,
+        template: &templates::RuleTemplate,
+    ) -> bool {
+        if rules.rules.len() >= ilium_core::status_rule_expression::MAXIMUM_RULES {
+            return false;
+        }
+        let id = self.fresh_rule_id(rules);
+        rules.rules.push(template.build(id));
+        self.selected_rule = Some(rules.rules.len() - 1);
+        self.fallback_selected = false;
+        self.selected_condition = 0;
         true
     }
 
     pub fn toggle_selected(&self, rules: &mut StatusRules) -> bool {
         let Some(rule) = self
-            .selected_rule
+            .rule_index(rules)
             .and_then(|index| rules.rules.get_mut(index))
         else {
             return false;
@@ -657,7 +833,7 @@ impl EditorState {
             return Err("Enter a name of 1 to 48 printable characters".into());
         }
         let rule = self
-            .selected_rule
+            .rule_index(rules)
             .and_then(|index| rules.rules.get_mut(index))
             .ok_or("Select a rule first")?;
         rule.name = name.to_owned();
@@ -680,7 +856,7 @@ impl EditorState {
             return Err("Choose at least one condition and at most eight conditions per group");
         }
         let rule = self
-            .selected_rule
+            .rule_index(rules)
             .and_then(|index| rules.rules.get_mut(index))
             .ok_or("Select a rule first")?;
         rule.any_of = groups;
@@ -691,8 +867,11 @@ impl EditorState {
         &self,
         rules: &StatusRules,
     ) -> Result<(Vec<ConditionTerm<Condition>>, Vec<Connector>), &'static str> {
+        if self.fallback_selected {
+            return Err("The fallback applies when no rule matches; it has no conditions");
+        }
         let rule = self
-            .selected_rule
+            .rule_index(rules)
             .and_then(|index| rules.rules.get(index))
             .ok_or("Select a rule first")?;
         to_line(&rule.any_of)
@@ -765,14 +944,7 @@ impl EditorState {
         // value for states such as individual goal or agent states.
         let current = catalog
             .iter()
-            .position(|condition| match (condition, &term.condition) {
-                (Condition::ScreenMatches(_), Condition::ScreenMatches(_))
-                | (Condition::MonitorCountAtLeast(_), Condition::MonitorCountAtLeast(_))
-                | (Condition::ProgressAtLeast(_), Condition::ProgressAtLeast(_))
-                | (Condition::ProgressBelow(_), Condition::ProgressBelow(_))
-                | (Condition::ProgressBetween { .. }, Condition::ProgressBetween { .. }) => true,
-                _ => *condition == term.condition,
-            })
+            .position(|condition| picker::same_entry(condition, &term.condition))
             .ok_or("This condition is not available in the selector")?;
         let next = (current as i32 + direction.signum()).rem_euclid(catalog.len() as i32) as usize;
         term.condition = catalog[next].clone();
@@ -784,9 +956,9 @@ impl EditorState {
         match &terms.get(self.selected_condition)?.condition {
             Condition::ScreenMatches(pattern) => Some(pattern.pattern.clone()),
             Condition::MonitorCountAtLeast(value) => Some(value.to_string()),
-            Condition::ProgressAtLeast(value) | Condition::ProgressBelow(value) => {
-                Some(value.to_string())
-            }
+            Condition::ProgressAtLeast(value)
+            | Condition::ProgressBelow(value)
+            | Condition::ContextAbovePercent(value) => Some(value.to_string()),
             Condition::ProgressBetween { minimum, maximum } => Some(format!("{minimum},{maximum}")),
             _ => None,
         }
@@ -816,7 +988,9 @@ impl EditorState {
                     .parse()
                     .map_err(|_| "Enter a nonnegative monitor count")?
             }
-            Condition::ProgressAtLeast(value) | Condition::ProgressBelow(value) => {
+            Condition::ProgressAtLeast(value)
+            | Condition::ProgressBelow(value)
+            | Condition::ContextAbovePercent(value) => {
                 let parsed: u8 = input
                     .parse()
                     .map_err(|_| "Enter a percentage from 0 to 100")?;
@@ -860,40 +1034,45 @@ impl EditorState {
     }
 
     pub fn cycle_visual(&self, rules: &mut StatusRules) -> bool {
-        let Some(rule) = self
-            .selected_rule
-            .and_then(|index| rules.rules.get_mut(index))
-        else {
+        let Some(visual) = self.visual_mut(rules) else {
             return false;
         };
-        rule.then.kind = match &rule.then.kind {
+        visual.kind = match &visual.kind {
             VisualKind::Hidden => VisualKind::BuiltIn("working".into()),
             VisualKind::BuiltIn(_) => VisualKind::Glyph("●".into()),
             VisualKind::Glyph(_) => VisualKind::BrailleAnimation {
                 preset: "spinner".into(),
                 frames_per_second: 8,
             },
-            VisualKind::BrailleAnimation { .. } => VisualKind::FrameAnimation {
-                frames: ["◐", "◓", "◑", "◒"]
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect(),
-                frames_per_second: 4,
-                ping_pong: false,
-            },
-            VisualKind::FrameAnimation { .. } => VisualKind::ProgressFrames {
-                frames: ["🌑", "🌒", "🌓", "🌔", "🌕"]
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect(),
-            },
+            VisualKind::BrailleAnimation { .. } => {
+                crate::status_rule_visual::FRAME_FAMILIES[0].visual_kind()
+            }
+            // Step through the ready-made frame families (quarters, moon
+            // phases, clock hours, arrows, hearts, blocks); user-typed frames
+            // or the last family move on to progress frames.
+            VisualKind::FrameAnimation { frames, .. } => {
+                match crate::status_rule_visual::frame_family_of(frames).and_then(|family| {
+                    crate::status_rule_visual::FRAME_FAMILIES
+                        .iter()
+                        .skip_while(|candidate| candidate.name != family.name)
+                        .nth(1)
+                }) {
+                    Some(next) => next.visual_kind(),
+                    None => VisualKind::ProgressFrames {
+                        frames: ["🌑", "🌒", "🌓", "🌔", "🌕"]
+                            .into_iter()
+                            .map(str::to_owned)
+                            .collect(),
+                    },
+                }
+            }
             VisualKind::ProgressFrames { .. } => VisualKind::Hidden,
         };
         true
     }
 
     pub fn visual_value(&self, rules: &StatusRules) -> Option<String> {
-        let visual = &rules.rules.get(self.selected_rule?)?.then;
+        let visual = self.visual(rules)?;
         match &visual.kind {
             VisualKind::Hidden => None,
             VisualKind::BuiltIn(key) | VisualKind::Glyph(key) => Some(key.clone()),
@@ -905,11 +1084,8 @@ impl EditorState {
     }
 
     pub fn set_visual_value(&self, rules: &mut StatusRules, input: &str) -> Result<(), String> {
-        let rule = self
-            .selected_rule
-            .and_then(|index| rules.rules.get_mut(index))
-            .ok_or("Select a rule")?;
-        let mut visual = rule.then.clone();
+        let target = self.visual_mut(rules).ok_or("Select a rule")?;
+        let mut visual = target.clone();
         match &mut visual.kind {
             VisualKind::Hidden => return Err("Choose a visible icon type first".into()),
             VisualKind::BuiltIn(key) | VisualKind::Glyph(key) => *key = input.to_owned(),
@@ -919,45 +1095,36 @@ impl EditorState {
             }
         }
         crate::status_rule_visual::validate_visual(&visual, 2).map_err(str::to_owned)?;
-        rule.then = visual;
+        *target = visual;
         Ok(())
     }
 
     pub fn set_colour(&self, rules: &mut StatusRules, input: &str) -> Result<(), String> {
-        let rule = self
-            .selected_rule
-            .and_then(|index| rules.rules.get_mut(index))
-            .ok_or("Select a rule")?;
-        let mut visual = rule.then.clone();
+        let target = self.visual_mut(rules).ok_or("Select a rule")?;
+        let mut visual = target.clone();
         visual.style.color = (!input.is_empty()).then(|| input.to_owned());
         crate::status_rule_visual::validate_visual(&visual, 2).map_err(str::to_owned)?;
-        rule.then = visual;
+        *target = visual;
         Ok(())
     }
 
     pub fn toggle_weight(&self, rules: &mut StatusRules, bold: bool) -> bool {
-        let Some(rule) = self
-            .selected_rule
-            .and_then(|index| rules.rules.get_mut(index))
-        else {
+        let Some(visual) = self.visual_mut(rules) else {
             return false;
         };
         if bold {
-            rule.then.style.bold = !rule.then.style.bold;
+            visual.style.bold = !visual.style.bold;
         } else {
-            rule.then.style.dim = !rule.then.style.dim;
+            visual.style.dim = !visual.style.dim;
         }
         true
     }
 
     pub fn adjust_animation_speed(&self, rules: &mut StatusRules, direction: i8) -> bool {
-        let Some(rule) = self
-            .selected_rule
-            .and_then(|index| rules.rules.get_mut(index))
-        else {
+        let Some(visual) = self.visual_mut(rules) else {
             return false;
         };
-        let frames_per_second = match &mut rule.then.kind {
+        let frames_per_second = match &mut visual.kind {
             VisualKind::BrailleAnimation {
                 frames_per_second, ..
             }
@@ -974,13 +1141,10 @@ impl EditorState {
     }
 
     pub fn toggle_ping_pong(&self, rules: &mut StatusRules) -> bool {
-        let Some(rule) = self
-            .selected_rule
-            .and_then(|index| rules.rules.get_mut(index))
-        else {
+        let Some(visual) = self.visual_mut(rules) else {
             return false;
         };
-        let VisualKind::FrameAnimation { ping_pong, .. } = &mut rule.then.kind else {
+        let VisualKind::FrameAnimation { ping_pong, .. } = &mut visual.kind else {
             return false;
         };
         *ping_pong = !*ping_pong;
@@ -1034,7 +1198,10 @@ fn visual_label(visual: &VisualKind) -> String {
         VisualKind::Glyph(glyph) => glyph.clone(),
         VisualKind::BrailleAnimation { .. } => "braille animation".into(),
         VisualKind::FrameAnimation { frames, .. } => {
-            format!("{} animation", frames.first().map_or("", String::as_str))
+            match crate::status_rule_visual::frame_family_of(frames) {
+                Some(family) => format!("{} animation", family.name),
+                None => format!("{} animation", frames.first().map_or("", String::as_str)),
+            }
         }
         VisualKind::ProgressFrames { frames } => {
             format!("{} progress", frames.first().map_or("", String::as_str))
@@ -1072,14 +1239,13 @@ fn rule_summary_line(
     app: &crate::app::App,
 ) -> Line<'static> {
     let keyword = Style::new().fg(Color::White).add_modifier(Modifier::BOLD);
-    let condition = Style::new().fg(Color::Cyan);
     let mut visual = crate::status_rule_visual::visual_span(
         &rule.then,
         &app.ui_settings.icons,
         app.ui_settings.use_stable_glyphs,
         u64::try_from(app.started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
         app.ui_settings.motion_level,
-        Some(50.0),
+        crate::status_rule_visual::ProgressCue::measured(50.0),
     );
     if visual.content.is_empty() {
         visual = Span::styled("∅", Style::new().fg(Color::DarkGray));
@@ -1124,7 +1290,10 @@ fn rule_summary_line(
                         .add_modifier(Modifier::BOLD),
                 );
             }
-            add(condition_label(&term.condition), condition);
+            add(
+                condition_label(&term.condition),
+                Style::new().fg(picker::category_color(term.condition.category())),
+            );
         }
     }
     spans.push(Span::styled(" THEN ", keyword));
@@ -1154,8 +1323,11 @@ pub fn help_anchor_lines(
         .left_panel_sizing
         .resolved_width(app.layout.screen_area.width, true);
     let regions = layout_for_column(area, desired, state.column);
-    if let Ok((terms, _)) = state.expression(&app.custom_status_rules) {
-        let (_, visible) = condition_window(state, regions.editor, terms.len());
+    if state.fallback_selected || state.expression(&app.custom_status_rules).is_ok() {
+        let count = state
+            .expression(&app.custom_status_rules)
+            .map_or(0, |(terms, _)| terms.len());
+        let (_, visible) = condition_window(state, regions.editor, count);
         let then_row = regions
             .editor
             .y
@@ -1249,6 +1421,9 @@ pub fn render(frame: &mut Frame<'_>, area: Rect, app: &crate::app::App, state: &
     render_rules_column(frame, regions.rules, app, state);
     render_condition_column(frame, regions.editor, app, state);
     render_preview_column(frame, regions.preview, app, state);
+    if let Some(open) = &state.picker {
+        picker::render(frame, picker_area(&regions), open);
+    }
 }
 
 fn render_rules_column(
@@ -1260,6 +1435,11 @@ fn render_rules_column(
     let count = app.custom_status_rules.rules.len();
     let first = first_visible_rule(state, area.height, count);
     let visible = visible_rule_rows(area.height);
+    // Text sits inside the border and the inner margin on both sides; the
+    // seven rule action cells take the end of each name row.
+    let inner_width = usize::from(area.width.saturating_sub(2 + 2 * INNER_MARGIN));
+    let issues = crate::config::validate_status_rules(&app.custom_status_rules);
+    let live = winning_pane_counts(app);
     let mut lines = Vec::new();
     for (index, rule) in app
         .custom_status_rules
@@ -1270,7 +1450,7 @@ fn render_rules_column(
         .take(visible)
     {
         let marker = if rule.enabled { "●" } else { "○" };
-        let selected = state.selected_rule == Some(index);
+        let selected = state.selected_rule == Some(index) && !state.fallback_selected;
         let style = if selected {
             crate::theme::selected_style().add_modifier(Modifier::BOLD)
         } else if rule.enabled {
@@ -1278,16 +1458,42 @@ fn render_rules_column(
         } else {
             dim()
         };
-        lines.push(Line::from(vec![
+        let number = format!("{:>2} ", index + 1);
+        let mut badges = Vec::new();
+        if let Some(issue) = issues.iter().find(|issue| issue.rule == Some(index)) {
+            let colour =
+                if issue.severity == ilium_core::status_rule_expression::IssueSeverity::Error {
+                    Color::LightRed
+                } else {
+                    Color::Yellow
+                };
+            badges.push(Span::styled("⚠ ", Style::new().fg(colour)));
+        }
+        let matched = live.get(index).copied().unwrap_or(0);
+        if matched > 0 {
+            badges.push(Span::styled(
+                format!("{matched} live"),
+                Style::new().fg(Color::Green),
+            ));
+        }
+        let badge_width: usize = badges.iter().map(Span::width).sum();
+        let room = inner_width.saturating_sub(7 + 1 + 2 + number.len() + badge_width);
+        let name = crate::settings_ui::truncate_icon_text(&rule.name, room);
+        let used = 2 + number.len() + unicode_width::UnicodeWidthStr::width(name.as_str());
+        let gap = inner_width.saturating_sub(7 + 1 + used + badge_width);
+        let mut spans = vec![
             Span::styled(format!("{marker} "), style),
-            Span::styled(
-                format!("{:>2} ", index + 1),
-                style.add_modifier(Modifier::DIM),
-            ),
-            Span::styled(rule.name.clone(), style),
-        ]));
-        lines.push(rule_summary_line(rule, area.width.saturating_sub(2), app));
+            Span::styled(number, style.add_modifier(Modifier::DIM)),
+            Span::styled(name, style),
+            crate::value_control::leader_span(gap),
+        ];
+        spans.extend(badges);
+        lines.push(Line::from(spans));
+        lines.push(rule_summary_line(rule, inner_width as u16, app));
         lines.push(Line::from(""));
+    }
+    if count == 0 {
+        lines.push(Line::from(Span::styled("No rules yet: A adds one", dim())));
     }
     let title = if count > visible {
         format!(
@@ -1299,9 +1505,17 @@ fn render_rules_column(
         " Rules ".to_owned()
     };
     frame.render_widget(
-        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title)),
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .padding(Padding::horizontal(INNER_MARGIN)),
+        ),
         area,
     );
+    if let Some(row) = fallback_row(area) {
+        render_fallback_row(frame, area, row, app, state, inner_width);
+    }
     if let Some(button) = add_rule_button(area) {
         frame.render_widget(
             Paragraph::new("+ Add ").style(crate::theme::selected_style()),
@@ -1348,6 +1562,56 @@ fn render_rules_column(
     }
 }
 
+/// The pinned "no rule matches" row under a thin divider: the icon panes
+/// get when every rule misses. It is selectable and edited like a rule's
+/// icon, but has no conditions, cannot move and cannot be deleted.
+fn render_fallback_row(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    row: u16,
+    app: &crate::app::App,
+    state: &EditorState,
+    inner_width: usize,
+) {
+    let x = area.x.saturating_add(1 + INNER_MARGIN);
+    let width = inner_width as u16;
+    frame.render_widget(
+        Paragraph::new(Span::styled("─".repeat(inner_width), dim())),
+        Rect::new(x, row.saturating_sub(1), width, 1),
+    );
+    let style = if state.fallback_selected {
+        crate::theme::selected_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+    };
+    let hidden = StatusVisual {
+        kind: VisualKind::Hidden,
+        style: VisualStyle::default(),
+    };
+    let visual = app.custom_status_rules.fallback.as_ref().unwrap_or(&hidden);
+    let mut icon = crate::status_rule_visual::visual_span(
+        visual,
+        &app.ui_settings.icons,
+        app.ui_settings.use_stable_glyphs,
+        u64::try_from(app.started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+        app.ui_settings.motion_level,
+        crate::status_rule_visual::ProgressCue::measured(50.0),
+    );
+    if icon.content.is_empty() {
+        icon = Span::styled("∅ no icon", dim());
+    }
+    let label = "Otherwise (no rule matches) ";
+    let room = inner_width.saturating_sub(icon.width() + 5);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(crate::settings_ui::truncate_icon_text(label, room), style),
+            Span::styled("THEN ", style.fg(Color::White)),
+            icon,
+        ])),
+        Rect::new(x, row, width, 1),
+    );
+}
+
 fn render_condition_column(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -1355,96 +1619,115 @@ fn render_condition_column(
     state: &EditorState,
 ) {
     let keyword_style = Style::new().fg(Color::White).add_modifier(Modifier::BOLD);
+    let inner_width = usize::from(area.width.saturating_sub(2 + 2 * INNER_MARGIN));
     let mut details = Vec::new();
-    let selected_rule = state.selected_rule.and_then(|index| {
-        app.custom_status_rules
-            .rules
-            .get(index)
-            .map(|rule| (index, rule))
-    });
-    if let Some((rule_index, rule)) = selected_rule {
-        let brackets = group_brackets(rule);
-        if let Ok((terms, connectors)) = state.expression(&app.custom_status_rules) {
-            let (first, visible) = condition_window(state, area, terms.len());
-            for (index, term) in terms.iter().enumerate().skip(first).take(visible) {
-                let prefix = if index == 0 {
-                    "IF"
-                } else if connectors[index - 1] == Connector::And {
-                    "AND"
-                } else {
-                    "OR"
-                };
-                let selected = state.column == EditorColumn::ConditionAndVisual
-                    && state.selected_condition == index;
-                let background = if selected {
-                    crate::theme::selected_style()
-                } else {
-                    Style::new()
-                };
-                let keyword = background.fg(Color::White).add_modifier(Modifier::BOLD);
-                let (opens, closes) = brackets.get(index).copied().unwrap_or((false, false));
-                let mut spans = vec![Span::styled(format!("{prefix} "), keyword)];
-                if opens {
-                    spans.push(Span::styled("(", keyword.fg(Color::Yellow)));
-                }
-                if term.negated {
+    let selected_rule = state
+        .rule_index(&app.custom_status_rules)
+        .map(|index| (index, &app.custom_status_rules.rules[index]));
+    let hidden = StatusVisual {
+        kind: VisualKind::Hidden,
+        style: VisualStyle::default(),
+    };
+    let visual = if state.fallback_selected {
+        Some(app.custom_status_rules.fallback.as_ref().unwrap_or(&hidden))
+    } else {
+        selected_rule.map(|(_, rule)| &rule.then)
+    };
+    if let Some(visual) = visual {
+        if let Some((_, rule)) = selected_rule {
+            let brackets = group_brackets(rule);
+            if let Ok((terms, connectors)) = state.expression(&app.custom_status_rules) {
+                let (first, visible) = condition_window(state, area, terms.len());
+                for (index, term) in terms.iter().enumerate().skip(first).take(visible) {
+                    let prefix = if index == 0 {
+                        "IF"
+                    } else if connectors[index - 1] == Connector::And {
+                        "AND"
+                    } else {
+                        "OR"
+                    };
+                    let selected = state.column == EditorColumn::ConditionAndVisual
+                        && state.selected_condition == index;
+                    let background = if selected {
+                        crate::theme::selected_style()
+                    } else {
+                        Style::new()
+                    };
+                    let keyword = background.fg(Color::White).add_modifier(Modifier::BOLD);
+                    let (opens, closes) = brackets.get(index).copied().unwrap_or((false, false));
+                    let mut spans = vec![Span::styled(format!("{prefix} "), keyword)];
+                    if opens {
+                        spans.push(Span::styled("(", keyword.fg(Color::Yellow)));
+                    }
+                    if term.negated {
+                        spans.push(Span::styled(
+                            "NOT ",
+                            background.fg(Color::LightRed).add_modifier(Modifier::BOLD),
+                        ));
+                    }
                     spans.push(Span::styled(
-                        "NOT ",
-                        background.fg(Color::LightRed).add_modifier(Modifier::BOLD),
+                        format!(
+                            "{}{}",
+                            condition_label(&term.condition),
+                            region_suffix(&term.condition)
+                        ),
+                        background.fg(picker::category_color(term.condition.category())),
                     ));
+                    if closes {
+                        spans.push(Span::styled(")", keyword.fg(Color::Yellow)));
+                    }
+                    details.push(Line::from(spans));
                 }
-                spans.push(Span::styled(
-                    format!(
-                        "{}{}",
-                        condition_label(&term.condition),
-                        region_suffix(&term.condition)
-                    ),
-                    background.fg(Color::Cyan),
-                ));
-                if closes {
-                    spans.push(Span::styled(")", keyword.fg(Color::Yellow)));
-                }
-                details.push(Line::from(spans));
             }
+        } else if condition_window(state, area, 0).1 > 0 {
+            details.push(Line::from(vec![
+                Span::styled("WHEN ", keyword_style),
+                Span::styled("no rule matches", Style::new().fg(Color::Gray)),
+            ]));
         }
         details.push(Line::from(vec![
             Span::styled("THEN ", keyword_style),
             crate::status_rule_visual::visual_span(
-                &rule.then,
+                visual,
                 &app.ui_settings.icons,
                 app.ui_settings.use_stable_glyphs,
                 u64::try_from(app.started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
                 app.ui_settings.motion_level,
-                Some(50.0),
+                crate::status_rule_visual::ProgressCue::measured(50.0),
             ),
             Span::styled(
-                format!("  {}", visual_label(&rule.then.kind)),
+                format!("  {}", visual_label(&visual.kind)),
                 Style::new().fg(Color::Cyan),
             ),
         ]));
         // The visual controls are painted over this row.
         details.push(Line::from(""));
-        let matches = matching_pane_count(app, rule);
-        details.push(Line::from(Span::styled(
-            format!(
-                "Matches {matches} pane{} now{}",
-                if matches == 1 { "" } else { "s" },
-                if rule.enabled { "" } else { " (rule disabled)" }
-            ),
-            dim(),
-        )));
-        if rule.any_of.len() > 1 {
-            details.push(Line::from(Span::styled(
-                "( ) AND groups are checked before OR",
-                dim().fg(Color::Yellow),
-            )));
-        }
-        for text in crate::padding_ui::wrap(
-            &why(rule_index + 1, rule, None),
-            usize::from(area.width.saturating_sub(2)).max(8),
-        )
-        .into_iter()
-        .take(3)
+        let explanation = match selected_rule {
+            Some((rule_index, rule)) => {
+                let matches = matching_pane_count(app, rule);
+                details.push(Line::from(Span::styled(
+                    format!(
+                        "Matches {matches} pane{} now{}",
+                        if matches == 1 { "" } else { "s" },
+                        if rule.enabled { "" } else { " (rule disabled)" }
+                    ),
+                    dim(),
+                )));
+                if rule.any_of.len() > 1 {
+                    details.push(Line::from(Span::styled(
+                        "( ) AND groups are checked before OR",
+                        dim().fg(Color::Yellow),
+                    )));
+                }
+                why(rule_index + 1, rule, None)
+            }
+            None => {
+                "Panes that no enabled rule matches show this icon. Hidden shows none.".to_owned()
+            }
+        };
+        for text in crate::padding_ui::wrap(&explanation, inner_width.max(8))
+            .into_iter()
+            .take(3)
         {
             details.push(Line::from(Span::styled(text, dim())));
         }
@@ -1454,34 +1737,41 @@ fn render_condition_column(
                 "Value: {draft}▏  Enter saves · Esc cancels"
             )));
         }
-        if let Some(error) = &state.save_error {
+        if let Some(message) = &state.save_error {
             details.push(Line::from(Span::styled(
-                format!("Save failed: {error}"),
+                message.clone(),
                 Style::new().fg(Color::LightRed),
             )));
         }
-        details.push(Line::from("Tab changes column · Esc back"));
-        if state.column == EditorColumn::ConditionAndVisual {
-            details.push(Line::from("‹ › condition   ¬ NOT   ∨ AND/OR"));
-            details.push(Line::from("+ add   × remove   ✎ edit   i case   L region"));
-            details.push(Line::from("V type  G icon  C colour  B bold"));
-            details.push(Line::from("D dim  −/+ speed  P ping-pong"));
-        } else {
-            details.push(Line::from("A add · D duplicate · N rename · Space enable"));
-            details.push(Line::from("Delete remove · Ctrl+↑/↓ reorder"));
-            details.push(Line::from("U or Ctrl+Z undo · R reset"));
+        let hints: &[&str] = match state.column {
+            EditorColumn::Rules => &keyboard::HINTS_RULES,
+            EditorColumn::ConditionAndVisual => &keyboard::HINTS_CONDITION,
+            EditorColumn::Preview => &keyboard::HINTS_PREVIEW,
+        };
+        for hint in hints {
+            details.push(Line::from(Span::styled(*hint, dim())));
         }
     } else {
         details.push(Line::from("Select a rule"));
+        if let Some(message) = &state.save_error {
+            details.push(Line::from(Span::styled(
+                message.clone(),
+                Style::new().fg(Color::LightRed),
+            )));
+        }
     }
     frame.render_widget(
         Paragraph::new(details).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Condition and icon "),
+                .title(" Condition and icon ")
+                .padding(Padding::horizontal(INNER_MARGIN)),
         ),
         area,
     );
+    let count = state
+        .expression(&app.custom_status_rules)
+        .map_or(0, |(terms, _)| terms.len());
     if let Ok((terms, _)) = state.expression(&app.custom_status_rules) {
         let (first, visible) = condition_window(state, area, terms.len());
         for (offset, term) in terms.iter().skip(first).take(visible).enumerate() {
@@ -1498,6 +1788,9 @@ fn render_condition_column(
                 );
             }
         }
+    }
+    if visual.is_some() {
+        let (_, visible) = condition_window(state, area, count);
         if let Some(rect) = visual_actions(area, visible) {
             let buttons = ["V", "G", "C", "B", "D", "−", "+", "P"];
             let mut spans = Vec::new();
@@ -1656,6 +1949,15 @@ mod tests {
             ),
             (Condition::ProgressAtLeast(73), Condition::ProgressBelow(50)),
             (
+                // A changed threshold still finds its catalogue entry.
+                Condition::ContextAbovePercent(95),
+                Condition::ScreenMatches(ScreenPattern {
+                    pattern: "error".into(),
+                    ignore_case: true,
+                    region: ScreenRegion::All,
+                }),
+            ),
+            (
                 Condition::ScreenMatches(ScreenPattern {
                     pattern: "custom".into(),
                     ignore_case: false,
@@ -1678,6 +1980,33 @@ mod tests {
             editor.cycle_condition(&mut rules, 1).unwrap();
             assert_eq!(editor.expression(&rules).unwrap().0[0].condition, expected);
         }
+    }
+
+    #[test]
+    fn context_threshold_is_an_editable_percentage() {
+        let mut rules = default_rules();
+        let mut editor = EditorState::new(&rules);
+        assert!(editor.add_rule(&mut rules));
+        editor
+            .replace_expression(
+                &mut rules,
+                vec![ConditionTerm {
+                    condition: Condition::ContextAbovePercent(80),
+                    negated: false,
+                }],
+                &[],
+            )
+            .unwrap();
+        assert_eq!(editor.parameter(&rules).as_deref(), Some("80"));
+        editor.set_parameter(&mut rules, "100").unwrap();
+        assert_eq!(
+            editor.expression(&rules).unwrap().0[0].condition,
+            Condition::ContextAbovePercent(100)
+        );
+        for invalid in ["101", "-1", "", "ninety"] {
+            assert!(editor.set_parameter(&mut rules, invalid).is_err(), "{invalid:?}");
+        }
+        assert_eq!(editor.parameter(&rules).as_deref(), Some("100"));
     }
 
     #[test]
@@ -1712,21 +2041,21 @@ mod tests {
         let count = rules.rules.len();
         assert!(count >= 10, "defaults should fill more than one window");
         let mut editor = EditorState::new(&rules);
-        // Height 11 shows three rules.
-        assert_eq!(super::visible_rule_rows(11), 3);
-        editor.scroll_rules(-1, count, 11);
-        assert_eq!(super::first_visible_rule(&editor, 11, count), 0);
+        // Height 13 shows three rules above the pinned fallback.
+        assert_eq!(super::visible_rule_rows(13), 3);
+        editor.scroll_rules(-1, count, 13);
+        assert_eq!(super::first_visible_rule(&editor, 13, count), 0);
         for _ in 0..100 {
-            editor.scroll_rules(1, count, 11);
+            editor.scroll_rules(1, count, 13);
         }
-        assert_eq!(super::first_visible_rule(&editor, 11, count), count - 3);
+        assert_eq!(super::first_visible_rule(&editor, 13, count), count - 3);
         // The wheel leaves the selection at rule 0, off-screen; selecting
         // rule 1 by keyboard brings the window back to it minimally.
-        editor.select_rule(1, count, 11);
-        assert_eq!(super::first_visible_rule(&editor, 11, count), 1);
-        editor.select_rule(5, count, 11);
-        assert_eq!(super::first_visible_rule(&editor, 11, count), 3);
-        let area = Rect::new(0, 2, 40, 11);
+        editor.select_rule(1, count, 13);
+        assert_eq!(super::first_visible_rule(&editor, 13, count), 1);
+        editor.select_rule(5, count, 13);
+        assert_eq!(super::first_visible_rule(&editor, 13, count), 3);
+        let area = Rect::new(0, 2, 40, 13);
         assert_eq!(super::rule_at_row(&editor, area, count, 3), Some(3));
         assert_eq!(super::rule_at_row(&editor, area, count, 5), Some(3));
         assert_eq!(super::rule_at_row(&editor, area, count, 9), Some(5));
@@ -1741,7 +2070,10 @@ mod tests {
         let count = rules.rules.len();
         let before = rules.rules.clone();
         assert!(editor.duplicate_selected(&mut rules));
-        editor.record_history(before.clone());
+        editor.record_history(ilium_core::status_rule_expression::StatusRules {
+            rules: before.clone(),
+            ..rules.clone()
+        });
         assert_eq!(rules.rules.len(), count + 1);
         assert_eq!(editor.selected_rule, Some(1));
         assert_eq!(rules.rules[1].name, format!("{} copy", before[0].name));
@@ -1756,7 +2088,10 @@ mod tests {
         assert!(!editor.undo(&mut rules));
         // History never grows past the undo depth.
         for _ in 0..(super::UNDO_DEPTH + 5) {
-            editor.record_history(before.clone());
+            editor.record_history(ilium_core::status_rule_expression::StatusRules {
+                rules: before.clone(),
+                ..rules.clone()
+            });
         }
         assert_eq!(editor.history.len(), super::UNDO_DEPTH);
     }
@@ -1940,6 +2275,33 @@ mod tests {
         editor.column = super::EditorColumn::Preview;
         let anchors = super::help_anchor_lines(area, &app, &editor);
         assert_eq!(anchors[1].0, "AM-30");
+    }
+
+    #[test]
+    fn every_help_anchor_of_the_editor_resolves_in_the_catalog() {
+        let mut app = crate::app::App::new("anchor-catalog".into(), std::env::temp_dir());
+        app.custom_status_rules = default_rules();
+        app.set_screen_area(Rect::new(0, 0, 160, 40));
+        let area = Rect::new(20, 4, 120, 30);
+        for column in [
+            super::EditorColumn::Rules,
+            super::EditorColumn::ConditionAndVisual,
+            super::EditorColumn::Preview,
+        ] {
+            for fallback_selected in [false, true] {
+                let mut editor = EditorState::new(&app.custom_status_rules);
+                editor.column = column;
+                editor.fallback_selected = fallback_selected;
+                for (topic, _, _) in super::help_anchor_lines(area, &app, &editor) {
+                    assert!(
+                        crate::settings_help::catalog::by_id(topic).is_some(),
+                        "{topic} ({column:?}, fallback {fallback_selected}) is missing from the help catalog"
+                    );
+                }
+            }
+        }
+        // The Settings page links the Configure button to AM-26.
+        assert!(crate::settings_help::catalog::by_id("AM-26").is_some());
     }
 
     #[test]
@@ -2251,11 +2613,54 @@ mod tests {
     }
 
     #[test]
+    fn the_visual_picker_steps_through_every_frame_family() {
+        use crate::status_rule_visual::{frame_family_of, FRAME_FAMILIES};
+        use ilium_core::status_rule_expression::VisualKind;
+        let mut rules = default_rules();
+        let editor = EditorState::new(&rules);
+        rules.rules[0].then.kind = VisualKind::BrailleAnimation {
+            preset: "spinner".into(),
+            frames_per_second: 8,
+        };
+        for family in FRAME_FAMILIES {
+            assert!(editor.cycle_visual(&mut rules));
+            let VisualKind::FrameAnimation { frames, .. } = &rules.rules[0].then.kind else {
+                panic!("expected the {} family", family.name);
+            };
+            assert_eq!(
+                frame_family_of(frames).map(|found| found.name),
+                Some(family.name)
+            );
+        }
+        assert!(editor.cycle_visual(&mut rules));
+        assert!(matches!(
+            rules.rules[0].then.kind,
+            VisualKind::ProgressFrames { .. }
+        ));
+        // Hand-typed frames move straight on to progress frames.
+        rules.rules[0].then.kind = VisualKind::FrameAnimation {
+            frames: vec!["a".into(), "b".into()],
+            frames_per_second: 4,
+            ping_pong: false,
+        };
+        assert!(editor.cycle_visual(&mut rules));
+        assert!(matches!(
+            rules.rules[0].then.kind,
+            VisualKind::ProgressFrames { .. }
+        ));
+    }
+
+    #[test]
     fn live_preview_renders_the_actual_session_tree() {
         use ratatui::{backend::TestBackend, Terminal};
         let mut app = crate::app::App::new("preview".into(), std::env::temp_dir());
-        app.tree
+        let group = app
+            .tree
             .add_group(ilium_core::ROOT_ID, "Unique live project")
+            .unwrap();
+        // A session with no panes shows guidance instead of a tree.
+        app.tree
+            .add_pane(group, "agent one", ilium_core::PaneContentKind::Terminal)
             .unwrap();
         let editor = EditorState::new(&app.custom_status_rules);
         let mut terminal = Terminal::new(TestBackend::new(130, 24)).unwrap();
@@ -2271,5 +2676,48 @@ mod tests {
             .collect();
         assert!(text.contains("Unique live project"));
         assert!(!text.contains("Live preview integration pending"));
+    }
+}
+
+#[cfg(test)]
+mod fallback_and_picker_geometry_tests {
+    use super::{fallback_row, picker_area, visible_rule_rows, EditorLayout, EditorState};
+    use ilium_core::status_rule_expression::default_rules;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn fallback_row_sits_under_the_list_and_takes_two_rows_from_it() {
+        let area = Rect::new(0, 2, 40, 13);
+        assert_eq!(fallback_row(area), Some(area.bottom() - 2));
+        assert!(fallback_row(Rect::new(0, 0, 40, 6)).is_none());
+        assert_eq!(visible_rule_rows(13), 3);
+    }
+
+    #[test]
+    fn list_overlay_uses_the_widest_column_and_prefers_the_editor() {
+        let regions = EditorLayout {
+            rules: Rect::new(0, 1, 30, 20),
+            editor: Rect::new(30, 1, 30, 20),
+            preview: Rect::new(60, 1, 20, 20),
+            back: Rect::new(70, 0, 8, 1),
+        };
+        assert_eq!(picker_area(&regions), regions.editor);
+        let wide = EditorLayout {
+            rules: Rect::new(0, 1, 50, 20),
+            ..regions
+        };
+        assert_eq!(picker_area(&wide), wide.rules);
+    }
+
+    #[test]
+    fn fallback_selection_has_no_conditions_and_edits_only_the_fallback_icon() {
+        let mut rules = default_rules();
+        let mut editor = EditorState::new(&rules);
+        editor.select_fallback();
+        assert!(editor.expression(&rules).is_err());
+        let before = rules.rules.clone();
+        assert!(editor.cycle_visual(&mut rules));
+        assert_eq!(rules.rules, before);
+        assert!(rules.fallback.is_some());
     }
 }

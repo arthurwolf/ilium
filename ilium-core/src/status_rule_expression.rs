@@ -30,7 +30,7 @@ pub use demo::{demo_situations, DemoSituation};
 pub use explanation::{explain_all, term_text, why, GroupOutcome, RuleOutcome, TermOutcome};
 pub use registry::{condition_catalog, ConditionCategory};
 pub use validation::{
-    error_summary, has_errors, validate, IssueSeverity, ValidationIssue,
+    error_summary, has_errors, validate, IssueKind, IssueSeverity, TermPath, ValidationIssue,
     MAXIMUM_CONDITIONS_PER_GROUP, MAXIMUM_CONDITIONS_PER_RULE, MAXIMUM_ENABLED_SCREEN_PATTERNS,
     MAXIMUM_GROUPS_PER_RULE, MAXIMUM_NAME_CHARS, MAXIMUM_PATTERN_CHARS, MAXIMUM_RULES,
 };
@@ -43,15 +43,65 @@ pub enum Observation {
     Unknown,
 }
 
-/// Facts that only the terminal client knows (the server never reports
-/// them). `None` means the client did not observe the fact for this pane, so
-/// the matching conditions stay `Unknown` instead of silently reading false.
+/// Facts outside the pane's [`PaneStatus`]: client-only observations (frozen
+/// screen, spend, keyboard focus) and the pane node's own fields (bookmark, prompt queue).
+/// `None` means the fact was not observed for this pane, so the matching
+/// conditions stay `Unknown` instead of silently reading false.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SupplementaryFacts {
     /// Whether the pane's agent screen is frozen by the user.
     pub frozen: Option<bool>,
     /// The agent session's spend so far, in US cents.
     pub session_cost_cents: Option<u64>,
+    /// Whether the user bookmarked the pane in the sidebar.
+    pub bookmarked: Option<bool>,
+    /// How many prompts wait in the pane's prompt queue.
+    pub queued_prompts: Option<u32>,
+    /// Whether this pane's terminal holds keyboard focus. False for every
+    /// pane while focus is on the tree, a dialog or Settings.
+    pub focused: Option<bool>,
+    /// Whether this pane has a retained blocking error (a failed action
+    /// whose target is exactly this pane).
+    pub blocking_error: Option<bool>,
+    /// Whether the session has a retained session-level error, one that
+    /// belongs to no particular pane. Identical for every pane of a session.
+    pub session_error: Option<bool>,
+    /// Whether the tree cursor rests on this pane's row, whichever part of
+    /// the window holds keyboard focus.
+    pub selected: Option<bool>,
+    /// Whether the pane's terminal is on screen in the right panel, alone
+    /// or as a split-view member.
+    pub visible: Option<bool>,
+    /// Whether the prompt queue is held on a head prompt whose delivery was
+    /// interrupted. The server never replays such a prompt, so the queue
+    /// waits for the user (see `ilium-server/src/prompt_queue.rs`).
+    pub prompt_queue_held: Option<bool>,
+    /// How full the agent's context window was at its latest prompt, in
+    /// tenths of a percent (0..=1000).
+    pub context_permille: Option<u16>,
+}
+
+impl SupplementaryFacts {
+    /// Add the facts the pane's tree node carries. Every builder of live
+    /// pane facts (tree renderer, hover tooltip, editor inspector) calls this
+    /// so the three cannot disagree about a node fact.
+    pub fn with_node(self, node: &crate::Node) -> Self {
+        let crate::NodeKind::Pane { prompt_queue, .. } = &node.kind else {
+            return self;
+        };
+        Self {
+            bookmarked: Some(node.is_bookmarked),
+            queued_prompts: Some(u32::try_from(prompt_queue.len()).unwrap_or(u32::MAX)),
+            // Only the head is ever delivered, so only an attempted head can
+            // hold the queue; an empty queue is known not to be held.
+            prompt_queue_held: Some(
+                prompt_queue
+                    .first()
+                    .is_some_and(|prompt| prompt.attempted_delivery),
+            ),
+            ..self
+        }
+    }
 }
 
 /// Facts available independently of the rules that consume them. Screen
@@ -93,13 +143,32 @@ pub enum Condition {
     PaneKind(PaneKind),
     EditorDirty,
     PaneFrozen,
+    /// The pane's terminal holds keyboard focus.
+    PaneFocused,
+    /// The pane has a retained blocking error.
+    BlockingError,
+    /// The session has a retained session-level error.
+    SessionError,
+    PaneBookmarked,
+    PromptsQueued,
+    /// The prompt queue is held on a head whose delivery was interrupted.
+    PromptQueueHeld,
+    /// The tree cursor rests on the pane's row.
+    PaneSelected,
+    /// The pane's terminal is on screen in the right panel.
+    PaneVisible,
     AgentClass(AgentClass),
+    /// Any agent other than the built-in Claude Code, Codex and Antigravity
+    /// (custom signatures).
+    OtherAgent,
     AgentAvailability(AvailabilityKind),
     AgentTurn(AgentTurn),
     GoalSet,
     GoalState(GoalState),
     CompletionUnread,
     ActivityStale,
+    /// A live agent whose activity freshness was never observed.
+    ActivityUnchecked,
     MonitorCountAtLeast(u32),
     TaskStatus(ProgressTaskStatus),
     AnyTaskStatus(ProgressTaskStatus),
@@ -124,6 +193,8 @@ pub enum Condition {
     ShellOutputSlow,
     /// Whole US dollars; the client supplies the session spend in cents.
     SessionCostAbove(u32),
+    /// The agent's context window is more than this percentage full.
+    ContextAbovePercent(u8),
     ScreenMatches(ScreenPattern),
 }
 
@@ -168,7 +239,16 @@ impl Condition {
                 _ => None,
             },
             Self::PaneFrozen => facts.supplementary.frozen,
+            Self::PaneFocused => facts.supplementary.focused,
+            Self::BlockingError => facts.supplementary.blocking_error,
+            Self::SessionError => facts.supplementary.session_error,
+            Self::PaneBookmarked => facts.supplementary.bookmarked,
+            Self::PromptsQueued => facts.supplementary.queued_prompts.map(|count| count > 0),
+            Self::PromptQueueHeld => facts.supplementary.prompt_queue_held,
+            Self::PaneSelected => facts.supplementary.selected,
+            Self::PaneVisible => facts.supplementary.visible,
             Self::AgentClass(class) => agent.map(|agent| &agent.class == class),
+            Self::OtherAgent => agent.map(|agent| matches!(agent.class, AgentClass::Other(_))),
             Self::AgentAvailability(expected) => facts.status.agent_recovery().map(|recovery| {
                 match expected {
                     AvailabilityKind::Unverified => recovery.availability == AgentAvailability::Unverified,
@@ -183,6 +263,9 @@ impl Condition {
             Self::GoalState(goal) => agent.map(|agent| agent.goal.as_ref() == Some(goal)),
             Self::CompletionUnread => agent.map(|agent| agent.completion_unread),
             Self::ActivityStale => facts.activity_stale,
+            // Known exactly when a live agent runs: the freshness check is
+            // either reported (false) or missing (true).
+            Self::ActivityUnchecked => agent.map(|_| facts.activity_stale.is_none()),
             Self::MonitorCountAtLeast(count) => Some(facts.progress.len() >= *count as usize),
             Self::TaskStatus(status) => monitor.map(|monitor| &monitor.report.status == status),
             Self::AnyTaskStatus(status) => Some(facts.progress.iter().any(|monitor| &monitor.report.status == status)),
@@ -214,6 +297,8 @@ impl Condition {
                 _ => None,
             },
             Self::SessionCostAbove(dollars) => facts.supplementary.session_cost_cents.map(|cents| cents > u64::from(*dollars) * 100),
+            // Compared in tenths of a percent so 80.4% is above 80%.
+            Self::ContextAbovePercent(percent) => facts.supplementary.context_permille.map(|permille| permille > u16::from(*percent) * 10),
             Self::ScreenMatches(pattern) => return (facts.screen_matches)(pattern),
         };
         match result {
@@ -337,17 +422,34 @@ pub enum VisualKind {
     },
 }
 
+/// Every field may be left out of a hand-written `config.toml`.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct VisualStyle {
     /// Theme colour name or an explicit RGB colour.
     pub color: Option<String>,
     pub bold: bool,
     pub dim: bool,
+    /// Draw attention with a pulsing icon. The client renderer decides how
+    /// the pulse honours the user's motion setting.
+    pub pulse: bool,
+}
+
+/// The `[status_rules]` format version this build reads and writes.
+pub const STATUS_RULES_SCHEMA_VERSION: u32 = 1;
+
+const fn status_rules_schema_version() -> u32 {
+    STATUS_RULES_SCHEMA_VERSION
 }
 
 /// User-owned rules are ordered and persisted together with their fallback.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StatusRules {
+    /// Format version of the stored table; absent means version 1.
+    #[serde(default = "status_rules_schema_version")]
+    pub version: u32,
+    /// Which shipped default set the rules started from, so a later Ilium
+    /// can offer new defaults without overwriting the user's edits.
     pub defaults_version: u32,
     pub rules: Vec<Rule<Condition, StatusVisual>>,
     pub fallback: Option<StatusVisual>,
@@ -685,6 +787,233 @@ mod tests {
     }
 
     #[test]
+    fn activity_unchecked_and_custom_agent_need_a_live_agent() {
+        let custom = PaneStatus::Agent(AgentState {
+            class: AgentClass::Other("aider".to_owned()),
+            turn: AgentTurn::Working,
+            goal: None,
+            completion_unread: false,
+        });
+        let mut facts = PaneFacts {
+            status: &custom,
+            progress: &[],
+            scheduled_input: false,
+            shell_output: None,
+            activity_stale: None,
+            supplementary: SupplementaryFacts::default(),
+            screen_matches: &|_| Observation::Unknown,
+        };
+        assert_eq!(Condition::OtherAgent.observe(&facts), Observation::True);
+        assert_eq!(
+            Condition::AgentClass(AgentClass::Other("aider".to_owned())).observe(&facts),
+            Observation::True
+        );
+        assert_eq!(
+            Condition::AgentClass(AgentClass::Other("goose".to_owned())).observe(&facts),
+            Observation::False
+        );
+        assert_eq!(
+            Condition::ActivityUnchecked.observe(&facts),
+            Observation::True
+        );
+        // The stale condition itself stays unobservable, which is exactly
+        // why "unchecked" exists.
+        assert_eq!(
+            Condition::ActivityStale.observe(&facts),
+            Observation::Unknown
+        );
+        for stale in [false, true] {
+            facts.activity_stale = Some(stale);
+            assert_eq!(
+                Condition::ActivityUnchecked.observe(&facts),
+                Observation::False
+            );
+        }
+
+        let codex = PaneStatus::Agent(AgentState {
+            class: AgentClass::Codex,
+            turn: AgentTurn::Idle,
+            goal: None,
+            completion_unread: false,
+        });
+        facts.status = &codex;
+        assert_eq!(Condition::OtherAgent.observe(&facts), Observation::False);
+
+        let shell = PaneStatus::PlainShell;
+        facts.status = &shell;
+        facts.activity_stale = None;
+        assert_eq!(Condition::OtherAgent.observe(&facts), Observation::Unknown);
+        assert_eq!(
+            Condition::ActivityUnchecked.observe(&facts),
+            Observation::Unknown
+        );
+    }
+
+    #[test]
+    fn node_facts_feed_bookmark_and_prompt_queue_conditions() {
+        use crate::{PaneContentKind, Tree, ROOT_ID};
+
+        let status = PaneStatus::PlainShell;
+        let mut facts = PaneFacts {
+            status: &status,
+            progress: &[],
+            scheduled_input: false,
+            shell_output: None,
+            activity_stale: None,
+            supplementary: SupplementaryFacts::default(),
+            screen_matches: &|_| Observation::Unknown,
+        };
+        assert_eq!(
+            Condition::PaneBookmarked.observe(&facts),
+            Observation::Unknown
+        );
+        assert_eq!(
+            Condition::PromptsQueued.observe(&facts),
+            Observation::Unknown
+        );
+
+        let mut tree = Tree::new();
+        let group_id = tree.add_group(ROOT_ID, "group").unwrap();
+        let pane_id = tree
+            .add_pane(group_id, "pane", PaneContentKind::Terminal)
+            .unwrap();
+        let pane = tree.get(pane_id).unwrap();
+        facts.supplementary = SupplementaryFacts::default().with_node(pane);
+        assert_eq!(facts.supplementary.bookmarked, Some(false));
+        assert_eq!(facts.supplementary.queued_prompts, Some(0));
+        assert_eq!(
+            Condition::PaneBookmarked.observe(&facts),
+            Observation::False
+        );
+        assert_eq!(Condition::PromptsQueued.observe(&facts), Observation::False);
+
+        facts.supplementary.bookmarked = Some(true);
+        facts.supplementary.queued_prompts = Some(3);
+        assert_eq!(Condition::PaneBookmarked.observe(&facts), Observation::True);
+        assert_eq!(Condition::PromptsQueued.observe(&facts), Observation::True);
+
+        // A group carries neither fact, so nothing is invented for it.
+        let group = tree.get(group_id).unwrap();
+        assert_eq!(
+            SupplementaryFacts::default().with_node(group),
+            SupplementaryFacts::default()
+        );
+    }
+
+    #[test]
+    fn prompt_queue_is_held_only_by_an_attempted_head() {
+        use crate::{PaneContentKind, PromptQueueDelivery, QueuedPrompt, Tree, ROOT_ID};
+
+        let status = PaneStatus::PlainShell;
+        let observe = |supplementary| {
+            Condition::PromptQueueHeld.observe(&PaneFacts {
+                status: &status,
+                progress: &[],
+                scheduled_input: false,
+                shell_output: None,
+                activity_stale: None,
+                supplementary,
+                screen_matches: &|_| Observation::Unknown,
+            })
+        };
+        // Not observed: unknown, not false.
+        assert_eq!(observe(SupplementaryFacts::default()), Observation::Unknown);
+
+        let mut tree = Tree::new();
+        let group_id = tree.add_group(ROOT_ID, "group").unwrap();
+        let pane_id = tree
+            .add_pane(group_id, "pane", PaneContentKind::Terminal)
+            .unwrap();
+        let with_pane = |tree: &Tree| SupplementaryFacts::default().with_node(tree.get(pane_id).unwrap());
+        // Empty queue: known not to be held.
+        assert_eq!(with_pane(&tree).prompt_queue_held, Some(false));
+        assert_eq!(observe(with_pane(&tree)), Observation::False);
+
+        let prompt = |text: &str| QueuedPrompt {
+            text: text.to_owned(),
+            delivery: PromptQueueDelivery::Once,
+            attempted_delivery: false,
+        };
+        tree.enqueue_prompt(pane_id, prompt("first")).unwrap();
+        tree.enqueue_prompt(pane_id, prompt("second")).unwrap();
+        // Waiting prompts that were never attempted do not hold the queue.
+        assert_eq!(observe(with_pane(&tree)), Observation::False);
+
+        assert!(tree
+            .mark_queued_prompt_attempted(pane_id, &prompt("first"))
+            .unwrap());
+        assert_eq!(observe(with_pane(&tree)), Observation::True);
+    }
+
+    #[test]
+    fn view_and_context_conditions_read_their_facts_or_stay_unknown() {
+        let status = PaneStatus::Agent(AgentState::from_activity(
+            AgentClass::Claude,
+            crate::AgentActivity::Idle,
+            None,
+        ));
+        let mut facts = PaneFacts {
+            status: &status,
+            progress: &[],
+            scheduled_input: false,
+            shell_output: None,
+            activity_stale: None,
+            supplementary: SupplementaryFacts::default(),
+            screen_matches: &|_| Observation::Unknown,
+        };
+        for condition in [
+            Condition::PaneSelected,
+            Condition::PaneVisible,
+            Condition::ContextAbovePercent(80),
+        ] {
+            assert_eq!(condition.observe(&facts), Observation::Unknown, "{condition:?}");
+        }
+
+        facts.supplementary.selected = Some(true);
+        facts.supplementary.visible = Some(false);
+        assert_eq!(Condition::PaneSelected.observe(&facts), Observation::True);
+        assert_eq!(Condition::PaneVisible.observe(&facts), Observation::False);
+
+        // Boundary: strictly above, measured in tenths of a percent.
+        facts.supplementary.context_permille = Some(800);
+        assert_eq!(
+            Condition::ContextAbovePercent(80).observe(&facts),
+            Observation::False
+        );
+        facts.supplementary.context_permille = Some(801);
+        assert_eq!(
+            Condition::ContextAbovePercent(80).observe(&facts),
+            Observation::True
+        );
+        // Empty window reads false; 0% threshold is true for any use.
+        facts.supplementary.context_permille = Some(0);
+        assert_eq!(
+            Condition::ContextAbovePercent(0).observe(&facts),
+            Observation::False
+        );
+        facts.supplementary.context_permille = Some(1000);
+        assert_eq!(
+            Condition::ContextAbovePercent(100).observe(&facts),
+            Observation::False
+        );
+        assert_eq!(
+            Condition::ContextAbovePercent(99).observe(&facts),
+            Observation::True
+        );
+    }
+
+    #[test]
+    fn hand_written_tables_may_omit_the_version_and_style_flags() {
+        let rules: super::StatusRules = toml::from_str(
+            "defaults_version = 1\nrules = []\n[fallback]\nkind = \"hidden\"\n[fallback.style]\nbold = true\n",
+        )
+        .expect("parseable");
+        assert_eq!(rules.version, super::STATUS_RULES_SCHEMA_VERSION);
+        let style = rules.fallback.expect("fallback").style;
+        assert!(style.bold && !style.dim && !style.pulse && style.color.is_none());
+    }
+
+    #[test]
     fn eta_frozen_and_cost_conditions_stay_unknown_without_their_facts() {
         use crate::{PaneProgress, ProgressAttention, ProgressMonitorHealth, ProgressTaskReport};
 
@@ -704,6 +1033,7 @@ mod tests {
             Observation::Unknown
         );
         assert_eq!(Condition::PaneFrozen.observe(&facts), Observation::Unknown);
+        assert_eq!(Condition::PaneFocused.observe(&facts), Observation::Unknown);
         assert_eq!(
             Condition::SessionCostAbove(1).observe(&facts),
             Observation::Unknown
@@ -750,8 +1080,20 @@ mod tests {
         facts.supplementary = SupplementaryFacts {
             frozen: Some(true),
             session_cost_cents: Some(250),
+            focused: Some(false),
+            ..SupplementaryFacts::default()
         };
         assert_eq!(Condition::PaneFrozen.observe(&facts), Observation::True);
+        assert_eq!(Condition::PaneFocused.observe(&facts), Observation::False);
+        // Unobserved error facts stay Unknown rather than reading false.
+        assert_eq!(Condition::BlockingError.observe(&facts), Observation::Unknown);
+        assert_eq!(Condition::SessionError.observe(&facts), Observation::Unknown);
+        facts.supplementary.blocking_error = Some(true);
+        facts.supplementary.session_error = Some(false);
+        assert_eq!(Condition::BlockingError.observe(&facts), Observation::True);
+        assert_eq!(Condition::SessionError.observe(&facts), Observation::False);
+        facts.supplementary.focused = Some(true);
+        assert_eq!(Condition::PaneFocused.observe(&facts), Observation::True);
         assert_eq!(
             Condition::SessionCostAbove(2).observe(&facts),
             Observation::True

@@ -940,6 +940,7 @@ pub enum AgentMonitoringRow {
     Mode,
     AttentionRunningIndicator,
     AttentionProgressReports,
+    BlockingErrorDisplay,
     ModelIcons,
     ProgressMonitor,
     ProgressMonitorMaxLines,
@@ -965,6 +966,7 @@ impl AgentMonitoringRow {
             Self::Mode,
             Self::AttentionRunningIndicator,
             Self::AttentionProgressReports,
+            Self::BlockingErrorDisplay,
             Self::ModelIcons,
             Self::ProgressMonitor,
             Self::ProgressMonitorMaxLines,
@@ -2408,6 +2410,11 @@ pub struct App {
     /// entries it could not read); cleared once the user saves the rules.
     pub custom_status_rules_load_issues: Vec<ilium_core::status_rule_expression::ValidationIssue>,
     pub custom_status_rules_editor: Option<crate::status_rules_editor::EditorState>,
+    /// When the debounced write of the in-memory rules is due (see
+    /// `status_rules_save`); also re-armed to retry a failed write.
+    pub custom_status_rules_save_deadline: Option<Instant>,
+    /// The last failed write of the rules, until a later write succeeds.
+    pub custom_status_rules_write_error: Option<String>,
     /// One wall-clock sample per maintenance tick keeps footer layout and drawing consistent.
     progress_display_now_unix_millis: u64,
     /// This session's live shortcut-base setting. Input dispatch and every
@@ -2584,7 +2591,6 @@ pub struct App {
     pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
     pub custom_toolbar_selected: Option<String>,
-    pub custom_toolbar_hovered: Option<String>,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
     /// Toolbar buttons whose click was accepted but whose server-side work
     /// (spawning a pane, creating a worktree) has not been confirmed yet.
@@ -3155,6 +3161,8 @@ impl App {
             custom_status_rules_error: None,
             custom_status_rules_load_issues: Vec::new(),
             custom_status_rules_editor: None,
+            custom_status_rules_save_deadline: None,
+            custom_status_rules_write_error: None,
             progress_display_now_unix_millis: crate::scheduled_input::unix_millis_now(),
             keyboard_settings: KeyboardSettings::default(),
             keybindings: keymap::LEADER_BINDINGS.to_vec(),
@@ -3259,7 +3267,6 @@ impl App {
             statistics_diagnostic: None,
             tree_toolbar_hovered: false,
             custom_toolbar_selected: None,
-            custom_toolbar_hovered: None,
             hovered_tree_toolbar_action: None,
             pending_toolbar_actions: Vec::new(),
             pending_pane_creations: HashMap::new(),
@@ -7271,8 +7278,9 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
-    /// Validate and queue an ordered configuration write before applying a
-    /// ruleset. A failed read must not silently replace the saved rules.
+    /// Validate a ruleset, apply it in memory at once and schedule its
+    /// debounced write (`status_rules_save`). A failed read must not silently
+    /// replace the saved rules.
     pub(crate) fn settings_save_custom_status_rules(
         &mut self,
         rules: ilium_core::status_rule_expression::StatusRules,
@@ -7287,7 +7295,7 @@ impl App {
         // The validated edit takes effect in memory first: a refused write
         // must not throw the user's change away, and the next successful save
         // persists the current rules.
-        self.custom_status_rules = rules.clone();
+        self.custom_status_rules = rules;
         if !self
             .custom_status_screen_observations
             .watches_match(&self.custom_status_rules)
@@ -7295,21 +7303,16 @@ impl App {
             self.refresh_custom_status_screen_watches();
         }
         self.bump_tree_version();
-        let directory = self
-            .config_dir
-            .clone()
-            .ok_or("The configuration directory is unavailable")?;
-        self.enqueue_configuration(
-            directory,
-            crate::filesystem::configuration::ConfigurationChange::StatusRules(Box::new(rules)),
-            crate::filesystem::configurations::ConfigurationIntent::Plain {
-                label: "custom status rules",
-                success: None,
-            },
-        )?;
-        // The saved file now mirrors the rules in memory, so the loader's
-        // repair notes no longer describe it.
-        self.custom_status_rules_load_issues.clear();
+        // Without a configuration folder the edit still applies (it is
+        // already in memory); returning an error here would make the editor
+        // roll back its own state while the app kept the new rules. The
+        // lasting notice tells the user the change ends with the session.
+        if self.config_dir.is_none() {
+            self.custom_status_rules_write_error =
+                Some(crate::status_rules_save::STATUS_RULES_SESSION_ONLY.to_owned());
+            return Ok(());
+        }
+        self.schedule_custom_status_rules_save();
         Ok(())
     }
 
@@ -7349,6 +7352,20 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Cycles how blocking errors appear in Custom mode (rules only,
+    /// overlay or second icon); wraps at both ends like the mode row.
+    pub fn settings_adjust_blocking_error_display(&mut self, direction: i32) {
+        let options = crate::config::BlockingErrorDisplay::ALL;
+        let current = options
+            .iter()
+            .position(|option| *option == self.ui_settings.blocking_error_display)
+            .unwrap_or(0);
+        let next = (current as i32 + direction.signum()).rem_euclid(options.len() as i32);
+        let mut ui = self.ui_settings.clone();
+        ui.blocking_error_display = options[next as usize];
+        self.apply_and_persist_ui_settings(ui);
+    }
+
     pub fn settings_adjust_agent_monitoring_row(
         &mut self,
         row: AgentMonitoringRow,
@@ -7358,6 +7375,9 @@ impl App {
             AgentMonitoringRow::Mode => self.settings_adjust_agent_monitoring_mode(direction),
             AgentMonitoringRow::AttentionRunningIndicator => {
                 self.settings_adjust_attention_running_indicator(direction)
+            }
+            AgentMonitoringRow::BlockingErrorDisplay => {
+                self.settings_adjust_blocking_error_display(direction)
             }
             AgentMonitoringRow::AttentionProgressReports => {
                 let mut ui = self.ui_settings.clone();
@@ -18248,6 +18268,21 @@ impl App {
         admitted
     }
 
+    /// Keeps the toolbar layout in step with the custom agent profiles: a new
+    /// profile joins the toolbar as an ordinary entry, a deleted one leaves.
+    /// In-memory only; the next persisted UI-settings save carries the result.
+    pub(crate) fn reconcile_toolbar_custom_agents(&mut self) {
+        let ids: Vec<String> = self
+            .custom_agents
+            .profiles
+            .iter()
+            .map(|profile| profile.id.clone())
+            .collect();
+        self.ui_settings
+            .tree_toolbar_layout
+            .reconcile_custom_agents(&ids);
+    }
+
     pub(crate) fn step_custom_toolbar(&mut self, direction: i32) {
         let profiles = &self.custom_agents.profiles;
         if profiles.is_empty() {
@@ -18583,6 +18618,7 @@ impl App {
             })
             .chain(self.restructure_budget_autosave_deadline)
             .chain(self.remote_compaction_save_deadline)
+            .chain(self.custom_status_rules_save_deadline)
             .chain(self.next_chatroom_reconcile_at)
             .chain(self.compaction_next_poll(now))
             .min();

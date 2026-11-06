@@ -143,6 +143,15 @@ pub fn demo_situations() -> Vec<DemoSituation> {
     let observed = SupplementaryFacts {
         frozen: Some(false),
         session_cost_cents: Some(40),
+        bookmarked: Some(false),
+        queued_prompts: Some(0),
+        focused: Some(false),
+        blocking_error: Some(false),
+        session_error: Some(false),
+        selected: Some(false),
+        visible: Some(false),
+        prompt_queue_held: Some(false),
+        context_permille: Some(300),
     };
     let situation = |name, status, progress: Vec<PaneProgress>, default_rule| DemoSituation {
         name,
@@ -362,10 +371,18 @@ pub fn demo_situations() -> Vec<DemoSituation> {
             supplementary: SupplementaryFacts {
                 frozen: Some(true),
                 session_cost_cents: Some(1_250),
+                bookmarked: Some(true),
+                queued_prompts: Some(2),
+                focused: Some(true),
+                selected: Some(true),
+                visible: Some(true),
+                prompt_queue_held: Some(true),
+                context_permille: Some(920),
+                ..observed
             },
             screen: "$ claude\nerror: failed to compile",
             ..situation(
-                "Frozen, costly, slow task",
+                "Focused, frozen, costly, slow task",
                 agent(Claude, Working, None, false),
                 single(Monitor {
                     health: ProgressMonitorHealth::Degraded {
@@ -394,6 +411,27 @@ pub fn demo_situations() -> Vec<DemoSituation> {
             Some("task-failed"),
         ),
         situation(
+            "Parked, monitor unsteady",
+            agent(Claude, Idle, None, false),
+            single(Monitor {
+                health: ProgressMonitorHealth::Degraded {
+                    consecutive_failures: 2,
+                    last_error: "probe timed out".to_owned(),
+                },
+                ..Monitor::running(40.0)
+            }),
+            Some("parked-progress-unsteady"),
+        ),
+        DemoSituation {
+            activity_stale: None,
+            ..situation(
+                "Custom agent, not yet checked",
+                agent(AgentClass::Other("aider".to_owned()), Idle, None, false),
+                vec![],
+                Some("idle"),
+            )
+        },
+        situation(
             "Task done, acknowledged",
             agent(Claude, Idle, None, false),
             single(Monitor {
@@ -403,6 +441,32 @@ pub fn demo_situations() -> Vec<DemoSituation> {
             }),
             Some("idle"),
         ),
+        DemoSituation {
+            supplementary: SupplementaryFacts {
+                blocking_error: Some(true),
+                ..observed
+            },
+            ..situation(
+                "Blocking error on a working agent",
+                agent(Claude, Working, None, false),
+                vec![],
+                Some("blocking-error"),
+            )
+        },
+        // A session-level error belongs to no pane, so the shipped rules
+        // (which only test the pane's own error) still show the idle icon.
+        DemoSituation {
+            supplementary: SupplementaryFacts {
+                session_error: Some(true),
+                ..observed
+            },
+            ..situation(
+                "Session error, pane unaffected",
+                agent(Codex, Idle, None, false),
+                vec![],
+                Some("idle"),
+            )
+        },
     ]
 }
 

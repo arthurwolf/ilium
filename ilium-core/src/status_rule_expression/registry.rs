@@ -63,13 +63,23 @@ impl Condition {
             Self::PaneKind(_) => "pane-kind",
             Self::EditorDirty => "editor-dirty",
             Self::PaneFrozen => "pane-frozen",
+            Self::PaneFocused => "pane-focused",
+            Self::BlockingError => "blocking-error",
+            Self::SessionError => "session-error",
+            Self::PaneBookmarked => "pane-bookmarked",
+            Self::PromptsQueued => "prompts-queued",
+            Self::PromptQueueHeld => "prompt-queue-held",
+            Self::PaneSelected => "pane-selected",
+            Self::PaneVisible => "pane-visible",
             Self::AgentClass(_) => "agent-class",
+            Self::OtherAgent => "other-agent",
             Self::AgentAvailability(_) => "agent-availability",
             Self::AgentTurn(_) => "agent-turn",
             Self::GoalSet => "goal-set",
             Self::GoalState(_) => "goal-state",
             Self::CompletionUnread => "completion-unread",
             Self::ActivityStale => "activity-stale",
+            Self::ActivityUnchecked => "activity-unchecked",
             Self::MonitorCountAtLeast(_) => "monitor-count-at-least",
             Self::TaskStatus(_) => "task-status",
             Self::AnyTaskStatus(_) => "any-task-status",
@@ -90,20 +100,27 @@ impl Condition {
             Self::ShellOutputFast => "shell-output-fast",
             Self::ShellOutputSlow => "shell-output-slow",
             Self::SessionCostAbove(_) => "session-cost-above",
+            Self::ContextAbovePercent(_) => "context-above-percent",
             Self::ScreenMatches(_) => "screen-matches",
         }
     }
 
     pub const fn category(&self) -> ConditionCategory {
         match self {
-            Self::Always | Self::PaneKind(_) | Self::EditorDirty | Self::ScheduledInput => {
-                ConditionCategory::Pane
-            }
+            Self::Always
+            | Self::PaneKind(_)
+            | Self::EditorDirty
+            | Self::PaneBookmarked
+            | Self::ScheduledInput
+            | Self::PromptsQueued
+            | Self::PromptQueueHeld => ConditionCategory::Pane,
             Self::AgentClass(_)
+            | Self::OtherAgent
             | Self::AgentAvailability(_)
             | Self::AgentTurn(_)
             | Self::CompletionUnread
             | Self::ActivityStale
+            | Self::ActivityUnchecked
             | Self::Parked => ConditionCategory::Agent,
             Self::GoalSet | Self::GoalState(_) => ConditionCategory::Goal,
             Self::MonitorCountAtLeast(_)
@@ -124,7 +141,14 @@ impl Condition {
                 ConditionCategory::Shell
             }
             Self::ScreenMatches(_) => ConditionCategory::Screen,
-            Self::PaneFrozen | Self::SessionCostAbove(_) => ConditionCategory::Client,
+            Self::PaneFrozen
+            | Self::PaneFocused
+            | Self::PaneSelected
+            | Self::PaneVisible
+            | Self::BlockingError
+            | Self::SessionError
+            | Self::SessionCostAbove(_)
+            | Self::ContextAbovePercent(_) => ConditionCategory::Client,
         }
     }
 
@@ -145,6 +169,14 @@ impl Condition {
             ),
             Self::EditorDirty => "editor has unsaved changes".into(),
             Self::PaneFrozen => "pane is frozen".into(),
+            Self::PaneFocused => "pane has keyboard focus".into(),
+            Self::BlockingError => "pane has a blocking error".into(),
+            Self::SessionError => "session has a blocking error".into(),
+            Self::PaneBookmarked => "pane is bookmarked".into(),
+            Self::PromptsQueued => "prompts are queued".into(),
+            Self::PromptQueueHeld => "prompt queue is held".into(),
+            Self::PaneSelected => "pane is selected in the tree".into(),
+            Self::PaneVisible => "pane is on screen".into(),
             Self::AgentClass(class) => format!(
                 "agent is {}",
                 match class {
@@ -154,6 +186,7 @@ impl Condition {
                     AgentClass::Other(name) => name.as_str(),
                 }
             ),
+            Self::OtherAgent => "agent is a custom agent".into(),
             Self::AgentAvailability(availability) => match availability {
                 AvailabilityKind::Unverified => "lost agent is unverified",
                 AvailabilityKind::ShellForeground => "lost agent left a shell in front",
@@ -183,6 +216,7 @@ impl Condition {
             ),
             Self::CompletionUnread => "completion is unread".into(),
             Self::ActivityStale => "activity check is stale".into(),
+            Self::ActivityUnchecked => "activity could not be checked".into(),
             Self::MonitorCountAtLeast(count) => format!("at least {count} monitors"),
             Self::TaskStatus(status) => {
                 format!("selected monitored task is {}", task_status_word(*status))
@@ -209,6 +243,7 @@ impl Condition {
             Self::ShellOutputFast => "terminal output is fast".into(),
             Self::ShellOutputSlow => "terminal output is slow".into(),
             Self::SessionCostAbove(dollars) => format!("session cost is above ${dollars}"),
+            Self::ContextAbovePercent(percent) => format!("context window is over {percent}% full"),
             Self::ScreenMatches(pattern) => format!(
                 "visible screen matches /{}/{}",
                 pattern.pattern,
@@ -225,13 +260,23 @@ impl Condition {
             Self::PaneKind(_) => "The kind of pane: a live agent, a plain terminal, a lost agent, an editor or a board. Custom icons apply to agent and terminal panes.",
             Self::EditorDirty => "The editor pane has unsaved changes. Unknown for any other pane kind.",
             Self::PaneFrozen => "You froze the pane's screen. Known only for panes the client is currently displaying.",
+            Self::PaneFocused => "The pane's terminal holds keyboard focus. False for every pane while focus is on the tree, a dialog or Settings.",
+            Self::BlockingError => "A failed action targeting this pane left a retained blocking error that has not been dismissed. Known only for panes the client is currently displaying.",
+            Self::SessionError => "The session holds a retained error that belongs to no particular pane, such as a server-wide failure. The same for every pane. Known only while the client is displaying the session.",
+            Self::PaneBookmarked => "You bookmarked the pane in the sidebar.",
+            Self::PromptsQueued => "At least one prompt waits in the pane's prompt queue.",
+            Self::PromptQueueHeld => "The prompt queue stopped on a prompt whose delivery was interrupted. Ilium never resends it on its own, so the queue waits until you send or remove it.",
+            Self::PaneSelected => "The tree cursor rests on the pane's row, whether the tree or the terminal holds keyboard focus.",
+            Self::PaneVisible => "The pane's terminal is on screen in the right panel, alone or in a split view. Combine NOT with this to flag panes you are not looking at.",
             Self::AgentClass(_) => "Which agent CLI runs in the pane. Unknown unless a live agent is detected.",
+            Self::OtherAgent => "The pane runs an agent recognised by a custom signature rather than Claude Code, Codex or Antigravity. Unknown unless a live agent is detected.",
             Self::AgentAvailability(_) => "Why a lost agent is lost: unverified, a shell took the foreground, or the process exited (cleanly or with an error). Unknown for live agents and terminals.",
             Self::AgentTurn(_) => "The agent's current turn phase: working, needing approval, waiting for subagents, settling or idle. Unknown without a live agent.",
             Self::GoalSet => "A /goal is attached to the agent, whatever its state. Unknown without a live agent.",
             Self::GoalState(_) => "The goal's state: active, paused, blocked, usage limited or reached. False when no goal is set; unknown without a live agent.",
             Self::CompletionUnread => "The agent finished a turn you have not looked at yet. Unknown without a live agent.",
             Self::ActivityStale => "The activity detector has not confirmed the agent's state recently. Unknown until the detector reports freshness.",
+            Self::ActivityUnchecked => "The activity detector has never reported on this live agent, so its state is a guess. Unknown without a live agent.",
             Self::MonitorCountAtLeast(_) => "The pane has at least this many progress monitors; zero monitors is always known.",
             Self::TaskStatus(_) => "The selected (representative) monitored task is pending, running, failed or done. Unknown without a monitor.",
             Self::AnyTaskStatus(_) => "Any of the pane's monitored tasks has this status; false without monitors.",
@@ -252,6 +297,7 @@ impl Condition {
             Self::ShellOutputFast => "A plain terminal is printing quickly, like a build log. Unknown for agent panes.",
             Self::ShellOutputSlow => "A plain terminal is printing slowly, like a long test. Unknown for agent panes.",
             Self::SessionCostAbove(_) => "The agent session's tracked spend exceeds this many dollars. Unknown until cost tracking has a figure for the pane.",
+            Self::ContextAbovePercent(_) => "The agent's context window was more than this percentage full at its latest prompt. Unknown until cost tracking has read the session's transcript.",
             Self::ScreenMatches(_) => "A regular expression matches the pane's visible screen text, optionally only its first or last lines. Unknown until the screen has been scanned.",
         }
     }
@@ -269,10 +315,14 @@ pub fn condition_catalog() -> Vec<Condition> {
         Condition::PaneKind(PaneKind::Editor),
         Condition::EditorDirty,
         Condition::PaneKind(PaneKind::Board),
+        Condition::PaneBookmarked,
         Condition::ScheduledInput,
+        Condition::PromptsQueued,
+        Condition::PromptQueueHeld,
         Condition::AgentClass(AgentClass::Claude),
         Condition::AgentClass(AgentClass::Codex),
         Condition::AgentClass(AgentClass::Antigravity),
+        Condition::OtherAgent,
         Condition::AgentAvailability(AvailabilityKind::Unverified),
         Condition::AgentAvailability(AvailabilityKind::ShellForeground),
         Condition::AgentAvailability(AvailabilityKind::Exited),
@@ -285,6 +335,7 @@ pub fn condition_catalog() -> Vec<Condition> {
         Condition::AgentTurn(AgentTurn::Idle),
         Condition::CompletionUnread,
         Condition::ActivityStale,
+        Condition::ActivityUnchecked,
         Condition::Parked,
         Condition::GoalSet,
         Condition::GoalState(GoalState::Active),
@@ -319,7 +370,13 @@ pub fn condition_catalog() -> Vec<Condition> {
         Condition::ShellOutputFast,
         Condition::ShellOutputSlow,
         Condition::PaneFrozen,
+        Condition::PaneFocused,
+        Condition::PaneSelected,
+        Condition::PaneVisible,
+        Condition::BlockingError,
+        Condition::SessionError,
         Condition::SessionCostAbove(5),
+        Condition::ContextAbovePercent(80),
         // Screen matching stays last: the editor cycles through this list and
         // wraps from the screen pattern back to `Always`.
         Condition::ScreenMatches(ScreenPattern {
@@ -401,7 +458,7 @@ mod tests {
         let keys: HashSet<&str> = catalogue.iter().map(Condition::key).collect();
         assert_eq!(
             keys.len(),
-            32,
+            41,
             "every Condition variant has a catalogue entry: {keys:?}"
         );
         for category in ConditionCategory::ALL {
@@ -413,6 +470,23 @@ mod tests {
             );
             assert!(!category.label().is_empty());
         }
+    }
+
+    #[test]
+    fn a_named_custom_agent_round_trips_through_toml() {
+        // `AgentClass::Other` carries data inside an externally tagged enum,
+        // which is where TOML encodings are easiest to get wrong.
+        let terms = vec![ConditionTerm {
+            condition: Condition::AgentClass(crate::AgentClass::Other("aider".to_owned())),
+            negated: true,
+        }];
+        let text = toml::to_string(&Document {
+            terms: terms.clone(),
+        })
+        .expect("serializable");
+        let parsed: Document = toml::from_str(&text).expect("parseable");
+        assert_eq!(parsed.terms, terms);
+        assert_eq!(terms[0].condition.label(), "agent is aider");
     }
 
     #[test]
@@ -436,6 +510,10 @@ mod tests {
         assert_eq!(
             Condition::MonitorCountAtLeast(2).label(),
             "at least 2 monitors"
+        );
+        assert_eq!(
+            Condition::ContextAbovePercent(90).label(),
+            "context window is over 90% full"
         );
     }
 }

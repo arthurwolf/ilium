@@ -187,6 +187,7 @@ mod startup_dialog;
 pub mod status_demo;
 pub mod status_rule_visual;
 pub mod status_rules_editor;
+pub(crate) mod status_rules_save;
 pub mod status_screen_observations;
 /// Typed source custody returned when light-copy shutdown cannot finish.
 pub use smart_copy_selection::{
@@ -1100,6 +1101,7 @@ async fn run_inner(
 
     app.custom_agents = config.custom_agents;
     app.apply_ui_settings(config.ui);
+    app.reconcile_toolbar_custom_agents();
     app.initialize_disabled_model_icon_setting();
     match crate::project_config::load(&app.session_cwd) {
         Ok(project_config) => {
@@ -1160,6 +1162,10 @@ async fn run_inner(
     app.voice_output_devices = voice_output_devices;
     app.startup_audio_retention = Some(audio_retention);
     app.config_dir = config_dir;
+    // Known limitation: custom status rules are read once, here, at client
+    // start. Rules live in each client's own config.toml and are not shared
+    // with or propagated to other clients attached to the same session, and
+    // an edit made by another client is seen only after this client restarts.
     if let Some(directory) = app.config_dir.as_deref() {
         match crate::config::load_status_rules(directory) {
             Ok(loaded) => {
@@ -1167,6 +1173,27 @@ async fn run_inner(
                 app.custom_status_rules_load_issues = loaded.issues;
             }
             Err(error) => app.custom_status_rules_error = Some(error.to_string()),
+        }
+        // One log line per load that needs attention; the editor and the
+        // Agent Monitoring page show the same banner.
+        if let Some(banner) = crate::config::status_rules_load_banner(
+            app.custom_status_rules_error.as_deref(),
+            &app.custom_status_rules_load_issues,
+        ) {
+            let enabled_rules = app
+                .custom_status_rules
+                .rules
+                .iter()
+                .filter(|rule| rule.enabled)
+                .count();
+            tracing::warn!(
+                config_dir = %directory.display(),
+                unreadable = banner.unreadable,
+                enabled_rules,
+                details = %banner.details.join("; "),
+                "{}",
+                banner.headline
+            );
         }
     }
     app.custom_status_screen_observations.replace_rules(&app.custom_status_rules);
@@ -2311,6 +2338,8 @@ async fn run_inner(
     // The local file receipt alone cannot prove the server request was emitted.
     // File publication is an accepted local side effect. Its warning deadline
     // must not be cancelled by the separate bounded network-request drain.
+    // A pending debounced rules write joins the queue the drain below waits for.
+    app.flush_custom_status_rules_save();
     app.drain_filesystem().await.map_err(ClientError::TerminalSetup)?;
     let request_drain = async {
         reconcile_debug_logging(&mut app);

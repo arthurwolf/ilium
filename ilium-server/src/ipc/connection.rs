@@ -354,21 +354,33 @@ where
 
         let request = decoded.view();
         if let ClientRequest::SetStatusScreenWatches { revision, watches } = request {
-            // Validated and replaced as a whole: a rejected set leaves the
-            // previous revision running, and an empty set spawns nothing.
-            match crate::status_screen_watch::compile_wire(watches) {
-                Ok(compiled) => {
-                    crate::status_screen_watch::replace_revision(
-                        &mut screen_watches,
-                        Arc::clone(&state),
-                        *revision,
-                        compiled,
-                        direct_tx.clone(),
-                    );
-                }
-                Err(message) => {
-                    let _ = direct_tx.send(ServerEvent::Error { message }).await;
-                }
+            // Validated and replaced as a whole, so a refused set never runs
+            // partially. The client fences every observation by revision and
+            // has already moved to this one, so a refused set also stops the
+            // previous revision's observer: its answers would be discarded on
+            // arrival, and the client keeps every watch Unknown until a valid
+            // revision arrives. An empty set spawns nothing.
+            let compiled = crate::status_screen_watch::compile_wire(watches);
+            let rejection = compiled.as_ref().err().cloned();
+            crate::status_screen_watch::replace_revision(
+                &mut screen_watches,
+                Arc::clone(&state),
+                *revision,
+                compiled.unwrap_or_default(),
+                direct_tx.clone(),
+            );
+            if let Some(error) = rejection {
+                tracing::warn!(
+                    revision = *revision,
+                    watch_id = ?error.watch_id,
+                    message = %error.message,
+                    "status screen watch set refused; every watch stays unknown"
+                );
+                let _ = direct_tx
+                    .send(ServerEvent::StatusScreenWatchesRejected(
+                        error.into_rejection(*revision),
+                    ))
+                    .await;
             }
             continue;
         }

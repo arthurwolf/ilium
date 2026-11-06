@@ -71,34 +71,26 @@ impl ScreenReader {
     }
 
     /// Read the generation under the same parser guard as the visible text so
-    /// consumers can reject out-of-order observations without a race.
+    /// consumers can reject out-of-order observations without a race. The
+    /// screen's cell count and its text length are both bounded by `limit`.
     pub fn try_text_with_generation_and_limit(&self, limit: usize) -> Option<(u64, Result<String, &'static str>)> {
-        self.try_with_frame(|screen, generation| (generation, (|| {
-            let (rows, columns) = screen.size();
-            if usize::from(rows).saturating_mul(usize::from(columns)) > limit {
-                return Err("terminal evidence geometry exceeds limit");
-            }
-            // Blank cells may become spaces between populated cells. Charge
-            // geometry as well as UTF-8 contents before contents() allocates.
-            let mut bytes = usize::from(rows)
-                .saturating_mul(usize::from(columns))
-                .saturating_add(usize::from(rows));
-            for row in 0..rows {
-                for column in 0..columns {
-                    if let Some(cell) = screen.cell(row, column) {
-                        bytes = bytes.saturating_add(cell.contents().len());
-                        if bytes > limit {
-                            return Err("terminal evidence text exceeds limit");
-                        }
-                    }
-                }
-            }
-            let text = screen.contents();
-            if text.len() > limit {
-                return Err("terminal evidence text exceeds limit");
-            }
-            Ok(text)
-        })()))
+        self.try_text_with_generation_and_limits(limit, limit)
+    }
+
+    /// Like `try_text_with_generation_and_limit`, with separate bounds for the
+    /// scanned grid (`cell_limit`, rows x columns) and the returned text
+    /// (`byte_limit`, UTF-8 bytes). A large but mostly blank grid stays
+    /// readable as long as its text fits: blank cells after the last populated
+    /// cell of a row and trailing blank rows are not part of the text, so they
+    /// are not charged against `byte_limit`.
+    pub fn try_text_with_generation_and_limits(
+        &self,
+        cell_limit: usize,
+        byte_limit: usize,
+    ) -> Option<(u64, Result<String, &'static str>)> {
+        self.try_with_frame(|screen, generation| {
+            (generation, bounded_contents(screen, cell_limit, byte_limit))
+        })
     }
 
     /// Reads current screen geometry and its session-local resize epoch under
@@ -141,6 +133,66 @@ impl ScreenReader {
         let parser = self.parser.try_read().ok()?;
         Some(f(parser.screen(), self.generation.load(Ordering::Acquire)))
     }
+}
+
+/// The visible text (`vt100::Screen::contents`) of a screen whose geometry
+/// and text both fit, computed without allocating an oversized string.
+fn bounded_contents(
+    screen: &vt100::Screen,
+    cell_limit: usize,
+    byte_limit: usize,
+) -> Result<String, &'static str> {
+    let (rows, columns) = screen.size();
+    // Bounds the preflight scan itself, which visits every cell.
+    if usize::from(rows).saturating_mul(usize::from(columns)) > cell_limit {
+        return Err("terminal evidence geometry exceeds limit");
+    }
+    if contents_length_upper_bound(screen, byte_limit) > byte_limit {
+        return Err("terminal evidence text exceeds limit");
+    }
+    let text = screen.contents();
+    // The preflight is an upper bound; this keeps the contract exact even if
+    // vt100's formatting ever emits more than the preflight predicts.
+    if text.len() > byte_limit {
+        return Err("terminal evidence text exceeds limit");
+    }
+    Ok(text)
+}
+
+/// An upper bound on `screen.contents().len()`, mirroring vt100's row
+/// formatter: blank cells before a populated cell become one space each,
+/// populated cells contribute their UTF-8 contents, the continuation half of
+/// a wide character contributes nothing, and every row may end with one
+/// newline. Stops counting once `stop_above` is exceeded.
+fn contents_length_upper_bound(screen: &vt100::Screen, stop_above: usize) -> usize {
+    let (rows, columns) = screen.size();
+    let mut bytes = 0usize;
+    for row in 0..rows {
+        let mut next_column = 0u16;
+        let mut skip_wide_continuation = false;
+        for column in 0..columns {
+            if skip_wide_continuation {
+                skip_wide_continuation = false;
+                continue;
+            }
+            let Some(cell) = screen.cell(row, column) else {
+                continue;
+            };
+            skip_wide_continuation = cell.is_wide();
+            if cell.has_contents() {
+                let gap = usize::from(column.saturating_sub(next_column));
+                bytes = bytes
+                    .saturating_add(gap)
+                    .saturating_add(cell.contents().len());
+                next_column = column.saturating_add(if cell.is_wide() { 2 } else { 1 });
+            }
+        }
+        bytes = bytes.saturating_add(1);
+        if bytes > stop_above {
+            return bytes;
+        }
+    }
+    bytes
 }
 
 #[cfg(test)]
@@ -205,6 +257,83 @@ mod tests {
         assert_eq!(
             reader.try_with_frame(|screen, revision| (screen.contents(), revision)),
             Some(("oldnew".into(), 8))
+        );
+    }
+
+    fn reader_with(rows: u16, columns: u16, output: &[u8]) -> ScreenReader {
+        let parser = Arc::new(RwLock::new(Parser::new_with_callbacks(
+            rows,
+            columns,
+            0,
+            TerminalQueryResponder::new(),
+        )));
+        parser.write().unwrap().process(output);
+        ScreenReader::new(parser, Arc::new(AtomicU64::new(0)))
+    }
+
+    #[test]
+    fn large_mostly_blank_grids_are_charged_by_their_text_not_their_geometry() {
+        // 200 x 500 = 100,000 cells: above a 64 KiB text budget by geometry
+        // alone, but its text is a few bytes, so it stays readable.
+        let reader = reader_with(200, 500, b"ready\r\n\x1b[150;10Hprompt");
+        let (_, text) = reader
+            .try_text_with_generation_and_limits(256 * 1024, 64 * 1024)
+            .unwrap();
+        let text = text.expect("sparse text fits the byte budget");
+        assert!(text.starts_with("ready\n"));
+        assert!(text.ends_with("         prompt"));
+        // The single-limit form still bounds the scanned geometry by `limit`.
+        assert!(reader.try_text_with_limit(64 * 1024).unwrap().is_err());
+        // The cell bound still refuses a grid too large to scan.
+        assert!(reader
+            .try_text_with_generation_and_limits(99_999, 64 * 1024)
+            .unwrap()
+            .1
+            .is_err());
+    }
+
+    #[test]
+    fn text_budget_counts_wide_characters_and_refuses_instead_of_truncating() {
+        let reader = reader_with(2, 10, "ab\r\n\u{4e2d}x".as_bytes());
+        let (_, text) = reader.try_text_with_generation_and_limits(20, 64).unwrap();
+        let text = text.unwrap();
+        // "ab\n" + a three-byte wide character + "x".
+        assert_eq!(text, "ab\n\u{4e2d}x");
+        let bound = reader
+            .try_with_screen(|screen| contents_length_upper_bound(screen, usize::MAX))
+            .unwrap();
+        assert!(bound >= text.len(), "{bound} must cover {}", text.len());
+        // A budget below the real text refuses instead of truncating.
+        let refused = reader
+            .try_text_with_generation_and_limits(20, text.len() - 1)
+            .unwrap()
+            .1;
+        assert!(refused.is_err());
+        // An empty screen is readable and empty.
+        let empty = reader_with(3, 3, b"");
+        assert_eq!(
+            empty.try_text_with_generation_and_limits(9, 16).unwrap().1,
+            Ok(String::new())
+        );
+    }
+
+    #[test]
+    fn dense_screens_above_the_text_budget_are_refused() {
+        // Four fully written, soft-wrapped rows: 80 bytes of text; the
+        // preflight also reserves one newline per row.
+        let reader = reader_with(4, 20, &[b'x'; 80]);
+        assert!(reader
+            .try_text_with_generation_and_limits(80, 79)
+            .unwrap()
+            .1
+            .is_err());
+        assert_eq!(
+            reader
+                .try_text_with_generation_and_limits(80, 84)
+                .unwrap()
+                .1
+                .map(|text| text.len()),
+            Ok(80)
         );
     }
 }

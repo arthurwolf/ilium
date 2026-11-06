@@ -524,7 +524,20 @@ fn status_tooltip_content(
         identity_explanation, now_explanation, objective_explanation, StatusSlot,
     };
 
-    if slot == StatusSlot::Now {
+    // In Custom mode the error replaces the rule tooltip only when it is
+    // also painted over the rule icon (Overlay); otherwise the custom slot
+    // keeps explaining the winning rule. Group/session rows have no rule
+    // icon, so they keep the error tooltip in every mode.
+    let custom_mode = app.ui_settings.agent_monitoring_mode
+        == crate::agent_monitoring::AgentMonitoringMode::Custom;
+    let is_pane = app
+        .tree
+        .get(node_id)
+        .is_some_and(|node| matches!(node.kind, NodeKind::Pane { .. }));
+    let error_overrides_now = !custom_mode
+        || !is_pane
+        || app.ui_settings.blocking_error_display == crate::config::BlockingErrorDisplay::Overlay;
+    if slot == StatusSlot::Now && error_overrides_now {
         if let Some(error) = app.blocking_error_tooltip(node_id) {
             return Some(error);
         }
@@ -573,7 +586,15 @@ fn status_tooltip_content(
     if app.ui_settings.agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Custom
     {
         match slot {
-            StatusSlot::Objective => return None,
+            // Custom has no objective icon; with Second icon this slot is the
+            // error cell beside the custom icon (`PaintedTreeRows::status_at`).
+            StatusSlot::Objective => {
+                return (app.ui_settings.blocking_error_display
+                    == crate::config::BlockingErrorDisplay::SecondIcon
+                    && app.pane_has_blocking_error(node_id))
+                .then(|| app.blocking_error_tooltip(node_id))
+                .flatten();
+            }
             StatusSlot::Now => return crate::custom_status_live::tooltip(app, node_id),
             StatusSlot::Identity => {}
         }
@@ -897,6 +918,8 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         })
         .collect();
     let tree_visibility = app.active_tree_projection(std::time::Instant::now());
+    // Owned once per frame so the render options can borrow it.
+    let blocking_error_facts = app.blocking_error_facts();
     let mut painted_rows = tree_ui::render(
         frame,
         layout.tree_area,
@@ -907,7 +930,6 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             toolbar_layout: &app.ui_settings.tree_toolbar_layout,
             custom_toolbar_profiles: Some(&app.custom_agents.profiles),
             custom_toolbar_selected: app.custom_toolbar_selected.as_deref(),
-            custom_toolbar_hovered: app.custom_toolbar_hovered.as_deref(),
             custom_toolbar_pending: Some(&custom_toolbar_pending),
             custom_agent_labels: Some(&custom_agent_labels),
             focused: tree_focused,
@@ -950,6 +972,8 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             attention_running_indicator: app.ui_settings.attention_running_indicator,
             show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
             frozen_panes: &app.frozen_panes,
+            blocking_errors: Some(&blocking_error_facts),
+            pane_view: Some(crate::custom_status_live::PaneViewFacts::from_app(app)),
             cost: Some(app.cost_tracker.overlay().as_ref()),
             hover: tree_ui::TreeHoverState {
                 node: app.hovered_tree_node,
@@ -1008,15 +1032,67 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         })
         .collect();
     painted_rows.retain_values(values);
-    let blocked = painted_rows
-        .node_ids()
-        .filter(|node_id| app.blocking_error_tooltip(*node_id).is_some())
-        .collect();
-    painted_rows.paint_blocking_errors(frame, &blocked);
+    paint_tree_blocking_errors(frame, app, &mut painted_rows);
     app.record_composed_tree_rows(painted_rows);
     draw_cost_card(frame, app);
     draw_status_bar(frame, layout.status_area, app);
     None
+}
+
+/// Shows retained blocking errors on the painted tree rows. Normal and
+/// Attention modes always overlay the warning on the status cell. Custom mode
+/// follows `[ui] blocking_error_display` for pane rows, because there the
+/// cell holds the icon the user's ordered rules chose: Rules only paints
+/// nothing (rules use the `blocking-error` / `session-error` conditions),
+/// Overlay keeps the old triangle, Second icon uses the extra cell beside the
+/// custom icon. Group, project and session rows are not covered by pane
+/// rules, so they keep the overlay in every mode.
+fn paint_tree_blocking_errors(
+    frame: &mut Frame,
+    app: &App,
+    painted_rows: &mut tree_ui::PaintedTreeRows,
+) {
+    use crate::agent_monitoring::AgentMonitoringMode;
+    use crate::config::BlockingErrorDisplay;
+    let custom = app.ui_settings.agent_monitoring_mode == AgentMonitoringMode::Custom;
+    let display = app.ui_settings.blocking_error_display;
+    let mut overlay = std::collections::HashSet::new();
+    let mut second_icon = std::collections::HashSet::new();
+    for node_id in painted_rows.node_ids() {
+        let is_pane = app
+            .tree
+            .get(node_id)
+            .is_some_and(|node| matches!(node.kind, NodeKind::Pane { .. }));
+        if !custom || !is_pane {
+            if app.blocking_error_tooltip(node_id).is_some() {
+                overlay.insert(node_id);
+            }
+            continue;
+        }
+        match display {
+            BlockingErrorDisplay::RulesOnly => {}
+            BlockingErrorDisplay::Overlay => {
+                if app.blocking_error_tooltip(node_id).is_some() {
+                    overlay.insert(node_id);
+                }
+            }
+            BlockingErrorDisplay::SecondIcon => {
+                if app.pane_has_blocking_error(node_id) {
+                    second_icon.insert(node_id);
+                }
+            }
+        }
+    }
+    if !second_icon.is_empty() {
+        // A pane whose row layout hides the Activity slot has no error cell;
+        // fall back to the overlay rather than hiding its error.
+        overlay.extend(painted_rows.paint_second_error_icons(
+            frame,
+            &second_icon,
+            app.ui_settings.use_stable_glyphs,
+        ));
+    }
+    painted_rows.paint_blocking_errors(frame, &overlay);
 }
 
 /// Draws the per-agent cost card beside its tree entry when the detail-card
