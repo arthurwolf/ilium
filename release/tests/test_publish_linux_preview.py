@@ -39,7 +39,7 @@ class PublishLinuxPreviewTests(unittest.TestCase):
     def test_refuses_any_tag_other_than_the_preview_tag(self):
         with tempfile.TemporaryDirectory() as root:
             native, packages = self.make_release(Path(root))
-            for tag in ('v0.1.1', 'v0.1.1-linux.3', ''):
+            for tag in ('v0.1.1', 'v0.1.1-linux.4', ''):
                 with self.subTest(tag=tag), self.assertRaises(SystemExit):
                     publisher.verify_inventory(native, packages, tag)
 
@@ -88,10 +88,10 @@ def make_deb(version):
     return out
 
 
-def make_tarball(version):
+def make_tarball(version, architecture='aarch64'):
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
-        for name, data in (('ilium-linux-aarch64', None), ('ilium-linux-aarch64/VERSION', (version + '\n').encode())):
+        for name, data in ((f'ilium-linux-{architecture}', None), (f'ilium-linux-{architecture}/VERSION', (version + '\n').encode())):
             info = tarfile.TarInfo(name)
             if data is None:
                 info.type = tarfile.DIRTYPE
@@ -297,3 +297,65 @@ class Aarch64ReleaseTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CombinedReleaseTests(unittest.TestCase):
+    """v0.1.1-linux.3 carries both architectures from one source commit and one version."""
+    def make(self, root, x86_version='0.1.1-linux.3', arm_version='0.1.1-linux.3', arm_deb='0.1.1~linux.3'):
+        native, packages, arm = root / 'native', root / 'packages', root / 'arm'
+        for directory in (native, packages, arm):
+            directory.mkdir()
+        tarball = make_tarball(x86_version, 'x86_64')
+        (native / publisher.TARBALL).write_bytes(tarball)
+        (native / 'SHA256SUMS').write_text(f'{publisher.sha256(native / publisher.TARBALL)}  {publisher.TARBALL}\n', encoding='ascii')
+        for name in publisher.PACKAGES:
+            (packages / name).write_bytes(make_deb('0.1.1~linux.3') if name.endswith('.deb') else b'x86 ' + name.encode())
+        (arm / publisher.AARCH64_TARBALL).write_bytes(make_tarball(arm_version))
+        for name in publisher.AARCH64_PACKAGES:
+            (arm / name).write_bytes(make_deb(arm_deb) if name.endswith('.deb') else b'arm ' + name.encode())
+        return native, packages, arm
+
+    def test_constants(self):
+        self.assertEqual(publisher.COMBINED_TAG, 'v0.1.1-linux.3')
+        self.assertEqual(len(publisher.COMBINED_COMMIT), 40)
+        self.assertEqual(len(publisher.COMBINED_ASSETS), len(publisher.ASSETS) + len(publisher.AARCH64_ASSETS))
+
+    def test_inventory_covers_both_architectures_with_real_digests(self):
+        with tempfile.TemporaryDirectory() as root:
+            native, packages, arm = self.make(Path(root))
+            files, inventory = publisher.verify_inventory(native, packages, publisher.COMBINED_TAG, arm)
+            self.assertEqual(sorted(files), sorted(publisher.COMBINED_ASSETS))
+            self.assertEqual([line.split('  ')[1] for line in inventory.splitlines()], list(publisher.COMBINED_ASSETS))
+            for name, path in files.items():
+                self.assertIn(f'{publisher.sha256(path)}  {name}', inventory)
+
+    def test_needs_the_arm_directory(self):
+        with tempfile.TemporaryDirectory() as root:
+            native, packages, _ = self.make(Path(root))
+            with self.assertRaises(SystemExit):
+                publisher.verify_inventory(native, packages, publisher.COMBINED_TAG)
+
+    def test_any_mixed_embedded_version_is_refused(self):
+        for kwargs in ({'x86_version': '0.1.1-linux.1'}, {'arm_version': '0.1.1-linux.2'}, {'arm_deb': '0.1.1~linux.2'}):
+            with self.subTest(**kwargs), tempfile.TemporaryDirectory() as root:
+                native, packages, arm = self.make(Path(root), **kwargs)
+                with self.assertRaises(SystemExit):
+                    publisher.verify_inventory(native, packages, publisher.COMBINED_TAG, arm)
+
+    def test_arm_rpm_and_snap_remain_refused(self):
+        with tempfile.TemporaryDirectory() as root:
+            native, packages, arm = self.make(Path(root))
+            (arm / 'ilium-linux-aarch64.snap').write_bytes(b'snap')
+            with self.assertRaises(SystemExit):
+                publisher.verify_inventory(native, packages, publisher.COMBINED_TAG, arm)
+
+    def test_commit_is_pinned(self):
+        with tempfile.TemporaryDirectory() as root:
+            native, packages, arm = self.make(Path(root))
+            output = io.StringIO()
+            args = ['dry-run', '--tag', publisher.COMBINED_TAG, '--native-directory', str(native),
+                    '--packages-directory', str(packages), '--aarch64-directory', str(arm), '--work', str(Path(root) / 'w')]
+            with redirect_stdout(output):
+                self.assertEqual(publisher.main(args + ['--commit', publisher.COMBINED_COMMIT]), 0)
+            with self.assertRaises(SystemExit), redirect_stdout(output):
+                publisher.main(args + ['--commit', 'b' * 40])

@@ -32,12 +32,17 @@ PACKAGES = ('ilium-linux-x86_64.deb', 'ilium-linux-x86_64.rpm', 'ilium-linux-x86
             'ilium-linux-x86_64.flatpak', 'ilium-linux-x86_64.snap')
 ASSETS = (TARBALL,) + PACKAGES
 AARCH64_TAG = 'v0.1.1-linux.2'
+# v0.1.1-linux.3 carries both architectures from ONE source commit and ONE embedded version.
+COMBINED_TAG = 'v0.1.1-linux.3'
+COMBINED_COMMIT = '1a9819290c61b7cf970f5e76cafeb2b4390fe6da'
 # The ARM64 release is built from this exact commit (the x86_64 source plus the version bump only).
 AARCH64_COMMIT = 'f69e1c94cf527d9394de2970561874e4ca68bb5a'
 AARCH64_TARBALL = 'ilium-linux-aarch64.tar.gz'
 # Four of six ARM64 formats are qualified; rpm and Snap are deliberately not published.
 AARCH64_PACKAGES = ('ilium-linux-aarch64.deb', 'ilium-linux-aarch64.AppImage', 'ilium-linux-aarch64.flatpak')
 AARCH64_ASSETS = (AARCH64_TARBALL,) + AARCH64_PACKAGES
+COMBINED_X86_ASSETS = ASSETS
+COMBINED_ASSETS = COMBINED_X86_ASSETS + AARCH64_ASSETS
 SUMS_NAME = 'SHA256SUMS'
 NOTES_DIRECTORY = Path(__file__).resolve().parents[1] / 'notes'
 NOTES = """Linux x86_64 development preview `{tag}`.
@@ -98,25 +103,56 @@ def tarball_version(path):
             fail(f'{path.name} must contain exactly one VERSION file, found {len(members)}')
         return archive.extractfile(members[0]).read().decode('utf-8').strip()
 
-def verify_versions(files, tag):
-    """Every versioned ARM64 artifact must carry the tag's version (deb uses ~ for the prerelease dash)."""
+def verify_versions(files, tag, architectures=('aarch64',)):
+    """Every versioned artifact must carry the tag's version (deb uses ~ for the prerelease dash)."""
     version = tag[1:]
-    found = tarball_version(files[AARCH64_TARBALL])
-    if found != version:
-        fail(f'{AARCH64_TARBALL} VERSION is {found!r}, expected {version!r}')
     expected_deb = version.replace('-', '~')
-    found = deb_version(files['ilium-linux-aarch64.deb'])
-    if found != expected_deb:
-        fail(f'ilium-linux-aarch64.deb Version is {found!r}, expected {expected_deb!r}')
+    for architecture in architectures:
+        tarball = f'ilium-linux-{architecture}.tar.gz'
+        found = tarball_version(files[tarball])
+        if found != version:
+            fail(f'{tarball} VERSION is {found!r}, expected {version!r}')
+        deb = f'ilium-linux-{architecture}.deb'
+        found = deb_version(files[deb])
+        if found != expected_deb:
+            fail(f'{deb} Version is {found!r}, expected {expected_deb!r}')
 
-def verify_inventory(native_dir, packages_dir, tag):
-    """Locate and byte-check the asset set of the tag's architecture; returns (files, SHA256SUMS text)."""
+def locate_set(native_dir, packages_dir, tarball_name, assets, require_native_sums):
+    """Locate and byte-check one architecture's asset set; returns its name -> path map."""
+    tarball = locate(native_dir, tarball_name)
+    native_sums = list(native_dir.rglob(SUMS_NAME))
+    expected_line = f'{sha256(tarball)}  {tarball_name}\n'
+    if require_native_sums or native_sums:
+        if len(native_sums) != 1 or native_sums[0].read_text(encoding='ascii') != expected_line:
+            fail('native SHA256SUMS does not match the qualified tarball bytes')
+    files = {tarball_name: tarball}
+    for name in assets[1:]:
+        files[name] = locate(packages_dir, name)
+    for name, path in files.items():
+        if path.stat().st_size == 0:
+            fail(f'{name} is empty')
+    architecture = tarball_name.split('-')[2].split('.')[0]
+    stray = sorted(path.name for path in packages_dir.rglob(f'ilium-linux-{architecture}.*')
+                   if path.is_file() and path.name not in assets)
+    if stray:
+        fail('refusing unexpected files ' + ', '.join(stray) + '; they are not part of this release')
+    return files
+
+def verify_inventory(native_dir, packages_dir, tag, aarch64_dir=None):
+    """Locate and byte-check the asset set of the tag; returns (files, SHA256SUMS text)."""
+    if tag == COMBINED_TAG:
+        if aarch64_dir is None:
+            fail(f'{COMBINED_TAG} needs --aarch64-directory holding the verified ARM64 files')
+        files = locate_set(native_dir, packages_dir, TARBALL, COMBINED_X86_ASSETS, True)
+        files.update(locate_set(aarch64_dir, aarch64_dir, AARCH64_TARBALL, AARCH64_ASSETS, False))
+        verify_versions(files, tag, ('x86_64', 'aarch64'))
+        return files, ''.join(f'{sha256(files[name])}  {name}\n' for name in COMBINED_ASSETS)
     if tag == PREVIEW_TAG:
         tarball_name, assets = TARBALL, ASSETS
     elif tag == AARCH64_TAG:
         tarball_name, assets = AARCH64_TARBALL, AARCH64_ASSETS
     else:
-        fail(f'refusing tag {tag!r}; only {PREVIEW_TAG} and {AARCH64_TAG} may be published here')
+        fail(f'refusing tag {tag!r}; only {PREVIEW_TAG}, {AARCH64_TAG} and {COMBINED_TAG} may be published here')
     tarball = locate(native_dir, tarball_name)
     native_sums = list(native_dir.rglob(SUMS_NAME))
     expected_line = f'{sha256(tarball)}  {tarball_name}\n'
@@ -151,11 +187,13 @@ def github(arguments, payload=None, method=None):
 
 
 def release_body(tag, assets):
-    if tag == AARCH64_TAG:
+    if tag in (AARCH64_TAG, COMBINED_TAG):
         return (NOTES_DIRECTORY / f'{tag}.md').read_text(encoding='utf-8')
     return NOTES.format(tag=tag, assets=', '.join(assets))
 
 def release_title(tag):
+    if tag == COMBINED_TAG:
+        return 'Ilium ' + tag + ' (Linux x86_64 and ARM64 preview)'
     return 'Ilium ' + tag + (' (Linux ARM64 preview)' if tag == AARCH64_TAG else ' (Linux preview)')
 
 def existing_releases(tag, repository):
@@ -211,6 +249,7 @@ def main(argv=None):
     parser.add_argument('--repository', default='arthurwolf/ilium', help='GitHub owner/name')
     parser.add_argument('--native-directory', type=Path, required=True)
     parser.add_argument('--packages-directory', type=Path, required=True)
+    parser.add_argument('--aarch64-directory', type=Path, help='directory with the verified ARM64 files (combined release only)')
     parser.add_argument('--work', type=Path, help='scratch directory for the generated SHA256SUMS')
     arguments = parser.parse_args(argv)
     if arguments.mode != 'check-versions':
@@ -220,10 +259,13 @@ def main(argv=None):
             fail('--work is required')
         if arguments.tag == AARCH64_TAG and arguments.commit != AARCH64_COMMIT:
             fail(f'{AARCH64_TAG} must be published from commit {AARCH64_COMMIT}')
+        if arguments.tag == COMBINED_TAG and arguments.commit != COMBINED_COMMIT:
+            fail(f'{COMBINED_TAG} must be published from commit {COMBINED_COMMIT}')
         arguments.work.mkdir(parents=True, exist_ok=True)
-    if arguments.mode == 'check-versions' and arguments.tag != AARCH64_TAG:
-        fail(f'check-versions applies to {AARCH64_TAG} only')
-    files, inventory = verify_inventory(arguments.native_directory, arguments.packages_directory, arguments.tag)
+    if arguments.mode == 'check-versions' and arguments.tag not in (AARCH64_TAG, COMBINED_TAG):
+        fail(f'check-versions applies to {AARCH64_TAG} and {COMBINED_TAG} only')
+    files, inventory = verify_inventory(arguments.native_directory, arguments.packages_directory, arguments.tag,
+                                        arguments.aarch64_directory)
     if arguments.mode == 'check-versions':
         print(json.dumps({'type': 'result', 'command': 'publish-linux-preview', 'state': 'versions-verified',
                           'tag': arguments.tag, 'assets': sorted(files)}))
