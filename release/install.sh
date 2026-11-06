@@ -120,8 +120,7 @@ case "$kernel/$architecture" in
 esac
 # END GENERATED POSIX TARGETS
 # BEGIN GENERATED PREVIEW PINS
-preview_version=0.1.1-linux.1
-preview_pins='ilium-linux-aarch64.tar.gz=1e9b4656ea537fd369950a3e32853a3e8714cdafd076aaf188f1568204bb1746 ilium-linux-x86_64.tar.gz=c84bcc0279e2339ae02d5e9dfaebe00ca0e0dea9eea8759f1e26358f96d91e26'
+preview_pins='ilium-linux-x86_64.tar.gz=0.1.1-linux.1:c84bcc0279e2339ae02d5e9dfaebe00ca0e0dea9eea8759f1e26358f96d91e26'
 # END GENERATED PREVIEW PINS
 if [ "$target_os" = linux ]; then
     libc_identity=$(getconf GNU_LIBC_VERSION 2>/dev/null) || fail "Linux release requires glibc; musl or unverified libc is unsupported"
@@ -344,15 +343,26 @@ fi
 download() {
     curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fLsS --connect-timeout 15 --max-time 300 -o "$2" "$1" 2> "$work/download-error" || fail "HTTPS download failed (network, rate limit, or missing release asset); no latest fallback"
 }
+# Preview pins are per architecture (each architecture is published in its own
+# prerelease): the table maps an archive name to VERSION:SHA256.
+pin_version=
+pin_hash=
+for pin in $preview_pins; do
+    pin_value=${pin#*=}
+    if [ "${pin%%=*}" = "$archive_name" ]; then
+        pin_version=${pin_value%%:*}
+        pin_hash=${pin_value#*:}
+    fi
+done
 if [ -z "$version" ]; then
     resolution=$(curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fLsS --connect-timeout 15 --max-time 300 -o /dev/null -w '%{http_code} %{url_effective}' "$origin/latest" 2> "$work/download-error") || {
-        # Only a definite missing stable release selects the published preview.
+        # Only a definite missing stable release selects this platform's pinned preview.
         # Network errors, authorization failures and rate limits never downgrade.
-        case "$resolution" in '404 '*) version=$preview_version ;; *) fail "Cannot resolve latest stable release" ;; esac
+        case "$resolution" in '404 '*) [ -n "$pin_version" ] || fail "This platform is not ready yet for the requested release"; version=$pin_version ;; *) fail "Cannot resolve latest stable release" ;; esac
     }
     if [ -z "$version" ]; then
         case "$resolution" in
-            "200 $origin"|"200 $origin/") version=$preview_version ;;
+            "200 $origin"|"200 $origin/") [ -n "$pin_version" ] || fail "This platform is not ready yet for the requested release"; version=$pin_version ;;
             "200 $origin/tag/v"*) version=${resolution#"200 $origin/tag/v"} ;;
             *) fail "Latest release redirect is not the expected tagged origin" ;;
         esac
@@ -360,16 +370,19 @@ if [ -z "$version" ]; then
     valid_version "$version" || fail "Latest release tag is not a safe version"
     requested_version=$version
 fi
-if [ "$version" = "$preview_version" ]; then
-    # This historical preview predates AVAILABILITY and has package-format
-    # checksums rather than the native archive inventory. Each native archive is
-    # pinned in the generated table above (release/linux-preview-pins.json);
-    # an archive without a pin is never guessed or fetched from the release.
-    expected=
-    for pin in $preview_pins; do
-        [ "${pin%%=*}" = "$archive_name" ] && expected=${pin#*=}
-    done
-    [ -n "$expected" ] || fail "This platform is not ready yet for the requested release"
+preview_known=0
+for pin in $preview_pins; do
+    pin_value=${pin#*=}
+    [ "${pin_value%%:*}" = "$version" ] && preview_known=1
+done
+if [ "$preview_known" = 1 ]; then
+    # Preview releases predate AVAILABILITY and have package-format checksums
+    # rather than the native archive inventory. Each native archive is pinned
+    # with its own release version in the generated table above
+    # (release/linux-preview-pins.json); an archive without a pin for this
+    # exact version is never guessed or fetched from the release.
+    [ "$pin_version" = "$version" ] && [ -n "$pin_hash" ] || fail "This platform is not ready yet for the requested release"
+    expected=$pin_hash
     [ "${#expected}" -eq 64 ] && [ -z "$(printf '%s' "$expected" | tr -d '0-9a-f')" ] || fail "Malformed pinned preview checksum"
 else
 download "$origin/download/v$version/SHA256SUMS" "$work/SHA256SUMS"

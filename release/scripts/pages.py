@@ -157,9 +157,9 @@ def verify_preview_pins(root, targets):
     pins = root / 'release/linux-preview-pins.json'
     if not pins.is_file():
         return
-    version, archives = release_tool.load_preview_pins(pins, targets)
+    pinned = release_tool.load_preview_pins(pins, targets)
     text = text_content((root / 'release/install.sh').read_bytes())
-    expected = release_tool.preview_pins_block(version, archives)
+    expected = release_tool.preview_pins_block(pinned)
     require(text.count(release_tool.PREVIEW_PINS_START) == 1 and text.count(release_tool.PREVIEW_PINS_END) == 1, 'installer needs exactly one preview pin block')
     start = text.index(release_tool.PREVIEW_PINS_START)
     end = text.index(release_tool.PREVIEW_PINS_END) + len(release_tool.PREVIEW_PINS_END)

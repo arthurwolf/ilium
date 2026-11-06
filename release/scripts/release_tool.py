@@ -498,57 +498,83 @@ PREVIEW_PINS_START = "# BEGIN GENERATED PREVIEW PINS"
 PREVIEW_PINS_END = "# END GENERATED PREVIEW PINS"
 
 
-def load_preview_pins(pins_path, targets, checksums_path=None):
+def load_preview_pins(pins_path, targets, checksums=None):
     """Validate the preview pin file; the installer never trusts an unvalidated hash.
 
-    Only Linux archives named by targets.toml may be pinned. When a published
-    SHA256SUMS is supplied, every pin must equal that file's record, so a hash
-    always originates from release output rather than being typed by hand.
+    Each pinned archive carries its own release version and SHA-256, because the
+    architectures are published in separate prereleases. Only Linux archives
+    named by targets.toml may be pinned. `checksums` maps a version to the
+    published SHA256SUMS of that release; when given it must cover every pinned
+    version and every pin must equal that file's record, so a hash always
+    originates from release output rather than being typed by hand.
+    Returns {archive name: (version, sha256)} sorted by archive name.
     """
     record = json.loads(pins_path.read_text(encoding="utf-8"))
-    version, archives = record.get("version"), record.get("archives")
-    if set(record) != {"version", "archives"} or not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?", version):
-        raise ReleaseError("preview pins need exactly a safe version and an archives map")
+    archives = record.get("archives")
+    if set(record) != {"archives"} or not isinstance(archives, dict) or not archives:
+        raise ReleaseError("preview pins need exactly a non-empty archives map")
     linux_archives = {row["archive"] for row in targets if row["os"] == "linux"}
-    if not isinstance(archives, dict) or not archives:
-        raise ReleaseError("preview pins need at least one archive")
-    for name, value in archives.items():
+    pins = {}
+    for name, entry in archives.items():
         if name not in linux_archives:
             raise ReleaseError(f"preview pin {name} is not an approved Linux archive")
+        if not isinstance(entry, dict) or set(entry) != {"version", "sha256"}:
+            raise ReleaseError(f"preview pin for {name} needs exactly a version and a sha256")
+        version, value = entry["version"], entry["sha256"]
+        if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?", version):
+            raise ReleaseError(f"preview pin for {name} has an unsafe version")
         if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
             raise ReleaseError(f"preview pin for {name} is not a lowercase SHA-256")
-    if checksums_path is not None:
+        pins[name] = (version, value)
+    if checksums:
+        missing = sorted({version for version, _ in pins.values()} - set(checksums))
+        if missing:
+            raise ReleaseError("no published checksum file given for preview version(s) " + ", ".join(missing))
         published = {}
-        for line in checksums_path.read_text(encoding="ascii").splitlines():
-            match = re.fullmatch(r"([0-9a-f]{64})  (\S+)", line)
-            if match:
-                published[match.group(2)] = match.group(1)
-        for name, value in archives.items():
-            if published.get(name) != value:
-                raise ReleaseError(f"preview pin for {name} differs from the published checksum file")
-    return version, dict(sorted(archives.items()))
+        for version, path in checksums.items():
+            records = {}
+            for line in path.read_text(encoding="ascii").splitlines():
+                match = re.fullmatch(r"([0-9a-f]{64})  (\S+)", line)
+                if match:
+                    records[match.group(2)] = match.group(1)
+            published[version] = records
+        for name, (version, value) in pins.items():
+            if published[version].get(name) != value:
+                raise ReleaseError(f"preview pin for {name} differs from the published {version} checksum file")
+    return dict(sorted(pins.items()))
 
 
-def preview_pins_block(version, archives):
-    pins = " ".join(f"{name}={value}" for name, value in archives.items())
-    return "\n".join([PREVIEW_PINS_START, f"preview_version={version}", f"preview_pins='{pins}'", PREVIEW_PINS_END])
+def preview_pins_block(pins):
+    table = " ".join(f"{name}={version}:{value}" for name, (version, value) in pins.items())
+    return "\n".join([PREVIEW_PINS_START, f"preview_pins='{table}'", PREVIEW_PINS_END])
+
+
+def parse_checksum_arguments(values):
+    """Turn repeated VERSION=PATH arguments into {version: Path}."""
+    result = {}
+    for value in values or []:
+        version, separator, path = value.partition("=")
+        if not separator or not version or not path or version in result:
+            raise ReleaseError("--checksums needs distinct VERSION=PATH values")
+        result[version] = Path(path)
+    return result
 
 
 def generate_preview_pins(arguments):
     targets = load_targets(arguments.manifest)
-    version, archives = load_preview_pins(arguments.pins, targets, arguments.checksums)
+    pins = load_preview_pins(arguments.pins, targets, parse_checksum_arguments(arguments.checksums))
     original = arguments.installer.read_text(encoding="utf-8")
     if original.count(PREVIEW_PINS_START) != 1 or original.count(PREVIEW_PINS_END) != 1:
         raise ReleaseError("installer must contain exactly one generated preview pin block")
     before, remainder = original.split(PREVIEW_PINS_START)
     _, after = remainder.split(PREVIEW_PINS_END)
-    updated = before + preview_pins_block(version, archives) + after
+    updated = before + preview_pins_block(pins) + after
     if arguments.check:
         if updated != original:
             raise ReleaseError("generated preview pins differ from the pin file")
     else:
         arguments.output.write_text(updated, encoding="utf-8")
-    emit({"type": "result", "command": "generate-preview-pins", "state": "passed", "installer": str(arguments.installer.resolve()), "sha256": digest(updated.encode()), "pinned": sorted(archives)})
+    emit({"type": "result", "command": "generate-preview-pins", "state": "passed", "installer": str(arguments.installer.resolve()), "sha256": digest(updated.encode()), "pinned": sorted(pins), "versions": sorted({version for version, _ in pins.values()})})
 
 
 WINDOWS_TABLE_START = "# BEGIN GENERATED WINDOWS TARGETS"
@@ -599,7 +625,7 @@ def build_parser():
     pins_parser.add_argument("--manifest", type=Path, required=True)
     pins_parser.add_argument("--installer", type=Path, required=True)
     pins_parser.add_argument("--pins", type=Path, required=True, help="release/linux-preview-pins.json")
-    pins_parser.add_argument("--checksums", type=Path, help="published SHA256SUMS every pin must match")
+    pins_parser.add_argument("--checksums", action="append", metavar="VERSION=PATH", help="published SHA256SUMS of one preview version; repeat once per pinned version")
     pins_mode = pins_parser.add_mutually_exclusive_group(required=True)
     pins_mode.add_argument("--check", action="store_true")
     pins_mode.add_argument("--output", type=Path, help="explicit generated output path")

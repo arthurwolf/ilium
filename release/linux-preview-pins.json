@@ -1,7 +1,8 @@
 {
-  "version": "0.1.1-linux.1",
   "archives": {
-    "ilium-linux-x86_64.tar.gz": "c84bcc0279e2339ae02d5e9dfaebe00ca0e0dea9eea8759f1e26358f96d91e26",
-    "ilium-linux-aarch64.tar.gz": "1e9b4656ea537fd369950a3e32853a3e8714cdafd076aaf188f1568204bb1746"
+    "ilium-linux-x86_64.tar.gz": {
+      "version": "0.1.1-linux.1",
+      "sha256": "c84bcc0279e2339ae02d5e9dfaebe00ca0e0dea9eea8759f1e26358f96d91e26"
+    }
   }
 }

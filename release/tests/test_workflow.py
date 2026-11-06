@@ -261,6 +261,7 @@ class WorkflowTests(unittest.TestCase):
 
         self.assertTrue(matches('v0.1.1'))
         self.assertFalse(matches('v0.1.1-linux.1'))
+        self.assertFalse(matches('v0.1.1-linux.2'))  # ARM64 is published by hand, not by the tag trigger
 
     def test_linux_preview_test_scope_keeps_product_packages_and_rejects_other_targets(self):
         full = pipeline.native_workspace_scope('full', 'x86_64-unknown-linux-gnu')

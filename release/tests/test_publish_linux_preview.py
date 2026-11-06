@@ -1,5 +1,6 @@
 import hashlib
 import io
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -38,7 +39,7 @@ class PublishLinuxPreviewTests(unittest.TestCase):
     def test_refuses_any_tag_other_than_the_preview_tag(self):
         with tempfile.TemporaryDirectory() as root:
             native, packages = self.make_release(Path(root))
-            for tag in ('v0.1.1', 'v0.1.1-linux.2', ''):
+            for tag in ('v0.1.1', 'v0.1.1-linux.3', ''):
                 with self.subTest(tag=tag), self.assertRaises(SystemExit):
                     publisher.verify_inventory(native, packages, tag)
 
@@ -72,125 +73,226 @@ class PublishLinuxPreviewTests(unittest.TestCase):
             self.assertIn(publisher.TARBALL, output.getvalue())
 
 
-class AppendAarch64Tests(unittest.TestCase):
-    def make_arm(self, root, optional=()):
+def make_deb(version):
+    """Minimal ar archive holding control.tar.gz with a Version field."""
+    control = io.BytesIO()
+    with tarfile.open(fileobj=control, mode='w:gz') as archive:
+        data = f'Package: ilium\nVersion: {version}\nArchitecture: arm64\n'.encode()
+        info = tarfile.TarInfo('./control')
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+    members = [('debian-binary', b'2.0\n'), ('control.tar.gz', control.getvalue())]
+    out = b'!<arch>\n'
+    for name, body in members:
+        out += f'{name + "/":<16}{0:<12}{0:<6}{0:<6}{100644:<8}{len(body):<10}`\n'.encode() + body + (b'\n' if len(body) % 2 else b'')
+    return out
+
+
+def make_tarball(version):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
+        for name, data in (('ilium-linux-aarch64', None), ('ilium-linux-aarch64/VERSION', (version + '\n').encode())):
+            info = tarfile.TarInfo(name)
+            if data is None:
+                info.type = tarfile.DIRTYPE
+            else:
+                info.size = len(data)
+            archive.addfile(info, None if data is None else io.BytesIO(data))
+    return buffer.getvalue()
+
+
+class Aarch64ReleaseTests(unittest.TestCase):
+    def make_arm(self, root, version='0.1.1-linux.2', deb_version='0.1.1~linux.2'):
         native, packages = root / 'arm-native', root / 'arm-packages'
         native.mkdir()
         packages.mkdir()
-        (native / publisher.AARCH64_TARBALL).write_bytes(b'arm tarball')
-        for name in publisher.AARCH64_REQUIRED_PACKAGES + tuple(optional):
-            (packages / name).write_bytes(b'arm ' + name.encode())
+        (native / publisher.AARCH64_TARBALL).write_bytes(make_tarball(version))
+        for name in publisher.AARCH64_PACKAGES:
+            (packages / name).write_bytes(make_deb(deb_version) if name.endswith('.deb') else b'arm ' + name.encode())
         return native, packages
 
-    def x86_sums(self):
-        return ''.join(f'{"1" * 64}  {name}\n' for name in publisher.ASSETS) + ''
+    def run_main(self, mode, native, packages, root, commit=publisher.AARCH64_COMMIT, tag=publisher.AARCH64_TAG):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = publisher.main([mode, '--tag', tag, '--commit', commit, '--native-directory', str(native),
+                                   '--packages-directory', str(packages), '--work', str(root / 'work')])
+        return code, output.getvalue()
 
-    def release(self, extra=()):
-        names = list(publisher.ASSETS) + [publisher.SUMS_NAME] + list(extra)
-        return {'id': 7, 'draft': False, 'prerelease': True, 'assets': [{'name': n, 'digest': 'sha256:' + '1' * 64} for n in names]}
+    def test_release_constants_split_architectures_by_tag(self):
+        self.assertEqual(publisher.PREVIEW_TAG, 'v0.1.1-linux.1')
+        self.assertEqual(publisher.AARCH64_TAG, 'v0.1.1-linux.2')
+        self.assertEqual(publisher.AARCH64_COMMIT, 'f69e1c94cf527d9394de2970561874e4ca68bb5a')
+        self.assertEqual(publisher.AARCH64_ASSETS, ('ilium-linux-aarch64.tar.gz', 'ilium-linux-aarch64.deb',
+                                                    'ilium-linux-aarch64.AppImage', 'ilium-linux-aarch64.flatpak'))
+        self.assertTrue(all('x86_64' not in name for name in publisher.AARCH64_ASSETS))
+        self.assertTrue(all('aarch64' not in name for name in publisher.ASSETS))
 
-    def test_set_uses_aarch64_names_and_skips_unqualified_formats(self):
+    def test_inventory_is_exactly_four_assets_with_real_digests(self):
         with tempfile.TemporaryDirectory() as root:
-            files = publisher.verify_aarch64_inventory(*self.make_arm(Path(root)), publisher.PREVIEW_TAG)
-            self.assertEqual(sorted(files), sorted(['ilium-linux-aarch64.tar.gz', 'ilium-linux-aarch64.deb', 'ilium-linux-aarch64.AppImage']))
-            self.assertTrue(all('x86_64' not in name for name in files))
+            files, inventory = publisher.verify_inventory(*self.make_arm(Path(root)), publisher.AARCH64_TAG)
+            self.assertEqual(sorted(files), sorted(publisher.AARCH64_ASSETS))
+            names = [line.split('  ')[1] for line in inventory.splitlines()]
+            self.assertEqual(names, list(publisher.AARCH64_ASSETS))
+            self.assertIn(f"{publisher.sha256(files[publisher.AARCH64_TARBALL])}  ilium-linux-aarch64.tar.gz", inventory)
 
-    def test_optional_format_is_included_when_present_and_missing_required_fails(self):
-        with tempfile.TemporaryDirectory() as root:
-            native, packages = self.make_arm(Path(root), optional=('ilium-linux-aarch64.rpm',))
-            self.assertIn('ilium-linux-aarch64.rpm', publisher.verify_aarch64_inventory(native, packages, publisher.PREVIEW_TAG))
-            (packages / 'ilium-linux-aarch64.deb').unlink()
-            with self.assertRaises(SystemExit):
-                publisher.verify_aarch64_inventory(native, packages, publisher.PREVIEW_TAG)
-
-    def test_wrong_tag_and_bad_native_checksum_fail(self):
+    def test_rpm_and_snap_are_refused_not_silently_uploaded(self):
         with tempfile.TemporaryDirectory() as root:
             native, packages = self.make_arm(Path(root))
+            (packages / 'ilium-linux-aarch64.rpm').write_bytes(b'rpm')
             with self.assertRaises(SystemExit):
-                publisher.verify_aarch64_inventory(native, packages, 'v0.1.1')
+                publisher.verify_inventory(native, packages, publisher.AARCH64_TAG)
+
+    def test_missing_empty_or_mismatched_native_checksum_fail_closed(self):
+        with tempfile.TemporaryDirectory() as root:
+            native, packages = self.make_arm(Path(root))
             (native / 'SHA256SUMS').write_text(f'{"0" * 64}  {publisher.AARCH64_TARBALL}\n', encoding='ascii')
             with self.assertRaises(SystemExit):
-                publisher.verify_aarch64_inventory(native, packages, publisher.PREVIEW_TAG)
+                publisher.verify_inventory(native, packages, publisher.AARCH64_TAG)
+            (native / 'SHA256SUMS').unlink()
+            (packages / 'ilium-linux-aarch64.flatpak').write_bytes(b'')
+            with self.assertRaises(SystemExit):
+                publisher.verify_inventory(native, packages, publisher.AARCH64_TAG)
+            (packages / 'ilium-linux-aarch64.flatpak').unlink()
+            with self.assertRaises(SystemExit):
+                publisher.verify_inventory(native, packages, publisher.AARCH64_TAG)
 
-    def test_merge_keeps_existing_lines_byte_for_byte_and_appends_arm(self):
+    def test_version_consistency_accepts_linux2_and_rejects_stale_artifacts(self):
         with tempfile.TemporaryDirectory() as root:
-            files = publisher.verify_aarch64_inventory(*self.make_arm(Path(root)), publisher.PREVIEW_TAG)
-            existing = self.x86_sums()
-            merged = publisher.merge_checksums(existing, files)
-            self.assertTrue(merged.startswith(existing))
-            added = merged[len(existing):].splitlines()
-            self.assertEqual([line.split('  ')[1] for line in added],
-                             ['ilium-linux-aarch64.tar.gz', 'ilium-linux-aarch64.deb', 'ilium-linux-aarch64.AppImage'])
-            self.assertIn(f"{hashlib.sha256(b'arm tarball').hexdigest()}  ilium-linux-aarch64.tar.gz", added)
-
-    def test_merge_refuses_duplicates_malformed_and_incomplete_x86_inventory(self):
-        files = {'ilium-linux-aarch64.deb': Path(__file__)}
-        for bad in (self.x86_sums() + f'{"2" * 64}  ilium-linux-aarch64.deb\n', 'garbage\n', ''.join(self.x86_sums().splitlines(True)[1:])):
-            with self.subTest(bad=bad[:20]), self.assertRaises(SystemExit):
-                publisher.merge_checksums(bad, files)
-
-    def test_plan_refuses_existing_remote_arm_asset(self):
-        files = {'ilium-linux-aarch64.deb': Path(__file__)}
-        with self.assertRaises(SystemExit):
-            publisher.append_plan(files, self.release(extra=['ilium-linux-aarch64.deb']), self.x86_sums())
-
-    def test_dry_run_writes_nothing_to_github(self):
-        with tempfile.TemporaryDirectory() as root, mock.patch.dict('os.environ', {'GITHUB_REPOSITORY': 'o/r'}), \
-                mock.patch.object(publisher, 'release_for_tag', return_value=self.release()), \
-                mock.patch.object(publisher, 'download_sums', return_value=self.x86_sums()), \
-                mock.patch.object(publisher.subprocess, 'run') as run, mock.patch.object(publisher, 'github') as api:
             native, packages = self.make_arm(Path(root))
-            output = io.StringIO()
-            with redirect_stdout(output):
-                code = publisher.main(['append-aarch64-dry-run', '--tag', publisher.PREVIEW_TAG, '--commit', COMMIT,
-                                       '--native-directory', str(native), '--packages-directory', str(packages),
-                                       '--work', str(Path(root) / 'work')])
+            code, output = self.run_main('check-versions', native, packages, Path(root))
+            self.assertEqual(code, 0)
+            self.assertIn('versions-verified', output)
+        for version, deb in (('0.1.1-linux.1', '0.1.1~linux.2'), ('0.1.1-linux.2', '0.1.1~linux.1'), ('0.1.1-linux.2', '0.1.1-linux.2')):
+            with self.subTest(tarball=version, deb=deb), tempfile.TemporaryDirectory() as root:
+                native, packages = self.make_arm(Path(root), version, deb)
+                with self.assertRaises(SystemExit):
+                    self.run_main('check-versions', native, packages, Path(root))
+
+    def test_check_versions_applies_to_the_arm_tag_only(self):
+        with tempfile.TemporaryDirectory() as root:
+            native, packages = self.make_arm(Path(root))
+            with self.assertRaises(SystemExit):
+                self.run_main('check-versions', native, packages, Path(root), tag=publisher.PREVIEW_TAG)
+
+    def test_arm_release_must_come_from_the_recorded_commit(self):
+        with tempfile.TemporaryDirectory() as root:
+            native, packages = self.make_arm(Path(root))
+            with self.assertRaises(SystemExit):
+                self.run_main('dry-run', native, packages, Path(root), commit=COMMIT)
+
+    def test_dry_run_has_no_network_access(self):
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(publisher.subprocess, 'run') as run:
+            native, packages = self.make_arm(Path(root))
+            code, output = self.run_main('dry-run', native, packages, Path(root))
             self.assertEqual(code, 0)
             run.assert_not_called()
-            api.assert_not_called()
-            self.assertIn('append-dry-run-passed', output.getvalue())
+            self.assertIn('dry-run-passed', output)
+            self.assertIn('ilium-linux-aarch64.flatpak', output)
 
-    def test_upload_never_clobbers_assets_and_clobbers_only_checksums(self):
-        with tempfile.TemporaryDirectory() as root, mock.patch.dict('os.environ', {'GITHUB_REPOSITORY': 'o/r'}):
+    def test_github_dry_run_only_reads_and_refuses_an_existing_release_or_tag(self):
+        calls = []
+
+        def api(arguments, payload=None, method=None):
+            calls.append((arguments, payload, method))
+            path = arguments[-1]
+            if path.endswith('/releases'):
+                return []
+            if 'matching-refs' in path:
+                return []
+            return {'sha': publisher.AARCH64_COMMIT}
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(publisher, 'github', side_effect=api), \
+                mock.patch.object(publisher.shutil, 'which', return_value='/usr/bin/gh'), mock.patch.object(publisher.subprocess, 'run') as run:
             native, packages = self.make_arm(Path(root))
-            files = publisher.verify_aarch64_inventory(native, packages, publisher.PREVIEW_TAG)
-            work = Path(root) / 'work'
-            work.mkdir()
-            merged = publisher.merge_checksums(self.x86_sums(), files)
-            (work / publisher.SUMS_NAME).write_text(merged, encoding='ascii')
-            readback = self.release()
-            readback['assets'] += [{'name': n, 'digest': 'sha256:' + publisher.sha256(p)} for n, p in files.items()]
-            for row in readback['assets']:
-                if row['name'] == publisher.SUMS_NAME:
-                    row['digest'] = 'sha256:' + publisher.sha256(work / publisher.SUMS_NAME)
-            with mock.patch.object(publisher, 'release_for_tag', return_value=self.release()), \
-                    mock.patch.object(publisher, 'download_sums', return_value=self.x86_sums()), \
-                    mock.patch.object(publisher.subprocess, 'run') as run, \
-                    mock.patch.object(publisher, 'github', return_value=readback):
-                publisher.append_aarch64(files, 'o/r', work, dry_run=False)
-            uploads = [call.args[0] for call in run.call_args_list]
-            self.assertNotIn('--clobber', uploads[0])
-            self.assertEqual(sorted(a for a in uploads[0] if a.endswith(tuple(files))), sorted(map(str, files.values())))
-            self.assertIn('--clobber', uploads[1])
-            self.assertEqual(uploads[1][-1], str(work / publisher.SUMS_NAME))
+            code, output = self.run_main('github-dry-run', native, packages, Path(root))
+            self.assertEqual(code, 0)
+            run.assert_not_called()
+            self.assertTrue(calls and all(payload is None and method is None for _, payload, method in calls))
+            self.assertIn('github-dry-run-passed', output)
+        for taken in ('release', 'tag'):
+            def taken_api(arguments, payload=None, method=None, taken=taken):
+                path = arguments[-1]
+                if path.endswith('/releases'):
+                    return [{'tag_name': publisher.AARCH64_TAG}] if taken == 'release' else []
+                if 'matching-refs' in path:
+                    return [{'ref': 'refs/tags/' + publisher.AARCH64_TAG}] if taken == 'tag' else []
+                return {'sha': publisher.AARCH64_COMMIT}
+            with self.subTest(taken=taken), tempfile.TemporaryDirectory() as root, mock.patch.object(publisher, 'github', side_effect=taken_api), \
+                    mock.patch.object(publisher.shutil, 'which', return_value='/usr/bin/gh'):
+                native, packages = self.make_arm(Path(root))
+                with self.assertRaises(SystemExit):
+                    self.run_main('github-dry-run', native, packages, Path(root))
 
-    def test_changed_x86_digest_after_upload_fails(self):
-        with tempfile.TemporaryDirectory() as root, mock.patch.dict('os.environ', {'GITHUB_REPOSITORY': 'o/r'}):
-            files = publisher.verify_aarch64_inventory(*self.make_arm(Path(root)), publisher.PREVIEW_TAG)
-            work = Path(root) / 'work'
-            work.mkdir()
-            readback = self.release()
-            merged = publisher.merge_checksums(self.x86_sums(), files)
-            (work / publisher.SUMS_NAME).write_text(merged, encoding='ascii')
-            readback['assets'] += [{'name': n, 'digest': 'sha256:' + publisher.sha256(p)} for n, p in files.items()]
-            readback['assets'][0]['digest'] = 'sha256:' + '9' * 64
-            readback['assets'][len(publisher.ASSETS)]['digest'] = 'sha256:' + publisher.sha256(work / publisher.SUMS_NAME)
-            with mock.patch.object(publisher, 'release_for_tag', return_value=self.release()), \
-                    mock.patch.object(publisher, 'download_sums', return_value=self.x86_sums()), \
-                    mock.patch.object(publisher.subprocess, 'run'), mock.patch.object(publisher, 'github', return_value=readback):
-                with self.assertRaises(SystemExit) as caught:
-                    publisher.append_aarch64(files, 'o/r', work, dry_run=False)
-            self.assertIn('x86_64 asset', str(caught.exception))
+    def publish_fixture(self, root, drift=None, extra_asset=False):
+        native, packages = self.make_arm(root)
+        files, inventory = publisher.verify_inventory(native, packages, publisher.AARCH64_TAG)
+        work = root / 'work'
+        work.mkdir()
+        sums = work / publisher.SUMS_NAME
+        sums.write_text(inventory, encoding='ascii')
+        assets = [{'name': n, 'digest': 'sha256:' + publisher.sha256(p)} for n, p in files.items()]
+        assets.append({'name': publisher.SUMS_NAME, 'digest': 'sha256:' + publisher.sha256(sums)})
+        if drift:
+            assets[0]['digest'] = 'sha256:' + '9' * 64
+        if extra_asset:
+            assets.append({'name': 'stray.bin', 'digest': 'sha256:' + '1' * 64})
+        requests = []
+
+        def api(arguments, payload=None, method=None):
+            requests.append((arguments, payload, method))
+            if arguments[-1].endswith('/releases') and payload is None:
+                return []
+            if arguments[-1].endswith('/releases'):
+                return {'id': 9}
+            return {'id': 9, 'draft': method is None and len(requests) < 5, 'prerelease': True, 'html_url': 'u', 'assets': assets} | ({'draft': False} if method == 'PATCH' or len(requests) > 4 else {})
+        return files, inventory, work, requests, api
+
+    def test_publish_creates_a_draft_for_the_new_tag_uploads_four_assets_then_publishes(self):
+        with tempfile.TemporaryDirectory() as root:
+            files, inventory, work, requests, api = self.publish_fixture(Path(root))
+            with mock.patch.object(publisher, 'github', side_effect=api), mock.patch.object(publisher.subprocess, 'run') as run, \
+                    redirect_stdout(io.StringIO()) as output:
+                publisher.publish(files, inventory, publisher.AARCH64_COMMIT, 'o/r', work, publisher.AARCH64_TAG)
+            create = next(payload for arguments, payload, method in requests if payload and 'tag_name' in payload)
+            self.assertEqual(create['tag_name'], 'v0.1.1-linux.2')
+            self.assertEqual(create['target_commitish'], publisher.AARCH64_COMMIT)
+            self.assertTrue(create['draft'] and create['prerelease'])
+            self.assertIn('QEMU', create['body'])
+            self.assertIn('v0.1.1-linux.1', create['body'])
+            command = run.call_args.args[0]
+            self.assertEqual(command[:4], ['gh', 'release', 'upload', 'v0.1.1-linux.2'])
+            self.assertNotIn('--clobber', command)
+            self.assertEqual(sorted(Path(a).name for a in command[command.index('o/r') + 1:]), sorted([*publisher.AARCH64_ASSETS, 'SHA256SUMS']))
+            patch = next(payload for arguments, payload, method in requests if method == 'PATCH')
+            self.assertEqual(patch, {'draft': False, 'prerelease': True, 'make_latest': 'false'})
+            self.assertIn('"state": "passed"', output.getvalue())
+
+    def test_publish_refuses_an_existing_release_before_any_write(self):
+        with tempfile.TemporaryDirectory() as root:
+            files, inventory, work, requests, api = self.publish_fixture(Path(root))
+            with mock.patch.object(publisher, 'github', return_value=[{'tag_name': publisher.AARCH64_TAG}]), \
+                    mock.patch.object(publisher.subprocess, 'run') as run:
+                with self.assertRaises(SystemExit):
+                    publisher.publish(files, inventory, publisher.AARCH64_COMMIT, 'o/r', work, publisher.AARCH64_TAG)
+            run.assert_not_called()
+
+    def test_publish_fails_before_going_public_on_digest_drift_or_stray_assets(self):
+        for label, options in (('drift', {'drift': True}), ('stray', {'extra_asset': True})):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as root:
+                files, inventory, work, requests, api = self.publish_fixture(Path(root), **options)
+                with mock.patch.object(publisher, 'github', side_effect=api), mock.patch.object(publisher.subprocess, 'run'):
+                    with self.assertRaises(SystemExit):
+                        publisher.publish(files, inventory, publisher.AARCH64_COMMIT, 'o/r', work, publisher.AARCH64_TAG)
+                self.assertFalse(any(method == 'PATCH' for _, _, method in requests))
+
+    def test_arm_release_notes_state_the_limits(self):
+        text = (publisher.NOTES_DIRECTORY / 'v0.1.1-linux.2.md').read_text(encoding='utf-8')
+        for phrase in ('QEMU', 'native ARM64 hardware', '4 of 6', 'coming soon', 'v0.1.1-linux.1', 'rpm', 'Snap'):
+            self.assertIn(phrase, text)
+
+    def test_failed_append_modes_no_longer_exist(self):
+        for mode in ('append-aarch64', 'append-aarch64-dry-run'):
+            with self.subTest(mode=mode), self.assertRaises(SystemExit):
+                publisher.main([mode, '--tag', publisher.AARCH64_TAG])
 
 
 if __name__ == '__main__':

@@ -27,7 +27,8 @@ import release_tool
 import native_install as install_gate
 import smoke_installed_animation as animation_gate
 
-TAG = 'v0.1.1-linux.1'
+TAG = 'v0.1.1-linux.1'  # x86_64 preview release
+PREVIEW_TAGS = {'x86_64': TAG, 'aarch64': 'v0.1.1-linux.2'}  # ARM64 is published separately
 TARGET = 'x86_64-unknown-linux-gnu'
 PROFILE = 'linux-x86-preview'
 PREVIEW_ARCHITECTURES = {
@@ -162,7 +163,7 @@ def bound_reference(native: Path, reference: object, name: str) -> str:
 
 def validate_inputs(arguments: argparse.Namespace, source: Path, native: Path) -> SimpleNamespace:
     target_name, profile = preview_architecture(getattr(arguments, 'arch', 'x86_64'))
-    require(arguments.tag == TAG, 'This gate accepts only the first Linux preview tag')
+    require(arguments.tag == PREVIEW_TAGS[getattr(arguments, 'arch', 'x86_64')], 'This gate accepts only the preview tag of the selected architecture')
     for value in (arguments.expected_bridge_sha256, arguments.expected_harness_sha256):
         require(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value), 'Expected receipt SHA-256 is required')
     bridge_path, harness_path = native / 'native-candidate-receipt.json', native / 'native-test-harness.json'

@@ -16,7 +16,7 @@ name: Native release and installation
         required: false
         type: string
       publish_linux_preview:
-        description: Publish the verified Linux preview prerelease (only with release_tag v0.1.1-linux.1)
+        description: Publish the verified Linux x86_64 preview prerelease (only with release_tag v0.1.1-linux.1; ARM64 v0.1.1-linux.2 is published by hand)
         required: false
         default: false
         type: boolean

@@ -131,6 +131,10 @@ class LinuxTarballTests(unittest.TestCase):
         self.assertEqual(inputs.runtime_files, self.runtime_files)
         self.assertEqual(inputs.embedding_binding['model_files'], self.model_files)
 
+    def test_preview_tags_are_per_architecture(self):
+        self.assertEqual(gate.PREVIEW_TAGS, {'x86_64': 'v0.1.1-linux.1', 'aarch64': 'v0.1.1-linux.2'})
+        self.assertEqual(gate.TAG, gate.PREVIEW_TAGS['x86_64'])
+
     def test_arm64_inputs_require_arm64_receipts_and_archive(self):
         self.arguments.arch = 'aarch64'
         target_name, profile = gate.preview_architecture(self.arguments.arch)
@@ -148,7 +152,13 @@ class LinuxTarballTests(unittest.TestCase):
                           ('runtime_inventory', 'runtime-inventory.json')):
             self.bridge[key] = {'path': '/synthetic-original-build/' + name, 'sha256': gate.sha(self.native / name)}
         self.freeze_receipts()
-        self.assertEqual(self.validate().target['rust_target'], target_name)
+        with self.assertRaises(Exception) as caught:  # The x86_64 tag is not the ARM64 preview tag.
+            self.validate()
+        self.assertIn('preview tag of the selected architecture', str(caught.exception))
+        # The synthetic receipts above are bound to the x86_64 tag text, so exercise the rest of the
+        # ARM64 checks with the ARM64 tag mapping pointed at that fixture tag.
+        with patch.dict(gate.PREVIEW_TAGS, {'aarch64': gate.TAG}):
+            self.assertEqual(self.validate().target['rust_target'], target_name)
         self.arguments.arch = 'x86_64'
         with self.assertRaises(release_tool.ReleaseError):
             self.validate()
