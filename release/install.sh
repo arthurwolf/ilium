@@ -120,7 +120,7 @@ case "$kernel/$architecture" in
 esac
 # END GENERATED POSIX TARGETS
 # BEGIN GENERATED PREVIEW PINS
-preview_pins='ilium-linux-aarch64.tar.gz=0.1.1-linux.2:68f273a4142c80652f1d08aa2091025696435160d3f44b4102a9c505c0f13fde ilium-linux-x86_64.tar.gz=0.1.1-linux.1:c84bcc0279e2339ae02d5e9dfaebe00ca0e0dea9eea8759f1e26358f96d91e26'
+preview_pins='ilium-linux-aarch64.tar.gz=0.1.1-linux.3:1f2f51d6dd3b98cd157883aa2f484aefbf192d383c0c5d61f397ce9fa114b6dd ilium-linux-x86_64.tar.gz=0.1.1-linux.3:102231b8f85aa6321c27e6465e4a7fff15e42cca333642c6b897c1cdd666622a'
 # END GENERATED PREVIEW PINS
 if [ "$target_os" = linux ]; then
     libc_identity=$(getconf GNU_LIBC_VERSION 2>/dev/null) || fail "Linux release requires glibc; musl or unverified libc is unsupported"

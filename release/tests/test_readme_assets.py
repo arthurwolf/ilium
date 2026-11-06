@@ -33,16 +33,15 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
         expected.update(build_windows_installers.INSTALLER_NAMES)
 
         readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
-        if "Linux x86_64 preview: [v0.1.1-linux.1]" in readme:
+        if "Linux preview: [v0.1.1-linux.3]" in readme:
             # The published documentation can remain on the preview while the
             # workspace is prepared for the next, not-yet-published release.
             base = "https://github.com/arthurwolf/ilium/releases/download/"
-            # x86_64 lives in the immutable first preview; ARM64 (four formats verified in an
-            # emulated guest) lives in its own second preview. rpm and Snap stay "coming soon".
+            # One combined prerelease carries both architectures; ARM64 rpm and Snap stay "coming soon".
             preview = {
-                "v0.1.1-linux.1": {"ilium-linux-x86_64.tar.gz", "SHA256SUMS", *build_linux_packages.package_names("x86_64")},
-                "v0.1.1-linux.2": {
-                    "SHA256SUMS", "ilium-linux-aarch64.tar.gz", "ilium-linux-aarch64.deb",
+                "v0.1.1-linux.3": {
+                    "ilium-linux-x86_64.tar.gz", "SHA256SUMS", *build_linux_packages.package_names("x86_64"),
+                    "ilium-linux-aarch64.tar.gz", "ilium-linux-aarch64.deb",
                     "ilium-linux-aarch64.AppImage", "ilium-linux-aarch64.flatpak",
                 },
             }
@@ -57,8 +56,8 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
             ))
             allowed = {base + tag + "/" + name for tag, names in preview.items() for name in names}
             self.assertEqual(all_downloads, allowed, "unexpected download channel")
-            self.assertNotIn("v0.1.1-linux.1/ilium-linux-aarch64", readme)
-            self.assertNotIn("v0.1.1-linux.2/ilium-linux-x86_64", readme)
+            self.assertNotIn("v0.1.1-linux.1/", readme)
+            self.assertNotIn("v0.1.1-linux.2/", readme)
             self.assertRegex(readme, r"(?m)^\| Linux ARM64 \(4 of 6 available and verified;")
             for system in ("macOS Apple Silicon", "macOS Intel", "Windows x86_64"):
                 self.assertRegex(readme, rf"(?m)^\| {re.escape(system)} \| .*\*\*\(coming soon; not yet available\)\*\* \|$")
