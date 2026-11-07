@@ -175,8 +175,18 @@ class PosixInstallTests(unittest.TestCase):
                 self.assertEqual(len(requests), 2)
                 self.assertTrue(requests[-1].endswith("/v0.1.1-linux.3/ilium-linux-aarch64.tar.gz"))
 
+    def test_committed_pins_offer_macos_apple_silicon_from_the_preview_4_prerelease(self):
+        for architecture in ("aarch64", "arm64"):
+            with self.subTest(architecture=architecture):
+                log = self.downloads / "requests.jsonl"
+                log.unlink(missing_ok=True)
+                self.failure(self.invoke(env={"FIXTURE_DOWNLOAD_FAILURE": "no-stable", "FIXTURE_KERNEL": "Darwin", "FIXTURE_ARCH": architecture}), "download")
+                requests = [json.loads(line)["url"] for line in log.read_text().splitlines()]
+                self.assertEqual(len(requests), 2)
+                self.assertTrue(requests[-1].endswith("/v0.1.1-preview.4/ilium-macos-aarch64.tar.gz"))
+
     def test_missing_stable_does_not_offer_preview_on_unpinned_platforms(self):
-        for architecture in ("arm64", "x86_64"):
+        for architecture in ("x86_64",):
             log = self.downloads / "requests.jsonl"
             log.unlink(missing_ok=True)
             self.failure(self.invoke(env={"FIXTURE_DOWNLOAD_FAILURE": "no-stable", "FIXTURE_KERNEL": "Darwin", "FIXTURE_ARCH": architecture}), "download")
@@ -273,8 +283,8 @@ class PosixInstallTests(unittest.TestCase):
         pins = ROOT / "release/linux-preview-pins.json"
         result = self.run_pin_tool(pins)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout)["pinned"], ["ilium-linux-aarch64.tar.gz", "ilium-linux-x86_64.tar.gz"])
-        self.assertEqual(json.loads(result.stdout)["versions"], ["0.1.1-linux.3"])
+        self.assertEqual(json.loads(result.stdout)["pinned"], ["ilium-linux-aarch64.tar.gz", "ilium-linux-x86_64.tar.gz", "ilium-macos-aarch64.tar.gz"])
+        self.assertEqual(json.loads(result.stdout)["versions"], ["0.1.1-linux.3", "0.1.1-preview.4"])
         good = json.loads(pins.read_text())
         x86 = self.X86
         entry = good["archives"][x86]
@@ -301,7 +311,10 @@ class PosixInstallTests(unittest.TestCase):
         sums = self.root / "SHA256SUMS"
         arm_entry = good["archives"][self.ARM]
         sums.write_text(f"{entry['sha256']}  {x86}\n{arm_entry['sha256']}  {self.ARM}\n")  # One combined release record.
-        both = [(entry["version"], sums)]
+        macos_entry = good["archives"]["ilium-macos-aarch64.tar.gz"]
+        preview_sums = self.root / "SHA256SUMS.preview"
+        preview_sums.write_text(f"{macos_entry['sha256']}  ilium-macos-aarch64.tar.gz\n")
+        both = [(entry["version"], sums), (macos_entry["version"], preview_sums)]
         self.assertEqual(self.run_pin_tool(pins, both).returncode, 0)
         self.assertNotEqual(self.run_pin_tool(pins, [("0.1.1-linux.9", sums)]).returncode, 0)  # No checksum file for the pinned version.
         sums.write_text(f"{'0' * 64}  {x86}\n")

@@ -674,3 +674,7 @@ files, and only accepts the pinned release commit. After publication, regenerate
 `release_tool.py generate-preview-pins --checksums 0.1.1-linux.3=<file>`, then
 re-run the suite. ARM64 evidence is emulated QEMU only, and rpm and Snap stay
 "coming soon" for ARM64.
+
+## v0.1.1-preview.4 (macOS Apple Silicon plus carried Linux files)
+
+Dispatch `release.yml` with `release_tag=v0.1.1-preview.4`; the `macos-preview` job (`macos-preview.yml`) builds natively on `macos-15`. Publishing is manual: carry the ten verified v0.1.1-linux.3 files byte for byte, add `ilium-macos-aarch64.tar.gz`, write one combined `SHA256SUMS`, create a draft prerelease (not latest) targeting the CI commit, upload, publish, then re-download every asset and compare size and SHA-256. Pin the installer afterwards with `release_tool.py generate-preview-pins`, passing the published `SHA256SUMS` of each pinned version. The macOS ZIP, PKG and DMG smoke test fails on this lineage because the animation helper sandbox is not qualified on macOS; do not lower that gate.
