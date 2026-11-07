@@ -9,6 +9,7 @@ name: Native release and installation
     tags:
     - v*
     - '!v*-linux.*'
+    - '!v*-preview.*'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -34,6 +35,13 @@ env:
   RUST_BACKTRACE: '1'
   PYTHONDONTWRITEBYTECODE: '1'
 jobs:
+  macos-preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.4'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/macos-preview.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
   linux-preview:
     if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'
     permissions:
@@ -70,7 +78,7 @@ jobs:
         set -o pipefail
         python release/scripts/publish_linux_preview.py "$PUBLISH_LINUX_PREVIEW" --tag "${{ inputs.release_tag }}" --commit "${{ github.sha }}" --native-directory preview-native --packages-directory preview-packages --work "$RUNNER_TEMP/preview-publish"
   source:
-    if: github.event_name != 'workflow_dispatch' || inputs.release_tag != 'v0.1.1-linux.3'
+    if: github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4')
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:

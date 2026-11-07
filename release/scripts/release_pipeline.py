@@ -302,10 +302,16 @@ def rustup_install_command():
     return command
 
 
+PREVIEW_PROFILES = {
+    'linux-x86-preview': ('x86_64-unknown-linux-gnu', r'v[0-9]+\.[0-9]+\.[0-9]+-linux\.[0-9]+'),
+    'macos-arm64-preview': ('aarch64-apple-darwin', r'v[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]+'),
+}
+
+
 def native_workspace_scope(profile, target):
     if profile == 'full':
         return ['--workspace']
-    require(profile == 'linux-x86-preview' and target == 'x86_64-unknown-linux-gnu',
+    require(profile in PREVIEW_PROFILES and PREVIEW_PROFILES[profile][0] == target,
             'unsupported native qualification profile or target')
     return ['--workspace', '--exclude', 'ilium-plugin-*']
 
@@ -316,7 +322,7 @@ def native_clippy_command(profile, target):
 
 
 def native_test_command(profile, target, cargo_arguments):
-    require(profile != 'linux-x86-preview' or cargo_arguments != ['--test', '*'],
+    require(profile not in PREVIEW_PROFILES or cargo_arguments != ['--test', '*'],
             'preview integration tests require explicit product target selection')
     return (['cargo', 'test', '--locked'] + native_workspace_scope(profile, target) +
             ['--no-fail-fast', '--target', target] + cargo_arguments)
@@ -328,9 +334,9 @@ def native(arguments):
     version = release_tool.workspace_version(arguments.workspace, arguments.tag)
     profile = getattr(arguments, 'qualification_profile', 'full')
     native_workspace_scope(profile, arguments.target)
-    if profile == 'linux-x86-preview':
-        require(re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-linux\.[0-9]+', arguments.tag),
-                'Linux preview profile requires a Linux preview tag')
+    if profile in PREVIEW_PROFILES:
+        require(re.fullmatch(PREVIEW_PROFILES[profile][1], arguments.tag),
+                'Preview profile requires its matching preview tag')
     expected_system = {'linux': 'Linux', 'windows': 'Windows', 'macos': 'Darwin'}[target['os']]
     expected_machines = {'x86_64': {'x86_64', 'AMD64'}, 'aarch64': {'aarch64', 'arm64', 'ARM64'}}[target['arch']]
     require(platform.system() == expected_system and platform.machine() in expected_machines, 'native runner does not match target')
@@ -456,7 +462,7 @@ def native(arguments):
     logged(test_command(['--lib', '--bins'], parallel_environment), root, work / 'workspace-unit-tests.log', parallel_environment, timeout=7200)
     logged(test_command(['--doc'], parallel_environment), root, work / 'workspace-doc-tests.log', parallel_environment, timeout=3600)
     integration_arguments = ['--test', '*']
-    if profile == 'linux-x86-preview':
+    if profile in PREVIEW_PROFILES:
         # Package exclusions alone still run preview suites in product crates.
         # Cargo metadata retains every product target instead of a fragile allowlist.
         metadata_log = work / 'preview-workspace-metadata.log'
@@ -528,7 +534,7 @@ def native(arguments):
         command.extend(['--dumpbin', tools[0]])
     logged(command, root, work / 'native-candidate.log', environment)
     output = arguments.output.resolve()
-    if profile == 'linux-x86-preview':
+    if profile in PREVIEW_PROFILES:
         # Keep the exact selection auditable in the uploaded, hash-bound evidence.
         for name in ('preview-test-scope.json', 'preview-workspace-metadata.log'):
             shutil.copyfile(work / name, output / 'evidence' / name)
@@ -1969,7 +1975,7 @@ def parser():
         if name == 'native':
             command.add_argument('--target', required=True)
             command.add_argument('--runner-identity', required=True)
-            command.add_argument('--qualification-profile', choices=('full', 'linux-x86-preview'), default='full')
+            command.add_argument('--qualification-profile', choices=('full', *PREVIEW_PROFILES), default='full')
             command.add_argument('--work', type=Path, required=True)
             command.add_argument('--output', type=Path, required=True)
         if name == 'aggregate':

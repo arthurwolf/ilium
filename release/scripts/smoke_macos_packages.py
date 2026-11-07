@@ -314,7 +314,7 @@ def read_build(directory: Path, target: dict[str, Any], audit: dict[str, Any], b
     return receipt  # Retain immutable receipt.
 #
 def validate_package_metadata(distribution: bytes, information: bytes, layout: dict[str, Any], payload_tree: dict[str, Any]) -> dict[str, Any]:  # Inspect before privilege.
-    wanted = packages.package_layout(layout['zip']['prefix'].removeprefix('ilium-macos-'), layout['pkg']['version'])  # Revalidate package layout.
+    wanted = packages.package_layout(layout['zip']['prefix'].removeprefix('ilium-macos-'), layout['pkg']['install_location'].split('/')[-2])  # Revalidate (the install path carries the full version, the installer receipt only its numeric core) package layout.
     require(layout == wanted, 'unrecognized package metadata layout')  # Reject policy drift.
     reference, observed = safe_xml(packages.distribution_xml(layout)), safe_xml(distribution)  # Compare actual Distribution.
     for element in observed.iter():  # Validate generated bookkeeping.
@@ -963,7 +963,7 @@ def smoke(arguments: argparse.Namespace) -> dict[str, Any]:  # Qualify all forma
                 run_command(runner, 'package-install', ['/usr/bin/sudo', '-n', '/usr/sbin/installer', '-pkg', package, '-target', mount], timeout=300)  # Install on owned volume.
                 installed = mount / layout['pkg']['install_location'].lstrip('/')  # Retain exact destination.
                 info = plistlib.loads(run_command(runner, 'installed-receipt', ['/usr/sbin/pkgutil', '--volume', mount, '--pkg-info-plist', layout['pkg']['identifier']]))  # Inspect isolated receipt.
-                require(isinstance(info, dict) and info.get('pkgid') == layout['pkg']['identifier'] and info.get('pkg-version') == audit['version'], 'installed receipt identity differs')  # Reject stale receipt.
+                require(isinstance(info, dict) and info.get('pkgid') == layout['pkg']['identifier'] and info.get('pkg-version') == layout['pkg']['version'], 'installed receipt identity differs')  # Reject stale receipt.
                 require(isinstance(info.get('volume'), str) and Path(info['volume']).resolve() == mount.resolve() and str(info.get('install-location', '')).strip('/') == layout['pkg']['install_location'].strip('/'), 'installed receipt escaped the isolated destination')  # Bind target location.
                 file_output = run_command(runner, 'installed-receipt-files', ['/usr/sbin/pkgutil', '--volume', mount, '--files', layout['pkg']['identifier']]).decode('utf-8')  # Read registered paths.
                 files = [line.removeprefix('./') if line != '.' else line for line in file_output.splitlines()]  # Normalize root spelling.
