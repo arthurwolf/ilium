@@ -513,11 +513,11 @@ def load_preview_pins(pins_path, targets, checksums=None):
     archives = record.get("archives")
     if set(record) != {"archives"} or not isinstance(archives, dict) or not archives:
         raise ReleaseError("preview pins need exactly a non-empty archives map")
-    linux_archives = {row["archive"] for row in targets if row["os"] == "linux"}
+    linux_archives = {row["archive"] for row in targets if row["os"] == "linux" or row["archive"] == "ilium-macos-aarch64.tar.gz"}
     pins = {}
     for name, entry in archives.items():
         if name not in linux_archives:
-            raise ReleaseError(f"preview pin {name} is not an approved Linux archive")
+            raise ReleaseError(f"preview pin {name} is not an approved preview archive")
         if not isinstance(entry, dict) or set(entry) != {"version", "sha256"}:
             raise ReleaseError(f"preview pin for {name} needs exactly a version and a sha256")
         version, value = entry["version"], entry["sha256"]

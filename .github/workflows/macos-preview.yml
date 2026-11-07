@@ -1,0 +1,107 @@
+# Qualification only: builds, packages and smoke-tests macOS Apple Silicon natively on macos-15.
+# Nothing here publishes; the verified artifacts are published by hand with the Linux files.
+name: macOS Apple Silicon preview qualification
+'on':
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  RUST_BACKTRACE: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: 'false'
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - name: Pinned release test parser
+      run: python -m pip install PyYAML==6.0.2
+    - name: macOS product build, tests, licence closure and candidate audit
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: python release/scripts/release_pipeline.py native --qualification-profile macos-arm64-preview --tag "${{ inputs.release_tag }}" --target "aarch64-apple-darwin" --runner-identity "macos-15" --work "$RUNNER_TEMP/native-work" --output "$GITHUB_WORKSPACE/native-output"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: native-aarch64-apple-darwin
+        path: native-output/
+        if-no-files-found: error
+        retention-days: '30'
+    - name: Retain native failure evidence
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: diagnostics-aarch64-apple-darwin
+        path: |
+          ${{ runner.temp }}/native-work/*.log
+          ${{ runner.temp }}/native-work/*/*.log
+          ${{ runner.temp }}/native-work/*/*.json
+        if-no-files-found: warn
+        retention-days: '30'
+  macos-packages:
+    needs:
+    - native
+    runs-on: macos-15
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: 'false'
+        ref: ${{ github.sha }}
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.11'
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-aarch64-apple-darwin
+        path: native-macos
+    - name: Build ZIP, PKG and DMG from the audited native tarball
+      run: >-
+        python release/scripts/build_macos_packages.py build
+        --tag "${{ inputs.release_tag }}" --arch aarch64
+        --source-commit "${{ github.sha }}" --runner-identity macos-15
+        --native native-macos --archive "native-macos/ilium-macos-aarch64.tar.gz"
+        --work "$RUNNER_TEMP/macos-package-work" --output macos-packages
+    - name: Qualify all three formats and retain exact native audit and installed animation bytes
+      run: >-
+        python release/scripts/smoke_macos_packages.py
+        --tag "${{ inputs.release_tag }}" --arch aarch64
+        --source-commit "${{ github.sha }}" --runner-identity macos-15
+        --native native-macos --archive "native-macos/ilium-macos-aarch64.tar.gz"
+        --packages macos-packages --build-work "$RUNNER_TEMP/macos-package-work"
+        --root "$RUNNER_TEMP/macos-package-smoke"
+        --output "macos-packages/macos-smoke-aarch64.json"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: macos-packages-aarch64
+        path: macos-packages/
+        if-no-files-found: error
+        retention-days: '30'
+    - name: Retain package build and lifecycle diagnostics
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: diagnostics-macos-packages-aarch64
+        path: |
+          ${{ runner.temp }}/macos-package-work/
+          ${{ runner.temp }}/macos-package-smoke/
+        if-no-files-found: warn
+        retention-days: '30'

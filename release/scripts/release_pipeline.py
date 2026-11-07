@@ -308,6 +308,7 @@ def rustup_install_command():
 PREVIEW_TARGETS = {
     'linux-x86-preview': 'x86_64-unknown-linux-gnu',
     'linux-arm64-preview': 'aarch64-unknown-linux-gnu',
+    'macos-arm64-preview': 'aarch64-apple-darwin',
 }
 
 
@@ -338,8 +339,8 @@ def native(arguments):
     profile = getattr(arguments, 'qualification_profile', 'full')
     native_workspace_scope(profile, arguments.target)
     if profile in PREVIEW_TARGETS:
-        require(re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-linux\.[0-9]+', arguments.tag),
-                'Linux preview profile requires a Linux preview tag')
+        require(re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-' + ('preview' if profile.startswith('macos') else 'linux') + r'\.[0-9]+', arguments.tag),
+                'Preview profile requires a matching preview tag')
     expected_system = {'linux': 'Linux', 'windows': 'Windows', 'macos': 'Darwin'}[target['os']]
     expected_machines = {'x86_64': {'x86_64', 'AMD64'}, 'aarch64': {'aarch64', 'arm64', 'ARM64'}}[target['arch']]
     require(platform.system() == expected_system and platform.machine() in expected_machines, 'native runner does not match target')

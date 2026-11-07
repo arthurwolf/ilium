@@ -736,3 +736,17 @@ class macos_smoke_contract_tests(unittest.TestCase):  # Check pure smoke admissi
 #
 if __name__ == "__main__":  # Support direct test execution.
     unittest.main()  # Run discovered regressions.
+
+
+class PreviewVersionTests(unittest.TestCase):
+    """The Apple Silicon preview carries a prerelease payload version with a numeric installer version."""
+    def test_preview_tag_keeps_the_payload_version_and_a_numeric_installer_version(self):
+        import build_macos_packages as preview_packages
+        self.assertEqual(preview_packages.version_from_tag('v0.1.1-preview.4'), '0.1.1-preview.4')
+        self.assertEqual(preview_packages.installer_version('0.1.1-preview.4'), '0.1.1')
+        layout = preview_packages.package_layout('aarch64', '0.1.1-preview.4')
+        self.assertEqual(layout['pkg']['version'], '0.1.1')
+        self.assertTrue(layout['pkg']['install_location'].endswith('/0.1.1-preview.4/aarch64'))
+        for bad in ('v0.1.1-linux.4', 'v0.1.1-rc.1', 'v0.1.1-preview.', 'v0.1', '0.1.1-preview.4'):
+            with self.assertRaises(Exception):
+                preview_packages.version_from_tag(bad)
