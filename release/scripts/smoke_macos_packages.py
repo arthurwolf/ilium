@@ -704,7 +704,13 @@ def session_gate(runner: packages.command_runner, installed: Path, directory: Pa
             cursor = process_identity(runner, cursor['ppid'])  # Observe parent identity.
             require(cursor is not None, 'pane ancestry disappeared before observation')  # Require live ancestry.
         require(server is not None, 'installed server ancestry exceeds bound')  # Require server evidence.
-        listing = run_command(runner, 'session-list', [client, 'ls'], environment=environment, cwd=project).decode('utf-8')  # List installed sessions.
+        session_pattern = r'(?<![A-Za-z0-9_-])' + re.escape(session) + r'(?![A-Za-z0-9_-])'  # Match only the owned token.
+        listing_deadline = time.monotonic() + 60  # The server persists the session snapshot shortly after creation.
+        while True:  # Observe the persisted listing without a fixed sleep.
+            listing = run_command(runner, 'session-list', [client, 'ls'], environment=environment, cwd=project).decode('utf-8')  # List installed sessions.
+            if re.search(session_pattern, listing) or time.monotonic() >= listing_deadline:  # Stop on proof or bound.
+                break
+            time.sleep(1)  # Bound listing polling.
         require(re.search(r'(?<![A-Za-z0-9_-])' + re.escape(session) + r'(?![A-Za-z0-9_-])', listing), 'created session is not listed')  # Require owned token.
         run_command(runner, 'session-kill', [client, 'kill-session', session], environment=environment, cwd=project)  # Kill exact session.
         deadline = time.monotonic() + 15  # Bound pane shutdown.
