@@ -20,7 +20,13 @@ if failure in ("network", "rate-limit") or (failure == "asset" and url.endswith(
     print({"network": "network unavailable", "rate-limit": "HTTP 429", "asset": "HTTP 404"}[failure], file=sys.stderr)
     sys.exit(22)
 if url.endswith("/latest"):
-    sys.stdout.write("https://127.0.0.1:18443/releases/tag/v0.1.0")
+    if failure == "no-stable":
+        sys.stdout.write("404 https://127.0.0.1:18443/releases/latest")
+        sys.exit(22)
+    if failure == "no-stable-redirect":
+        sys.stdout.write("200 https://127.0.0.1:18443/releases")
+        sys.exit(0)
+    sys.stdout.write("200 https://127.0.0.1:18443/releases/tag/v0.1.0")
     sys.exit(0)
 parts = url.split("/download/")[-1].split("/")
 source = root / parts[0] / parts[1]

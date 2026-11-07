@@ -59,6 +59,24 @@ evidence. A passing job must identify the Package page and immutable manifest
 digest. These contracts do not claim that a package is already publicly
 available; actual tagged workflow execution and public readback remain required.
 
+## Preview archive pins
+
+Each Linux architecture is published in its own immutable prerelease: x86_64 in `v0.1.1-linux.1`, ARM64 in `v0.1.1-linux.2` (a published release cannot gain assets). When no stable release exists the hosted `install.sh` falls back, per architecture, to the version pinned for that archive in `release/linux-preview-pins.json` and installs only archives pinned there. Each pin is `{"version": ..., "sha256": ...}`. An archive without a pin for the requested version fails with "not ready yet"; the ARM64 pin is absent until its release is published. Never type a hash by hand: pass the published `SHA256SUMS` of every pinned version, `generate-preview-pins ... --checksums 0.1.1-linux.1=<x86 SHA256SUMS> --checksums 0.1.1-linux.2=<arm SHA256SUMS> --output release/install.sh`, so every pin must equal the published record, then `--check`.
+
+### Publishing the ARM64 preview (`v0.1.1-linux.2`)
+
+The ARM64 release is built from commit `f69e1c94cf527d9394de2970561874e4ca68bb5a` (the x86_64 source plus the version bump) and contains exactly `ilium-linux-aarch64.{tar.gz,deb,AppImage,flatpak}` and its own four-line `SHA256SUMS`; rpm and Snap stay "coming soon". Notes come from `release/notes/v0.1.1-linux.2.md`. With the staged artifacts in `<stage>/native` and `<stage>/packages`:
+
+```sh
+S="--tag v0.1.1-linux.2 --commit f69e1c94cf527d9394de2970561874e4ca68bb5a --native-directory <stage>/native --packages-directory <stage>/packages"
+python release/scripts/publish_linux_preview.py check-versions $S          # VERSION 0.1.1-linux.2 and deb 0.1.1~linux.2
+python release/scripts/publish_linux_preview.py dry-run $S --work <work>   # local checks only
+python release/scripts/publish_linux_preview.py github-dry-run $S --work <work>   # adds GitHub reads only
+python release/scripts/publish_linux_preview.py publish $S --work <work>   # writes: draft, upload, readback, publish
+gh release download v0.1.1-linux.2 --repo arthurwolf/ilium --pattern SHA256SUMS --dir <published>
+python release/scripts/release_tool.py generate-preview-pins ... --pins release/linux-preview-pins.json   # after adding the ARM64 entry, see above
+```
+
 ## Source checks
 
 Run from the repository root with Python 3.11 or newer:
@@ -66,6 +84,7 @@ Run from the repository root with Python 3.11 or newer:
 ```sh
 python release/scripts/release_tool.py targets --manifest release/targets.toml
 python release/scripts/release_tool.py generate-posix-table --manifest release/targets.toml --installer release/install.sh --check
+python release/scripts/release_tool.py generate-preview-pins --manifest release/targets.toml --installer release/install.sh --pins release/linux-preview-pins.json --check
 python release/scripts/release_tool.py generate-windows-table --manifest release/targets.toml --installer release/install.ps1 --check
 python -m unittest discover -s release/tests -p 'test_*.py'
 ```
@@ -216,7 +235,7 @@ Format decisions:
 - **Snap** is `snap pack` of a hand-written `snap.yaml` with `confinement: classic` (Ilium spawns
   host shells and agents and reads the host process tree). Classic confinement needs
   Snap Store review, so the asset installs only with `snap install --dangerous --classic`.
-- **Flatpak** is an OSTree bundle of the payload on `org.freedesktop.Platform//24.08`.
+- **Flatpak** is an OSTree bundle of the payload on `org.freedesktop.Platform//25.08`.
   Its initial trusted CLI forwards the whole application to the host from the
   exact running deployment. Panes, server, helper and native process detection
   then use the host interfaces; Flatpak itself is a distribution wrapper, not
@@ -263,6 +282,12 @@ Flatpak documents as arbitrary host-command authority. This is deliberate for a
 terminal multiplexer that spawns host agents; it must be reviewed as such, not
 represented as Flatpak confinement. The existing host helper retains bounded
 binary pipes, Bubblewrap, its owned cgroup and post-bootstrap syscall seal.
+Because the payload therefore runs with the *host's* dynamic loader, the Flatpak
+runtime's own `libasound.so.2` is never used: the host needs the same reviewed
+system libraries as the tarball (`SYSTEM_LIBRARIES` in `build_linux_packages.py`,
+including ALSA). A minimal host or test guest without `libasound2` fails with
+`libasound.so.2: cannot open shared object file`; offline guest inputs must
+include the pinned `libasound2` and `libasound2-data` packages.
 `flatpak-spawn --watch-bus` is only an additional lifetime hint: upstream source
 retries without it on `INVALID_ARGS`, so it is not an ownership certificate.
 The native Flatpak gate must prove PTY and stdio behavior, exact three-binary

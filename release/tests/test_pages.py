@@ -50,6 +50,19 @@ class PagesTests(unittest.TestCase):
         self.assertEqual(len(metadata['files']), 5)
         pages.verify_pages(self.output, self.sums, source_root=self.root)
 
+    def test_preview_pin_block_is_checked_when_pins_exist(self):
+        pins = {'archives': {'ilium-linux-aarch64.tar.gz': {'version': '0.1.1-linux.2', 'sha256': 'b' * 64},
+                             'ilium-linux-x86_64.tar.gz': {'version': '0.1.1-linux.1', 'sha256': 'c' * 64}}}
+        (self.root / 'release/linux-preview-pins.json').write_text(json.dumps(pins))
+        block = release_tool.preview_pins_block(release_tool.load_preview_pins(self.root / 'release/linux-preview-pins.json', self.targets))
+        installer = self.root / 'release/install.sh'
+        good = installer.read_text() + block + '\n'
+        installer.write_text(good)
+        self.build()
+        installer.write_text(good.replace('c' * 64, 'd' * 64))
+        with self.assertRaises(release_tool.ReleaseError):
+            pages.verify_pages(self.output, self.sums, source_root=self.root)
+
     def test_literal_commands_targets_and_provenance(self):
         self.build()
         text = (self.output / 'index.html').read_text()
