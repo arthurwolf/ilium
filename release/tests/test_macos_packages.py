@@ -763,3 +763,22 @@ class MacosAnimationRefusalContractTests(unittest.TestCase):
                                      (row + row, error, 1), (row.replace('carpet', 'x'), error, 1)):
             with self.assertRaises(Exception):
                 gate.parse_refusal_output(stdout, stderr, code)
+
+
+class AppleToolOutputShapeTests(unittest.TestCase):
+    """pkgbuild/productbuild emit extra inert bookkeeping that the strict inspector must admit, and nothing else."""
+    def test_real_distribution_and_package_info_shapes(self):
+        import build_macos_packages as builder
+        import smoke_macos_packages as smoke
+        layout = builder.package_layout('aarch64', '0.1.1-preview.5')
+        identifier, location = layout['pkg']['identifier'], layout['pkg']['install_location']
+        distribution = builder.distribution_xml(layout).decode()
+        distribution = distribution.replace('>ilium-component.pkg<', ' installKBytes="297489" updateKBytes="0">#ilium-component.pkg<', 1)
+        distribution = distribution.replace('</installer-gui-script>', '<pkg-ref id="' + identifier + '"><bundle-version/></pkg-ref></installer-gui-script>')
+        info = ('<pkg-info overwrite-permissions="true" relocatable="false" identifier="' + identifier + '" postinstall-action="none" version="0.1.1" format-version="2" generator-version="InstallCmds-860.14 (24H232)" install-location="' + location + '" auth="root"><payload numberOfFiles="9" installKBytes="297489"/><bundle-version/><relocate/></pkg-info>')
+        tree = {str(index): {'kind': 'file'} for index in range(8)}
+        good = smoke.validate_package_metadata(distribution.encode(), info.encode(), layout, tree)
+        self.assertEqual(good['version'], '0.1.1')
+        for bad in (info.replace('relocatable="false"', 'relocatable="true"'), info.replace('postinstall-action="none"', 'postinstall-action="run"'), info.replace('auth="root"', 'auth="none"')):
+            with self.assertRaises(Exception):
+                smoke.validate_package_metadata(distribution.encode(), bad.encode(), layout, tree)

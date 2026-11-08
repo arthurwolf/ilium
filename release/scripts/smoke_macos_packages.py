@@ -319,7 +319,7 @@ def validate_package_metadata(distribution: bytes, information: bytes, layout: d
     for element in observed.iter():  # Validate generated bookkeeping.
         if element.tag != 'pkg-ref':  # Preserve reference semantics.
             continue  # Retain installer controls.
-        for field in ('installKBytes', 'archiveKBytes'):  # Allow generated sizes.
+        for field in ('installKBytes', 'archiveKBytes', 'updateKBytes'):  # Allow generated sizes.
             if field in element.attrib:  # Validate numeric metadata.
                 require(re.fullmatch(r'[0-9]{1,12}', element.attrib[field]), 'invalid generated package size')  # Reject arbitrary expressions.
                 del element.attrib[field]  # Compare remaining semantics.
@@ -330,11 +330,16 @@ def validate_package_metadata(distribution: bytes, information: bytes, layout: d
             element.remove(child)  # Ignore empty bookkeeping.
         if (element.text or '').strip() == '#' + layout['pkg']['component']:  # Allow local URL prefix.
             element.text = layout['pkg']['component']  # Normalize component URL.
+    for element in list(observed):  # Drop productbuild's bookkeeping-only root reference.
+        if element.tag == 'pkg-ref' and set(element.attrib) == {'id'} and not (element.text or '').strip() and not list(element) and any(other is not element and other.tag == 'pkg-ref' and other.attrib.get('id') == element.attrib['id'] for other in observed):  # Only an id-only duplicate of a full reference.
+            observed.remove(element)  # Keep the substantive reference and the choice reference.
     def shape(element: xml_tree.Element) -> tuple[Any, ...]:  # Compare XML structure.
         return (element.tag, tuple(sorted(element.attrib.items())), (element.text or '').strip(), tuple(sorted((shape(child) for child in element), key=repr)))  # Preserve semantic multiplicities.
     require(shape(observed) == shape(reference), 'actual Distribution changes package behavior')  # Reject changed behavior.
     info = safe_xml(information)  # Inspect actual PackageInfo.
-    require(info.tag == 'pkg-info' and set(info.attrib) == {'format-version', 'identifier', 'version', 'install-location', 'auth'}, 'PackageInfo schema differs')  # Reject unknown controls.
+    generated = {'overwrite-permissions': 'true', 'relocatable': 'false', 'postinstall-action': 'none'}  # Admit pkgbuild's fixed, non-redirecting defaults.
+    require(info.tag == 'pkg-info' and {'format-version', 'identifier', 'version', 'install-location', 'auth'} <= set(info.attrib) <= {'format-version', 'identifier', 'version', 'install-location', 'auth', 'generator-version', *generated}, 'PackageInfo schema differs')  # Reject unknown controls.
+    require(all(info.attrib.pop(key, value) == value for key, value in generated.items()) and re.fullmatch(r'[A-Za-z0-9 ._()\-]{1,64}', info.attrib.pop('generator-version', 'x')), 'PackageInfo generated attributes differ')  # Reject changed defaults.
     expected = {'format-version': '2', 'identifier': layout['pkg']['identifier'], 'version': layout['pkg']['version'], 'install-location': layout['pkg']['install_location'], 'auth': 'root'}  # Freeze administrator destination.
     require(info.attrib == expected, 'PackageInfo identity or installation location differs')  # Prevent installation redirection.
     children = list(info)  # Require payload metadata.
@@ -421,7 +426,7 @@ def parse_xar(data: bytes) -> dict[str, bytes]:  # Inspect unsigned XAR.
     fields = xml_children(document[0], {'creation-time', 'checksum', 'file'}, {'file'})  # Reject signatures/extensions.
     packages.require('checksum' in fields and 'file' in fields, 'missing XAR checksum or file inventory')  # Require nonempty inventory.
     if 'creation-time' in fields:  # Allow creation timestamp.
-        packages.require(re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', xml_scalar(fields['creation-time'][0])), 'invalid XAR creation time')  # Validate UTC spelling.
+        packages.require(re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?', xml_scalar(fields['creation-time'][0])), 'invalid XAR creation time')  # Validate UTC spelling.
     checksum = fields['checksum'][0]  # Bind checksum declaration.
     algorithm = algorithms[algorithm_id]  # Select admitted algorithm.
     packages.require(checksum.attrib == {'style': algorithm}, 'XAR header/TOC checksum styles differ')  # Reject contradictory algorithms.
@@ -444,7 +449,8 @@ def parse_xar(data: bytes) -> dict[str, bytes]:  # Inspect unsigned XAR.
         identifier = element.attrib.get('id')  # Read member ID.
         packages.require(set(element.attrib) == {'id'} and isinstance(identifier, str) and re.fullmatch(r'[1-9][0-9]{0,9}', identifier) and identifier not in identifiers and len(identifiers) < 1024 and depth <= 8, 'invalid XAR file identifier, count, or depth')  # Bound unique structure.
         identifiers.add(identifier)  # Reserve member identity.
-        member = xml_children(element, {'name', 'type', 'data', 'file'} | metadata_names, {'file'})  # Reject active metadata.
+        member = xml_children(element, {'name', 'type', 'data', 'file', 'FinderCreateTime'} | metadata_names, {'file', 'name'})  # Reject active metadata; Apple's xar repeats name.
+        packages.require(len({xml_scalar(item) for item in member.get('name', [])}) <= 1 and all(item.text == member['name'][0].text for item in member.get('name', [])), 'XAR member names differ')  # Allow only an identical repeat.
         packages.require('name' in member and 'type' in member, 'missing XAR member name/type')  # Require extraction identity.
         base_name = xml_scalar(member['name'][0])  # Reject encoded names.
         packages.require(member['name'][0].text == base_name and '/' not in base_name and packages.relative_name(base_name) == base_name, 'unsafe XAR basename')  # Use explicit hierarchy.
@@ -453,6 +459,9 @@ def parse_xar(data: bytes) -> dict[str, bytes]:  # Inspect unsigned XAR.
         names.add(name.casefold())  # Reserve unique spelling.
         kind = xml_scalar(member['type'][0])  # Read explicit type.
         packages.require(kind in ('file', 'directory'), 'XAR links or special files are prohibited')  # Reject unsafe types.
+        if 'FinderCreateTime' in member:  # Admit Apple's inert Finder creation record, shape-checked.
+            finder = xml_children(member['FinderCreateTime'][0], {'nanoseconds', 'time'})  # Reject any other child.
+            packages.require(not member['FinderCreateTime'][0].attrib and set(finder) == {'nanoseconds', 'time'} and re.fullmatch(r'[0-9]{1,10}', xml_scalar(finder['nanoseconds'][0])) and re.fullmatch(r'[0-9T:\-]{1,32}', xml_scalar(finder['time'][0])), 'invalid XAR Finder creation metadata')  # Keep it inert.
         for metadata_name in metadata_names & set(member):  # Validate stat fields.
             value = xml_scalar(member[metadata_name][0])  # Require scalar metadata.
             if metadata_name in ('inode', 'deviceno', 'uid', 'gid'):  # Check numeric fields.
