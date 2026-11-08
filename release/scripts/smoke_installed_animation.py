@@ -139,6 +139,113 @@ def validate_receipt(receipt: dict, *, target: dict, tag: str, package_format: s
             'installed animation process or sibling helper differs from audited payload')
 
 
+MACOS_REFUSAL_MESSAGE = ('macOS animation helper Seatbelt/resource isolation is not qualified; '
+                         'unverified packages are disabled')
+REFUSAL_FIELDS = {
+    'schema', 'state', 'publication_allowed', 'scope', 'format', 'target', 'tag', 'version',
+    'installed_root', 'launcher_command', 'native_audit_sha256', 'source_files',
+    'installed_files', 'native_identity', 'exit_code', 'stdout', 'stdout_sha256', 'stderr',
+    'stderr_sha256', 'expected_refusal', 'catalogue'}
+
+
+def parse_refusal_output(stdout: str, stderr: str, exit_code: int) -> dict:
+    """The macOS contract: the probe lists both packages, renders none, and refuses on the sandbox."""
+    require(isinstance(exit_code, int) and exit_code != 0,
+            'macOS animation probe must refuse (non-zero exit), not succeed')
+    require(MACOS_REFUSAL_MESSAGE in stderr,
+            'macOS animation refusal message differs from the product contract')
+    require(stdout.endswith('\n') and len(stdout.encode('utf-8')) <= 65536,
+            'macOS animation probe output is unbounded or incomplete')
+    rows = [json.loads(line) for line in stdout.splitlines()]
+    require(len(rows) == 1 and isinstance(rows[0], dict)
+            and rows[0].get('gate') == 'installed_catalogue'
+            and rows[0].get('packages') == ['beach', 'carpet'],
+            'macOS animation probe must list both packages and render none')
+    return rows[0]
+
+
+def validate_refusal_receipt(receipt: dict, *, target: dict, tag: str, package_format: str,
+                             audit_path: Path, installed_root: Path, command: list[str],
+                             source_hashes: dict[str, str]) -> None:
+    require(isinstance(receipt, dict) and set(receipt) == REFUSAL_FIELDS,
+            'installed animation refusal receipt schema differs')
+    require(receipt['schema'] == 1 and receipt['state'] == 'passed'
+            and receipt['publication_allowed'] is False
+            and receipt['scope'] == 'installed-animation-refusal-contract'
+            and receipt['format'] == package_format and receipt['target'] == target['rust_target']
+            and receipt['tag'] == tag and receipt['version'] == tag[1:]
+            and receipt['native_audit_sha256'] == sha(audit_path)
+            and receipt['installed_root'] == str(installed_root)
+            and receipt['launcher_command'] == command
+            and receipt['source_files'] == source_hashes
+            and receipt['expected_refusal'] == MACOS_REFUSAL_MESSAGE,
+            'installed animation refusal identity differs')
+    identity = receipt['native_identity']
+    machines = {'aarch64': {'aarch64', 'arm64'}, 'x86_64': {'x86_64'}}[target['arch']]
+    require(isinstance(identity, dict) and identity.get('system') == 'Darwin'
+            and identity.get('machine') in machines, 'refusal did not run on the macOS host')
+    audit = release_tool.audit_receipt(audit_path, target, tag[1:], tag)
+    members = (*target['executables'], *target['packages'])
+    require(receipt['installed_files'] == {name: audit['files'][name] for name in members},
+            'installed animation refusal member map differs from audit')
+    for key, text in (('stdout', receipt['stdout']), ('stderr', receipt['stderr'])):
+        require(isinstance(text, str) and hashlib.sha256(text.encode('utf-8')).hexdigest()
+                == receipt[key + '_sha256'], 'installed animation refusal output differs')
+    catalogue = parse_refusal_output(receipt['stdout'], receipt['stderr'], receipt['exit_code'])
+    client_name, helper_name = target['executables'][0], target['executables'][2]
+    require(catalogue == receipt['catalogue']
+            and catalogue.get('client_path') == str(installed_root / client_name)
+            and catalogue.get('helper_path') == str(installed_root / helper_name)
+            and catalogue.get('client_sha256') == audit['files'][client_name]
+            and catalogue.get('helper_sha256') == audit['files'][helper_name],
+            'refusing process or sibling helper differs from audited payload')
+
+
+def refusal_smoke(arguments: argparse.Namespace, *, environment: dict[str, str],
+                  executor: Callable[[list[str], dict[str, str], int], object]) -> dict:
+    """Assert the real macOS contract without bypassing the product's refusal."""
+    source_root = arguments.workspace.resolve(strict=True)
+    source_root = source_root.parent if source_root.name == 'Cargo.toml' else source_root
+    installed = arguments.root.resolve(strict=True)
+    require(arguments.os == 'macos' and arguments.format in FORMATS['macos']
+            and arguments.output.is_absolute() and not arguments.output.exists(),
+            'macOS refusal receipt needs an absolute new output path')
+    target = next(row for row in release_tool.load_targets(arguments.manifest)
+                  if (row['os'], row['arch']) == (arguments.os, arguments.arch))
+    audit = release_tool.audit_receipt(arguments.audit, target, arguments.tag[1:], arguments.tag)
+    members = (*target['executables'], *target['packages'])
+    for name in members:
+        regular(installed, name, audit['files'][name])
+    source_hashes = {name: sha(source_root / name) for name in SOURCE_FILES}
+    command = [str(installed / target['executables'][0]), 'release-animation-probe']
+    process = executor(command, dict(environment), 300)
+    require(all(sha(installed / name) == audit['files'][name] for name in members),
+            'installed payload changed during the refusal probe')
+    catalogue = parse_refusal_output(process.stdout, process.stderr, process.returncode)
+    receipt = {
+        'schema': 1, 'state': 'passed', 'publication_allowed': False,
+        'scope': 'installed-animation-refusal-contract', 'format': arguments.format,
+        'target': target['rust_target'], 'tag': arguments.tag, 'version': arguments.tag[1:],
+        'installed_root': str(installed), 'launcher_command': command,
+        'native_audit_sha256': sha(arguments.audit), 'source_files': source_hashes,
+        'installed_files': {name: audit['files'][name] for name in members},
+        'native_identity': {'system': platform.system(), 'machine': platform.machine()},
+        'exit_code': process.returncode, 'stdout': process.stdout,
+        'stdout_sha256': hashlib.sha256(process.stdout.encode('utf-8')).hexdigest(),
+        'stderr': process.stderr,
+        'stderr_sha256': hashlib.sha256(process.stderr.encode('utf-8')).hexdigest(),
+        'expected_refusal': MACOS_REFUSAL_MESSAGE, 'catalogue': catalogue}
+    validate_refusal_receipt(receipt, target=target, tag=arguments.tag,
+                             package_format=arguments.format, audit_path=arguments.audit,
+                             installed_root=installed, command=command,
+                             source_hashes=source_hashes)
+    with arguments.output.open('x', encoding='utf-8') as output:
+        json.dump(receipt, output, indent=2, sort_keys=True)
+        output.write('\n')
+    return receipt
+
+
+
 def smoke(arguments: argparse.Namespace, *, command: list[str] | None = None,
           environment: dict[str, str] | None = None,
           executor: Callable[[list[str], dict[str, str], int], object] | None = None) -> dict:

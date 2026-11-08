@@ -283,10 +283,9 @@ def validate_smoke_receipt(receipt: dict[str, Any], build: dict[str, Any], targe
         require(animation.get('source_files') == {source_name: smoke_sources[source_name]
                                                  for source_name in animation_gate.SOURCE_FILES},
                 'installed macOS animation evidence is missing or changed')
-        animation_gate.validate_receipt(
+        animation_gate.validate_refusal_receipt(
             animation, target=target, tag=receipt['tag'], package_format=name,
-            audit_path=retained['native-audit'][0],
-            installed_root=installed, executable_root=installed,
+            audit_path=retained['native-audit'][0], installed_root=installed,
             command=[str(installed / 'ilium'), 'release-animation-probe'],
             source_hashes={source_name: smoke_sources[source_name]
                            for source_name in animation_gate.SOURCE_FILES})
@@ -299,7 +298,7 @@ def validate_smoke_receipt(receipt: dict[str, Any], build: dict[str, Any], targe
     require(all(paths == hidden_originals[0] for paths in hidden_originals), 'formats hid different source/build inputs')
     commands = receipt['commands']
     require(isinstance(commands, list) and 0 < len(commands) <= packages.max_commands and all(isinstance(item, dict) and type(item.get('exit_code')) is int and 0 <= item['exit_code'] <= 255 for item in commands), 'missing or invalid macOS native command evidence')
-    require(all(item['exit_code'] == 0 or item.get('label') in ('package-signature-diagnostic', 'process-identity', 'session-cleanup') for item in commands), 'macOS smoke retained a failed required command')
+    require(all(item['exit_code'] == 0 or item.get('label') in ('package-signature-diagnostic', 'process-identity', 'session-cleanup') or str(item.get('label')).startswith('installed-animation-refusal-') for item in commands), 'macOS smoke retained a failed required command')
 
 
 def read_build(directory: Path, target: dict[str, Any], audit: dict[str, Any], binding: dict[str, Any]) -> dict[str, Any]:  # Revalidate build outputs.
@@ -985,16 +984,16 @@ def smoke(arguments: argparse.Namespace) -> dict[str, Any]:  # Qualify all forma
                 require(versions == audit['binary_versions'], 'installed pair version output differs')  # Require exact versions.
                 session = session_gate(runner, installed, directory, environment, project)  # Require native session lifecycle.
                 embedding = embedding_gate(runner, installed, directory, environment, project, wrapper, register, model, audit)  # Require observed native inference.
-                animation = animation_gate.smoke(
+                def refusal_executor(command, child_env, timeout):  # Run the real probe; macOS must refuse.
+                    stdout = run_command(runner, 'installed-animation-refusal-' + package_format, command, timeout=timeout, allowed=(1, 2), environment=child_env, cwd=project).decode('utf-8')  # Observe the product refusal.
+                    record = runner.records[-1]  # Take the recorded evidence.
+                    return argparse.Namespace(returncode=record['exit_code'], stdout=stdout, stderr=record['stderr'])  # Return bounded output.
+                animation = animation_gate.refusal_smoke(
                     argparse.Namespace(workspace=workspace, root=installed, manifest=manifest,
                                        audit=animation_audit, output=directory / 'installed-animation.json',
                                        os='macos', arch=arguments.arch, tag=arguments.tag,
                                        format=package_format), environment=environment,
-                    executor=lambda command, child_env, timeout: argparse.Namespace(
-                        returncode=0, stdout=run_command(runner, 'installed-animation-' + package_format,
-                                                         command, timeout=timeout,
-                                                         environment=child_env, cwd=project).decode('utf-8'),
-                        stderr=''))
+                    executor=refusal_executor)  # Assert the real macOS contract: add-on animations are refused.
                 hiding = [dict(item) for item in hidden]  # Record hidden roots.
             require(not installed_processes(runner, installed), 'format left an installed process alive')  # Clean before removal.
             remove_payload(runner, installed, payload_tree, package_format == 'pkg')  # Remove stopped payload.

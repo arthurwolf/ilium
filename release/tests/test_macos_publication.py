@@ -61,26 +61,17 @@ def qualified_fixture(f, build, binding):
                      'wrapper_sha256': binding['source_inputs']['release/tests/embedding_acceptance.py'],
                      'register_sha256': binding['source_inputs']['release/embedding-model.json'],
                      'stdout': output, 'stdout_sha256': release_tool.digest(output.encode()), 'stderr': ''}
-        animation_rows = [
-            {'type': 'artifact', 'gate': 'installed_catalogue', 'packages': ['beach', 'carpet'],
-             'client_path': client_path, 'client_sha256': f.files['ilium'],  # Reuse the same client in animation output.
-             'helper_path': helper_path,  # Reuse the same helper in animation output.
-             'helper_sha256': f.files['ilium-animation-helper'],
-             'worker_threads_before': 1, 'worker_bytes_before': 1024},
-            *({'type': 'artifact', 'gate': 'installed_render', 'package': filename.split('-')[0],
-               'archive_sha256': digest_value, 'helper_sha256': f.files['ilium-animation-helper'],
-               'rendered_frames': 2, 'physical_retirement': True,
-               'worker_threads_before': 1, 'worker_threads_after': 1,
-               'worker_bytes_before': 1024, 'worker_bytes_after': 1024}
-              for filename, digest_value in release_tool.APPROVED_PACKAGES.items()),
-            {'type': 'result', 'gate': 'installed_animation', 'state': 'passed',
-             'publication_allowed': False, 'packages': ['beach', 'carpet']},
-        ]
-        animation_stdout = ''.join(json.dumps(row) + '\n' for row in animation_rows)
+        catalogue_row = {'type': 'artifact', 'gate': 'installed_catalogue', 'packages': ['beach', 'carpet'],
+                         'client_path': client_path, 'client_sha256': f.files['ilium'],  # Reuse the same client in animation output.
+                         'helper_path': helper_path,  # Reuse the same helper in animation output.
+                         'helper_sha256': f.files['ilium-animation-helper'],
+                         'worker_threads_before': 1, 'worker_bytes_before': 1024}
+        animation_stdout = json.dumps(catalogue_row) + '\n'
+        animation_stderr = 'ilium: ' + animation_gate.MACOS_REFUSAL_MESSAGE + '\n'
         animation = {'schema': 1, 'state': 'passed', 'publication_allowed': False,
-                     'scope': 'installed-animation-contract', 'format': name,
+                     'scope': 'installed-animation-refusal-contract', 'format': name,
                      'target': f.target['rust_target'], 'tag': f.tag, 'version': f.version,
-                     'installed_root': installed, 'executable_root': installed,
+                     'installed_root': installed,
                      'launcher_command': [client_path, 'release-animation-probe'],  # Match the validated installed command exactly.
                      'native_audit_sha256': digest(audit_copy),
                      'source_files': {source_name: source_inputs[source_name]
@@ -88,10 +79,12 @@ def qualified_fixture(f, build, binding):
                      'installed_files': {member: f.files[member]
                                          for member in (*f.target['executables'], *f.target['packages'])},
                      'native_identity': {'system': 'Darwin', 'machine': f.identity['machine']},
-                     'stdout': animation_stdout,
+                     'exit_code': 1, 'stdout': animation_stdout,
                      'stdout_sha256': release_tool.digest(animation_stdout.encode()),
-                     'stderr_sha256': release_tool.digest(b''),
-                     'catalogue': animation_rows[0], 'renders': animation_rows[1:3]}
+                     'stderr': animation_stderr,
+                     'stderr_sha256': release_tool.digest(animation_stderr.encode()),
+                     'expected_refusal': animation_gate.MACOS_REFUSAL_MESSAGE,
+                     'catalogue': catalogue_row}
         animation_path = smoke_root / name / 'installed-animation.json'
         animation_path.parent.mkdir()
         animation_path.write_bytes((json.dumps(animation, sort_keys=True) + '\n').encode('utf-8'))
@@ -381,7 +374,7 @@ class MacosPublicationTests(unittest.TestCase):
                 'embed-wrapper': lambda v: v['formats']['zip']['embedding'].update(wrapper_sha256='b' * 64),
                 'embed-mapping': lambda v: v['formats']['zip']['embedding'].update(native_mappings='/foreign/libonnxruntime.1.24.2.dylib\n'),
                 'embed-output': lambda v: v['formats']['zip']['embedding'].update(stdout='{}\n'),
-                'animation-retirement': lambda v: v['formats']['zip']['animation']['renders'][1].update(physical_retirement=False),
+                'animation-refusal': lambda v: v['formats']['zip']['animation'].update(exit_code=0),
                 'dmg-mounted': lambda v: v['formats']['dmg']['installation'].update(source_image_detached_before_execution=False),
                 'pkg-receipt': lambda v: v['formats']['pkg']['installation'].update(receipt_removed=False),
                 'pkg-host-change': lambda v: v['formats']['pkg']['installation'].update(host_receipts_unchanged=False),
