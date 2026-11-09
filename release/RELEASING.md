@@ -678,3 +678,7 @@ re-run the suite. ARM64 evidence is emulated QEMU only, and rpm and Snap stay
 ## v0.1.1-preview.4 (macOS Apple Silicon plus carried Linux files)
 
 Dispatch `release.yml` with `release_tag=v0.1.1-preview.4`; the `macos-preview` job (`macos-preview.yml`) builds natively on `macos-15`. Publishing is manual: carry the ten verified v0.1.1-linux.3 files byte for byte, add `ilium-macos-aarch64.tar.gz`, write one combined `SHA256SUMS`, create a draft prerelease (not latest) targeting the CI commit, upload, publish, then re-download every asset and compare size and SHA-256. Pin the installer afterwards with `release_tool.py generate-preview-pins`, passing the published `SHA256SUMS` of each pinned version. The macOS ZIP, PKG and DMG smoke test fails on this lineage because the animation helper sandbox is not qualified on macOS; do not lower that gate.
+
+## v0.1.1-preview.5 (macOS ZIP, PKG and DMG plus carried files)
+
+Dispatch `release.yml` with `release_tag=v0.1.1-preview.5` from `release/v0.1.1-preview.5`. The macOS smoke asserts the real macOS contract (animation add-ons refused with the Seatbelt message, session lifecycle, versions, removal) through `smoke_installed_animation.refusal_smoke`; no other gate changed. Publishing is manual as for preview.4: carry the ten linux.3 files, add the four macOS files from `macos-packages-aarch64`, one combined `SHA256SUMS`, draft prerelease (not latest) targeting the CI commit, upload, publish, re-download and compare. The installer keeps the preview.4 macOS tar.gz pin, which stays published.

@@ -44,7 +44,7 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
                     "ilium-linux-aarch64.tar.gz", "ilium-linux-aarch64.deb",
                     "ilium-linux-aarch64.AppImage", "ilium-linux-aarch64.flatpak",
                 },
-                "v0.1.1-preview.4": {"ilium-macos-aarch64.tar.gz"},
+                "v0.1.1-preview.5": {f"ilium-macos-aarch64.{ext}" for ext in ("tar.gz", "zip", "pkg", "dmg")},
             }
             for tag, names in preview.items():
                 pinned = re.findall(re.escape(base + tag + "/") + r"([^\s)]+)", readme)
@@ -60,7 +60,7 @@ class ReadmeReleaseAssetTests(unittest.TestCase):
             self.assertNotIn("v0.1.1-linux.1/", readme)
             self.assertNotIn("v0.1.1-linux.2/", readme)
             self.assertRegex(readme, r"(?m)^\| Linux ARM64 \(4 of 6 available and verified;")
-            self.assertRegex(readme, r"(?m)^\| macOS Apple Silicon \(1 of 4 available and verified;")
+            self.assertRegex(readme, r"(?m)^\| macOS Apple Silicon \(4 of 4 available and verified;")
             for system in ("macOS Intel", "Windows x86_64"):
                 self.assertRegex(readme, rf"(?m)^\| {re.escape(system)} \| .*\*\*\(coming soon; not yet available\)\*\* \|$")
             self.assertIn("two of six Linux ARM64 formats (rpm, Snap)", readme)

@@ -336,10 +336,10 @@ class WorkflowTests(unittest.TestCase):
         caller = self.workflow['jobs']['linux-preview']
         self.assertEqual(caller['uses'], './.github/workflows/linux-preview.yml')
         self.assertEqual(caller['if'], "github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'")
-        self.assertEqual(self.workflow['jobs']['source']['if'], "github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4')")
+        self.assertEqual(self.workflow['jobs']['source']['if'], "github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4' && inputs.release_tag != 'v0.1.1-preview.5')")
         macos = self.workflow['jobs']['macos-preview']
         self.assertEqual(macos['uses'], './.github/workflows/macos-preview.yml')
-        self.assertEqual(macos['if'], "github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.4'")
+        self.assertEqual(macos['if'], "github.event_name == 'workflow_dispatch' && (inputs.release_tag == 'v0.1.1-preview.4' || inputs.release_tag == 'v0.1.1-preview.5')")
         self.assertEqual(caller['permissions']['contents'], 'read')
         jobs = workflow['jobs']
         native = jobs['native']

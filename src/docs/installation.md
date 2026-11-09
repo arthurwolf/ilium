@@ -2,9 +2,9 @@
 
 This page describes Ilium's installation routes: the hosted one-line installers, the release packages for Linux, macOS and Windows, checksum verification, upgrading, uninstalling, and the prerequisites for native animations. No Rust toolchain is needed for any of these routes. To compile Ilium yourself, see [Building from source](building-from-source.md).
 
-Preview [v0.1.1-preview.4](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.4) carries the ten Linux files of v0.1.1-linux.3 unchanged and adds the macOS Apple Silicon tar.gz (native macOS-15 evidence, unsigned). Linux preview: [v0.1.1-linux.3](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.3) provides Linux x86_64 (six formats) and Linux ARM64 (four formats) from one source commit, with one SHA256SUMS covering all ten files. The public downloads have been checked against their checksums. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
+Preview [v0.1.1-preview.5](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.5) carries the ten Linux files of v0.1.1-linux.3 unchanged and adds the four macOS Apple Silicon formats (tar.gz, ZIP, PKG, DMG; native macOS-15 evidence, unsigned, not notarized). Linux preview: [v0.1.1-linux.3](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.3) provides Linux x86_64 (six formats) and Linux ARM64 (four formats) from one source commit, with one SHA256SUMS covering all ten files. The public downloads have been checked against their checksums. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
 
-**Not yet available for this preview:** hosted installers, two of six Linux ARM64 formats (rpm, Snap), macOS Intel and the macOS ZIP, PKG and DMG, Windows. Plugins are an unsupported development preview. GitHub Actions artifacts remain candidate builds until independently qualified.
+**Not yet available for this preview:** hosted installers, two of six Linux ARM64 formats (rpm, Snap), macOS Intel, Windows. Plugins are an unsupported development preview. GitHub Actions artifacts remain candidate builds until independently qualified.
 
 ## Contents
 
@@ -29,7 +29,7 @@ Linux is the primary platform. macOS and Windows support is implemented, with di
 | Platform | Architectures | Package formats |
 | --- | --- | --- |
 | Linux | x86_64 (Intel/AMD); aarch64 (ARM64): tar.gz, deb, AppImage, Flatpak verified in an emulated guest (emulated QEMU guest, not native hardware); rpm, Snap **coming soon** | tar.gz, deb, rpm, AppImage, Snap, Flatpak |
-| macOS | Apple Silicon (aarch64), Intel (x86_64) | tar.gz, zip, pkg, dmg; Apple Silicon tar.gz available in v0.1.1-preview.4, the rest **not yet available** |
+| macOS | Apple Silicon (aarch64), Intel (x86_64) | tar.gz, zip, pkg, dmg; Apple Silicon: all four available in v0.1.1-preview.5; Intel **not yet available** |
 | Windows | x86_64 (native AMD64) | setup exe, msi, zip; **not yet available** |
 
 Linux packages target the glibc 2.35 baseline (Ubuntu 22.04, Debian 12 and the tested Fedora and openSUSE environments). Flatpak uses its declared platform runtime. All packages are unsigned: check the asset digest on the release page.
@@ -177,24 +177,23 @@ The Linux release gate requires receipt-bound installed-file checks, client, ser
 
 ## macOS packages
 
-**Preview: Apple Silicon tar.gz only.** [`ilium-macos-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.4/ilium-macos-aarch64.tar.gz) from [v0.1.1-preview.4](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.4) was built, linted, tested and audited natively on a GitHub Actions `macos-15` (Apple Silicon) runner. It is unsigned and not notarized, and native animations are unavailable on macOS because the animation sandbox is not qualified there. Intel (`ilium-macos-x86_64.tar.gz`) is coming soon.
+**Preview: Apple Silicon, four formats.** [v0.1.1-preview.5](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.5) provides [`ilium-macos-aarch64.tar.gz`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.tar.gz), [`.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.zip), [`.pkg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.pkg) and [`.dmg`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.dmg). All were built, linted, tested and audited natively on a GitHub Actions `macos-15` (Apple Silicon) runner, and the ZIP, PKG and DMG were installed there and passed the installed-package test (versions, session lifecycle, removal). They hold the same binaries as the tar.gz. They are **unsigned and not notarized**, so Gatekeeper warns.
 
-If macOS blocks the extracted binaries, run `xattr -dr com.apple.quarantine <extracted directory>` or allow them in System Settings, Privacy & Security.
+**Native animations are disabled on macOS.** The animation sandbox (Seatbelt) is not qualified, so the product refuses animation add-ons with "macOS animation helper Seatbelt/resource isolation is not qualified; unverified packages are disabled". The macOS test asserts that refusal.
 
-1. Download the archive and `SHA256SUMS`.
-2. Compare `shasum -a 256 <archive>` with the archive's entry in `SHA256SUMS`.
-3. Extract with `tar -xzf <archive>` into a new directory.
+If macOS blocks a download or the extracted binaries, right-click and choose Open, allow it in System Settings, Privacy & Security, or run `xattr -dr com.apple.quarantine <file or extracted directory>`.
+
+1. Download the format you want and `SHA256SUMS`.
+2. Compare `shasum -a 256 <file>` with its entry in `SHA256SUMS`.
+3. tar.gz: extract with `tar -xzf` into a new directory; ZIP: unzip into a new directory; DMG: open it and copy the folder out; PKG: see below.
 4. Add the package directory to `PATH`.
 
-The hosted installer selects your architecture and uses the same layout as Linux.
+The hosted installer selects your architecture and uses the same layout as Linux (it still pins the v0.1.1-preview.4 macOS tar.gz).
 
-The macOS package builders also produce these formats (not published: their installed-package smoke test is blocked because macOS animation sandboxing is not qualified):
-
-| Mac | ZIP | Installer PKG | Disk image DMG |
-| --- | --- | --- | --- |
-| Apple Silicon | Coming soon | Coming soon | Coming soon |
-
-| Intel | Not yet available | Not yet available | Not yet available |
+| Mac | tar.gz | ZIP | Installer PKG | Disk image DMG |
+| --- | --- | --- | --- | --- |
+| Apple Silicon | Available | Available | Available | Available |
+| Intel | Not yet available | Not yet available | Not yet available | Not yet available |
 
 The PKG needs administrator approval and installs into `/usr/local/lib/ilium/<version>/<arch>`. Add that directory to `PATH`; the package does not change your shell configuration. You can keep separate versions and choose the one your shell uses.
 

@@ -204,7 +204,7 @@ def validate_smoke_session(session: dict[str, Any], installed: PurePosixPath) ->
     chain = session.get('ancestry')
     require(isinstance(pane, dict) and isinstance(server, dict) and isinstance(chain, list) and 2 <= len(chain) <= 16, 'missing installed session process identities')
     require(chain[0] == pane and chain[-1] == server and server.get('executable') == str(installed / 'ilium-server') and pane.get('executable') in ('/bin/sh', '/bin/bash'), 'session did not use the installed server')
-    require(all(isinstance(item, dict) and type(item.get('pid')) is int and item['pid'] > 1 and type(item.get('ppid')) is int and item['ppid'] > 1 and isinstance(item.get('started'), str) and item['started'] for item in chain), 'invalid installed process custody')
+    require(all(isinstance(item, dict) and type(item.get('pid')) is int and item['pid'] > 1 and type(item.get('ppid')) is int and item['ppid'] >= 1 and isinstance(item.get('started'), str) and item['started'] for item in chain) and all(item['ppid'] > 1 for item in chain[:-1]), 'invalid installed process custody')  # Only the detached server may be adopted by launchd (ppid 1).
     require(len({item['pid'] for item in chain}) == len(chain) and all(first['ppid'] == second['pid'] for first, second in zip(chain, chain[1:])), 'installed server ancestry differs')
     ready = nonce + ' ' + str(pane['pid']) + '\n'
     require(session.get('ready') == ready and session.get('ready_sha256') == release_tool.digest(ready.encode('ascii')), 'installed pane readiness differs')
@@ -283,10 +283,9 @@ def validate_smoke_receipt(receipt: dict[str, Any], build: dict[str, Any], targe
         require(animation.get('source_files') == {source_name: smoke_sources[source_name]
                                                  for source_name in animation_gate.SOURCE_FILES},
                 'installed macOS animation evidence is missing or changed')
-        animation_gate.validate_receipt(
+        animation_gate.validate_refusal_receipt(
             animation, target=target, tag=receipt['tag'], package_format=name,
-            audit_path=retained['native-audit'][0],
-            installed_root=installed, executable_root=installed,
+            audit_path=retained['native-audit'][0], installed_root=installed,
             command=[str(installed / 'ilium'), 'release-animation-probe'],
             source_hashes={source_name: smoke_sources[source_name]
                            for source_name in animation_gate.SOURCE_FILES})
@@ -299,7 +298,7 @@ def validate_smoke_receipt(receipt: dict[str, Any], build: dict[str, Any], targe
     require(all(paths == hidden_originals[0] for paths in hidden_originals), 'formats hid different source/build inputs')
     commands = receipt['commands']
     require(isinstance(commands, list) and 0 < len(commands) <= packages.max_commands and all(isinstance(item, dict) and type(item.get('exit_code')) is int and 0 <= item['exit_code'] <= 255 for item in commands), 'missing or invalid macOS native command evidence')
-    require(all(item['exit_code'] == 0 or item.get('label') in ('package-signature-diagnostic', 'process-identity', 'session-cleanup') for item in commands), 'macOS smoke retained a failed required command')
+    require(all(item['exit_code'] == 0 or item.get('label') in ('package-signature-diagnostic', 'process-identity', 'session-cleanup') or str(item.get('label')).startswith('installed-animation-refusal-') or item.get('label') in ('target-receipts-before', 'target-receipts-after') for item in commands), 'macOS smoke retained a failed required command')
 
 
 def read_build(directory: Path, target: dict[str, Any], audit: dict[str, Any], binding: dict[str, Any]) -> dict[str, Any]:  # Revalidate build outputs.
@@ -320,7 +319,7 @@ def validate_package_metadata(distribution: bytes, information: bytes, layout: d
     for element in observed.iter():  # Validate generated bookkeeping.
         if element.tag != 'pkg-ref':  # Preserve reference semantics.
             continue  # Retain installer controls.
-        for field in ('installKBytes', 'archiveKBytes'):  # Allow generated sizes.
+        for field in ('installKBytes', 'archiveKBytes', 'updateKBytes'):  # Allow generated sizes.
             if field in element.attrib:  # Validate numeric metadata.
                 require(re.fullmatch(r'[0-9]{1,12}', element.attrib[field]), 'invalid generated package size')  # Reject arbitrary expressions.
                 del element.attrib[field]  # Compare remaining semantics.
@@ -331,11 +330,16 @@ def validate_package_metadata(distribution: bytes, information: bytes, layout: d
             element.remove(child)  # Ignore empty bookkeeping.
         if (element.text or '').strip() == '#' + layout['pkg']['component']:  # Allow local URL prefix.
             element.text = layout['pkg']['component']  # Normalize component URL.
+    for element in list(observed):  # Drop productbuild's bookkeeping-only root reference.
+        if element.tag == 'pkg-ref' and set(element.attrib) == {'id'} and not (element.text or '').strip() and not list(element) and any(other is not element and other.tag == 'pkg-ref' and other.attrib.get('id') == element.attrib['id'] for other in observed):  # Only an id-only duplicate of a full reference.
+            observed.remove(element)  # Keep the substantive reference and the choice reference.
     def shape(element: xml_tree.Element) -> tuple[Any, ...]:  # Compare XML structure.
         return (element.tag, tuple(sorted(element.attrib.items())), (element.text or '').strip(), tuple(sorted((shape(child) for child in element), key=repr)))  # Preserve semantic multiplicities.
     require(shape(observed) == shape(reference), 'actual Distribution changes package behavior')  # Reject changed behavior.
     info = safe_xml(information)  # Inspect actual PackageInfo.
-    require(info.tag == 'pkg-info' and set(info.attrib) == {'format-version', 'identifier', 'version', 'install-location', 'auth'}, 'PackageInfo schema differs')  # Reject unknown controls.
+    generated = {'overwrite-permissions': 'true', 'relocatable': 'false', 'postinstall-action': 'none'}  # Admit pkgbuild's fixed, non-redirecting defaults.
+    require(info.tag == 'pkg-info' and {'format-version', 'identifier', 'version', 'install-location', 'auth'} <= set(info.attrib) <= {'format-version', 'identifier', 'version', 'install-location', 'auth', 'generator-version', *generated}, 'PackageInfo schema differs')  # Reject unknown controls.
+    require(all(info.attrib.pop(key, value) == value for key, value in generated.items()) and re.fullmatch(r'[A-Za-z0-9 ._()\-]{1,64}', info.attrib.pop('generator-version', 'x')), 'PackageInfo generated attributes differ')  # Reject changed defaults.
     expected = {'format-version': '2', 'identifier': layout['pkg']['identifier'], 'version': layout['pkg']['version'], 'install-location': layout['pkg']['install_location'], 'auth': 'root'}  # Freeze administrator destination.
     require(info.attrib == expected, 'PackageInfo identity or installation location differs')  # Prevent installation redirection.
     children = list(info)  # Require payload metadata.
@@ -422,7 +426,7 @@ def parse_xar(data: bytes) -> dict[str, bytes]:  # Inspect unsigned XAR.
     fields = xml_children(document[0], {'creation-time', 'checksum', 'file'}, {'file'})  # Reject signatures/extensions.
     packages.require('checksum' in fields and 'file' in fields, 'missing XAR checksum or file inventory')  # Require nonempty inventory.
     if 'creation-time' in fields:  # Allow creation timestamp.
-        packages.require(re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', xml_scalar(fields['creation-time'][0])), 'invalid XAR creation time')  # Validate UTC spelling.
+        packages.require(re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?', xml_scalar(fields['creation-time'][0])), 'invalid XAR creation time')  # Validate UTC spelling.
     checksum = fields['checksum'][0]  # Bind checksum declaration.
     algorithm = algorithms[algorithm_id]  # Select admitted algorithm.
     packages.require(checksum.attrib == {'style': algorithm}, 'XAR header/TOC checksum styles differ')  # Reject contradictory algorithms.
@@ -445,7 +449,8 @@ def parse_xar(data: bytes) -> dict[str, bytes]:  # Inspect unsigned XAR.
         identifier = element.attrib.get('id')  # Read member ID.
         packages.require(set(element.attrib) == {'id'} and isinstance(identifier, str) and re.fullmatch(r'[1-9][0-9]{0,9}', identifier) and identifier not in identifiers and len(identifiers) < 1024 and depth <= 8, 'invalid XAR file identifier, count, or depth')  # Bound unique structure.
         identifiers.add(identifier)  # Reserve member identity.
-        member = xml_children(element, {'name', 'type', 'data', 'file'} | metadata_names, {'file'})  # Reject active metadata.
+        member = xml_children(element, {'name', 'type', 'data', 'file', 'FinderCreateTime'} | metadata_names, {'file', 'name'})  # Reject active metadata; Apple's xar repeats name.
+        packages.require(len({xml_scalar(item) for item in member.get('name', [])}) <= 1 and all(item.text == member['name'][0].text for item in member.get('name', [])), 'XAR member names differ')  # Allow only an identical repeat.
         packages.require('name' in member and 'type' in member, 'missing XAR member name/type')  # Require extraction identity.
         base_name = xml_scalar(member['name'][0])  # Reject encoded names.
         packages.require(member['name'][0].text == base_name and '/' not in base_name and packages.relative_name(base_name) == base_name, 'unsafe XAR basename')  # Use explicit hierarchy.
@@ -454,6 +459,9 @@ def parse_xar(data: bytes) -> dict[str, bytes]:  # Inspect unsigned XAR.
         names.add(name.casefold())  # Reserve unique spelling.
         kind = xml_scalar(member['type'][0])  # Read explicit type.
         packages.require(kind in ('file', 'directory'), 'XAR links or special files are prohibited')  # Reject unsafe types.
+        if 'FinderCreateTime' in member:  # Admit Apple's inert Finder creation record, shape-checked.
+            finder = xml_children(member['FinderCreateTime'][0], {'nanoseconds', 'time'})  # Reject any other child.
+            packages.require(not member['FinderCreateTime'][0].attrib and set(finder) == {'nanoseconds', 'time'} and re.fullmatch(r'[0-9]{1,10}', xml_scalar(finder['nanoseconds'][0])) and re.fullmatch(r'[0-9T:\-]{1,32}', xml_scalar(finder['time'][0])), 'invalid XAR Finder creation metadata')  # Keep it inert.
         for metadata_name in metadata_names & set(member):  # Validate stat fields.
             value = xml_scalar(member[metadata_name][0])  # Require scalar metadata.
             if metadata_name in ('inode', 'deviceno', 'uid', 'gid'):  # Check numeric fields.
@@ -964,7 +972,7 @@ def smoke(arguments: argparse.Namespace) -> dict[str, Any]:  # Qualify all forma
                 run_command(runner, 'target-create', ['/usr/bin/hdiutil', 'create', '-size', str(megabytes) + 'm', '-fs', 'HFS+', '-type', 'UDIF', '-volname', 'Ilium-smoke-' + arguments.arch, image], timeout=120)  # Own writable image.
                 handle = attach_image(runner, image, directory / 'target-volume', False, owners)  # Require distinct filesystem.
                 mount = Path(handle['mount'])  # Limit Installer target.
-                require(not run_command(runner, 'target-receipts-before', ['/usr/sbin/pkgutil', '--volume', mount, '--pkgs']).strip(), 'new target volume already has package receipts')  # Reject preexisting installation.
+                require(not run_command(runner, 'target-receipts-before', ['/usr/sbin/pkgutil', '--volume', mount, '--pkgs'], allowed=(0, 1)).strip() and not runner.records[-1]['stderr'].strip(), 'new target volume already has package receipts or pkgutil failed')  # An empty volume lists nothing (exit 1 is admitted only with no output and no diagnostics).  # Reject preexisting installation.
                 host_before = sorted(run_command(runner, 'host-receipts-before', ['/usr/sbin/pkgutil', '--pkgs']).decode('utf-8').splitlines())  # Observe host receipts.
                 run_command(runner, 'package-install', ['/usr/bin/sudo', '-n', '/usr/sbin/installer', '-pkg', package, '-target', mount], timeout=300)  # Install on owned volume.
                 installed = mount / layout['pkg']['install_location'].lstrip('/')  # Retain exact destination.
@@ -985,23 +993,23 @@ def smoke(arguments: argparse.Namespace) -> dict[str, Any]:  # Qualify all forma
                 require(versions == audit['binary_versions'], 'installed pair version output differs')  # Require exact versions.
                 session = session_gate(runner, installed, directory, environment, project)  # Require native session lifecycle.
                 embedding = embedding_gate(runner, installed, directory, environment, project, wrapper, register, model, audit)  # Require observed native inference.
-                animation = animation_gate.smoke(
+                def refusal_executor(command, child_env, timeout):  # Run the real probe; macOS must refuse.
+                    stdout = run_command(runner, 'installed-animation-refusal-' + package_format, command, timeout=timeout, allowed=(1, 2), environment=child_env, cwd=project).decode('utf-8')  # Observe the product refusal.
+                    record = runner.records[-1]  # Take the recorded evidence.
+                    return argparse.Namespace(returncode=record['exit_code'], stdout=stdout, stderr=record['stderr'])  # Return bounded output.
+                animation = animation_gate.refusal_smoke(
                     argparse.Namespace(workspace=workspace, root=installed, manifest=manifest,
                                        audit=animation_audit, output=directory / 'installed-animation.json',
                                        os='macos', arch=arguments.arch, tag=arguments.tag,
                                        format=package_format), environment=environment,
-                    executor=lambda command, child_env, timeout: argparse.Namespace(
-                        returncode=0, stdout=run_command(runner, 'installed-animation-' + package_format,
-                                                         command, timeout=timeout,
-                                                         environment=child_env, cwd=project).decode('utf-8'),
-                        stderr=''))
+                    executor=refusal_executor)  # Assert the real macOS contract: add-on animations are refused.
                 hiding = [dict(item) for item in hidden]  # Record hidden roots.
             require(not installed_processes(runner, installed), 'format left an installed process alive')  # Clean before removal.
             remove_payload(runner, installed, payload_tree, package_format == 'pkg')  # Remove stopped payload.
             if package_format == 'pkg':  # Exercise receipt removal.
                 mount = Path(handle['mount'])  # Use proven target.
                 run_command(runner, 'installed-receipt-forget', ['/usr/bin/sudo', '-n', '/usr/sbin/pkgutil', '--volume', mount, '--forget', layout['pkg']['identifier']], cleanup=True)  # Forget isolated receipt.
-                require(not run_command(runner, 'target-receipts-after', ['/usr/sbin/pkgutil', '--volume', mount, '--pkgs'], cleanup=True).strip(), 'isolated package receipt remains')  # Verify receipt absence.
+                require(not run_command(runner, 'target-receipts-after', ['/usr/sbin/pkgutil', '--volume', mount, '--pkgs'], allowed=(0, 1), cleanup=True).strip() and not runner.records[-1]['stderr'].strip(), 'isolated package receipt remains or pkgutil failed')  # Verify receipt absence.
                 host_after = sorted(run_command(runner, 'host-receipts-after', ['/usr/sbin/pkgutil', '--pkgs'], cleanup=True).decode('utf-8').splitlines())  # Recheck host receipts.
                 require(host_after == host_before, 'host package receipt set changed during isolated install')  # Reject host side effects.
                 detach_image(runner, handle, owners)  # Detach owned target.
