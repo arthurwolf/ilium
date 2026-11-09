@@ -204,7 +204,7 @@ def validate_smoke_session(session: dict[str, Any], installed: PurePosixPath) ->
     chain = session.get('ancestry')
     require(isinstance(pane, dict) and isinstance(server, dict) and isinstance(chain, list) and 2 <= len(chain) <= 16, 'missing installed session process identities')
     require(chain[0] == pane and chain[-1] == server and server.get('executable') == str(installed / 'ilium-server') and pane.get('executable') in ('/bin/sh', '/bin/bash'), 'session did not use the installed server')
-    require(all(isinstance(item, dict) and type(item.get('pid')) is int and item['pid'] > 1 and type(item.get('ppid')) is int and item['ppid'] > 1 and isinstance(item.get('started'), str) and item['started'] for item in chain), 'invalid installed process custody')
+    require(all(isinstance(item, dict) and type(item.get('pid')) is int and item['pid'] > 1 and type(item.get('ppid')) is int and item['ppid'] >= 1 and isinstance(item.get('started'), str) and item['started'] for item in chain) and all(item['ppid'] > 1 for item in chain[:-1]), 'invalid installed process custody')  # Only the detached server may be adopted by launchd (ppid 1).
     require(len({item['pid'] for item in chain}) == len(chain) and all(first['ppid'] == second['pid'] for first, second in zip(chain, chain[1:])), 'installed server ancestry differs')
     ready = nonce + ' ' + str(pane['pid']) + '\n'
     require(session.get('ready') == ready and session.get('ready_sha256') == release_tool.digest(ready.encode('ascii')), 'installed pane readiness differs')
