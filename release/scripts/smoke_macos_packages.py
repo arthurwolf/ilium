@@ -298,7 +298,7 @@ def validate_smoke_receipt(receipt: dict[str, Any], build: dict[str, Any], targe
     require(all(paths == hidden_originals[0] for paths in hidden_originals), 'formats hid different source/build inputs')
     commands = receipt['commands']
     require(isinstance(commands, list) and 0 < len(commands) <= packages.max_commands and all(isinstance(item, dict) and type(item.get('exit_code')) is int and 0 <= item['exit_code'] <= 255 for item in commands), 'missing or invalid macOS native command evidence')
-    require(all(item['exit_code'] == 0 or item.get('label') in ('package-signature-diagnostic', 'process-identity', 'session-cleanup') or str(item.get('label')).startswith('installed-animation-refusal-') for item in commands), 'macOS smoke retained a failed required command')
+    require(all(item['exit_code'] == 0 or item.get('label') in ('package-signature-diagnostic', 'process-identity', 'session-cleanup') or str(item.get('label')).startswith('installed-animation-refusal-') or item.get('label') in ('target-receipts-before', 'target-receipts-after') for item in commands), 'macOS smoke retained a failed required command')
 
 
 def read_build(directory: Path, target: dict[str, Any], audit: dict[str, Any], binding: dict[str, Any]) -> dict[str, Any]:  # Revalidate build outputs.
@@ -972,7 +972,7 @@ def smoke(arguments: argparse.Namespace) -> dict[str, Any]:  # Qualify all forma
                 run_command(runner, 'target-create', ['/usr/bin/hdiutil', 'create', '-size', str(megabytes) + 'm', '-fs', 'HFS+', '-type', 'UDIF', '-volname', 'Ilium-smoke-' + arguments.arch, image], timeout=120)  # Own writable image.
                 handle = attach_image(runner, image, directory / 'target-volume', False, owners)  # Require distinct filesystem.
                 mount = Path(handle['mount'])  # Limit Installer target.
-                require(not run_command(runner, 'target-receipts-before', ['/usr/sbin/pkgutil', '--volume', mount, '--pkgs']).strip(), 'new target volume already has package receipts')  # Reject preexisting installation.
+                require(not run_command(runner, 'target-receipts-before', ['/usr/sbin/pkgutil', '--volume', mount, '--pkgs'], allowed=(0, 1)).strip() and not runner.records[-1]['stderr'].strip(), 'new target volume already has package receipts or pkgutil failed')  # An empty volume lists nothing (exit 1 is admitted only with no output and no diagnostics).  # Reject preexisting installation.
                 host_before = sorted(run_command(runner, 'host-receipts-before', ['/usr/sbin/pkgutil', '--pkgs']).decode('utf-8').splitlines())  # Observe host receipts.
                 run_command(runner, 'package-install', ['/usr/bin/sudo', '-n', '/usr/sbin/installer', '-pkg', package, '-target', mount], timeout=300)  # Install on owned volume.
                 installed = mount / layout['pkg']['install_location'].lstrip('/')  # Retain exact destination.
@@ -1009,7 +1009,7 @@ def smoke(arguments: argparse.Namespace) -> dict[str, Any]:  # Qualify all forma
             if package_format == 'pkg':  # Exercise receipt removal.
                 mount = Path(handle['mount'])  # Use proven target.
                 run_command(runner, 'installed-receipt-forget', ['/usr/bin/sudo', '-n', '/usr/sbin/pkgutil', '--volume', mount, '--forget', layout['pkg']['identifier']], cleanup=True)  # Forget isolated receipt.
-                require(not run_command(runner, 'target-receipts-after', ['/usr/sbin/pkgutil', '--volume', mount, '--pkgs'], cleanup=True).strip(), 'isolated package receipt remains')  # Verify receipt absence.
+                require(not run_command(runner, 'target-receipts-after', ['/usr/sbin/pkgutil', '--volume', mount, '--pkgs'], allowed=(0, 1), cleanup=True).strip() and not runner.records[-1]['stderr'].strip(), 'isolated package receipt remains or pkgutil failed')  # Verify receipt absence.
                 host_after = sorted(run_command(runner, 'host-receipts-after', ['/usr/sbin/pkgutil', '--pkgs'], cleanup=True).decode('utf-8').splitlines())  # Recheck host receipts.
                 require(host_after == host_before, 'host package receipt set changed during isolated install')  # Reject host side effects.
                 detach_image(runner, handle, owners)  # Detach owned target.
