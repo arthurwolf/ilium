@@ -169,5 +169,25 @@ class InstalledAnimationGateTests(unittest.TestCase):
                               command=launcher, source_root=self.source)
 
 
+class WindowsRefusalContractTests(unittest.TestCase):
+    catalogue = json.dumps({'type': 'artifact', 'gate': 'installed_catalogue', 'packages': ['beach', 'carpet']}) + '\n'
+
+    def parse(self, stdout, stderr, code):
+        return gate.parse_refusal_output(stdout, stderr, code, gate.WINDOWS_REFUSAL_MESSAGE)
+
+    def test_real_windows_refusal_is_accepted(self):
+        self.assertEqual(self.parse(self.catalogue, 'error: ' + gate.WINDOWS_REFUSAL_MESSAGE + '\n', 1)['gate'],
+                         'installed_catalogue')
+
+    def test_success_wrong_message_or_rendered_output_is_rejected(self):
+        message = gate.WINDOWS_REFUSAL_MESSAGE
+        for stdout, stderr, code in ((self.catalogue, message, 0), (self.catalogue, 'other failure', 1),
+                                     (self.catalogue + self.catalogue, message, 1), ('', message, 1)):
+            with self.assertRaises(Exception):
+                self.parse(stdout, stderr, code)
+        with self.assertRaises(Exception):  # The macOS wording must not satisfy the Windows contract.
+            self.parse(self.catalogue, gate.MACOS_REFUSAL_MESSAGE, 1)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -42,6 +42,13 @@ jobs:
     uses: ./.github/workflows/macos-preview.yml
     with:
       release_tag: ${{ inputs.release_tag }}
+  windows-preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-preview.6'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/windows-preview.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
   linux-preview:
     if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'
     permissions:
@@ -78,7 +85,7 @@ jobs:
         set -o pipefail
         python release/scripts/publish_linux_preview.py "$PUBLISH_LINUX_PREVIEW" --tag "${{ inputs.release_tag }}" --commit "${{ github.sha }}" --native-directory preview-native --packages-directory preview-packages --work "$RUNNER_TEMP/preview-publish"
   source:
-    if: github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4' && inputs.release_tag != 'v0.1.1-preview.5')
+    if: github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4' && inputs.release_tag != 'v0.1.1-preview.5' && inputs.release_tag != 'v0.1.1-preview.6')
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:

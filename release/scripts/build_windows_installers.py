@@ -554,6 +554,7 @@ def parser():
     command.add_argument('--archive', type=Path, required=True)  # Bind the retained audited ZIP.
     command.add_argument('--audit-report', type=Path, required=True)  # Require the native audit receipt.
     command.add_argument('--manifest', type=Path, required=True)  # Reuse the approved Windows target.
+    command.add_argument('--animation-contract', choices=('render', 'refusal'), default='render')  # Preview packages assert the product's Windows animation refusal.
     command.add_argument('--disposable-account', action='store_true')  # Attest exclusive VM test-account custody.
     command.add_argument('--log', type=Path, required=True)
     return result

@@ -3094,7 +3094,7 @@ dependencies = [
 
 [[package]]
 name = "ilium"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3131,7 +3131,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-agent-debug"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-core",
  "serde",
@@ -3140,7 +3140,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-agent-session"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-core",
  "ilium-platform",
@@ -3151,7 +3151,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-ambient"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "cap-std",
  "chrono",
@@ -3176,7 +3176,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-animation-js"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "chrono",
  "cosmic-text",
@@ -3200,7 +3200,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-client"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3270,7 +3270,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-compaction-analysis"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -3279,7 +3279,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-control"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-core",
  "ilium-ipc",
@@ -3291,7 +3291,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-core"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -3299,7 +3299,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-detect"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-core",
  "ilium-platform",
@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-execution"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "crossbeam-channel",
  "ilium-platform",
@@ -3319,7 +3319,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-git"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-platform",
  "tempfile",
@@ -3329,7 +3329,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-gpu"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-ambient",
  "ilium-execution",
@@ -3341,14 +3341,14 @@ dependencies = [
 
 [[package]]
 name = "ilium-http"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ureq",
 ]
 
 [[package]]
 name = "ilium-inference"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-execution",
  "ilium-http",
@@ -3367,7 +3367,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-instructions"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "directories",
  "ilium-platform",
@@ -3380,7 +3380,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-ipc"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "bincode",
  "ilium-agent-debug",
@@ -3397,7 +3397,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-kilo-gateway"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "directories",
  "ilium-http",
@@ -3412,7 +3412,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-logging"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-execution",
  "ilium-platform",
@@ -3427,7 +3427,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-platform"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "directories",
  "getrandom 0.3.4",
@@ -3442,7 +3442,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-api"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "proptest",
  "semver",
@@ -3454,7 +3454,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-bench"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-host",
  "ilium-plugin-testkit",
@@ -3464,7 +3464,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-conformance"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-api",
  "ilium-plugin-host",
@@ -3476,7 +3476,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-agent-detect"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3485,7 +3485,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-agent-setup"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3494,7 +3494,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-agent-toolbar"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3503,7 +3503,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-ambient"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3512,7 +3512,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-chatroom"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3521,7 +3521,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-compaction"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3530,7 +3530,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-cost"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3539,7 +3539,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-diagnostics"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3548,7 +3548,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-editor"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3557,7 +3557,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-fleet"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3566,7 +3566,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-inference"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3575,7 +3575,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-kanban"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3584,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-keys-and-help"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3593,7 +3593,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-layout"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3602,7 +3602,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-notifications"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3611,7 +3611,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-progress"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3620,7 +3620,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-recap"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3629,7 +3629,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-scenes"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3638,7 +3638,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-scheduler"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3647,7 +3647,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-search"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3656,7 +3656,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-session-convert"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3665,7 +3665,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-sessions"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3674,7 +3674,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-settings"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3683,7 +3683,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-smart-copy"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3692,7 +3692,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-terminal"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3702,7 +3702,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-text-triggers"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3711,7 +3711,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-titles"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3720,7 +3720,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-tree"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3729,7 +3729,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-voice"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3738,7 +3738,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-worktrees"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
@@ -3747,14 +3747,14 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-fixture-conformance-probe"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk",
 ]
 
 [[package]]
 name = "ilium-plugin-helper"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-platform",
  "ilium-plugin-api",
@@ -3765,7 +3765,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-host"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "cosmic-text",
  "base64 0.22.1",
@@ -3798,7 +3798,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-precompile"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "anyhow",
  "ilium-plugin-host",
@@ -3808,7 +3808,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-sdk"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-sdk-core",
  "ilium-plugin-sdk-macros",
@@ -3817,7 +3817,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-sdk-core"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -3827,7 +3827,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-sdk-macros"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3836,7 +3836,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-testkit"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-plugin-api",
  "ilium-plugin-sdk-core",
@@ -3851,7 +3851,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-prompts"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "handlebars",
  "serde",
@@ -3862,7 +3862,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-pty"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -3878,7 +3878,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-remote-compaction"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "chrono",
  "ilium-agent-session",
@@ -3892,7 +3892,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-server"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "axum",
  "chrono",
@@ -3939,7 +3939,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-session-convert"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "chrono",
  "ilium-agent-session",
@@ -3955,7 +3955,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-sound"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "ilium-core",
  "serde",
@@ -3966,7 +3966,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-test-fixtures"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "crossterm",
  "ilium-platform",
@@ -3979,7 +3979,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-transport"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "sha2 0.10.9",
  "tempfile",
@@ -3990,7 +3990,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-voice"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "base64 0.22.1",
  "cpal",
@@ -4010,7 +4010,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-wikipedia"
-version = "0.1.1"
+version = "0.1.1-preview.6"
 dependencies = [
  "chrono",
  "ego-tree",

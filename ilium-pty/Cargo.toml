@@ -10,8 +10,8 @@ repository.workspace = true
 anyhow = "1.0.103"
 crossterm = "0.29.0"
 # Native transport, cancellation, worker ownership and process probes.
-ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
-ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
+ilium-platform = { version = "0.1.1-preview.6", path = "../ilium-platform" }
+ilium-execution = { version = "0.1.1-preview.6", path = "../ilium-execution" }
 portable-pty = "0.9.0"
 thiserror = "2.0.18"
 tracing = "0.1.44"
@@ -19,5 +19,5 @@ tokio = { version = "1", features = ["sync"] }
 vt100 = "0.16.2"
 
 [dev-dependencies]
-ilium-core = { version = "0.1.1", path = "../ilium-core" }
+ilium-core = { version = "0.1.1-preview.6", path = "../ilium-core" }
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "time"] }

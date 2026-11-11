@@ -336,7 +336,7 @@ class WorkflowTests(unittest.TestCase):
         caller = self.workflow['jobs']['linux-preview']
         self.assertEqual(caller['uses'], './.github/workflows/linux-preview.yml')
         self.assertEqual(caller['if'], "github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'")
-        self.assertEqual(self.workflow['jobs']['source']['if'], "github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4' && inputs.release_tag != 'v0.1.1-preview.5')")
+        self.assertEqual(self.workflow['jobs']['source']['if'], "github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4' && inputs.release_tag != 'v0.1.1-preview.5' && inputs.release_tag != 'v0.1.1-preview.6')")
         macos = self.workflow['jobs']['macos-preview']
         self.assertEqual(macos['uses'], './.github/workflows/macos-preview.yml')
         self.assertEqual(macos['if'], "github.event_name == 'workflow_dispatch' && (inputs.release_tag == 'v0.1.1-preview.4' || inputs.release_tag == 'v0.1.1-preview.5')")
@@ -761,10 +761,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(commands, {'source', 'native', 'aggregate', 'qualify', 'draft', 'publish', 'latest', 'deploy', 'install', 'baseline', 'recovery-ready', 'readback', 'recover'})
 
     def test_all_actions_are_sha_pinned_and_checkout_cannot_push(self):
-        previews = [yaml.load((ROOT / '.github/workflows' / name).read_text(), Loader=yaml.BaseLoader) for name in ('linux-preview.yml', 'macos-preview.yml')]
+        previews = [yaml.load((ROOT / '.github/workflows' / name).read_text(), Loader=yaml.BaseLoader) for name in ('linux-preview.yml', 'macos-preview.yml', 'windows-preview.yml')]
         for job in [*self.workflow['jobs'].values(), *[job for preview in previews for job in preview['jobs'].values()]]:
             if 'uses' in job:
-                self.assertIn(job['uses'], ('./.github/workflows/linux-preview.yml', './.github/workflows/macos-preview.yml'))
+                self.assertIn(job['uses'], ('./.github/workflows/linux-preview.yml', './.github/workflows/macos-preview.yml', './.github/workflows/windows-preview.yml'))
                 self.assertTrue((ROOT / job['uses']).is_file())
             for step in job.get('steps', []):
                 if 'uses' in step:
