@@ -3295,6 +3295,7 @@ version = "0.1.1-preview.6"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
+ "toml 0.8.23",
 ]
 
 [[package]]
