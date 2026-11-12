@@ -130,9 +130,9 @@ fn cor_041_cwd_that_is_not_a_directory_fails_with_exit_one_and_the_documented_me
     assert!(failed.stderr.starts_with("ilium: "), "{:?}", failed.stderr);
     assert!(
         // The path is quoted as Rust debug text, so Windows backslashes are escaped.
-        failed.stderr.contains(&format!(
-            "--cwd {missing_text:?} is not a valid directory"
-        )),
+        failed
+            .stderr
+            .contains(&format!("--cwd {missing_text:?} is not a valid directory")),
         "{:?}",
         failed.stderr
     );

@@ -137,6 +137,19 @@ async fn write_until(tui: &PtySession, keys: &[u8], mut condition: impl FnMut() 
     false
 }
 
+/// ConPTY can leave its screen out of step with what the client drew (wide
+/// emoji repaints, last-column wraps); the client then paints only changed
+/// cells and never repairs the stale ones. A width nudge makes it clear and
+/// repaint every cell, so the next capture reflects the real frame. The
+/// assertions that follow still check the same content. Only used on Windows.
+async fn conpty_full_repaint(tui: &PtySession) {
+    let (rows, columns) = tui.with_screen(|screen| screen.size());
+    let _ = tui.resize(rows, columns.saturating_sub(1));
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let _ = tui.resize(rows, columns);
+    tokio::time::sleep(Duration::from_millis(400)).await;
+}
+
 async fn wait_until(condition: impl FnMut() -> bool, timeout: Duration) -> bool {
     wait_until_polling(condition, timeout, Duration::from_millis(20)).await
 }
@@ -1616,8 +1629,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // differently: it is present on the plain frame (asserted above), so if it
     // is still here with Settings open, only the tab navigated to below can
     // have displaced it.
+    if cfg!(windows) && !tui.screen_text().contains("VOICE") {
+        conpty_full_repaint(&tui).await;
+    }
     assert!(
-        tui.screen_text().contains("VOICE"),
+        wait_until(|| tui.screen_text().contains("VOICE"), WAIT_TIMEOUT).await,
         "the footer's voice control vanished when Settings opened. rows written \
          to their last column are {:?} (a written last cell wraps, and on the \
          last row scrolls), bottom rows are {:#?}",
@@ -3058,16 +3074,27 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     // Wait for the scene list to settle after the palette dialog closes; a
     // single capture can land mid-repaint (seen under ConPTY).
     let mut scene_cell = None;
-    wait_until(
-        || {
-            scene_cell = first_client.with_screen(|screen| {
-                animation_scene_label_cell(screen, default_animation.kind.label())
-            });
-            scene_cell.is_some()
-        },
-        WAIT_TIMEOUT,
-    )
-    .await;
+    for attempt in 0..2 {
+        if attempt == 1 {
+            if !cfg!(windows) {
+                break;
+            }
+            conpty_full_repaint(&first_client).await;
+        }
+        if wait_until(
+            || {
+                scene_cell = first_client.with_screen(|screen| {
+                    animation_scene_label_cell(screen, default_animation.kind.label())
+                });
+                scene_cell.is_some()
+            },
+            WAIT_TIMEOUT,
+        )
+        .await
+        {
+            break;
+        }
+    }
     let (scene_column, scene_row) = scene_cell.unwrap_or_else(|| {
         panic!(
             "initial scene is visible in the scene list: {:?}",
@@ -4526,8 +4553,8 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
             // shift the row by one cell and overwrite the first character next to
             // the split border (seen on the Windows runner), so after the second
             // route accept the first child's text without that one cell.
-            let left_visible = screen.contains("left-route")
-                || (cfg!(windows) && screen.contains("eft-route"));
+            let left_visible =
+                screen.contains("left-route") || (cfg!(windows) && screen.contains("eft-route"));
             left_visible && screen.contains("right-route")
         },
         WAIT_TIMEOUT,

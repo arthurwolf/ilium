@@ -227,7 +227,11 @@ fn saved_cache_is_never_loaded_without_an_owner_only_handle_check() {
     let home = tempfile::tempdir().unwrap();
     let project = tempfile::tempdir().unwrap();
     let path = project.path().join("transcript.jsonl");
-    std::fs::write(&path, "{\"type\":\"user\",\"message\":{\"content\":\"synthetic\"}}\n").unwrap();
+    std::fs::write(
+        &path,
+        "{\"type\":\"user\",\"message\":{\"content\":\"synthetic\"}}\n",
+    )
+    .unwrap();
     let request = StatsRequest {
         class: AgentClass::Claude,
         session_id: "session-one".into(),
