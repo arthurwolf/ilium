@@ -89,7 +89,10 @@ python release/scripts/release_tool.py generate-windows-table --manifest release
 python -m unittest discover -s release/tests -p 'test_*.py'
 ```
 
-The complete POSIX fixture suite runs on Linux. Windows runs its PowerShell
+The complete POSIX fixture suite runs on Linux; the native pipeline skips the
+Linux-host suites (`test_posix_install.py`, `test_linux_tarball.py`,
+`test_linux_vm.py`, listed in `LINUX_HOST_SUITES` of `release_pipeline.py`) on
+other runners. Windows runs its PowerShell
 contracts and Pester suite under both Windows PowerShell 5.1 and current
 PowerShell. Portable source tests do not establish native platform support.
 Run workspace tests, all-target Clippy and formatting separately. Native
