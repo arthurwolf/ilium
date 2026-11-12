@@ -643,8 +643,19 @@ mod tests {
             assert!(Instant::now() < deadline, "old callback completed");
             std::thread::yield_now();
         }
+        // `poll` is a non-blocking try_lock, so it can miss while the worker
+        // briefly holds the mailbox on its way back to waiting.
+        let event = loop {
+            if let Some(event) = worker.poll() {
+                break Some(event);
+            }
+            if Instant::now() >= deadline {
+                break None;
+            }
+            std::thread::yield_now();
+        };
         assert!(matches!(
-            worker.poll(),
+            event,
             Some(IconSemanticSearchEvent::Failed { revision: 2, .. })
         ));
         let ticket = worker.worker.as_ref().unwrap().ticket();
