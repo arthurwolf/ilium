@@ -484,7 +484,7 @@ impl ServerKernel {
     /// Runs every pending task until the server is idle.
     pub fn settle(&self) {
         let mut state = self.lock();
-        if state.tree_dirty && state.clock_ms.saturating_sub(state.last_snapshot_ms) >= 0 {
+        if state.tree_dirty {
             state.snapshot_writes += 1;
             state.tree_dirty = false;
             state.last_snapshot_ms = state.clock_ms;
