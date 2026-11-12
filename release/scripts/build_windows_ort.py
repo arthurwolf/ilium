@@ -104,7 +104,7 @@ def logged_command(command, cwd, environment, log_path):
 
 def failure_excerpt(text, context_lines=20, max_errors=10, tail_lines=60):
     """Compiler error blocks plus the log tail, so a failed native build is diagnosable from the job log."""
-    lines = text.splitlines()
+    lines = [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in text.splitlines()]
     starts = [index for index, line in enumerate(lines)
               if line.startswith("error") or ": error " in line or ": fatal error " in line][:max_errors]
     excerpt = []

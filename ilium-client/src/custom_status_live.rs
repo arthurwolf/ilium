@@ -34,7 +34,7 @@ pub(crate) struct LivePaneVerdict<'a> {
 /// the right panel. Captured once per render so every pane row reads the
 /// same view.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct PaneViewFacts {
+pub struct PaneViewFacts {
     /// The tree row under the cursor (`App::selected_node_id`).
     pub selected_node_id: Option<NodeId>,
     /// The right panel's terminals (`App::displayed_pane_slots`).
@@ -502,10 +502,7 @@ mod tests {
 
         app.select_node(pane_id);
         app.right_panel_target = crate::app::RightPanelTarget::Pane { pane_id };
-        assert_eq!(
-            observe(&app),
-            Some((Observation::True, Observation::True))
-        );
+        assert_eq!(observe(&app), Some((Observation::True, Observation::True)));
     }
 
     #[test]
@@ -533,7 +530,10 @@ mod tests {
                 )
             })
         };
-        assert_eq!(observe(&app), Some((Observation::False, Observation::False)));
+        assert_eq!(
+            observe(&app),
+            Some((Observation::False, Observation::False))
+        );
         // A session-level error is a session fact, never this pane's error.
         app.replace_blocking_errors(vec![ilium_ipc::BlockingError {
             node_id: None,

@@ -61,21 +61,42 @@ impl<'de> Deserialize<'de> for RawFields {
 /// Returned bytes retain the raw original values in their original order;
 /// the caller must still preserve the account, endpoint, and headers.
 pub(crate) fn claude_refresh_body(original: &str) -> Result<String, ClaudeRefreshError> {
-    let parsed: Value = serde_json::from_str(original).map_err(|_| ClaudeRefreshError::InvalidJson)?;
+    let parsed: Value =
+        serde_json::from_str(original).map_err(|_| ClaudeRefreshError::InvalidJson)?;
     let source = parsed.as_object().ok_or(ClaudeRefreshError::NotObject)?;
-    let fields: RawFields = serde_json::from_str(original).map_err(|_| ClaudeRefreshError::InvalidJson)?;
-    if source.get("model").and_then(Value::as_str).filter(|s| !s.is_empty()).is_none()
+    let fields: RawFields =
+        serde_json::from_str(original).map_err(|_| ClaudeRefreshError::InvalidJson)?;
+    if source
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .is_none()
         || !source.get("messages").is_some_and(Value::is_array)
     {
         return Err(ClaudeRefreshError::MissingModelOrMessages);
     }
-    if source.get("thinking").and_then(|v| v.get("type")).and_then(Value::as_str) == Some("enabled") {
+    if source
+        .get("thinking")
+        .and_then(|v| v.get("type"))
+        .and_then(Value::as_str)
+        == Some("enabled")
+    {
         return Err(ClaudeRefreshError::ExtendedThinking);
     }
-    if source.get("output_config").and_then(|v| v.get("format")).is_some_and(|v| !v.is_null()) {
+    if source
+        .get("output_config")
+        .and_then(|v| v.get("format"))
+        .is_some_and(|v| !v.is_null())
+    {
         return Err(ClaudeRefreshError::StructuredOutput);
     }
-    if matches!(source.get("tool_choice").and_then(|v| v.get("type")).and_then(Value::as_str), Some("tool" | "any")) {
+    if matches!(
+        source
+            .get("tool_choice")
+            .and_then(|v| v.get("type"))
+            .and_then(Value::as_str),
+        Some("tool" | "any")
+    ) {
         return Err(ClaudeRefreshError::ForcedTool);
     }
     if source.get("compaction").is_some_and(|v| !v.is_null()) {
@@ -123,18 +144,40 @@ mod tests {
     fn rejects_documented_incompatible_output_modes() {
         let base = json!({"model":"claude-example","messages":[]});
         for (field, value, expected) in [
-            ("thinking", json!({"type":"enabled"}), ClaudeRefreshError::ExtendedThinking),
-            ("output_config", json!({"format":{"type":"json_schema"}}), ClaudeRefreshError::StructuredOutput),
-            ("tool_choice", json!({"type":"tool","name":"x"}), ClaudeRefreshError::ForcedTool),
-            ("tool_choice", json!({"type":"any"}), ClaudeRefreshError::ForcedTool),
+            (
+                "thinking",
+                json!({"type":"enabled"}),
+                ClaudeRefreshError::ExtendedThinking,
+            ),
+            (
+                "output_config",
+                json!({"format":{"type":"json_schema"}}),
+                ClaudeRefreshError::StructuredOutput,
+            ),
+            (
+                "tool_choice",
+                json!({"type":"tool","name":"x"}),
+                ClaudeRefreshError::ForcedTool,
+            ),
+            (
+                "tool_choice",
+                json!({"type":"any"}),
+                ClaudeRefreshError::ForcedTool,
+            ),
             ("compaction", json!({}), ClaudeRefreshError::Compaction),
         ] {
             let mut request = base.clone();
             request[field] = value;
             assert_eq!(claude_refresh_body(&request.to_string()), Err(expected));
         }
-        assert_eq!(claude_refresh_body("[]"), Err(ClaudeRefreshError::NotObject));
-        assert_eq!(claude_refresh_body("{}"), Err(ClaudeRefreshError::MissingModelOrMessages));
+        assert_eq!(
+            claude_refresh_body("[]"),
+            Err(ClaudeRefreshError::NotObject)
+        );
+        assert_eq!(
+            claude_refresh_body("{}"),
+            Err(ClaudeRefreshError::MissingModelOrMessages)
+        );
     }
 
     #[test]
@@ -143,6 +186,9 @@ mod tests {
         let prepared = claude_refresh_body(request).unwrap();
         assert!(prepared.contains(r#"[{"role":"user", "content":"a\\u0062"}]"#));
         assert!(prepared.contains(r#"[{"z":1,"a":2}]"#));
-        assert_eq!(claude_refresh_body(r#"{"model":"a","model":"b","messages":[]}"#), Err(ClaudeRefreshError::InvalidJson));
+        assert_eq!(
+            claude_refresh_body(r#"{"model":"a","model":"b","messages":[]}"#),
+            Err(ClaudeRefreshError::InvalidJson)
+        );
     }
 }

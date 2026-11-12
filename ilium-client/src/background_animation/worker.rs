@@ -1907,9 +1907,10 @@ impl AnimationFrame {
                     image_background: image_background(
                         color,
                         scene_color,
-                        self.raster.image_coverage.get(
-                            usize::from(y) * usize::from(self.width) + usize::from(x),
-                        ).copied(),
+                        self.raster
+                            .image_coverage
+                            .get(usize::from(y) * usize::from(self.width) + usize::from(x))
+                            .copied(),
                         &request.settings.appearance,
                     ),
                     article_underline: false,
@@ -1968,13 +1969,15 @@ fn image_background(
     let tone = if appearance.mode == ilium_ambient::style::ColorMode::Monotone {
         let (red, green, blue) = scene.unwrap_or((255, 255, 255));
         let luma = (54 * u32::from(red) + 183 * u32::from(green) + 19 * u32::from(blue)) / 256;
-        if appearance.invert { 255 - luma } else { luma }
+        if appearance.invert {
+            255 - luma
+        } else {
+            luma
+        }
     } else {
         255
     };
-    let dim = |channel: u8| {
-        (u32::from(channel) * u32::from(coverage) * tone / (16 * 255)) as u8
-    };
+    let dim = |channel: u8| (u32::from(channel) * u32::from(coverage) * tone / (16 * 255)) as u8;
     Some((dim(red), dim(green), dim(blue)))
 }
 
@@ -1999,17 +2002,25 @@ mod tests {
 
     #[test]
     fn image_background_monotone_preserves_image_tone_and_inversion() {
-        let mut look = ilium_ambient::style::Appearance::default();
-        look.mode = ilium_ambient::style::ColorMode::Monotone;
+        let mut look = ilium_ambient::style::Appearance {
+            mode: ilium_ambient::style::ColorMode::Monotone,
+            ..Default::default()
+        };
         let ink = Some((240, 120, 60));
         let dark = image_background(ink, Some((32, 32, 32)), Some(8), &look).unwrap();
         let light = image_background(ink, Some((224, 224, 224)), Some(8), &look).unwrap();
         assert!(dark.0 < light.0 && dark.1 < light.1 && dark.2 < light.2);
         assert_eq!(image_background(ink, None, Some(0), &look), None);
         look.invert = true;
-        assert_eq!(image_background(ink, Some((223, 223, 223)), Some(8), &look), Some(dark));
+        assert_eq!(
+            image_background(ink, Some((223, 223, 223)), Some(8), &look),
+            Some(dark)
+        );
         look.mode = ilium_ambient::style::ColorMode::Color;
-        assert_eq!(image_background(ink, Some((32, 32, 32)), Some(8), &look), Some((120, 60, 30)));
+        assert_eq!(
+            image_background(ink, Some((32, 32, 32)), Some(8), &look),
+            Some((120, 60, 30))
+        );
     }
 
     #[test]

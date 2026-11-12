@@ -94,10 +94,17 @@ impl WaitTracker {
             (Some("response_item"), Some("function_call_output" | "custom_tool_call_output")) => {
                 self.end(payload["call_id"].as_str());
             }
-            (Some("event_msg"), Some("task_started" | "task_complete" | "turn_complete" | "turn_aborted")) => {
+            (
+                Some("event_msg"),
+                Some("task_started" | "task_complete" | "turn_complete" | "turn_aborted"),
+            ) => {
                 self.reset();
             }
-            (Some("response_item"), Some("message")) if payload["role"].as_str() == Some("user") => self.reset(),
+            (Some("response_item"), Some("message"))
+                if payload["role"].as_str() == Some("user") =>
+            {
+                self.reset()
+            }
             _ => {}
         }
     }
@@ -108,11 +115,15 @@ impl WaitTracker {
             self.reset();
             return;
         }
-        let Some(content) = content_value.as_array() else { return };
+        let Some(content) = content_value.as_array() else {
+            return;
+        };
         match entry["type"].as_str() {
             Some("assistant") => {
                 for item in content {
-                    if item["type"].as_str() != Some("tool_use") { continue }
+                    if item["type"].as_str() != Some("tool_use") {
+                        continue;
+                    }
                     let kind = match item["name"].as_str() {
                         Some("Bash") => Some(WaitKind::Command),
                         Some("Agent" | "Task") => Some(WaitKind::Subagent),
@@ -124,7 +135,10 @@ impl WaitTracker {
             Some("user") => {
                 // A new human message interrupts an outstanding turn. Tool
                 // results are also user messages, but close only their ID.
-                if content.iter().any(|item| item["type"].as_str() == Some("text")) {
+                if content
+                    .iter()
+                    .any(|item| item["type"].as_str() == Some("text"))
+                {
                     self.reset();
                 }
                 for item in content {
@@ -156,15 +170,31 @@ pub(crate) struct WaitTranscriptCursor {
 
 impl WaitTranscriptCursor {
     pub fn new(path: PathBuf, session_id: String, provider: AgentClass, generation: u64) -> Self {
-        Self { path, session_id, provider, generation, file_identity: None, offset: 0,
-            pending: Vec::new(), tracker: WaitTracker::default(), failed: false, caught_up: false }
+        Self {
+            path,
+            session_id,
+            provider,
+            generation,
+            file_identity: None,
+            offset: 0,
+            pending: Vec::new(),
+            tracker: WaitTracker::default(),
+            failed: false,
+            caught_up: false,
+        }
     }
 
-    pub fn caught_up(&self) -> bool { self.caught_up }
+    pub fn caught_up(&self) -> bool {
+        self.caught_up
+    }
 
     /// Read no more than 256 KiB per call. None means incomplete or unsafe
     /// evidence, not that the agent is idle. Never retain or log parsed text.
-    pub fn read_available(&mut self, generation: u64, verified_path: &Path) -> io::Result<Option<WaitEvidence>> {
+    pub fn read_available(
+        &mut self,
+        generation: u64,
+        verified_path: &Path,
+    ) -> io::Result<Option<WaitEvidence>> {
         if self.failed || generation != self.generation || verified_path != self.path.as_path() {
             self.failed = true;
             self.pending.clear();
@@ -185,8 +215,13 @@ impl WaitTranscriptCursor {
         const MAX_RECORD_BYTES: usize = 16 * 1024 * 1024;
         let mut file = ilium_platform::secure_fs::open_regular_file(&self.path)?;
         let metadata = file.metadata()?;
-        let identity = transcript_file_identity(&metadata).ok_or_else(|| io::Error::other("transcript identity unavailable"))?;
-        if self.file_identity.is_some_and(|previous| previous != identity) || metadata.len() < self.offset {
+        let identity = transcript_file_identity(&metadata)
+            .ok_or_else(|| io::Error::other("transcript identity unavailable"))?;
+        if self
+            .file_identity
+            .is_some_and(|previous| previous != identity)
+            || metadata.len() < self.offset
+        {
             return Err(io::Error::other("transcript replaced or truncated"));
         }
         self.file_identity = Some(identity);
@@ -201,7 +236,11 @@ impl WaitTranscriptCursor {
                     .map_err(|_| io::Error::other("invalid transcript record"))?;
                 self.pending.clear();
                 if self.provider == AgentClass::Claude {
-                    if entry.get("sessionId").and_then(Value::as_str).is_some_and(|id| id != self.session_id) {
+                    if entry
+                        .get("sessionId")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| id != self.session_id)
+                    {
                         return Err(io::Error::other("transcript session changed"));
                     }
                     if entry.get("isSidechain").and_then(Value::as_bool) == Some(true) {
@@ -254,10 +293,15 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("session.jsonl");
         std::fs::write(&path, b"{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"ilium_wait\",\"call_id\":\"a\"}}\n{\"type\":").unwrap();
-        let mut cursor = WaitTranscriptCursor::new(path.clone(), "session".into(), AgentClass::Codex, 7);
+        let mut cursor =
+            WaitTranscriptCursor::new(path.clone(), "session".into(), AgentClass::Codex, 7);
         assert_eq!(cursor.read_available(7, &path).unwrap(), None);
-        let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
-        file.write_all(b"\"event_msg\",\"payload\":{\"type\":\"other\"}}\n").unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(b"\"event_msg\",\"payload\":{\"type\":\"other\"}}\n")
+            .unwrap();
         assert!(cursor.read_available(7, &path).unwrap().unwrap().monitor);
         assert_eq!(cursor.read_available(8, &path).unwrap(), None);
         assert_eq!(cursor.read_available(7, &path).unwrap(), None);
@@ -269,10 +313,27 @@ mod tests {
         for (id, name) in [("a", "ilium_wait"), ("b", "wait_agent"), ("c", "exec")] {
             tracker.observe(&AgentClass::Codex, &json!({"type":"response_item","payload":{"type":"function_call","call_id":id,"name":name}}));
         }
-        assert_eq!(tracker.evidence(), WaitEvidence { monitor: true, command: false, subagent: true });
+        assert_eq!(
+            tracker.evidence(),
+            WaitEvidence {
+                monitor: true,
+                command: false,
+                subagent: true
+            }
+        );
         tracker.observe(&AgentClass::Codex, &json!({"type":"response_item","payload":{"type":"function_call_output","call_id":"a"}}));
-        assert_eq!(tracker.evidence(), WaitEvidence { monitor: false, command: false, subagent: true });
-        tracker.observe(&AgentClass::Codex, &json!({"type":"event_msg","payload":{"type":"turn_aborted"}}));
+        assert_eq!(
+            tracker.evidence(),
+            WaitEvidence {
+                monitor: false,
+                command: false,
+                subagent: true
+            }
+        );
+        tracker.observe(
+            &AgentClass::Codex,
+            &json!({"type":"event_msg","payload":{"type":"turn_aborted"}}),
+        );
         assert_eq!(tracker.evidence(), WaitEvidence::default());
     }
 
@@ -282,10 +343,27 @@ mod tests {
         let call = json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"Bash"},{"type":"tool_use","id":"b","name":"Agent"}]}});
         tracker.observe(&AgentClass::Claude, &call);
         tracker.observe(&AgentClass::Claude, &json!({"type":"api-request-blob","message":{"content":[{"type":"tool_result","tool_use_id":"a"}]}}));
-        assert_eq!(tracker.evidence(), WaitEvidence { monitor: false, command: true, subagent: true });
+        assert_eq!(
+            tracker.evidence(),
+            WaitEvidence {
+                monitor: false,
+                command: true,
+                subagent: true
+            }
+        );
         tracker.observe(&AgentClass::Claude, &json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a"}]}}));
-        assert_eq!(tracker.evidence(), WaitEvidence { monitor: false, command: false, subagent: true });
-        tracker.observe(&AgentClass::Claude, &json!({"type":"user","message":{"content":[{"type":"text","text":"stop"}]}}));
+        assert_eq!(
+            tracker.evidence(),
+            WaitEvidence {
+                monitor: false,
+                command: false,
+                subagent: true
+            }
+        );
+        tracker.observe(
+            &AgentClass::Claude,
+            &json!({"type":"user","message":{"content":[{"type":"text","text":"stop"}]}}),
+        );
         assert_eq!(tracker.evidence(), WaitEvidence::default());
     }
 
@@ -294,10 +372,16 @@ mod tests {
         let mut tracker = WaitTracker::default();
         let call = json!({"type":"response_item","payload":{"type":"function_call","call_id":"a","name":"ilium_wait"}});
         tracker.observe(&AgentClass::Codex, &call);
-        tracker.observe(&AgentClass::Codex, &json!({"type":"response_item","payload":{"type":"message","role":"user"}}));
+        tracker.observe(
+            &AgentClass::Codex,
+            &json!({"type":"response_item","payload":{"type":"message","role":"user"}}),
+        );
         assert_eq!(tracker.evidence(), WaitEvidence::default());
         tracker.observe(&AgentClass::Codex, &call);
-        tracker.observe(&AgentClass::Codex, &json!({"type":"event_msg","payload":{"type":"task_started"}}));
+        tracker.observe(
+            &AgentClass::Codex,
+            &json!({"type":"event_msg","payload":{"type":"task_started"}}),
+        );
         assert_eq!(tracker.evidence(), WaitEvidence::default());
     }
 
@@ -307,7 +391,10 @@ mod tests {
         tracker.observe(&AgentClass::Codex, &json!({"type":"response_item","payload":{"type":"function_call","call_id":"x".repeat(257),"name":"ilium_wait"}}));
         tracker.observe(&AgentClass::Codex, &json!({"type":"response_item","payload":{"type":"function_call","call_id":"valid","name":"ilium_wait"}}));
         assert_eq!(tracker.evidence(), WaitEvidence::default());
-        tracker.observe(&AgentClass::Codex, &json!({"type":"event_msg","payload":{"type":"task_started"}}));
+        tracker.observe(
+            &AgentClass::Codex,
+            &json!({"type":"event_msg","payload":{"type":"task_started"}}),
+        );
         tracker.observe(&AgentClass::Codex, &json!({"type":"response_item","payload":{"type":"function_call","call_id":"valid","name":"ilium_wait"}}));
         assert!(tracker.evidence().monitor);
     }

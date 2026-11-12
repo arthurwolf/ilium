@@ -215,6 +215,7 @@ pub struct ProgressMonitorRuntimeState {
 /// Process-bound inputs for an off-lock cache-wait observation. Possession
 /// of this snapshot alone does not authorize a provider request: its caller
 /// must recheck the process and the pane binding immediately before use.
+#[allow(dead_code)] // Staged for the cache-wait observation, not yet wired in.
 pub(crate) struct CacheWaitSource {
     pub generation: u64,
     pub process: AgentProcessKey,
@@ -835,6 +836,7 @@ impl TerminalPaneRuntime {
 
     /// Read only facts already established by agent detection. A monitor may
     /// run independently of an agent wait, so its state stays a separate fact.
+    #[allow(dead_code)] // Staged for the cache-wait observation, not yet wired in.
     pub(crate) fn cache_wait_source(&self) -> Option<CacheWaitSource> {
         let process = self.agent_process_key.as_ref()?;
         if self.is_session_identity_invalidated
@@ -852,13 +854,16 @@ impl TerminalPaneRuntime {
             process_identity: self.session_process_identity.clone()?,
             session_id: self.session_id.clone()?,
             transcript_path: self.session_transcript_path.clone()?,
-            monitor_running: self.progress_monitors().any(|monitor| !monitor.is_settled()),
+            monitor_running: self
+                .progress_monitors()
+                .any(|monitor| !monitor.is_settled()),
         })
     }
 
     /// Recheck after I/O; a resumed session or replaced process cannot reuse
     /// evidence collected for its predecessor. Monitor liveness is returned
     /// afresh by `cache_wait_source`, never trusted from an earlier snapshot.
+    #[allow(dead_code)] // Staged for the cache-wait observation, not yet wired in.
     pub(crate) fn cache_wait_source_is_current(&self, source: &CacheWaitSource) -> bool {
         self.cache_wait_source().is_some_and(|current| {
             current.generation == source.generation

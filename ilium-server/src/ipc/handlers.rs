@@ -12922,7 +12922,9 @@ mod tests {
 
         let done = settle_wait_test_monitor(&state, pane_id, 71).await;
         assert!(hand_outcome_to_progress_waiters(&state, pane_id, 71, &done).await);
-        let outcome = next_wait_reply(&mut receiver).await.expect("actual outcome");
+        let outcome = next_wait_reply(&mut receiver)
+            .await
+            .expect("actual outcome");
         assert_eq!(outcome.monitor_id, 71);
         assert_eq!(outcome.progress, Some(done.clone()));
         assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Settled);

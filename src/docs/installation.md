@@ -2,9 +2,9 @@
 
 This page describes Ilium's installation routes: the hosted one-line installers, the release packages for Linux, macOS and Windows, checksum verification, upgrading, uninstalling, and the prerequisites for native animations. No Rust toolchain is needed for any of these routes. To compile Ilium yourself, see [Building from source](building-from-source.md).
 
-Preview [v0.1.1-preview.5](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.5) carries the ten Linux files of v0.1.1-linux.3 unchanged and adds the four macOS Apple Silicon formats (tar.gz, ZIP, PKG, DMG; native macOS-15 evidence, unsigned, not notarized). Linux preview: [v0.1.1-linux.3](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.3) provides Linux x86_64 (six formats) and Linux ARM64 (four formats) from one source commit, with one SHA256SUMS covering all ten files. The public downloads have been checked against their checksums. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
+Preview [v0.1.1-preview.5](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.5) carries the ten Linux files of v0.1.1-linux.3 unchanged and adds the four macOS Apple Silicon formats (tar.gz, ZIP, PKG, DMG; native macOS-15 evidence, unsigned, not notarized). Linux preview: [v0.1.1-linux.3](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.3) provides Linux x86_64 (six formats) and Linux ARM64 (four formats) from one source commit, with one SHA256SUMS covering all ten files. The public downloads have been checked against their checksums. Preview [v0.1.1-preview.6](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.6) carries those fourteen files unchanged and adds the Windows x86_64 setup EXE, MSI and ZIP (native windows-2025 evidence, unsigned), with one SHA256SUMS over all seventeen files. These prereleases are not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
 
-**Not yet available for this preview:** hosted installers, two of six Linux ARM64 formats (rpm, Snap), macOS Intel, Windows. Plugins are an unsupported development preview. GitHub Actions artifacts remain candidate builds until independently qualified.
+**Not yet available for this preview:** hosted installers, two of six Linux ARM64 formats (rpm, Snap), macOS Intel. Plugins are an unsupported development preview. GitHub Actions artifacts remain candidate builds until independently qualified.
 
 ## Contents
 
@@ -30,7 +30,7 @@ Linux is the primary platform. macOS and Windows support is implemented, with di
 | --- | --- | --- |
 | Linux | x86_64 (Intel/AMD); aarch64 (ARM64): tar.gz, deb, AppImage, Flatpak verified in an emulated guest (emulated QEMU guest, not native hardware); rpm, Snap **coming soon** | tar.gz, deb, rpm, AppImage, Snap, Flatpak |
 | macOS | Apple Silicon (aarch64), Intel (x86_64) | tar.gz, zip, pkg, dmg; Apple Silicon: all four available in v0.1.1-preview.5; Intel **not yet available** |
-| Windows | x86_64 (native AMD64) | setup exe, msi, zip; **not yet available** |
+| Windows | x86_64 (native AMD64) | setup exe, msi, zip; all three available in v0.1.1-preview.6 (unsigned) |
 
 Linux packages target the glibc 2.35 baseline (Ubuntu 22.04, Debian 12 and the tested Fedora and openSUSE environments). Flatpak uses its declared platform runtime. All packages are unsigned: check the asset digest on the release page.
 
@@ -201,7 +201,7 @@ The ZIP, PKG and DMG packages are unsigned and not notarized. macOS may block do
 
 ## Windows packages
 
-**Not yet available.** These instructions describe a future release.
+**Preview: x86_64, three formats.** [v0.1.1-preview.6](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.6) provides [`ilium-windows-x86_64-setup.exe`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64-setup.exe), [`ilium-windows-x86_64.msi`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64.msi) and [`ilium-windows-x86_64.zip`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64.zip). All three were built, tested and audited natively on a GitHub Actions `windows-2025` runner, and the setup EXE and MSI were silently installed there, run and uninstalled. They are **unsigned**, so Microsoft Defender SmartScreen shows "Windows protected your PC": verify the SHA-256 first, then choose More info and Run anyway. Animation add-ons are disabled on Windows because the animation helper sandbox is not yet qualified. The PowerShell one-line installer does not install this preview yet; use these downloads.
 
 For a guided install, use `ilium-windows-x86_64-setup.exe` or `ilium-windows-x86_64.msi`. Both install for your user without administrator rights, add Ilium to your `PATH`, and uninstall from Windows Settings. Use one installer, not several. To upgrade, run the newer installer.
 
