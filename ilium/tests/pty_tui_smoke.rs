@@ -2667,7 +2667,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
 
     // Loaded runners (Intel macOS) drain a pane's output backlog before the client
     // sees the server close, so a slow exit is not a hang.
-    let attached_process_exited = wait_screen(&tui, || tui.has_exited(), WAIT_TIMEOUT * 4).await;
+    let attached_process_exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT * 4).await;
     if !attached_process_exited {
         // Defensive fallback only -- see this file's module docs. Getting
         // here means the graceful shutdown path itself regressed, which
