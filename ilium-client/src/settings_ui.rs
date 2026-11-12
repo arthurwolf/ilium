@@ -8337,6 +8337,43 @@ mod tests {
                     // Idle, scanning and report pages carry different topics.
                     reachable.extend(crate::compaction_ui::tests::reachable_topics());
                 }
+                SettingsTab::AgentMonitoring => {
+                    // The page itself, then the custom rules editor that owns the
+                    // same content area while open (heading, each section tab and
+                    // the THEN row carry their own topics).
+                    let state = SettingsState {
+                        tab,
+                        ..SettingsState::default()
+                    };
+                    reachable.extend(
+                        settings_help_anchors(&layout, &app, &state)
+                            .into_iter()
+                            .map(|anchor| anchor.topic_id),
+                    );
+                    let saved_screen = app.layout.screen_area;
+                    app.set_screen_area(Rect::new(0, 0, 160, 100));
+                    for column in [
+                        crate::status_rules_editor::EditorColumn::Rules,
+                        crate::status_rules_editor::EditorColumn::ConditionAndVisual,
+                        crate::status_rules_editor::EditorColumn::Preview,
+                    ] {
+                        for fallback_selected in [false, true] {
+                            let mut editor = crate::status_rules_editor::EditorState::new(
+                                &app.custom_status_rules,
+                            );
+                            editor.column = column;
+                            editor.fallback_selected = fallback_selected;
+                            app.custom_status_rules_editor = Some(editor);
+                            reachable.extend(
+                                settings_help_anchors(&layout, &app, &state)
+                                    .into_iter()
+                                    .map(|anchor| anchor.topic_id),
+                            );
+                        }
+                    }
+                    app.custom_status_rules_editor = None;
+                    app.set_screen_area(saved_screen);
+                }
                 _ => {
                     let state = SettingsState {
                         tab,
@@ -9107,11 +9144,15 @@ mod tests {
         )
         .content
         .into_owned();
+        // Change the rule the first demo situation resolves to by default.
+        let first_rule = crate::status_demo::situations()[0]
+            .default_rule
+            .expect("first demo situation names its default rule");
         let working = app
             .custom_status_rules
             .rules
             .iter_mut()
-            .find(|rule| rule.id == "working-goal")
+            .find(|rule| rule.id == first_rule)
             .unwrap();
         working.then.kind = VisualKind::Glyph("X".to_owned());
         let after = crate::status_demo::preview_span(

@@ -302,6 +302,8 @@ impl ResourceLedgerFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Linux-only helper: used only by the Linux-only resource queue tests.
+    #[cfg(target_os = "linux")]
     fn durable_test_directory() -> tempfile::TempDir {
         let root = std::env::var_os("ILIUM_RESOURCE_TEST_ROOT")
             .map(std::path::PathBuf::from)
@@ -310,6 +312,8 @@ mod tests {
         std::fs::write(root.join(".scratch-reaper"), b"").unwrap();
         tempfile::tempdir_in(root).unwrap()
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn cached_read_skips_only_previously_reconciled_inode_and_rechecks_replacements() {
         let directory = durable_test_directory();
@@ -365,6 +369,8 @@ mod tests {
             .read_reconciled_cached(1024, &ResourceLedgerReadCache::default())
             .is_err());
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn warmed_cache_reconciles_child_rename_without_acknowledgement() {
         let directory = durable_test_directory();
@@ -420,6 +426,8 @@ mod tests {
         std::fs::rename(&temporary, &path).unwrap();
         std::process::exit(73);
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn new_process_reconciles_unacknowledged_rename() {
         let directory = durable_test_directory();
@@ -466,6 +474,8 @@ mod tests {
         ledger.replace(b"next-acknowledgement").unwrap();
         panic!("crash hook did not execute");
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn actual_replace_crash_boundaries_preserve_old_or_new_authority() {
         for stage in ["before-flush", "after-flush", "before-ack"] {
@@ -744,5 +754,27 @@ mod identity_tests {
         assert!(!a.boot_id.is_empty());
         assert_eq!(a.boot_id, b.boot_id);
         assert!(b.monotonic_millis >= a.monotonic_millis);
+    }
+}
+/// The resource queue is Linux-only: every other platform must refuse it
+/// (fail closed) instead of claiming durable leases it cannot prove.
+#[cfg(all(test, not(target_os = "linux")))]
+mod unsupported_platform_tests {
+    use super::*;
+    #[test]
+    fn resource_ledger_clock_and_process_identity_are_refused() {
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = directory.path().join("catalog.json");
+        let refusal = ResourceLedgerFile::try_lock(&catalog).unwrap_err();
+        assert_eq!(refusal.kind(), io::ErrorKind::Unsupported);
+        assert_eq!(
+            refusal.to_string(),
+            "resource queue requires a supported local durable filesystem"
+        );
+        assert_eq!(
+            resource_clock().unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert!(capture_resource_process(std::process::id()).is_err());
     }
 }

@@ -3,6 +3,8 @@ use super::*;
 use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::state::ServerStateOptions;
 struct Fixture {
+    // Read only by the Linux-only queue tests; elsewhere it just keeps the directory alive.
+    #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
     directory: tempfile::TempDir,
     state: Arc<ServerState>,
     project: NodeId,
@@ -73,6 +75,8 @@ fn definition() -> ResourceDefinition {
         archived: false,
     }
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn link() -> ProjectResourceLink {
     ProjectResourceLink {
         created_at_unix_millis: 0,
@@ -84,11 +88,15 @@ fn link() -> ProjectResourceLink {
         sync_debt: None,
     }
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn request(f: &Fixture, command: ResourceCommand) -> ResourceRequest {
     let mut r = ResourceRequest::new(Some(f.project), ResourceOperation::Mutate(command));
     r.request_key = Some(key(&clock().unwrap()).0);
     r
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 async fn create(f: &Fixture) -> ResourceMemory<ResourceReply> {
     execute(
         &f.state,
@@ -103,6 +111,8 @@ async fn create(f: &Fixture) -> ResourceMemory<ResourceReply> {
     .await
     .unwrap()
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn store(f: &Fixture) -> store::ResourceStore {
     store::ResourceStore::new(service(&f.state).unwrap().path.clone()).unwrap()
 }
@@ -139,6 +149,8 @@ async fn resource_snapshot_when_admitted(f: &Fixture) {
         }
     }
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn synthetic_agent(f: &Fixture) -> AgentIdentity {
     AgentIdentity {
         project_id: project_identity(f.directory.path()).unwrap(),
@@ -149,6 +161,8 @@ fn synthetic_agent(f: &Fixture) -> AgentIdentity {
         label: "Synthetic GPU owner".into(),
     }
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn reserve_synthetic(f: &Fixture) {
     let now = clock().unwrap();
     let agent = synthetic_agent(f);
@@ -169,6 +183,8 @@ fn reserve_synthetic(f: &Fixture) {
         )
         .unwrap();
 }
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn create_and_project_binding_roundtrip_durable_authority() {
     let f = fixture(None).await;
@@ -186,6 +202,8 @@ async fn create_and_project_binding_roundtrip_durable_authority() {
     assert!(settings.contains("test-gpu"));
     assert!(settings.contains("resource synchronization"));
 }
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn independent_project_services_share_one_catalog_binding() {
     let first = fixture(None).await;
@@ -211,6 +229,8 @@ async fn independent_project_services_share_one_catalog_binding() {
     assert_eq!(store(&second).snapshot().unwrap(), shared);
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn connected_server_discovers_first_external_project_link() {
     let fixture = fixture(None).await;
@@ -294,6 +314,8 @@ async fn connected_server_discovers_first_external_project_link() {
     observer.abort();
     let _ = observer.await;
 }
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn unknown_live_observation_never_discards_occupied_claim() {
     let f = fixture(None).await;
@@ -305,6 +327,8 @@ async fn unknown_live_observation_never_discards_occupied_claim() {
         ReservationState::Owned
     );
 }
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn stale_interactive_recovery_token_cannot_clear_new_revision() {
     let f = fixture(None).await;
@@ -345,6 +369,8 @@ async fn stale_interactive_recovery_token_cannot_clear_new_revision() {
         ReservationState::Owned
     );
 }
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn headless_recovery_without_fresh_confirmation_is_refused() {
     let f = fixture(None).await;
@@ -365,6 +391,8 @@ async fn headless_recovery_without_fresh_confirmation_is_refused() {
         ReservationState::Owned
     );
 }
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn public_mutation_cannot_forge_internal_eligibility() {
     let f = fixture(None).await;
@@ -374,6 +402,8 @@ async fn public_mutation_cannot_forge_internal_eligibility() {
         .unwrap_err();
     assert_eq!(error.code, "system_required");
 }
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn provider_validation_rejects_previous_server_incarnation() {
     let f = fixture(None).await;
@@ -386,6 +416,8 @@ async fn provider_validation_rejects_previous_server_incarnation() {
     .unwrap_err();
     assert_eq!(error.code, "stale_invocation");
 }
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn project_metadata_failure_retains_authority_and_records_sync_debt() {
     let f = fixture(None).await;
@@ -406,6 +438,8 @@ async fn project_metadata_failure_retains_authority_and_records_sync_debt() {
     );
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 // Final unlink has no surviving link on which to store projection debt.
 // Reopening the affected project must still reconcile its empty binding set.
 #[tokio::test]
@@ -484,6 +518,8 @@ async fn final_unlink_cleanup_failure_retries_after_project_state_restart() {
     );
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 // Opening a project is observable even when its client disconnects before the
 // resource observer ticks. No subscriber or waiter may be needed for cleanup.
 #[tokio::test]
@@ -554,6 +590,8 @@ async fn final_unlink_cleanup_observes_new_project_while_idle() {
     assert_eq!(authoritative.resources.len(), 1);
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn guarded_recovery_retry_reuses_receipt_after_token_consumed() {
     let f = fixture(None).await;
@@ -661,6 +699,8 @@ fn bounded_duplicate_wait_attachments_reject_without_changing_registry() {
     assert_eq!(registry.entries, before);
     assert_eq!(registry.revision, revision);
 }
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn shared_catalog_charge_survives_clones_and_retires_with_last_owner() {
     let f = fixture(None).await;
@@ -688,6 +728,8 @@ async fn shared_catalog_charge_survives_clones_and_retires_with_last_owner() {
     );
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 /// Distinct synthetic USB descriptors model two independently usable boards.
 /// This exercises catalog coordination only; no USB device is accessed.
 #[tokio::test]
@@ -791,6 +833,8 @@ async fn individual_usb_board_bindings_have_independent_ownership_and_queues() {
     assert!(config.contains("board-beta"));
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn reply_to_event_mapping_preserves_charge_until_payload_drop() {
     let fixture = fixture(None).await;
@@ -890,6 +934,8 @@ async fn new_server_incarnation_cannot_clear_owner_while_synthetic_workload_live
     );
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn recovery_confirmation_from_previous_owner_cannot_revoke_after_handoff() {
     let fixture = fixture(None).await;
@@ -1107,6 +1153,8 @@ fn detail_projection_keeps_all_active_claims_and_latest_sixteen_terminal_claims(
     );
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn late_attach_snapshot_includes_deduplicated_waiters_and_revision() {
     let fixture = fixture(None).await;
@@ -1130,6 +1178,8 @@ async fn late_attach_snapshot_includes_deduplicated_waiters_and_revision() {
     assert_eq!(active_waits, &vec![(NodeId(77), reservation)]);
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn full_active_claim_capacity_crosses_admitted_snapshot_transport() {
     let fixture = fixture(None).await;
@@ -1181,6 +1231,8 @@ async fn full_active_claim_capacity_crosses_admitted_snapshot_transport() {
     );
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn lifecycle_history_survives_repository_reopen_and_acknowledgement_loss() {
     let fixture = fixture(None).await;
@@ -2256,6 +2308,8 @@ async fn attached_wait_survives_catalog_busy_until_grant_or_disconnect() {
     }
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn local_catalog_admission_waits_without_spending_worker_capacity() {
     let fixture = fixture(None).await;
@@ -2375,6 +2429,8 @@ async fn foreign_live_invocation_with_local_pane_number_is_unknown_not_dead() {
     );
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn stale_owner_recovery_is_one_step_and_refuses_a_live_owner() {
     let fixture = fixture(None).await;

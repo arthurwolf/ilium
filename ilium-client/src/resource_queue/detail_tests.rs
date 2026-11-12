@@ -291,9 +291,7 @@ fn split_geometry_and_real_parents_survive_wait_attach_grouping_and_detach() {
     let tree = serde_json::to_vec(&app.tree).unwrap();
     assert_eq!(before.len(), 2);
     // A waiting pane deliberately gains a wait footer while the progress monitor
-    // is on; this test pins that the grouping setting itself never moves geometry.
-    app.ui_settings.progress_monitor_enabled = false;
-    let before = app.pane_viewports();
+    // is on (checked below); the grouping setting itself never moves geometry.
     app.resources
         .waits
         .insert(first, ReservationId::from("reservation"));

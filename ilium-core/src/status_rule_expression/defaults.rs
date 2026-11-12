@@ -422,7 +422,7 @@ mod tests {
             .filter(|rule| !rule.then.style.bold && !rule.then.style.dim)
             .map(|rule| rule.id.as_str())
             .collect();
-        assert_eq!(plain.len(), 16, "{plain:?}");
+        assert_eq!(plain.len(), 17, "{plain:?}");
     }
 
     #[test]
