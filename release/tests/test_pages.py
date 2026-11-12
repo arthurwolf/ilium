@@ -57,9 +57,10 @@ class PagesTests(unittest.TestCase):
         block = release_tool.preview_pins_block(release_tool.load_preview_pins(self.root / 'release/linux-preview-pins.json', self.targets))
         installer = self.root / 'release/install.sh'
         good = installer.read_text() + block + '\n'
-        installer.write_text(good)
+        # The shipped installer is LF-only; keep the fixture byte-identical on Windows.
+        installer.write_text(good, newline='\n')
         self.build()
-        installer.write_text(good.replace('c' * 64, 'd' * 64))
+        installer.write_text(good.replace('c' * 64, 'd' * 64), newline='\n')
         with self.assertRaises(release_tool.ReleaseError):
             pages.verify_pages(self.output, self.sums, source_root=self.root)
 

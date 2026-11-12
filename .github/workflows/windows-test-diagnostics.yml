@@ -44,6 +44,7 @@ jobs:
         Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
         Import-Module Pester -RequiredVersion 5.7.1 -Force
         Invoke-Pester -Path release/tests/Install.Tests.ps1 -Output Detailed *> "$env:RUNNER_TEMP/test-logs/pester.log"
+        & powershell -NoProfile -NonInteractive -Command "Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force; Set-PSRepository -Name PSGallery -InstallationPolicy Trusted; Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck; Import-Module Pester -RequiredVersion 5.7.1 -Force; Invoke-Pester -Path release/tests/Install.Tests.ps1 -Output Detailed" *> "$env:RUNNER_TEMP/test-logs/pester-ps51.log"
         & pwsh -NoProfile -File release/tests/Test-WindowsInstallerContracts.ps1 *> "$env:RUNNER_TEMP/test-logs/installer-contracts.log"
         "pwsh contracts exit $LASTEXITCODE" | Add-Content "$env:RUNNER_TEMP/test-logs/installer-contracts.log"
         & powershell -NoProfile -ExecutionPolicy Bypass -File release/tests/Test-WindowsInstallerContracts.ps1 *> "$env:RUNNER_TEMP/test-logs/installer-contracts-ps51.log"
@@ -55,8 +56,14 @@ jobs:
       run: |
         set +e
         mkdir -p "$RUNNER_TEMP/test-logs"
-        PYTHONPATH="$PWD;$PWD/release/scripts;$PWD/release/tests" python release/tests/run_tests.py 'test_*.py' > "$RUNNER_TEMP/test-logs/release-python.log" 2>&1
-        echo "release python exit $?" >> "$RUNNER_TEMP/test-logs/release-python.log"
+        python -m pip install PyYAML==6.0.2 > /dev/null 2>&1
+        # Mirror release_pipeline.py: one discover per module, Linux-host suites skipped off Linux.
+        for module in release/tests/test_*.py; do
+          name=$(basename "$module")
+          case "$name" in test_posix_install.py|test_linux_tarball.py|test_linux_vm.py) continue;; esac
+          python -m unittest discover -s release/tests -p "$name" >> "$RUNNER_TEMP/test-logs/release-python.log" 2>&1
+          echo "module $name exit $?" >> "$RUNNER_TEMP/test-logs/release-python.log"
+        done
         exit 0
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()

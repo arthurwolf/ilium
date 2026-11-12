@@ -315,7 +315,9 @@ Describe 'Windows installer transaction contract' -Skip:([Environment]::OSVersio
         Test-Path $script:root | Should -BeTrue
         Test-Path (Join-Path $script:root '.install-lock') | Should -BeTrue
         [IO.File]::ReadAllText($authored) | Should -Be 'keep'
-        $script:userPath | Should -Be $before
+        # A completed uninstall removes only the PATH entry it added (as in the test above).
+        $before | Should -Be ('C:\other;;C:\keep;' + $script:bin)
+        $script:userPath | Should -Be 'C:\other;;C:\keep'
     }
     It 'preserves unknown installer metadata while removing empty default directories' {
         $script:bin = Join-Path $script:root 'bin'
