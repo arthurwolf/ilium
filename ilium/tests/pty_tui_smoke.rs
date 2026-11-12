@@ -1601,16 +1601,6 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let settings_column = tree_divider_column.saturating_sub(2);
     tui.write(&sgr_mouse_down(0, settings_column, settings_row))
         .expect("pressing the settings toolbar icon");
-    assert!(
-        wait_until(|| tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
-        "expected the settings press to open Settings, got: {:?}",
-        tui.screen_text()
-    );
-    tui.write(&sgr_mouse_up(settings_column, settings_row))
-        .expect("releasing the settings toolbar icon");
-    // The default non-animation poll interval is 250 ms. Waiting through
-    // more than one cycle proves maintenance no longer destroys Settings.
-    tokio::time::sleep(Duration::from_millis(600)).await;
     let settings_open = |screen: &str| {
         screen.contains("⚙ Settings")
             // ConPTY can drop the start of the title row when it repaints the
@@ -1619,6 +1609,16 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 && screen.contains("Esc or q to close")
                 && screen.contains("· Navigation"))
     };
+    assert!(
+        wait_until(|| settings_open(&tui.screen_text()), WAIT_TIMEOUT).await,
+        "expected the settings press to open Settings, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(&sgr_mouse_up(settings_column, settings_row))
+        .expect("releasing the settings toolbar icon");
+    // The default non-animation poll interval is 250 ms. Waiting through
+    // more than one cycle proves maintenance no longer destroys Settings.
+    tokio::time::sleep(Duration::from_millis(600)).await;
     assert!(
         settings_open(&tui.screen_text()),
         "Settings closed after the opening click and maintenance ticks: {:?}",
@@ -1724,7 +1724,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("⚙ Settings")
+                settings_open(&screen)
                     && screen.contains("Voice control")
                     && screen.contains("Protected value")
                     && screen.contains("Keep existing")
@@ -1755,7 +1755,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("⚙ Settings")
+                settings_open(&screen)
                     && screen.contains("Voice control")
                     && !screen.contains("Keep existing")
             },
@@ -1772,9 +1772,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         wait_until(
             || {
                 let screen = tui.screen_text();
-                !screen.contains("⚙ Settings")
-                    && screen.contains("VOICE OFF")
-                    && screen.contains("F8")
+                !settings_open(&screen) && screen.contains("VOICE OFF") && screen.contains("F8")
             },
             WAIT_TIMEOUT,
         )
