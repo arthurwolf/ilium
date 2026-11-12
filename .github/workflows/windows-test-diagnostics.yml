@@ -28,7 +28,12 @@ jobs:
     - name: Toolchain
       run: rustup show active-toolchain || rustup toolchain install
     - name: Clippy (warnings as errors, Windows target)
-      run: cargo clippy --locked --workspace --exclude 'ilium-plugin-*' --all-targets --keep-going --target x86_64-pc-windows-msvc -- -D warnings > "$RUNNER_TEMP/clippy.log" 2>&1; status=$?; mkdir -p "$RUNNER_TEMP/test-logs"; mv "$RUNNER_TEMP/clippy.log" "$RUNNER_TEMP/test-logs/"; echo "clippy exit $status"
+      run: |
+        set +e
+        mkdir -p "$RUNNER_TEMP/test-logs"
+        cargo clippy --locked --workspace --exclude 'ilium-plugin-*' --all-targets --keep-going --target x86_64-pc-windows-msvc -- -D warnings > "$RUNNER_TEMP/test-logs/clippy.log" 2>&1
+        echo "clippy exit $?"
+        exit 0
     - name: Unit, doc and integration tests (keep going)
       run: python ci/gate_tests.py . "$RUNNER_TEMP/test-logs" --target x86_64-pc-windows-msvc
     - name: Pester installer tests
