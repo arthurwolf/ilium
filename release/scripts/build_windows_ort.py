@@ -97,7 +97,29 @@ def logged_command(command, cwd, environment, log_path):
                                 stdout=log, stderr=subprocess.STDOUT, check=False)
     emit({"type": "artifact", "path": str(Path(log_path).resolve()),
           "sha256": digest(Path(log_path).read_bytes())})
+    if result.returncode != 0:
+        print_failure_excerpt(log_path)
     require(result.returncode == 0, f"native build failed exit={result.returncode}; complete log: {log_path}")
+
+
+def failure_excerpt(text, context_lines=20, max_errors=10, tail_lines=60):
+    """Compiler error blocks plus the log tail, so a failed native build is diagnosable from the job log."""
+    lines = text.splitlines()
+    starts = [index for index, line in enumerate(lines)
+              if line.startswith("error") or ": error " in line or ": fatal error " in line][:max_errors]
+    excerpt = []
+    for start in starts:
+        excerpt.extend(lines[start:start + context_lines])
+        excerpt.append("---")
+    excerpt.append(f"--- last {tail_lines} log lines ---")
+    excerpt.extend(lines[-tail_lines:])
+    return "\n".join(excerpt)
+
+
+def print_failure_excerpt(log_path):
+    text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+    print(f"Failure excerpt of {log_path}:", file=sys.stderr)
+    print(failure_excerpt(text), file=sys.stderr, flush=True)
 
 
 def parse_cmake_cache(path):

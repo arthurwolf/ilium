@@ -25,6 +25,16 @@ class WindowsOrtBuilderTests(unittest.TestCase):
     def test_builder_module_exists(self):
         self.assertTrue(MODULE_PATH.is_file())
 
+    def test_failure_excerpt_keeps_compiler_errors_and_tail(self):
+        builder = load_builder()
+        log = "\n".join(["   Compiling a v0.1"] * 500 + ["error[E0502]: cannot borrow", "  --> src/ui.rs:976:80"]
+                        + ["warning: noise"] * 200 + ["error: could not compile `ilium-client`"])
+        excerpt = builder.failure_excerpt(log)
+        self.assertIn("error[E0502]: cannot borrow", excerpt)
+        self.assertIn("src/ui.rs:976:80", excerpt)
+        self.assertIn("error: could not compile `ilium-client`", excerpt)
+        self.assertLess(len(excerpt.splitlines()), 120)
+
     def test_host_gate_requires_windows_amd64_and_exact_runner(self):
         builder = load_builder()
         builder.require_windows_host("Windows", "AMD64", "windows-2025")
