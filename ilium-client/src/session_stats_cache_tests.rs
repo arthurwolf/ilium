@@ -3,6 +3,9 @@
 use super::*;
 use std::io::Write;
 
+// Unix-only: the persistent cache is read only after an owner-only handle check,
+// which is unavailable elsewhere, so other platforms never load it (see below).
+#[cfg(unix)]
 #[test]
 fn new_store_resumes_a_previously_scanned_large_transcript() {
     let home = tempfile::tempdir().unwrap();
@@ -69,6 +72,9 @@ fn new_store_resumes_a_previously_scanned_large_transcript() {
     );
 }
 
+// Unix-only: the persistent cache is read only after an owner-only handle check,
+// which is unavailable elsewhere, so other platforms never load it (see below).
+#[cfg(unix)]
 #[test]
 fn saved_accumulator_rejects_changed_transcript_and_owner() {
     let home = tempfile::tempdir().unwrap();
@@ -114,6 +120,9 @@ fn saved_accumulator_rejects_changed_transcript_and_owner() {
     );
 }
 
+// Unix-only: the persistent cache is read only after an owner-only handle check,
+// which is unavailable elsewhere, so other platforms never load it (see below).
+#[cfg(unix)]
 #[test]
 fn older_cache_writer_does_not_replace_newer_progress() {
     let home = tempfile::tempdir().unwrap();
@@ -142,6 +151,9 @@ fn older_cache_writer_does_not_replace_newer_progress() {
     assert_eq!(loaded.offset(), newer.offset());
 }
 
+// Unix-only: the persistent cache is read only after an owner-only handle check,
+// which is unavailable elsewhere, so other platforms never load it (see below).
+#[cfg(unix)]
 #[test]
 fn restored_accumulator_resumes_partial_main_and_subagent_records() {
     let home = tempfile::tempdir().unwrap();
@@ -204,4 +216,26 @@ fn replacing_or_truncating_transcript_invalidates_saved_position() {
         persistent_cache::load(&request).is_none(),
         "replacement invalidates even identical content"
     );
+}
+
+/// Without an owner-only handle proof the saved cache is never trusted: a
+/// saved accumulator is not loaded back, so statistics are rescanned instead.
+#[cfg(not(unix))]
+#[test]
+fn saved_cache_is_never_loaded_without_an_owner_only_handle_check() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let path = project.path().join("transcript.jsonl");
+    std::fs::write(&path, "{\"type\":\"user\",\"message\":{\"content\":\"synthetic\"}}\n").unwrap();
+    let request = StatsRequest {
+        class: AgentClass::Claude,
+        session_id: "session-one".into(),
+        project_path: project.path().to_path_buf(),
+        home: home.path().to_path_buf(),
+    };
+    let mut accumulator = StatsAccumulator::new(AgentClass::Claude);
+    accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
+    // Saving may succeed; loading must still refuse.
+    let _ = persistent_cache::save(&request, &path, &accumulator, || false);
+    assert!(persistent_cache::load(&request).is_none());
 }

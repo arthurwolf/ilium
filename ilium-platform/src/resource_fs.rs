@@ -310,6 +310,8 @@ mod tests {
         std::fs::write(root.join(".scratch-reaper"), b"").unwrap();
         tempfile::tempdir_in(root).unwrap()
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn cached_read_skips_only_previously_reconciled_inode_and_rechecks_replacements() {
         let directory = durable_test_directory();
@@ -365,6 +367,8 @@ mod tests {
             .read_reconciled_cached(1024, &ResourceLedgerReadCache::default())
             .is_err());
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn warmed_cache_reconciles_child_rename_without_acknowledgement() {
         let directory = durable_test_directory();
@@ -420,6 +424,8 @@ mod tests {
         std::fs::rename(&temporary, &path).unwrap();
         std::process::exit(73);
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn new_process_reconciles_unacknowledged_rename() {
         let directory = durable_test_directory();
@@ -466,6 +472,8 @@ mod tests {
         ledger.replace(b"next-acknowledgement").unwrap();
         panic!("crash hook did not execute");
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn actual_replace_crash_boundaries_preserve_old_or_new_authority() {
         for stage in ["before-flush", "after-flush", "before-ack"] {
