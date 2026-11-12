@@ -1,6 +1,7 @@
 # Scratch flake meter for the v0.1.1-preview.6 Windows PTY smoke tests: builds the
-# pty_tui_smoke harness once per lane, then runs it repeatedly and records each
-# iteration's result and failing tests. Not part of the release pipeline.
+# harness once per lane, then runs it repeatedly and records each iteration's
+# result, failing tests, leftover processes and raw PTY dumps of failures.
+# Not part of the release pipeline.
 name: Windows test diagnostics (scratch)
 'on':
   push:
@@ -15,13 +16,29 @@ env:
   CARGO_INCREMENTAL: '0'
   RUST_BACKTRACE: '1'
 jobs:
+  clippy:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: 'false'
+    - name: Toolchain
+      run: rustup show active-toolchain || rustup toolchain install
+    - name: Clippy (warnings as errors, Windows target)
+      run: cargo clippy --locked --workspace --exclude 'ilium-plugin-*' --all-targets --keep-going --target x86_64-pc-windows-msvc -- -D warnings
   flake-meter:
     runs-on: windows-2025
     timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
-        lane: [parallel]
+        include:
+        - {lane: solo, replica: 1, iterations: 12, args: '--exact universal_settings_catalog_and_exact_number_survive_fresh_client_reload'}
+        - {lane: lock-default, replica: 1, iterations: 6, args: ''}
+        - {lane: lock-default, replica: 2, iterations: 6, args: ''}
+        - {lane: lock-one-thread, replica: 1, iterations: 6, args: '--threads 1'}
+        - {lane: lock-one-thread, replica: 2, iterations: 6, args: '--threads 1'}
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
@@ -31,14 +48,14 @@ jobs:
         python-version: '3.11'
     - name: Toolchain
       run: rustup show active-toolchain || rustup toolchain install
-    - name: Build the PTY smoke harness
+    - name: Build the workspace binaries and the PTY smoke harness
       run: |
         cargo build --locked --workspace --exclude 'ilium-plugin-*' --bins --target x86_64-pc-windows-msvc
         cargo test --locked --target x86_64-pc-windows-msvc --package ilium --test pty_tui_smoke --no-run
     - name: Run the PTY smoke harness repeatedly
-      run: python ci/flake_meter.py "$RUNNER_TEMP/flake-logs" --lane ${{ matrix.lane }} --iterations 8
+      run: python ci/flake_meter.py "$RUNNER_TEMP/flake-logs" --lane ${{ matrix.lane }} --iterations ${{ matrix.iterations }} ${{ matrix.args }}
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()
       with:
-        name: flake-${{ matrix.lane }}
+        name: flake-${{ matrix.lane }}-${{ matrix.replica }}
         path: ${{ runner.temp }}/flake-logs

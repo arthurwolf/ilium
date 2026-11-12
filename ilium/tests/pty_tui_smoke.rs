@@ -143,6 +143,42 @@ async fn windows_pty_serial_guard() -> Option<tokio::sync::MutexGuard<'static, (
     }
 }
 
+/// Scratch diagnostics: when `ILIUM_PTY_DUMP_DIR` is set, save the session's
+/// retained raw output and screen size so a failure can be replayed elsewhere.
+fn dump_pty_output(session: &PtySession, label: &str) {
+    let Some(directory) = std::env::var_os("ILIUM_PTY_DUMP_DIR") else {
+        return;
+    };
+    let directory = std::path::PathBuf::from(directory);
+    let _ = std::fs::create_dir_all(&directory);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or_default();
+    let (rows, columns) = session.with_screen(|screen| screen.size());
+    if let Ok(history) = session.try_output_history_before(u64::MAX, 512 * 1024 * 1024) {
+        let _ = std::fs::write(
+            directory.join(format!("{label}-{stamp}.bin")),
+            &history.bytes,
+        );
+        let _ = std::fs::write(
+            directory.join(format!("{label}-{stamp}.json")),
+            serde_json::json!({
+                "rows": rows,
+                "columns": columns,
+                "reaches_journal_start": history.reaches_journal_start,
+                "first_sequence": history.first_sequence,
+                "bytes": history.bytes.len(),
+            })
+            .to_string(),
+        );
+    }
+    let _ = std::fs::write(
+        directory.join(format!("{label}-{stamp}-screen.txt")),
+        session.screen_text(),
+    );
+}
+
 async fn write_until(tui: &PtySession, keys: &[u8], mut condition: impl FnMut() -> bool) -> bool {
     for _ in 0..4 {
         tui.write(keys).expect("send keys");
@@ -3197,6 +3233,9 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
             break;
         }
     }
+    if scene_cell.is_none() {
+        dump_pty_output(&first_client, "universal-scene-list");
+    }
     let (scene_column, scene_row) = scene_cell.unwrap_or_else(|| {
         panic!(
             "initial scene is visible in the scene list: {:?}",
@@ -3230,9 +3269,12 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
             first_client.screen_text()
         );
     }
-    let (osm_column, osm_row) = first_client
-        .with_screen(|screen| animation_scene_label_cell(screen, osm_label))
-        .expect("OpenStreetMap label after scrolling the actual scene list");
+    let osm_cell = first_client.with_screen(|screen| animation_scene_label_cell(screen, osm_label));
+    if osm_cell.is_none() {
+        dump_pty_output(&first_client, "universal-osm-label");
+    }
+    let (osm_column, osm_row) =
+        osm_cell.expect("OpenStreetMap label after scrolling the actual scene list");
     first_client
         .write(&sgr_mouse_click(0, osm_column, osm_row))
         .expect("select the actual OpenStreetMap scene row");
