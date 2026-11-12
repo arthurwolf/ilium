@@ -45,6 +45,18 @@ jobs:
         Import-Module Pester -RequiredVersion 5.7.1 -Force
         Invoke-Pester -Path release/tests/Install.Tests.ps1 -Output Detailed *> "$env:RUNNER_TEMP/test-logs/pester.log"
         & pwsh -NoProfile -File release/tests/Test-WindowsInstallerContracts.ps1 *> "$env:RUNNER_TEMP/test-logs/installer-contracts.log"
+        "pwsh contracts exit $LASTEXITCODE" | Add-Content "$env:RUNNER_TEMP/test-logs/installer-contracts.log"
+        & powershell -NoProfile -ExecutionPolicy Bypass -File release/tests/Test-WindowsInstallerContracts.ps1 *> "$env:RUNNER_TEMP/test-logs/installer-contracts-ps51.log"
+        "powershell 5.1 contracts exit $LASTEXITCODE" | Add-Content "$env:RUNNER_TEMP/test-logs/installer-contracts-ps51.log"
+        exit 0
+    - name: Release python suite
+      if: always()
+      shell: bash
+      run: |
+        set +e
+        mkdir -p "$RUNNER_TEMP/test-logs"
+        PYTHONPATH="$PWD;$PWD/release/scripts;$PWD/release/tests" python release/tests/run_tests.py 'test_*.py' > "$RUNNER_TEMP/test-logs/release-python.log" 2>&1
+        echo "release python exit $?" >> "$RUNNER_TEMP/test-logs/release-python.log"
         exit 0
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       if: always()

@@ -341,7 +341,16 @@ mod tests {
                 for line in [
                     chrome.top_line(width),
                     chrome.title_line("Custom", width),
-                    chrome.framed_line(vec![ratatui::text::Span::raw(" x")], width),
+                    // framed_line pads but never clips: callers truncate to the inner width.
+                    chrome.framed_line(
+                        vec![ratatui::text::Span::raw(
+                            crate::settings_ui::truncate_icon_text(
+                                " x",
+                                usize::from(width.saturating_sub(2)),
+                            ),
+                        )],
+                        width,
+                    ),
                     chrome.bottom_line(width),
                 ] {
                     assert_eq!(

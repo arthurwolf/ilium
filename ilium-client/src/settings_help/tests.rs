@@ -149,6 +149,7 @@ fn expected_ids() -> BTreeSet<String> {
     ids.insert("TEXTTRIGGER-01".to_owned());
     ids.insert("TOOLBAR-01".to_owned());
     ids.insert("CUSTOMAGENT-01".to_owned());
+    ids.insert("CACHE-01".to_owned());
     ids
 }
 
