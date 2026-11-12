@@ -746,3 +746,25 @@ mod identity_tests {
         assert!(b.monotonic_millis >= a.monotonic_millis);
     }
 }
+/// The resource queue is Linux-only: every other platform must refuse it
+/// (fail closed) instead of claiming durable leases it cannot prove.
+#[cfg(all(test, not(target_os = "linux")))]
+mod unsupported_platform_tests {
+    use super::*;
+    #[test]
+    fn resource_ledger_clock_and_process_identity_are_refused() {
+        let directory = tempfile::tempdir().unwrap();
+        let catalog = directory.path().join("catalog.json");
+        let refusal = ResourceLedgerFile::try_lock(&catalog).unwrap_err();
+        assert_eq!(refusal.kind(), io::ErrorKind::Unsupported);
+        assert_eq!(
+            refusal.to_string(),
+            "resource queue requires a supported local durable filesystem"
+        );
+        assert_eq!(
+            resource_clock().unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert!(capture_resource_process(std::process::id()).is_err());
+    }
+}

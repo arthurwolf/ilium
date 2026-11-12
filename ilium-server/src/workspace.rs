@@ -2064,7 +2064,9 @@ mod tests {
 
     async fn assert_eight_completed_include_results_leave_general_io_capacity(partial: bool) {
         let directory = TempDir::new().expect("isolated include-copy fixture");
-        let source = directory.path().join("source");
+        // Canonical like a real worktree root (Windows temp paths may be 8.3 short names).
+        let root = paths::canonicalize(directory.path()).expect("canonical fixture root");
+        let source = root.join("source");
         std::fs::create_dir(&source).expect("source directory");
         std::fs::write(source.join(".worktreeinclude"), b"a\nb\n").expect("include selection");
         std::fs::write(source.join("a"), b"new a").expect("source a");
@@ -2074,7 +2076,7 @@ mod tests {
         let client = execution.client.clone();
         let mut copies = tokio::task::JoinSet::new();
         for index in 0..8 {
-            let target = directory.path().join(format!("target-{index}"));
+            let target = root.join(format!("target-{index}"));
             std::fs::create_dir(&target).expect("target directory");
             if partial {
                 // Sorted selection copies a first, then the existing b causes
@@ -2364,6 +2366,11 @@ mod tests {
             "git {arguments:?}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+        if arguments.first() == Some(&"init") {
+            // Fixture bytes must survive checkout unchanged even where the
+            // machine's Git converts line endings (core.autocrlf on Windows).
+            git(directory, &["config", "core.autocrlf", "false"]);
+        }
     }
 
     #[tokio::test]

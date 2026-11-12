@@ -129,8 +129,9 @@ fn cor_041_cwd_that_is_not_a_directory_fails_with_exit_one_and_the_documented_me
     assert_eq!(failed.code, 1);
     assert!(failed.stderr.starts_with("ilium: "), "{:?}", failed.stderr);
     assert!(
+        // The path is quoted as Rust debug text, so Windows backslashes are escaped.
         failed.stderr.contains(&format!(
-            "--cwd \"{missing_text}\" is not a valid directory"
+            "--cwd {missing_text:?} is not a valid directory"
         )),
         "{:?}",
         failed.stderr
@@ -606,7 +607,8 @@ fn cor_041_wait_is_an_alias_of_progress_wait() {
             .split_once("Usage:")
             .expect("alias usage")
             .1
-            .replace("ilium wait", "ilium progress wait"),
+            // The binary name differs per platform (`ilium.exe` on Windows).
+            .replacen(" wait [OPTIONS]", " progress wait [OPTIONS]", 1),
         full.stdout.split_once("Usage:").expect("full usage").1
     );
 }

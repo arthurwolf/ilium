@@ -43,8 +43,9 @@ function New-ContractZip([string]$Mode) {
     $file = [IO.File]::Open($path, 'CreateNew')
     $zip = New-Object IO.Compression.ZipArchive($file, [IO.Compression.ZipArchiveMode]::Create)
     try {
-        $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium-server.exe', 'ilium.exe')
-        if ($Mode -eq 'partial') { $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium.exe') }
+        # Every member install.ps1 requires: client, server, animation helper and the two bundled packs.
+        $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium-server.exe', 'ilium.exe', 'ilium-animation-helper.exe', 'beach-1.0.0.iliumanim', 'carpet-1.0.0.iliumanim')
+        if ($Mode -eq 'partial') { $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium.exe', 'ilium-animation-helper.exe', 'beach-1.0.0.iliumanim', 'carpet-1.0.0.iliumanim') }
         if ($Mode -eq 'traversal') { $names += '../outside' }
         if ($Mode -eq 'absolute') { $names += '/outside' }
         if ($Mode -eq 'duplicate') { $names += 'ilium.exe' }
