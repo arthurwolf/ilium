@@ -335,3 +335,15 @@ Contract: `ilium:plugin@0.1.0`.
 - **[SEC-454]** Each OS user MUST have separate 0700 runtime, socket, cache, trust and state paths; the server MUST refuse foreign or open ones.
 - **[SEC-455]** No compiled module, cache or secret MAY be shared between OS users; a writable-by-others policy file MUST be refused.
 - **[SEC-456]** A helper MUST NOT see another OS user's processes, sockets or files, and `peer` messaging MUST stay inside one user's server.
+
+## Production additions (round 10)
+
+- **[PRR-017]** The system must reserve trusted-chrome cells (pane title bar, grant and policy marks, dialog border) that plugin output can never write to, and must draw any plugin region rendering a host consent or lock mark glyph sequence with a distinct untrusted-content border or marker.
+
+## Production additions (round 11)
+
+- **[PRQ-016]** The system must keep a machine-readable threat register mapping every threat id to at least one control id and one automated test id, and the release gate must fail naming the threat id when a threat has no passing test or a registered control id no longer exists in the manual.
+
+## Production additions (round 12)
+
+- **[PRP-014]** The system must show a behavioural diff on update (added or removed network hosts and URL literals, new imported host functions, new bundled codecs, size change over 25 percent), raise the update to review required when any is present, and have plugin check emit the same list as check.behaviour-diff.

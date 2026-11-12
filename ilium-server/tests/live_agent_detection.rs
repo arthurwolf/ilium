@@ -1150,22 +1150,21 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
                 .await
                 .expect("read event while checking invalidated-session quarantine");
             if matches!(
-                event,
+                &event,
                 ServerEvent::PaneSessionIdResolved {
                     pane_id: changed_id,
                     session_id,
                     ..
-                } if changed_id == pane_id && session_id == resumed_session_id
+                } if *changed_id == pane_id && session_id.as_str() == resumed_session_id
             ) {
-                return;
+                return event;
             }
         }
     })
     .await;
-    assert!(
-        rebound_old_session.is_err(),
-        "the same PID's still-open old transcript must not restore an invalidated session ID"
-    );
+    if let Ok(event) = rebound_old_session {
+        panic!("the same PID's still-open old transcript must not restore an invalidated session ID; observed {event:?}");
+    }
 
     // Recreate the IPC ordering race directly: a worker result tagged with
     // the cleared ID arrives after invalidation. The server's compare-and-set
@@ -1681,7 +1680,11 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
         unreachable!("predicate only matches PaneSessionIdResolved");
     };
     assert!(initial_process_id.is_some());
-    assert_eq!(initial_title_generation, 0);
+    // Launch-time process identification can advance the title generation
+    // before the first session is resolved. Fence /clear against that session.
+    let clear_title_generation = initial_title_generation
+        .checked_add(1)
+        .expect("the submitted /clear must have a new title generation");
 
     write_frame(
         &mut client,
@@ -1706,24 +1709,17 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
                     pane_id: changed_id,
                     title_generation,
                 } if changed_id == pane_id => {
-                    assert_eq!(title_generation, 1);
+                    assert_eq!(title_generation, clear_title_generation);
                     saw_session_clear = true;
                 }
                 ServerEvent::PaneSessionTitleCleared {
                     pane_id: changed_id,
                     title_generation,
                 } if changed_id == pane_id => {
-                    // The submitted `/clear` itself is generation 1. The
-                    // detector clears the title again, at a later generation,
-                    // whenever it sees the fresh agent screen *appear* -- and a
-                    // host that paints the cleared screen in two frames (a
-                    // Windows console) shows it a blank one first, so a second
-                    // appearance is legitimate. It is never an earlier one.
-                    assert!(
-                        title_generation >= 1,
-                        "a /clear title reset must advance the generation"
-                    );
-                    saw_title_clear |= title_generation == 1;
+                    // A launch-time title clear can follow the initial session
+                    // resolution. Only the submitted clear's exact generation
+                    // satisfies this fence; stale or later events cannot.
+                    saw_title_clear |= title_generation == clear_title_generation;
                 }
                 _ => {}
             }
@@ -1861,9 +1857,9 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
     };
     assert_eq!(replacement_process_id, initial_process_id);
     assert!(
-        replacement_title_generation >= 1,
-        "the replacement session must carry a generation past the /clear fence, got \
-         {replacement_title_generation}"
+        replacement_title_generation >= clear_title_generation,
+        "the replacement session must carry a generation at or beyond the /clear fence \
+         {clear_title_generation}, got {replacement_title_generation}"
     );
 
     write_frame(

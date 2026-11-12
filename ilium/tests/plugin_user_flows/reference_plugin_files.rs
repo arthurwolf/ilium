@@ -372,6 +372,8 @@ fn usr_205_level_is_padded_to_five_characters() {
 // ---- USR-206 ----
 
 /// REQ: USR-206
+// Unix mode bits and umask have no Windows representation.
+#[cfg(unix)]
 #[test]
 fn usr_206_folders_are_0700_and_files_are_0600() {
     let mut rig = UserRig::new();
@@ -392,6 +394,8 @@ fn usr_206_folders_are_0700_and_files_are_0600() {
 }
 
 /// REQ: USR-206
+// Unix mode bits and umask have no Windows representation.
+#[cfg(unix)]
 #[test]
 fn usr_206_a_permissive_umask_does_not_widen_the_modes() {
     let mut rig = UserRig::new();

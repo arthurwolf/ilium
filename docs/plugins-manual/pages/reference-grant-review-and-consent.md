@@ -270,3 +270,7 @@ A grant stays until the user revokes it ([SEC-118]), so a plugin that was truste
 - [Audit log](/pages/reference-audit-log/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Production additions (round 12)
+
+- **[PRP-008]** The system must ignore --yes, --grant and --trust for any ilium plugin command run from a pane descendant, always open the confirmation dialog in an attached client naming the requesting pane, and fail with install.review-required plus an audit record when no client is attached.

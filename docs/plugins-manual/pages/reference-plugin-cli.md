@@ -779,3 +779,15 @@ Every command here follows the output model above. Synopses are in the table; sh
 | `backup.inside-live-root` | `backup` | 1 | The target lies inside a folder the backup would read. |
 
 - **[HST-691]** The commands in the "yes" rows of the table MUST follow the unreachable and unresponsive rules in [DEV-006].
+
+## Production additions (round 10)
+
+- **[PRR-010]** The system must, when ilium plugin check, lint, test, pack or publish runs with --all at a repository root holding several plugin projects, process projects in sorted plugin-id order, print one summary record per project and one overall summary, continue after a failing project, exit with the highest project exit code, and publish nothing when any project check or lint failed (also documented in reference-project-templates).
+
+## Production additions (round 11)
+
+- **[PRQ-024]** The system must provide ilium plugin check --baseline that classifies each public-surface difference as breaking, additive or neutral and fails with lint.semver-bump-too-small (exit 3) when the version bump is too small, and publish must refuse the same way unless --allow-semver-violation with a reason is given and audited.
+
+## Production additions (round 12)
+
+- **[PRP-005]** The system must provide ilium plugin fmt that rewrites ilium-plugin.toml into one canonical layout preserving comments, is idempotent and never changes the parsed manifest value, and with --check exits 1 listing files that would change.

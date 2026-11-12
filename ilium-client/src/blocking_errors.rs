@@ -1,5 +1,5 @@
 //! Retained presentation of blocking failures and correlated creation receipts.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use ilium_core::{NodeId, ROOT_ID};
@@ -8,6 +8,30 @@ use ilium_ipc::{BlockingError, ClientRequest, NewPaneKind};
 use crate::app::App;
 use crate::status_icons::{safe_tooltip_text, TooltipContent};
 use crate::tree_ui::TreeToolbarAction;
+
+/// The retained-error facts the custom status rules read, precomputed from
+/// `App` so the tree renderer's context stays a set of plain borrows.
+// `pub` (not `pub(crate)`) because the public `tree_ui::TreeRenderOptions`
+// borrows it; the module itself stays private.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BlockingErrorFacts {
+    /// Nodes that are the exact target of at least one retained error.
+    pub panes: HashSet<NodeId>,
+    /// Whether a session-level error (no node) is retained.
+    pub session: bool,
+    /// How Custom mode presents these errors (`[ui] blocking_error_display`).
+    /// Carried with the facts because the tree renderer decides row widths
+    /// (the Second icon slot) from the same per-frame value it reads the
+    /// facts from, so geometry and painting can never disagree.
+    pub custom_display: crate::config::BlockingErrorDisplay,
+}
+
+impl BlockingErrorFacts {
+    /// Whether this pane is the exact target of a retained error.
+    pub fn pane_has_error(&self, node_id: NodeId) -> bool {
+        self.panes.contains(&node_id)
+    }
+}
 
 pub(crate) struct PendingPaneCreation {
     pub custom_profile_id: Option<String>,
@@ -192,6 +216,44 @@ impl App {
         self.blocking_errors = by_node;
     }
 
+    /// Whether a retained blocking error targets exactly this node, from the
+    /// server's records or this client's own refusals. Errors of descendants
+    /// do not count: the `blocking-error` rule condition describes the pane
+    /// itself. A session-level error (filed under ROOT_ID) is never a pane
+    /// error; see [`App::session_has_blocking_error`].
+    pub(crate) fn pane_has_blocking_error(&self, node_id: NodeId) -> bool {
+        node_id != ROOT_ID
+            && [&self.blocking_errors, &self.local_blocking_errors]
+                .into_iter()
+                .any(|errors| errors.get(&node_id).is_some_and(|list| !list.is_empty()))
+    }
+
+    /// Whether the session has a retained session-level error: one with no
+    /// node (`node_id` None, filed under ROOT_ID by
+    /// [`App::replace_blocking_errors`]) or a local refusal recorded against
+    /// the root group.
+    pub(crate) fn session_has_blocking_error(&self) -> bool {
+        [&self.blocking_errors, &self.local_blocking_errors]
+            .into_iter()
+            .any(|errors| errors.get(&ROOT_ID).is_some_and(|list| !list.is_empty()))
+    }
+
+    /// Both error facts at once, for the tree renderer, which sees a render
+    /// context rather than `App`. Computed once per frame.
+    pub(crate) fn blocking_error_facts(&self) -> BlockingErrorFacts {
+        BlockingErrorFacts {
+            panes: self
+                .blocking_errors
+                .iter()
+                .chain(&self.local_blocking_errors)
+                .filter(|(target, errors)| **target != ROOT_ID && !errors.is_empty())
+                .map(|(target, _)| *target)
+                .collect(),
+            session: self.session_has_blocking_error(),
+            custom_display: self.ui_settings.blocking_error_display,
+        }
+    }
+
     pub(crate) fn blocking_error_tooltip(&self, node_id: NodeId) -> Option<TooltipContent> {
         let mut messages = Vec::new();
         for (target, errors) in self
@@ -199,8 +261,13 @@ impl App {
             .iter()
             .chain(&self.local_blocking_errors)
         {
+            // Walk from the failing node up to the root. A session-level
+            // error is filed under ROOT_ID, so the walk starts at the root and
+            // matches only the root (session) row itself: it must not make
+            // every pane look failed. A pane error still reaches its real
+            // ancestor groups.
             let mut ancestor = Some(*target);
-            let mut is_descendant = *target == ROOT_ID;
+            let mut is_descendant = false;
             while let Some(id) = ancestor {
                 if id == node_id {
                     is_descendant = true;
@@ -320,6 +387,50 @@ mod tests {
         let tooltip = app.blocking_error_tooltip(ROOT_ID).unwrap();
         assert!(!tooltip.body.contains("permission denied"));
         assert!(tooltip.body.contains("queue full"));
+    }
+
+    #[test]
+    fn session_errors_stay_on_the_session_and_pane_errors_on_their_pane() {
+        use ilium_core::PaneContentKind;
+
+        let mut app = App::new("errors".into(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "agents").unwrap();
+        let failing = app
+            .tree
+            .add_pane(group, "failing", PaneContentKind::Terminal)
+            .unwrap();
+        let healthy = app
+            .tree
+            .add_pane(group, "healthy", PaneContentKind::Terminal)
+            .unwrap();
+        assert!(!app.session_has_blocking_error());
+        assert_eq!(app.blocking_error_facts(), BlockingErrorFacts::default());
+
+        // One session-level error must not mark every pane.
+        app.replace_blocking_errors(vec![BlockingError {
+            node_id: None,
+            operation: "session".into(),
+            message: "snapshot write failed".into(),
+        }]);
+        assert!(app.session_has_blocking_error());
+        assert!(!app.pane_has_blocking_error(failing));
+        assert!(!app.pane_has_blocking_error(ROOT_ID));
+        assert!(app.blocking_error_tooltip(ROOT_ID).is_some());
+        assert!(app.blocking_error_tooltip(group).is_none());
+        assert!(app.blocking_error_tooltip(healthy).is_none());
+
+        // A pane error marks that pane and its ancestor group only.
+        app.record_local_blocking_error(failing, "Send input", "pipe closed");
+        assert!(app.pane_has_blocking_error(failing));
+        assert!(!app.pane_has_blocking_error(healthy));
+        assert!(app.blocking_error_tooltip(failing).is_some());
+        assert!(app.blocking_error_tooltip(group).is_some());
+        assert!(app.blocking_error_tooltip(healthy).is_none());
+        let facts = app.blocking_error_facts();
+        assert!(facts.session);
+        assert!(facts.pane_has_error(failing));
+        assert!(!facts.pane_has_error(healthy));
+        assert!(!facts.pane_has_error(group));
     }
 
     #[test]

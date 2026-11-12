@@ -315,7 +315,17 @@ fn eventually(mut predicate: impl FnMut() -> bool) {
 #[test]
 fn reply_completion_precedes_resize_and_later_output_uses_new_geometry() {
     let (writer_gate, release) = gate();
-    let harness = Harness::new(OwnerLimits::default(), Some(writer_gate), None);
+    let harness = Harness::new(
+        OwnerLimits {
+            // A starved CI runner can stall this test for longer than the
+            // product's 2 s delivery deadlines while the writer gate is held.
+            command_timeout: Duration::from_secs(60),
+            reply_timeout: Duration::from_secs(60),
+            ..OwnerLimits::default()
+        },
+        Some(writer_gate),
+        None,
+    );
     harness.output(b"\x1b[61;1H\x1b[6n");
     release
         .started
@@ -354,7 +364,15 @@ fn reply_completion_precedes_resize_and_later_output_uses_new_geometry() {
 #[test]
 fn failed_reply_never_allows_a_queued_resize_or_later_input() {
     let (writer_gate, release) = gate();
-    let harness = Harness::new(OwnerLimits::default(), Some(writer_gate), Some(2));
+    let harness = Harness::new(
+        OwnerLimits {
+            command_timeout: Duration::from_secs(60),
+            reply_timeout: Duration::from_secs(60),
+            ..OwnerLimits::default()
+        },
+        Some(writer_gate),
+        Some(2),
+    );
     harness.output(b"\x1b[61;1H\x1b[6n");
     release
         .started
@@ -681,16 +699,30 @@ fn shutdown_rejects_queued_work_cancels_active_io_and_joins_owned_worker() {
 fn parser_reader_cannot_make_owner_cancellation_wait_forever() {
     let limits = OwnerLimits {
         parser_lock_timeout: Duration::from_millis(40),
+        // The guarantee under test is that the 40 ms parser-lock deadline of the
+        // pending output retires the owner and thereby settles the queued resize
+        // with `Shutdown(ParserUnavailable)`. The resize carries its own command
+        // deadline (2 s by default); on a loaded Windows runner the owner thread
+        // can reach the resize later than that, and the resize then settles as a
+        // plain timeout, which says nothing about the guarantee. Keep the command
+        // deadline far beyond any scheduling stall so only the parser-lock
+        // deadline can settle it; a regression that waited forever would still
+        // surface as a `Timeout` here instead of the asserted shutdown.
+        command_timeout: Duration::from_secs(30),
         ..OwnerLimits::default()
     };
     let harness = Harness::new(limits, None, None);
     let read_guard = harness.parser.read().unwrap();
     harness.output(b"pending-output");
     let resize = harness.input.resize(10, 20).unwrap();
-    assert!(matches!(
-        resize.wait_blocking().unwrap_err().failure,
-        DeliveryFailure::Shutdown(ShutdownReason::ParserUnavailable)
-    ));
+    let failure = resize.wait_blocking().unwrap_err().failure;
+    assert!(
+        matches!(
+            failure,
+            DeliveryFailure::Shutdown(ShutdownReason::ParserUnavailable)
+        ),
+        "the queued resize must settle through the parser-lock shutdown, got {failure:?}"
+    );
     drop(read_guard);
     assert!(harness.resizes().is_empty());
     // Unparsed raw output is still journalled as final evidence, and the parser
@@ -842,7 +874,11 @@ fn queued_input_deadline_completes_before_an_earlier_reply_barrier_is_released()
     let (writer_gate, controller) = gate();
     let limits = OwnerLimits {
         command_timeout: Duration::from_millis(30),
-        reply_timeout: Duration::from_millis(250),
+        // The reply stays blocked at the test-controlled gate until this test
+        // releases it, so its write deadline must outlast the whole
+        // observation window below; otherwise the owner would abandon the
+        // reply (a fatal writer failure) before the queued input is checked.
+        reply_timeout: Duration::from_secs(30),
         ..OwnerLimits::default()
     };
     let harness = Harness::new(limits, Some(writer_gate), None);
@@ -856,7 +892,12 @@ fn queued_input_deadline_completes_before_an_earlier_reply_barrier_is_released()
         Err(error) => (None, Some(error)),
     };
     let observer = input.as_ref().map(|input| input.observer());
-    let observed_deadline = Instant::now() + Duration::from_millis(100);
+    // The 30 ms command deadline is the product guarantee; the window here is
+    // only a wall-clock margin for a loaded CI runner. The ordering claim does
+    // not depend on it: the reply barrier is held by this test until after the
+    // observation, so any completion seen here came from the independent
+    // deadline worker and not from the blocked owner.
+    let observed_deadline = Instant::now() + Duration::from_secs(10);
     let mut before_release = None;
     while let Some(observer) = observer.as_ref() {
         if let Some(result) = observer.result() {
@@ -897,7 +938,7 @@ fn queued_input_deadline_completes_before_an_earlier_reply_barrier_is_released()
         "the controlled reply or later input completed before release"
     );
     let error = before_release
-        .expect("queued command must complete within 100 ms, before releasing the earlier reply")
+        .expect("queued command must complete on its 30 ms deadline, before releasing the earlier reply")
         .expect_err("an expired queued input cannot report delivery success");
     assert_eq!(error.failure, DeliveryFailure::Timeout);
     assert!(

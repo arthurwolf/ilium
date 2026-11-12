@@ -271,3 +271,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[LIF-308]** An operator MUST be able to resume a halted rollout or cancel it with `ilium plugin rollout resume <id>` and `ilium plugin rollout cancel <id>`, and each command MUST write an audit event.
 - **[LIF-950]** Before replacing the Ilium binary, the operator MUST keep a copy of the previous Ilium binary and of the plugin state files (`installed.json`, the plugin buckets and the stamps), and MUST keep both until the checks after the upgrade pass. Keeping one previous binary is the minimum this page relies on (proposed, owner to confirm).
 - **[LIF-951]** After a host rollback, an operator MUST NOT enable a plugin whose log shows `host.format-newer` until either the newer host has been started again or the file named in that log line has been restored from the copy kept under LIF-950, because the earlier host cannot read that file.
+
+## Production additions (round 10)
+
+- **[PRR-008]** The system must, in a host upgrade of a session with 40 plugins, keep plugin features unavailable for no more than 30 s between server stop and all plugins reaching ready, and the upgrade log must record the measured interval.

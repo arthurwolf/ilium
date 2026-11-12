@@ -426,3 +426,7 @@ The host knows the effective UI language, so it can format a number for the plug
 ## Production additions (round 5)
 
 - **[PRW-028]** Every list the host shows sorted by name (installed plugins, store results, settings rows, permission rows) MUST be ordered with the Unicode collation of the active UI language, with a code-point tiebreak on the id.
+
+## Production additions (round 10)
+
+- **[PRR-020]** The system must, when a server-side plugin raises a notice or toast while two clients with different effective languages are attached, deliver each client the message variant for its own language (English fallback when none exists) under the same plugin-supplied message id so dismissal on one client does not hide the other.

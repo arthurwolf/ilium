@@ -844,3 +844,7 @@ Writing the archive MUST NOT change any plugin state, grant, health counter, fai
 - **[USR-227]** Each helper crash, kill or out-of-memory kill MUST append one crash record with UTC time, plugin id and version, side, reason, exit status and export name, and no payloads.
 - **[USR-228]** Crash records MUST be kept for 30 days and at most 200, removing the oldest first.
 - **[USR-229]** Crash records MUST live in the server state folder, never in a plugin data folder, and MUST appear in the support bundle.
+
+## Production additions (round 10)
+
+- **[PRR-004]** The system must include in the first section of every support bundle and diagnostics bundle the host version and build id, OS and architecture, data root filesystem type, free bytes on it, safe mode or read-only state, and the keys (not secret values) of administrator-set policy.

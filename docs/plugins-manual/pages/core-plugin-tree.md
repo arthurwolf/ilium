@@ -732,3 +732,11 @@ Requirement ids for this section: [PAN-021], [COR-203], [COR-216]. The three ses
 ## Production additions: T6-core-plugins
 
 - **[COR-216]** Replacing ilium.core.tree MUST be performed with no pane closed and no PTY restarted, and the tree contents MUST be identical before and after the switch as compared by node id, kind, parent and order.
+
+## Production additions (round 10)
+
+- **[PRR-026]** The system must offer a Reopen closed pane command that restores the most recent 10 closed panes of the session (kind, working directory, title and tree position) last-closed-first, is unavailable for a pane closed with its process still running unless the user confirmed, and drops closed-pane entries after server restart or 24 hours.
+
+## Production additions (round 12)
+
+- **[PRP-025]** The system must keep a session with 500 panes in 50 groups responsive, with tree redraw within 50 ms, snapshot write under 1 s without blocking input, new-client attach within 2 s, and refuse pane 1001 with the visible error tree.pane-limit.

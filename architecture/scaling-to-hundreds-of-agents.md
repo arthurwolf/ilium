@@ -117,3 +117,4 @@ treated as an empty snapshot that silently clears current state.
   hooks) still re-checks each project once a second on a background worker; its cost scales with
   projects, not agents. Design target: drive it from file-change notifications with a slow safety
   rescan.
+

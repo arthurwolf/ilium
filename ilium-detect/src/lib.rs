@@ -1267,9 +1267,19 @@ fn looks_like_background_wait_line(screen_text: &str) -> bool {
 fn is_background_wait_line(line: &str) -> bool {
     // Use to_ascii_lowercase() for ASCII terminal output (faster than to_lowercase() for typical case)
     let lower = line.to_ascii_lowercase();
-    normalize_goal_status_line(line).starts_with("waiting for ")
-        && lower.contains("background")
-        && (lower.contains("agent") || lower.contains("task"))
+    if !normalize_goal_status_line(line).starts_with("waiting for ") {
+        return false;
+    }
+    // Claude Code words the same blocked-on-dispatched-work state two ways:
+    // "Waiting for 2 background agents to finish" and, for a dynamic workflow
+    // script, "Waiting for 1 dynamic workflow to finish" (no "background"
+    // or "agent"). Both are an actively blocked turn, so both qualify; the
+    // workflow form additionally requires the "to finish" tail so prose that
+    // merely mentions a workflow does not match.
+    let names_background_work =
+        lower.contains("background") && (lower.contains("agent") || lower.contains("task"));
+    let names_workflow = lower.contains("workflow") && lower.contains("to finish");
+    names_background_work || names_workflow
 }
 
 /// The `WORKING_MARKER` rule as a per-line predicate, so evidence recovery
@@ -1809,8 +1819,13 @@ pub fn identify_agent_with_extra_excluding(
                 .into_iter()
                 .enumerate()
                 .find_map(|(index, candidate)| {
-                    match_process_name_with_extra(&candidate, extra_signatures)
-                        .map(|process_match| (index > 0, candidate, process_match))
+                    match_process_name_with_extra(&candidate, extra_signatures).map(
+                        |process_match| {
+                            let is_interpreted =
+                                index > 0 && !is_stale_name_native_invocation(process, &candidate);
+                            (is_interpreted, candidate, process_match)
+                        },
+                    )
                 });
             if let Some((is_interpreted, matched_name, process_match)) = matched {
                 let process_key = AgentProcessKey {
@@ -1852,6 +1867,22 @@ pub fn identify_agent_with_extra_excluding(
             process_tree_depth: depth,
         },
     )
+}
+
+/// macOS only: whether `candidate` is the basename of a non-interpreter
+/// `argv[0]`, i.e. a natively executed program rather than one handed to an
+/// interpreter.
+///
+/// sysinfo keeps the kernel name it first read for the life of a macOS
+/// process, so an agent first observed between `fork` and `exec` keeps the
+/// parent's name (`bash`) and is recognised only through `argv[0]`. That match
+/// is native evidence, not an interpreter-inferred one; ranking it as
+/// interpreted would let a sibling launcher shim at a shallower depth win over
+/// the real native process it spawned.
+fn is_stale_name_native_invocation(process: &sysinfo::Process, candidate: &str) -> bool {
+    cfg!(target_os = "macos")
+        && argument_file_name(process.cmd(), 0)
+            .is_some_and(|invoked| invoked == candidate && !is_interpreter_name(&invoked))
 }
 
 /// Whether this match is only a program handed to an interpreter, rather
@@ -2766,6 +2797,32 @@ mod tests {
             classify_activity(&fixture("claude_code_waiting_background.txt")),
             AgentTurn::WaitingSubagents
         );
+    }
+
+    #[test]
+    fn claude_code_waiting_on_dynamic_workflow_is_waiting_subagents() {
+        let fixture_text = fixture("claude_code_waiting_dynamic_workflow.txt");
+        assert_eq!(
+            classify_activity(&fixture_text),
+            AgentTurn::WaitingSubagents
+        );
+        let classified = classify_activity_for_agent_detailed(&AgentClass::Claude, &fixture_text);
+        assert_eq!(classified.turn, AgentTurn::WaitingSubagents);
+        assert_eq!(classified.evidence, ActivityEvidence::BackgroundWait);
+    }
+
+    #[test]
+    fn workflow_mentioned_in_prose_is_not_a_wait() {
+        for screen in [
+            "I will start a dynamic workflow soon.\n❯",
+            "Waiting for the workflow design review.\n❯",
+        ] {
+            assert_eq!(
+                classify_activity_for_agent(&AgentClass::Claude, screen),
+                AgentTurn::Idle,
+                "{screen}"
+            );
+        }
     }
 
     #[test]

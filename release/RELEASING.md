@@ -59,6 +59,24 @@ evidence. A passing job must identify the Package page and immutable manifest
 digest. These contracts do not claim that a package is already publicly
 available; actual tagged workflow execution and public readback remain required.
 
+## Preview archive pins
+
+Each Linux architecture is published in its own immutable prerelease: x86_64 in `v0.1.1-linux.1`, ARM64 in `v0.1.1-linux.2` (a published release cannot gain assets). When no stable release exists the hosted `install.sh` falls back, per architecture, to the version pinned for that archive in `release/linux-preview-pins.json` and installs only archives pinned there. Each pin is `{"version": ..., "sha256": ...}`. An archive without a pin for the requested version fails with "not ready yet"; the ARM64 pin is absent until its release is published. Never type a hash by hand: pass the published `SHA256SUMS` of every pinned version, `generate-preview-pins ... --checksums 0.1.1-linux.1=<x86 SHA256SUMS> --checksums 0.1.1-linux.2=<arm SHA256SUMS> --output release/install.sh`, so every pin must equal the published record, then `--check`.
+
+### Publishing the ARM64 preview (`v0.1.1-linux.2`)
+
+The ARM64 release is built from commit `f69e1c94cf527d9394de2970561874e4ca68bb5a` (the x86_64 source plus the version bump) and contains exactly `ilium-linux-aarch64.{tar.gz,deb,AppImage,flatpak}` and its own four-line `SHA256SUMS`; rpm and Snap stay "coming soon". Notes come from `release/notes/v0.1.1-linux.2.md`. With the staged artifacts in `<stage>/native` and `<stage>/packages`:
+
+```sh
+S="--tag v0.1.1-linux.2 --commit f69e1c94cf527d9394de2970561874e4ca68bb5a --native-directory <stage>/native --packages-directory <stage>/packages"
+python release/scripts/publish_linux_preview.py check-versions $S          # VERSION 0.1.1-linux.2 and deb 0.1.1~linux.2
+python release/scripts/publish_linux_preview.py dry-run $S --work <work>   # local checks only
+python release/scripts/publish_linux_preview.py github-dry-run $S --work <work>   # adds GitHub reads only
+python release/scripts/publish_linux_preview.py publish $S --work <work>   # writes: draft, upload, readback, publish
+gh release download v0.1.1-linux.2 --repo arthurwolf/ilium --pattern SHA256SUMS --dir <published>
+python release/scripts/release_tool.py generate-preview-pins ... --pins release/linux-preview-pins.json   # after adding the ARM64 entry, see above
+```
+
 ## Source checks
 
 Run from the repository root with Python 3.11 or newer:
@@ -66,6 +84,7 @@ Run from the repository root with Python 3.11 or newer:
 ```sh
 python release/scripts/release_tool.py targets --manifest release/targets.toml
 python release/scripts/release_tool.py generate-posix-table --manifest release/targets.toml --installer release/install.sh --check
+python release/scripts/release_tool.py generate-preview-pins --manifest release/targets.toml --installer release/install.sh --pins release/linux-preview-pins.json --check
 python release/scripts/release_tool.py generate-windows-table --manifest release/targets.toml --installer release/install.ps1 --check
 python -m unittest discover -s release/tests -p 'test_*.py'
 ```
@@ -216,7 +235,7 @@ Format decisions:
 - **Snap** is `snap pack` of a hand-written `snap.yaml` with `confinement: classic` (Ilium spawns
   host shells and agents and reads the host process tree). Classic confinement needs
   Snap Store review, so the asset installs only with `snap install --dangerous --classic`.
-- **Flatpak** is an OSTree bundle of the payload on `org.freedesktop.Platform//24.08`.
+- **Flatpak** is an OSTree bundle of the payload on `org.freedesktop.Platform//25.08`.
   Its initial trusted CLI forwards the whole application to the host from the
   exact running deployment. Panes, server, helper and native process detection
   then use the host interfaces; Flatpak itself is a distribution wrapper, not
@@ -263,6 +282,12 @@ Flatpak documents as arbitrary host-command authority. This is deliberate for a
 terminal multiplexer that spawns host agents; it must be reviewed as such, not
 represented as Flatpak confinement. The existing host helper retains bounded
 binary pipes, Bubblewrap, its owned cgroup and post-bootstrap syscall seal.
+Because the payload therefore runs with the *host's* dynamic loader, the Flatpak
+runtime's own `libasound.so.2` is never used: the host needs the same reviewed
+system libraries as the tarball (`SYSTEM_LIBRARIES` in `build_linux_packages.py`,
+including ALSA). A minimal host or test guest without `libasound2` fails with
+`libasound.so.2: cannot open shared object file`; offline guest inputs must
+include the pinned `libasound2` and `libasound2-data` packages.
 `flatpak-spawn --watch-bus` is only an additional lifetime hint: upstream source
 retries without it on `INVALID_ARGS`, so it is not an ownership certificate.
 The native Flatpak gate must prove PTY and stdio behavior, exact three-binary
@@ -425,8 +450,10 @@ For each format the smoke gate checks the installed payload against the exact
 native audit, exercises both executable versions and creates, lists and stops a
 real pane through the installed client/server. It checks the live server's
 ancestry and the pane's nonce-bearing readiness marker. During execution it
-hides the native artifact, package directory and retained build inputs, then
-restores all three. The embedding gate holds the installed client alive, checks
+hides the native artifact, package directory, retained build inputs and container
+snapshots, then restores all four. The receipt requires the same four distinct
+source roots for every format, with snapshots at the recorded smoke root and
+numbered destinations under each format's owned hidden-input directory. The embedding gate holds the installed client alive, checks
 its loaded dylib through `vmmap`, binds the binary, model and runtime hashes, and
 requires a finite nonzero 384-dimensional result from the reviewed wrapper.
 
@@ -440,8 +467,11 @@ process retirement, source restoration, receipt removal or image teardown fails
 the gate and retains recovery evidence.
 
 The workflow supplies a fresh build directory and a disjoint smoke root under
-the runner's temporary directory. It uploads the five final files for each
-architecture after native smoke passes, and uploads both build and smoke
+the runner's temporary directory. It uploads nine final files for each
+architecture after native smoke passes: the three packages, both receipts, the
+original native audit and the three original installed-animation JSON receipts.
+The four evidence files use the flat `macos-evidence-<arch>-*.json` names beside
+the packages. It uploads both build and smoke
 diagnostics on failure as well as success. Local execution needs the same native
 architecture, Apple packaging/image tools, Python 3.11+, a complete qualified
 native artifact and noninteractive sudo for the isolated PKG transaction. Do
@@ -449,8 +479,8 @@ not run this gate against an existing user's installation or adopt their mounts.
 
 ### Aggregation and publication
 
-Aggregation requires exactly ten macOS files: ZIP, PKG, DMG and both receipts
-for each architecture. It reconstructs the native/source binding from the
+Aggregation requires exactly eighteen macOS files: ZIP, PKG, DMG, both receipts
+and four retained JSON evidence files for each architecture. It reconstructs the native/source binding from the
 qualified native artifacts, then checks the receipts against that binding and
 the current acceptance sources. It rehashes every container, independently
 parses ZIP and PKG payloads, and checks their members and installation metadata
@@ -458,9 +488,20 @@ against the native audit. DMG filesystem traversal needs Darwin; the aggregate
 host binds the exact DMG hash to the native mount, source-detachment and installed
 lifecycle evidence rather than substituting a portable parser result.
 
+The smoke receipt's `retained_evidence` map names exactly four roles: native
+audit and one installed-animation receipt for ZIP, PKG and DMG. Each entry fixes
+the portable filename, original absolute Darwin path, byte count and SHA-256.
+Transport copies the original JSON bytes; it never rewrites provenance paths or
+recomputes a digest to make edited evidence pass. Every consumer supplies its
+explicit local evidence directory. Recorded macOS roots, runtime paths and hidden
+input paths use POSIX semantics even when the consumer runs on Windows. Missing
+or extra evidence, changed bytes, duplicate JSON keys, aliases, redirected roots,
+foreign paths and source mismatches block qualification. The retained native
+audit must also match the independently qualified audit and its native binding.
+
 `candidate.json` retains the complete macOS asset map and native/source bindings.
-Every later candidate read repeats these checks. Attestation covers the packages
-and receipts; the shared draft, publication, public asset readback and recovery
+Every later candidate read repeats these checks. Attestation covers the packages,
+receipts and retained evidence; the shared draft, publication, public asset readback and recovery
 paths use the same complete asset inventory. The stable names match the installation guide's (src/docs/installation.md)
 six direct ZIP/PKG/DMG links. GitHub asset digests and `candidate.json` carry their
 hashes; the five-entry `SHA256SUMS` remains the portable native-archive inventory
@@ -619,3 +660,25 @@ Do not print secrets. Proposed, built, audited, uploaded, published and publicly
 installed are distinct states. Advertise the commands in the installation guide (src/docs/installation.md) only after all
 five native literal-command receipts pass. Preserve the existing demo gallery
 and inference/privacy text when updating the installation guide (src/docs/installation.md).
+
+## Combined Linux preview (v0.1.1-linux.3)
+
+`v0.1.1-linux.3` carries Linux x86_64 and Linux ARM64 in one prerelease because a
+published GitHub release cannot gain assets. The x86_64 files come from the
+`release.yml` dispatch (dry-run publish); the ARM64 files come from the emulated
+guest pipeline. Run `publish_linux_preview.py` with `--native-directory`,
+`--packages-directory` and `--aarch64-directory`: it re-hashes every file, checks
+that all embedded versions equal the tag, publishes one `SHA256SUMS` over all ten
+files, and only accepts the pinned release commit. After publication, regenerate
+`release/linux-preview-pins.json` from the published `SHA256SUMS` with
+`release_tool.py generate-preview-pins --checksums 0.1.1-linux.3=<file>`, then
+re-run the suite. ARM64 evidence is emulated QEMU only, and rpm and Snap stay
+"coming soon" for ARM64.
+
+## v0.1.1-preview.4 (macOS Apple Silicon plus carried Linux files)
+
+Dispatch `release.yml` with `release_tag=v0.1.1-preview.4`; the `macos-preview` job (`macos-preview.yml`) builds natively on `macos-15`. Publishing is manual: carry the ten verified v0.1.1-linux.3 files byte for byte, add `ilium-macos-aarch64.tar.gz`, write one combined `SHA256SUMS`, create a draft prerelease (not latest) targeting the CI commit, upload, publish, then re-download every asset and compare size and SHA-256. Pin the installer afterwards with `release_tool.py generate-preview-pins`, passing the published `SHA256SUMS` of each pinned version. The macOS ZIP, PKG and DMG smoke test fails on this lineage because the animation helper sandbox is not qualified on macOS; do not lower that gate.
+
+## v0.1.1-preview.5 (macOS ZIP, PKG and DMG plus carried files)
+
+Dispatch `release.yml` with `release_tag=v0.1.1-preview.5` from `release/v0.1.1-preview.5`. The macOS smoke asserts the real macOS contract (animation add-ons refused with the Seatbelt message, session lifecycle, versions, removal) through `smoke_installed_animation.refusal_smoke`; no other gate changed. Publishing is manual as for preview.4: carry the ten linux.3 files, add the four macOS files from `macos-packages-aarch64`, one combined `SHA256SUMS`, draft prerelease (not latest) targeting the CI commit, upload, publish, re-download and compare. The installer keeps the preview.4 macOS tar.gz pin, which stays published.

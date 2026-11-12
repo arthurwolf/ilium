@@ -15,7 +15,7 @@ The `codec` import does the byte-level work that plugins need without shipping t
 - No grant. `codec` is always granted in the server, client and scene worlds, and in job instances.
 - Rust: the `ilium-plugin-sdk` crate, module `ilium_plugin_sdk::host::codec`.
 - TypeScript: the `@ilium/plugin-sdk` package, subpath `@ilium/plugin-sdk/host/codec`.
-- Inputs of up to 16 MiB per call. Larger work belongs in a job, see [background jobs](/pages/background-jobs/).
+- Compression and image inputs are limited to 16 MiB per call. SHA-256 has no codec-specific input limit.
 
 ### Interface
 
@@ -46,7 +46,7 @@ Names follow the SDK naming rules. In Rust the functions are snake_case and the 
 
 | Function | Parameters | Returns | What it does |
 |---|---|---|---|
-| `inflate` | `format`, `data`, `max-output: u32` | bytes | Decompresses zlib, gzip or raw deflate data. Refused if the output is longer than `max-output`, which may be at most 64 MiB. |
+| `inflate` | `format`, `data`, `max-output: u32` | bytes | Decompresses one complete zlib, gzip or raw deflate stream. Trailing bytes, including additional gzip members, are refused. Refused if the output is longer than `max-output`, which may be at most 64 MiB. |
 | `deflate` | `format`, `data`, `level: u8` | bytes | Compresses data. `level` runs from 0 to 9. Higher levels are slower and produce smaller output. |
 | `image-info` | `data` | `image-info` | Reads the width, height and frame count from the header. It does not decode any pixels. |
 | `decode-image` | `data`, `frame: u32`, `max-pixels: u32` | `decoded-image` | Decodes one frame, counted from 0, to 8-bit RGBA. Refused if the image has more pixels than `max-pixels`. |
@@ -78,6 +78,7 @@ The native crates behind the import are flate2, the image decoders, sha2 and cos
 | `rasterize-text` text | 64 KiB | `invalid-argument` |
 | `rasterize-text` `size-px` | 1 to 512 | `invalid-argument` |
 | `rasterize-text` `max-width-px` | 1 to 16,384 | `invalid-argument` |
+| `rasterize-text` output | at most 1 GiB of RGBA bytes | `quota-exceeded` |
 
 ### Example 1: decode a PNG into a surface
 
@@ -245,7 +246,7 @@ The `codec` interface (`ilium:host/codec@0.1.0`) has several consumers of its ou
 <line x1="96" y1="79" x2="150" y2="58" stroke="currentColor" marker-end="url(#codec-arrow)"/>
 <rect x="152" y="36" width="110" height="38" rx="6" fill="none" stroke="currentColor"/>
 <text x="207" y="52" font-size="11" text-anchor="middle" fill="currentColor">codec</text>
-<text x="207" y="66" font-size="9" text-anchor="middle" fill="currentColor">sync, 16 MiB in</text>
+<text x="207" y="66" font-size="9" text-anchor="middle" fill="currentColor">sync codec calls</text>
 <line x1="262" y1="55" x2="316" y2="55" stroke="currentColor" marker-end="url(#codec-arrow)"/>
 <text x="289" y="48" font-size="9" text-anchor="middle" fill="currentColor">rgba, digest</text>
 <rect x="318" y="14" width="116" height="34" rx="6" fill="none" stroke="currentColor"/>

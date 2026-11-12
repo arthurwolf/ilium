@@ -94,3 +94,11 @@ The log shows the deadline trap as the cause. The operator then reads the plugin
 - [Telemetry and plugin health](/pages/reference-host-telemetry/) for the counters that the report shows.
 - [Administrator failure runbook](/pages/guide-admin-failure-runbook/) for the policy keys used in an incident.
 - [Ops: telemetry consent](/pages/ops-telemetry-consent/) and [Ops: crash isolation, health checks and the kill switch](/pages/ops-crash-isolation-health-and-kill-switch/).
+
+## Production additions (round 11)
+
+- **[PRQ-019]** The system must, after an abnormal server exit, write one host.crash record to host.log on next start without pane text, storage values or secrets, show one footer notice, include it in the host support bundle, and enter safe mode after 3 crashes within 300 s.
+
+## Production additions (round 12)
+
+- **[PRP-018]** The system must carry one operation id through every lifecycle operation and host-to-plugin call chain, appearing in host.log lines, plugin log lines, audit records and CLI JSONL records, and usable to filter with ilium plugin logs --op and in the support bundle.

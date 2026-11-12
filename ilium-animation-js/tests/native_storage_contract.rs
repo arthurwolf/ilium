@@ -1,4 +1,6 @@
-use ilium_animation_js::native_storage::{MemoryNamespace, NamespaceKey};
+use ilium_animation_js::native_storage::MemoryNamespace;
+#[cfg(target_os = "linux")]
+use ilium_animation_js::native_storage::NamespaceKey;
 use ilium_animation_js::permissions::PackageIdentity;
 #[cfg(target_os = "linux")]
 use ilium_animation_js::{
@@ -12,9 +14,11 @@ use ilium_animation_js::{
     },
 };
 use ilium_execution::{QuotaGroup, QuotaLimits};
+#[cfg(any(target_os = "linux", not(any(target_os = "macos", windows))))]
 use ilium_platform::animation_files::PinnedDirectory;
 #[cfg(target_os = "linux")]
 use ilium_platform::animation_files::WriteMode;
+#[cfg(any(target_os = "linux", not(any(target_os = "macos", windows))))]
 use ilium_platform::secure_fs::NoFollowDirectory;
 #[cfg(target_os = "linux")]
 use sha2::Digest;
@@ -536,7 +540,8 @@ fn persistent_cache_ttl_reload_remove_and_principal_isolation_are_real() {
     assert!(reopened.get("short", 16, &cancel).unwrap().is_none());
 }
 
-#[cfg(not(target_os = "linux"))]
+// Linux, macOS and Windows have qualified pinned-directory backends; only other targets report Unsupported.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 #[test]
 fn native_atomic_storage_reports_unsupported_on_non_linux_platforms() {
     let temporary_directory = tempfile::tempdir().unwrap();

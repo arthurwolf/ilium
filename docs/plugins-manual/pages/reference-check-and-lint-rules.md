@@ -297,3 +297,12 @@ A TypeScript plugin requests `fs.read:project` but never calls a file function. 
 - [Plugin documentation guide](/pages/guide-plugin-documentation/)
 
 API checked against `ilium:plugin@0.1.0`.
+
+## Production additions (round 11)
+
+- **[PRQ-025]** The system must provide lint rules lint.a11y-no-label, lint.a11y-colour-only-status and lint.a11y-unreachable-action and harness calls host.focus_order and host.screen_reader_text, so a flawed fixture yields exactly those three findings and a corrected fixture yields none.
+- **[PRQ-028]** The system must make ilium plugin check read the built component import table, failing with check.grant-missing for each host import whose grant is not declared and warning with lint.grant-unused for each declared grant no import requires, naming the import and grant.
+
+## Production additions (round 12)
+
+- **[PRP-003]** The system must provide lint.dependency-license that reads SPDX identifiers of locked dependencies from SBOM data, fails check and publish naming the dependency and licence when it is outside allowed_licenses or copyleft-incompatible with the declared license, and reports lint.dependency-license-unknown when licence data is missing.

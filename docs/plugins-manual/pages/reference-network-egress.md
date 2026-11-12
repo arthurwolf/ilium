@@ -182,3 +182,7 @@ Contract: `ilium:plugin@0.1.0`.
 ## Production additions (round 5)
 
 - **[PRW-046]** The host MUST resolve each granted host name once per request, validate the resolved address against the reserved ranges, and connect to that validated address, so a second DNS answer cannot redirect the connection.
+
+## Production additions (round 12)
+
+- **[PRP-009]** The system must expose no HTTP API endpoint that adds a grant, trusts a key, marks a project trusted or answers a consent prompt, must return 403 api.confirmation-required with an audit record for such requests, and must keep the token file and path out of pane child environments.

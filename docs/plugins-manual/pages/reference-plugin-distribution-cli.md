@@ -252,3 +252,7 @@ The commands and their rules are in [Signing and trust](/pages/reference-signing
 - **[PKG-444]** `keygen`, `sign` and `trust` MUST use the file formats, the fingerprint and the codes of Signing and trust. A page that shows another format is wrong.
 - **[PKG-445]** The following MUST hold. `trust` failures exit 1, except `trust.not-found` (5). A declined prompt (`trust.declined`) exits 1, as [PKG-424] says.
 - **[PKG-446]** A secret variable MUST NOT appear in any record, log or error message.
+
+## Production additions (round 11)
+
+- **[PRQ-026]** The system must make ilium plugin publish download the published package after the index shows it, compare SHA-256 and length with the local file, print a result record with readback verified, and on mismatch exit 1 with registry.hash-mismatch naming both hashes while leaving the version listed.

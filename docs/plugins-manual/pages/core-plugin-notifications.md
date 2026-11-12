@@ -668,3 +668,7 @@ The host raises one catch-up notice per affected pane and skips any notice alrea
 ## Production additions (round 9)
 
 - **[PRS-001]** For a pane marked private, or in a private project, the Notifications plugin MUST NOT place the pane title, process name, command line or agent text in a desktop notification, a toast shown on a shared or mirrored client, or the durable notice log; it MUST show only a generic label naming the event kind and a pane number, and the full text MUST be shown only inside the focused client.
+
+## Production additions (round 11)
+
+- **[PRQ-004]** The system must offer a Settings switch Hide details in desktop notifications that replaces the body and pane title of every desktop notification with a generic line while the durable log keeps the full text, and activating a desktop notification must focus the originating pane or show a notice naming the pane when it no longer exists.

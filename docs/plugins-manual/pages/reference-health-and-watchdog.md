@@ -300,3 +300,7 @@ Target behaviour of the production plugin system.
 - **[ABI-080]** The host MUST expose a counter per ABI code, labelled by plugin id, so an operator can alert on ABI-class failures without parsing messages.
 - **[OPS-233]** `ilium plugin health --json` MUST print one JSON line per installed plugin with the fields `id`, `version`, `side`, `state`, `reason` and `restarts_10m`, and MUST keep the exit codes of [HST-617](/pages/reference-health-and-watchdog/). `state` is the health value of the first table, `reason` is the reason of its matching row or `null`, `side` is `server` or `client` when the matching row names a side and `none` otherwise, and `restarts_10m` is the number of restarts of the plugin's sides in the last 10 minutes, the window of [LIF-134](/pages/reference-health-and-watchdog/) (proposed, owner to confirm).
 - **[OPS-234]** The `--json` output of `ilium plugin health` MUST contain no log text and no plugin data, MUST write the fields of OPS-233 in that order on every line, and MUST keep the field names and their order across releases within one ABI major version (proposed, owner to confirm).
+
+## Production additions (round 12)
+
+- **[PRP-017]** The system must persist a compact per-plugin operations history across restarts, at most 1 MiB and 90 days per plugin, readable with ilium plugin history, surviving SIGKILL up to a 5 second fsync interval, and containing no secret values, pane text or storage values.

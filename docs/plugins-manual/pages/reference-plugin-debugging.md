@@ -103,3 +103,7 @@ API checked against `ilium:plugin@0.1.0`.
 ## Production additions (round 5)
 
 - **[PRW-045]** The debug endpoint MUST create its token file with mode 0600, MUST be disabled when `packages.allow_dev_mode` is false, MUST bind only to loopback, and MUST write one audit record each time a client authenticates or is refused.
+
+## Production additions (round 10)
+
+- **[PRR-011]** The system must ship in the same release as the SDK a documented debugger attach for a --debug plugin build, where a breakpoint on a hello template export stops at the correct source file and line for both Rust and TypeScript, attaching raises no manifest-declared limit or grant, and attach is refused with a stable error code on a release build or a T3-signed install.

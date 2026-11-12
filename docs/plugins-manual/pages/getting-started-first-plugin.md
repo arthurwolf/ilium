@@ -421,3 +421,7 @@ For your own bug report template, ask for the bundle together with the answers i
 - [Agent primitive](/pages/primitives-agent/) lists the activity values.
 - [Manifest reference](/pages/reference-manifest/) lists every manifest key.
 - [Testing](/pages/testing/) shows how to test `on_events` without a running Ilium.
+
+## Production additions (round 11)
+
+- **[PRQ-027]** The system must let a first plugin go from ilium plugin new to first dev reload in at most 5 minutes and rebuild-to-reload a one-line change in at most 5 s for TypeScript and 15 s for Rust on each reference runner, with the benchmark workflow failing the SDK release on a regression above 20 percent.

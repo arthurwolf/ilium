@@ -531,3 +531,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 8)
 
 - **[PRT-002]** When copying files matched by .worktreeinclude, the Worktrees plugin MUST skip any entry that is a symbolic link or whose resolved path lies outside the source checkout root, MUST NOT follow links while copying, and MUST report each skipped entry in the creation summary.
+
+## Production additions (round 12)
+
+- **[PRP-022]** The system must route a confirmation for a destructive core-plugin action to exactly one client, refuse with exit code 2 and error confirm.no-client when no client is attached and no --yes flag was given, and write one audit record naming the confirming client or the flag.

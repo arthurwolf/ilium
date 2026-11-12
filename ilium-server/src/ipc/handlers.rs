@@ -2834,6 +2834,8 @@ async fn state_synchronization_events(
     // needs them even when no client has changed the list during this stream.
     let settings = state.text_trigger_settings.read().await.settings.clone();
     events.push(ServerEvent::TextTriggersChanged { settings });
+    // Mirrors the production builder: blocking errors follow the rules and
+    // precede the attach-only completion events.
     events.push(ServerEvent::BlockingErrorsSnapshot {
         errors: state.blocking_errors_snapshot(),
     });
@@ -6961,6 +6963,8 @@ async fn broadcast_captured_terminal_recovery(
 /// previously hidden pane visible. Hidden output remains in the PTY-owned
 /// journal; no session-global parser or subscription state is duplicated.
 #[cfg(test)]
+// Its callers are Unix-only tests.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) async fn terminal_recovery_event(
     state: &ServerState,
     pane_id: NodeId,
@@ -8384,6 +8388,8 @@ where
     .await
 }
 
+// Each argument is an independent input of the key-write path; the probe and
+// admission hook are injected so tests can interleave concurrent writers.
 // Eight arguments: `after_admission` is the test seam for the admission path.
 // The production wrapper above passes a no-op for it.
 #[allow(clippy::too_many_arguments)]
@@ -8493,11 +8499,13 @@ where
         let input_cancel_generation = *runtime.agent_input_cancel.borrow();
         (ProbeRequest::for_runtime(runtime), input_cancel_generation)
     };
+    let mut probe_unavailable: Option<String> = None;
     let probe_observation = if probe_request.needs_inspection() {
         match probe(probe_request).await {
             Ok(observed) => Some(observed),
             Err(error) => {
                 tracing::debug!(pane_id = pane_id.0, %error, "input preflight unavailable");
+                probe_unavailable = Some(error.to_string());
                 None
             }
         }
@@ -8582,11 +8590,23 @@ where
         } else {
             runtime.automated_agent_input_rejection(status, probe_observation.as_ref())
         };
-        let active_agent = runtime.agent_process_key.is_some() && rejection.is_none();
+        // User typing is attributed to the agent whenever one owns the pane: a
+        // failed or late identity probe only gates automated input. Skipping
+        // the tracker for a probe failure silently dropped single keystrokes
+        // from the observed prompt.
+        let active_agent = runtime.agent_process_key.is_some()
+            && (rejection.is_none() || (is_user_directed && !cancelled_during_preflight));
         if !is_user_directed {
             if let Some(reason) = rejection {
+                // The probe's own failure (deadline, admission, or identity
+                // mismatch) is otherwise lost; name it so a refused delivery
+                // says which of those it was.
+                let probe_outcome = probe_unavailable.map_or_else(
+                    || "probe completed".to_string(),
+                    |error| format!("probe unavailable: {error}"),
+                );
                 return Err(format!(
-                    "automatic input refused for pane {pane_id:?}: {reason}"
+                    "automatic input refused for pane {pane_id:?}: {reason} ({probe_outcome})"
                 ));
             }
         }
@@ -10225,7 +10245,11 @@ mod tests {
         let current =
             candidate_new_pane_working_directory(&state, &NewPaneWorkingDirectory::FocusedTerminal)
                 .await;
-        assert_eq!(current.as_deref(), Some(directory.path()));
+        // The accepted directory is canonical; macOS temporary directories
+        // are reached through the /var -> /private/var symlink.
+        let canonical_directory = ilium_platform::paths::canonicalize(directory.path())
+            .expect("canonical isolated directory");
+        assert_eq!(current.as_deref(), Some(canonical_directory.as_path()));
         if let Some(PaneResource::Terminal(mut runtime)) =
             state.panes.write().await.remove(&pane_id)
         {
@@ -11050,17 +11074,21 @@ mod tests {
     #[tokio::test]
     async fn replacing_shared_worktree_member_preserves_owner_directory_and_sibling() {
         let directory = tempfile::tempdir().expect("isolated replacement fixture");
+        // Spawn admission requires canonical paths, including macOS temporary
+        // directory aliases; the fixture must satisfy that existing contract.
+        let fixture_root = ilium_platform::paths::canonicalize(directory.path())
+            .expect("canonical replacement fixture");
         let state = snapshot_io_handler_state(&directory);
         assert!(state
             .execution
             .set(crate::execution::ServerExecution::start().expect("execution bank"))
             .is_ok());
-        let root = directory.path().join("worktree");
+        let root = fixture_root.join("worktree");
         let launch_cwd = root.join("src");
         std::fs::create_dir_all(&launch_cwd).unwrap();
         let workspace = ilium_core::PaneWorkspace {
             workspace_id: None,
-            repo_common_dir: directory.path().join(".git"),
+            repo_common_dir: fixture_root.join(".git"),
             worktree_root: root,
             branch: "agent/shared".into(),
             base_ref: "main".into(),
@@ -11070,7 +11098,7 @@ mod tests {
         };
         let (old, sibling, owner, sibling_before) = {
             let mut tree = state.tree.write().await;
-            let project = tree.add_project(directory.path().to_path_buf()).unwrap();
+            let project = tree.add_project(fixture_root).unwrap();
             let old = tree
                 .add_pane(project, "old", PaneContentKind::Terminal)
                 .unwrap();
@@ -11883,9 +11911,9 @@ mod tests {
             .await
         );
         let ServerEvent::BlockingErrorsSnapshot { errors } =
-            events.try_recv().expect("visible refusal")
+            events.recv().await.expect("blocking error broadcast")
         else {
-            panic!("a refused expansion must publish its retained error");
+            panic!("a rejected expand must broadcast only its blocking error");
         };
         assert!(errors.iter().any(|error| error.node_id == Some(folder_id)
             && error.operation == "set_node_expanded"

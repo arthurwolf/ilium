@@ -354,37 +354,33 @@ where
 
         let request = decoded.view();
         if let ClientRequest::SetStatusScreenWatches { revision, watches } = request {
-            match crate::status_screen_watch::compile_wire(watches) {
-                Ok(compiled) => {
-                    screen_watches.abort_all();
-                    while screen_watches.try_join_next().is_some() {}
-                    if !compiled.is_empty() {
-                        let watch_state = Arc::clone(&state);
-                        let replies = direct_tx.clone();
-                        let revision = *revision;
-                        screen_watches.spawn(async move {
-                            let pane_ids: Vec<_> = watch_state.panes.read().await.keys().copied().collect();
-                            let watches = Arc::new(compiled);
-                            let (sender, mut receiver) = mpsc::channel(64);
-                            let mut panes = tokio::task::JoinSet::new();
-                            for pane_id in pane_ids {
-                                panes.spawn(crate::status_screen_watch::watch_pane(
-                                    Arc::clone(&watch_state), pane_id, revision,
-                                    Arc::clone(&watches), sender.clone(),
-                                ));
-                            }
-                            drop(sender);
-                            while let Some(observation) = receiver.recv().await {
-                                if replies.send(ServerEvent::StatusScreenObserved(observation)).await.is_err() {
-                                    break;
-                                }
-                            }
-                        });
-                    }
-                }
-                Err(message) => {
-                    let _ = direct_tx.send(ServerEvent::Error { message }).await;
-                }
+            // Validated and replaced as a whole, so a refused set never runs
+            // partially. The client fences every observation by revision and
+            // has already moved to this one, so a refused set also stops the
+            // previous revision's observer: its answers would be discarded on
+            // arrival, and the client keeps every watch Unknown until a valid
+            // revision arrives. An empty set spawns nothing.
+            let compiled = crate::status_screen_watch::compile_wire(watches);
+            let rejection = compiled.as_ref().err().cloned();
+            crate::status_screen_watch::replace_revision(
+                &mut screen_watches,
+                Arc::clone(&state),
+                *revision,
+                compiled.unwrap_or_default(),
+                direct_tx.clone(),
+            );
+            if let Some(error) = rejection {
+                tracing::warn!(
+                    revision = *revision,
+                    watch_id = ?error.watch_id,
+                    message = %error.message,
+                    "status screen watch set refused; every watch stays unknown"
+                );
+                let _ = direct_tx
+                    .send(ServerEvent::StatusScreenWatchesRejected(
+                        error.into_rejection(*revision),
+                    ))
+                    .await;
             }
             continue;
         }
@@ -2555,6 +2551,9 @@ mod tests {
         sound_task.abort();
     }
 
+    // The pane command is a POSIX shell script (`printf`, `read`, `;`), which
+    // the Windows `cmd.exe` pane shell cannot run.
+    #[cfg(unix)]
     #[tokio::test]
     async fn live_pane_broadcast_replay_sends_only_missing_bytes_and_attach_stays_full() {
         let directory = tempfile::tempdir().expect("private directory");
@@ -2564,7 +2563,10 @@ mod tests {
         );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "live-replay-normalization".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            // Pane launch admission only accepts a canonical directory, and
+            // macOS temporary directories live behind /var -> /private/var.
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("snapshot.json"),
             socket_path: directory.path().join("test.sock"),
@@ -2625,8 +2627,8 @@ mod tests {
                 };
                 if let Some((through_sequence, bytes)) = replay {
                     if bytes
-                        .windows(b"writer-prefix".len())
-                        .any(|window| window == b"writer-prefix")
+                        .windows(b"writer-prefix\r\n".len())
+                        .any(|window| window == b"writer-prefix\r\n")
                     {
                         break (through_sequence, bytes);
                     }
@@ -2668,8 +2670,8 @@ mod tests {
                 if let Some((through_sequence, bytes)) = replay {
                     if through_sequence > prefix_sequence
                         && bytes
-                            .windows(b"writer-tail".len())
-                            .any(|window| window == b"writer-tail")
+                            .windows(b"writer-tail\r\n".len())
+                            .any(|window| window == b"writer-tail\r\n")
                     {
                         if let Some(ServerEvent::ScreenUpdate {
                             first_sequence,

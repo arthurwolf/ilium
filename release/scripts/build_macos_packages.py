@@ -94,7 +94,7 @@ def smoke_receipt_name(architecture: str) -> str:  # Reserve the B2 lifecycle ar
     return 'macos-smoke-' + architecture + '.json'  # Avoid changing a hashed build receipt after testing.
 #
 def version_from_tag(tag: str) -> str:  # Make the PKG numeric version policy explicit.
-    require(isinstance(tag, str) and re.fullmatch(r'v(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})', tag), 'macOS package versions require plain vMAJOR.MINOR.PATCH; prereleases are not rewritten')  # Fail unsupported native ordering safely.
+    require(isinstance(tag, str) and re.fullmatch(r'v(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})(?:-preview\.(?:0|[1-9][0-9]{0,4}))?', tag), 'macOS package versions require vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-preview.N')  # Fail unsupported native ordering safely.
     return tag[1:]  # Preserve every accepted version digit.
 #
 def relative_name(name: str) -> str:  # Validate recursive evidence paths without normalization aliases.
@@ -279,10 +279,14 @@ def load_native(native: Path, archive: Path, manifest: Path, workspace: Path, ta
     binding = {'source_commit': source_commit, 'source_inputs': source_hashes, 'source_archive': target['archive'], 'source_archive_sha256': native_hashes[target['archive']], 'native_audit_sha256': native_hashes['native-audit.json'], 'native_candidate_receipt_sha256': native_hashes['native-candidate-receipt.json'], 'native_test_harness_sha256': native_hashes['native-test-harness.json'], 'native_files': native_hashes, 'native_evidence_files_sha256': release_tool.digest(json.dumps(retained, sort_keys=True, separators=(',', ':')).encode('utf-8'))}  # Expose exact future aggregation bindings.
     return target, audit, runtime, binding  # Keep validation reusable by M3 and offline M4 fixtures.
 #
+def installer_version(version: str) -> str:  # Installer receipts compare numerically, so they carry only MAJOR.MINOR.PATCH.
+    require(version_from_tag('v' + version) == version, 'invalid package version')  # Same validation as the tag policy.
+    return version.split('-', 1)[0]  # The prerelease stays in the identifier, install path and payload version.
+#
 def package_layout(architecture: str, version: str) -> dict[str, Any]:  # Define one complete CLI payload layout per format.
     require(architecture in architectures and version_from_tag('v' + version) == version, 'invalid package layout identity')  # Refuse unsafe path/version inputs.
     prefix = 'ilium-macos-' + architecture  # Preserve the tarball's parent directory.
-    return {'zip': {'prefix': prefix}, 'dmg': {'prefix': prefix, 'volume_name': 'Ilium-' + version + '-' + architecture, 'filesystem': 'HFS+', 'format': 'UDZO'}, 'pkg': {'identifier': 'io.github.arthurwolf.ilium.' + architecture + '.v' + version, 'version': version, 'install_location': '/usr/local/lib/ilium/' + version + '/' + architecture, 'component': 'ilium-component.pkg', 'host_architecture': architectures[architecture][0], 'installation_domain': 'system-or-nonsystem-volume', 'administrator_required': True, 'scripts': False, 'path_modified': False}}  # Keep versions separate and require explicit PATH selection.
+    return {'zip': {'prefix': prefix}, 'dmg': {'prefix': prefix, 'volume_name': 'Ilium-' + version + '-' + architecture, 'filesystem': 'HFS+', 'format': 'UDZO'}, 'pkg': {'identifier': 'io.github.arthurwolf.ilium.' + architecture + '.v' + version, 'version': installer_version(version), 'install_location': '/usr/local/lib/ilium/' + version + '/' + architecture, 'component': 'ilium-component.pkg', 'host_architecture': architectures[architecture][0], 'installation_domain': 'system-or-nonsystem-volume', 'administrator_required': True, 'scripts': False, 'path_modified': False}}  # Keep versions separate and require explicit PATH selection.
 #
 def distribution_xml(layout: dict[str, Any]) -> bytes:  # Generate escaped, script-free Installer metadata.
     package = layout['pkg']  # Read only the validated layout contract.
@@ -411,7 +415,7 @@ def build(arguments: argparse.Namespace) -> dict[str, Any]:  # Build all formats
         components = work / 'components'  # Separate the intermediate component PKG from published assets.
         components.mkdir(mode=0o700)  # Create a new private component directory.
         component = components / layout['pkg']['component']  # Use one fixed, locally resolved component name.
-        runner.run('pkgbuild', ['/usr/bin/pkgbuild', '--root', payload, '--identifier', layout['pkg']['identifier'], '--version', version, '--install-location', layout['pkg']['install_location'], '--ownership', 'recommended', '--compression', 'legacy', '--quiet', component], timeout=600)  # Build without scripts, signing, or binary rewriting.
+        runner.run('pkgbuild', ['/usr/bin/pkgbuild', '--root', payload, '--identifier', layout['pkg']['identifier'], '--version', layout['pkg']['version'], '--install-location', layout['pkg']['install_location'], '--ownership', 'recommended', '--compression', 'legacy', '--quiet', component], timeout=600)  # Build without scripts, signing, or binary rewriting.
         distribution = work / 'Distribution.xml'  # Keep native metadata as retained source evidence.
         write_bytes(distribution, distribution_xml(layout))  # Generate exact escaped distribution bytes.
         pkg_path = products / package_name(arguments.arch, 'pkg')  # Name the mandatory system-installable container.

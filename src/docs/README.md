@@ -22,6 +22,7 @@ This is the full documentation for Ilium. The [project README](../../README.md) 
 | Page | What it covers |
 | --- | --- |
 | [Agent monitoring](agent-monitoring.md) | Agent identity and activity, status indicators, attention mode, the `/goal` badge, recovery after an agent stops. |
+| [Custom status icons](custom-status-icons.md) | Custom display mode: ordered rules, every condition, shipped defaults, icon kinds, the rules editor, troubleshooting. |
 | [Agent cost](agent-cost.md) | Spend indicators, units, thresholds, budget and price overrides. |
 | [Notifications](notifications.md) | Sounds and desktop notifications, per-event switches, merge and skip rules. |
 | [Worktrees](worktrees.md) | Running agents in linked Git worktrees and cleaning them up safely. |

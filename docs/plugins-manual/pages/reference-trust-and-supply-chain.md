@@ -291,3 +291,7 @@ A published plugin inherits the risk of the SDK it was built with. [SEC-173] pin
 ## Production additions (round 5)
 
 - **[PRW-040]** A client with a configured mirror or witness MUST compare the signed log head of the primary registry with the head from that independent source at each metadata refresh and MUST refuse installs with `trust.log-split-view` when the two heads are not consistent.
+
+## Production additions (round 10)
+
+- **[PRR-019]** The system must record the source and publisher key from which each plugin was first installed and refuse any update or reinstall of the same plugin id from a different source or publisher key with trust.source-changed unless the user or policy explicitly confirms the switch.

@@ -109,3 +109,7 @@ Publish the new version when every job of the matrix is green. The range must no
 - **[AUT-957]** The manual MUST contain one worked page that takes a plugin from a single-minor `requires` range to a two-minor range, with the commands, the golden directory layout per minor and the expected output of each step.
 
 - **[AUT-958]** The worked page's steps MUST be run as a CI job in the examples repository, and the job MUST fail when the page's commands or expected output change.
+
+## Production additions (round 10)
+
+- **[PRR-009]** The system must publish the contract and host test bundle of every host minor on the beta channel at least 7 days before stable, accept a beta contract in ilium plugin test --host-contract and --conformance with every record labelled pre-release true, and make ilium plugin publish refuse a package whose requires range admits only a beta contract with an error code naming the beta (owner page is guide-supporting-two-host-minors, with release-process for the host side).

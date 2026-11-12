@@ -341,3 +341,7 @@ Contract: `ilium:plugin@0.1.0`.
 ## Production additions (round 8)
 
 - **[PRT-010]** Compilation of a T2 or T3 component in the sandbox helper MUST have a wall-clock deadline of 60 seconds, and when it passes the host MUST kill the helper, refuse the load with the code host.compile-timeout, and count no more than one failure in the three-failure window.
+
+## Production additions (round 10)
+
+- **[PRR-018]** The system must have each helper run a built-in confinement self-test (forbidden open, socket and exec) after applying the sandbox and before instantiating plugin code, report the result to the server, and on any success exit and refuse the plugin with sandbox.unavailable reason self-test-failed plus an audit record.

@@ -27,6 +27,10 @@ vt100 = "0.16.2"
 # own argv (`--resume`) and exits before any pane detection can see it. Without
 # the harness the fixture's own `main` runs, as the tests expect.
 #
+# `test = false`: the fixture is a spawned helper, not a test. As a test target
+# `cargo test --lib --bins` would run it directly with no behaviour sidecar and
+# it would panic on purpose. The normal (non-test) build still lands in the
+# profile root, where the integration tests and other crates' tests find it.
 # `test = false`: with the harness off, `cargo test` would still run this bin as
 # a test target, which executes the fixture's `main` with no behaviour file and
 # fails the run before the integration tests start. The bin has no unit tests,

@@ -122,7 +122,7 @@ fn expected_ids() -> BTreeSet<String> {
     for id in crate::animation_rows::help_ids() {
         ids.insert(id);
     }
-    add_range(&mut ids, "AM", 1, 25);
+    add_range(&mut ids, "AM", 1, 31);
     add_range(&mut ids, "IC", 1, 48);
     add_range(&mut ids, "KEY", 1, 38);
     add_range(&mut ids, "TERM", 1, 3);
@@ -147,6 +147,8 @@ fn expected_ids() -> BTreeSet<String> {
     ids.insert("TITLE-02".to_owned());
     add_range(&mut ids, "TRIGGER", 1, 8);
     ids.insert("TEXTTRIGGER-01".to_owned());
+    ids.insert("TOOLBAR-01".to_owned());
+    ids.insert("CUSTOMAGENT-01".to_owned());
     ids
 }
 
@@ -429,4 +431,20 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
         assert!(matches!(app.mode, Mode::Settings(_)));
         assert_eq!(app.animation_settings, before);
     }
+}
+
+#[test]
+fn custom_icon_editor_help_names_every_condition_group() {
+    use ilium_core::status_rule_expression::ConditionCategory;
+
+    let conditions = catalog::by_id("AM-28").expect("AM-28 describes conditions");
+    for category in ConditionCategory::ALL {
+        assert!(
+            conditions.specimen.contains(category.label()),
+            "AM-28 must list the {} condition group",
+            category.label()
+        );
+    }
+    assert!(conditions.states.contains("16 distinct patterns"));
+    assert!(conditions.states.contains("256 characters"));
 }

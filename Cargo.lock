@@ -3767,13 +3767,16 @@ dependencies = [
 name = "ilium-plugin-host"
 version = "0.1.1"
 dependencies = [
+ "cosmic-text",
  "base64 0.22.1",
  "ed25519-dalek",
+ "flate2",
  "ilium-execution",
  "ilium-logging",
  "ilium-platform",
  "ilium-plugin-api",
  "ilium-plugin-testkit",
+ "image",
  "loom",
  "proptest",
  "regex",
@@ -3835,6 +3838,7 @@ dependencies = [
 name = "ilium-plugin-testkit"
 version = "0.1.1"
 dependencies = [
+ "ilium-plugin-api",
  "ilium-plugin-sdk-core",
  "proptest",
  "rand 0.9.5",
@@ -3942,6 +3946,7 @@ dependencies = [
  "ilium-core",
  "ilium-platform",
  "ilium-prompts",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",

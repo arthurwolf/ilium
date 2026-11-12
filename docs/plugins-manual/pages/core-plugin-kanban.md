@@ -729,3 +729,7 @@ The plugin owns both points below. The complete manifest holds the grants `exten
 ## Production additions (round 6)
 
 - **[PRV-002]** When the board file changes on disk while the user has an unsaved card edit, the Kanban plugin MUST keep the in-progress edit, MUST NOT reload over it, and MUST on save compare the revision recorded at load with the revision on disk and offer Reload, Overwrite and Merge cards by card identity when they differ.
+
+## Production additions (round 12)
+
+- **[PRP-024]** The system must open a board of 2000 cards and 20 columns with the first frame within 200 ms and key-to-redraw latency under 50 ms, and above 5000 cards or 1 MiB of Markdown show a visible reason and open the file read-only in the Source view.

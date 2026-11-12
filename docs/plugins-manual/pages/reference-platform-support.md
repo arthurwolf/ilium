@@ -154,3 +154,7 @@ A cross-OS restore therefore always needs the user to re-establish trust, even f
 - [Host architecture](/pages/reference-host-architecture/) and [Packages](/pages/packages/).
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions (round 11)
+
+- **[PRQ-003]** The system must detect missing mouse, enhanced-keyboard and Unicode-width support at client start, keep every core plugin action reachable by keyboard without a mouse, switch to the stable-glyph set automatically only when the terminal cannot draw the icon set with one notice naming the reason, and start without error under TERM=dumb or tmux.

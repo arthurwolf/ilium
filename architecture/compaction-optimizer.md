@@ -7,3 +7,4 @@ Settings → Optimization recommends the auto-compaction threshold that minimize
 - **Writers** — `agent_config_writer` patches exactly one key of `~/.claude/settings.json` or `~/.codex/config.toml` (span-based, every other byte preserved), as a compare-and-swap under a sidecar lock with an atomic rename, and keeps a revert record in Ilium's data directory. It never creates the file and never touches a process: a running agent keeps the limit it loaded.
 
 The tab itself is `compaction_ui` (layout, hit testing, the Apply confirmation) over `compaction_app` (selected agent, current values, pending apply, outcome notes, key and mouse actions; per-tick `drain_events` next to `tick_cost`). `docs/compaction-optimizer-design.md` (git-ignored scratch) records the design history and the user's decisions; this section is the maintained description.
+

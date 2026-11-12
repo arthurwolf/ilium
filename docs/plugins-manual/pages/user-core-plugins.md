@@ -201,3 +201,11 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[USR-041]** The Plugins tab MUST refuse to turn off a core plugin marked "no" in the table, and MUST say why.
 - **[USR-042]** A request to replace `ilium.core.settings` or `ilium.core.sessions` MUST fail at install with `manifest.replaces-not-replaceable`.
 - **[USR-043]** Ilium MUST ask the user to confirm every `replaces` entry at install, MUST allow at most 4 entries, and MUST NOT replace without a yes.
+
+## Production additions (round 10)
+
+- **[PRR-025]** The system must, on the first start after an upgrade that adds, removes or changes the default enable state of a core plugin, show one dismissible notice listing each such plugin and its new state with an Open Plugins link, never enable a newly added core plugin requesting a grant the user has not been shown, and keep a user's explicit disable across the upgrade.
+
+## Production additions (round 11)
+
+- **[PRQ-007]** The system must, when the user triggers a key, command or CLI subcommand owned by a disabled core plugin, show one notice naming the plugin, the reason (user, policy or crashed) and an Open Plugins action, and the CLI must exit non-zero with a message naming the plugin and the command to enable it.

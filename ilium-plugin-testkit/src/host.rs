@@ -225,7 +225,7 @@ pub struct HostSnapshot {
     pub state: InstanceState,
     /// Every bucket with its keys and values.
     pub storage: BTreeMap<String, BTreeMap<String, Vec<u8>>>,
-    /// The bytes the previous deactivate returned.
+    /// The restored bytes supplied to the current or most recent activation.
     pub restored: Option<Vec<u8>>,
 }
 
@@ -492,9 +492,14 @@ struct PendingRequest {
     correlation: u64,
     needed_grant: Option<&'static str>,
     fixed: Option<Outcome>,
+    /// The sound name when the intent is `play-sound`.
+    sound: Option<String>,
 }
 
 mod bridge;
+mod delivery;
+mod native;
+mod setup;
 
 /// One plugin on one side with deterministic fakes.
 #[derive(Debug)]
@@ -535,6 +540,7 @@ pub struct FakeHost {
     pending: Vec<PendingRequest>,
     outcomes: Vec<Outcome>,
     auto_outcome: Option<Outcome>,
+    played_sounds: Vec<String>,
     dedup: BTreeMap<String, (u64, u64)>,
     failures: Vec<FailureRecord>,
     restarts: Vec<Restart>,
@@ -615,6 +621,7 @@ impl FakeHost {
             pending: Vec::new(),
             outcomes: Vec::new(),
             auto_outcome: None,
+            played_sounds: Vec::new(),
             dedup: BTreeMap::new(),
             failures: Vec::new(),
             restarts: Vec::new(),
@@ -1171,10 +1178,15 @@ impl FakeHost {
                 .calls
                 .push(format!("submission:{}", submission.correlation));
             self.submitted.push(submission.clone());
+            let sound = match &submission.intent {
+                Intent::PlaySound(name) => Some(name.clone()),
+                _ => None,
+            };
             self.pending.push(PendingRequest {
                 correlation: submission.correlation,
                 needed_grant,
                 fixed: verdict,
+                sound,
             });
         }
         submissions
@@ -1256,7 +1268,7 @@ impl FakeHost {
         }
     }
 
-    /// Runs queued deliveries and completions until idle; fails with `harness.settle-limit` after 100 rounds.
+    /// Completes fake work and delivers completion batches until idle, at most 100 rounds.
     pub fn settle(&mut self) {
         self.require_started("settle");
         for _round in 0..=SETTLE_ROUNDS {
@@ -1299,10 +1311,17 @@ impl FakeHost {
         let pending = std::mem::take(&mut self.pending);
         let mut events = Vec::new();
         for request in pending {
+            let defaulted = request.fixed.is_none() && self.auto_outcome.is_none();
             let outcome = request
                 .fixed
                 .or_else(|| self.auto_outcome.clone())
                 .unwrap_or(Outcome::Ok);
+            if defaulted {
+                if let Some(name) = request.sound {
+                    // The sound fake records the effect instead of touching host audio.
+                    self.played_sounds.push(name);
+                }
+            }
             self.outcomes.push(outcome.clone());
             events.push(Event::RequestCompleted(RequestResult {
                 request: RequestRef::Submission(request.correlation),
@@ -1312,7 +1331,7 @@ impl FakeHost {
         events
     }
 
-    /// Outcomes completed so far, in order.
+    /// Outcomes completed so far, in submission order.
     pub fn outcomes(&self) -> Vec<Outcome> {
         self.outcomes.clone()
     }
@@ -1338,6 +1357,11 @@ impl FakeHost {
         self.outbox
             .borrow_mut()
             .push(Event::RequestCompleted(RequestResult { request, outcome }));
+    }
+
+    /// Sounds applied to the deterministic sound fake at `settle`; this never plays host audio.
+    pub fn played_sounds(&self) -> Vec<String> {
+        self.played_sounds.clone()
     }
 }
 

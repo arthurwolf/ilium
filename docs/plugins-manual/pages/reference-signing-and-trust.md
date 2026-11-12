@@ -480,3 +480,7 @@ Signature algorithms are not permanent. A cryptographic break or a better scheme
 The host verifies both the old and the new algorithm during the announced period, so no package is stranded. After retirement the registry stops accepting new publishes signed only with the retired algorithm, while the host keeps verifying packages already installed and warns the user.
 
 - **[PRX-010]** Adding or retiring a signature algorithm MUST be announced at least 12 months before enforcement; during that period the host MUST verify both algorithms; after retirement the registry MUST refuse new publishes signed only with the retired algorithm while the host still verifies already-installed packages signed with it and shows a warning naming the algorithm.
+
+## Production additions (round 12)
+
+- **[PRP-011]** The system must accept a package signed by the declared recovery_key_id as a key change only after a registry-signed key-recovery statement, a 14-day public delay and a trust dialog showing both fingerprints and the delay, and otherwise refuse with trust.source-changed and an audit record.

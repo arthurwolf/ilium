@@ -208,3 +208,15 @@ The project sets its own disclosure clocks in this page ([SEC-321], [SEC-729]). 
 - **[SEC-439]** The project MUST publish a `security.txt` with contact, policy link and expiry no more than 12 months ahead, naming the SECURITY.md contact.
 - **[SEC-440]** The disclosure policy MUST state a good-faith safe harbor for reporters.
 - **[SEC-441]** Reporters MUST be credited on request or kept anonymous on request; the embargo MUST NOT exceed 90 days without written consent.
+
+## Production additions (round 10)
+
+- **[PRR-016]** The system must have a running host fetch the signed blocklist at least every 6 hours (configurable down to 1 hour), disable a named plugin within 60 seconds of receiving an entry with an audit record, and show a persistent revocation data stale warning in the Plugins screen and ilium plugin doctor after 7 days of feed unreachability while still applying the last verified list.
+
+## Production additions (round 11)
+
+- **[PRQ-011]** The system must offer an admin policy key [packages] max_revocation_age (default unset, minimum 1 hour) so that when the last verified revocation feed is older than it, the host refuses to start or activate any T2 or T3 plugin with trust.revocation-stale, writes one audit record naming feed age and limit, and resumes loading within 60 seconds of a verified fresh feed.
+
+## Production additions (round 12)
+
+- **[PRP-012]** The system must apply a blocklist entry at exactly its declared scope (version, range, publisher-key or id), show the entry id and reason in the notice, keep plugin data and secrets unchanged and unreadable while blocked, and allow override only through the admin policy key allow_blocked with an audit record.

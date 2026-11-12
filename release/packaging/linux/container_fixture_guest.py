@@ -73,17 +73,36 @@ def retire_user_unit(unit, cgroup):  # Verify physical collection of this exact 
     raise ValueError('delegation capability unit did not physically retire')  # Fail instead of deleting its cgroup manually.
 
 
-def namespace_record():  # Observe actual kernel boundaries before starting the package transaction.
+def namespace_record(diagnostics=None):  # Preserve failed observations separately from accepted namespace evidence.
     require(Path('/proc/1/comm').read_text().strip() == 'systemd', 'container PID 1 is not systemd')  # A shell or tini is insufficient.
     namespaces = {name: os.stat('/proc/1/ns/' + name).st_ino for name in namespace_names}  # Capture the container init's namespace identities.
-    require(all(os.stat('/proc/self/ns/' + name).st_ino == value for name, value in namespaces.items()), 'caller is outside the container init namespaces')  # Keep process and cgroup path interpretations aligned.
+    caller_namespaces = {name: os.stat('/proc/self/ns/' + name).st_ino for name in namespace_names}  # Retain the same kernel reads for failure diagnosis.
+    if diagnostics is not None:  # Direct callers may omit diagnostic retention without changing admission.
+        diagnostics['init_namespaces'] = namespaces  # These observations never substitute for host corroboration.
+        diagnostics['caller_namespaces'] = caller_namespaces  # Preserve the actual caller view before comparison.
+        for name in ('/proc/1/cgroup', '/proc/self/cgroup', '/proc/1/uid_map', '/proc/1/gid_map'):  # Read only fixed kernel topology records.
+            try:  # Optional evidence failure must not replace the original isolation rejection.
+                with Path(name).open('r', encoding='utf-8', errors='replace') as stream:  # Bound diagnostic allocation before parsing.
+                    text = stream.read(513)  # A 512-character field leaves room under the host JSON ceiling.
+                diagnostics[name] = {'text': text[:512], 'truncated': len(text) > 512}  # Never present a shortened field as complete.
+            except OSError as error:  # Retain unreadable observations without guessing their values.
+                diagnostics[name] = {'error': str(error)[:256]}  # Preserve the original gate as the qualification authority.
+    require(caller_namespaces == namespaces, 'caller is outside the container init namespaces')  # Keep process and cgroup path interpretations aligned.
     mounts = []  # Locate the actual cgroup-v2 mount.
-    for line in Path('/proc/self/mountinfo').read_text().splitlines():  # Read this process's kernel mount table.
+    mountinfo = Path('/proc/self/mountinfo').read_text()  # Use one snapshot for both diagnosis and the original admission parser.
+    if diagnostics is not None:  # Retain raw target rows before any topology assertion can reject them.
+        rows = [line for line in mountinfo.splitlines() if len(line.split()) > 4 and line.split()[4] == '/sys/fs/cgroup']  # Preserve exact kernel row spelling.
+        diagnostics['cgroup_mount_rows'] = [{'text': line[:1024], 'truncated': len(line) > 1024} for line in rows[:4]]  # Cap retained text at 4096 characters, including rejected layouts.
+        diagnostics['cgroup_mount_count'] = len(rows)  # Distinguish absence, uniqueness and ambiguous overmounts.
+        diagnostics['cgroup_mount_rows_truncated'] = len(rows) > 4  # Expose row-count truncation explicitly.
+    for line in mountinfo.splitlines():  # Keep the original exact-root selection and rejection contract.
         fields = line.split()  # The fixed mountpoint contains no escaped characters.
         if fields[4] == '/sys/fs/cgroup':  # Do not accept a second unrelated mount.
             mounts.append((fields, fields.index('-')))  # Retain filesystem type and mount-root fields.
     require(len(mounts) == 1, 'cgroup mount is missing or ambiguous')  # Reject guessed mount layouts.
     fields, separator = mounts[0]  # Use only the exact mounted cgroup root.
+    if diagnostics is not None:  # Evaluate every conjunct without turning a failed check into admission.
+        diagnostics['mount_checks'] = {'root_is_slash': fields[3] == '/', 'mount_rw': 'rw' in fields[5].split(','), 'filesystem_is_cgroup2': fields[separator + 1] == 'cgroup2', 'superblock_rw': 'rw' in fields[separator + 3].split(',') if len(fields) > separator + 3 else None}  # The raw row explains each independently retained boolean.
     require(fields[3] == '/' and 'rw' in fields[5].split(',') and fields[separator + 1] == 'cgroup2', 'cgroup namespace root is not a writable unified hierarchy')  # A host-relative subtree bind is not sufficient.
     require(controllers <= set(Path('/sys/fs/cgroup/cgroup.controllers').read_text().split()), 'container lacks cpu, memory or pids')  # Never enable an unavailable ancestor controller.
     init_group = membership(Path('/proc/1/cgroup').read_text())  # Bind PID 1 to the visible cgroup tree.
@@ -123,6 +142,17 @@ def read_ready(stream, timeout=5):
         value += chunk
         require(b'ready\n'.startswith(value), 'limited child readiness differs')
     return value
+
+
+def hung_probe_evidence(unit, expired):  # Explain a probe that outlived its own runtime limit.
+    evidence = ['probe partial output: ' + repr(((expired.stdout or '') + (expired.stderr or ''))[-600:])]  # Python 3.6 keeps these as text when requested.
+    for label, command, user in (('unit status', ['/usr/bin/systemctl', '--user', 'status', '--no-pager', '--full', unit], True), ('manager journal', ['/usr/bin/journalctl', '--no-pager', '-n', '60', '-u', user_unit], False), ('processes', ['/usr/bin/ps', '-eo', 'pid,ppid,stat,etime,cgroup,args'], False)):  # Fixed read-only views.
+        try:  # Evidence gathering never replaces the timeout failure.
+            done = subprocess.run(command, env=user_environment() if user else None, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, timeout=10)  # Bound each view.
+            evidence.append(label + ': ' + done.stdout[-1500:])  # Keep the tail, where the stall shows.
+        except (OSError, subprocess.SubprocessError) as error:  # A missing tool is itself a finding.
+            evidence.append(label + ' unavailable: ' + str(error)[-300:])  # Preserve the reason.
+    return evidence
 
 
 def delegated_check(unit):  # Exercise delegation only in this fresh probe service.
@@ -169,7 +199,8 @@ def main():  # Run only in the fixture's root transaction service.
     manager_group = None  # Retain the exact guest user-manager cgroup once observed.
     manager_attempted = False  # Partial manager startup also requires cleanup.
     try:  # Preserve diagnostic and cleanup evidence after any startup failure.
-        result['namespace'] = namespace_record()  # Reject incorrect namespace topology before a package install.
+        result['namespace_diagnostics'] = {}  # Keep partial observations outside the accepted namespace schema.
+        result['namespace'] = namespace_record(result['namespace_diagnostics'])  # Retain diagnostics even when the unchanged isolation gate raises.
         result['machine'] = os.uname().machine  # Match this booted container to the requested native architecture.
         os_release = {}  # Parse only the two required distro identity fields.
         for line in Path('/etc/os-release').read_text().splitlines():  # Use the booted distribution's own identity file.
@@ -206,7 +237,11 @@ def main():  # Run only in the fixture's root transaction service.
         absent = json.loads(run(as_user(['/usr/bin/python3', __file__, 'unit-state', probe_unit])))  # Require a real manager response before adopting a name.
         require(absent['LoadState'] == 'not-found', 'capability service identity already exists')  # Never stop or reuse another service.
         command = ['/usr/bin/systemd-run', '--user', '--wait', '--pipe', '--collect', '--quiet', '--unit=' + probe_unit, '--property=Type=exec', '--property=Delegate=yes', '--property=MemoryMax=536870912', '--property=MemorySwapMax=0', '--property=TasksMax=64', '--property=RuntimeMaxSec=45', '/usr/bin/python3', __file__, 'delegate', probe_unit]  # Delegate only the fresh sacrificial capability service.
-        result['delegation'] = json.loads(run(as_user(command), timeout=60))  # A failure prevents actual package qualification.
+        try:  # A hung transient service needs manager evidence before it is torn down.
+            result['delegation'] = json.loads(run(as_user(command), timeout=60))  # A failure prevents actual package qualification.
+        except subprocess.TimeoutExpired as expired:  # Keep the original timeout as the authoritative failure.
+            result['errors'].extend(hung_probe_evidence(probe_unit, expired))  # Record what the manager and processes were doing.
+            raise
         probe_group = Path(result['delegation']['cgroup'])  # Retain the path reported by the independently executed user process.
         require(manager_group in probe_group.parents and probe_group.name == probe_unit, 'capability service escaped its manager')  # Confine retirement to this manager's subtree.
         retire_user_unit(probe_unit, probe_group)  # Require --wait/--collect to physically retire the successful probe before package execution.

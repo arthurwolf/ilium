@@ -43,7 +43,15 @@ LIFECYCLE = ROOT / 'release/packaging/linux/lifecycle.sh'
 DEB_IMAGES = ('ubuntu:22.04', 'ubuntu:24.04', 'debian:12')
 RPM_IMAGES = ('fedora:41', 'opensuse/leap:15.6')
 APPIMAGE_IMAGE = 'ubuntu:24.04'
-UNPRIVILEGED = 'setpriv --reuid=65534 --regid=65534 --clear-groups'
+ROOT_PACKAGE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+UNPRIVILEGED = 'setpriv --reuid=65534 --regid=65534 --clear-groups env PATH=/usr/bin:/bin'
+# The animation sandbox requires a delegated cgroup; setpriv alone retains the root service's cgroup.
+DELEGATED_PROBE = (UNPRIVILEGED + ' /usr/bin/systemd-run --user --wait --pipe --collect --quiet'
+                   ' --property=Type=exec --property=Delegate=yes --setenv=PATH=/usr/bin:/bin' + ''.join(
+                       ' --setenv="%s=${%s:-}"' % (name, name) for name in (
+                           'HOME', 'XDG_RUNTIME_DIR', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME',
+                           'XDG_CACHE_HOME', 'TMPDIR', 'ILIUM_SMOKE_BASE',
+                           'APPIMAGE_EXTRACT_AND_RUN', 'ILIUM_SMOKE_IMAGE')))
 
 
 def require(condition, message):
@@ -219,7 +227,7 @@ def appimage_wrapper(image, checks, version):  # Check the actual cache used by 
         shlex.quote(str(image)) + ' "$@" # Exercise the actual AppImage launcher.',  # The host or container environment chooses its declared execution mode.
         'identity=$(cat %s) # Read the receipt-bound cache identity.' % shlex.quote(str(Path(checks) / 'identity')),  # Use exactly the builder's key.
         'target=$XDG_DATA_HOME/ilium/appimage/$identity # Locate this invocation\'s materialized pair.',  # Lifecycle may change XDG_DATA_HOME between runs.
-        'sh %s "$target" >&2 # Verify actual materialized runtime bytes.' % shlex.quote(str(Path(checks) / 'check-core.sh')),  # Keep ls stdout usable by the lifecycle contract.
+        'check=$(sh %s "$target" 2>&1) || { printf "%%s\\n" "$check" >&2; exit 1; } # Verify actual materialized runtime bytes; the animation gate requires an empty stderr on success.' % shlex.quote(str(Path(checks) / 'check-core.sh')),  # Keep ls stdout usable by the lifecycle contract.
         'test "$("$target/ilium-server" --version)" = %s # Check the installed sibling server.' % shlex.quote('ilium-server ' + version),  # Preserve exact server-version expectations.
         'test "$("$target/ilium-animation-helper" --version)" = %s # Check the installed animation helper.' % shlex.quote(release_tool.helper_version_record(version)),
     ]) + '\n'  # Return complete executable wrapper source.
@@ -408,6 +416,7 @@ def managed_script(package_format, prelude, install, remove, body):  # Preserve 
     absent = '/smoke/absent-' + package_format + '.sh'  # Reuse the exact before/after inventory gate.
     return '\n'.join([  # Each cleanup command has its own explicit failure handling.
         'set -eu # Fail native acceptance on the first functional error.',  # Run through the existing sh -ec interface.
+        'export PATH=' + ROOT_PACKAGE_PATH + ' # Resolve root package tools and helpers only from standard system directories.',
         'owned=0 # Never remove an installation before ownership preflight.',  # Installation ownership is armed only after absence.
         'cleanup() { # Preserve both primary failure and cleanup outcome.',  # Trap-owned teardown is part of qualification.
         '    prior=$? # Retain the original command status.',  # Successful removal must not erase a failed smoke.
@@ -439,7 +448,7 @@ def installed_body(version):  # Share complete FHS installed behavior across deb
         'test "$(/usr/bin/ilium-server --version)" = %s # Check the installed server.' % shlex.quote('ilium-server ' + version),  # Repair the RPM server-version omission.
         'test "$(/usr/lib/ilium/ilium-animation-helper --version)" = %s # Check the installed animation helper.' % shlex.quote(release_tool.helper_version_record(version)),
         'printf "ILIUM_ANIMATION_BEGIN\\n" # Delimit the native installed helper IPC proof.',
-        UNPRIVILEGED + ' /usr/bin/ilium release-animation-probe # Exercise both approved packages as the disposable account.',
+        DELEGATED_PROBE + ' /usr/bin/ilium release-animation-probe # Exercise both approved packages in a delegated user service.',
         'printf "ILIUM_ANIMATION_END\\n" # A failed probe cannot reach this marker under sh -e.',
         'test "$(readlink /usr/bin/ilium)" = ../lib/ilium/ilium # Bind the client launcher.',  # Preserve the builder's exact symlink contract.
         'test "$(readlink /usr/bin/ilium-server)" = ../lib/ilium/ilium-server # Bind the server launcher.',  # Reject redirected sibling launchers.
@@ -451,8 +460,13 @@ def deb_script(name, version, *, offline=False):  # Preserve the existing helper
     prelude = 'export DEBIAN_FRONTEND=noninteractive # Disable package-manager prompts.\nrm -f /etc/dpkg/dpkg.cfg.d/excludes # Preserve audited notices.\napt-get update -qq >/dev/null # Refresh this disposable image.'  # Retain existing working setup.
     install = 'apt-get install -y -qq %s >/dev/null # Install the exact deb.' % shlex.quote('/packages/' + name)  # Quote the receipt-bound path.
     if offline:  # Dependency preparation already completed inside the native base image.
-        prelude = ": # Use the prepared package database without external networking."  # Keep acceptance in its private network namespace.
-        install = install.replace("apt-get install", "apt-get --no-download install")  # Require all dependencies to be locally available.
+        prelude = '\n'.join([  # Retain native tool identity and public package metadata before taking installation ownership.
+            'export DEBIAN_FRONTEND=noninteractive # Disable package-manager prompts in the isolated boot.',  # Preserve the normal Debian transaction environment.
+            'apt-get --version >&2 # Retain the actual APT version.',  # Do not infer a version from the distribution label.
+            'dpkg --version >&2 # Retain the actual native installer version.',  # Bind diagnosis to the executed distribution tools.
+            'dpkg-deb --field %s Package Version Architecture Depends Pre-Depends >&2 # Retain exact-file dependency metadata.' % shlex.quote('/packages/' + name),  # Read only the admitted local package.
+        ])  # These read-only diagnostics cannot substitute for installation acceptance.
+        install = 'dpkg --install %s # Install the exact local file with normal dependency enforcement.\napt-get --no-download check # Reject any broken dependency state before installed verification.' % shlex.quote('/packages/' + name)  # Avoid APT local-file acquisition while keeping the boot offline.
     body = "dpkg -s ilium | grep -q '^Status: install ok installed' # Verify successful registration.\nsh /smoke/package-deb.sh / # Read back every admitted package-owned leaf.\n" + installed_body(version)  # Retain the existing registration proof.
     return managed_script('deb', prelude, install, 'apt-get remove -y -qq ilium >/dev/null', body)  # Make removal and readback part of success.
 
@@ -475,7 +489,7 @@ def appimage_script(name, version, *, offline=False):  # Keep extract-and-run as
         'export DEBIAN_FRONTEND=noninteractive # Avoid interactive apt prompts.',  # Keep native dependency installation unattended.
         ': # Use the prepared distribution metadata.' if offline else 'apt-get update -qq >/dev/null # Refresh the disposable image.',  # Preserve the existing Ubuntu lane.
         ': # Runtime dependencies were installed during image preparation.' if offline else 'apt-get install -y -qq libasound2t64 libssl3t64 libstdc++6 >/dev/null # Install existing runtime dependencies.',  # Do not alter the AppImage payload.
-        'work=$(mktemp -d /tmp/ilium-appimage.XXXXXX) # Own all extraction and cache data.',  # Never use the developer\'s AppImage cache.
+        'work=$(mktemp -d /var/tmp/ilium-appimage.XXXXXX) # Own all extraction and cache data on disk: guest /tmp is a memory-backed tmpfs charged to the 768 MiB caller budget.',  # Never use the developer\'s AppImage cache.
         'trap \'rm -rf "$work"\' EXIT # Limit fallback cleanup to the owned scope.',  # Container failure still propagates through sh -e.
         'chmod 0755 "$work" # Allow the existing unprivileged identity to enter.',  # Avoid root-only temporary-directory permissions.
         'cp %s "$work/ilium.AppImage" # Preserve the input artifact.' % shlex.quote('/packages/' + name),  # Only the private copy is made executable.
@@ -491,7 +505,7 @@ def appimage_script(name, version, *, offline=False):  # Keep extract-and-run as
         'export APPIMAGE_EXTRACT_AND_RUN=1 ILIUM_SMOKE_IMAGE="$work/ilium.AppImage" # Select only this container\'s extraction execution mode.',  # The host mode explicitly clears extraction overrides.
         'test "$(%s sh "$work/client.sh" --version)" = %s # Verify client, cached bytes and sibling server.' % (UNPRIVILEGED, shlex.quote('ilium ' + version)),  # The wrapper checks the exact server version too.
         'printf "ILIUM_ANIMATION_BEGIN\\n" # Delimit the installed AppImage cache proof.',
-        '%s sh "$work/client.sh" release-animation-probe # Use the real image launcher and cache.' % UNPRIVILEGED,
+        '%s sh "$work/client.sh" release-animation-probe # Use the real image launcher and cache in a delegated user service.' % DELEGATED_PROBE,
         'printf "ILIUM_ANIMATION_END\\n" # Preserve the failure-sensitive shell contract.',
         '%s sh /smoke/lifecycle.sh sh "$work/client.sh" # Retain real extract-and-run lifecycle coverage.' % UNPRIVILEGED,  # The wrapper hashes each lifecycle cache before it disappears.
         'rm -rf "$work" # Remove only the owned image, extraction and cache.',  # AppImage has no package-manager registration.
@@ -771,6 +785,29 @@ def expect_version(command, expected, log, label, environment):  # Check a real 
     require(result.stdout.rstrip('\n') == expected, 'installed version differs: expected %r, got %r' % (expected, result.stdout))  # Do not accept a different successful binary.
 
 
+# Older systemd (Ubuntu 22.04) keeps the service process in the delegated cgroup, which forbids enabling child controllers there;
+# move into a child cgroup first, then enable the controllers the sandbox requires on the now process-free parent.
+DELEGATED_LEAF = (  # The runner's shell fails the cgroup.procs write with EIO while a Python process succeeds, so Python does the setup.
+    'import os, sys\n'
+    'cg = "/sys/fs/cgroup" + next(l.strip()[3:] for l in open("/proc/self/cgroup") if l.startswith("0::"))\n'
+    'os.mkdir(cg + "/probe")\n'
+    'open(cg + "/probe/cgroup.procs", "w").write(str(os.getpid()))\n'
+    'open(cg + "/cgroup.subtree_control", "w").write("+cpu +memory +pids")\n'
+    'os.execvp(sys.argv[1], sys.argv[1:])\n')
+
+
+def delegated_service(command, child_env, own_bus=False):  # The animation sandbox needs an owned cgroup with memory, pids and cpu, which a runner's service cgroup lacks.
+    uid, gid = os.getuid(), os.getgid()  # Keep the probe unprivileged while a system service supplies the delegated cgroup.
+    if own_bus:  # Flatpak's session helper spawns the server, so it must be started by a bus that lives inside this service's cgroup.
+        child_env = {key: value for key, value in child_env.items() if key != 'DBUS_SESSION_BUS_ADDRESS'}
+        command = ['sh', '-c', 'err=$(mktemp) || exit 1; dbus-run-session -- "$@" 2>"$err"; status=$?; '  # The bus daemon logs every service activation to stderr, which the animation gate rejects.
+                   '[ "$status" -eq 0 ] || cat "$err" >&2; rm -f "$err"; exit "$status"', 'sh', *command]  # Surface the diagnostics only when the probe fails.
+    return [*sudo(), 'systemd-run', '--uid=%d' % uid, '--gid=%d' % gid, '--wait', '--pipe', '--collect', '--quiet',
+            '--property=Type=exec', '--property=Delegate=cpu memory pids', '--property=MemoryMax=6G', '--property=TasksMax=4096', '--property=CPUWeight=100', '--property=WorkingDirectory=' + os.getcwd(),
+            *('--setenv=%s=%s' % item for item in sorted(child_env.items())), '/usr/bin/python3', '-c', DELEGATED_LEAF,
+            *[str(part) for part in command]]
+
+
 def installed_animation(arguments, receipt, log, label, package_format, payload_root,
                         executable_root, launcher, environment):
     supplied_audit = getattr(arguments, 'audit_report', None)
@@ -785,7 +822,7 @@ def installed_animation(arguments, receipt, log, label, package_format, payload_
                            format=package_format, executable_root=Path(executable_root)),
         command=[str(part) for part in launcher] + ['release-animation-probe'],
         environment=environment,
-        executor=lambda command, child_env, timeout: checked(command, log, label,
+        executor=lambda command, child_env, timeout: checked(delegated_service(command, child_env, own_bus=package_format == 'flatpak'), log, label,
                                                                env=child_env, timeout=timeout))
     require(qualified['installed_files']['ilium'] == receipt['package_files']['ilium'] and
             qualified['installed_files']['ilium-animation-helper'] ==
@@ -892,7 +929,7 @@ def flatpak_wrapper(user_directory, host_environment, architecture, command=None
     fixed += [key + '=' + host_environment[key] for key in ('HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'TMPDIR') if key in host_environment]  # Keep launcher-side state stable and owned.
     if host_environment.get('XDG_RUNTIME_DIR'):  # Preserve the real session runtime needed by Flatpak itself.
         fixed.append('XDG_RUNTIME_DIR=' + host_environment['XDG_RUNTIME_DIR'])  # Do not replace the launcher's session context with lifecycle scratch.
-    fixed += ['flatpak', 'run', '--user', '--arch=' + architecture, '--branch=' + packages.FLATPAK_BRANCH]  # Exclude same-ID system or other-architecture applications.
+    fixed += ['flatpak', 'run', '--user', '--no-documents-portal', '--arch=' + architecture, '--branch=' + packages.FLATPAK_BRANCH]  # Exclude same-ID system or other-architecture applications.
     if command is not None:  # The client exercises the metadata's default command.
         fixed.append('--command=' + command)  # Server-version readback uses the documented command override.
     return '#!/bin/sh\n' + 'exec ' + shlex.join(fixed) + ' --env=HOME="$HOME" --env=XDG_DATA_HOME="$XDG_DATA_HOME" --env=XDG_CONFIG_HOME="$XDG_CONFIG_HOME" --env=XDG_CACHE_HOME="$XDG_CACHE_HOME" --env=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" --env=TMPDIR="$TMPDIR" ' + shlex.quote(packages.APP_ID) + ' "$@" # Run with fixed installation identity and isolated application state.\n'  # Shell expansion captures lifecycle state before env fixes the launcher.
@@ -1092,4 +1129,6 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
+    if sys.argv[1:2] == ['host'] and not os.environ.get('DBUS_SESSION_BUS_ADDRESS') and shutil.which('dbus-run-session'):
+        os.execvp('dbus-run-session', ['dbus-run-session', '--', sys.executable, *sys.argv])  # Flatpak needs a session bus on a headless runner.
     sys.exit(main())

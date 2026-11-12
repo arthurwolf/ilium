@@ -1,5 +1,7 @@
 //! Real helper process and original broker activation for pure task yields.
-#![cfg(all(feature = "v8-runtime", feature = "native-host"))]
+// The animation helper sandbox (bubblewrap/cgroup/seccomp) is qualified only on Linux; elsewhere
+// `spawn_helper` deliberately returns Unsupported, so tests that spawn the real helper run on Linux only.
+#![cfg(all(feature = "v8-runtime", feature = "native-host", target_os = "linux"))]
 mod common;
 
 use ilium_animation_js::{

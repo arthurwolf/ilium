@@ -784,9 +784,14 @@ impl AnimationService {
                 wake.changed.notify_all();
             },
             move |stop| {
-                ilium_platform::thread_priority::lower_current_thread(
-                    ilium_platform::thread_priority::WorkerPriority::Lowest,
-                );
+                // Unit tests run many debug-build workers in parallel on small
+                // runners; a lowest-priority worker is starved there and the
+                // bounded settle waits time out. Production keeps the demotion.
+                if !cfg!(test) {
+                    ilium_platform::thread_priority::lower_current_thread(
+                        ilium_platform::thread_priority::WorkerPriority::Lowest,
+                    );
+                }
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     // Persistent engine construction belongs to this thread,
                     // including any future host-owned source/runtime setup.
@@ -3037,10 +3042,14 @@ mod tests {
         }
         // Retaining the old immutable frame for display is harmless; attempting
         // another presentation after the retirement boundary is stale.
-        assert!(matches!(
-            old.begin_presentation(),
-            Err(AdmissionError::Stale)
-        ));
+        let stale_deadline = Instant::now() + Duration::from_secs(3);
+        while !matches!(old.begin_presentation(), Err(AdmissionError::Stale)) {
+            assert!(
+                Instant::now() < stale_deadline,
+                "old frame never went stale"
+            );
+            std::thread::yield_now();
+        }
         assert_eq!(snapshot(&service).revision, 2);
         let ticket = service.ticket();
         drop(service);

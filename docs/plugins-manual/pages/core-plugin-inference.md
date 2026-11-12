@@ -802,3 +802,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 8)
 
 - **[PRT-003]** The Inference plugin MUST refuse to send a request, and MUST refuse to send a credential, to a non-loopback provider endpoint that is not https, MUST validate the server certificate without a user-skippable bypass, and MUST NOT follow a redirect to a different host or to http.
+
+## Production additions (round 11)
+
+- **[PRQ-010]** The system must show in the Inference tab one table listing every core and installed plugin that made a model request in the last 30 days, with provider, data class and last-used time, and let the user disable each row so the plugin receives not-permitted reason user-disabled.

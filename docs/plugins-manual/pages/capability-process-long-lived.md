@@ -210,3 +210,7 @@ Long-lived children follow the same confinement as `process.run` ([SEC-032], [SE
 ## Production additions (round 3)
 
 - **[PRY-017]** The host MUST refuse a spawn with busy and retryAfterMs 5000 when the same plugin has spawned the same program more than 5 times in 10 seconds, and MUST record one audit entry for the refusal burst rather than one per refused call.
+
+## Production additions (round 11)
+
+- **[PRQ-012]** The system must, when a process.run or process.spawn grant is revoked or expires or the plugin enters disabled-blocked, signal the whole process group of every child that plugin started (SIGTERM, then SIGKILL after 2000 ms) so no child exists 3 seconds later, and write one process-killed audit record per child with reason revoked.

@@ -768,3 +768,7 @@ The user sees the registry only through search results, plugin detail pages and 
 ## Production additions (round 8)
 
 - **[PRT-011]** A client downloading a package blob MUST abort the transfer with registry.size as soon as the received bytes exceed the length field of the signed index entry or the 64 MiB package limit, and MUST abort with registry.stalled when no bytes arrive for 30 seconds, and MUST delete the partial staging file in both cases.
+
+## Production additions (round 10)
+
+- **[PRR-003]** The system must, when the first configured registry is unreachable after its retries, try the next configured registry for install, search and update checks, still refuse any package whose id is owned by a different registry, and record in the result and the audit record which registry served the metadata.

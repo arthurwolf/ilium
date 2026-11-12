@@ -723,7 +723,7 @@ pub fn resource_process_is_live(identity: &ResourceProcessIdentity) -> io::Resul
         Err(error) => Err(error),
     }
 }
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod identity_tests {
     use super::*;
     #[cfg(target_os = "linux")]

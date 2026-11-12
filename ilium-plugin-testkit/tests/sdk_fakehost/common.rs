@@ -166,7 +166,7 @@ pub fn manifest_text(id: &str, server_grants: &[&str], client_grants: &[&str]) -
   "name": "Test plugin",
   "version": "0.1.0",
   "publisher": "Example Publisher",
-  "server": {{ "entry": "server.wasm", "world": "ilium:server/base@0.1.0", "exports": ["handler"] }},
+  "server": {{ "entry": "server.wasm", "world": "ilium:server/base@0.1.0", "exports": [] }},
   "client": {{ "entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": ["views"] }},
   "capabilities": {{ "server": [{}], "client": [{}] }}
 }}

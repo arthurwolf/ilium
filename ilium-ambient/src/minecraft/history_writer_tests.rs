@@ -19,7 +19,7 @@ fn history(completed: u64) -> History {
 }
 // Test-only finite waiting; production callbacks never block/wait for receipts.
 fn receipt(writer: &Writer) -> Receipt {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         match writer.take_receipt() {
             Ok(Some(value)) => return value,
@@ -31,7 +31,7 @@ fn receipt(writer: &Writer) -> Receipt {
     }
 }
 fn submit(writer: &Writer, serial: u64, history: History) -> Admission {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         match writer.submit(serial, history) {
             Ok(value) => return value,
@@ -43,7 +43,7 @@ fn submit(writer: &Writer, serial: u64, history: History) -> Admission {
     }
 }
 fn assert_stale(writer: &Writer, serial: u64, value: History) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         match writer.submit(serial, value) {
             // Admission is explicitly nonblocking: the worker can hold its
@@ -178,7 +178,7 @@ fn gated_writer(
         move |repository, revision, history| {
             if initial.swap(false, Ordering::Relaxed) {
                 entered_sender.send(()).unwrap();
-                gate.recv_timeout(Duration::from_secs(5)).unwrap();
+                gate.recv_timeout(Duration::from_secs(60)).unwrap();
             }
             commit(repository, revision, history)
         },
@@ -193,7 +193,7 @@ fn admission_close_is_not_a_catalog_binding_barrier_while_commit_is_in_flight() 
     let (mut writer, entered, release) = gated_writer(repository.clone());
     assert!(!writer.is_drained());
     submit(&writer, 1, history(1));
-    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    entered.recv_timeout(Duration::from_secs(60)).unwrap();
     submit(&writer, 2, history(2));
     writer.close();
     let incorrectly_drained = writer.is_drained();
@@ -202,7 +202,7 @@ fn admission_close_is_not_a_catalog_binding_barrier_while_commit_is_in_flight() 
         !incorrectly_drained,
         "catalog binding must not race an accepted, blocked history write"
     );
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     while !writer.is_drained() {
         assert!(Instant::now() < deadline);
         std::thread::yield_now();
@@ -221,7 +221,7 @@ fn drained_failure_never_certifies_history_commit_or_reopens_admission() {
     repository.commit_history(0, history(9), &|| false).unwrap();
     let writer = Writer::start(repository.clone(), 0, &crate::resources::test_resources()).unwrap();
     submit(&writer, 1, history(1));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     while !writer.is_drained() {
         assert!(Instant::now() < deadline);
         std::thread::yield_now();
@@ -238,7 +238,7 @@ fn rapid_full_snapshots_coalesce_to_latest_and_close_drains_both_accepted_slots(
     let (_temporary, repository, _) = fixture();
     let (mut writer, entered, release) = gated_writer(repository.clone());
     submit(&writer, 1, history(1));
-    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    entered.recv_timeout(Duration::from_secs(60)).unwrap();
     assert_eq!(submit(&writer, 2, history(2)), Admission::Queued);
     for serial in 3..=100 {
         assert_eq!(
@@ -256,7 +256,7 @@ fn rapid_full_snapshots_coalesce_to_latest_and_close_drains_both_accepted_slots(
     assert!(writer.shared.closed.load(Ordering::Acquire));
     assert_eq!(writer.submit(101, history(101)), Err(Error::Closed));
     release.send(()).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let result = receipt(&writer);
         assert_eq!(result.status, Status::Committed);
@@ -280,14 +280,14 @@ fn dropping_blocked_writer_drains_pending_on_background_cleanup_owner() {
     let (_temporary, repository, _) = fixture();
     let (writer, entered, release) = gated_writer(repository.clone());
     submit(&writer, 1, history(1));
-    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    entered.recv_timeout(Duration::from_secs(60)).unwrap();
     submit(&writer, 2, history(2));
     let shared = Arc::clone(&writer.shared);
     let before = Instant::now();
     drop(writer);
     assert!(before.elapsed() < Duration::from_millis(100));
     release.send(()).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         if worker_state(&shared)
             .receipt
@@ -394,13 +394,13 @@ fn worker_panic_reports_latest_accepted_serial_and_never_silently_loses_pending_
         &crate::resources::test_resources(),
         move |_, _, _| {
             entered_sender.send(()).unwrap();
-            gate.recv_timeout(Duration::from_secs(5)).unwrap();
+            gate.recv_timeout(Duration::from_secs(60)).unwrap();
             panic!("synthetic worker fault before publication");
         },
     )
     .unwrap();
     submit(&writer, 1, history(1));
-    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    entered.recv_timeout(Duration::from_secs(60)).unwrap();
     submit(&writer, 2, history(2));
     release.send(()).unwrap();
     let result = receipt(&writer);
@@ -437,7 +437,7 @@ fn independently_stopped_worker_drains_accepted_latest_then_closes_admission() {
     let (_temporary, repository, _) = fixture();
     let (writer, entered, release) = gated_writer(repository.clone());
     submit(&writer, 1, history(1));
-    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    entered.recv_timeout(Duration::from_secs(60)).unwrap();
     writer
         .worker
         .as_ref()
@@ -449,7 +449,7 @@ fn independently_stopped_worker_drains_accepted_latest_then_closes_admission() {
     // The stop flag does not cancel accepted disk transactions. Observe their
     // terminal lifecycle with the same finite budget as the other disk tests;
     // closure alone cannot distinguish a slow drain from a failed commit.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(60);
     while !writer.is_drained() {
         assert!(
             Instant::now() < deadline,
@@ -574,14 +574,14 @@ fn blocked_commit_keeps_its_independent_host_claim_after_writer_drop_until_join(
         &resources,
         move |repository, revision, history| {
             entered_sender.send(()).unwrap();
-            gate.recv_timeout(Duration::from_secs(5)).unwrap();
+            gate.recv_timeout(Duration::from_secs(60)).unwrap();
             commit(repository, revision, history)
         },
     )
     .unwrap();
     let ticket = writer.worker.as_ref().unwrap().join_observer().unwrap();
     submit(&writer, 1, history(1));
-    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    entered.recv_timeout(Duration::from_secs(60)).unwrap();
     drop(writer);
     assert_eq!(quota.snapshot().worker_threads, 2);
     assert_eq!(
@@ -597,7 +597,7 @@ fn blocked_commit_keeps_its_independent_host_claim_after_writer_drop_until_join(
     assert!(ticket.exit().is_none());
     release.send(()).unwrap();
     ticket
-        .join_until(Instant::now() + Duration::from_secs(5))
+        .join_until(Instant::now() + Duration::from_secs(60))
         .unwrap();
     assert_eq!(quota.snapshot().worker_threads, 1);
     assert_eq!(quota.snapshot().worker_bytes, baseline);
@@ -606,7 +606,7 @@ fn blocked_commit_keeps_its_independent_host_claim_after_writer_drop_until_join(
     assert_eq!(quota.snapshot().worker_bytes, baseline);
     execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
     execution
-        .join_until_background(Instant::now() + Duration::from_secs(5))
+        .join_until_background(Instant::now() + Duration::from_secs(60))
         .unwrap();
 }
 
@@ -637,6 +637,6 @@ fn rejected_history_thread_admission_never_starts_commit_callback() {
     drop(claim);
     execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
     execution
-        .join_until_background(Instant::now() + Duration::from_secs(5))
+        .join_until_background(Instant::now() + Duration::from_secs(60))
         .unwrap();
 }

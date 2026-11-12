@@ -2052,7 +2052,7 @@ mod tests {
             ),
             (
                 SettingsChoice::AgentMonitoringMode,
-                vec!["Normal", "Attention"],
+                vec!["Normal", "Attention", "Custom"],
             ),
         ] {
             let (options, selected) = field.options(&app);

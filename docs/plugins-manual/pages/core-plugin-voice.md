@@ -647,3 +647,15 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 8)
 
 - **[PRT-004]** Raw captured audio MUST stay in memory or in an owner-only temporary file, MUST be sent only to a speech model running on the machine unless the user has enabled a named remote provider in the same session, and MUST be deleted when transcription ends or fails, unless the user has enabled recording retention.
+
+## Production additions (round 10)
+
+- **[PRR-021]** The system must offer a Voice Recognition language setting that defaults to the active UI language, refuse to start capture with a notice naming the language when no recogniser is installed for it (leaving the microphone closed), and report the language actually used in every transcript record and hook payload.
+
+## Production additions (round 11)
+
+- **[PRQ-005]** The system must refuse capture with a notice naming the cause and the OS setting to change when microphone access is denied or no input device exists, must match spoken command names against active-language command titles with English as fallback, and must run no command and show candidates for keyboard choice when a transcript matches more than one command.
+
+## Production additions (round 12)
+
+- **[PRP-023]** The system must, before downloading a speech model, show its source host, exact size and destination, require explicit confirmation, refuse with voice.low-disk when free space is under twice the model size, resume from a verified partial file, and delete the partial file on cancel.

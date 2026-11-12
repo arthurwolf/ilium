@@ -1364,3 +1364,7 @@ Older pages use the spellings below. They are not printed. A host that reads old
 - **[PKG-581]** The host MUST refuse an install whose package source (registry URL, mirror or local file) is not in the administrator `allowed_sources` list with `policy.blocked` (detail `policy.source-denied`).
 - **[PKG-582]** A `cli` contribution that names a name owned by the kernel itself (plugin, session, kill-session, help, version) MUST be refused with `manifest.cli-name-reserved`. The names `recap`, `progress`, `wait`, `chat`, `panes`, `broadcast`, `new-pane` and `voice` are owned by bundled core plugins: only that core plugin may declare its own, and any other plugin is refused with `manifest.cli-name-taken`, which is used for a name that another installed plugin owns.
 - **[PKG-583]** An extension point that declares a risk level lower than the grant its handlers receive, or an unknown risk, MUST be refused with `manifest.point-risk`.
+
+## Production additions (round 12)
+
+- **[PRP-004]** The system must accept an optional https support_url of at most 256 characters in the manifest, show it as a distinct Get help link in Settings, the store listing and ilium plugin info, warn manifest.support-missing when neither support_url nor repository is set, and open it only after the open-external consent dialog.

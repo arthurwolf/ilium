@@ -141,7 +141,7 @@ class PosixInstallTests(unittest.TestCase):
             with self.subTest(kernel=kernel, arch=arch):
                 self.success(self.invoke("--version", "0.1.0", env={"FIXTURE_KERNEL": kernel, "FIXTURE_ARCH": arch}))
                 requests = [json.loads(line)["url"] for line in (self.downloads / "requests.jsonl").read_text().splitlines()]
-                self.assertTrue(requests[-2].endswith("/v0.1.0/" + archive))
+                self.assertTrue(requests[-1].endswith("/v0.1.0/" + archive))
 
     def test_latest_resolves_once_then_downloads_same_pinned_release(self):
         self.success(self.invoke())
@@ -151,6 +151,192 @@ class PosixInstallTests(unittest.TestCase):
         for row in requests:
             self.assertIn("--proto", row["arguments"])
             self.assertIn("--tlsv1.2", row["arguments"])
+
+    def test_missing_stable_selects_only_the_known_linux_preview(self):
+        for mode in ("no-stable", "no-stable-redirect"):
+            with self.subTest(mode=mode):
+                log = self.downloads / "requests.jsonl"
+                log.unlink(missing_ok=True)
+                result = self.invoke(env={"FIXTURE_DOWNLOAD_FAILURE": mode})
+                self.failure(result, "download")  # No preview archive in the fixture.
+                requests = [json.loads(line)["url"] for line in log.read_text().splitlines()]
+                self.assertEqual(len(requests), 2)
+                self.assertTrue(requests[-1].endswith("/v0.1.1-linux.3/ilium-linux-x86_64.tar.gz"))
+
+    def test_committed_pins_offer_arm64_from_the_linux_2_preview(self):
+        # The committed pin file pins ARM64 to the separate 0.1.1-linux.3 prerelease.
+        for architecture in ("aarch64", "arm64"):
+            with self.subTest(architecture=architecture):
+                log = self.downloads / "requests.jsonl"
+                log.unlink(missing_ok=True)
+                result = self.invoke(env={"FIXTURE_DOWNLOAD_FAILURE": "no-stable", "FIXTURE_ARCH": architecture})
+                self.failure(result, "download")  # No preview archive in the fixture.
+                requests = [json.loads(line)["url"] for line in log.read_text().splitlines()]
+                self.assertEqual(len(requests), 2)
+                self.assertTrue(requests[-1].endswith("/v0.1.1-linux.3/ilium-linux-aarch64.tar.gz"))
+
+    def test_committed_pins_offer_macos_apple_silicon_from_the_preview_4_prerelease(self):
+        for architecture in ("aarch64", "arm64"):
+            with self.subTest(architecture=architecture):
+                log = self.downloads / "requests.jsonl"
+                log.unlink(missing_ok=True)
+                self.failure(self.invoke(env={"FIXTURE_DOWNLOAD_FAILURE": "no-stable", "FIXTURE_KERNEL": "Darwin", "FIXTURE_ARCH": architecture}), "download")
+                requests = [json.loads(line)["url"] for line in log.read_text().splitlines()]
+                self.assertEqual(len(requests), 2)
+                self.assertTrue(requests[-1].endswith("/v0.1.1-preview.4/ilium-macos-aarch64.tar.gz"))
+
+    def test_missing_stable_does_not_offer_preview_on_unpinned_platforms(self):
+        for architecture in ("x86_64",):
+            log = self.downloads / "requests.jsonl"
+            log.unlink(missing_ok=True)
+            self.failure(self.invoke(env={"FIXTURE_DOWNLOAD_FAILURE": "no-stable", "FIXTURE_KERNEL": "Darwin", "FIXTURE_ARCH": architecture}), "download")
+            self.assertEqual(len(log.read_text().splitlines()), 1)  # Only the latest-release lookup.
+
+    def test_preview_archive_with_unpinned_bytes_is_rejected_before_extraction(self):
+        self.release("0.1.1-linux.3")  # Synthetic bytes cannot match the real pinned hashes.
+        result = self.invoke(env={"FIXTURE_DOWNLOAD_FAILURE": "no-stable", "FIXTURE_ARCH": "x86_64"})
+        self.failure(result, "checksum")
+        self.assertIn("Archive SHA-256 mismatch", result.stderr)
+        self.assertFalse((self.install_root / "versions/0.1.1-linux.3").exists())
+
+    X86 = "ilium-linux-x86_64.tar.gz"
+    ARM = "ilium-linux-aarch64.tar.gz"
+
+    def preview_installer(self, arm_version="0.1.1-linux.2", x86_checksums=None):
+        """Installer copy whose pins come from the tool and two synthetic per-architecture inventories."""
+        def sums_of(version):
+            return dict(line.split("  ")[::-1] for line in (self.downloads / ("v" + version) / "SHA256SUMS").read_text().splitlines())
+        x86_sums, arm_sums = sums_of("0.1.1-linux.1"), sums_of(arm_version)
+        pins = self.root / "pins.json"
+        pins.write_text(json.dumps({"archives": {self.X86: {"version": "0.1.1-linux.1", "sha256": x86_sums[self.X86]},
+                                                   self.ARM: {"version": arm_version, "sha256": arm_sums[self.ARM]}}}))
+        installer = self.root / "preview-install.sh"
+        result = subprocess.run([sys.executable, "-B", str(ROOT / "release/scripts/release_tool.py"), "generate-preview-pins", "--manifest", str(MANIFEST), "--installer", str(INSTALLER), "--pins", str(pins),
+                                 "--checksums", "0.1.1-linux.1=" + str(x86_checksums or self.downloads / "v0.1.1-linux.1/SHA256SUMS"), "--checksums", arm_version + "=" + str(self.downloads / ("v" + arm_version) / "SHA256SUMS"),
+                                 "--output", str(installer)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return installer
+
+    def run_preview(self, installer, architecture, *arguments):
+        return subprocess.run(["/bin/sh", str(installer), *arguments], env=self.environment | {"FIXTURE_DOWNLOAD_FAILURE": "no-stable", "FIXTURE_ARCH": architecture}, capture_output=True, text=True)
+
+    def test_pinned_preview_installs_each_architecture_from_its_own_release(self):
+        self.release("0.1.1-linux.1")
+        self.release("0.1.1-linux.2")
+        installer = self.preview_installer()
+        for architecture, version in (("x86_64", "0.1.1-linux.1"), ("aarch64", "0.1.1-linux.2"), ("arm64", "0.1.1-linux.2")):
+            with self.subTest(architecture=architecture):
+                shutil.rmtree(self.install_root, ignore_errors=True)
+                shutil.rmtree(self.bin, ignore_errors=True)
+                (self.downloads / "requests.jsonl").unlink(missing_ok=True)
+                result = self.run_preview(installer, architecture)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("stage=complete", result.stdout)
+                self.assertEqual(self.launch(), f"ilium {version}\nilium-server {version}\n")
+                requests = [json.loads(line)["url"] for line in (self.downloads / "requests.jsonl").read_text().splitlines()]
+                name = "aarch64" if architecture == "arm64" else architecture
+                self.assertTrue(requests[-1].endswith(f"/v{version}/ilium-linux-{name}.tar.gz"))
+                self.assertFalse(any(url.endswith("SHA256SUMS") for url in requests))
+
+    def test_explicit_preview_versions_are_bound_to_the_architecture_that_has_them(self):
+        self.release("0.1.1-linux.1")
+        self.release("0.1.1-linux.2")
+        installer = self.preview_installer()
+        for architecture, version, ready in (("aarch64", "0.1.1-linux.2", True), ("aarch64", "0.1.1-linux.1", False), ("x86_64", "0.1.1-linux.1", True), ("x86_64", "0.1.1-linux.2", False)):
+            with self.subTest(architecture=architecture, version=version):
+                shutil.rmtree(self.install_root, ignore_errors=True)
+                shutil.rmtree(self.bin, ignore_errors=True)
+                log = self.downloads / "requests.jsonl"
+                log.unlink(missing_ok=True)
+                result = self.run_preview(installer, architecture, "--version", version)
+                if ready:
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                else:
+                    self.failure(result, "download")
+                    self.assertIn("not ready yet", result.stderr)
+                    self.assertFalse(log.exists() and log.read_text().strip())  # Nothing is fetched for a version this architecture lacks.
+
+    def test_stable_release_still_wins_over_per_architecture_previews(self):
+        self.release("0.1.0")
+        self.release("0.1.1-linux.1")
+        self.release("0.1.1-linux.2")
+        installer = self.preview_installer()
+        result = subprocess.run(["/bin/sh", str(installer)], env=self.environment | {"FIXTURE_ARCH": "aarch64"}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.launch(), "ilium 0.1.0\nilium-server 0.1.0\n")
+
+    def test_pinned_preview_rejects_tampered_arm64_archive(self):
+        self.release("0.1.1-linux.1")
+        self.release("0.1.1-linux.2")
+        installer = self.preview_installer()
+        archive = self.downloads / "v0.1.1-linux.2/ilium-linux-aarch64.tar.gz"
+        archive.write_bytes(archive.read_bytes() + b"x")
+        self.failure(self.run_preview(installer, "aarch64"), "checksum")
+
+    def run_pin_tool(self, pins, checksums=(), installer=INSTALLER):
+        command = [sys.executable, "-B", str(ROOT / "release/scripts/release_tool.py"), "generate-preview-pins", "--manifest", str(MANIFEST), "--installer", str(installer), "--pins", str(pins), "--check"]
+        for version, path in checksums:
+            command += ["--checksums", f"{version}={path}"]
+        return subprocess.run(command, capture_output=True, text=True)
+
+    def test_committed_preview_pins_match_installer_and_reject_bad_input(self):
+        pins = ROOT / "release/linux-preview-pins.json"
+        result = self.run_pin_tool(pins)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["pinned"], ["ilium-linux-aarch64.tar.gz", "ilium-linux-x86_64.tar.gz", "ilium-macos-aarch64.tar.gz"])
+        self.assertEqual(json.loads(result.stdout)["versions"], ["0.1.1-linux.3", "0.1.1-preview.4"])
+        good = json.loads(pins.read_text())
+        x86 = self.X86
+        entry = good["archives"][x86]
+        cases = {
+            "uppercase": {"archives": {x86: {**entry, "sha256": "A" * 64}}},
+            "short": {"archives": {x86: {**entry, "sha256": "ab"}}},
+            "windows": {"archives": {"ilium-windows-x86_64.zip": entry}},
+            "unknown": {"archives": {"evil.tar.gz": entry}},
+            "empty": {"archives": {}},
+            "bad-version": {"archives": {x86: {**entry, "version": "../x"}}},
+            "missing-version": {"archives": {x86: {"sha256": entry["sha256"]}}},
+            "extra-entry-key": {"archives": {x86: {**entry, "extra": 1}}},
+            "flat-legacy": {"version": "0.1.1-linux.1", "archives": {x86: entry["sha256"]}},
+            "extra-key": {**good, "extra": 1},
+        }
+        for label, record in cases.items():
+            with self.subTest(label=label):
+                bad = self.root / (label + ".json")
+                bad.write_text(json.dumps(record))
+                self.assertNotEqual(self.run_pin_tool(bad).returncode, 0)
+        drift = self.root / "drift.json"
+        drift.write_text(json.dumps({"archives": {x86: {**entry, "sha256": "0" * 64}}}))
+        self.assertNotEqual(self.run_pin_tool(drift).returncode, 0)  # Installer block no longer matches.
+        sums = self.root / "SHA256SUMS"
+        arm_entry = good["archives"][self.ARM]
+        sums.write_text(f"{entry['sha256']}  {x86}\n{arm_entry['sha256']}  {self.ARM}\n")  # One combined release record.
+        macos_entry = good["archives"]["ilium-macos-aarch64.tar.gz"]
+        preview_sums = self.root / "SHA256SUMS.preview"
+        preview_sums.write_text(f"{macos_entry['sha256']}  ilium-macos-aarch64.tar.gz\n")
+        both = [(entry["version"], sums), (macos_entry["version"], preview_sums)]
+        self.assertEqual(self.run_pin_tool(pins, both).returncode, 0)
+        self.assertNotEqual(self.run_pin_tool(pins, [("0.1.1-linux.9", sums)]).returncode, 0)  # No checksum file for the pinned version.
+        sums.write_text(f"{'0' * 64}  {x86}\n")
+        self.assertNotEqual(self.run_pin_tool(pins, both).returncode, 0)  # Pin differs from the published checksum.
+
+    def test_pin_tool_validates_each_versions_checksum_file_separately(self):
+        arm_sums, x86_sums = self.root / "arm.sums", self.root / "x86.sums"
+        pins = self.root / "two.json"
+        pins.write_text(json.dumps({"archives": {self.X86: {"version": "0.1.1-linux.1", "sha256": "1" * 64}, self.ARM: {"version": "0.1.1-linux.2", "sha256": "2" * 64}}}))
+        x86_sums.write_text(f"{'1' * 64}  {self.X86}\n")
+        arm_sums.write_text(f"{'2' * 64}  {self.ARM}\n")
+        installer = self.root / "two-install.sh"
+        def generate(*checksums):
+            command = [sys.executable, "-B", str(ROOT / "release/scripts/release_tool.py"), "generate-preview-pins", "--manifest", str(MANIFEST), "--installer", str(INSTALLER), "--pins", str(pins), "--output", str(installer)]
+            for version, path in checksums:
+                command += ["--checksums", f"{version}={path}"]
+            return subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(generate(("0.1.1-linux.1", x86_sums), ("0.1.1-linux.2", arm_sums)).returncode, 0)
+        self.assertIn(f"{self.ARM}=0.1.1-linux.2:{'2' * 64}", installer.read_text())
+        self.assertNotEqual(generate(("0.1.1-linux.1", x86_sums)).returncode, 0)  # linux.2 checksum file missing.
+        self.assertNotEqual(generate(("0.1.1-linux.1", arm_sums), ("0.1.1-linux.2", x86_sums)).returncode, 0)  # Files swapped between versions.
+        self.assertNotEqual(generate(("0.1.1-linux.1", x86_sums), ("0.1.1-linux.1", arm_sums)).returncode, 0)  # Duplicate version.
 
     def test_unsupported_targets_do_not_download_or_install(self):
         for kernel, arch in (("FreeBSD", "x86_64"), ("Linux", "i686"), ("Darwin", "ppc"), ("Windows", "ARM64")):
@@ -194,6 +380,44 @@ class PosixInstallTests(unittest.TestCase):
             sums.write_text(text)
             self.failure(self.invoke("--version", "0.2.0"), "checksum", previous=True)
             self.assertFalse((self.install_root / "versions/0.2.0").exists())
+
+    def test_partial_release_installs_only_declared_available_archives(self):
+        release = self.downloads / "v0.1.0"
+        selected = {"ilium-linux-x86_64.tar.gz", "ilium-windows-x86_64.zip"}
+        sums = release / "SHA256SUMS"
+        lines = [line for line in sums.read_text().splitlines() if line.split("  ")[1] in selected]
+        sums.write_text("\n".join(lines) + "\n")
+        digest = hashlib.sha256(sums.read_bytes()).hexdigest()
+        inventory = ["ilium-availability-v1", "tag v0.1.0", "commit " + "a" * 40,
+                     "selection-sha256 " + "b" * 64, "checksums-sha256 " + digest]
+        inventory.extend(("available " if row["archive"] in selected else "omitted ") + row["archive"]
+                         for row in self.targets)
+        availability = release / "AVAILABILITY"
+        original_inventory = "\n".join(inventory) + "\n"
+        availability.write_text(original_inventory)
+
+        self.success(self.invoke("--version", "0.1.0"))
+        result = self.invoke("--version", "0.1.0", env={"FIXTURE_KERNEL": "Darwin", "FIXTURE_ARCH": "arm64"})
+        self.failure(result, previous=True)
+        self.assertIn("not ready yet", result.stderr)
+        self.assertEqual(self.launch(), "ilium 0.1.0\nilium-server 0.1.0\n")
+
+        malformed = [original_inventory.replace("tag v0.1.0", "tag v0.2.0"),
+                     original_inventory + inventory[-1] + "\n",
+                     original_inventory.replace(inventory[-1] + "\n", ""),
+                     original_inventory.replace(inventory[-1], "omitted unknown.zip"),
+                     original_inventory.replace("commit " + "a" * 40, "commit " + "a" * 39),
+                     original_inventory.rstrip("\n")]
+        for content in malformed:
+            with self.subTest(content=content):
+                availability.write_text(content)
+                self.failure(self.invoke("--version", "0.1.0"), previous=True)
+                self.assertEqual(self.launch(), "ilium 0.1.0\nilium-server 0.1.0\n")
+        availability.write_text(original_inventory)
+
+        sums.write_text(sums.read_text().replace(lines[0][:64], "0" * 64))
+        self.failure(self.invoke("--version", "0.1.0"), previous=True)
+        self.assertEqual(self.launch(), "ilium 0.1.0\nilium-server 0.1.0\n")
 
     def test_hostile_archive_inventory_is_rejected_before_extraction(self):
         mutations = {

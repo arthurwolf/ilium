@@ -49,3 +49,4 @@ is requested on branch-line hover and agent completion. Status events are
 runtime-only, change-only, and replayed to attaching clients. The second
 tree line presents the branch and missing/conflict marker; its hover text
 explains provenance and the latest verified status.
+

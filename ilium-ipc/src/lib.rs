@@ -43,12 +43,11 @@ pub use protocol::{
     PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
     ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
-    StatusScreenObservation, StatusScreenWatch,
-    WorkspaceClosePolicy, WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition,
-    WorkspaceGitStatus, WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry,
-    WorkspaceInventoryOwner, WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy,
-    WorkspacePruneMode, WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget,
-    WorkspaceWorktreeFact,
+    StatusScreenObservation, StatusScreenWatch, StatusScreenWatchRejection, WorkspaceClosePolicy, WorkspaceCreateSpec,
+    WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus, WorkspaceGitVersion,
+    WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
+    WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
+    WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget, WorkspaceWorktreeFact,
 };
 pub use startup::{
     clear_startup_progress, publish_startup_progress, read_startup_progress, startup_progress_path,
@@ -90,6 +89,7 @@ mod tests {
     use std::path::PathBuf;
 
     use ilium_core::{
+        status_rule_expression::{ScreenPattern, ScreenRegion},
         AgentActivity, AgentClass, BoardStorage, BuiltinAgentProvider, NodeId, PaneStatus,
         PromptQueueDelivery, SplitOrientation, Tree, TreeMoveDirection, ROOT_ID,
     };
@@ -716,6 +716,33 @@ mod tests {
                 request_id: 86,
                 pane_id: NodeId(2),
             },
+            // A populated subscription exercises every pattern option on the
+            // wire; the empty one is how a client cancels its watches.
+            ClientRequest::SetStatusScreenWatches {
+                revision: 1,
+                watches: vec![
+                    StatusScreenWatch {
+                        id: 0,
+                        pattern: ScreenPattern {
+                            pattern: "\\b(error|failed)\\b".to_string(),
+                            ignore_case: true,
+                            region: ScreenRegion::LastLines(5),
+                        },
+                    },
+                    StatusScreenWatch {
+                        id: 1,
+                        pattern: ScreenPattern {
+                            pattern: "^Done".to_string(),
+                            ignore_case: false,
+                            region: ScreenRegion::FirstLines(1),
+                        },
+                    },
+                ],
+            },
+            ClientRequest::SetStatusScreenWatches {
+                revision: 2,
+                watches: Vec::new(),
+            },
         ]
     }
 
@@ -905,6 +932,16 @@ mod tests {
                 screen_generation: 42,
                 matched: vec![1, 3],
                 unknown: vec![2],
+            }),
+            ServerEvent::StatusScreenWatchesRejected(StatusScreenWatchRejection {
+                revision: 9,
+                watch_id: Some(4),
+                message: "Invalid screen watch 4: unclosed group".into(),
+            }),
+            ServerEvent::StatusScreenWatchesRejected(StatusScreenWatchRejection {
+                revision: 10,
+                watch_id: None,
+                message: "At most 16 screen watches are allowed".into(),
             }),
             ServerEvent::NodeFocusCheckpointChanged {
                 node_id: NodeId(2),
@@ -1473,11 +1510,6 @@ mod tests {
 
     #[test]
     fn workspace_variants_preserve_close_pane_wire_layout() {
-        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
-            let bytes = bincode::serialize(value).expect("serializable");
-            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
-        }
-
         assert_eq!(
             bincode::serialize(&ClientRequest::ClosePane { pane_id: NodeId(2) })
                 .expect("serializable"),

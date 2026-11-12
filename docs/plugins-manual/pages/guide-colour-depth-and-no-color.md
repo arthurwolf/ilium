@@ -55,3 +55,7 @@ For each depth, look for three things. First, the colour escape sequences are go
 ## Production additions (round 3)
 
 - **[PRY-032]** After downgrade to the 16-colour palette, any plugin-supplied foreground and background pair rendered together MUST have a contrast ratio of at least 4.5:1 (WCAG relative luminance), otherwise the host MUST substitute the theme foreground for that cell and record `ui.contrast-adjusted` once per plugin per session.
+
+## Production additions (round 10)
+
+- **[PRR-023]** The system must render every status role (danger, warning, success, attention) with a distinct non-colour cue such as a glyph or text prefix at every colour depth, and the conformance suite must fail a core plugin whose status row, tree decoration or toolbar badge differs from its neighbour only by colour.

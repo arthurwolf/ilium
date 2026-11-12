@@ -86,6 +86,15 @@ impl Fixture {
             .agent_setup
             .never_ask_projects
             .push(project.clone());
+        // The launcher canonicalizes the project root (macOS reaches its temp
+        // dir through `/var` -> `/private/var`, Windows may hand out 8.3 short
+        // names), so the suppression list needs the canonical spelling too.
+        if let Ok(canonical_project) = ilium_platform::paths::canonicalize(&project) {
+            settings
+                .agent_setup
+                .never_ask_projects
+                .push(canonical_project);
+        }
         settings.onboarding.finish();
         settings.onboarding.ai_enabled = false;
         settings.triggers.startup_complete.clear();
@@ -602,6 +611,15 @@ fn retain_tree(fixture: &Fixture, name: &str, tree: &Tree) {
 
 #[tokio::test]
 async fn unasked_agent_keeps_title_across_all_restructure_apply_lanes() {
+    // The acceptance drives the client inside a tmux session, so it needs the
+    // external `tmux` program. Hosted macOS runners do not ship it; skip there
+    // (loudly) instead of failing on an environment that cannot run the check.
+    if Command::new("tmux").arg("-V").output().is_err() {
+        eprintln!(
+            "SKIPPED: `tmux` is not installed on this machine; the tmux acceptance cannot run"
+        );
+        return;
+    }
     let mut fixture = Fixture::new();
     fixture.start();
     let mut connection = fixture.control().await;

@@ -406,20 +406,20 @@ fn fs_scan_exactly_max_entries_matches_succeeds() {
 
 /// REQ: WIT:ilium:host/fs.scan
 #[test]
-fn fs_scan_max_entries_65536_accepted_and_65537_invalid_argument() {
+fn fs_scan_max_entries_100000_accepted_and_100001_invalid_argument() {
     let dir = tempfile::tempdir().unwrap();
     scan_tree(dir.path());
     let mut fixture = rw_fixture(dir.path());
     expect_ok(
         fixture
             .fs()
-            .scan(project_path("src"), "*".to_owned(), 65_536),
+            .scan(project_path("src"), "*".to_owned(), 100_000),
     );
     assert_eq!(
         expect_code(
             fixture
                 .fs()
-                .scan(project_path("src"), "*".to_owned(), 65_537)
+                .scan(project_path("src"), "*".to_owned(), 100_001)
         ),
         ErrorCode::InvalidArgument
     );

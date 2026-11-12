@@ -1,12 +1,13 @@
 //! `#[ilium_plugin(side = "...", exports = [...])]` (rust-sdk.md "The ilium_plugin macro").
 //!
-//! Arguments are parsed and unknown ones are a compile error. The expansion is an `impl NativeEntry`
-//! that forwards to the plugin's `Lifecycle` (and, with the `handler` export, `Handler`) implementation.
-//! The wasm32 glue (wit-bindgen exports) is generated separately.
+//! Server and client native entry points forward to SDK lifecycle and handler traits; unknown
+//! arguments are a compile error. Scene native callbacks and wasm32 glue remain separate,
+//! unfinished contracts.
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
+use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::{Expr, ExprArray, ExprLit, Ident, ItemStruct, Lit, LitStr, Token};
 
@@ -24,7 +25,8 @@ impl Parse for PluginArgs {
         let mut exports = Vec::new();
         let mut krate: syn::Path = syn::parse_quote!(::ilium_plugin_sdk);
         while !input.is_empty() {
-            let name: Ident = input.parse()?;
+            // `crate = "..."` is a supported argument even though crate is a Rust keyword.
+            let name = input.call(Ident::parse_any)?;
             input.parse::<Token![=]>()?;
             match name.to_string().as_str() {
                 "side" => {
@@ -89,14 +91,26 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
     let side = &args.side;
     let exports = &args.exports;
     let krate = &args.krate;
+    // Scene worlds have a different lifecycle; never impose server/client traits on them.
+    let is_scene = side == "scene";
+    let activate = if is_scene {
+        quote!(unimplemented!("rust-sdk.scene-native-lifecycle"))
+    } else {
+        quote!(<Self as #krate::Lifecycle>::activate(self, _context))
+    };
+    let deactivate = if is_scene {
+        quote!(unimplemented!("rust-sdk.scene-native-lifecycle"))
+    } else {
+        quote!(<Self as #krate::Lifecycle>::deactivate(self, _reason))
+    };
     // Only a plugin that declares the `handler` export implements `Handler`; others receive no events.
-    let on_events_body = if exports.iter().any(|export| export == "handler") {
-        quote! {
-            <Self as #krate::Handler>::on_events(self, batch)
-        }
+    let events = if is_scene {
+        quote!(unimplemented!("rust-sdk.scene-native-handler"))
+    } else if exports.iter().any(|export| export == "handler") {
+        quote!(<Self as #krate::Handler>::on_events(self, _batch))
     } else {
         quote! {
-            let _ = batch;
+            let _ = _batch;
             ::std::vec::Vec::new()
         }
     };
@@ -147,23 +161,23 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
 
             fn native_activate(
                 &mut self,
-                context: #krate::types::Activation,
+                _context: #krate::types::Activation,
             ) -> ::core::result::Result<(), #krate::types::PluginError> {
-                <Self as #krate::Lifecycle>::activate(self, context)
+                #activate
             }
 
             fn native_deactivate(
                 &mut self,
-                reason: #krate::types::DeactivationReason,
+                _reason: #krate::types::DeactivationReason,
             ) -> ::core::option::Option<::std::vec::Vec<u8>> {
-                <Self as #krate::Lifecycle>::deactivate(self, reason)
+                #deactivate
             }
 
             fn native_on_events(
                 &mut self,
-                batch: ::std::vec::Vec<#krate::types::Event>,
+                _batch: ::std::vec::Vec<#krate::types::Event>,
             ) -> ::std::vec::Vec<#krate::types::Submission> {
-                #on_events_body
+                #events
             }
 
             #run_job_fn

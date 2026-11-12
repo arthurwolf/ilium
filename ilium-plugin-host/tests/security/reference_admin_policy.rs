@@ -596,6 +596,7 @@ fn sec_192_project_values_apply_for_a_trusted_project_without_the_restriction() 
 /// REQ: SEC-194
 #[test]
 fn sec_194_user_stores_are_owner_only_and_below_the_users_directories() {
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     let rig = setup(&["clipboard.read"]).start();
     rig.host.persist_all_stores();
@@ -609,17 +610,22 @@ fn sec_194_user_stores_are_owner_only_and_below_the_users_directories() {
     ] {
         let path = rig.state.path().join(name);
         if path.exists() {
-            let mode = std::fs::metadata(&path)
-                .expect("metadata")
-                .permissions()
-                .mode()
-                & 0o777;
-            assert_eq!(mode & 0o077, 0, "{name} is {mode:o}");
+            #[cfg(unix)]
+            {
+                let mode = std::fs::metadata(&path)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777;
+                assert_eq!(mode & 0o077, 0, "{name} is {mode:o}");
+            }
             seen += 1;
         }
     }
     assert!(seen >= 1, "at least the grant store must exist");
     let audit = rig.state.path().join("audit");
+    assert!(audit.is_dir(), "audit directory exists");
+    #[cfg(unix)]
     assert_eq!(
         std::fs::metadata(&audit)
             .expect("audit dir")
@@ -671,6 +677,7 @@ fn sec_195_the_system_directory_is_not_written_by_a_user_install() {
 }
 
 /// REQ: SEC-196
+#[cfg(unix)]
 #[test]
 fn sec_196_runtime_directory_is_mode_0700_per_user() {
     use std::os::unix::fs::PermissionsExt;

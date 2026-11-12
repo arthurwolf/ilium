@@ -106,3 +106,7 @@ Every replacement is checked with the same codes, whichever row it replaces. The
 - **[DEV-847]** A replacement MUST NOT read, write or delete the config tables, snapshot sections and storage keys named in its row. Its stored data MUST stay on disk unchanged when the built-in plugin comes back.
 - **[DEV-848]** A replacement MUST keep every CLI name listed in its row. Each name MUST give the arguments, output and exit codes of the CLI reference, so that `ilium chat context --since-last-read` and the other names used by scripts and agent hooks keep working.
 - **[DEV-849]** The matrix MUST have one row for each core plugin whose page says `**Replaceable:** yes`, and for no other plugin. Each row MUST match the points, services, topics, commands and pane kinds of that page.
+
+## Production additions (round 11)
+
+- **[PRQ-009]** The system must, when a core plugin is replaced, keep the old plugin's stored data untouched, offer the replacement a one-time read-only import with a visible summary of keys migrated and keys with no counterpart, and restore the original unchanged on revert.

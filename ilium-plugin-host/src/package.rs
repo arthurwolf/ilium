@@ -339,6 +339,12 @@ struct CentralEntry {
 }
 
 fn read_entries(bytes: &[u8]) -> Result<Vec<ArchiveEntry>, Vec<Diagnostic>> {
+    if bytes.starts_with(b"ILIUMANIM\x01") {
+        return Err(vec![failure(
+            "package.old-format",
+            "Legacy .iliumanim packages must be ported to the current format",
+        )]);
+    }
     read_entries_inner(bytes)
         .map_err(|error| vec![error])
         .and_then(|(entries, errors)| {

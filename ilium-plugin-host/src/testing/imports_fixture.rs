@@ -5,11 +5,12 @@
 use super::fake_kernel::FakeKernel;
 use crate::imports::{
     basic::BasicImport,
+    codec::CodecImport,
     log::{LogClock, LogDiagnostics, LogFailure, LogImport, LogTime, PluginLogger},
     storage::{StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState},
 };
 use crate::imports::{
-    clock::ClockImport, codec::CodecImport, fs::FsImport, http::HttpImport, jobs::JobsImport,
+    clock::ClockImport, fs::FsImport, http::HttpImport, jobs::JobsImport,
     journal::JournalImport, panes::PanesImport, process::ProcessImport, settings::SettingsImport,
     timers::TimersImport, tree::TreeImport,
 };
@@ -287,9 +288,13 @@ impl ImportsFixtureBuilder {
                 .and_then(|value| value.checked_mul(1024 * 1024))
                 .ok_or_else(|| "limit exceeds address space".into())
         };
+        // Storage rejects symlink ancestors. Resolve the temporary parent
+        // before allocating the fixture so later reopen paths stay canonical.
+        let temporary_parent = ilium_platform::paths::canonicalize(&std::env::temp_dir())
+            .map_err(|error| error.to_string())?;
         let root = tempfile::Builder::new()
             .prefix("ilium-imports-")
-            .tempdir()
+            .tempdir_in(temporary_parent)
             .map_err(|error| error.to_string())?;
         let project = match self.project {
             Some(project) => std::fs::canonicalize(project).map_err(|error| error.to_string())?,

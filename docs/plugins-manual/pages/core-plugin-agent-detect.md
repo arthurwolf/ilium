@@ -16,7 +16,7 @@ Walking the process tree and scraping the vt100 screen are kernel-native. The ke
 - Activity classification and status indicators (see Agent monitoring, "Status indicators and their defaults").
 - Pane status signals and the three icon slots in the tree (see Agent monitoring, "The three icon slots in the tree").
 - Goal tracking and the `/goal` badge (see Agent monitoring, "The /goal badge").
-- The Normal and Attention display modes, and custom signatures (see Agent monitoring, "Normal mode and Attention mode" and "The Agent Monitoring settings tab").
+- The Normal and Attention display modes, and custom signatures (see Agent monitoring, "Display modes" and "The Agent Monitoring settings tab").
 - Agent icons and identifiers in the tree.
 
 ### See it
@@ -672,6 +672,8 @@ export function render() {
 #### Normal and Attention modes
 
 A display mode changes what the tree emphasises. The plugin declares `display_modes` in the manifest and listens for `display-mode-changed` ([events and intents](/pages/events-and-intents/), [events](/pages/api-events/)). In Attention mode the panel lists only agents that need the user or have just finished: those awaiting approval and those whose activity is `done`.
+
+The Custom display mode (`ui.agent_monitoring_mode = "custom"`) is not a plugin display mode. It is client-owned: ordered user rules over shared pane facts choose each pane's status icon, so the manifest declares only Attention. A plugin written like the example below treats any mode it does not recognise, `custom` included, as Normal.
 
 **Rust**
 

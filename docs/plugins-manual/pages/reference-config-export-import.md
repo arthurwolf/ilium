@@ -55,3 +55,7 @@ Two kinds of failure end an import with exit code 2: a file that fails validatio
 - **[PDV-012]** `ilium plugin config import --dry-run <file>` MUST print each change as one JSONL line and MUST write nothing.
 - **[PDV-013]** Import of a file whose `version` is higher than the supported version MUST fail with reason `config-version-unsupported` and exit code 2.
 - **[PDV-014]** Each export and import MUST write one audit record of event `config-export` or `config-import` with the byte count and file count in `detail` and no setting values.
+
+## Production additions (round 12)
+
+- **[PRP-026]** The system must provide ilium config export and ilium config import using one TOML profile of enabled state, non-secret settings and keymap, with a dry-run diff, no import of secrets, grants or trust decisions, per-key unknown key reports with exit code 1, and idempotent re-import.

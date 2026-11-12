@@ -45,6 +45,7 @@ fn sec_260_the_manual_promises_opt_in_for_any_future_collection() {
 /// REQ: SEC-261
 #[test]
 fn sec_261_every_file_the_platform_creates_is_readable_only_by_the_user() {
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     let rig = setup(&["clipboard.read"])
         .secret("token", "abcdef-secret")
@@ -56,8 +57,11 @@ fn sec_261_every_file_the_platform_creates_is_readable_only_by_the_user() {
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).expect("dir") {
             let entry = entry.expect("entry");
-            let mode = entry.metadata().expect("metadata").permissions().mode() & 0o777;
-            assert_eq!(mode & 0o077, 0, "{:?} is {mode:o}", entry.path());
+            #[cfg(unix)]
+            {
+                let mode = entry.metadata().expect("metadata").permissions().mode() & 0o777;
+                assert_eq!(mode & 0o077, 0, "{:?} is {mode:o}", entry.path());
+            }
             files += 1;
             if entry.path().is_dir() {
                 stack.push(entry.path());

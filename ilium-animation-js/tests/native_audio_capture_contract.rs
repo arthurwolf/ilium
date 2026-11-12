@@ -1,4 +1,5 @@
-#![cfg(feature = "native-host")]
+// The synthetic capture helper is a `#!/bin/sh` script, so this fixture only runs where one can be executed.
+#![cfg(all(feature = "native-host", unix))]
 use ilium_ambient::resources::{AmbientResources, WorkerCost};
 use ilium_animation_js::{
     native_audio::{

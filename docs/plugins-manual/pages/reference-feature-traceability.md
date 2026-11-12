@@ -60,7 +60,7 @@ Related pages: [kernel and boot](/pages/reference-kernel-and-boot/), [config and
 | F-027 | Activity classification | `agent-monitoring` | primitive-extended | agent-detect plugin | server | detect.classify | [detection] | none | 4a | COR-011 |
 | F-028 | Pane status signals | `agent-monitoring` | primitive-extended | agent-detect plugin | both | agent.read | none | none | 4b | COR-011 |
 | F-029 | Goal state tracking | `agent-monitoring` | primitive-extended | agent-detect plugin | both | agent.read | none | none | 4b | COR-011 |
-| F-030 | Display modes and custom signatures | `agent-monitoring` | primitive-extended | agent-detect plugin | both | detect.signature | [ui] agent_monitoring_mode; [detection] custom_signatures | none | 4a | COR-011 |
+| F-030 | Display modes (Normal, Attention, Custom) and custom signatures | `agent-monitoring` | primitive-extended | agent-detect plugin (Normal, Attention); Custom status rules are client-owned | both | detect.signature | [ui] agent_monitoring_mode; [detection] custom_signatures | none | 4a | COR-011 |
 | F-031 | Session stats and popover | `agent-cost` | plugin-wasm | cost plugin | both | agent.read, ui.panels | [cost] | stats store | 4b | COR-011 |
 | F-032 | Agent debug history | `agent-monitoring` | primitive-extended | diagnostics plugin | both | agent.read | [ui] agent_debug_menu_enabled | debug history | 4b | COR-011 |
 | F-033 | Last-prompt banner | `agent-monitoring` | primitive-extended | agent-toolbar plugin | both | agent.transcript, ui.chrome | [ui] last_prompt_enabled, last_prompt_max_lines | none | 4b | COR-011 |

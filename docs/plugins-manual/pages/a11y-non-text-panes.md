@@ -48,3 +48,11 @@ When the reduced motion setting is on, a scene is limited to at most one frame p
 - **[PDT-019]** With reduced motion on, a scene MUST be limited to at most 1 frame per second or one static frame.
 - **[PDT-020]** Every scene control MUST be reachable with the keyboard only, and `ilium plugin lint` MUST reject a mouse-only control with `ui.mouse-only-control`.
 - **[PDT-021]** A scene MUST NOT convey required information in cells alone; every required state MUST appear in the state line.
+
+## Production additions (round 10)
+
+- **[PRR-022]** The system must give every sound played by a core plugin or via sound.play a text equivalent that appears in notification history and is announced in screen-reader mode within 1 second even when audio is muted or no output device exists, and ilium plugin lint must warn when a plugin plays a sound with no paired visible message.
+
+## Production additions (round 11)
+
+- **[PRQ-002]** The system must, in screen-reader mode, expose the editor buffer line by line with line, column and selection announcements, the Kanban board as columns of cards announced as card N of M in column, the tree as levels with expanded or collapsed state, and a terminal pane as appended output lines.

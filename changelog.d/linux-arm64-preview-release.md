@@ -1,0 +1,4 @@
+### Changed
+- Linux ARM64 preview downloads now come from their own prerelease, `v0.1.1-linux.2` (tar.gz, deb, AppImage and Flatpak, verified in an emulated QEMU guest only; rpm and Snap are coming soon). Linux x86_64 stays in the immutable `v0.1.1-linux.1`.
+- The hosted installer pins each architecture's preview archive to its own release version and SHA-256, installs ARM64 from `v0.1.1-linux.2` once its pin is generated, and reports "not ready yet" until then. `generate-preview-pins` takes one `--checksums VERSION=SHA256SUMS` per pinned version.
+- The Linux preview publisher creates a new release per architecture tag, uploads while the release is a draft, verifies digests by readback and refuses to overwrite a release; it gains a read-only `github-dry-run` mode and a `check-versions` step for ARM64 artifacts. The failed `append-aarch64` modes are removed.

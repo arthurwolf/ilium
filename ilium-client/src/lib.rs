@@ -37,6 +37,7 @@ pub mod agent_freeze;
 pub mod agent_from_line;
 pub mod agent_history_path;
 pub mod agent_monitoring;
+pub mod agent_monitoring_cards;
 pub mod agent_prompt_transcript;
 pub mod agent_toolbar;
 mod animation_hover;
@@ -78,6 +79,7 @@ pub mod cost_settings_ui;
 pub mod cost_tracker;
 pub mod custom_agent_editor;
 mod custom_agent_settings;
+pub(crate) mod custom_status_live;
 pub mod debug_logging;
 pub mod document_preparation;
 mod editor_capture_budget;
@@ -121,10 +123,6 @@ pub mod padding;
 pub mod padding_app;
 pub mod padding_dialog;
 pub mod padding_ui;
-pub mod selectable_cards;
-pub mod status_rule_visual;
-pub mod status_rules_editor;
-pub mod status_screen_observations;
 pub mod pane_title;
 pub mod paths;
 pub mod plugin_host;
@@ -163,6 +161,7 @@ pub mod screen_transfer;
 pub mod search_ui;
 pub mod search_workers;
 pub mod section_frame;
+pub mod selectable_cards;
 mod semantic_animation;
 pub mod session_conversion;
 mod session_goal_claude;
@@ -185,6 +184,11 @@ pub mod smart_copy;
 pub mod smart_copy_light;
 mod smart_copy_selection;
 mod startup_dialog;
+pub mod status_demo;
+pub mod status_rule_visual;
+pub mod status_rules_editor;
+pub(crate) mod status_rules_save;
+pub mod status_screen_observations;
 /// Typed source custody returned when light-copy shutdown cannot finish.
 pub use smart_copy_selection::{
     RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
@@ -1097,6 +1101,7 @@ async fn run_inner(
 
     app.custom_agents = config.custom_agents;
     app.apply_ui_settings(config.ui);
+    app.reconcile_toolbar_custom_agents();
     app.initialize_disabled_model_icon_setting();
     match crate::project_config::load(&app.session_cwd) {
         Ok(project_config) => {
@@ -1157,10 +1162,38 @@ async fn run_inner(
     app.voice_output_devices = voice_output_devices;
     app.startup_audio_retention = Some(audio_retention);
     app.config_dir = config_dir;
+    // Known limitation: custom status rules are read once, here, at client
+    // start. Rules live in each client's own config.toml and are not shared
+    // with or propagated to other clients attached to the same session, and
+    // an edit made by another client is seen only after this client restarts.
     if let Some(directory) = app.config_dir.as_deref() {
         match crate::config::load_status_rules(directory) {
-            Ok(rules) => app.custom_status_rules = rules,
+            Ok(loaded) => {
+                app.custom_status_rules = loaded.rules;
+                app.custom_status_rules_load_issues = loaded.issues;
+            }
             Err(error) => app.custom_status_rules_error = Some(error.to_string()),
+        }
+        // One log line per load that needs attention; the editor and the
+        // Agent Monitoring page show the same banner.
+        if let Some(banner) = crate::config::status_rules_load_banner(
+            app.custom_status_rules_error.as_deref(),
+            &app.custom_status_rules_load_issues,
+        ) {
+            let enabled_rules = app
+                .custom_status_rules
+                .rules
+                .iter()
+                .filter(|rule| rule.enabled)
+                .count();
+            tracing::warn!(
+                config_dir = %directory.display(),
+                unreadable = banner.unreadable,
+                enabled_rules,
+                details = %banner.details.join("; "),
+                "{}",
+                banner.headline
+            );
         }
     }
     app.custom_status_screen_observations.replace_rules(&app.custom_status_rules);
@@ -1410,7 +1443,7 @@ async fn run_inner(
         }
         app.begin_editor_capture_turn();
         if let Err(failure) = app.retry_native_terminal_paste() {
-            input_failure = Some(failure);
+            input_failure = Some(*failure);
             break;
         }
         if advance_pending_key_paste(
@@ -1943,7 +1976,7 @@ async fn run_inner(
                 .expect("remote compaction owner is initialized before the event loop")
                 .spawn(job)
             {
-                app.apply_remote_compaction_worker_event(event);
+                app.apply_remote_compaction_worker_event(*event);
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
@@ -2305,6 +2338,8 @@ async fn run_inner(
     // The local file receipt alone cannot prove the server request was emitted.
     // File publication is an accepted local side effect. Its warning deadline
     // must not be cancelled by the separate bounded network-request drain.
+    // A pending debounced rules write joins the queue the drain below waits for.
+    app.flush_custom_status_rules_save();
     app.drain_filesystem().await.map_err(ClientError::TerminalSetup)?;
     let request_drain = async {
         reconcile_debug_logging(&mut app);
@@ -2792,6 +2827,7 @@ async fn finish_input_retirement(
     loop {
         if let Some(mut report) = retirement.try_complete() {
             report.complete_exit_click_release(exit_click_release);
+            report.complete_exit_resizes();
             return report
                 .into_result()
                 .map_err(crate::error::InputRetirementError::Failed);
@@ -3762,6 +3798,7 @@ async fn collect_normal_voice_retirement(
                     tracing::error!(
                         cancelled_commands = cancelled,
                         undelivered_stop_outputs = final_outputs,
+                        actor_exit = ?exit,
                         "Original voice actor stopped; consumed provider delivery may be uncertain"
                     );
                     app.status_message = Some(format!(
@@ -4597,7 +4634,7 @@ where
                     if let Some(pane_id) = destination {
                         if !crate::keys::intercept_event(app, event.view()) {
                             if let Err(error) = app.capture_native_terminal_paste(pane_id, event) {
-                                failure = Some(error);
+                                failure = Some(*error);
                             }
                         }
                         // Preserve App::handle_event's post-key layout sampling,
@@ -4787,7 +4824,10 @@ impl InputBatchItem
 
     fn coalesce_motion(self) -> Result<(), Self> {
         match self {
-            Ok(event) => event.coalesce_motion().map_err(Ok),
+            Ok(event) => match event.coalesce_motion() {
+                Err(original) => Err(Ok(original)),
+                Ok(()) => Ok(()),
+            },
             Err(error) => Err(Err(error)),
         }
     }

@@ -125,3 +125,7 @@ An SDK release line is the series of releases of one SDK major and minor, publis
 A fix release names the SDK versions it affects and the version that fixes them. It states this in its release notes and in the advisory feed, so that tooling can read it. An author who pins an SDK line can then see when staying pinned becomes unsafe, because `ilium plugin check` reports `lint.sdk-unsupported` once the pinned line is outside its window.
 
 - **[PRX-011]** Every SDK release line (`ilium-plugin-sdk` and `@ilium/plugin-sdk`) MUST receive security fixes for the documented support window after its successor ships; a fix release MUST name the affected SDK versions and the fixed version in its release notes and in the advisory feed, so that `ilium plugin check` flags a plugin pinned to an SDK line outside its window with `lint.sdk-unsupported`.
+
+## Production additions (round 12)
+
+- **[PRP-006]** The system must mark every SDK item as stable or as experimental behind an explicit opt-in, apply the semver promise only to stable items, emit lint.sdk-unstable-used for each experimental item used, refuse publishing to a stable channel without --allow-unstable-sdk, and limit experimental status to two minor releases.

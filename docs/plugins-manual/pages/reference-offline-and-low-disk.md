@@ -155,3 +155,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[LIF-174]** A read-only data folder MUST NOT stop the server or the running plugins.
 - **[LIF-175]** A corrupt storage database MUST be moved aside and replaced with an empty one, never deleted.
 - **[LIF-176]** The compile cache key MUST include the component hash, the Wasmtime version and the CPU features, and a missing cache MUST NOT stop a plugin.
+
+## Production additions (round 12)
+
+- **[PRP-016]** The system must, when the plugin data root or its recorded volume is absent or mismatched at server start, avoid creating the root or installing defaults, start with third-party plugins off, show one banner naming the path and cause, and log host.data-root-missing once.

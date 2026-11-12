@@ -24,9 +24,7 @@ pub fn parse_start_mode(
     safe_plugins_env: Option<&str>,
     no_plugins_env: Option<&str>,
 ) -> StartMode {
-    fn is_set(value: Option<&str>) -> bool {
-        value.is_some_and(|text| !text.is_empty() && text != "0")
-    }
+    let is_set = |value: Option<&str>| value.is_some_and(|text| !text.is_empty() && text != "0");
     if no_plugins_flag || is_set(no_plugins_env) {
         StartMode::NoPlugins
     } else if safe_plugins_flag || is_set(safe_plugins_env) {

@@ -940,6 +940,7 @@ pub enum AgentMonitoringRow {
     Mode,
     AttentionRunningIndicator,
     AttentionProgressReports,
+    BlockingErrorDisplay,
     ModelIcons,
     ProgressMonitor,
     ProgressMonitorMaxLines,
@@ -965,6 +966,7 @@ impl AgentMonitoringRow {
             Self::Mode,
             Self::AttentionRunningIndicator,
             Self::AttentionProgressReports,
+            Self::BlockingErrorDisplay,
             Self::ModelIcons,
             Self::ProgressMonitor,
             Self::ProgressMonitorMaxLines,
@@ -1285,6 +1287,8 @@ pub struct SettingsState {
     pub keyboard_picker: Option<Action>,
     /// Hover, threshold editing and the fine-tuning dialog of the Padding tab.
     pub padding: crate::padding_ui::PaddingUiState,
+    /// The Agent Monitoring display-mode card under the pointer.
+    pub agent_monitoring_hover: Option<crate::agent_monitoring::AgentMonitoringMode>,
     /// Horizontal chip cursor in the selected Triggers event. Zero is None;
     /// later positions follow that event's available action registry.
     pub trigger_action_cursor: usize,
@@ -1419,6 +1423,7 @@ impl SettingsState {
             icon_picker: None,
             keyboard_picker: None,
             padding: crate::padding_ui::PaddingUiState::default(),
+            agent_monitoring_hover: None,
             trigger_action_cursor: 0,
         }
     }
@@ -2401,7 +2406,15 @@ pub struct App {
     pub custom_status_rules: ilium_core::status_rule_expression::StatusRules,
     pub custom_status_screen_observations: crate::status_screen_observations::ScreenObservations,
     pub custom_status_rules_error: Option<String>,
+    /// What the tolerant loader changed (rules disabled, identifiers renamed,
+    /// entries it could not read); cleared once the user saves the rules.
+    pub custom_status_rules_load_issues: Vec<ilium_core::status_rule_expression::ValidationIssue>,
     pub custom_status_rules_editor: Option<crate::status_rules_editor::EditorState>,
+    /// When the debounced write of the in-memory rules is due (see
+    /// `status_rules_save`); also re-armed to retry a failed write.
+    pub custom_status_rules_save_deadline: Option<Instant>,
+    /// The last failed write of the rules, until a later write succeeds.
+    pub custom_status_rules_write_error: Option<String>,
     /// One wall-clock sample per maintenance tick keeps footer layout and drawing consistent.
     progress_display_now_unix_millis: u64,
     /// This session's live shortcut-base setting. Input dispatch and every
@@ -2578,7 +2591,6 @@ pub struct App {
     pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
     pub custom_toolbar_selected: Option<String>,
-    pub custom_toolbar_hovered: Option<String>,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
     /// Toolbar buttons whose click was accepted but whose server-side work
     /// (spawning a pane, creating a worktree) has not been confirmed yet.
@@ -3144,9 +3156,13 @@ impl App {
             ),
             ui_settings: UiSettings::default(),
             custom_status_rules: ilium_core::status_rule_expression::default_rules(),
-            custom_status_screen_observations: crate::status_screen_observations::ScreenObservations::default(),
+            custom_status_screen_observations:
+                crate::status_screen_observations::ScreenObservations::default(),
             custom_status_rules_error: None,
+            custom_status_rules_load_issues: Vec::new(),
             custom_status_rules_editor: None,
+            custom_status_rules_save_deadline: None,
+            custom_status_rules_write_error: None,
             progress_display_now_unix_millis: crate::scheduled_input::unix_millis_now(),
             keyboard_settings: KeyboardSettings::default(),
             keybindings: keymap::LEADER_BINDINGS.to_vec(),
@@ -3251,7 +3267,6 @@ impl App {
             statistics_diagnostic: None,
             tree_toolbar_hovered: false,
             custom_toolbar_selected: None,
-            custom_toolbar_hovered: None,
             hovered_tree_toolbar_action: None,
             pending_toolbar_actions: Vec::new(),
             pending_pane_creations: HashMap::new(),
@@ -7263,8 +7278,9 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
-    /// Validate and queue an ordered configuration write before applying a
-    /// ruleset. A failed read must not silently replace the saved rules.
+    /// Validate a ruleset, apply it in memory at once and schedule its
+    /// debounced write (`status_rules_save`). A failed read must not silently
+    /// replace the saved rules.
     pub(crate) fn settings_save_custom_status_rules(
         &mut self,
         rules: ilium_core::status_rule_expression::StatusRules,
@@ -7272,21 +7288,31 @@ impl App {
         if let Some(error) = &self.custom_status_rules_error {
             return Err(format!("Cannot replace unreadable saved rules: {error}"));
         }
-        let errors = crate::config::validate_status_rules(&rules);
-        if !errors.is_empty() {
-            return Err(errors.join("; "));
+        let issues = crate::config::validate_status_rules(&rules);
+        if ilium_core::status_rule_expression::has_errors(&issues) {
+            return Err(ilium_core::status_rule_expression::error_summary(&issues));
         }
-        let directory = self.config_dir.clone().ok_or("The configuration directory is unavailable")?;
-        self.enqueue_configuration(
-            directory,
-            crate::filesystem::configuration::ConfigurationChange::StatusRules(Box::new(rules.clone())),
-            crate::filesystem::configurations::ConfigurationIntent::Plain { label: "custom status rules", success: None },
-        )?;
+        // The validated edit takes effect in memory first: a refused write
+        // must not throw the user's change away, and the next successful save
+        // persists the current rules.
         self.custom_status_rules = rules;
-        if !self.custom_status_screen_observations.watches_match(&self.custom_status_rules) {
+        if !self
+            .custom_status_screen_observations
+            .watches_match(&self.custom_status_rules)
+        {
             self.refresh_custom_status_screen_watches();
         }
         self.bump_tree_version();
+        // Without a configuration folder the edit still applies (it is
+        // already in memory); returning an error here would make the editor
+        // roll back its own state while the app kept the new rules. The
+        // lasting notice tells the user the change ends with the session.
+        if self.config_dir.is_none() {
+            self.custom_status_rules_write_error =
+                Some(crate::status_rules_save::STATUS_RULES_SESSION_ONLY.to_owned());
+            return Ok(());
+        }
+        self.schedule_custom_status_rules_save();
         Ok(())
     }
 
@@ -7295,24 +7321,48 @@ impl App {
     /// a replaced terminal.
     pub(crate) fn refresh_custom_status_screen_watches(&mut self) {
         let had_watches = self.custom_status_screen_observations.has_watches();
-        let retry_pending = self.custom_status_screen_observations.retry_due(std::time::Instant::now());
-        let (revision, watches) = self.custom_status_screen_observations.replace_rules(&self.custom_status_rules);
+        let retry_pending = self
+            .custom_status_screen_observations
+            .retry_due(std::time::Instant::now());
+        let (revision, watches) = self
+            .custom_status_screen_observations
+            .replace_rules(&self.custom_status_rules);
         if had_watches || !watches.is_empty() || retry_pending {
-            let admitted = self.queue_request(ClientRequest::SetStatusScreenWatches { revision, watches });
-            self.custom_status_screen_observations.set_subscription_admitted(admitted);
+            let admitted =
+                self.queue_request(ClientRequest::SetStatusScreenWatches { revision, watches });
+            self.custom_status_screen_observations
+                .set_subscription_admitted(admitted);
         }
     }
 
     pub fn settings_adjust_agent_monitoring_mode(&mut self, direction: i32) {
         let modes = crate::agent_monitoring::AgentMonitoringMode::ALL;
-        let current = modes.iter().position(|mode| *mode == self.ui_settings.agent_monitoring_mode).unwrap_or(0);
-        let mode = modes[(current as i32 + direction.signum()).rem_euclid(modes.len() as i32) as usize];
+        let current = modes
+            .iter()
+            .position(|mode| *mode == self.ui_settings.agent_monitoring_mode)
+            .unwrap_or(0);
+        let mode =
+            modes[(current as i32 + direction.signum()).rem_euclid(modes.len() as i32) as usize];
         self.settings_set_agent_monitoring_mode(mode);
     }
 
     pub fn settings_adjust_attention_running_indicator(&mut self, direction: i32) {
         let mut ui = self.ui_settings.clone();
         ui.attention_running_indicator = ui.attention_running_indicator.step(direction);
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    /// Cycles how blocking errors appear in Custom mode (rules only,
+    /// overlay or second icon); wraps at both ends like the mode row.
+    pub fn settings_adjust_blocking_error_display(&mut self, direction: i32) {
+        let options = crate::config::BlockingErrorDisplay::ALL;
+        let current = options
+            .iter()
+            .position(|option| *option == self.ui_settings.blocking_error_display)
+            .unwrap_or(0);
+        let next = (current as i32 + direction.signum()).rem_euclid(options.len() as i32);
+        let mut ui = self.ui_settings.clone();
+        ui.blocking_error_display = options[next as usize];
         self.apply_and_persist_ui_settings(ui);
     }
 
@@ -7325,6 +7375,9 @@ impl App {
             AgentMonitoringRow::Mode => self.settings_adjust_agent_monitoring_mode(direction),
             AgentMonitoringRow::AttentionRunningIndicator => {
                 self.settings_adjust_attention_running_indicator(direction)
+            }
+            AgentMonitoringRow::BlockingErrorDisplay => {
+                self.settings_adjust_blocking_error_display(direction)
             }
             AgentMonitoringRow::AttentionProgressReports => {
                 let mut ui = self.ui_settings.clone();
@@ -7356,16 +7409,27 @@ impl App {
                 let policy = &mut ui.cache_keepalive;
                 match row {
                     AgentMonitoringRow::CacheKeepaliveEnabled => policy.enabled = !policy.enabled,
-                    AgentMonitoringRow::CacheKeepaliveMonitor => policy.on_monitor = !policy.on_monitor,
-                    AgentMonitoringRow::CacheKeepaliveCommand => policy.on_command = !policy.on_command,
-                    AgentMonitoringRow::CacheKeepaliveSubagent => policy.on_subagent = !policy.on_subagent,
-                    AgentMonitoringRow::CacheKeepaliveClaudeInterval | AgentMonitoringRow::CacheKeepaliveCodexInterval => {
+                    AgentMonitoringRow::CacheKeepaliveMonitor => {
+                        policy.on_monitor = !policy.on_monitor
+                    }
+                    AgentMonitoringRow::CacheKeepaliveCommand => {
+                        policy.on_command = !policy.on_command
+                    }
+                    AgentMonitoringRow::CacheKeepaliveSubagent => {
+                        policy.on_subagent = !policy.on_subagent
+                    }
+                    AgentMonitoringRow::CacheKeepaliveClaudeInterval
+                    | AgentMonitoringRow::CacheKeepaliveCodexInterval => {
                         let interval = if row == AgentMonitoringRow::CacheKeepaliveClaudeInterval {
                             &mut policy.claude_interval_minutes
                         } else {
                             &mut policy.codex_interval_minutes
                         };
-                        *interval = if direction < 0 { interval.saturating_sub(1).max(1) } else { interval.saturating_add(1).min(1440) };
+                        *interval = if direction < 0 {
+                            interval.saturating_sub(1).max(1)
+                        } else {
+                            interval.saturating_add(1).min(1440)
+                        };
                     }
                     _ => unreachable!(),
                 }
@@ -12145,23 +12209,30 @@ impl App {
         let mut requirements = AnimationRequirements::default();
 
         // Custom rules can animate even when the underlying agent is idle. The
-        // settings cards and the editor also render those rules as previews.
+        // settings cards and the editor render every rule as a preview, so
+        // they follow the whole rule set; the live tree wakes only for the
+        // animations its panes actually matched, so an idle tree stays quiet.
         let custom_preview_visible = matches!(&self.mode, Mode::Settings(settings)
             if settings.tab == SettingsTab::AgentMonitoring);
-        if custom_preview_visible
-            || self.ui_settings.agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Custom
-        {
-            if let Some(delay_millis) = crate::status_rule_visual::animation_frame_delay(
+        let custom_delay_millis = if custom_preview_visible {
+            crate::status_rule_visual::animation_frame_delay(
                 &self.custom_status_rules,
                 self.ui_settings.motion_level,
                 elapsed_ms,
-            ) {
-                requirements.is_active = true;
-                retain_minimum_delay(
-                    &mut requirements.next_semantic_delay,
-                    Duration::from_millis(delay_millis),
-                );
-            }
+            )
+        } else if self.ui_settings.agent_monitoring_mode
+            == crate::agent_monitoring::AgentMonitoringMode::Custom
+        {
+            crate::custom_status_live::animation_frame_delay(self, elapsed_ms)
+        } else {
+            None
+        };
+        if let Some(delay_millis) = custom_delay_millis {
+            requirements.is_active = true;
+            retain_minimum_delay(
+                &mut requirements.next_semantic_delay,
+                Duration::from_millis(delay_millis),
+            );
         }
 
         // An address search answers on its own thread; poll for it at 10 Hz.
@@ -12299,7 +12370,15 @@ impl App {
                 },
                 None => None,
             };
-            if let Some(frame_millis) = frame_millis.filter(|_| !motion_off) {
+            // In Custom mode the live tree shows the rules' visuals instead of
+            // these built-in icons, and their clock ran above; the preview
+            // cards still animate the built-in icons.
+            let built_in_icons_visible = custom_preview_visible
+                || self.ui_settings.agent_monitoring_mode
+                    != crate::agent_monitoring::AgentMonitoringMode::Custom;
+            if let Some(frame_millis) =
+                frame_millis.filter(|_| !motion_off && built_in_icons_visible)
+            {
                 requirements.is_active = true;
                 retain_minimum_delay(
                     &mut requirements.next_semantic_delay,
@@ -16914,7 +16993,10 @@ impl App {
             }
             SubmenuItemAction::CustomAgentAtWorktree(profile_id)
             | SubmenuItemAction::CustomAgentAtProjectRoot(profile_id) => {
-                let identity = self.custom_agents.profiles.iter()
+                let identity = self
+                    .custom_agents
+                    .profiles
+                    .iter()
                     .find(|profile| profile.id == profile_id)
                     .map(|profile| ilium_core::custom_agent::CustomAgentIdentity {
                         profile_id: profile.id.clone(),
@@ -16923,12 +17005,17 @@ impl App {
                 if let Some(identity) = identity {
                     if matches!(&item.action, SubmenuItemAction::CustomAgentAtWorktree(_)) {
                         self.start_context_agent_at_worktree(
-                            target, identity.base_provider, Some(identity),
+                            target,
+                            identity.base_provider,
+                            Some(identity),
                         );
                     } else {
                         self.start_context_agent_at_project_root(
                             target,
-                            ilium_ipc::NewPaneKind::CustomAgent { identity, initial_input: None },
+                            ilium_ipc::NewPaneKind::CustomAgent {
+                                identity,
+                                initial_input: None,
+                            },
                             profile_id,
                         );
                     }
@@ -17027,10 +17114,18 @@ impl App {
         let spec = ilium_ipc::WorkspaceCreateSpec::Existing { path };
         let request = match identity {
             Some(identity) => ClientRequest::CreateCustomAgentInWorkspace {
-                request_id, parent_group, identity, spec, initial_input: None,
+                request_id,
+                parent_group,
+                identity,
+                spec,
+                initial_input: None,
             },
             None => ClientRequest::CreateAgentInWorkspace {
-                request_id, parent_group, provider, spec, initial_input: None,
+                request_id,
+                parent_group,
+                provider,
+                spec,
+                initial_input: None,
             },
         };
         if self.queue_request(request) {
@@ -18173,6 +18268,21 @@ impl App {
         admitted
     }
 
+    /// Keeps the toolbar layout in step with the custom agent profiles: a new
+    /// profile joins the toolbar as an ordinary entry, a deleted one leaves.
+    /// In-memory only; the next persisted UI-settings save carries the result.
+    pub(crate) fn reconcile_toolbar_custom_agents(&mut self) {
+        let ids: Vec<String> = self
+            .custom_agents
+            .profiles
+            .iter()
+            .map(|profile| profile.id.clone())
+            .collect();
+        self.ui_settings
+            .tree_toolbar_layout
+            .reconcile_custom_agents(&ids);
+    }
+
     pub(crate) fn step_custom_toolbar(&mut self, direction: i32) {
         let profiles = &self.custom_agents.profiles;
         if profiles.is_empty() {
@@ -18508,6 +18618,7 @@ impl App {
             })
             .chain(self.restructure_budget_autosave_deadline)
             .chain(self.remote_compaction_save_deadline)
+            .chain(self.custom_status_rules_save_deadline)
             .chain(self.next_chatroom_reconcile_at)
             .chain(self.compaction_next_poll(now))
             .min();
@@ -19187,17 +19298,21 @@ impl App {
         &mut self,
         pane_id: NodeId,
         event: crate::terminal_input_owner::InputEvent,
-    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
+    ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
         if self.pending_native_paste.is_some() {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::QueueFull,
-                event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::QueueFull,
+                    event,
+                ),
             ));
         }
         let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::Closed,
-                event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::Closed,
+                    event,
+                ),
             ));
         };
         self.last_tree_click = None;
@@ -19214,9 +19329,9 @@ impl App {
     #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub(crate) fn retry_native_terminal_paste(
         &mut self,
-    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
+    ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
         if let Some(failure) = self.native_paste_failure.take() {
-            return Err(failure);
+            return Err(Box::new(failure));
         }
         let Some(pending) = self.pending_native_paste.take() else {
             return Ok(());
@@ -19248,16 +19363,20 @@ impl App {
         if bytes > crate::terminal_input::MAX_BYTES
             || wire_bytes > ilium_ipc::MAX_FRAME_LEN as usize
         {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::InputBytes,
-                pending.event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::InputBytes,
+                    pending.event,
+                ),
             ));
         }
         if self.terminal_parsing.is_none() {
             let Some(client) = &self.outbound_admission else {
-                return Err(crate::terminal_input_owner::InputFailure::refused(
-                    ilium_execution::RejectReason::Closed,
-                    pending.event,
+                return Err(Box::new(
+                    crate::terminal_input_owner::InputFailure::refused(
+                        ilium_execution::RejectReason::Closed,
+                        pending.event,
+                    ),
                 ));
             };
             let reservation = match crate::ipc_preparation::reserve_request(
@@ -19272,9 +19391,11 @@ impl App {
                             | ilium_execution::RejectReason::InvalidCost
                             | ilium_execution::RejectReason::AccountingPoisoned
                     ) {
-                        return Err(crate::terminal_input_owner::InputFailure::refused(
-                            reason,
-                            pending.event,
+                        return Err(Box::new(
+                            crate::terminal_input_owner::InputFailure::refused(
+                                reason,
+                                pending.event,
+                            ),
                         ));
                     }
                     self.pending_native_paste = Some(pending);
@@ -19284,9 +19405,11 @@ impl App {
             let placeholder = match reservation.retain(()) {
                 Ok(placeholder) => placeholder,
                 Err(_) => {
-                    return Err(crate::terminal_input_owner::InputFailure::refused(
-                        ilium_execution::RejectReason::InvalidCost,
-                        pending.event,
+                    return Err(Box::new(
+                        crate::terminal_input_owner::InputFailure::refused(
+                            ilium_execution::RejectReason::InvalidCost,
+                            pending.event,
+                        ),
                     ));
                 }
             };
@@ -21333,6 +21456,60 @@ impl App {
     }
 }
 
+/// If `position` lands on a markdown task-list checkbox glyph in `editor`'s
+/// Source-mode content, returns the buffer row, the checkbox's `[` char
+/// column, and its current checked state -- ready for
+/// `EditorPane::toggle_checkbox`. `content_area` must be the exact rect the
+/// `TextArea` widget itself was rendered into (`editor_chrome::compute`'s
+/// `content_area`), since column/row math is anchored to it.
+///
+/// Column mapping assumes no horizontal scroll (`ratatui_textarea` exposes
+/// no public way to read its actual horizontal scroll offset). A checkbox
+/// on a line long enough to have scrolled horizontally (rare for a short
+/// "- [ ] ..." item) simply won't be found rather than risk mutating the
+/// wrong character.
+// Markdown checkbox click toggling was moved out of the app click path; this lookup has
+// no remaining caller but documents the column mapping, so it is kept for that work.
+#[cfg(test)]
+#[allow(dead_code)]
+fn checkbox_at(
+    editor: &EditorPane,
+    content_area: Rect,
+    position: Position,
+) -> Option<(usize, usize, bool)> {
+    if !editor.is_markdown() || !content_area.contains(position) {
+        return None;
+    }
+
+    let clicked_row_on_screen = position.y - content_area.y;
+    let visual_row = editor.source_visual_row_at(
+        content_area.width,
+        editor.source_scroll_row() as usize + clicked_row_on_screen as usize,
+    )?;
+    let row = visual_row.source_row;
+    let line = editor.textarea.lines().get(row)?;
+    let (bracket_col, checked) = crate::markdown::checkbox::find_checkbox(line)?;
+    let bracket_byte = line.char_indices().nth(bracket_col)?.0;
+    if !(visual_row.start_byte..visual_row.end_byte).contains(&bracket_byte) {
+        return None;
+    }
+
+    let gutter_width = if editor.show_line_numbers {
+        usize::from(crate::editor_highlight::line_number_gutter_width(
+            editor.textarea.lines().len(),
+        ))
+    } else {
+        0
+    };
+    let clicked_col_on_screen = (position.x - content_area.x) as usize;
+    let expected_col = gutter_width
+        + unicode_width::UnicodeWidthStr::width(&line[visual_row.start_byte..bracket_byte]);
+    let checkbox_span = expected_col..expected_col + 3; // "[ ]" / "[x]"
+    checkbox_span
+        .contains(&clicked_col_on_screen)
+        .then_some((row, bracket_col, checked))
+}
+
 fn is_press(key: &crossterm::event::KeyEvent) -> bool {
     matches!(
         key.kind,
@@ -21901,11 +22078,20 @@ mod tests {
         app.config_dir = Some(config_dir.path().to_path_buf());
         assert!(!app.ui_settings.cache_keepalive.enabled);
         app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveEnabled, 1);
-        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveClaudeInterval, -1);
-        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveCodexInterval, 1);
+        app.settings_adjust_agent_monitoring_row(
+            AgentMonitoringRow::CacheKeepaliveClaudeInterval,
+            -1,
+        );
+        app.settings_adjust_agent_monitoring_row(
+            AgentMonitoringRow::CacheKeepaliveCodexInterval,
+            1,
+        );
         app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::CacheKeepaliveMonitor, 1);
         app.settle_filesystem_for_test();
-        let policy = crate::config::load(config_dir.path()).unwrap().ui.cache_keepalive;
+        let policy = crate::config::load(config_dir.path())
+            .unwrap()
+            .ui
+            .cache_keepalive;
         assert!(policy.enabled);
         assert_eq!(policy.claude_interval_minutes, 54);
         assert_eq!(policy.codex_interval_minutes, 26);
@@ -25572,7 +25758,8 @@ mod tests {
     #[test]
     fn agent_message_filesystem_folder_status_update_reaches_agents_within_folder_path() {
         let mut app = app();
-        let project_path = PathBuf::from("/tmp/ask-for-update-folder-scope");
+        // Absolute on every platform (`/tmp/...` is relative on Windows).
+        let project_path = std::env::temp_dir().join("ask-for-update-folder-scope");
         let project = app.tree.add_project(project_path.clone()).unwrap();
         let group = app.tree.add_group(project, "agents").unwrap();
         let folder_path = project_path.join("src");
@@ -25964,12 +26151,16 @@ mod tests {
         app.settle_filesystem_for_test();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
 
+        // The board adapter stores the file's canonical identity (macOS
+        // temp directories are `/var` -> `/private/var` symlinks; Windows
+        // may expand 8.3 short names), so compare against that form.
+        let canonical = ilium_platform::paths::canonicalize(&path).unwrap();
         assert_eq!(
             app.take_outbound_requests(),
             vec![ClientRequest::NewBoard {
                 parent_group: group,
                 name: "release-plan".to_string(),
-                storage: ilium_core::BoardStorage::MarkdownFile { path },
+                storage: ilium_core::BoardStorage::MarkdownFile { path: canonical },
             }]
         );
     }
@@ -26034,13 +26225,15 @@ mod tests {
         assert!(std::fs::read_to_string(&board_path)
             .unwrap()
             .contains("## To do"));
+        // The queued request carries the created file's canonical identity.
+        let canonical_board_path = ilium_platform::paths::canonicalize(&board_path).unwrap();
         assert!(matches!(
             app.take_outbound_requests().as_slice(),
             [ClientRequest::NewBoard {
                 name,
                 storage: ilium_core::BoardStorage::MarkdownFile { path },
                 ..
-            }] if name == "Sprint" && path == &board_path
+            }] if name == "Sprint" && path == &canonical_board_path
         ));
         let _ = std::fs::remove_dir_all(project_path);
     }
@@ -26841,6 +27034,70 @@ mod tests {
     }
 
     #[test]
+    fn custom_mode_wakes_only_for_the_animations_its_panes_matched() {
+        use crate::agent_monitoring::AgentMonitoringMode;
+        use crate::config::MotionLevel;
+
+        let mut app = app();
+        let now = Instant::now();
+        app.started_at = now;
+        // Motion defaults to Reduced; the frame maths below assume Full.
+        app.ui_settings.motion_level = MotionLevel::Full;
+        let group_id = app.tree.add_group(ROOT_ID, "agents").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        let set_status = |app: &mut App, goal| {
+            app.tree
+                .set_pane_status(
+                    pane_id,
+                    PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, goal),
+                )
+                .unwrap();
+        };
+
+        // Normal mode: the built-in working spinner keeps its clock.
+        set_status(&mut app, None);
+        assert!(app.animation_requirements(now).is_active);
+
+        // Custom mode, default rules: plain "working" is a static built-in
+        // icon, so the tree has nothing to redraw...
+        app.ui_settings.agent_monitoring_mode = AgentMonitoringMode::Custom;
+        let quiet = app.animation_requirements(now);
+        assert!(!quiet.is_active);
+        assert_eq!(quiet.next_semantic_delay, None);
+        assert_eq!(app.maintenance_schedule(now).delay, Duration::from_secs(1));
+
+        // ...until a pane matches the animated "working toward a goal" rule
+        // (a Braille spinner at 8 frames per second).
+        set_status(&mut app, Some(ilium_core::GoalState::Active));
+        let spinning = app.animation_requirements(now);
+        assert!(spinning.is_active);
+        assert_eq!(
+            spinning.next_semantic_delay,
+            Some(Duration::from_millis(125))
+        );
+        assert_eq!(
+            app.animation_requirements(now + Duration::from_millis(100))
+                .next_semantic_delay,
+            Some(Duration::from_millis(25))
+        );
+
+        // Reduced motion slows the same spinner to 2 frames per second.
+        app.ui_settings.motion_level = MotionLevel::Reduced;
+        assert_eq!(
+            app.animation_requirements(now).next_semantic_delay,
+            Some(Duration::from_millis(500))
+        );
+
+        // Motion Off freezes it: no wake at all.
+        app.ui_settings.motion_level = MotionLevel::Off;
+        assert!(!app.animation_requirements(now).is_active);
+        assert!(!app.has_active_animation());
+    }
+
+    #[test]
     fn motion_off_suppresses_frame_wakes_but_keeps_terminal_activity_expiry() {
         let mut app = app();
         app.ui_settings.motion_level = crate::config::MotionLevel::Off;
@@ -27463,8 +27720,12 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        // The toolbar, prompt and footer sections each add a rule row.
-        let expected_rows = 27 - 3 * u16::from(crate::theme::section_frames_enabled());
+        // These panes have no prompt or progress footer; only the toolbar is shown.
+        assert!(!app.shows_last_prompt_banner(first));
+        assert!(!app.shows_progress_footer(first));
+        assert!(!app.shows_last_prompt_banner(second));
+        assert!(!app.shows_progress_footer(second));
+        let expected_rows = 36 - u16::from(crate::theme::section_frames_enabled());
         assert_eq!(resize_requests.len(), 2);
         assert!(
             resize_requests
@@ -29403,17 +29664,18 @@ mod tests {
             },
             menu,
         );
-        assert_eq!(
+        assert!(matches!(
             app.take_outbound_requests()
                 .into_iter()
                 .find(|request| matches!(request, ClientRequest::NewPane { .. })),
             Some(ClientRequest::NewPane {
                 request_id: 1,
-                parent_group: group,
-                kind: ilium_ipc::NewPaneKind::Editor(resolved_path.clone()),
+                parent_group,
+                kind: ilium_ipc::NewPaneKind::Editor(path),
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
-            })
-        );
+                ..
+            }) if parent_group == group && path == resolved_path
+        ));
         assert_eq!(
             app.status_message.as_deref(),
             Some(format!("Opening {} in editor", resolved_path.display()).as_str())
@@ -31914,8 +32176,11 @@ mod board_handoff_tests {
         assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
         assert_eq!(app.pending_pane_focuses.len(), 1);
         assert_eq!(app.outbox.len(), 1);
+        // The board source reports the file's canonical identity (macOS
+        // `/var` -> `/private/var`, Windows 8.3 short names).
+        let canonical_path = ilium_platform::paths::canonicalize(&path).unwrap();
         assert!(
-            matches!(app.outbox[0].view(), ilium_ipc::ClientRequest::NewBoard { parent_group: actual, name, storage } if *actual == parent_group && name == "retained-board" && storage.path() == path)
+            matches!(app.outbox[0].view(), ilium_ipc::ClientRequest::NewBoard { parent_group: actual, name, storage } if *actual == parent_group && name == "retained-board" && storage.path() == canonical_path)
         );
         app.collect_board_files();
         assert_eq!(

@@ -65,7 +65,8 @@ fn dev_564_a_list_that_only_adds_grants_deactivates_with_granted() {
         assert_eq!(log.deactivations, vec![DeactivationReason::Granted]);
         assert_eq!(
             log.activations[1].granted,
-            strings(&["tree.read", "sound.play", "agent.read"])
+            // DEV-420 requires sorted activation grants, including a grant-only change.
+            strings(&["agent.read", "sound.play", "tree.read"])
         );
     });
 }

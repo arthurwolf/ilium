@@ -135,3 +135,15 @@ Before you restore over live data, keep the state you have now. Take a new archi
 ## Production additions (round 8)
 
 - **[PRT-006]** `ilium plugin restore` and `--dry-run` MUST refuse, with `restore.unsafe-entry` and before writing any file, an archive entry whose path is absolute, contains a `..` segment or a drive prefix, or whose type is a symbolic link, hard link, device, FIFO or socket, and MUST create every restored file with the owner-only mode of the live data root and never with the mode, owner or setuid bits recorded in the archive.
+
+## Production additions (round 10)
+
+- **[PRR-002]** The system must produce a backup taken while the server runs in which every plugin bucket is captured at one flush boundary with no half-written record, and restoring that archive passes the same bucket integrity check as a bucket read after a clean stop.
+
+## Production additions (round 11)
+
+- **[PRQ-022]** The system must record host version and each plugin's installed version, data_version and update state in the backup manifest, never include a half-migrated bucket, and refuse restore with restore.host-too-old before any write when a data_version is newer than the host supports.
+
+## Production additions (round 12)
+
+- **[PRP-019]** The system must stream backup and restore with peak host memory growth of at most 64 MiB, emit a progress JSONL record at least every 2 seconds, and not block plugin event delivery longer than one tick on a live server.

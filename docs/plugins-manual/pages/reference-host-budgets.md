@@ -138,3 +138,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions (round 7)
 
 - **[PRU-010]** Server start MUST scale with the number of enabled plugins that activate at startup, not with the number installed: the host MUST read only installed.json and the manifests of installed plugins at start, MUST NOT read or compile the component of a plugin that has not activated, and with 500 installed plugins of which 5 activate at startup the server MUST be ready for input within the same budget as with 5 installed.
+
+## Production additions (round 10)
+
+- **[PRR-006]** The system must, after SIGKILL of the server with 40 installed plugins and an interrupted update in staging, restart and accept its first client within 5 seconds with plugins loading in the background, and a benchmark must report time spent in each recovery step.

@@ -162,6 +162,53 @@ class LicenceInventoryTests(unittest.TestCase):
             (widget / "Cargo.toml").write_text('[package]\nname="widget"\nversion="2.0.0"\nlicense="MIT"\n')
             self.assertIn(("widget", "2.0.0"), module.local_packages(root))
 
+    def test_workspace_member_glob_includes_each_locked_local_package(self):
+        module = self.module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry, fixture = self.fixture(root)
+            (fixture / "LICENSE").write_text("MIT License\nCopyright fixture owner\n")
+            self.checksum(fixture, {})
+            (root / "Cargo.toml").write_text(
+                '[workspace]\nmembers=["plugins/core/*"]\n'
+                '[workspace.package]\nversion="1.0.0"\nlicense="MIT"\n')
+            (root / "LICENSE").write_text("MIT License\nCopyright workspace owner\n")
+            for name in ("agent-detect", "tree"):
+                package = root / "plugins/core" / name
+                package.mkdir(parents=True)
+                (package / "Cargo.toml").write_text(
+                    f'[package]\nname="{name}"\nversion.workspace=true\n'
+                    'license.workspace=true\n')
+                with (root / "Cargo.lock").open("a") as lock:
+                    lock.write(f'\n[[package]]\nname="{name}"\nversion="1.0.0"\n')
+            result = module.build_inventory(root, registry, None, root / "evidence")
+            self.assertEqual({p["name"] for p in result["packages"]},
+                             {"fixture", "agent-detect", "tree"})
+            local = [p for p in result["packages"] if p["name"] != "fixture"]
+            for record in local:
+                self.assertIn("Copyright workspace owner",
+                              Path(record["license_file"]).read_text())
+
+    def test_nested_explicit_licence_does_not_inherit_workspace_notice(self):
+        module = self.module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry, fixture = self.fixture(root)
+            (fixture / "LICENSE").write_text("MIT License\nCopyright fixture owner\n")
+            self.checksum(fixture, {})
+            (root / "Cargo.toml").write_text(
+                '[workspace]\nmembers=["vendor/widget"]\n'
+                '[workspace.package]\nlicense="MIT"\n')
+            (root / "LICENSE").write_text("MIT License\nCopyright workspace owner\n")
+            package = root / "vendor/widget"
+            package.mkdir(parents=True)
+            (package / "Cargo.toml").write_text(
+                '[package]\nname="widget"\nversion="1.0.0"\nlicense="MIT"\n')
+            with (root / "Cargo.lock").open("a") as lock:
+                lock.write('\n[[package]]\nname="widget"\nversion="1.0.0"\n')
+            with self.assertRaisesRegex(ValueError, "licence bytes or declaration missing: widget"):
+                module.build_inventory(root, registry, None, root / "evidence")
+
 
 if __name__ == "__main__":
     unittest.main()

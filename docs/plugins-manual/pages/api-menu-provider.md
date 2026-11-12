@@ -239,3 +239,7 @@ A checked entry draws `✓ ` before its icon; an unchecked tri-state entry keeps
 - [Errors and limits](/pages/reference-errors-and-limits/) for `manifest.menu-depth`.
 
 Return unique entry ids and valid parents; an entry whose `parent` is unknown is dropped, and of two entries with the same `id` only the first is kept. Each dropped entry gets a `warn` line in the plugin log, and the rest of the menu is still shown. Contract: `ilium:plugin@0.1.0`, export fragment `with-menus`.
+
+## Production additions (round 11)
+
+- **[PRQ-008]** The system must group contributed menu and palette entries by owner with core entries first, show the owner name for duplicate titles, scroll rather than clip tall lists, stay keyboard-usable with 200 contributed entries, and match palette queries against active-language and English titles case- and accent-insensitively with recent commands first for an empty query.

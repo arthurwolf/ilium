@@ -696,3 +696,16 @@ The flags act on attach. The precedence is the flag, then the environment variab
 - **[USR-355]** The first-start prompt of a bundled plugin (USR-014) MUST NOT appear inside a setup step of another plugin. While the flow runs, such a prompt MUST wait until the flow ends, and the Not now count of USR-014 MUST NOT change because it waited.
 - **[USR-356]** A T3 plugin MUST NOT contribute a setup step unless the user installed it before the first run. A T3 plugin installed later MUST NOT add a step to the first-run flow; it may appear only in a later `ilium --onboarding` run if it declares the `onboarding-steps` contribution and the user holds its grant.
 - **[USR-357]** A release check MUST run the guided setup under the pseudo-locale `en-XA` (USR-316) and at 48 columns (USR-951), and MUST pass only when no step clips, overflows or loses a focusable element, and Next, Back and Skip stay reachable in every step. A failure blocks the release.
+
+## Production additions (round 10)
+
+- **[PRR-024]** The Settings screen must provide one search field matching label, description and keywords of every visible row from the core settings plugin and enabled plugins in the active language and English, showing the owning plugin on each result, showing no rows for a disabled plugin, and opening the result's tab with the row focused within 200 ms.
+
+## Production additions (round 11)
+
+- **[PRQ-001]** The system must store theme, density, motion level, icon mode and language as per-client preferences, deliver theme-changed and language-changed only to plugin instances rendering for the client whose preference changed, and start a newly attached client from config file values rather than another client's live state.
+- **[PRQ-006]** The system must provide Reset this tab and Reset all settings with a confirmation listing the number of rows affected, keep secrets, grants, installed plugins and enabled state, write a timestamped copy of the previous config before applying, and emit settings-changed with origin reset to each affected plugin.
+
+## Production additions (round 12)
+
+- **[PRP-027]** The system must show a settings row whose backing capability or dependency is unavailable as disabled but visible, with a one-line reason and an action, and expose the same reason through screen-reader text.

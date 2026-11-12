@@ -167,3 +167,12 @@ Contract: `ilium:plugin@0.1.0`.
 ## Production additions (round 5)
 
 - **[PRW-043]** When a plugin is disabled, blocked or its publisher key is revoked as compromised, the host MUST stop serving its secrets to that plugin and MUST list its stored secret names in the revocation notice so the user can rotate them.
+
+## Production additions (round 10)
+
+- **[PRR-014]** The system must let a secret settings row declare bound_hosts and must refuse an outbound HTTP request from that plugin with secret.host-mismatch and write one audit record when the request carries the secret value, or its base64 or percent-encoded form, in a URL, header or body for a host outside bound_hosts; if the design rejects this control, the page must list the exfiltration path in the accepted-residual-risk table with the reason.
+
+## Production additions (round 11)
+
+- **[PRQ-014]** The system must let a secret row declare redact = always so the host redacts every occurrence of its value in logs, bundles, captured process output and error text regardless of length, and refuses to save a value shorter than 4 characters that would match more than 1 percent of the plugin's last 1000 log lines.
+- **[PRQ-017]** The system must, when a plugin is disabled-blocked or its publisher key is revoked as compromised, mark every backup archive since its install that includes its secrets as secret-tainted, warn and require confirmation on restore, and list affected archives in plugin doctor.

@@ -1,0 +1,4 @@
+# Tests hash fixture bytes and split include_str! source text on "\n", so a
+# Windows checkout (core.autocrlf) must not turn these into CRLF.
+*.rs text eol=lf
+*.json text eol=lf

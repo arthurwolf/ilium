@@ -338,3 +338,7 @@ Every case has one remediation line. It names the manifest key, SDK item or expo
 - **[DEV-228]** Every case of the conformance suite MUST carry a remediation line naming the manifest key, SDK item or export that most often causes its failure, and `ilium plugin test --conformance` MUST print that line in the `remediation` field of every `conformance` case record.
 
 - **[DEV-229]** The release pipeline MUST fail when a case id has no remediation line.
+
+## Production additions (round 12)
+
+- **[PRP-007]** The system must fail the conformance run with conformance.error-undocumented naming the code when any emittable diagnostic code lacks an offline ilium plugin explain entry with cause, fix and manual page link, and must never reuse a released code for a different meaning.

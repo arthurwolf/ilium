@@ -663,7 +663,7 @@ fn sign_cli(
 ) -> (CliFixture, ilium_plugin_host::cli::CliOutput) {
     let fixture = cli_fixture();
     let key = fixture.work().join("publisher.key");
-    write_key(&key, 0, 0o600);
+    write_key(&key, 0);
     let unsigned = put_package(&fixture, "in.ilpl", &vector_unsigned());
     let out_path = fixture.work().join("out.ilpl");
     let key_text = key.to_string_lossy().into_owned();
@@ -839,12 +839,12 @@ fn pkg_210_a_private_key_in_pem_is_accepted_by_sign() {
 fn pkg_210_a_key_with_another_label_is_refused() {
     let fixture = cli_fixture();
     let key = fixture.work().join("publisher.key");
-    write_key(&key, 0, 0o600);
+    write_key(&key, 0);
     let text = std::fs::read_to_string(&key)
         .unwrap()
         .replace("PRIVATE KEY", "RSA PRIVATE KEY");
     write_file(&key, text.as_bytes());
-    std::fs::set_permissions(&key, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+    ilium_platform::secure_fs::restrict_file_to_owner(&key).expect("owner-only signing key");
     let unsigned = put_package(&fixture, "in.ilpl", &vector_unsigned());
     let out = run_cli(
         &fixture,
@@ -956,6 +956,7 @@ fn pkg_211_passphrase_never_appears_in_the_output() {
 }
 
 /// REQ: PKG-212
+#[cfg(unix)]
 #[test]
 fn pkg_212_keygen_creates_file_0600_and_folder_0700() {
     let fixture = cli_fixture();
@@ -1001,10 +1002,13 @@ fn pkg_212_keygen_refuses_to_overwrite_an_existing_key() {
     assert_eq!(key_file(&fixture, "k"), before);
 }
 
+#[cfg(unix)]
 fn sign_with_mode(mode: u32) -> ilium_plugin_host::cli::CliOutput {
     let fixture = cli_fixture();
     let key = fixture.work().join("publisher.key");
-    write_key(&key, 0, mode);
+    use std::os::unix::fs::PermissionsExt;
+    write_key(&key, 0);
+    std::fs::set_permissions(&key, std::fs::Permissions::from_mode(mode)).expect("chmod");
     let unsigned = put_package(&fixture, "in.ilpl", &vector_unsigned());
     run_cli(
         &fixture,
@@ -1020,6 +1024,7 @@ fn sign_with_mode(mode: u32) -> ilium_plugin_host::cli::CliOutput {
 }
 
 /// REQ: PKG-212
+#[cfg(unix)]
 #[test]
 fn pkg_212_group_or_other_readable_key_is_refused_key_permissions() {
     for mode in [0o640, 0o604, 0o644, 0o660, 0o666, 0o440] {
@@ -1034,6 +1039,7 @@ fn pkg_212_group_or_other_readable_key_is_refused_key_permissions() {
 }
 
 /// REQ: PKG-212
+#[cfg(unix)]
 #[test]
 fn pkg_212_owner_only_modes_are_accepted() {
     for mode in [0o600, 0o400] {
@@ -1600,6 +1606,7 @@ fn pkg_220_ilium_prefixed_plugin_id_with_valid_signature_refused_id_reserved() {
 }
 
 /// REQ: PKG-221
+#[cfg(unix)]
 #[test]
 fn pkg_221_trust_add_creates_the_store_with_mode_0600() {
     let (fixture, out) = trust_add(&pub_text(

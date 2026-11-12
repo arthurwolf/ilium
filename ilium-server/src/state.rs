@@ -1113,34 +1113,40 @@ impl Drop for ServerState {
     }
 }
 
+/// A minimal in-process server state for unit tests across this crate: no
+/// listener, no detection loop, default configuration, state files inside
+/// `directory`. Shared so modules that only need a registry and an event bus
+/// do not each grow their own copy of this constructor.
+#[cfg(test)]
+pub(crate) fn test_server_state(directory: &tempfile::TempDir) -> ServerState {
+    let (sound_requests, _playback_task) = crate::sounds::spawn(
+        Arc::new(crate::NoopSoundPlayer),
+        crate::execution::test_general_client(),
+    );
+    ServerState::new(ServerStateOptions {
+        session_name: "state-test".to_string(),
+        session_cwd: directory.path().to_path_buf(),
+        home_dir: directory.path().to_path_buf(),
+        snapshot_path: directory.path().join("state-test.snapshot.json"),
+        socket_path: directory.path().join("state-test.sock"),
+        detection_config: DetectionConfig::default(),
+        notifications_config: NotificationsConfig::default(),
+        sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
+        sound_requests,
+        custom_signatures: Vec::new(),
+        agent_debug_menu_enabled: false,
+        progress_monitor_enabled: true,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use crate::config::{DetectionConfig, NotificationsConfig};
-    use crate::NoopSoundPlayer;
-
     use super::*;
 
     fn test_state(directory: &tempfile::TempDir) -> ServerState {
-        let (sound_requests, _playback_task) = crate::sounds::spawn(
-            Arc::new(NoopSoundPlayer),
-            crate::execution::test_general_client(),
-        );
-        ServerState::new(ServerStateOptions {
-            session_name: "state-test".to_string(),
-            session_cwd: directory.path().to_path_buf(),
-            home_dir: directory.path().to_path_buf(),
-            snapshot_path: directory.path().join("state-test.snapshot.json"),
-            socket_path: directory.path().join("state-test.sock"),
-            detection_config: DetectionConfig::default(),
-            notifications_config: NotificationsConfig::default(),
-            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
-            sound_requests,
-            custom_signatures: Vec::new(),
-            agent_debug_menu_enabled: false,
-            progress_monitor_enabled: true,
-        })
+        test_server_state(directory)
     }
 
     #[tokio::test]

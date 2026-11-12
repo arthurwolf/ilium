@@ -171,7 +171,7 @@ Custom agents are profiles, not additional detection signatures. A stable profil
 
 [Detailed design](architecture/detection-design.md).
 
-Custom tree status icons use ordered client-side rules over shared pane facts and revision-fenced screen-match observations from the server; the detection design describes the boundary.
+Custom tree status icons use ordered client-side rules over shared pane facts and revision-fenced screen-match observations from the server; the detection design describes the boundary. The condition registry in `ilium-core/src/status_rule_expression/registry.rs` is the single source for labels, categories and explanations; `src/docs/custom-status-icons.md` carries a table of it and the shipped defaults, and `ilium-core/tests/status_rule_docs_drift.rs` fails when the registry and that page disagree. Custom is a client-owned display mode: the agent-detect plugin manifest declares only the Attention mode, and Custom is selected through `ui.agent_monitoring_mode`.
 
 ## Scaling to hundreds of agents
 
@@ -204,6 +204,10 @@ Custom tree status icons use ordered client-side rules over shared pane facts an
 ## Embedded application prompts
 
 [Detailed design](architecture/embedded-application-prompts.md).
+
+### Input latency and freeze containment
+
+See [Embedded application prompts](architecture/embedded-application-prompts.md).
 
 ## Shared resource queues
 

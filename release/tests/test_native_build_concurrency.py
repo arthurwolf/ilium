@@ -1,5 +1,6 @@
 """Release builds must bound both Cargo and native child parallelism."""
 from pathlib import Path
+import os
 import sys
 import tempfile
 import unittest
@@ -20,7 +21,7 @@ class NativeBuildConcurrencyTests(unittest.TestCase):
                 target = {'os': operating_system, 'rust_target': 'synthetic-target'}
                 configured = pipeline.configure_workspace_test_environment(
                     environment, target, work, work / 'target')
-                self.assertEqual(configured['CARGO_BUILD_JOBS'], '16')
+                self.assertEqual(configured['CARGO_BUILD_JOBS'], str(min(16, os.cpu_count() or 2)))
                 for name in ('CMAKE_BUILD_PARALLEL_LEVEL', 'NUM_JOBS',
                              'OMP_NUM_THREADS', 'RAYON_NUM_THREADS'):
                     self.assertEqual(configured[name], '1', name)

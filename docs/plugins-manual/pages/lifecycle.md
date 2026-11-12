@@ -675,3 +675,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions (round 9)
 
 - **[PRS-002]** When the session server receives SIGTERM, SIGINT or SIGHUP (or the Windows console close, logoff or shutdown event), it MUST begin the same graceful stop as a user stop request, with the same 5 second total deactivation budget, flush acknowledged storage writes and the audit log, and exit within 10 seconds, and a second signal during the stop MUST NOT skip the flush
+
+## Production additions (round 10)
+
+- **[PRR-005]** The system must serialise lifecycle writes on installed.lock so a second concurrent command either waits up to a stated bound and then exits with install.locked naming the holder command and age, or runs after the first, and the final installed.json never holds a state that neither command alone would produce.

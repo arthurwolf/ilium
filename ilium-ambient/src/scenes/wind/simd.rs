@@ -10,7 +10,7 @@
 //! Rust's runtime feature detection is documented here:
 //! https://doc.rust-lang.org/std/arch/macro.is_x86_feature_detected.html
 
-use super::sim::{Dot, MOUSE_RADIUS};
+use super::sim::Dot;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum KernelPath {
@@ -39,7 +39,7 @@ pub(super) struct State {
     pub(super) dirty: bool,
     /// True only when the caller validated each force while generating its cache.
     pub(super) cell_wind_field_finite: bool,
-    #[cfg(test)]
+    #[cfg(all(test, target_arch = "x86_64"))]
     swept_scalar_lanes: usize,
 }
 
@@ -379,6 +379,7 @@ fn scalar_lane(
     state.vy[index] = vy;
 }
 
+#[cfg(any(target_arch = "x86_64", test))]
 #[inline]
 fn pointer_force_batch<const LANES: usize>(
     x: &[f32],
@@ -529,7 +530,8 @@ fn scalar_step(
 
 #[cfg(target_arch = "x86_64")]
 mod x86 {
-    use super::{pointer_force_batch, scalar_lane, State, MOUSE_RADIUS};
+    use super::super::sim::MOUSE_RADIUS;
+    use super::{pointer_force_batch, scalar_lane, State};
     use std::arch::x86_64::*;
 
     // Fused arithmetic changes rounding slightly; the dense-frame tests bound

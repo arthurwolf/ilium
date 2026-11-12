@@ -125,3 +125,11 @@ Parallel runs:
 - [Requirements of the developer tooling lane](/pages/reference-requirements-dev-tooling/)
 
 API checked against `ilium:plugin@0.1.0`.
+
+## Production additions (round 10)
+
+- **[PRR-013]** The system must include in the conformance suite a fidelity case that, for each template and export, yields identical outputs, error codes and emitted intents from the same scripted inputs through testing::FakeHost and through the embedded host of ilium plugin test --conformance, and any divergence must fail the SDK release with a case id naming the export.
+
+## Production additions (round 12)
+
+- **[PRP-001]** The system must let ilium plugin test --migrate-from seed FakeHost storage with older released data, run the plugin migrate, assert the final stamp equals data_version, a byte-identical no-op second run and recovery from interrupted runs, and fail with test.migration-incomplete naming the first unmigrated bucket key.

@@ -106,6 +106,7 @@ async fn create(f: &Fixture) -> ResourceMemory<ResourceReply> {
 fn store(f: &Fixture) -> store::ResourceStore {
     store::ResourceStore::new(service(&f.state).unwrap().path.clone()).unwrap()
 }
+#[cfg(target_os = "linux")]
 async fn snapshot_when_store_available(f: &Fixture) -> ResourceCatalog {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
@@ -118,6 +119,7 @@ async fn snapshot_when_store_available(f: &Fixture) -> ResourceCatalog {
         }
     }
 }
+#[cfg(target_os = "linux")]
 async fn resource_snapshot_when_admitted(f: &Fixture) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {

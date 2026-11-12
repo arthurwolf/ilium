@@ -1,5 +1,5 @@
 # Action commits read back from official GitHub tag refs on 2026-09-29.
-# workflow_dispatch is strictly nonpublishing. Automatic native receipts replace
+# workflow_dispatch is strictly nonpublishing except the explicit Linux preview publish input. Automatic native receipts replace
 # manual qualification. Latest activation precedes literal default-command tests
 # because those commands resolve /releases/latest; five default-preview installs
 # gate production deployment; five literal production commands gate completion.
@@ -8,12 +8,19 @@ name: Native release and installation
   push:
     tags:
     - v*
+    - '!v*-linux.*'
+    - '!v*-preview.*'
   workflow_dispatch:
     inputs:
       release_tag:
         description: Optional tag matching workspace version; dispatch never publishes
         required: false
         type: string
+      publish_linux_preview:
+        description: Publish the verified Linux preview prerelease (only with release_tag v0.1.1-linux.3)
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -28,7 +35,50 @@ env:
   RUST_BACKTRACE: '1'
   PYTHONDONTWRITEBYTECODE: '1'
 jobs:
+  macos-preview:
+    if: github.event_name == 'workflow_dispatch' && (inputs.release_tag == 'v0.1.1-preview.4' || inputs.release_tag == 'v0.1.1-preview.5')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/macos-preview.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+  linux-preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/linux-preview.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+  publish-linux-preview:
+    # Dry-run unless publish_linux_preview is set; publication needs every qualification job green.
+    needs:
+    - linux-preview
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: native-x86_64-unknown-linux-gnu
+        path: preview-native
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: linux-packages-x86_64
+        path: preview-packages
+    - name: Verify and publish the Linux preview prerelease
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PUBLISH_LINUX_PREVIEW: ${{ inputs.publish_linux_preview && 'publish' || 'dry-run' }}
+      run: |
+        set -o pipefail
+        python release/scripts/publish_linux_preview.py "$PUBLISH_LINUX_PREVIEW" --tag "${{ inputs.release_tag }}" --commit "${{ github.sha }}" --native-directory preview-native --packages-directory preview-packages --work "$RUNNER_TEMP/preview-publish"
   source:
+    if: github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4' && inputs.release_tag != 'v0.1.1-preview.5')
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:
@@ -54,6 +104,8 @@ jobs:
       matrix: ${{ steps.identity.outputs.matrix }}
       tag: ${{ steps.identity.outputs.tag }}
       commit: ${{ steps.identity.outputs.commit }}
+      selection: ${{ steps.identity.outputs.selection }}
+      selection_sha256: ${{ steps.identity.outputs.selection_sha256 }}
   native:
     needs:
     - source
@@ -72,7 +124,9 @@ jobs:
     - name: Linux native build prerequisites
       run: 'sudo apt-get update
 
-        sudo apt-get install -y bubblewrap libasound2-dev pkg-config libssl-dev'
+        sudo apt-get install -y bubblewrap libasound2-dev pkg-config libssl-dev
+
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0'
       if: matrix.os == 'linux'
     - name: Windows Visual Studio 2022 Build Tools (the pinned ORT source build needs VS 17; windows-2025 ships only VS 18)
       if: matrix.os == 'windows'
@@ -212,6 +266,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y systemd-container ffmpeg bubblewrap rpm rpm2cpio cpio squashfs-tools flatpak fuse3 qemu-system-x86 qemu-utils cloud-image-utils openssh-client # Supply native package inspectors and the disposable guest tools.
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
         command -v snap >/dev/null # Require the runner's existing Snap tooling before building or installing.
         command -v docker >/dev/null # Require native distribution-container coverage on this runner.
     - name: Build deb, rpm, AppImage, Flatpak and Snap from the audited tarball
@@ -232,14 +287,35 @@ jobs:
         set -o pipefail
         mkdir -p "$RUNNER_TEMP/package-smoke-host"
         python release/scripts/smoke_linux_packages.py host --arch "${{ matrix.arch }}" --packages linux-packages --formats snap,flatpak,deb,appimage --log "$RUNNER_TEMP/package-smoke-host" --flatpak-user-dir "$RUNNER_TEMP/flatpak-install" --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml | tee "$RUNNER_TEMP/package-smoke-host/host-results.jsonl"
+    - name: Delegate the cpu controller to the runner user's service manager # The runner's user manager delegates only memory and pids; a user service needs cpu too.
+      run: |
+        uid="$(id -u)"
+        for group in /sys/fs/cgroup /sys/fs/cgroup/user.slice /sys/fs/cgroup/user.slice/user-$uid.slice /sys/fs/cgroup/user.slice/user-$uid.slice/user@$uid.service; do
+          echo +cpu | sudo tee "$group/cgroup.subtree_control" >/dev/null
+          echo "$group: $(cat "$group/cgroup.subtree_control")"
+        done
     - name: Execute every declared native Linux sandbox case # Keep this step bound to the runner and matching Rust test source.
       run: python release/scripts/native_sandbox_runner.py --artifact-directory native-linux/evidence --helper native-linux/candidate/ilium-animation-helper --workspace Cargo.toml --output "$RUNNER_TEMP/native-sandbox"
+    - name: Select the VM accelerator # Software emulation is too slow for the animation helper deadline, so use hardware acceleration when the runner exposes it.
+      if: matrix.arch == 'x86_64'
+      run: |
+        mkdir -p "$RUNNER_TEMP/package-smoke-vm"
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+        sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true
+        if [ -e /dev/kvm ]; then sudo chmod 0666 /dev/kvm; fi
+        accelerator=tcg; if [ -w /dev/kvm ]; then accelerator=kvm; fi
+        {
+          echo "VM accelerator: $accelerator"
+          ls -la /dev/kvm 2>&1 || true
+          echo "cpuinfo vmx/svm cores: $(grep -cE 'vmx|svm' /proc/cpuinfo)  nproc: $(nproc)"
+        } | tee "$RUNNER_TEMP/package-smoke-vm/accelerator-decision.txt"
+        echo "accelerator=$accelerator" >> "$GITHUB_ENV"
     - name: Install and run Linux packages in a disposable x86_64 Ubuntu VM
       if: matrix.arch == 'x86_64'
       run: |
         set -o pipefail
         mkdir -p "$RUNNER_TEMP/package-smoke-vm"
-        python release/packaging/linux/vm_smoke.py --native-directory native-linux --packages linux-packages --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work "$RUNNER_TEMP/package-vm-work" --log "$RUNNER_TEMP/package-smoke-vm" --formats deb,appimage,snap,flatpak --accelerator tcg | tee package-vm.jsonl
+        python release/packaging/linux/vm_smoke.py --native-directory native-linux --packages linux-packages --audit-report native-linux/native-audit.json --workspace Cargo.toml --manifest release/targets.toml --arch x86_64 --work "$RUNNER_TEMP/package-vm-work" --log "$RUNNER_TEMP/package-smoke-vm" --formats deb,appimage,snap,flatpak --accelerator "$accelerator" | tee package-vm.jsonl
     - name: Seal native Linux animation evidence
       run: python release/scripts/validate_animation_smoke.py --workspace Cargo.toml --manifest release/targets.toml --target "${{ matrix.rust_target }}" --tag "${{ needs.source.outputs.tag }}" --audit native-linux/native-audit.json --archive "native-linux/ilium-linux-${{ matrix.arch }}.tar.gz" --packages linux-packages --container-log "$RUNNER_TEMP/package-smoke" --host-log "$RUNNER_TEMP/package-smoke-host" --native-sandbox-receipt "$RUNNER_TEMP/native-sandbox/native-sandbox-tests.json"
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -299,7 +375,7 @@ jobs:
         --source-commit "${{ needs.source.outputs.commit }}" --runner-identity "${{ matrix.runner }}"
         --native native-macos --archive "native-macos/ilium-macos-${{ matrix.arch }}.tar.gz"
         --work "$RUNNER_TEMP/macos-package-work" --output macos-packages
-    - name: Qualify all three installed formats with hidden source and build inputs
+    - name: Qualify all three formats and retain exact native audit and installed animation bytes
       run: >-
         python release/scripts/smoke_macos_packages.py
         --tag "${{ needs.source.outputs.tag }}" --arch "${{ matrix.arch }}"
@@ -496,6 +572,8 @@ jobs:
           candidate/macos-packages-*.json
 
           candidate/macos-smoke-*.json
+
+          candidate/macos-evidence-*.json
 
           candidate/SHA256SUMS
 

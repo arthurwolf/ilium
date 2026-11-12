@@ -8,9 +8,9 @@
 
 ## Quick start
 
-Linux x86_64 preview: [v0.1.1-linux.1](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.1) provides six packages and SHA256SUMS. The public downloads have been checked against their checksums. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
+Linux preview: [v0.1.1-linux.3](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.3) provides Linux x86_64 (six formats) and Linux ARM64 (four formats) from one source commit, with one `SHA256SUMS` covering all ten files. The public downloads have been checked against their checksums. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
 
-**Not yet available for this preview:** Linux ARM64, macOS, Windows and the GitHub Packages bundle. Plugins are an unsupported development preview.
+**Not yet available for this preview:** two of six Linux ARM64 formats (rpm, Snap), macOS Intel and Windows. The macOS Apple Silicon packages are unsigned and not notarized, so Gatekeeper warns: right-click and choose Open, or run `xattr -dr com.apple.quarantine <file>`. Plugins are an unsupported development preview.
 
 Plugin code is present for future integration and is not yet available for use.
 
@@ -19,6 +19,8 @@ Install the Linux x86_64 preview (no root required):
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh | sh
 ```
+
+The Linux installer supports x86_64 and ARM64 (aarch64); ARM64 has been verified in an emulated guest only.
 
 Windows PowerShell **(coming soon: the Windows package is not yet available)**:
 
@@ -32,13 +34,15 @@ Direct downloads (Linux x86_64 preview; other systems not yet available):
 
 | System | Downloads / availability |
 | --- | --- |
-| Linux x86_64 | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/ilium-linux-x86_64.flatpak) |
-| Linux ARM64 | tar.gz, deb, rpm, AppImage, Snap, Flatpak **(coming soon; not yet available)** |
-| macOS Apple Silicon | tar.gz, ZIP, PKG, DMG **(coming soon; not yet available)** |
+| Linux x86_64 (6 of 6 available and verified) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.flatpak) |
+| Linux ARM64 (4 of 6 available and verified; emulated QEMU, not native hardware) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-aarch64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-aarch64.deb) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-aarch64.AppImage) · rpm **(coming soon: only a limited `--nodeps` install was tested)** · Snap **(coming soon: install not verified)** · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-aarch64.flatpak) |
+| macOS Apple Silicon (4 of 4 available and verified; native macOS build, tests and installed-package checks; unsigned, not notarized; animations disabled) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.dmg) |
 | macOS Intel | tar.gz, ZIP, PKG, DMG **(coming soon; not yet available)** |
 | Windows x86_64 | setup `.exe`, MSI, ZIP **(coming soon; not yet available)** |
 
-Verify packages using the preview checksum file [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.1/SHA256SUMS). Details: [Installation](src/docs/installation.md).
+**Linux ARM64: 4 of 6 ARM64 formats available and verified.** The tar.gz, deb, AppImage and Flatpak ran in an emulated ARM64 (QEMU) guest; no native ARM64 hardware has been tested. Both architectures are in the same prerelease, [v0.1.1-linux.3](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.3).
+
+Verify every package using [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/SHA256SUMS) of `v0.1.1-linux.3`, which lists both architectures. Details: [Installation](src/docs/installation.md).
 
 The GitHub Packages release bundle is **not yet available**. After a qualified release, it is planned to contain the published assets as an OCI artifact retrievable with [ORAS](https://oras.land/docs/installation/).
 
@@ -57,41 +61,41 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Find the next agent that needs you</strong></p>
-<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Three real Claude sessions show two waiting questions and one unread completed turn in the attention queue, jumped to with Ctrl+B i and listed with Ctrl+B O; setup is cut, with reading holds and a redacted status bar" width="100%"></a></p>
+<p><a href="assets/demos/27-attention-queue.gif?raw=true"><img src="assets/demos/27-attention-queue.gif" alt="Three real Claude sessions show two waiting questions and one unread completed turn in the attention queue, jumped to with Ctrl+B i and listed with Ctrl+B O; setup is cut, with reading holds, a redacted status bar and two frames with a blanked header line" width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>AI names agents and organizes the project tree</strong></p>
-<p><a href="assets/demos/01-ai-tree.gif?raw=true"><img src="assets/demos/01-ai-tree.gif" alt="Earlier recording: Ilium organizes the project tree using local scripted fixture content; no provider request is made." width="100%"></a></p>
+<p><a href="assets/demos/01-ai-tree.gif?raw=true"><img src="assets/demos/01-ai-tree.gif" alt="Three real Claude Code agents (Haiku 5.5) work in an isolated project. When one finishes, Ilium's default trigger regroups the panes by topic using OpenAI gpt-4.1, twice; the three pane titles are then shown matching their content. Staged project and prompts; one wait is cut and two short holds are added; the status bar shows an empty-skipped restructuring message during the first 30 seconds, before the first agent finishes." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Control Ilium and prompt agents with voice</strong></p>
-<p><a href="assets/demos/02-voice-control.gif?raw=true"><img src="assets/demos/02-voice-control.gif" alt="Synthesized speech triggers three Ilium actions using local recognition and fixed keyword rules; pauses are shortened." width="100%"></a></p>
+<p><a href="assets/demos/02-voice-control.gif?raw=true"><img src="assets/demos/02-voice-control.gif" alt="A real OpenAI Realtime voice session (gpt-realtime-2.1) in an isolated Ilium. The speech is synthesized (OpenAI text-to-speech) and played into a virtual microphone, not spoken live. The model hears six commands and calls Ilium tools: open a new terminal, open Settings, show the Triggers tab, close Settings, close that terminal, stop voice mode. Long waits between commands are cut; setup is skipped." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Give agent panes automatic titles</strong></p>
-<p><a href="assets/demos/03-contextual-titles.gif?raw=true"><img src="assets/demos/03-contextual-titles.gif" alt="Ilium applies deterministic local fixture titles and preserves the manually named Stamp desk. Claude uses a local model through loopback; Codex is a fixture with a seeded prompt. A stale title is retried; setup and a wait are cut, with captions and holds. Claude’s turn is unfinished." width="100%"></a></p>
+<p><a href="assets/demos/03-contextual-titles.gif?raw=true"><img src="assets/demos/03-contextual-titles.gif" alt="Ilium titles one shell pane and two real Claude Code panes with a local Ollama model (qwen3:8b). The shell titles itself from its output, a name typed by hand stays, and a Claude pane is titled from its first prompt. Codex is not shown (usage limit); the second Claude stands in. The boot and a 45 s detection wait are cut (captioned), with reading holds." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Transfer a terminal screen between panes</strong></p>
-<p><a href="assets/demos/05-screen-transfer.gif?raw=true"><img src="assets/demos/05-screen-transfer.gif" alt="Ilium transfers terminal output into a real Codex prompt without submitting it. Setup is cut, with reading holds and captions." width="100%"></a></p>
+<p><a href="assets/demos/05-screen-transfer.gif?raw=true"><img src="assets/demos/05-screen-transfer.gif" alt="Ilium transfers terminal output into a real Codex prompt without submitting it. Setup is cut, with reading holds and captions. Local scratch paths were masked frame by frame, so the affected lines are blank." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Inspect agent usage and recorded costs</strong></p>
-<p><a href="assets/demos/06-cost-and-stats.gif?raw=true"><img src="assets/demos/06-cost-and-stats.gif" alt="Costs and Stats for retained Claude and Codex sessions in current Ilium. Setup is cut, and a local file-link target and an account notice are redacted. Claude is logged out during the replay." width="100%"></a></p>
+<p><a href="assets/demos/06-cost-and-stats.gif?raw=true"><img src="assets/demos/06-cost-and-stats.gif" alt="Costs and Stats for retained Claude and Codex sessions in current Ilium. Setup is cut, and a local file-link target and an account notice are redacted. Claude is logged out during the replay. An account login notice was masked frame by frame (a floating ACCOUNT NOTICE REDACTED box also appears briefly), so the affected lines are blank." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Track agent status and current goals</strong></p>
-<p><a href="assets/demos/08-agent-activity.gif?raw=true"><img src="assets/demos/08-agent-activity.gif" alt="Real Claude and Codex agents show a goal, approval wait and unread completion. Pane names are staged; setup and part of a wait are cut, with a reading hold and a labelled status redaction." width="100%"></a></p>
+<p><a href="assets/demos/08-agent-activity.gif?raw=true"><img src="assets/demos/08-agent-activity.gif" alt="Real Claude and Codex agents show a goal, approval wait and unread completion. Pane names are staged; setup and part of a wait are cut, with a reading hold and a labelled status redaction. Local scratch paths and a notice were masked frame by frame, so the affected lines are blank; the status area shows a labelled redaction." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Use agents, editors, and terminals side by side</strong></p>
-<p><a href="assets/demos/10-mixed-splits.gif?raw=true"><img src="assets/demos/10-mixed-splits.gif" alt="A terminal, editor, and two idle agent panes remain in a split after visiting another pane; setup is cut and an account notice is redacted." width="100%"></a></p>
+<p><a href="assets/demos/10-mixed-splits.gif?raw=true">Historical recording, not embedded (one frame shows an unredacted login-expiry account notice and some frames show scratch-path fragments; keyframe review 2026-11-05). A terminal, editor, and two idle agent panes remain in a split after visiting another pane; setup is cut and an account notice is redacted.</a></p>
 </td>
 </tr>
 <tr>
@@ -101,17 +105,17 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Queue prompts for an agent</strong></p>
-<p><a href="assets/demos/13-prompt-queue.gif?raw=true"><img src="assets/demos/13-prompt-queue.gif" alt="Queue two prompts for a real Claude agent; Ilium sends each one after the previous turn ends, in order." width="100%"></a></p>
+<p><a href="assets/demos/13-prompt-queue.gif?raw=true"><img src="assets/demos/13-prompt-queue.gif" alt="Queue two prompts for a real Claude agent; Ilium sends each one after the previous turn ends, in order. Idle waits are cut; only a sampled review was completed." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Get results from background tasks</strong></p>
-<p><a href="assets/demos/14-progress-monitor.gif?raw=true"><img src="assets/demos/14-progress-monitor.gif" alt="A real Claude agent monitors a ten-card task and receives its completed result. Setup is cut and an account notice is redacted." width="100%"></a></p>
+<p><a href="assets/demos/14-progress-monitor.gif?raw=true">Historical recording, not embedded: a scan found local scratch-path text in some frames and no full review was made (see the demo gallery). A real Claude agent monitors a ten-card task.</a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Search agents, files, and terminals</strong></p>
-<p><a href="assets/demos/17-workspace-search.gif?raw=true"><img src="assets/demos/17-workspace-search.gif" alt="Search real agent output, a shell history, and an open file, then jump to matches. Setup is cut and reading holds are added; automatic restructuring is disabled." width="100%"></a></p>
+<p><a href="assets/demos/17-workspace-search.gif?raw=true">Historical recording, not embedded: a scan found local scratch-path text in some frames and no full review was made (see the demo gallery). Searches real agent output, a shell history and a file.</a></p>
 </td>
 </tr>
 <tr>
@@ -127,11 +131,11 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Choose an animation, then watch it play</strong></p>
-<p><a href="assets/demos/26-animations.gif?raw=true"><img src="assets/demos/26-animations.gif" alt="Historical animation gallery from an earlier Ilium build; current-build Voxel preview remains visually unqualified." width="100%"></a></p>
+<p><a href="assets/demos/26-animations.gif?raw=true"><img src="assets/demos/26-animations.gif" alt="Thirteen of the 60 background animations, each shown first in Settings and then in its full-screen preview on the 2026-11-05 release build. Real capture in isolated state; scene-navigation steps are cut; chapter numbers skip 5 and 9 because two scenes were removed after review; the other scenes were not captured or were left out as too faint." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Schedule input for a pane</strong></p>
-<p><a href="assets/demos/04-scheduled-input.gif?raw=true"><img src="assets/demos/04-scheduled-input.gif" alt="Schedule input for a real Claude agent and a local terminal fixture in separate takes; setup is cut, reading holds are added, and local paths are redacted." width="100%"></a></p>
+<p><a href="assets/demos/04-scheduled-input.gif?raw=true"><img src="assets/demos/04-scheduled-input.gif" alt="Schedule input for a real Claude agent and a local terminal fixture in separate takes; setup is cut, reading holds are added, local paths are redacted, and captions were retimed to their actions." width="100%"></a></p>
 </td>
 </tr>
 <tr>
@@ -147,7 +151,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Configure automatic titles</strong></p>
-<p><a href="assets/demos/07c-settings-tour-c.gif?raw=true"><img src="assets/demos/07c-settings-tour-c.gif" alt="Ilium Settings: titles, triggers, custom agents, debugging, API, and setup. Setup paths belong to the isolated demo; other pages are cut and reading holds are added." width="100%"></a></p>
+<p><a href="assets/demos/07c-settings-tour-c.gif?raw=true"><img src="assets/demos/07c-settings-tour-c.gif" alt="Ilium Settings: titles, triggers, custom agents, debugging, API, and setup. Setup paths belong to the isolated demo; other pages are cut and reading holds are added. A local scratch path on the Setup page was masked in the late frames, so that line is blank." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Move panes without stopping their processes</strong></p>
@@ -157,17 +161,17 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 <tr>
 <td width="50%" valign="top">
 <p><strong>Request updates from active agents</strong></p>
-<p><a href="assets/demos/12-ask-for-update.gif?raw=true"><img src="assets/demos/12-ask-for-update.gif" alt="Ilium asks idle Claude and Codex agents for updates while skipping an agent awaiting approval; pane names were staged, setup and waits were cut, and a reading pause was added." width="100%"></a></p>
+<p><a href="assets/demos/12-ask-for-update.gif?raw=true"><img src="assets/demos/12-ask-for-update.gif" alt="Ilium asks idle Claude and Codex agents for updates while skipping an agent awaiting approval; pane names were staged, setup and waits were cut, and a reading pause was added. Local scratch paths and title-inference error text were masked frame by frame, so the affected lines are blank." width="100%"></a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Track work on a Kanban board</strong></p>
-<p><a href="assets/demos/15-kanban.gif?raw=true"><img src="assets/demos/15-kanban.gif" alt="Move a staged Kanban card to Doing, mark it complete, add a note, then reopen the board and verify the saved Markdown file. Setup is cut; column width is 15 cells, with added captions, pointer, arrows and holds." width="100%"></a></p>
+<p><a href="assets/demos/15-kanban.gif?raw=true"><img src="assets/demos/15-kanban.gif" alt="Move a staged Kanban card to Doing, mark it complete, add a note, then reopen the board and verify the saved Markdown file. Setup is cut; column width is 15 cells, with added captions, pointer, arrows and holds. A local scratch path in the file-picker title was masked frame by frame; the masked callout area in the last scene is blank." width="100%"></a></p>
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <p><strong>Start a Codex agent from a TODO</strong></p>
-<p><a href="assets/demos/16-agent-from-line.gif?raw=true"><img src="assets/demos/16-agent-from-line.gif" alt="Start Codex from a TODO line and repair the source. Setup is cut and reading holds are added; automatic title inference reports no user transcript." width="100%"></a></p>
+<p><a href="assets/demos/16-agent-from-line.gif?raw=true">Historical recording, not embedded (a scratch path with the local username and a title-inference error are visible; keyframe review 2026-11-05). Start Codex from a TODO line and repair the source. Setup is cut and reading holds are added; automatic title inference reports no user transcript.</a></p>
 </td>
 <td width="50%" valign="top">
 <p><strong>Detach and reconnect while agents keep running</strong></p>
@@ -181,7 +185,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Coordinate local models with Chatroom</strong></p>
-<p><a href="assets/demos/20-chatroom.gif?raw=true"><img src="assets/demos/20-chatroom.gif" alt="Two local models generate messages that a script posts to Ilium Chatroom; waits are shortened." width="100%"></a></p>
+<p><a href="assets/demos/20-chatroom.gif?raw=true"><img src="assets/demos/20-chatroom.gif" alt="Two local models generate messages that a script posts to Ilium Chatroom; waits are shortened. The local username and host name in the shell prompt are masked." width="100%"></a></p>
 </td>
 </tr>
 <tr>
@@ -201,7 +205,7 @@ More: [Getting started](src/docs/getting-started.md) · [Building from source](s
 </td>
 <td width="50%" valign="top">
 <p><strong>Convert a session between Claude and Codex</strong></p>
-<p><a href="assets/demos/26-convert-session.gif?raw=true"><img src="assets/demos/26-convert-session.gif" alt="Real Claude and Codex sessions recall a fictional mascot after conversion in both directions. Setup and idle wait are cut; an account notice is redacted." width="100%"></a></p>
+<p><a href="assets/demos/26-convert-session.gif?raw=true">Historical recording, not embedded: local scratch paths and a plan label are visible in its frames (see the demo gallery). Real Claude and Codex sessions recall a fictional mascot after conversion in both directions.</a></p>
 </td>
 </tr>
 <tr>
@@ -238,7 +242,7 @@ All keys, mouse use and remapping: [Getting started](src/docs/getting-started.md
 ## What Ilium does
 
 - **Arrange**: group panes and split the screen four ways. The project tree stays visible. [Panes and layout](src/docs/panes-and-layout.md)
-- **Track**: identify agent CLIs from process trees and read activity from terminal screens, with optional model icons in the tree. Choose Normal or Attention status icons, or configure ordered Custom icon rules. Stale activity checks show a caution with their age on hover. [Agent monitoring](src/docs/agent-monitoring.md)
+- **Track**: identify agent CLIs from process trees and read activity from terminal screens, with optional model icons in the tree. Choose Normal or Attention status icons, or configure ordered Custom icon rules. Stale activity checks show a caution with their age on hover. [Agent monitoring](src/docs/agent-monitoring.md), [Custom status icons](src/docs/custom-status-icons.md)
 - **Separate**: start agents in linked Git worktrees. Unclear file, process, or ownership state blocks cleanup. [Worktrees](src/docs/worktrees.md)
 - **Resume**: detach without stopping panes. Recovery rebuilds the layout and relaunches pane programs. [Session recovery](src/docs/session-recovery.md)
 

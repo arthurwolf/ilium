@@ -303,3 +303,11 @@ Five kinds of copy exist. They answer different questions and are not interchang
 - **[USR-207]** The host MUST refuse to read a grant file or the trust store when another user can write to it, and MUST treat every third-party plugin as not allowed to run until the file is fixed.
 - **[USR-208]** A default uninstall MUST remove the package, the grants, the cache and the Extensions order entries, and MUST keep settings.
 - **[USR-209]** `--purge` MUST also remove settings, data, storage buckets and the log, and `--keep-data` MUST keep data and storage without asking. The two flags exclude each other.
+
+## Production additions (round 10)
+
+- **[PRR-001]** The system must, when plugins.data_dir or ILIUM_PLUGIN_DATA_DIR points to an empty or different root, start no plugin from the old root, show one persistent notice naming old root, new root and count of plugins not found, log host.data-root-changed once, and offer a command that copies the old root to the new one with hash verification and leaves the old root untouched.
+
+## Production additions (round 11)
+
+- **[PRQ-020]** The system must, before extracting a package, restoring an archive or starting a migration, compute the longest resulting absolute path and refuse with install.path-too-long before any write if it exceeds the platform limit.

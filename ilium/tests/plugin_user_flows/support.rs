@@ -114,7 +114,8 @@ pub fn tree_snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
     found
 }
 
-/// The permission bits (`0o777` mask) of a path.
+/// The Unix permission bits (`0o777` mask) of a path.
+#[cfg(unix)]
 pub fn file_mode(path: &Path) -> u32 {
     #[cfg(unix)]
     {

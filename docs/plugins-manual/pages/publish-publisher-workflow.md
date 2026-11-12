@@ -126,3 +126,11 @@ A publish token lasts 90 days and works for one publisher id only ([PKG-968](/pa
 
 - **[PRW-039]** `ilium plugin log monitor` MUST compare the registry transparency log entries for a publisher id against the publisher's local release record and MUST print each entry with no matching record as `unexpected-release` and exit non-zero.
 - **[PRW-035]** On every publish, yank, token issue, token revoke and owner change in a namespace, the registry MUST send an out-of-band notice to every maintainer of the publisher id within 15 minutes, naming the version, the token id and the source address class, so that a publish made with a stolen token is visible to the owner.
+
+## Production additions (round 10)
+
+- **[PRR-012]** The system must let a user run ilium plugin support-bundle <id> --submit-to-author after a crash, print the exact payload of plugin id, version, sha256, crash reason, export name and count, send nothing until the user confirms, include no host name, user name, path or other plugin ids, send only to the contact address in the signed manifest, and have the registry relay and store nothing.
+
+## Production additions (round 12)
+
+- **[PRP-002]** The system must provide ilium plugin publish --verify and ilium plugin verify-published that install the published version into a throw-away data root with a fresh trust store, check signature, hash and manifest against the local dist build, activate it, and exit non-zero with publish.verify-failed and the failing step, never touching the real installed set.

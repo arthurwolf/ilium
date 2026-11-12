@@ -184,3 +184,7 @@ The user can change the grant at any time in Settings > Plugins > com.example.li
 ### Security
 
 **[PAN-009]** accepts only `https`, `http` and `mailto` URLs. Each origin needs consent. See [Network egress](/pages/reference-network-egress/).
+
+## Production additions (round 11)
+
+- **[PRQ-013]** The system must show the origin in an open-external consent prompt in ASCII punycode form beside the Unicode form, mark mixed-script or confusable hosts with an untrusted-script warning, never show a truncated host, and key remembered consent on the ASCII form so a lookalike origin prompts again.

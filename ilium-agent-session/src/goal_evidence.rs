@@ -600,10 +600,13 @@ d.close()
             .success());
         // This synthetic fixture runs without the production sandbox and does
         // not qualify privacy, WAL concurrency or process-to-session binding.
-        let query = include_str!("../../ilium-platform/src/codex_goal_query.py").replace(
-            "file:/goal/goals_1.sqlite?mode=ro",
-            &format!("file:{}?mode=ro", database.display()),
-        );
+        // Quote the native path as a Python string and let pathlib encode a
+        // file URI; Windows backslashes must not become Python escapes.
+        let path_literal = serde_json::to_string(&database.to_string_lossy()).unwrap();
+        let database_uri =
+            format!("__import__('pathlib').Path({path_literal}).as_uri() + '?mode=ro'");
+        let query = include_str!("../../ilium-platform/src/codex_goal_query.py")
+            .replace("\"file:/goal/goals_1.sqlite?mode=ro\"", &database_uri);
         let mut child = Command::new("python3")
             .args(["-I", "-c", &query])
             .stdin(Stdio::piped())

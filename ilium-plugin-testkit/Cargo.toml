@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
 ilium-plugin-sdk-core = { version = "0.1.1", path = "../ilium-plugin-sdk-core" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.151"

@@ -355,3 +355,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[LIF-724]** A subscriber of `plugin-state-changed` MUST have a queue of at most 256 events (proposed, owner to confirm); on overflow the host MUST drop the oldest, MUST deliver one `plugin-state-resync` event, and the subscriber MUST then call `plugins.list`. Ordering per plugin id MUST be preserved.
 - **[PKG-710]** A publisher MAY declare end of life for a plugin with a signed metadata entry that names the date and an optional successor id. From the declaration, the host MUST show the plugin as `end-of-life` in its state and in the store, and MUST warn the user at install, then at most once every 30 days while it stays installed.
 - **[PKG-711]** The registry MAY declare a plugin abandoned when its namespace is abandoned or the publisher has not answered a security report for 90 days. The host MUST then disable that plugin after a 30 day warning period, unless an administrator pins it, and MUST keep its data. Re-enabling it MUST need an explicit user action.
+
+## Production additions (round 12)
+
+- **[PRP-021]** The system must clear the automatic safe mode crash counter after a start reaching all plugins ready and staying up 5 minutes or by ilium plugin doctor --clear-crash-marks, and re-enter safe mode only after three new crash marks, listing live marks in ilium plugin status --safe-mode --json.

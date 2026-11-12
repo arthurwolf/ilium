@@ -12,16 +12,7 @@ const MAX_BUCKET_BYTES: usize = 16 * 1024 * 1024;
 /// Read handle on the fake storage of a host.
 #[derive(Debug, Default, Clone)]
 pub struct FakeStorage {
-    buckets: BTreeMap<&'static str, BTreeMap<String, Vec<u8>>>,
-}
-
-fn bucket_name(bucket: Bucket) -> &'static str {
-    match bucket {
-        Bucket::Global => "global",
-        Bucket::Project => "project",
-        Bucket::Session => "session",
-        Bucket::Shared => "shared",
-    }
+    values: BTreeMap<String, BTreeMap<String, Vec<u8>>>,
 }
 
 impl FakeStorage {
@@ -32,16 +23,16 @@ impl FakeStorage {
 
     /// Every key and value of one bucket.
     pub fn dump(&self, bucket: Bucket) -> BTreeMap<String, Vec<u8>> {
-        self.buckets
-            .get(bucket_name(bucket))
+        self.values
+            .get(bucket.as_str())
             .cloned()
             .unwrap_or_default()
     }
 
     /// One value.
     pub fn get(&self, bucket: Bucket, key: &str) -> Option<Vec<u8>> {
-        self.buckets
-            .get(bucket_name(bucket))
+        self.values
+            .get(bucket.as_str())
             .and_then(|map| map.get(key))
             .cloned()
     }
@@ -52,7 +43,7 @@ impl FakeStorage {
         if value.len() > MAX_VALUE_BYTES {
             return;
         }
-        let map = self.buckets.entry(bucket_name(bucket)).or_default();
+        let map = self.values.entry(bucket.as_str().to_owned()).or_default();
         let others: usize = map
             .iter()
             .filter(|(existing, _)| existing.as_str() != key)
@@ -66,18 +57,22 @@ impl FakeStorage {
 
     /// Removes one value as the plugin asked; a missing key is not an error.
     pub(crate) fn remove(&mut self, bucket: Bucket, key: &str) {
-        if let Some(map) = self.buckets.get_mut(bucket_name(bucket)) {
+        if let Some(map) = self.values.get_mut(bucket.as_str()) {
             map.remove(key);
         }
     }
 
     /// Whole content as `{bucket: {key: bytes}}`, for snapshots; empty buckets are left out.
     pub(crate) fn dump_all(&self) -> BTreeMap<String, BTreeMap<String, Vec<u8>>> {
-        self.buckets
+        self.values
             .iter()
             .filter(|(_, map)| !map.is_empty())
-            .map(|(name, map)| (name.to_string(), map.clone()))
+            .map(|(name, map)| (name.clone(), map.clone()))
             .collect()
+    }
+
+    pub(crate) fn snapshot(&self) -> BTreeMap<String, BTreeMap<String, Vec<u8>>> {
+        self.values.clone()
     }
 }
 

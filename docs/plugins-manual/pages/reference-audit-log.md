@@ -222,3 +222,16 @@ If the key does not exist at the first start, the kernel creates it in the secre
 ## Production additions (round 5)
 
 - **[PRW-042]** Each audit record MUST carry the build identity of the host that wrote it (version and component hash), and `ilium plugin audit verify` MUST report a chain break, a missing rotation link or a record with an unknown host build as a failure with exit code 1.
+
+## Production additions (round 10)
+
+- **[PRR-015]** The system must write one secret-read audit record with plugin id, secret row key, side and time (never the value) the first time per activation that a plugin reads a secret row, and again after the row value changes.
+
+## Production additions (round 11)
+
+- **[PRQ-015]** The system must write one audit record for every unattended action (auto-update applied or held, policy-driven grant, preapproved grant, blocklist-driven disable) carrying actor automatic, the authorising policy key or setting, and old and new package SHA-256, and ilium plugin audit verify must fail if an installed version change has no matching record.
+- **[PRQ-018]** The system must create a random 128-bit machine id on first start, store it owner-only in the state folder, put it in every audit record, and on a missing or duplicated id create a new one and write one machine-id-changed audit record.
+
+## Production additions (round 12)
+
+- **[PRP-013]** The system must keep every audit record mentioning a plugin id, key id or blocklist entry involved in a trust.* or sandbox.unavailable event for at least audit_min_retention (default 365 days) despite rotation or size limits, and must fail a purge below that age with audit.retention-hold and an audit-purge-refused record.

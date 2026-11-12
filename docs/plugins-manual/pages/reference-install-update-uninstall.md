@@ -492,3 +492,17 @@ API version checked: `ilium:plugin@0.1.0`.
 
 - **[PRW-025]** Before the first start of a host build with a higher host version than the one that last wrote the plugin state, the host MUST copy installed.json, trust.json and every bucket file to a restore point under backups/host-upgrade/ and MUST keep the newest two such points.
 - **[PRW-030]** While a download, install, update migration or export lasts longer than 2 seconds, the host MUST show a progress line with a percentage or step count and the key that cancels it, and in linear screen-reader mode MUST print one new line per 10 percent.
+
+## Production additions (round 10)
+
+- **[PRR-007]** The system must provide an uninstall purge verification that walks data, state, cache, compile cache, logs, secrets, CLI shims, durable timers and helper binaries for the plugin id, reports zero remaining artefacts on success, and otherwise exits non-zero listing each leftover path or entry.
+
+## Production additions (round 11)
+
+- **[PRQ-021]** The system must, when an install finds kept data for the same plugin id, compare the recorded publisher key and data_version with the new package and refuse with install.kept-data-owner-changed or migration.data-newer as appropriate, writing one audit record for the decision.
+- **[PRQ-023]** The system must, when the CLI is killed with SIGKILL at any step boundary of install, update, rollback or uninstall, leave installed.json readable and let the next lifecycle command complete or undo the operation within 5 s with no manual repair.
+
+## Production additions (round 12)
+
+- **[PRP-015]** The system must retry a rename or delete that fails because another process holds the file, with backoff for at most 10 seconds, then abort with install.file-busy (exit 4) naming the path and holder, keeping the previous version active, removing staging and leaving installed.json unchanged.
+- **[PRP-020]** The system must not delete the store entry, compile cache entry or helper binary of a superseded or uninstalled version while any live server holds a lease on it, deferring deletion to a sweep within 24 hours after the last lease ends.

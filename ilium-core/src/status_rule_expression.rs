@@ -3,21 +3,105 @@
 //! An expression is a disjunction of conjunctions: each inner group is
 //! joined with AND, and groups are joined with OR. Missing observations do
 //! not become true merely because a condition is negated.
+//!
+//! This file owns the rule model and the evaluation primitives. The sibling
+//! modules own one concern each so the editor, the configuration adapter,
+//! the documentation and the tests share a single definition:
+//! `registry` (condition catalogue, labels, categories, explanations),
+//! `validation` (typed issues), `explanation` (per-rule outcomes and "why"
+//! text), `defaults` (the shipped rule set) and `demo` (named situations).
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AgentAvailability, AgentClass, AgentExitOutcome, AgentTurn, GoalState, PaneProgress, PaneStatus, ProgressAttention,
-    ProgressMonitorHealth, ProgressTaskStatus, ShellOutputPhase, has_live_progress,
-    representative_progress,
+    has_live_progress, representative_progress, AgentAvailability, AgentClass, AgentExitOutcome,
+    AgentTurn, GoalState, PaneProgress, PaneStatus, ProgressAttention, ProgressMonitorHealth,
+    ProgressTaskStatus, ShellOutputPhase,
+};
+
+pub mod defaults;
+pub mod demo;
+pub mod explanation;
+pub mod registry;
+pub mod validation;
+
+pub use defaults::{default_rules, DEFAULTS_VERSION, SCREEN_EXAMPLE_RULE_ID};
+pub use demo::{demo_situations, DemoSituation};
+pub use explanation::{explain_all, term_text, why, GroupOutcome, RuleOutcome, TermOutcome};
+pub use registry::{condition_catalog, ConditionCategory};
+pub use validation::{
+    error_summary, has_errors, validate, IssueKind, IssueSeverity, TermPath, ValidationIssue,
+    MAXIMUM_CONDITIONS_PER_GROUP, MAXIMUM_CONDITIONS_PER_RULE, MAXIMUM_ENABLED_SCREEN_PATTERNS,
+    MAXIMUM_GROUPS_PER_RULE, MAXIMUM_NAME_CHARS, MAXIMUM_PATTERN_CHARS, MAXIMUM_RULES,
 };
 
 /// The result of observing a single condition.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Observation {
     True,
     False,
     Unknown,
+}
+
+/// Facts outside the pane's [`PaneStatus`]: client-only observations (frozen
+/// screen, spend, keyboard focus) and the pane node's own fields (bookmark, prompt queue).
+/// `None` means the fact was not observed for this pane, so the matching
+/// conditions stay `Unknown` instead of silently reading false.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SupplementaryFacts {
+    /// Whether the pane's agent screen is frozen by the user.
+    pub frozen: Option<bool>,
+    /// The agent session's spend so far, in US cents.
+    pub session_cost_cents: Option<u64>,
+    /// Whether the user bookmarked the pane in the sidebar.
+    pub bookmarked: Option<bool>,
+    /// How many prompts wait in the pane's prompt queue.
+    pub queued_prompts: Option<u32>,
+    /// Whether this pane's terminal holds keyboard focus. False for every
+    /// pane while focus is on the tree, a dialog or Settings.
+    pub focused: Option<bool>,
+    /// Whether this pane has a retained blocking error (a failed action
+    /// whose target is exactly this pane).
+    pub blocking_error: Option<bool>,
+    /// Whether the session has a retained session-level error, one that
+    /// belongs to no particular pane. Identical for every pane of a session.
+    pub session_error: Option<bool>,
+    /// Whether the tree cursor rests on this pane's row, whichever part of
+    /// the window holds keyboard focus.
+    pub selected: Option<bool>,
+    /// Whether the pane's terminal is on screen in the right panel, alone
+    /// or as a split-view member.
+    pub visible: Option<bool>,
+    /// Whether the prompt queue is held on a head prompt whose delivery was
+    /// interrupted. The server never replays such a prompt, so the queue
+    /// waits for the user (see `ilium-server/src/prompt_queue.rs`).
+    pub prompt_queue_held: Option<bool>,
+    /// How full the agent's context window was at its latest prompt, in
+    /// tenths of a percent (0..=1000).
+    pub context_permille: Option<u16>,
+}
+
+impl SupplementaryFacts {
+    /// Add the facts the pane's tree node carries. Every builder of live
+    /// pane facts (tree renderer, hover tooltip, editor inspector) calls this
+    /// so the three cannot disagree about a node fact.
+    pub fn with_node(self, node: &crate::Node) -> Self {
+        let crate::NodeKind::Pane { prompt_queue, .. } = &node.kind else {
+            return self;
+        };
+        Self {
+            bookmarked: Some(node.is_bookmarked),
+            queued_prompts: Some(u32::try_from(prompt_queue.len()).unwrap_or(u32::MAX)),
+            // Only the head is ever delivered, so only an attempted head can
+            // hold the queue; an empty queue is known not to be held.
+            prompt_queue_held: Some(
+                prompt_queue
+                    .first()
+                    .is_some_and(|prompt| prompt.attempted_delivery),
+            ),
+            ..self
+        }
+    }
 }
 
 /// Facts available independently of the rules that consume them. Screen
@@ -29,6 +113,7 @@ pub struct PaneFacts<'a> {
     pub shell_output: Option<ShellOutputPhase>,
     /// None means the activity freshness has not been observed.
     pub activity_stale: Option<bool>,
+    pub supplementary: SupplementaryFacts,
     pub screen_matches: &'a dyn Fn(&ScreenPattern) -> Observation,
 }
 
@@ -49,19 +134,41 @@ pub enum ScreenRegion {
 }
 
 /// Conditions that can be evaluated from the existing pane and progress facts.
+/// Adding a variant also requires a registry entry (`registry.rs`), which the
+/// registry tests enforce.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Condition {
     Always,
     PaneKind(PaneKind),
     EditorDirty,
+    PaneFrozen,
+    /// The pane's terminal holds keyboard focus.
+    PaneFocused,
+    /// The pane has a retained blocking error.
+    BlockingError,
+    /// The session has a retained session-level error.
+    SessionError,
+    PaneBookmarked,
+    PromptsQueued,
+    /// The prompt queue is held on a head whose delivery was interrupted.
+    PromptQueueHeld,
+    /// The tree cursor rests on the pane's row.
+    PaneSelected,
+    /// The pane's terminal is on screen in the right panel.
+    PaneVisible,
     AgentClass(AgentClass),
+    /// Any agent other than the built-in Claude Code, Codex and Antigravity
+    /// (custom signatures).
+    OtherAgent,
     AgentAvailability(AvailabilityKind),
     AgentTurn(AgentTurn),
     GoalSet,
     GoalState(GoalState),
     CompletionUnread,
     ActivityStale,
+    /// A live agent whose activity freshness was never observed.
+    ActivityUnchecked,
     MonitorCountAtLeast(u32),
     TaskStatus(ProgressTaskStatus),
     AnyTaskStatus(ProgressTaskStatus),
@@ -73,12 +180,21 @@ pub enum Condition {
     ProgressMeasurable,
     ProgressAtLeast(u8),
     ProgressBelow(u8),
-    ProgressBetween { minimum: u8, maximum: u8 },
+    ProgressBetween {
+        minimum: u8,
+        maximum: u8,
+    },
+    EtaKnown,
+    EtaBelowMinutes(u16),
     Parked,
     ScheduledInput,
     ShellOutputRecent,
     ShellOutputFast,
     ShellOutputSlow,
+    /// Whole US dollars; the client supplies the session spend in cents.
+    SessionCostAbove(u32),
+    /// The agent's context window is more than this percentage full.
+    ContextAbovePercent(u8),
     ScreenMatches(ScreenPattern),
 }
 
@@ -107,6 +223,7 @@ impl Condition {
     pub fn observe(&self, facts: &PaneFacts<'_>) -> Observation {
         let agent = facts.status.agent_state();
         let monitor = representative_progress(facts.progress);
+        let eta_seconds = monitor.and_then(|monitor| monitor.report.eta_seconds);
         let result = match self {
             Self::Always => Some(true),
             Self::PaneKind(kind) => Some(matches!(
@@ -121,7 +238,17 @@ impl Condition {
                 PaneStatus::Editor { dirty } => Some(*dirty),
                 _ => None,
             },
+            Self::PaneFrozen => facts.supplementary.frozen,
+            Self::PaneFocused => facts.supplementary.focused,
+            Self::BlockingError => facts.supplementary.blocking_error,
+            Self::SessionError => facts.supplementary.session_error,
+            Self::PaneBookmarked => facts.supplementary.bookmarked,
+            Self::PromptsQueued => facts.supplementary.queued_prompts.map(|count| count > 0),
+            Self::PromptQueueHeld => facts.supplementary.prompt_queue_held,
+            Self::PaneSelected => facts.supplementary.selected,
+            Self::PaneVisible => facts.supplementary.visible,
             Self::AgentClass(class) => agent.map(|agent| &agent.class == class),
+            Self::OtherAgent => agent.map(|agent| matches!(agent.class, AgentClass::Other(_))),
             Self::AgentAvailability(expected) => facts.status.agent_recovery().map(|recovery| {
                 match expected {
                     AvailabilityKind::Unverified => recovery.availability == AgentAvailability::Unverified,
@@ -136,6 +263,9 @@ impl Condition {
             Self::GoalState(goal) => agent.map(|agent| agent.goal.as_ref() == Some(goal)),
             Self::CompletionUnread => agent.map(|agent| agent.completion_unread),
             Self::ActivityStale => facts.activity_stale,
+            // Known exactly when a live agent runs: the freshness check is
+            // either reported (false) or missing (true).
+            Self::ActivityUnchecked => agent.map(|_| facts.activity_stale.is_none()),
             Self::MonitorCountAtLeast(count) => Some(facts.progress.len() >= *count as usize),
             Self::TaskStatus(status) => monitor.map(|monitor| &monitor.report.status == status),
             Self::AnyTaskStatus(status) => Some(facts.progress.iter().any(|monitor| &monitor.report.status == status)),
@@ -148,6 +278,10 @@ impl Condition {
             Self::ProgressAtLeast(percent) => monitor.filter(|monitor| monitor.has_measurable_progress()).map(|monitor| monitor.report.percent >= f32::from(*percent)),
             Self::ProgressBelow(percent) => monitor.filter(|monitor| monitor.has_measurable_progress()).map(|monitor| monitor.report.percent < f32::from(*percent)),
             Self::ProgressBetween { minimum, maximum } => monitor.filter(|monitor| monitor.has_measurable_progress()).map(|monitor| (f32::from(*minimum)..=f32::from(*maximum)).contains(&monitor.report.percent)),
+            // Without a monitor the estimate is unobservable; with a monitor
+            // but no estimate it is known to be absent.
+            Self::EtaKnown => monitor.map(|_| eta_seconds.is_some()),
+            Self::EtaBelowMinutes(minutes) => eta_seconds.map(|seconds| seconds < u64::from(*minutes) * 60),
             Self::Parked => agent.map(|agent| agent.turn == AgentTurn::Idle && has_live_progress(facts.progress)),
             Self::ScheduledInput => Some(facts.scheduled_input),
             Self::ShellOutputRecent => match facts.status {
@@ -162,6 +296,9 @@ impl Condition {
                 PaneStatus::PlainShell => Some(facts.shell_output == Some(ShellOutputPhase::Slow)),
                 _ => None,
             },
+            Self::SessionCostAbove(dollars) => facts.supplementary.session_cost_cents.map(|cents| cents > u64::from(*dollars) * 100),
+            // Compared in tenths of a percent so 80.4% is above 80%.
+            Self::ContextAbovePercent(percent) => facts.supplementary.context_permille.map(|permille| permille > u16::from(*percent) * 10),
             Self::ScreenMatches(pattern) => return (facts.screen_matches)(pattern),
         };
         match result {
@@ -205,7 +342,9 @@ pub fn from_line<C>(
     let Some(first) = terms.next() else {
         return Ok(Vec::new());
     };
-    let mut groups = vec![AllOf { all_of: vec![first] }];
+    let mut groups = vec![AllOf {
+        all_of: vec![first],
+    }];
     for (connector, term) in connectors.iter().zip(terms) {
         match connector {
             Connector::And => {
@@ -221,7 +360,9 @@ pub fn from_line<C>(
 }
 
 /// Expand persisted groups back into a flat editor line.
-pub fn to_line<C: Clone>(groups: &[AllOf<C>]) -> Result<(Vec<ConditionTerm<C>>, Vec<Connector>), &'static str> {
+pub fn to_line<C: Clone>(
+    groups: &[AllOf<C>],
+) -> Result<(Vec<ConditionTerm<C>>, Vec<Connector>), &'static str> {
     let mut terms = Vec::new();
     let mut connectors = Vec::new();
     for group in groups {
@@ -230,7 +371,11 @@ pub fn to_line<C: Clone>(groups: &[AllOf<C>]) -> Result<(Vec<ConditionTerm<C>>, 
         }
         for (index, term) in group.all_of.iter().enumerate() {
             if !terms.is_empty() {
-                connectors.push(if index == 0 { Connector::Or } else { Connector::And });
+                connectors.push(if index == 0 {
+                    Connector::Or
+                } else {
+                    Connector::And
+                });
             }
             terms.push(term.clone());
         }
@@ -263,152 +408,51 @@ pub enum VisualKind {
     /// Stable key of an existing configurable icon target.
     BuiltIn(String),
     Glyph(String),
-    BrailleAnimation { preset: String, frames_per_second: u8 },
+    BrailleAnimation {
+        preset: String,
+        frames_per_second: u8,
+    },
     FrameAnimation {
         frames: Vec<String>,
         frames_per_second: u8,
         ping_pong: bool,
     },
-    ProgressFrames { frames: Vec<String> },
+    ProgressFrames {
+        frames: Vec<String>,
+    },
 }
 
+/// Every field may be left out of a hand-written `config.toml`.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct VisualStyle {
     /// Theme colour name or an explicit RGB colour.
     pub color: Option<String>,
     pub bold: bool,
     pub dim: bool,
+    /// Draw attention with a pulsing icon. The client renderer decides how
+    /// the pulse honours the user's motion setting.
+    pub pulse: bool,
+}
+
+/// The `[status_rules]` format version this build reads and writes.
+pub const STATUS_RULES_SCHEMA_VERSION: u32 = 1;
+
+const fn status_rules_schema_version() -> u32 {
+    STATUS_RULES_SCHEMA_VERSION
 }
 
 /// User-owned rules are ordered and persisted together with their fallback.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StatusRules {
+    /// Format version of the stored table; absent means version 1.
+    #[serde(default = "status_rules_schema_version")]
+    pub version: u32,
+    /// Which shipped default set the rules started from, so a later Ilium
+    /// can offer new defaults without overwriting the user's edits.
     pub defaults_version: u32,
     pub rules: Vec<Rule<Condition, StatusVisual>>,
     pub fallback: Option<StatusVisual>,
-}
-
-/// Validate structural limits before saving a ruleset. Regex syntax and cell
-/// widths are validated by their respective server and terminal adapters.
-pub fn validate(rules: &StatusRules) -> Vec<String> {
-    let mut errors = Vec::new();
-    let mut ids = std::collections::HashSet::new();
-    let mut enabled_watches: Vec<&ScreenPattern> = Vec::new();
-    if rules.rules.len() > 64 {
-        errors.push("A ruleset may contain at most 64 rules".to_owned());
-    }
-    for rule in &rules.rules {
-        if rule.id.is_empty() || !ids.insert(&rule.id) {
-            errors.push(format!("Rule {:?} has an empty or duplicate identifier", rule.name));
-        }
-        if rule.name.chars().count() > 48 {
-            errors.push(format!("Rule {:?} has a name longer than 48 characters", rule.id));
-        }
-        if rule.any_of.iter().any(|group| group.all_of.is_empty()) {
-            errors.push(format!("Rule {:?} contains an empty AND group", rule.name));
-        }
-        if rule.any_of.len() > 8 || rule.any_of.iter().any(|group| group.all_of.len() > 8) {
-            errors.push(format!("Rule {:?} exceeds the eight-group or eight-condition limit", rule.name));
-        }
-        if rule.any_of.iter().map(|group| group.all_of.len()).sum::<usize>() > 64 {
-            errors.push(format!("Rule {:?} has more than 64 conditions", rule.name));
-        }
-        for term in rule.any_of.iter().flat_map(|group| &group.all_of) {
-            if let Condition::ScreenMatches(pattern) = &term.condition {
-                if rule.enabled && !enabled_watches.contains(&pattern) {
-                    enabled_watches.push(pattern);
-                }
-            }
-            match &term.condition {
-                Condition::ProgressAtLeast(value) | Condition::ProgressBelow(value) if *value > 100 => {
-                    errors.push(format!("Rule {:?} has an invalid progress percentage", rule.name));
-                }
-                Condition::ProgressBetween { minimum, maximum } if minimum > maximum || *maximum > 100 => {
-                    errors.push(format!("Rule {:?} has an invalid progress range", rule.name));
-                }
-                Condition::ScreenMatches(pattern) if pattern.pattern.chars().count() > 256 => {
-                    errors.push(format!("Rule {:?} has a screen pattern longer than 256 characters", rule.name));
-                }
-                _ => {}
-            }
-        }
-    }
-    if enabled_watches.len() > 16 {
-        errors.push("A ruleset may enable at most 16 distinct screen patterns".to_owned());
-    }
-    errors
-}
-
-/// Fresh starting priorities for users who have not saved their own rules.
-pub fn default_rules() -> StatusRules {
-    use AgentTurn::{Idle, Settling, WaitingApproval, WaitingSubagents, Working};
-    use Condition::{AgentTurn as Turn, GoalState as Goal};
-    use GoalState::{Active, Blocked, Paused, Reached, UsageLimited};
-
-    fn rule(id: &str, name: &str, icon: &str, color: &str, terms: Vec<ConditionTerm<Condition>>) -> Rule<Condition, StatusVisual> {
-        Rule {
-            id: id.to_owned(),
-            name: name.to_owned(),
-            enabled: true,
-            any_of: vec![AllOf { all_of: terms }],
-            then: StatusVisual {
-                kind: VisualKind::BuiltIn(icon.to_owned()),
-                style: VisualStyle { color: Some(color.to_owned()), ..VisualStyle::default() },
-            },
-        }
-    }
-    let yes = |condition| ConditionTerm { condition, negated: false };
-    let not = |condition| ConditionTerm { condition, negated: true };
-    let mut rules = vec![
-        rule("approval", "Needs your approval", "waiting_approval", "warning", vec![yes(Turn(WaitingApproval))]),
-        rule("agent-lost", "Agent lost", "agent_unavailable", "danger", vec![yes(Condition::PaneKind(PaneKind::AgentUnavailable))]),
-        rule("task-failed", "Task failed", "task_error", "danger", vec![yes(Condition::TaskStatus(ProgressTaskStatus::Error))]),
-        rule("monitor-lost", "Monitor lost", "monitor_failed", "danger", vec![yes(Condition::MonitorFailed), not(Condition::TaskStatus(ProgressTaskStatus::Done)), not(Condition::TaskStatus(ProgressTaskStatus::Error))]),
-        rule("goal-blocked", "Goal blocked", "goal_blocked", "warning", vec![yes(Goal(Blocked))]),
-        rule("usage-limited", "Usage limit reached", "goal_usage_limited", "warning", vec![yes(Goal(UsageLimited))]),
-        rule("goal-paused", "Goal paused", "goal_paused", "info", vec![yes(Goal(Paused)), not(Turn(Working))]),
-        rule("task-unread", "Task finished, result unread", "task_done", "success", vec![yes(Condition::TaskStatus(ProgressTaskStatus::Done)), yes(Condition::MonitorUnread)]),
-        rule("goal-reached", "Goal reached", "goal_reached", "success", vec![yes(Goal(Reached))]),
-        rule("completion-unread", "Finished, not seen yet", "done", "accent", vec![yes(Condition::CompletionUnread), not(Condition::Parked)]),
-        // Disabled until the user enables it. Keep the example above broad
-        // activity and idle rules so enabling it can actually affect agents.
-        rule("screen-error-example", "Screen mentions an error", "task_error", "danger", vec![yes(Condition::ScreenMatches(ScreenPattern { pattern: "\\b(error|failed|panic)\\b".to_owned(), ignore_case: true, region: ScreenRegion::LastLines(20) }))]),
-        rule("parked-progress", "Parked, task progressing", "parked", "info", vec![yes(Condition::Parked), yes(Condition::ProgressMeasurable)]),
-        rule("parked", "Parked, waiting for task", "parked", "info", vec![yes(Condition::Parked)]),
-        rule("subagents", "Waiting for background agents", "waiting_background", "info", vec![yes(Turn(WaitingSubagents))]),
-        rule("settling", "Background work still running", "background_task_still_running", "info", vec![yes(Turn(Settling))]),
-        rule("working-goal", "Working toward a goal", "working", "accent", vec![yes(Turn(Working)), yes(Goal(Active))]),
-        rule("working", "Working", "working", "success", vec![yes(Turn(Working))]),
-        rule("pending", "Task pending", "task_pending", "muted", vec![yes(Condition::TaskStatus(ProgressTaskStatus::NotStartedYet))]),
-        rule("scheduled", "Next prompt scheduled", "scheduled_input", "muted", vec![yes(Condition::ScheduledInput)]),
-        rule("goal-idle", "Goal active, agent idle", "goal_active", "muted", vec![yes(Goal(Active)), yes(Turn(Idle))]),
-        rule("shell-busy", "Terminal busy", "working", "muted", vec![yes(Condition::PaneKind(PaneKind::PlainShell)), yes(Condition::ShellOutputRecent)]),
-        rule("idle", "Idle", "idle", "muted", vec![yes(Turn(Idle))]),
-    ];
-    if let Some(example) = rules.iter_mut().find(|rule| rule.id == "screen-error-example") {
-        example.enabled = false;
-    }
-    if let Some(rule) = rules.iter_mut().find(|rule| rule.id == "parked-progress") {
-        rule.then.kind = VisualKind::ProgressFrames {
-            frames: ["🌑", "🌒", "🌓", "🌔", "🌕"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
-        };
-    }
-    if let Some(rule) = rules.iter_mut().find(|rule| rule.id == "working-goal") {
-        rule.then.kind = VisualKind::BrailleAnimation {
-            preset: "spinner".to_owned(),
-            frames_per_second: 8,
-        };
-    }
-    if let Some(rule) = rules.iter_mut().find(|rule| rule.id == "shell-busy") {
-        rule.then.kind = VisualKind::BrailleAnimation {
-            preset: "loop".to_owned(),
-            frames_per_second: 8,
-        };
-    }
-    StatusRules { defaults_version: 1, rules, fallback: None }
 }
 
 /// Choose the first enabled matching rule, preserving the user's priority order.
@@ -426,36 +470,52 @@ pub fn first_match<C, V>(
 /// This conservative test never guesses about relationships between facts.
 pub fn shadowed_by<C: PartialEq, V>(rules: &[Rule<C, V>], index: usize) -> Option<usize> {
     let rule = rules.get(index)?;
-    if !rule.enabled || rule.any_of.is_empty() || rule.any_of.iter().any(|group| group.all_of.is_empty()) {
+    if !rule.enabled
+        || rule.any_of.is_empty()
+        || rule.any_of.iter().any(|group| group.all_of.is_empty())
+    {
         return None;
     }
     rules[..index].iter().position(|earlier| {
-        earlier.enabled && earlier.any_of.iter().any(|earlier_group| {
-            !earlier_group.all_of.is_empty() && rule.any_of.iter().all(|later_group| {
-                earlier_group.all_of.iter().all(|term| later_group.all_of.contains(term))
+        earlier.enabled
+            && earlier.any_of.iter().any(|earlier_group| {
+                !earlier_group.all_of.is_empty()
+                    && rule.any_of.iter().all(|later_group| {
+                        earlier_group
+                            .all_of
+                            .iter()
+                            .all(|term| later_group.all_of.contains(term))
+                    })
             })
-        })
     })
+}
+
+/// Whether one term holds under an observation: an unknown fact never
+/// satisfies a term, negated or not.
+pub fn term_holds(negated: bool, observation: Observation) -> bool {
+    match observation {
+        Observation::True => !negated,
+        Observation::False => negated,
+        Observation::Unknown => false,
+    }
 }
 
 /// Evaluate AND groups joined by OR. Empty expressions and groups never match.
 pub fn matches<C>(groups: &[AllOf<C>], mut observe: impl FnMut(&C) -> Observation) -> bool {
     groups.iter().any(|group| {
         !group.all_of.is_empty()
-            && group.all_of.iter().all(|term| match observe(&term.condition) {
-                Observation::True => !term.negated,
-                Observation::False => term.negated,
-                Observation::Unknown => false,
-            })
+            && group
+                .all_of
+                .iter()
+                .all(|term| term_holds(term.negated, observe(&term.condition)))
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AllOf, Condition, ConditionTerm, Connector, Observation, PaneFacts, Rule, StatusRules,
-        StatusVisual, VisualKind, VisualStyle, default_rules, first_match, from_line, matches,
-        shadowed_by, to_line, validate,
+        first_match, from_line, matches, shadowed_by, to_line, AllOf, Condition, ConditionTerm,
+        Connector, Observation, PaneFacts, Rule, SupplementaryFacts,
     };
     use crate::{AgentClass, AgentState, AgentTurn, GoalState, PaneStatus, ProgressTaskStatus};
 
@@ -485,13 +545,32 @@ mod tests {
             for b in [false, true] {
                 for c in [false, true] {
                     let expression = [
-                        AllOf { all_of: vec![ConditionTerm { condition: a, negated: false }] },
-                        AllOf { all_of: vec![
-                            ConditionTerm { condition: b, negated: false },
-                            ConditionTerm { condition: c, negated: false },
-                        ] },
+                        AllOf {
+                            all_of: vec![ConditionTerm {
+                                condition: a,
+                                negated: false,
+                            }],
+                        },
+                        AllOf {
+                            all_of: vec![
+                                ConditionTerm {
+                                    condition: b,
+                                    negated: false,
+                                },
+                                ConditionTerm {
+                                    condition: c,
+                                    negated: false,
+                                },
+                            ],
+                        },
                     ];
-                    let actual = matches(&expression, |value| if *value { Observation::True } else { Observation::False });
+                    let actual = matches(&expression, |value| {
+                        if *value {
+                            Observation::True
+                        } else {
+                            Observation::False
+                        }
+                    });
                     assert_eq!(actual, a || (b && c), "a={a}, b={b}, c={c}");
                 }
             }
@@ -500,10 +579,20 @@ mod tests {
 
     #[test]
     fn flat_editor_line_round_trips_without_changing_connectors() {
-        let terms = vec![term(Observation::True, false), term(Observation::False, true), term(Observation::True, false)];
+        let terms = vec![
+            term(Observation::True, false),
+            term(Observation::False, true),
+            term(Observation::True, false),
+        ];
         let connectors = vec![Connector::Or, Connector::And];
         let groups = from_line(terms.clone(), &connectors).expect("well-formed line");
-        assert_eq!(groups.iter().map(|group| group.all_of.len()).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(
+            groups
+                .iter()
+                .map(|group| group.all_of.len())
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
         assert_eq!(to_line(&groups).expect("valid groups"), (terms, connectors));
         assert!(from_line(vec![term(Observation::True, false)], &[Connector::And]).is_err());
         assert!(to_line(&[AllOf::<()> { all_of: vec![] }]).is_err());
@@ -562,12 +651,21 @@ mod tests {
     #[test]
     fn shadow_analysis_requires_a_provable_subset() {
         let make = |id: &str, terms: Vec<ConditionTerm<Observation>>| Rule {
-            id: id.into(), name: id.into(), enabled: true,
-            any_of: vec![AllOf { all_of: terms }], then: (),
+            id: id.into(),
+            name: id.into(),
+            enabled: true,
+            any_of: vec![AllOf { all_of: terms }],
+            then: (),
         };
         let rules = vec![
             make("earlier", vec![term(Observation::True, false)]),
-            make("shadowed", vec![term(Observation::True, false), term(Observation::False, true)]),
+            make(
+                "shadowed",
+                vec![
+                    term(Observation::True, false),
+                    term(Observation::False, true),
+                ],
+            ),
             make("distinct", vec![term(Observation::False, true)]),
         ];
         assert_eq!(shadowed_by(&rules, 1), Some(0));
@@ -588,6 +686,7 @@ mod tests {
             scheduled_input: false,
             shell_output: None,
             activity_stale: None,
+            supplementary: SupplementaryFacts::default(),
             screen_matches: &|_| Observation::Unknown,
         };
         assert_eq!(Condition::GoalSet.observe(&facts), Observation::True);
@@ -600,11 +699,20 @@ mod tests {
             Observation::False
         );
         assert_eq!(Condition::Parked.observe(&facts), Observation::False);
-        assert_eq!(Condition::AnyMonitorFailed.observe(&facts), Observation::False);
-        assert_eq!(Condition::AnyTaskStatus(ProgressTaskStatus::Error).observe(&facts), Observation::False);
+        assert_eq!(
+            Condition::AnyMonitorFailed.observe(&facts),
+            Observation::False
+        );
+        assert_eq!(
+            Condition::AnyTaskStatus(ProgressTaskStatus::Error).observe(&facts),
+            Observation::False
+        );
 
         let shell = PaneStatus::PlainShell;
-        let facts = PaneFacts { status: &shell, ..facts };
+        let facts = PaneFacts {
+            status: &shell,
+            ..facts
+        };
         assert_eq!(Condition::GoalSet.observe(&facts), Observation::Unknown);
         assert_eq!(
             Condition::TaskStatus(crate::ProgressTaskStatus::Running).observe(&facts),
@@ -614,14 +722,22 @@ mod tests {
 
     #[test]
     fn any_monitor_conditions_include_nonrepresentative_monitors() {
-        use crate::{PaneProgress, ProgressAttention, ProgressMonitorHealth, ProgressTaskReport, ProgressTaskStatus};
+        use crate::{
+            PaneProgress, ProgressAttention, ProgressMonitorHealth, ProgressTaskReport,
+            ProgressTaskStatus,
+        };
 
         let monitor = |id, status, health, attention| PaneProgress {
             monitor_id: id,
             report: ProgressTaskReport {
-                job_id: format!("task-{id}"), status, percent: 50.0,
-                message: "Example".into(), details: String::new(), error: None,
-                eta_seconds: None, indeterminate: false,
+                job_id: format!("task-{id}"),
+                status,
+                percent: 50.0,
+                message: "Example".into(),
+                details: String::new(),
+                error: None,
+                eta_seconds: None,
+                indeterminate: false,
             },
             monitor_health: health,
             last_observed_unix_millis: 0,
@@ -629,85 +745,362 @@ mod tests {
             attention,
         };
         let progress = [
-            monitor(1, ProgressTaskStatus::Running, ProgressMonitorHealth::Healthy, ProgressAttention::Acknowledged),
-            monitor(2, ProgressTaskStatus::Error, ProgressMonitorHealth::Failed { consecutive_failures: 1, last_error: "unavailable".into() }, ProgressAttention::Acknowledged),
+            monitor(
+                1,
+                ProgressTaskStatus::Running,
+                ProgressMonitorHealth::Healthy,
+                ProgressAttention::Acknowledged,
+            ),
+            monitor(
+                2,
+                ProgressTaskStatus::Error,
+                ProgressMonitorHealth::Failed {
+                    consecutive_failures: 1,
+                    last_error: "unavailable".into(),
+                },
+                ProgressAttention::Acknowledged,
+            ),
         ];
         let status = PaneStatus::PlainShell;
         let facts = PaneFacts {
-            status: &status, progress: &progress, scheduled_input: false,
-            shell_output: None, activity_stale: None, screen_matches: &|_| Observation::Unknown,
+            status: &status,
+            progress: &progress,
+            scheduled_input: false,
+            shell_output: None,
+            activity_stale: None,
+            supplementary: SupplementaryFacts::default(),
+            screen_matches: &|_| Observation::Unknown,
         };
-        assert_eq!(Condition::TaskStatus(ProgressTaskStatus::Running).observe(&facts), Observation::True);
+        assert_eq!(
+            Condition::TaskStatus(ProgressTaskStatus::Running).observe(&facts),
+            Observation::True
+        );
         assert_eq!(Condition::MonitorFailed.observe(&facts), Observation::False);
-        assert_eq!(Condition::AnyTaskStatus(ProgressTaskStatus::Error).observe(&facts), Observation::True);
-        assert_eq!(Condition::AnyMonitorFailed.observe(&facts), Observation::True);
+        assert_eq!(
+            Condition::AnyTaskStatus(ProgressTaskStatus::Error).observe(&facts),
+            Observation::True
+        );
+        assert_eq!(
+            Condition::AnyMonitorFailed.observe(&facts),
+            Observation::True
+        );
     }
 
     #[test]
-    fn validation_rejects_invalid_progress_and_duplicate_ids() {
-        let rule = Rule {
-            id: "one".to_owned(),
-            name: "Invalid progress".to_owned(),
-            enabled: true,
-            any_of: vec![AllOf {
-                all_of: vec![ConditionTerm {
-                    condition: Condition::ProgressAtLeast(101),
-                    negated: false,
-                }],
-            }],
-            then: StatusVisual {
-                kind: VisualKind::Hidden,
-                style: VisualStyle::default(),
+    fn activity_unchecked_and_custom_agent_need_a_live_agent() {
+        let custom = PaneStatus::Agent(AgentState {
+            class: AgentClass::Other("aider".to_owned()),
+            turn: AgentTurn::Working,
+            goal: None,
+            completion_unread: false,
+        });
+        let mut facts = PaneFacts {
+            status: &custom,
+            progress: &[],
+            scheduled_input: false,
+            shell_output: None,
+            activity_stale: None,
+            supplementary: SupplementaryFacts::default(),
+            screen_matches: &|_| Observation::Unknown,
+        };
+        assert_eq!(Condition::OtherAgent.observe(&facts), Observation::True);
+        assert_eq!(
+            Condition::AgentClass(AgentClass::Other("aider".to_owned())).observe(&facts),
+            Observation::True
+        );
+        assert_eq!(
+            Condition::AgentClass(AgentClass::Other("goose".to_owned())).observe(&facts),
+            Observation::False
+        );
+        assert_eq!(
+            Condition::ActivityUnchecked.observe(&facts),
+            Observation::True
+        );
+        // The stale condition itself stays unobservable, which is exactly
+        // why "unchecked" exists.
+        assert_eq!(
+            Condition::ActivityStale.observe(&facts),
+            Observation::Unknown
+        );
+        for stale in [false, true] {
+            facts.activity_stale = Some(stale);
+            assert_eq!(
+                Condition::ActivityUnchecked.observe(&facts),
+                Observation::False
+            );
+        }
+
+        let codex = PaneStatus::Agent(AgentState {
+            class: AgentClass::Codex,
+            turn: AgentTurn::Idle,
+            goal: None,
+            completion_unread: false,
+        });
+        facts.status = &codex;
+        assert_eq!(Condition::OtherAgent.observe(&facts), Observation::False);
+
+        let shell = PaneStatus::PlainShell;
+        facts.status = &shell;
+        facts.activity_stale = None;
+        assert_eq!(Condition::OtherAgent.observe(&facts), Observation::Unknown);
+        assert_eq!(
+            Condition::ActivityUnchecked.observe(&facts),
+            Observation::Unknown
+        );
+    }
+
+    #[test]
+    fn node_facts_feed_bookmark_and_prompt_queue_conditions() {
+        use crate::{PaneContentKind, Tree, ROOT_ID};
+
+        let status = PaneStatus::PlainShell;
+        let mut facts = PaneFacts {
+            status: &status,
+            progress: &[],
+            scheduled_input: false,
+            shell_output: None,
+            activity_stale: None,
+            supplementary: SupplementaryFacts::default(),
+            screen_matches: &|_| Observation::Unknown,
+        };
+        assert_eq!(
+            Condition::PaneBookmarked.observe(&facts),
+            Observation::Unknown
+        );
+        assert_eq!(
+            Condition::PromptsQueued.observe(&facts),
+            Observation::Unknown
+        );
+
+        let mut tree = Tree::new();
+        let group_id = tree.add_group(ROOT_ID, "group").unwrap();
+        let pane_id = tree
+            .add_pane(group_id, "pane", PaneContentKind::Terminal)
+            .unwrap();
+        let pane = tree.get(pane_id).unwrap();
+        facts.supplementary = SupplementaryFacts::default().with_node(pane);
+        assert_eq!(facts.supplementary.bookmarked, Some(false));
+        assert_eq!(facts.supplementary.queued_prompts, Some(0));
+        assert_eq!(
+            Condition::PaneBookmarked.observe(&facts),
+            Observation::False
+        );
+        assert_eq!(Condition::PromptsQueued.observe(&facts), Observation::False);
+
+        facts.supplementary.bookmarked = Some(true);
+        facts.supplementary.queued_prompts = Some(3);
+        assert_eq!(Condition::PaneBookmarked.observe(&facts), Observation::True);
+        assert_eq!(Condition::PromptsQueued.observe(&facts), Observation::True);
+
+        // A group carries neither fact, so nothing is invented for it.
+        let group = tree.get(group_id).unwrap();
+        assert_eq!(
+            SupplementaryFacts::default().with_node(group),
+            SupplementaryFacts::default()
+        );
+    }
+
+    #[test]
+    fn prompt_queue_is_held_only_by_an_attempted_head() {
+        use crate::{PaneContentKind, PromptQueueDelivery, QueuedPrompt, Tree, ROOT_ID};
+
+        let status = PaneStatus::PlainShell;
+        let observe = |supplementary| {
+            Condition::PromptQueueHeld.observe(&PaneFacts {
+                status: &status,
+                progress: &[],
+                scheduled_input: false,
+                shell_output: None,
+                activity_stale: None,
+                supplementary,
+                screen_matches: &|_| Observation::Unknown,
+            })
+        };
+        // Not observed: unknown, not false.
+        assert_eq!(observe(SupplementaryFacts::default()), Observation::Unknown);
+
+        let mut tree = Tree::new();
+        let group_id = tree.add_group(ROOT_ID, "group").unwrap();
+        let pane_id = tree
+            .add_pane(group_id, "pane", PaneContentKind::Terminal)
+            .unwrap();
+        let with_pane = |tree: &Tree| SupplementaryFacts::default().with_node(tree.get(pane_id).unwrap());
+        // Empty queue: known not to be held.
+        assert_eq!(with_pane(&tree).prompt_queue_held, Some(false));
+        assert_eq!(observe(with_pane(&tree)), Observation::False);
+
+        let prompt = |text: &str| QueuedPrompt {
+            text: text.to_owned(),
+            delivery: PromptQueueDelivery::Once,
+            attempted_delivery: false,
+        };
+        tree.enqueue_prompt(pane_id, prompt("first")).unwrap();
+        tree.enqueue_prompt(pane_id, prompt("second")).unwrap();
+        // Waiting prompts that were never attempted do not hold the queue.
+        assert_eq!(observe(with_pane(&tree)), Observation::False);
+
+        assert!(tree
+            .mark_queued_prompt_attempted(pane_id, &prompt("first"))
+            .unwrap());
+        assert_eq!(observe(with_pane(&tree)), Observation::True);
+    }
+
+    #[test]
+    fn view_and_context_conditions_read_their_facts_or_stay_unknown() {
+        let status = PaneStatus::Agent(AgentState::from_activity(
+            AgentClass::Claude,
+            crate::AgentActivity::Idle,
+            None,
+        ));
+        let mut facts = PaneFacts {
+            status: &status,
+            progress: &[],
+            scheduled_input: false,
+            shell_output: None,
+            activity_stale: None,
+            supplementary: SupplementaryFacts::default(),
+            screen_matches: &|_| Observation::Unknown,
+        };
+        for condition in [
+            Condition::PaneSelected,
+            Condition::PaneVisible,
+            Condition::ContextAbovePercent(80),
+        ] {
+            assert_eq!(condition.observe(&facts), Observation::Unknown, "{condition:?}");
+        }
+
+        facts.supplementary.selected = Some(true);
+        facts.supplementary.visible = Some(false);
+        assert_eq!(Condition::PaneSelected.observe(&facts), Observation::True);
+        assert_eq!(Condition::PaneVisible.observe(&facts), Observation::False);
+
+        // Boundary: strictly above, measured in tenths of a percent.
+        facts.supplementary.context_permille = Some(800);
+        assert_eq!(
+            Condition::ContextAbovePercent(80).observe(&facts),
+            Observation::False
+        );
+        facts.supplementary.context_permille = Some(801);
+        assert_eq!(
+            Condition::ContextAbovePercent(80).observe(&facts),
+            Observation::True
+        );
+        // Empty window reads false; 0% threshold is true for any use.
+        facts.supplementary.context_permille = Some(0);
+        assert_eq!(
+            Condition::ContextAbovePercent(0).observe(&facts),
+            Observation::False
+        );
+        facts.supplementary.context_permille = Some(1000);
+        assert_eq!(
+            Condition::ContextAbovePercent(100).observe(&facts),
+            Observation::False
+        );
+        assert_eq!(
+            Condition::ContextAbovePercent(99).observe(&facts),
+            Observation::True
+        );
+    }
+
+    #[test]
+    fn hand_written_tables_may_omit_the_version_and_style_flags() {
+        let rules: super::StatusRules = toml::from_str(
+            "defaults_version = 1\nrules = []\n[fallback]\nkind = \"hidden\"\n[fallback.style]\nbold = true\n",
+        )
+        .expect("parseable");
+        assert_eq!(rules.version, super::STATUS_RULES_SCHEMA_VERSION);
+        let style = rules.fallback.expect("fallback").style;
+        assert!(style.bold && !style.dim && !style.pulse && style.color.is_none());
+    }
+
+    #[test]
+    fn eta_frozen_and_cost_conditions_stay_unknown_without_their_facts() {
+        use crate::{PaneProgress, ProgressAttention, ProgressMonitorHealth, ProgressTaskReport};
+
+        let status = PaneStatus::PlainShell;
+        let mut facts = PaneFacts {
+            status: &status,
+            progress: &[],
+            scheduled_input: false,
+            shell_output: None,
+            activity_stale: None,
+            supplementary: SupplementaryFacts::default(),
+            screen_matches: &|_| Observation::Unknown,
+        };
+        assert_eq!(Condition::EtaKnown.observe(&facts), Observation::Unknown);
+        assert_eq!(
+            Condition::EtaBelowMinutes(5).observe(&facts),
+            Observation::Unknown
+        );
+        assert_eq!(Condition::PaneFrozen.observe(&facts), Observation::Unknown);
+        assert_eq!(Condition::PaneFocused.observe(&facts), Observation::Unknown);
+        assert_eq!(
+            Condition::SessionCostAbove(1).observe(&facts),
+            Observation::Unknown
+        );
+
+        let mut monitor = PaneProgress {
+            monitor_id: 1,
+            report: ProgressTaskReport {
+                job_id: "task".into(),
+                status: ProgressTaskStatus::Running,
+                percent: 10.0,
+                message: "Example".into(),
+                details: String::new(),
+                error: None,
+                eta_seconds: None,
+                indeterminate: false,
             },
+            monitor_health: ProgressMonitorHealth::Healthy,
+            last_observed_unix_millis: 0,
+            timing: Default::default(),
+            attention: ProgressAttention::Acknowledged,
         };
-        let rules = StatusRules {
-            defaults_version: 1,
-            rules: vec![rule.clone(), rule],
-            fallback: None,
+        let without_eta = [monitor.clone()];
+        facts.progress = &without_eta;
+        assert_eq!(Condition::EtaKnown.observe(&facts), Observation::False);
+        assert_eq!(
+            Condition::EtaBelowMinutes(5).observe(&facts),
+            Observation::Unknown
+        );
+
+        monitor.report.eta_seconds = Some(299);
+        let with_eta = [monitor];
+        facts.progress = &with_eta;
+        assert_eq!(Condition::EtaKnown.observe(&facts), Observation::True);
+        assert_eq!(
+            Condition::EtaBelowMinutes(5).observe(&facts),
+            Observation::True
+        );
+        assert_eq!(
+            Condition::EtaBelowMinutes(4).observe(&facts),
+            Observation::False
+        );
+
+        facts.supplementary = SupplementaryFacts {
+            frozen: Some(true),
+            session_cost_cents: Some(250),
+            focused: Some(false),
+            ..SupplementaryFacts::default()
         };
-        let errors = validate(&rules);
-        assert!(errors.iter().any(|error| error.contains("duplicate")));
-        assert!(errors.iter().any(|error| error.contains("percentage")));
-    }
-
-    #[test]
-    fn screen_watch_limit_counts_distinct_enabled_patterns() {
-        use super::{ScreenPattern, ScreenRegion};
-
-        let mut rules = default_rules();
-        let example_index = rules.rules.iter().position(|rule| rule.id == "screen-error-example").unwrap();
-        let mut example = rules.rules.remove(example_index);
-        example.enabled = true;
-        for index in 0..17 {
-            let mut rule = example.clone();
-            rule.id = format!("screen-{index}");
-            rule.any_of[0].all_of[0].condition = Condition::ScreenMatches(ScreenPattern {
-                pattern: "shared".to_owned(),
-                ignore_case: false,
-                region: ScreenRegion::All,
-            });
-            rules.rules.push(rule);
-        }
-        assert!(validate(&rules).is_empty());
-        for (index, rule) in rules.rules.iter_mut().rev().take(17).enumerate() {
-            if let Condition::ScreenMatches(pattern) = &mut rule.any_of[0].all_of[0].condition {
-                pattern.pattern = format!("pattern-{index}");
-            }
-        }
-        assert!(validate(&rules).iter().any(|error| error.contains("16 distinct")));
-        rules.rules.last_mut().unwrap().enabled = false;
-        assert!(validate(&rules).is_empty());
-    }
-
-    #[test]
-    fn defaults_have_unique_valid_ids_and_the_screen_example_is_disabled() {
-        let rules = default_rules();
-        assert!(validate(&rules).is_empty());
-        let example = rules.rules.iter().find(|rule| rule.id == "screen-error-example");
-        assert!(example.is_some_and(|rule| !rule.enabled));
-        let example_index = rules.rules.iter().position(|rule| rule.id == "screen-error-example").unwrap();
-        let idle_index = rules.rules.iter().position(|rule| rule.id == "idle").unwrap();
-        assert!(example_index < idle_index);
-        assert_eq!(rules.rules.first().map(|rule| rule.id.as_str()), Some("approval"));
+        assert_eq!(Condition::PaneFrozen.observe(&facts), Observation::True);
+        assert_eq!(Condition::PaneFocused.observe(&facts), Observation::False);
+        // Unobserved error facts stay Unknown rather than reading false.
+        assert_eq!(Condition::BlockingError.observe(&facts), Observation::Unknown);
+        assert_eq!(Condition::SessionError.observe(&facts), Observation::Unknown);
+        facts.supplementary.blocking_error = Some(true);
+        facts.supplementary.session_error = Some(false);
+        assert_eq!(Condition::BlockingError.observe(&facts), Observation::True);
+        assert_eq!(Condition::SessionError.observe(&facts), Observation::False);
+        facts.supplementary.focused = Some(true);
+        assert_eq!(Condition::PaneFocused.observe(&facts), Observation::True);
+        assert_eq!(
+            Condition::SessionCostAbove(2).observe(&facts),
+            Observation::True
+        );
+        assert_eq!(
+            Condition::SessionCostAbove(3).observe(&facts),
+            Observation::False
+        );
     }
 }

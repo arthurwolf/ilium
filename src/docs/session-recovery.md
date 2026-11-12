@@ -139,6 +139,14 @@ You can continue a Claude Code conversation under Codex, or a Codex conversation
 4. On success the frozen pane is replaced by a new pane that resumes the converted session in the other agent.
 5. If conversion fails and the original agent had already been stopped, press `Enter` to resume the original session, or `Esc` to close the dialog.
 
+Conversion streams the transcript line by line, so memory use stays small (a few hundred MiB at most) whatever the session size; multi-gigabyte sessions convert normally. Limits:
+
+- The source transcript may be up to 64 GiB. A larger file is refused before anything is read, with a message naming the limit.
+- The converted copy may be up to 8 GiB, and conversion to Claude Code first checks that the disk has room for it; if not, it stops before writing.
+- Any single line over 256 MiB is skipped and counted instead of loaded.
+- In a Codex to Claude conversion, each tool output is cut to 30,000 characters, with a note saying how many characters were left out.
+- If the Codex rollout changes while it is being converted (for example the agent is still writing), the conversion is refused rather than producing a mixed result.
+
 The original transcript is read, not modified. Antigravity sessions cannot be converted.
 
 ## Command-line control

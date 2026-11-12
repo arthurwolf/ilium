@@ -25,6 +25,22 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - The F9 "Full diagnostic" overlay, which every dialog and error popover opens for its full text, now has a clickable `[ Copy ]` button and a `c` key that copy the whole diagnostic to the clipboard.
 
 ### Fixed
+- The RAM video endpoint no longer naps 10 ms per blocked socket write while a body transfer is in flight (1 ms instead), which capped body throughput on macOS.
+- The Windows release test helper builds Linux container paths as POSIX paths, so the animation smoke checks pass on Windows runners.
+- The bootstrap format round-trip test runs with a 10 s per-phase budget; latency stays covered by the deadline tests, and the production default is unchanged.
+- Test-suite robustness on loaded CI runners: the RAM media full-body throughput test takes the best of three transfers, the text-measure quota test tolerates concurrently retiring engines, and the animation smoke validator checks Linux package paths as POSIX paths on every host.
+- Release workflow tests now pass on Windows (POSIX path validation of container fixture records, short/long temp-path comparison), and the voice actor exit reason is logged.
+- The snapshot service waits a bounded time for a briefly busy worker-admission gate instead of failing session persistence on a transient `Busy`.
+- Release pipeline Linux tests use a delegated user systemd scope; slow-runner waits in background cache and image-query tests are polled with longer deadlines.
+- The PTY owner no longer sleeps until the write deadline when a writer completion lands between its poll and its wait (lost wake-up); native sandbox command building accepts Linux paths on any host; slow-runner and Windows-only test races in the PTY, terminal-parsing and release tests are handled.
+- Release pipeline: Linux native tests now enable the cpu, memory and pids controllers in their delegated cgroup so the animation sandbox tests can run; the board path picker smoke test no longer indexes a screen row that can repaint away.
+- The board's stale-write message now leads with "press r to reload" and puts the file path last, so a long path can no longer clip the guidance.
+- A slow or failed agent identity check no longer drops a typed keystroke from the last-prompt banner and prompt tracking.
+- `ilium ctl close --worktree remove` now says why a worktree removal was refused (for example, a process still running inside it) instead of timing out after 30 seconds, and refuses up front when it runs from inside the worktree it would remove.
+- Typed and spoken voice turns no longer end the voice session when the quota ledger is briefly contended: an event waits up to 2 s for the admission section to clear, so queued turns are not dropped.
+- Restart and quit no longer report a failed terminal read when the input reader is cancelled during shutdown (Windows reports it as error 995); the requested client restart now runs.
+- A refused automatic input says whether its agent identity probe completed or was unavailable, and why, so a refused broadcast can be diagnosed.
+- The Windows PTY smoke test waits for the Voice control footer to render instead of sampling one partially drawn frame.
 - Removing a worktree with `ilium close-pane --worktree remove` no longer refuses while a process in that worktree is still exiting. A process whose working directory has already disappeared gets up to one second to finish; a process still running after that still blocks removal, as before.
 - Ilium no longer closes the window with "server event channel closed unexpectedly" when it catches a lagging client up on a terminal pane that has produced more than 32 MiB of output. The size estimate for such a pane's replay counted its terminal-reset prefix as 3 bytes while the replay itself is 2, so every catch-up attempt was rejected as "pane output moved after the estimate" and the connection was dropped.
 >- Agents in a folder that is not a usable Git checkout now start, reload and recover after a restart. A folder outside the work tree of the repository Git finds for it (for example a config repo whose `.git` sets `core.worktree` to another path, or a folder inside a `.git` directory) was refused with "launch repository cannot be verified: project path is outside Git worktree" and the restore retried that failure every 5 minutes forever; it is now treated as an ordinary folder. The same now applies when Git is not installed or refuses a repository owned by another user ("dubious ownership"), and when a folder sits under a corrupt `.git` file.
@@ -217,6 +233,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Wind rendering deduplicates dots that land on the same Braille subpixel and paints their flat raster indices directly, preserving raster ownership semantics.
 
 ### Fixed
+- The session server now starts on macOS when the debug-log directory path is long: the log-relay socket falls back to the short private session socket directory instead of exceeding the 104-byte Unix socket path limit.
+- Restored terminal panes now use Git-native discovery, so an empty ancestor `.git` directory cannot prevent ordinary project panes from starting. Restore diagnostics retain the actual admission refusal reason.
 
 - Board card typing retains brief bursts while disk publication is pending, within the shared filesystem job and memory limits; restored upstream image fixtures required by vendored tests.
 - Chatroom author defaults ignore empty environment values; invalid pane state selectors now use the documented structured selection-error response.
@@ -258,6 +276,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Retained terminal frame buffers now hold distinct presentation storage slots after acknowledgement, so later frames cannot exceed the declared three-buffer budget.
 - The animation settings paint-and-hit test no longer crosses every effective kind with the whole playback and colour matrix, which made it run for tens of minutes.
 - The Settings Padding tab is handled in the content-height and row-count matches.
+- On Windows the `ilium` and `ilium-server` binaries now reserve a 16 MiB main-thread stack, so the client no longer overflows the default 1 MiB stack at startup.
 - Saved animation catalogs report a directory as 0 bytes on Linux and macOS, as Windows already did, instead of the filesystem's own directory size, which varied by filesystem.
 
 ### Added

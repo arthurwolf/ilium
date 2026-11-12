@@ -42,3 +42,4 @@ immutable Release receipt. Registry acceptance requires matching anonymous
 download hashes and public repository-linked package metadata. A matching version
 retry verifies existing bytes; a conflicting tag is preserved and fails the job.
 The OCI bundle is a distribution artifact and adds no runtime container layer.
+

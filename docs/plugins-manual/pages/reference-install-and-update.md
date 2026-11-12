@@ -327,3 +327,7 @@ The user sees a progress line per step, the review dialog and the result. After 
 ## Production additions (round 7)
 
 - **[PRU-006]** Install MUST read the package bytes exactly once into staging, compute the SHA-256 over that staged copy, show the review dialog for that hash, and record the hash with the grant decision. Activation MUST use only the staged copy and MUST refuse with package.changed-after-review if the hash differs.
+
+## Production additions (round 12)
+
+- **[PRP-010]** The system must load a compiled-cache entry only after verifying an integrity tag covering the component SHA-256, engine id and entry bytes, and must delete, recompile and audit as cache-integrity-failure any mismatching, truncated or foreign-owner entry.

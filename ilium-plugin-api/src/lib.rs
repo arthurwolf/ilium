@@ -38,6 +38,7 @@ pub mod platform;
 pub mod registry;
 pub mod resolve;
 pub mod side;
+pub mod submission;
 pub mod tier;
 pub mod uitree;
 pub mod version;

@@ -9,10 +9,11 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::process::Command;
 
-use ilium_core::{BuiltinAgentProvider, NodeId, ROOT_ID};
-use ilium_ipc::{
-    read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent, WorkspaceCreateSpec,
-};
+use ilium_core::BuiltinAgentProvider;
+use ilium_core::{NodeId, ROOT_ID};
+#[cfg(unix)]
+use ilium_ipc::WorkspaceCreateSpec;
+use ilium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent};
 use ilium_server::config::DetectionConfig;
 
 mod common;
@@ -544,7 +545,11 @@ async fn unfreeze_preserves_worktree_ownership() {
     run_git(&server.project_cwd, &["commit", "-m", "test repository"]);
 
     let worktree_parent = tempfile::tempdir().expect("worktree parent");
-    let worktree_root = worktree_parent.path().join("linked");
+    // The server refuses a worktree path whose parent is not spelled
+    // canonically; macOS temporary directories live behind the /var symlink.
+    let worktree_root = std::fs::canonicalize(worktree_parent.path())
+        .expect("canonical worktree parent")
+        .join("linked");
 
     let mut client = attach(&server, session_name).await;
     write_frame(
@@ -661,8 +666,13 @@ async fn unfreeze_preserves_worktree_ownership() {
         assert!(!reasons.is_empty());
         assert!(
             reasons.iter().all(|reason| {
-                reason.contains("cannot inspect cwd of process")
-                    && reason.contains("Permission denied")
+                // Process inspection exists on Linux procfs only; every other
+                // platform reports it unavailable and removal stays fail-closed.
+                let is_non_linux_inspection_refusal = cfg!(not(target_os = "linux"))
+                    && reason.contains("worktree process inspection requires Linux procfs");
+                (is_non_linux_inspection_refusal
+                    || (reason.contains("cannot inspect cwd of process")
+                        && reason.contains("Permission denied")))
                     && !reason.contains("REMOVAL OUTCOME UNCERTAIN")
             }),
             "unexpected worktree removal refusal after unfreeze: {removal:?}"
@@ -703,6 +713,7 @@ async fn unfreeze_preserves_worktree_ownership() {
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
+#[cfg(unix)]
 async fn wait_for_detected_replacement_after_unfreeze(
     client: &mut SessionStream,
     frozen_pane_id: NodeId,

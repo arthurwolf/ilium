@@ -200,13 +200,15 @@ impl RemoteCompactionWorkers {
         }
     }
 
-    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
-    pub fn spawn(&mut self, job: RemoteCompactionJob) -> Result<(), RemoteCompactionWorkerEvent> {
+    pub fn spawn(
+        &mut self,
+        job: RemoteCompactionJob,
+    ) -> Result<(), Box<RemoteCompactionWorkerEvent>> {
         if self.active.is_some() {
-            return Err(failure_event(
+            return Err(Box::new(failure_event(
                 &job,
                 "A previous remote compaction is still stopping",
-            ));
+            )));
         }
         let pane_id = job.pane_id();
         let kind = job.kind();
@@ -215,10 +217,10 @@ impl RemoteCompactionWorkers {
         let event_overflow = Arc::new(AtomicBool::new(false));
         let cost = job.cost();
         let reservation = self.client.try_reserve(Lane::Io, cost).map_err(|reason| {
-            failure_event(
+            Box::new(failure_event(
                 &job,
                 &format!("Remote compaction admission refused: {reason:?}"),
-            )
+            ))
         })?;
         let task = RemoteCompactionTask {
             job,
@@ -229,10 +231,10 @@ impl RemoteCompactionWorkers {
             notification: Arc::clone(&self.notification),
         };
         let receipt = reservation.submit(task).map_err(|rejected| {
-            failure_event(
+            Box::new(failure_event(
                 &rejected.value.job,
                 &format!("Remote compaction admission refused: {:?}", rejected.reason),
-            )
+            ))
         })?;
         self.active = Some(ActiveWorker {
             cancel,
