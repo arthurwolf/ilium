@@ -22,7 +22,12 @@ use serde_json::Value;
 const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 const SESSION_NAME: &str = "default";
 
+#[path = "support/server_binary.rs"]
+mod server_binary;
+
+/// The `ilium` client binary; also builds `ilium-server` beside it, because the client spawns it.
 fn ilium_binary() -> String {
+    server_binary::ensure_server_binary();
     std::env::var_os("ILIUM_PTY_SMOKE_BINARY")
         .map(|binary_path| binary_path.to_string_lossy().into_owned())
         .unwrap_or_else(|| env!("CARGO_BIN_EXE_ilium").to_string())

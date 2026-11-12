@@ -14,6 +14,10 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+#[path = "support/server_binary.rs"]
+mod server_binary;
+use server_binary::ensure_server_binary;
 use std::process::{Command, Output};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -137,7 +141,8 @@ impl Fixture {
                 .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_ilium"))),
         )
         .unwrap();
-        assert!(binary.parent().unwrap().join("ilium-server").is_file());
+        let server_binary = ensure_server_binary();
+        assert!(server_binary.is_file());
         let environment = vec![
             ("XDG_CONFIG_HOME", root.join("config")),
             ("XDG_DATA_HOME", root.join("data")),

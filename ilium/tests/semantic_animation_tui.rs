@@ -13,6 +13,9 @@ use ilium_core::{RestructureNode, RestructurePlan, Tree};
 use ilium_ipc::{ClientRequest, ServerEvent};
 use ilium_pty::{PtyCommand, PtySession};
 use sha2::{Digest, Sha256};
+
+#[path = "support/server_binary.rs"]
+mod server_binary;
 use std::{
     collections::BTreeSet,
     fs::{self, OpenOptions},
@@ -119,6 +122,7 @@ impl Fixture {
             ("HOME", root.path().join("home")),
         ];
         std::fs::create_dir_all(root.path().join("home")).unwrap();
+        server_binary::ensure_server_binary();
         Self {
             _root: root,
             _runtime: runtime,

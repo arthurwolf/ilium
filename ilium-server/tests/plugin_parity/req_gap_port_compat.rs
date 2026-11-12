@@ -254,3 +254,196 @@ fn cor_015_oversized_nul_and_non_linux_setup_commands_are_refused_b() {
         "a non-empty setup command was accepted on a non-Linux platform"
     );
 }
+
+/// REQ: COR-005
+#[test]
+fn req_cor_005_backup_copy_taken_at_restart_when_backups_enabled_a() {
+    let kernel = world_with_config(StartMode::Normal, "[session]\nbackups_enabled = true\n");
+    project(&kernel, "backup-proj");
+    kernel.settle();
+    kernel.advance_clock_ms(750);
+    kernel.settle();
+    let restarted = kernel.restart_from_disk();
+    assert_eq!(
+        restarted.backup_files().len(),
+        1,
+        "COR-005: with backups_enabled true a copy must be taken at server start"
+    );
+}
+
+/// REQ: COR-005
+#[test]
+fn req_cor_005_no_backup_copy_when_backups_disabled_b() {
+    let kernel = world_with_config(StartMode::Normal, "[session]\nbackups_enabled = false\n");
+    project(&kernel, "backup-proj");
+    kernel.settle();
+    kernel.advance_clock_ms(750);
+    kernel.settle();
+    let restarted = kernel.restart_from_disk();
+    assert!(
+        restarted.backup_files().is_empty(),
+        "COR-005: with backups_enabled false no backup copy may be written"
+    );
+}
+
+/// REQ: COR-009
+#[test]
+fn req_cor_009_same_kind_alerts_on_one_pane_merge_within_window_a() {
+    let kernel = world(StartMode::Normal);
+    let shell = terminal(&kernel, None, "shell", &["sh"]);
+    let before = kernel.plugin_log("notifications").len();
+    kernel.feed_output(shell, b"Task finished\r\n");
+    kernel.settle();
+    let after_first = kernel.plugin_log("notifications").len();
+    assert!(after_first > before, "COR-009: the first task alert is missing");
+    kernel.advance_clock_ms(5000);
+    kernel.feed_output(shell, b"Task finished\r\n");
+    kernel.settle();
+    assert_eq!(
+        kernel.plugin_log("notifications").len(),
+        after_first,
+        "COR-009: a second alert of the same kind on the same pane inside the 30 s window was not merged"
+    );
+}
+
+/// REQ: COR-009
+#[test]
+fn req_cor_009_zero_coalesce_window_disables_merging_b() {
+    let kernel = world(StartMode::Normal);
+    assert_eq!(
+        kernel.apply_setting("notifications", "task_coalesce_seconds", "0"),
+        Ok(())
+    );
+    let shell = terminal(&kernel, None, "shell", &["sh"]);
+    let before = kernel.plugin_log("notifications").len();
+    kernel.feed_output(shell, b"Task finished\r\n");
+    kernel.settle();
+    let after_first = kernel.plugin_log("notifications").len();
+    kernel.advance_clock_ms(5000);
+    kernel.feed_output(shell, b"Task finished\r\n");
+    kernel.settle();
+    assert!(
+        kernel.plugin_log("notifications").len() > after_first && after_first > before,
+        "COR-009: with task_coalesce_seconds 0 the second alert was merged into the first"
+    );
+}
+
+/// REQ: COR-019
+#[test]
+fn req_cor_019_editor_refuses_file_over_262144_lines_a() {
+    let kernel = world(StartMode::Normal);
+    kernel.write_project_file("too-long.txt", &"x\n".repeat(262_145));
+    let outcome = apply(
+        &kernel,
+        ilium_plugin_api::generated::types::Intent::EditorOpen(
+            ilium_plugin_api::generated::types::EditorOpenSpec {
+                path: ilium_plugin_api::generated::types::FsPath {
+                    scope: "project".to_owned(),
+                    path: "too-long.txt".to_owned(),
+                },
+                line: None,
+                placement: ilium_plugin_api::generated::types::EditorPlacement::NewPane,
+            },
+        ),
+    );
+    assert!(
+        is_refused(&outcome),
+        "COR-019: a file of 262145 lines was opened instead of refused"
+    );
+}
+
+/// REQ: COR-019
+#[test]
+fn req_cor_019_editor_accepts_file_of_exactly_262144_lines_b() {
+    let kernel = world(StartMode::Normal);
+    kernel.write_project_file("at-limit.txt", &"x\n".repeat(262_144));
+    let outcome = apply(
+        &kernel,
+        ilium_plugin_api::generated::types::Intent::EditorOpen(
+            ilium_plugin_api::generated::types::EditorOpenSpec {
+                path: ilium_plugin_api::generated::types::FsPath {
+                    scope: "project".to_owned(),
+                    path: "at-limit.txt".to_owned(),
+                },
+                line: None,
+                placement: ilium_plugin_api::generated::types::EditorPlacement::NewPane,
+            },
+        ),
+    );
+    assert!(
+        !is_refused(&outcome),
+        "COR-019: a file of exactly 262144 lines was refused although the limit is over 262144"
+    );
+}
+
+/// REQ: COR-025
+#[test]
+fn req_cor_025_compaction_threshold_accepts_range_ends_a() {
+    let kernel = world(StartMode::Normal);
+    for accepted in ["30", "88"] {
+        assert_eq!(
+            kernel.apply_setting("remote_compaction", "threshold_percent", accepted),
+            Ok(()),
+            "COR-025: threshold_percent {accepted} is inside 30 to 88 and was refused"
+        );
+    }
+}
+
+/// REQ: COR-025
+#[test]
+fn req_cor_025_compaction_threshold_refuses_values_outside_range_b() {
+    let kernel = world(StartMode::Normal);
+    for refused in ["29", "89"] {
+        assert!(
+            kernel
+                .apply_setting("remote_compaction", "threshold_percent", refused)
+                .is_err(),
+            "COR-025: threshold_percent {refused} is outside 30 to 88 and was accepted"
+        );
+    }
+}
+
+/// REQ: COR-026
+#[test]
+fn req_cor_026_last_item_close_removes_empty_group_and_ancestors_a() {
+    let kernel = world(StartMode::Normal);
+    assert_eq!(
+        kernel.apply_setting("ui", "auto_remove_empty_groups", "true"),
+        Ok(())
+    );
+    let proj = project(&kernel, "proj-keep");
+    let fld = folder(&kernel, Some(proj), "fld-gone");
+    let grp = group(&kernel, Some(fld), "grp-gone");
+    let pane = terminal(&kernel, Some(grp), "pane-last", &["cat"]);
+    assert!(!is_refused(&close(&kernel, pane)), "closing the pane was refused");
+    let names = titles(&kernel);
+    assert!(
+        !names.contains(&"grp-gone".to_owned()),
+        "COR-026: the emptied group was not closed"
+    );
+    assert!(
+        !names.contains(&"fld-gone".to_owned()),
+        "COR-026: the emptied ancestor folder was not closed"
+    );
+    assert!(
+        names.contains(&"proj-keep".to_owned()),
+        "COR-026: a project was removed by the auto-remove rule"
+    );
+}
+
+/// REQ: COR-026
+#[test]
+fn req_cor_026_emptied_project_is_never_removed_b() {
+    let kernel = world(StartMode::Normal);
+    assert_eq!(
+        kernel.apply_setting("ui", "auto_remove_empty_groups", "true"),
+        Ok(())
+    );
+    let proj = project(&kernel, "proj-stay");
+    let pane = terminal(&kernel, Some(proj), "only-item", &["cat"]);
+    assert!(!is_refused(&close(&kernel, pane)), "closing the pane was refused");
+    assert!(
+        titles(&kernel).contains(&"proj-stay".to_owned()),
+        "COR-026: a project was removed when its last item closed"
+    );
+}
