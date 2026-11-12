@@ -142,6 +142,16 @@ async fn write_until(tui: &PtySession, keys: &[u8], mut condition: impl FnMut() 
 /// cells and never repairs the stale ones. A width nudge makes it clear and
 /// repaint every cell, so the next capture reflects the real frame. The
 /// assertions that follow still check the same content. Only used on Windows.
+/// Whether the full-screen Settings view is showing. ConPTY can drop the start
+/// of the title row when it repaints the wide gear emoji; the rest of the
+/// Settings frame is still exact, so Windows also accepts that frame.
+fn settings_open(screen: &str) -> bool {
+    screen.contains("\u{2699} Settings")
+        || (cfg!(windows)
+            && screen.contains("Esc or q to close")
+            && screen.contains("· Navigation"))
+}
+
 async fn conpty_full_repaint(tui: &PtySession) {
     let (rows, columns) = tui.with_screen(|screen| screen.size());
     let _ = tui.resize(rows, columns.saturating_sub(1));
@@ -1601,14 +1611,6 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let settings_column = tree_divider_column.saturating_sub(2);
     tui.write(&sgr_mouse_down(0, settings_column, settings_row))
         .expect("pressing the settings toolbar icon");
-    let settings_open = |screen: &str| {
-        screen.contains("⚙ Settings")
-            // ConPTY can drop the start of the title row when it repaints the
-            // wide gear emoji; the rest of the Settings frame is still exact.
-            || (cfg!(windows)
-                && screen.contains("Esc or q to close")
-                && screen.contains("· Navigation"))
-    };
     assert!(
         wait_until(|| settings_open(&tui.screen_text()), WAIT_TIMEOUT).await,
         "expected the settings press to open Settings, got: {:?}",
@@ -2029,11 +2031,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     tui.write(b"\x02:")
         .expect("opening Settings with Ctrl+B then :");
-    let settings_shown = wait_until(
-        || tui.screen_text().contains("\u{2699} Settings"),
-        WAIT_TIMEOUT,
-    )
-    .await;
+    let settings_shown = wait_until(|| settings_open(&tui.screen_text()), WAIT_TIMEOUT).await;
     assert!(
         settings_shown,
         "expected Settings to open, got: {:?}",
@@ -2660,11 +2658,7 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         .write(b"\x02:")
         .expect("open Settings with the default Tmux leader binding");
     assert!(
-        wait_until(
-            || first_client.screen_text().contains("⚙ Settings"),
-            WAIT_TIMEOUT
-        )
-        .await,
+        wait_until(|| settings_open(&first_client.screen_text()), WAIT_TIMEOUT).await,
         "expected Settings to open, got: {:?}",
         first_client.screen_text()
     );
@@ -3363,11 +3357,7 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         .write(b"\x02:")
         .expect("open Settings in fresh client");
     assert!(
-        wait_until(
-            || fresh_client.screen_text().contains("⚙ Settings"),
-            WAIT_TIMEOUT,
-        )
-        .await,
+        wait_until(|| settings_open(&fresh_client.screen_text()), WAIT_TIMEOUT,).await,
         "fresh client should open Settings before row navigation"
     );
     fresh_client
@@ -6683,8 +6673,34 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         .expect("press nested group row");
     tui.write(&sgr_mouse_up(8, nested_row))
         .expect("release nested group row");
-    tui.write(b"\x1b[C\x02c")
-        .expect("expand nested group and create its pane");
+    // Wait for each step to land before the next key: under ConPTY the expand
+    // key could otherwise arrive before the click selected the nested group.
+    let nested_selected = |screen: &str| {
+        screen
+            .lines()
+            .any(|line| line.contains("nested") && line.contains('\u{270f}'))
+    };
+    assert!(
+        wait_until(|| nested_selected(&tui.screen_text()), WAIT_TIMEOUT).await,
+        "expected the click to select the nested group, got: {:?}",
+        tui.screen_text()
+    );
+    // The edit icons can come from hover too; give the click itself time to land.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    tui.write(b"\x1b[C").expect("expand nested group");
+    assert!(
+        wait_until(
+            || tui
+                .screen_text()
+                .lines()
+                .any(|line| line.contains("nested") && line.contains('\u{25bc}')),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected the nested group to expand, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x02c").expect("create the nested group's pane");
     // Read both rows from the same settled frame that satisfied the wait; a
     // later separate capture can land mid-repaint (seen under ConPTY).
     let mut rows_before = None;
@@ -8597,7 +8613,7 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
     tui.write(&sgr_mouse_up(settings_column, settings_row))
         .expect("release worktree context menu Settings click");
     assert!(
-        wait_until(|| tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
+        wait_until(|| settings_open(&tui.screen_text()), WAIT_TIMEOUT).await,
         "Settings did not open: {:?}",
         tui.screen_text()
     );
