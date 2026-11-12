@@ -131,3 +131,7 @@ Before you restore over live data, keep the state you have now. Take a new archi
 ## Production additions (round 7)
 
 - **[PRU-005]** A restore of an archive older than the current revocation state MUST NOT weaken it: after restore the host MUST re-apply every key revocation, blocklist entry, recall notice and yank recorded before the restore, MUST drop any grant revoked after the archive was written, and MUST write one audit record naming each item re-applied.
+
+## Production additions (round 8)
+
+- **[PRT-006]** `ilium plugin restore` and `--dry-run` MUST refuse, with `restore.unsafe-entry` and before writing any file, an archive entry whose path is absolute, contains a `..` segment or a drive prefix, or whose type is a symbolic link, hard link, device, FIFO or socket, and MUST create every restored file with the owner-only mode of the live data root and never with the mode, owner or setuid bits recorded in the archive.

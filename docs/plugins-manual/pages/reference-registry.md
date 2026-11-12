@@ -764,3 +764,7 @@ The user sees the registry only through search results, plugin detail pages and 
 ## Production additions (round 5)
 
 - **[PRW-038]** When a published version requests a grant that the previous version did not, the registry MUST record `grants_added` with the grant names and their risk in the index entry, and `ilium plugin outdated` and the update dialog MUST show it before any download.
+
+## Production additions (round 8)
+
+- **[PRT-011]** A client downloading a package blob MUST abort the transfer with registry.size as soon as the received bytes exceed the length field of the signed index entry or the 64 MiB package limit, and MUST abort with registry.stalled when no bytes arrive for 30 seconds, and MUST delete the partial staging file in both cases.

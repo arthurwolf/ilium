@@ -337,3 +337,7 @@ Contract: `ilium:plugin@0.1.0`.
 ## Production additions (round 5)
 
 - **[PRW-036]** Every new plugin instance MUST start with zero-initialised linear memory and tables, and the host MUST clear a memory slot before reuse even when a pooling allocator is used, so that no byte of one instance or plugin is readable by another.
+
+## Production additions (round 8)
+
+- **[PRT-010]** Compilation of a T2 or T3 component in the sandbox helper MUST have a wall-clock deadline of 60 seconds, and when it passes the host MUST kill the helper, refuse the load with the code host.compile-timeout, and count no more than one failure in the three-failure window.

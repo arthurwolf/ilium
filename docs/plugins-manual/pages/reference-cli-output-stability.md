@@ -142,3 +142,8 @@ The JSON file of the deprecation register is a published document of each comman
 - [ABI evolution](/pages/reference-abi-evolution/)
 - [Versioning](/pages/versioning/)
 - [CI recipes](/pages/guide-ci-recipes/)
+
+## Production additions (round 8)
+
+- **[PRT-005]** When a reader closes standard output early (a broken pipe, for example `ilium plugin list --json / head -1`), every ilium command MUST stop writing, exit quietly without a panic, backtrace or error text on standard error, and MUST NOT leave an install, update, restore or publish half done, because a state-changing command finishes or rolls back its transaction before it exits.
+- **[PRT-007]** The `--json` and JSONL output of every ilium command MUST be independent of the user locale, language setting and the LANG, LC_ALL and LC_NUMERIC variables: numbers use a dot decimal mark and no grouping, timestamps are UTC in the documented form, enumerated values and `code` fields are never translated, and only a `message` field MAY follow the UI language.

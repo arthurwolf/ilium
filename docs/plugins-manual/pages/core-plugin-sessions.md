@@ -458,3 +458,7 @@ Instead the host restores a placeholder in the same tree position and carries th
 ## Production additions (round 6)
 
 - **[PRV-006]** When the Sessions plugin cannot write a snapshot (no space, permission denied, read-only volume), it MUST keep the previous snapshot and rolling backups byte-identical, MUST raise one persistent notice naming the path and cause, MUST retry with backoff of at most 60 seconds, and MUST list the unsaved state as not persisted in the session status.
+
+## Production additions (round 8)
+
+- **[PRT-001]** The Sessions plugin MUST create snapshot files, rolling backups and recovery copies readable by the owning user only (mode 0600 in a 0700 folder or the platform equivalent), MUST NOT write environment variable values or pane screen contents into a snapshot unless the user has enabled scrollback saving, and MUST refuse to load a snapshot that is group or world writable.

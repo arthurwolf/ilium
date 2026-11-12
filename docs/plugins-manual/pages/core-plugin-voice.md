@@ -643,3 +643,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 
 - **[PRV-003]** When microphone access is denied by the operating system, no input device exists, or the device disappears during capture, the Voice plugin MUST end capture within 500 ms, MUST show one notice naming the cause and the remedy, MUST NOT retry on its own, and MUST leave the Listening indicator cleared.
 - **[PRV-004]** The Voice plugin MUST verify the SHA-256 of a speech model file against the digest pinned in its manifest or the registry index before first use and after every download, MUST delete a file that fails the check, and MUST NOT load a model whose digest is unverified.
+
+## Production additions (round 8)
+
+- **[PRT-004]** Raw captured audio MUST stay in memory or in an owner-only temporary file, MUST be sent only to a speech model running on the machine unless the user has enabled a named remote provider in the same session, and MUST be deleted when transcription ends or fails, unless the user has enabled recording retention.

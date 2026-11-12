@@ -53,3 +53,7 @@ A plugin that retries anyway wastes its own calls and gains nothing, so it shoul
 - **[PDY-010]** The host MUST deliver the plugin event `grant-set-changed` within 1 s of each epoch bump, carrying only the `added` and `removed` grant names and the new `epoch`; it is distinct from the server-to-client `grants-changed` control record.
 - **[PDY-011]** A plugin MUST be able to read its current grant set through `grants.current`, and the result MUST list only grants its manifest requests, never grants it was not offered.
 - **[PDY-012]** A plugin MUST NOT retry a call refused with reason `declined`, `revoked` or `policy` until it receives a `grant-set-changed` event that adds the grant, and the host MUST return `not-permitted` without a prompt on such retries.
+
+## Production additions (round 8)
+
+- **[PRT-008]** When a grant is revoked or expires, the host MUST remove from that plugin side every already queued event, and every event held for redelivery after a trap, whose payload exists only because of that grant (screen cells, prompt text, transcript, editor text, file data), before it delivers grant-set-changed, so that no data gated by the grant reaches the plugin after the epoch bump.

@@ -527,3 +527,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 7)
 
 - **[PRU-003]** The Worktrees plugin MUST refuse to run git in a repository that is not owned by the current user, with refused(unsafe-repository), and MUST run every git command with core.fsmonitor and core.pager disabled and without honouring repository-local program settings, so that repository configuration cannot start a program outside the process.run grant.
+
+## Production additions (round 8)
+
+- **[PRT-002]** When copying files matched by .worktreeinclude, the Worktrees plugin MUST skip any entry that is a symbolic link or whose resolved path lies outside the source checkout root, MUST NOT follow links while copying, and MUST report each skipped entry in the creation summary.

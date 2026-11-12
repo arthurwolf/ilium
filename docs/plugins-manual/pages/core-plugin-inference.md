@@ -798,3 +798,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 6)
 
 - **[PRV-007]** The Inference plugin MUST show the user, per provider, the cumulative tokens and the estimated cost of the current calendar month, MUST let the user set a monthly hard limit that blocks further requests with quota-exceeded until the next month or an explicit raise, and MUST raise a notice at 80 percent of the limit.
+
+## Production additions (round 8)
+
+- **[PRT-003]** The Inference plugin MUST refuse to send a request, and MUST refuse to send a credential, to a non-loopback provider endpoint that is not https, MUST validate the server certificate without a user-skippable bypass, and MUST NOT follow a redirect to a different host or to http.

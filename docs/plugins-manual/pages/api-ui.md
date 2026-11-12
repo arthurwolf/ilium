@@ -564,3 +564,7 @@ Interface: `ilium:host/ui` and `ilium:types/ui` in `ilium:plugin@0.1.0`.
 ## Production additions (round 5)
 
 - **[PRW-023]** A plugin that contributes UI MUST have every panel, toolbar button, menu entry, status segment and keybinding it created removed in the same kernel frame as its disable, uninstall or crash, and a contribution whose plugin is not running MUST NOT be shown as active.
+
+## Production additions (round 8)
+
+- **[PRT-009]** Every ui-action MUST carry the revision of the rendered tree that the user acted on, and the host MUST drop, and MUST NOT deliver to the plugin, an action whose key is absent from the current tree or that carries an index or drop value, when the view was re-rendered between the paint the user saw and the input; the plugin sees a view-changed notice instead of the action.
