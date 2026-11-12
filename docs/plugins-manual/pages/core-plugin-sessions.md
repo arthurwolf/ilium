@@ -450,3 +450,7 @@ A saved session can contain a pane whose kind is owned by a plugin that is curre
 Instead the host restores a placeholder in the same tree position and carries the stored state through every later snapshot without changing it. When an owner for the kind becomes active again, the real pane replaces the placeholder with its original state.
 
 - **[PRX-004]** When a snapshot contains a pane whose kind has no active owner, the host MUST restore it as a placeholder pane that keeps its tree position and stored state byte for byte, MUST write that state back unchanged in later snapshots, and MUST restore the real pane when an owner for the kind becomes active.
+
+## Production additions (round 5)
+
+- **[PRW-005]** When the session snapshot cannot be parsed or fails its schema check at boot, the Sessions plugin MUST copy it to a corrupt-timestamped sibling once, MUST offer the newest valid rolling backup, and MUST start an empty session only after the user chooses it, writing nothing over the corrupt file until then.

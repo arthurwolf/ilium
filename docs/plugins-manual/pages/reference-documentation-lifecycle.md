@@ -39,3 +39,7 @@ The owners are roles, not people. The role holder is named in the release record
 - [Feature traceability](/pages/reference-feature-traceability/)
 - [Keeping the kit current](/pages/agent-docs-maintenance/)
 - [Glossary](/pages/glossary/)
+
+## Production additions (round 5)
+
+- **[PRW-029]** Every code sample in the manual and in the agent kit MUST be extracted and compiled or run against the SDK and host of its documentation snapshot in CI, and a failing sample MUST block publication of that snapshot.

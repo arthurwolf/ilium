@@ -374,3 +374,7 @@ Contract: `ilium:plugin@0.1.0`.
 
 - **[API-074]** A timer MUST NOT fire inside the call that set it; the first timer-fired MUST be queued after the delay counted from the return of timers.set; timers.cancel MUST remove a queued, undelivered timer-fired of that timer; cancelling an unknown id MUST be a silent no-op.
 - **[AUT-616]** A plugin MUST store time as UTC milliseconds and MUST state the zone or show relative time when it displays a time.
+
+## Production additions (round 5)
+
+- **[PRW-022]** When the host delivers a repeating timer late because the plugin queue was busy or the machine was suspended, it MUST deliver exactly one `timer-fired` event carrying `missed-count` for the skipped intervals and MUST NOT deliver the skipped firings as a burst.

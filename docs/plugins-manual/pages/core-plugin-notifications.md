@@ -652,3 +652,7 @@ When the agent-detect or notifications plugin crashes and restarts, panes may fi
 The host raises one catch-up notice per affected pane and skips any notice already delivered for the same pane and state. It records the count in the notice log so a user can read back what was missed after an unattended run.
 
 - **[PRX-013]** After `ilium.core.agent-detect` or `ilium.core.notifications` restarts following a crash, the host MUST raise exactly one catch-up notice for each pane whose activity changed to done or awaiting-approval during the outage, deduplicated against notices already delivered for the same pane and state, and MUST write `notify.catch-up` with the count to the notice log.
+
+## Production additions (round 5)
+
+- **[PRW-006]** The Notifications plugin MUST limit desktop notifications and toasts to 10 per minute across all sources, collapse the excess into one summary notice with a count, and keep every collapsed item readable in the notice log.

@@ -605,3 +605,7 @@ Checked against `ilium:plugin@0.1.0`.
 ## Requirement statements
 
 - **[EVT-030]** The settings-changed event MUST carry the changed keys and their new values, delivered once per debounce window.
+
+## Production additions (round 5)
+
+- **[PRW-016]** Every event delivered to a plugin MUST carry a per-plugin strictly increasing `seq` number and a UTC `emitted-at-ms` timestamp taken when the kernel queued it, so a plugin can detect gaps, order events across kinds and measure queue delay.

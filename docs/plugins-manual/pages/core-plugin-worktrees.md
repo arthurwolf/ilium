@@ -519,3 +519,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 4)
 
 - **[PRZ-015]** The Worktrees plugin MUST reject, with refused(invalid-ref) and before running any git command, a branch or base name that starts with '-', contains '..', a space, a control character, '~', '^', ':' or '\', or ends with '.lock', and MUST pass every remaining value to git after a '--' separator.
+
+## Production additions (round 5)
+
+- **[PRW-010]** Creating a worktree MUST take a per-repository lock, MUST fail with refused(exists) and change nothing when the target path or branch already exists or another create for the same repository is running, and on any failure MUST remove the partial directory and the branch it created.

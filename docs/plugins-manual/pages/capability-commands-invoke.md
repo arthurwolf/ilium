@@ -210,3 +210,7 @@ Illustrative, not generated. The refusal line has the same shape as the other re
 - [reference-capabilities](/pages/reference-capabilities/) for every grant and its risk tier.
 
 Checked against the API version `ilium:plugin@0.1.0`.
+
+## Production additions (round 5)
+
+- **[PRW-014]** The host MUST bound the chain of plugin-initiated command invocations at a fixed depth of 8 and MUST refuse a call that would revisit a command id already on the chain with `refused(loop-detected)` without running the handler.

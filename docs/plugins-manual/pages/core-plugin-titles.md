@@ -734,3 +734,7 @@ Session record: `/home/arthur/.codex/sessions/2026/11/03/rollout-2026-11-03T00-2
 ## Production additions (round 4)
 
 - **[PRZ-016]** The Titles, Recap and Compaction plugins MUST remove every C0 and C1 control character and every ESC-initiated sequence from model output before storing, displaying or sending it, MUST truncate a title to 80 cells, and MUST NOT interpret any model output as a command, key sequence or request.
+
+## Production additions (round 5)
+
+- **[PRW-009]** A pane or project marked private, and any pane in a directory listed in the titles exclude setting, MUST NOT have its screen text, command line or directory name sent to any inference provider; the plugin MUST fall back to the process name and show a lock icon on the title.

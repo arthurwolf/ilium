@@ -163,3 +163,7 @@ An operator planning recovery therefore records, outside Ilium, where each crede
 - [Debugging](/pages/debugging/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Production additions (round 5)
+
+- **[PRW-043]** When a plugin is disabled, blocked or its publisher key is revoked as compromised, the host MUST stop serving its secrets to that plugin and MUST list its stored secret names in the revocation notice so the user can rotate them.

@@ -667,3 +667,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[USR-130]** The notice N14 MUST read `Plugin <name> stopped after 3 failures in 10 minutes: <export> <code or trap>. Turn it on again in Settings > Plugins.` The `<export>` is the failing export. It names the view, as in `views.render trap (sidebar)`, only when the failing export was `views.render`. The tree footer and the row in Settings > Plugins MUST show the same text.
 - **[USR-164]** The state words MUST be the same in the footer notice N14, which is defined in [Lifecycle](/pages/lifecycle/#failure-counting-and-restart).
 - **[USR-172]** An uninstall MUST apply the effects of the table above in the same host step that removes the plugin from the registry.
+
+## Production additions (round 5)
+
+- **[PRW-017]** After an instance restart caused by a crash, trap or stuck queue, the host MUST restore every manifest-declared subscription, command, extension-point contribution and menu entry before delivering the first event, and MUST drop every runtime-created subscription, topic publisher registration and timer, delivering a `restarted` event whose `lost` list names each of them.

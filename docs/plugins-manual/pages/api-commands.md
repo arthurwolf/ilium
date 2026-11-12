@@ -515,3 +515,9 @@ Checked against `ilium:plugin@0.1.0`.
 ## Requirement statements
 
 - **[API-214]** Registering a command id that another plugin already owns MUST return `conflict` and leave both registrations unchanged, and unregistering a command during its own invocation MUST let that invocation finish.
+
+## Production additions (round 5)
+
+- **[PRW-013]** A command id that a plugin removes or renames MUST keep working through a manifest `aliases` list of former local ids for at least one minor release, and an invocation through an alias MUST reach the same handler, log `command.alias-used` once per session, and appear in `ilium plugin check` as a deprecation warning.
+- **[PRW-015]** When a command is invoked while an earlier invocation of the same command by the same plugin is still running, the host MUST apply the manifest `concurrency` policy (`queue` by default, `refuse` or `replace`), MUST NOT run two handlers of one plugin instance at once, and MUST report a refused invocation as `busy` with the command id.
+- **[PRW-020]** The host MUST validate the `arguments-json` of every command invocation against the command's declared argument schema before the handler runs, refuse a mismatch with `invalid-argument` naming the JSON path, and never deliver an invocation whose arguments exceed the schema or 64 KiB.

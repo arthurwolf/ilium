@@ -673,3 +673,8 @@ Side basis: `schedule-sources` is server because the server side owns the timers
 ## Production additions (round 3)
 
 - **[PRY-024]** When the wall clock steps backward by 1 hour or more, the scheduler MUST NOT run any job a second time for an occurrence it already ran, and when it steps forward past N occurrences of a job it MUST run that job at most once and record one 'missed N' entry in its run history.
+
+## Production additions (round 5)
+
+- **[PRW-001]** When the server starts and finds a scheduled input whose deadline passed more than 60 seconds earlier, the Scheduler MUST NOT send the text; it MUST keep the entry as overdue, raise one notice naming the pane and the age, and send only after the user chooses Send now, otherwise discard it after 24 hours.
+- **[PRW-002]** The prompt queue MUST pause an Enqueue forever entry, and raise one notice, when it has been delivered 5 times within 10 minutes and the agent returned to idle within 5 seconds each time, and it MUST resume only on an explicit user action.

@@ -389,3 +389,7 @@ The registry signs each version entry, including its `license`. It does not chan
 - **[AUT-954]** When the log or a trace shows that Ilium itself, and not the plugin, caused a failure, the author MUST tell the user to report it to the Ilium project, and the README MUST name that route (owner to confirm: the host project does not publish a general support channel yet).
 - **[LIF-975]** A plugin author who publishes documentation for a plugin MUST state the minimum host minor version the plugin needs and the `api` string it was built for. The statement MUST be kept in the same place as the release notes that name the plugin version (see [Publishing and support](/pages/guide-publishing-and-support/)).
 - **[USR-964]** A publisher whose plugin sends user data to its own server MUST erase that user's data on the user's written request within 30 days (proposed, owner to confirm), MUST name the contact for such requests in the README and in the `[privacy]` table ([AUT-955], [USR-329]), and MUST tell the user in writing when the erasure is complete or state why it cannot be done.
+
+## Production additions (round 5)
+
+- **[PRW-032]** The registry MUST check the security_contact and contact of each published version at publish time and weekly, and MUST show the plugin as unreachable-support in `ilium plugin info` after two consecutive failed checks.

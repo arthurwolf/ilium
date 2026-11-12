@@ -172,3 +172,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[LIF-979]** Three crashes during start within 5 minutes while the start runs in `all-optional` safe mode MUST cause the next start to use `--no-plugins` (proposed, owner to confirm: the count of 3), and the start MUST open the recovery page as its first screen.
 - **[LIF-980]** Three crashes during start within 5 minutes while the start runs with `--no-plugins` MUST stop automatic restarts: Ilium MUST exit with a non-zero status and print one line with the code `crash-loop.exhausted`, and until the marks clear under LIF-294 every later start MUST use `--no-plugins`.
 - **[LIF-981]** Every start MUST show the safe-mode level it runs in on the footer banner (`third-party`, `all-optional` or `--no-plugins`), and a level change MUST NOT clear the crash marks; only LIF-294 clears them.
+
+## Production additions (round 5)
+
+- **[PRW-034]** When the host detects a failed plugin update that happened while no client was attached, it MUST show a persistent notice with the plugin id, old and new version and reason code on the next attach, and MUST keep it until the user dismisses it.

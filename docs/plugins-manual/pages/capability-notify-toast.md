@@ -269,3 +269,7 @@ Notice from <plugin>: <title>. <body>
 ## Requirement statements
 
 - **[CAP-883]** A toast for an error or an action-needed event MUST be paired with a persistent text signal that remains after the toast duration; a toast without one MUST be rejected by the plugin check with `a11y.toast-only`.
+
+## Production additions (round 5)
+
+- **[PRW-027]** A toast that carries an action button MUST stay visible for at least 10 seconds regardless of duration-ms, and every toast MUST pause its countdown while it holds keyboard focus or the pointer is over it.

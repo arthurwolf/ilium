@@ -366,3 +366,7 @@ A managed fleet needs accessibility settings that a launcher flag cannot undo. A
 The Settings page shows the locked value together with the policy source that set it. The attach log records that a lock was applied.
 
 - **[PRX-012]** A key in `settings.locked` MUST take precedence over the matching CLI flag and environment variable (`--screen-reader`, `--contrast`, `--reduced-motion`, `ILIUM_SCREEN_READER`, and their siblings), the locked value MUST be shown with its source in Settings, and a test with a policy that locks `[ui] contrast = "high"` and a run with `--contrast normal` MUST end with the effective value `high` and the line `settings.locked` in the attach log.
+
+## Production additions (round 5)
+
+- **[PRW-044]** `ilium plugin policy check` MUST evaluate the installed set and the lockfile against a candidate policy file without applying it, and MUST print each plugin that would be blocked, disabled or lose a grant, with the rule that matched, and exit 0 only when no plugin is affected.

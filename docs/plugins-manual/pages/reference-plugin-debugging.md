@@ -99,3 +99,7 @@ Each rule names its failure code. A failure prints a `diagnostic` record in JSON
 - [Requirements of the developer tooling lane](/pages/reference-requirements-dev-tooling/)
 
 API checked against `ilium:plugin@0.1.0`.
+
+## Production additions (round 5)
+
+- **[PRW-045]** The debug endpoint MUST create its token file with mode 0600, MUST be disabled when `packages.allow_dev_mode` is false, MUST bind only to loopback, and MUST write one audit record each time a client authenticates or is refused.

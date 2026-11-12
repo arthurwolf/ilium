@@ -320,3 +320,7 @@ Checked against `ilium:plugin@0.1.0` (API draft of 2026-10-11).
 ### Security
 
 Service calls cross plugin boundaries; callers see the same error for a missing and an ungranted service ([SEC-373]).
+
+## Production additions (round 5)
+
+- **[PRW-041]** A service provider MUST receive the verified caller plugin id in every request, the host MUST refuse a service call when the caller lacks the grant the service declares, and the host MUST withdraw a provider's open streams and subscriptions to a caller within 1 s of that caller's grant being revoked.

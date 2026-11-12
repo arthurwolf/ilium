@@ -314,3 +314,8 @@ Detection does not depend on the language that Ilium shows.
 ## Production additions (round 3)
 
 - **[PRY-026]** Each core plugin MUST ship an accessibility declaration (PRX-008) at the 'screen-reader, high contrast, reduced motion, 40 columns' level, and a release check MUST fail when any core plugin's fixture run emits an interactive element without an accessible name.
+
+## Production additions (round 5)
+
+- **[PRW-011]** Terminals MUST accept input and render output within 1 second of server start even when any non-essential core plugin is slow, failed or still activating, and a core plugin that exceeds its activation deadline MUST be skipped with one notice and retried in the background.
+- **[PRW-012]** A core plugin that crashes 3 times within 5 minutes MUST be left stopped with state failed-repeatedly, its panes and data kept intact as placeholders, one notice naming it MUST be shown, and a Restart action and a Disable action MUST be offered in the plugin list.

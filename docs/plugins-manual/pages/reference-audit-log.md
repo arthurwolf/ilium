@@ -218,3 +218,7 @@ If the key does not exist at the first start, the kernel creates it in the secre
 
 - **[SEC-446]** Crash reports MUST contain only plugin id, error code, host version and host frames, and MUST pass a redaction test.
 - **[SEC-447]** Crash reports MUST be mode 0600, expire after 14 days, never be sent unprompted, and add a `crash-report` audit record.
+
+## Production additions (round 5)
+
+- **[PRW-042]** Each audit record MUST carry the build identity of the host that wrote it (version and component hash), and `ilium plugin audit verify` MUST report a chain break, a missing rotation link or a record with an unknown host build as a failure with exit code 1.

@@ -333,3 +333,7 @@ Contract: `ilium:plugin@0.1.0`.
 - **[SEC-442]** Ilium MUST document a minimum kernel and check each sandbox prerequisite separately at server start.
 - **[SEC-443]** `ilium plugin doctor --sandbox` MUST print one check line per prerequisite with remediation and MUST NOT change system settings.
 - **[SEC-444]** A missing `openat2` MUST be degraded, not `sandbox.unavailable`; other missing prerequisites MUST name the one missing.
+
+## Production additions (round 5)
+
+- **[PRW-036]** Every new plugin instance MUST start with zero-initialised linear memory and tables, and the host MUST clear a memory slot before reuse even when a pooling allocator is used, so that no byte of one instance or plugin is readable by another.

@@ -664,3 +664,7 @@ Requirements for this page: [Extension points requirements](/pages/reference-req
 - **[EXT-049]** An entry's identity MUST be the contribution id (contributes.extensions[].id), given to the owner as ExtensionEntry.extension. Equal ids from two plugins MUST both stay.
 - **[LIF-270]** A stop after three breaches MUST end at an instance restart of the contributor or Reset and MUST NOT be persisted.
 - **[LIF-274]** The host MUST activate inactive contributors of an active owner in the background.
+
+## Production additions (round 5)
+
+- **[PRW-019]** When two plugins contribute to the same extension point or menu position, the host MUST order contributions by the manifest `order` integer, then by plugin id in byte order, and this order MUST be identical across restarts, machines and install order.

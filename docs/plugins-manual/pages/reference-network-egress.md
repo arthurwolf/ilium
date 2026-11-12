@@ -178,3 +178,7 @@ async function fetchStatus(): Promise<Uint8Array | undefined> {
 - [Threat model](/pages/reference-threat-model/)
 
 Contract: `ilium:plugin@0.1.0`.
+
+## Production additions (round 5)
+
+- **[PRW-046]** The host MUST resolve each granted host name once per request, validate the resolved address against the reserved ranges, and connect to that validated address, so a second DNS answer cannot redirect the connection.

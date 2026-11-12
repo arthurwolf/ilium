@@ -560,3 +560,7 @@ write-surface: func(view: view-target, key: string, first-row: u32, format: pixe
 - [Errors and limits](/pages/reference-errors-and-limits/) for the error codes and the restart rule.
 
 Interface: `ilium:host/ui` and `ilium:types/ui` in `ilium:plugin@0.1.0`.
+
+## Production additions (round 5)
+
+- **[PRW-023]** A plugin that contributes UI MUST have every panel, toolbar button, menu entry, status segment and keybinding it created removed in the same kernel frame as its disable, uninstall or crash, and a contribution whose plugin is not running MUST NOT be shown as active.

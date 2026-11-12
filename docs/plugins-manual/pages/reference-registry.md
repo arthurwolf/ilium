@@ -760,3 +760,7 @@ The user sees the registry only through search results, plugin detail pages and 
 - **[PKG-979]** The client MUST extract a `.tar` bundle into a new temporary folder under the cache folder, verify its metadata with the pinned root keys ([PKG-413]) and move only verified packages into the install path. Nothing is written under the data directory before the install stages of [PKG-413] begin. A refused bundle leaves no extracted file behind.
 - **[PKG-986]** Registry and mirror requests MUST verify TLS against the system trust roots plus, when the policy sets `[network] ca_bundle`, the bundle it names, as [SEC-077] requires. No `[plugins.registry]` setting may disable verification or add a trust root.
 - **[PKG-988]** A change of a mirror's TLS certificate under the same CA needs no client change. A change of CA needs the administrator to update `ca_bundle`. TLS never decides metadata trust: every document is still verified with the root keys of [PKG-411], so a certificate change on a mirror cannot replace them.
+
+## Production additions (round 5)
+
+- **[PRW-038]** When a published version requests a grant that the previous version did not, the registry MUST record `grants_added` with the grant names and their risk in the index entry, and `ilium plugin outdated` and the update dialog MUST show it before any download.

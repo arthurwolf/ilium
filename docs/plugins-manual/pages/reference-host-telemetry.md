@@ -276,3 +276,7 @@ Scripted incident test, `host_telemetry_series`. On a fixture session with one h
 ## Requirement statements
 
 - **[API-092]** The host MUST keep a per-plugin, per-side counter for each trap code of [API-081] and for each restart, MUST collapse identical consecutive log lines of one trap code within 10 seconds into one line with a repeat count, and MUST retain a crash record (trap code, time, side and the last 20 log lines) for each plugin disabled by the restart rule until the plugin is enabled again or removed. `ilium plugin logs` MUST show the crash record.
+
+## Production additions (round 5)
+
+- **[PRW-026]** The host MUST expose a gauge `ilium_plugin_info` with value 1 and labels plugin, version and tier, and MUST NOT add the version label to any other `ilium_plugin_` metric.

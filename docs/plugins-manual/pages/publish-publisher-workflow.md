@@ -121,3 +121,8 @@ A publish token lasts 90 days and works for one publisher id only ([PKG-968](/pa
 ## Production additions (round 3)
 
 - **[PRY-036]** When two publish requests for the same plugin id and version are in flight, the registry MUST accept exactly one, MUST answer the other with HTTP 409 and error code `registry.version-exists`, and the stored blob hash MUST equal that of the accepted request.
+
+## Production additions (round 5)
+
+- **[PRW-039]** `ilium plugin log monitor` MUST compare the registry transparency log entries for a publisher id against the publisher's local release record and MUST print each entry with no matching record as `unexpected-release` and exit non-zero.
+- **[PRW-035]** On every publish, yank, token issue, token revoke and owner change in a namespace, the registry MUST send an out-of-band notice to every maintainer of the publisher id within 15 minutes, naming the version, the token id and the source address class, so that a publish made with a stolen token is visible to the owner.

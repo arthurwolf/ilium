@@ -163,3 +163,7 @@ The registry holds the signed transparency log, the metadata and the blobs, and 
 
 - **[PRX-005]** A registry that requires an SBOM MUST, on its own side and regardless of client flags, match every SBOM component against its advisory database and MUST refuse the publish with `registry.known-vulnerable` when a component has an unreviewed Critical advisory, unless the publisher attaches a signed VEX statement marking the advisory `not_affected`; the refusal MUST name the component, the advisory id and the fixed version.
 - **[PRX-006]** A registry operator MUST keep a copy of the signed transparency log, all metadata documents and all blobs in a second failure domain with a recovery point of at most 1 hour, MUST run a restore drill at least once per quarter, and a restored log MUST be byte-identical to the lost one so that every previously issued checkpoint and consistency proof still verifies.
+
+## Production additions (round 5)
+
+- **[PRW-037]** The registry MUST scan every uploaded package for embedded credentials (private keys, bearer tokens, cloud key ids, password assignments) and MUST refuse the publish with `registry.secret-in-package` naming the file and line, without echoing the matched value.

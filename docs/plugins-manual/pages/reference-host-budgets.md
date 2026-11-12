@@ -130,3 +130,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[HST-148]** A loaded plugin side that holds no timer, no subscription and no helper process MUST cause no wake-ups attributable to it (timer expiries, queue polls, helper polls) over a 10 minute idle run, and B24 MUST report the attributable wake-ups per plugin side so that the 100 wake-ups per second aggregate can be traced to its sources (proposed, owner to confirm).
 - **[HST-149]** While a sandbox helper compiles a component of the maximum size of SEC-707, the 99th percentile `on-events` latency of 30 other plugins MUST stay within 1.2x of idle, measured by a benchmark B28 in the pattern of B9 and B12 (proposed, owner to confirm).
 - **[HST-174]** `ilium plugin install <package>` MUST complete verification, unpacking and registration of a 2 MiB package within 2 s (proposed, owner to confirm) on the reference machine with the file cache warm and no download, measured by a benchmark B29 whose results are recorded in the results file of HST-646 (proposed, owner to confirm).
+
+## Production additions (round 5)
+
+- **[PRW-033]** The host MUST record the activation time of each third-party plugin from load to first successful activate return and MUST show a warning in `ilium plugin doctor` for any plugin whose activation takes more than 500 ms on three consecutive starts.

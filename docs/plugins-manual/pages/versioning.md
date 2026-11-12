@@ -275,3 +275,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Requirement statements
 
 - **[AUT-214]** The plugin MUST keep every name of the stable public list across its own releases.
+
+## Production additions (round 5)
+
+- **[PRW-021]** A plugin MUST be able to declare optional host features in the manifest `optional-features` list, and the host MUST load the plugin when they are absent, report each missing one in `host_info()` as `unavailable`, and never fail the load with `manifest.grant-unknown` for an optional entry.

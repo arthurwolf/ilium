@@ -141,3 +141,7 @@ Proposed, owner to confirm: the host moves focus to the next focusable node in t
 ## Production additions (round 4)
 
 - **[PRZ-003]** A toast or notice that carries an action MUST stay visible for at least 10 seconds or until the user dismisses it, MUST pause its countdown while it holds focus, and the host MUST keep the same action reachable from the notification history for at least 24 hours.
+
+## Production additions (round 5)
+
+- **[PRW-031]** Any multi-key chord or key sequence a plugin registers MUST have an equivalent that needs only single key presses (a command-palette entry or a menu item), and the host MUST make the sequence timeout at least 2 seconds and user-configurable.

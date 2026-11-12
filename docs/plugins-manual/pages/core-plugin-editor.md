@@ -758,3 +758,8 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 The editor offers a service-provider role, and other plugins call it. A provider acts with its own grants, so a caller could trick it into reading a file or URL the caller may not touch. The host therefore never treats a path, URL or handle supplied by a caller as the caller's authority. Replies that carry file or network content are labelled with the grant they were read under, and `ilium plugin check` warns when a service method lets caller input pick a granted resource.
 
 - **[PRX-001]** A service provider MUST NOT widen the caller's authority: the host MUST NOT pass a caller-supplied path, URL or handle to a provider as the caller's authority, a provider's reply that carries file or network content MUST be labelled with the grant it was read under so the host can refuse delivery to a caller that lacks that grant, and `ilium plugin check` MUST warn when a provider's service method lets caller input select a granted fs or net resource.
+
+## Production additions (round 5)
+
+- **[PRW-003]** A save MUST compare the file revision recorded at load with the revision on disk and, when they differ, MUST NOT write; it MUST refuse with conflict and offer Reload, Overwrite and Compare, and a before-save hook MUST NOT run again after the refusal.
+- **[PRW-004]** A buffer with unsaved changes MUST survive pane close, client detach, server stop, plugin disable and replacement: the host MUST ask before discarding, and MUST write a recovery copy owner-only every 10 seconds that is offered for restore at next open and deleted after a successful save.

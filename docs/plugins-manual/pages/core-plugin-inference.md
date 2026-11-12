@@ -789,3 +789,8 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 4)
 
 - **[PRZ-018]** Before the Inference plugin sends text to a provider whose endpoint is not loopback, it MUST replace every match of the configured secret patterns (default set: AWS access key ids, 'ghp_' and 'sk-' tokens of 20 or more characters, and PEM private-key blocks) with '[redacted]', and MUST count the replacements in the request's audit record.
+
+## Production additions (round 5)
+
+- **[PRW-007]** Provider credentials MUST be stored only in the OS credential store or an owner-only file, MUST NOT appear in snapshots, config export, logs, diagnostics bundles or plugin-visible settings reads, and MUST be shown as set or unset only.
+- **[PRW-008]** The Inference plugin MUST run at most 4 provider requests at once per provider, queue the rest in first-in first-out order with a per-plugin share so that one plugin cannot occupy more than 2 slots while others wait, and report queue position in the request outcome.

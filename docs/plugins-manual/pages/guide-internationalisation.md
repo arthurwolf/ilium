@@ -422,3 +422,7 @@ The host knows the effective UI language, so it can format a number for the plug
 ## Production additions (round 4)
 
 - **[PRZ-023]** The host MUST support ordinal plural messages selected by the CLDR ordinal rule of the active language, so that language `en` with count 1, 2, 3, 4 and 11 selects categories one, two, few, other and other, and a missing ordinal category MUST fall back to `other`.
+
+## Production additions (round 5)
+
+- **[PRW-028]** Every list the host shows sorted by name (installed plugins, store results, settings rows, permission rows) MUST be ordered with the Unicode collation of the active UI language, with a code-point tiebreak on the id.
