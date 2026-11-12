@@ -664,3 +664,7 @@ The host raises one catch-up notice per affected pane and skips any notice alrea
 ## Production additions (round 7)
 
 - **[PRU-004]** The Notifications plugin MUST remove every C0 and C1 control character and every ESC-initiated sequence from pane titles, process names and agent text before placing them in a toast, notice or desktop notification, MUST escape markup for the platform notifier, and MUST truncate the body to 256 cells.
+
+## Production additions (round 9)
+
+- **[PRS-001]** For a pane marked private, or in a private project, the Notifications plugin MUST NOT place the pane title, process name, command line or agent text in a desktop notification, a toast shown on a shared or mirrored client, or the durable notice log; it MUST show only a generic label naming the event kind and a pane number, and the full text MUST be shown only inside the focused client.

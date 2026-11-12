@@ -671,3 +671,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions (round 5)
 
 - **[PRW-017]** After an instance restart caused by a crash, trap or stuck queue, the host MUST restore every manifest-declared subscription, command, extension-point contribution and menu entry before delivering the first event, and MUST drop every runtime-created subscription, topic publisher registration and timer, delivering a `restarted` event whose `lost` list names each of them.
+
+## Production additions (round 9)
+
+- **[PRS-002]** When the session server receives SIGTERM, SIGINT or SIGHUP (or the Windows console close, logoff or shutdown event), it MUST begin the same graceful stop as a user stop request, with the same 5 second total deactivation budget, flush acknowledged storage writes and the audit log, and exit within 10 seconds, and a second signal during the stop MUST NOT skip the flush
