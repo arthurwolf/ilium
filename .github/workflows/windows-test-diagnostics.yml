@@ -32,7 +32,9 @@ jobs:
     - name: Toolchain
       run: rustup show active-toolchain || rustup toolchain install
     - name: Build the PTY smoke harness
-      run: cargo test --locked --target x86_64-pc-windows-msvc --package ilium --test pty_tui_smoke --no-run
+      run: |
+        cargo build --locked --workspace --exclude 'ilium-plugin-*' --bins --target x86_64-pc-windows-msvc
+        cargo test --locked --target x86_64-pc-windows-msvc --package ilium --test pty_tui_smoke --no-run
     - name: Run the PTY smoke harness repeatedly
       run: python ci/flake_meter.py "$RUNNER_TEMP/flake-logs" --lane ${{ matrix.lane }} --iterations ${{ matrix.lane == 'serial' && 5 || 8 }}
     - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
