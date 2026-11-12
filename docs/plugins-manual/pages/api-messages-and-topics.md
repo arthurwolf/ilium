@@ -466,3 +466,8 @@ Checked against `ilium:plugin@0.1.0`.
 
 - **[PRW-018]** A message addressed to a plugin that is installed but disabled, stopped, or restarting MUST complete with a distinct outcome (`refused(recipient-unavailable)` with the recipient state) and MUST NOT be queued for later delivery, so a sender can tell absence from back-pressure.
 - **[PRW-024]** A topic MUST have a declared schema version in its manifest entry, a publisher MUST NOT change a payload shape without raising that version, and the host MUST deliver each subscriber the version it named in its subscription or refuse the subscription with `topic.version-unsupported`.
+
+## Production additions (round 6)
+
+- **[PRV-009]** A topic subscription MUST deliver only publishes made after the subscription is active; the host MUST NOT replay earlier publishes or hold a last value, and the manual MUST name the pull method a plugin uses to read current state when it starts.
+- **[PRV-012]** The host MUST deliver the messages one plugin sends to one recipient in send order, and MUST state that order across different senders, topics or message kinds is not guaranteed.

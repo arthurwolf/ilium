@@ -656,3 +656,7 @@ The host raises one catch-up notice per affected pane and skips any notice alrea
 ## Production additions (round 5)
 
 - **[PRW-006]** The Notifications plugin MUST limit desktop notifications and toasts to 10 per minute across all sources, collapse the excess into one summary notice with a count, and keep every collapsed item readable in the notice log.
+
+## Production additions (round 6)
+
+- **[PRV-008]** The Notifications plugin MUST suppress desktop notifications and sounds, while still logging them to the durable notice log, whenever the user has set a do-not-disturb schedule or the operating system reports focus or do-not-disturb mode, and MUST deliver a single summary toast with the suppressed count when the period ends.

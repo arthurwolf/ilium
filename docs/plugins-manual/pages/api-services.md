@@ -481,3 +481,7 @@ A service provider often holds grants that its callers lack, such as file reads 
 The host never treats caller-supplied input as the caller's authority. Replies that carry file or network content are labelled with the grant they were read under, so the host can refuse delivery to a caller without that grant. `ilium plugin check` warns the author when a service method lets caller input choose a granted resource.
 
 - **[PRX-002]** A service provider MUST NOT widen the caller's authority: the host MUST NOT pass a caller-supplied path, URL or handle to a provider as the caller's authority, a provider's reply that carries file or network content MUST be labelled with the grant it was read under so the host can refuse delivery to a caller that lacks that grant, and `ilium plugin check` MUST warn when a provider's service method lets caller input select a granted fs or net resource.
+
+## Production additions (round 6)
+
+- **[PRV-011]** When service calls between plugins form a cycle (A waits on B while B calls A), the host MUST complete the call that closes the cycle with a distinct failed outcome naming the cycle and MUST NOT leave either provider waiting until its deadline.

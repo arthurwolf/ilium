@@ -725,3 +725,7 @@ The plugin owns both points below. The complete manifest holds the grants `exten
 ## Production additions (round 4)
 
 - **[PRZ-019]** When the Kanban plugin cannot parse its board file, or the file exceeds 2 MiB, it MUST open the board read-only with an error notice naming the line of the first failure, MUST copy the file to '<name>.corrupt-<YYYYMMDD-HHMMSS>' once, and MUST NOT write the board until the user chooses Repair or Replace.
+
+## Production additions (round 6)
+
+- **[PRV-002]** When the board file changes on disk while the user has an unsaved card edit, the Kanban plugin MUST keep the in-progress edit, MUST NOT reload over it, and MUST on save compare the revision recorded at load with the revision on disk and offer Reload, Overwrite and Merge cards by card identity when they differ.

@@ -794,3 +794,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 
 - **[PRW-007]** Provider credentials MUST be stored only in the OS credential store or an owner-only file, MUST NOT appear in snapshots, config export, logs, diagnostics bundles or plugin-visible settings reads, and MUST be shown as set or unset only.
 - **[PRW-008]** The Inference plugin MUST run at most 4 provider requests at once per provider, queue the rest in first-in first-out order with a per-plugin share so that one plugin cannot occupy more than 2 slots while others wait, and report queue position in the request outcome.
+
+## Production additions (round 6)
+
+- **[PRV-007]** The Inference plugin MUST show the user, per provider, the cumulative tokens and the estimated cost of the current calendar month, MUST let the user set a monthly hard limit that blocks further requests with quota-exceeded until the next month or an explicit raise, and MUST raise a notice at 80 percent of the limit.

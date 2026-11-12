@@ -763,3 +763,7 @@ The editor offers a service-provider role, and other plugins call it. A provider
 
 - **[PRW-003]** A save MUST compare the file revision recorded at load with the revision on disk and, when they differ, MUST NOT write; it MUST refuse with conflict and offer Reload, Overwrite and Compare, and a before-save hook MUST NOT run again after the refusal.
 - **[PRW-004]** A buffer with unsaved changes MUST survive pane close, client detach, server stop, plugin disable and replacement: the host MUST ask before discarding, and MUST write a recovery copy owner-only every 10 seconds that is offered for restore at next open and deleted after a successful save.
+
+## Production additions (round 6)
+
+- **[PRV-001]** The Editor plugin MUST preserve a file's detected encoding, byte order mark and line-ending style (LF or CRLF) on save, MUST refuse to open a file that is not valid in its detected encoding for editing without an explicit user choice of encoding, and MUST show the encoding and line-ending style in the pane status line.

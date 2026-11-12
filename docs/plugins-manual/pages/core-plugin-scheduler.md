@@ -678,3 +678,7 @@ Side basis: `schedule-sources` is server because the server side owns the timers
 
 - **[PRW-001]** When the server starts and finds a scheduled input whose deadline passed more than 60 seconds earlier, the Scheduler MUST NOT send the text; it MUST keep the entry as overdue, raise one notice naming the pane and the age, and send only after the user chooses Send now, otherwise discard it after 24 hours.
 - **[PRW-002]** The prompt queue MUST pause an Enqueue forever entry, and raise one notice, when it has been delivered 5 times within 10 minutes and the agent returned to idle within 5 seconds each time, and it MUST resume only on an explicit user action.
+
+## Production additions (round 6)
+
+- **[PRV-005]** When the target pane of a scheduled input or queued prompt is closed, replaced by another process, or its agent is reclassified, the Scheduler MUST cancel the pending entries for that pane within 1 second, MUST raise one notice listing the cancelled entries with their text shortened to 40 cells, and MUST NOT deliver them to any other pane.

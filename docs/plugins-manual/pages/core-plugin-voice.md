@@ -638,3 +638,8 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 4)
 
 - **[PRZ-017]** While the Voice plugin holds an open microphone it MUST show a status indicator labelled 'Listening' within 100 ms of the first captured frame, MUST stop capture and clear the indicator within 100 ms of focus loss, F8 key-up, client detach or a 60 s capture age, and MUST emit one audit record with the stop reason.
+
+## Production additions (round 6)
+
+- **[PRV-003]** When microphone access is denied by the operating system, no input device exists, or the device disappears during capture, the Voice plugin MUST end capture within 500 ms, MUST show one notice naming the cause and the remedy, MUST NOT retry on its own, and MUST leave the Listening indicator cleared.
+- **[PRV-004]** The Voice plugin MUST verify the SHA-256 of a speech model file against the digest pinned in its manifest or the registry index before first use and after every download, MUST delete a file that fails the check, and MUST NOT load a model whose digest is unverified.

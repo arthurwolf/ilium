@@ -454,3 +454,7 @@ Instead the host restores a placeholder in the same tree position and carries th
 ## Production additions (round 5)
 
 - **[PRW-005]** When the session snapshot cannot be parsed or fails its schema check at boot, the Sessions plugin MUST copy it to a corrupt-timestamped sibling once, MUST offer the newest valid rolling backup, and MUST start an empty session only after the user chooses it, writing nothing over the corrupt file until then.
+
+## Production additions (round 6)
+
+- **[PRV-006]** When the Sessions plugin cannot write a snapshot (no space, permission denied, read-only volume), it MUST keep the previous snapshot and rolling backups byte-identical, MUST raise one persistent notice naming the path and cause, MUST retry with backoff of at most 60 seconds, and MUST list the unsaved state as not persisted in the session status.
