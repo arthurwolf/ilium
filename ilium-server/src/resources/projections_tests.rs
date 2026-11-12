@@ -21,6 +21,8 @@ fn bindings(slug: &str) -> Vec<serde_json::Value> {
         serde_json::json!({"id":"synthetic-resource","slug":slug,"title":"Synthetic GPU","description":"Fixture only","rules":"Release after cleanup"}),
     ]
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn yaml(project: &Path) -> serde_norway::Value {
     serde_norway::from_str(&std::fs::read_to_string(project.join(".ilium/config.yaml")).unwrap())
         .unwrap()

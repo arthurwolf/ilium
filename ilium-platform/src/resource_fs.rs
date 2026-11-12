@@ -302,6 +302,8 @@ impl ResourceLedgerFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Linux-only helper: used only by the Linux-only resource queue tests.
+    #[cfg(target_os = "linux")]
     fn durable_test_directory() -> tempfile::TempDir {
         let root = std::env::var_os("ILIUM_RESOURCE_TEST_ROOT")
             .map(std::path::PathBuf::from)

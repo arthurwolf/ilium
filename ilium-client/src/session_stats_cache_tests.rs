@@ -1,6 +1,7 @@
 //! Regression coverage for resumable session statistics across client stores.
 
 use super::*;
+#[cfg(unix)]
 use std::io::Write;
 
 // Unix-only: the persistent cache is read only after an owner-only handle check,

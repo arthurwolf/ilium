@@ -3,6 +3,8 @@ use super::*;
 use crate::config::{DetectionConfig, NotificationsConfig};
 use crate::state::ServerStateOptions;
 struct Fixture {
+    // Read only by the Linux-only queue tests; elsewhere it just keeps the directory alive.
+    #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
     directory: tempfile::TempDir,
     state: Arc<ServerState>,
     project: NodeId,
@@ -73,6 +75,8 @@ fn definition() -> ResourceDefinition {
         archived: false,
     }
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn link() -> ProjectResourceLink {
     ProjectResourceLink {
         created_at_unix_millis: 0,
@@ -84,11 +88,15 @@ fn link() -> ProjectResourceLink {
         sync_debt: None,
     }
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn request(f: &Fixture, command: ResourceCommand) -> ResourceRequest {
     let mut r = ResourceRequest::new(Some(f.project), ResourceOperation::Mutate(command));
     r.request_key = Some(key(&clock().unwrap()).0);
     r
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 async fn create(f: &Fixture) -> ResourceMemory<ResourceReply> {
     execute(
         &f.state,
@@ -103,6 +111,8 @@ async fn create(f: &Fixture) -> ResourceMemory<ResourceReply> {
     .await
     .unwrap()
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn store(f: &Fixture) -> store::ResourceStore {
     store::ResourceStore::new(service(&f.state).unwrap().path.clone()).unwrap()
 }
@@ -139,6 +149,8 @@ async fn resource_snapshot_when_admitted(f: &Fixture) {
         }
     }
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn synthetic_agent(f: &Fixture) -> AgentIdentity {
     AgentIdentity {
         project_id: project_identity(f.directory.path()).unwrap(),
@@ -149,6 +161,8 @@ fn synthetic_agent(f: &Fixture) -> AgentIdentity {
         label: "Synthetic GPU owner".into(),
     }
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn reserve_synthetic(f: &Fixture) {
     let now = clock().unwrap();
     let agent = synthetic_agent(f);

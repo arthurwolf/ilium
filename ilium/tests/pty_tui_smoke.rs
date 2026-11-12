@@ -1598,8 +1598,16 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // The default non-animation poll interval is 250 ms. Waiting through
     // more than one cycle proves maintenance no longer destroys Settings.
     tokio::time::sleep(Duration::from_millis(600)).await;
+    let settings_open = |screen: &str| {
+        screen.contains("⚙ Settings")
+            // ConPTY can drop the start of the title row when it repaints the
+            // wide gear emoji; the rest of the Settings frame is still exact.
+            || (cfg!(windows)
+                && screen.contains("Esc or q to close")
+                && screen.contains("· Navigation"))
+    };
     assert!(
-        tui.screen_text().contains("⚙ Settings"),
+        settings_open(&tui.screen_text()),
         "Settings closed after the opening click and maintenance ticks: {:?}",
         tui.screen_text()
     );
@@ -3047,9 +3055,25 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     // actual city and duration controls. The bundled default catalog is
     // offline; the test makes no service/provider call or agent request.
     let osm_label = ilium_client::background_animation::AnimationKind::OpenStreetMap.label();
-    let (scene_column, scene_row) = first_client
-        .with_screen(|screen| animation_scene_label_cell(screen, default_animation.kind.label()))
-        .expect("initial scene is visible in the scene list");
+    // Wait for the scene list to settle after the palette dialog closes; a
+    // single capture can land mid-repaint (seen under ConPTY).
+    let mut scene_cell = None;
+    wait_until(
+        || {
+            scene_cell = first_client.with_screen(|screen| {
+                animation_scene_label_cell(screen, default_animation.kind.label())
+            });
+            scene_cell.is_some()
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    let (scene_column, scene_row) = scene_cell.unwrap_or_else(|| {
+        panic!(
+            "initial scene is visible in the scene list: {:?}",
+            first_client.screen_text()
+        )
+    });
     for _ in 0..ilium_client::background_animation::AnimationKind::ALL.len() {
         if first_client
             .with_screen(|screen| animation_scene_label_cell(screen, osm_label))
@@ -6636,12 +6660,18 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         .expect("release nested group row");
     tui.write(b"\x1b[C\x02c")
         .expect("expand nested group and create its pane");
+    // Read both rows from the same settled frame that satisfied the wait; a
+    // later separate capture can land mid-repaint (seen under ConPTY).
+    let mut rows_before = None;
     assert!(
         wait_until(
             || {
-                tui.with_screen(|screen| {
-                    rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]).len() == 1
-                })
+                rows_before = tui.with_screen(|screen| {
+                    let shells = rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]);
+                    let nested = rows_containing(screen, "nested");
+                    (shells.len() == 1 && !nested.is_empty()).then(|| (nested[0], shells[0]))
+                });
+                rows_before.is_some()
             },
             WAIT_TIMEOUT,
         )
@@ -6649,10 +6679,8 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         "expected one shell inside nested group, got: {:?}",
         tui.screen_text()
     );
-
-    let nested_row_before = tui.with_screen(|screen| rows_containing(screen, "nested"))[0];
-    let shell_row_before =
-        tui.with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]))[0];
+    let (nested_row_before, shell_row_before) =
+        rows_before.expect("the wait above returned only after capturing both rows");
     assert!(
         nested_row_before < shell_row_before,
         "fixture pane must begin below its nested parent: {:?}",

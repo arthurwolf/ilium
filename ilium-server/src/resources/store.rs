@@ -356,9 +356,14 @@ mod tests {
 #[cfg(test)]
 mod process_tests {
     use super::*;
+    // Process helpers serve only the Linux-only queue tests.
+    #[cfg(target_os = "linux")]
     use std::{
-        io::{BufRead, Read},
+        io::BufRead,
         process::{Command, Stdio},
+    };
+    use std::{
+        io::Read,
         time::{SystemTime, UNIX_EPOCH},
     };
     fn context(label: &str, user: bool) -> MutationContext {
@@ -392,6 +397,8 @@ mod process_tests {
             label: label.into(),
         }
     }
+    // Linux-only helper: used only by the Linux-only resource queue tests.
+    #[cfg(target_os = "linux")]
     fn create(store: &ResourceStore) {
         store
             .transact(
