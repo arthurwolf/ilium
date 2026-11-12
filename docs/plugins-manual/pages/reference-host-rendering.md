@@ -311,3 +311,7 @@ API version checked: `ilium:plugin@0.1.0`.
 
 - **[RND-020]** The depth limit of a ui-tree MUST be 32 levels with the root as level 1.
 - **[WID-030]** A theme change MUST repaint the last tree of every open view, deliver theme-changed and trigger exactly one views.render per open view.
+
+## Production additions (round 13)
+
+- **[PRO-001]** The system must, when a client terminal is narrower than 20 columns or shorter than 6 rows, replace the whole screen with one line 'Terminal too small: need 20x6, have WxH' in the plain role, must call views.render for no plugin view while that state lasts, must keep server work, panes and PTYs running, and must restore the previous layout, focus and scroll positions within 100 ms of the first resize that meets the minimum.

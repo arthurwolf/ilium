@@ -358,3 +358,7 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[USR-960]** An administrator MUST treat a support bundle as sensitive data and MUST send it outside the organisation only to the plugin's `security_contact` or the Ilium project contact, over a channel the organisation approves.
 - **[USR-961]** An administrator MUST keep a support bundle no longer than 90 days after the incident is closed (proposed, owner to confirm) and MUST delete every copy, including copies in tickets and mail, when that period ends.
 - **[USR-962]** Before a support bundle leaves the machine or the organisation, an administrator MUST read its `log.txt` and MUST NOT send the bundle while it holds personal data that the recipient is not entitled to receive.
+
+## Production additions (round 13)
+
+- **[PRO-019]** The system must, when a plugin updated within the last 30 minutes reaches stopped-by-failure on its new version and the previous version is still in the store, show a notice with a one-command rollback and, when the admin policy key plugins.auto_rollback_on_probation is true, roll back automatically, mark the new version skip, log update.rolled-back with reason probation and write one audit record.

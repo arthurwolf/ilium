@@ -393,3 +393,7 @@ The registry signs each version entry, including its `license`. It does not chan
 ## Production additions (round 5)
 
 - **[PRW-032]** The registry MUST check the security_contact and contact of each published version at publish time and weekly, and MUST show the plugin as unreachable-support in `ilium plugin info` after two consecutive failed checks.
+
+## Production additions (round 13)
+
+- **[PRO-015]** The system must offer opt-in anonymous health aggregates per plugin id and version (active installs, crash restarts, user-disabled count). They must reach a publisher only when at least 20 distinct installs contribute to the bucket, must contain no machine id, path or plugin data, and must be readable with ilium plugin stats <id>. With telemetry consent off, the host must send nothing and stats must print stats.unavailable.

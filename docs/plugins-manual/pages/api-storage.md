@@ -425,3 +425,7 @@ Enabling, disabling and uninstalling a plugin reach every running session within
 - **[LIF-117]** `write-batch` MUST apply all its entries or none of them. A batch holds at most 256 entries and at most 4 MiB of key and value bytes together; more is `invalid-argument`. A refused batch keeps every previous value.
 - **[LIF-118]** `put`, `remove` and `write-batch` MUST return only after the change is flushed to stable storage, so that a crash or power loss after the return cannot lose it. A crash before the return leaves the previous value.
 - **[LIF-120]** Several session servers can write the same `global` or `project` bucket. The host MUST serialise writers with a lock per bucket, so that each `put` and each batch is atomic across processes, and the last writer of a key wins. There is no compare-and-set; use a version key and `write-batch` if you need one.
+
+## Production additions (round 13)
+
+- **[PRO-018]** The system must, when it moves a corrupt storage database aside, show one notice naming the plugin, bucket and moved-aside file, write a storage.reset record with the operation id, pass the plugin a one-time data-reset reason on its next activate, and list the newest pre-migration backup and newest archive that contain that bucket in `ilium plugin status`, restorable with one command that passes the bucket integrity check.

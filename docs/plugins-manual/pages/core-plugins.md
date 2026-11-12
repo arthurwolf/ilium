@@ -319,3 +319,7 @@ Detection does not depend on the language that Ilium shows.
 
 - **[PRW-011]** Terminals MUST accept input and render output within 1 second of server start even when any non-essential core plugin is slow, failed or still activating, and a core plugin that exceeds its activation deadline MUST be skipped with one notice and retried in the background.
 - **[PRW-012]** A core plugin that crashes 3 times within 5 minutes MUST be left stopped with state failed-repeatedly, its panes and data kept intact as placeholders, one notice naming it MUST be shown, and a Restart action and a Disable action MUST be offered in the plugin list.
+
+## Production additions (round 13)
+
+- **[PRO-008]** The system must list in Settings > Plugins, for every core plugin that is off, a one-line description, its grants and its disk or network cost (for example speech model size), must let the user enable it with one command that shows the grant review in the same dialog, and must show no unsolicited prompt to enable any plugin more than once per host install.

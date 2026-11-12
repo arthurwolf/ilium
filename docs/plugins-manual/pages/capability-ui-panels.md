@@ -355,3 +355,7 @@ The host does not tell a plugin the user's locale, time zone or language. A plug
 - [tutorial-03-panel](/pages/tutorial-03-panel/) for a step-by-step panel.
 
 Checked against the API version `ilium:plugin@0.1.0`.
+
+## Production additions (round 13)
+
+- **[PRO-007]** The host must allow at most one plugin modal at a time, queue further plugin modal requests first-in first-out up to 4 per plugin and refuse the 5th with refused(rate-limited), must draw host-owned consent, confirm and security dialogs above any plugin modal without closing it, and must return focus to the plugin modal only after the host dialog closes.

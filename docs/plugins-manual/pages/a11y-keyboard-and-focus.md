@@ -145,3 +145,7 @@ Proposed, owner to confirm: the host moves focus to the next focusable node in t
 ## Production additions (round 5)
 
 - **[PRW-031]** Any multi-key chord or key sequence a plugin registers MUST have an equivalent that needs only single key presses (a command-palette entry or a menu item), and the host MUST make the sequence timeout at least 2 seconds and user-configurable.
+
+## Production additions (round 13)
+
+- **[PRO-002]** The system must park the terminal cursor on the first cell of the focused widget (or on the selected row for list-like widgets) after every render and focus change, must hide it only in views that declare a text-input focus elsewhere, and a harness test that moves focus through ten widgets must read back ten distinct cursor positions equal to each focused widget's origin cell.

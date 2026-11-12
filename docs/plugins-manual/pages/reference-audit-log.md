@@ -235,3 +235,7 @@ If the key does not exist at the first start, the kernel creates it in the secre
 ## Production additions (round 12)
 
 - **[PRP-013]** The system must keep every audit record mentioning a plugin id, key id or blocklist entry involved in a trust.* or sandbox.unavailable event for at least audit_min_retention (default 365 days) despite rotation or size limits, and must fail a purge below that age with audit.retention-hold and an audit-purge-refused record.
+
+## Production additions (round 13)
+
+- **[PRO-029]** The system must, when a plugin is disabled by blocklist, key revocation or `sandbox.unavailable self-test-failed`, exempt every audit record naming that plugin id from keep_days pruning for 365 further days (or until the user clears it), and write one `audit.auto-hold` record naming the plugin and trigger; a fixture with 400-day-old records for a blocked plugin keeps those records after pruning while unrelated records are pruned.

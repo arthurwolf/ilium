@@ -462,3 +462,7 @@ Instead the host restores a placeholder in the same tree position and carries th
 ## Production additions (round 8)
 
 - **[PRT-001]** The Sessions plugin MUST create snapshot files, rolling backups and recovery copies readable by the owning user only (mode 0600 in a 0700 folder or the platform equivalent), MUST NOT write environment variable values or pane screen contents into a snapshot unless the user has enabled scrollback saving, and MUST refuse to load a snapshot that is group or world writable.
+
+## Production additions (round 13)
+
+- **[PRO-004]** The Sessions plugin must accept session names of 1 to 64 Unicode characters after NFC normalisation, must refuse with refused(invalid-name) names containing path separators, control characters or only dots/spaces, must refuse with refused(exists) a name equal to an existing one under case-insensitive NFC comparison, and must derive the on-disk file name so that two accepted names never map to one file on case-insensitive file systems.

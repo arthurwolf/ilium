@@ -147,3 +147,7 @@ Before you restore over live data, keep the state you have now. Take a new archi
 ## Production additions (round 12)
 
 - **[PRP-019]** The system must stream backup and restore with peak host memory growth of at most 64 MiB, emit a progress JSONL record at least every 2 seconds, and not block plugin event delivery longer than one tick on a live server.
+
+## Production additions (round 13)
+
+- **[PRO-020]** The system must end `ilium plugin restore` (and --dry-run) with one `restore-summary` JSONL record listing per plugin id: data restored, grants needing re-review, secrets needing re-entry, trust state (kept or tampered-renamed), and plugins left disabled, and must exit 0 only when no plugin needs action, otherwise exit 5 with the same list in the human summary.

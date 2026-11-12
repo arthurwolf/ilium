@@ -279,3 +279,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions (round 5)
 
 - **[PRW-021]** A plugin MUST be able to declare optional host features in the manifest `optional-features` list, and the host MUST load the plugin when they are absent, report each missing one in `host_info()` as `unavailable`, and never fail the load with `manifest.grant-unknown` for an optional entry.
+
+## Production additions (round 13)
+
+- **[PRO-012]** The system must publish each SDK minor as a pre-release (-beta.N) at least 7 days before stable. ilium plugin new and upgrade-sdk must not select a pre-release unless --sdk-channel beta is given, and pack and publish must refuse a project whose resolved SDK version is a pre-release with pack.sdk-prerelease.

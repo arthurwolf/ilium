@@ -76,3 +76,5 @@ mod core_parity;
 mod round11;
 #[path = "production_completeness/round12.rs"]
 mod round12;
+#[path = "production_completeness/round13.rs"]
+mod round13;

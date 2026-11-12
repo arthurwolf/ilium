@@ -791,3 +791,8 @@ Two searches exist. Workspace search (F-009, owned by the search plugin) searche
 
 - **[COR-218]** The PTY and vt100 state MUST be owned by the kernel; disabling or crashing `ilium.core.terminal` MUST NOT kill, resize or detach any PTY, and input typed by the user MUST still reach the focused pane.
 - **[EXT-055]** The chain on ilium.core.terminal/before-send-input MUST NOT run for keystrokes typed into a pane. It MUST run once per write that Ilium makes on someone's behalf (paste, dialog, broadcast, voice, plugin write-input).
+
+## Production additions (round 13)
+
+- **[PRO-003]** The Terminal plugin must handle a BEL from a pane by marking that pane's tree row with the attention mark, playing the bell sound only when sound is not muted, showing a one-frame non-flashing visual cue instead when sound is muted or the pane is in screen-reader mode (announced as 'Bell in <pane title>' within 1 second), collapsing bursts to at most 1 bell effect per pane per second, and never sending a desktop notification for BEL from a pane that has client focus.
+- **[PRO-006]** The Terminal plugin must keep a configurable scrollback of 100 to 1,000,000 lines per pane (default 10,000), must evict oldest lines first without moving the viewport of a user who is scrolled up, must copy a selection that spans wide characters and combining sequences without splitting a grapheme cluster, and must report in the pane footer 'scrollback truncated' once per eviction burst when the user is scrolled up.

@@ -176,3 +176,8 @@ Contract: `ilium:plugin@0.1.0`.
 
 - **[PRQ-014]** The system must let a secret row declare redact = always so the host redacts every occurrence of its value in logs, bundles, captured process output and error text regardless of length, and refuses to save a value shorter than 4 characters that would match more than 1 percent of the plugin's last 1000 log lines.
 - **[PRQ-017]** The system must, when a plugin is disabled-blocked or its publisher key is revoked as compromised, mark every backup archive since its install that includes its secrets as secret-tainted, warn and require confirmation on restore, and list affected archives in plugin doctor.
+
+## Production additions (round 13)
+
+- **[PRO-021]** The system must pass a conformance case that sets a unique 32-character secret row value, exercises the plugin through log, crash, trap, settings export, config export, audit, support bundle (single and --all), trace file, telemetry summary and backup without --include-secrets, then scans every produced byte string, raw, base64 and percent-encoded, and fails the release naming each output that contains the value.
+- **[PRO-030]** The system must send a revealed or typed secret value only to the one client that performed the reveal or entry. Other attached clients must show the row as masked with `Being edited in another client` and no value bytes in their frames, and the value must be masked in screen-reader output, session recordings and `plugin doctor` bundles. A two-client test must find the secret string in zero frames bytes of the second client.

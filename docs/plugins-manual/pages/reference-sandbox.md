@@ -345,3 +345,7 @@ Contract: `ilium:plugin@0.1.0`.
 ## Production additions (round 10)
 
 - **[PRR-018]** The system must have each helper run a built-in confinement self-test (forbidden open, socket and exec) after applying the sandbox and before instantiating plugin code, report the result to the server, and on any success exit and refuse the plugin with sandbox.unavailable reason self-test-failed plus an audit record.
+
+## Production additions (round 13)
+
+- **[PRO-026]** The system must count denied seccomp and Landlock events per helper, write one rate-limited `sandbox-probe` audit record per helper run when the count passes a threshold of 20 denials, naming the plugin id, the syscall or path class and the count (never plugin data), and show `Sandbox probing detected` in `plugin doctor`; a hostile fixture issuing 1000 forbidden calls yields exactly one record per run and the plugin keeps running.

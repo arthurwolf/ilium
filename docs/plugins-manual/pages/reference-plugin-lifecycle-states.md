@@ -359,3 +359,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions (round 12)
 
 - **[PRP-021]** The system must clear the automatic safe mode crash counter after a start reaching all plugins ready and staying up 5 minutes or by ilium plugin doctor --clear-crash-marks, and re-enter safe mode only after three new crash marks, listing live marks in ilium plugin status --safe-mode --json.
+
+## Production additions (round 13)
+
+- **[PRO-016]** The system must let a successor plugin declare imports_from = [<old id>] in its manifest. After the user confirms, the host must give the successor a one-time read-only view of the old plugin's kept storage and settings values, report migrated and unmatched key counts, leave the old data untouched, and refuse with import.owner-mismatch unless the old plugin's deprecation names this successor id.

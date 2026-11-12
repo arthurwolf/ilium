@@ -311,3 +311,7 @@ Five kinds of copy exist. They answer different questions and are not interchang
 ## Production additions (round 11)
 
 - **[PRQ-020]** The system must, before extracting a package, restoring an archive or starting a migration, compute the longest resulting absolute path and refuse with install.path-too-long before any write if it exceeds the platform limit.
+
+## Production additions (round 13)
+
+- **[PRO-024]** The system must keep at most the 3 newest pre-migration backups per plugin and expire kept data of an uninstalled plugin only by explicit `ilium plugin gc --kept-data --older-than <days>`, report total bytes per class (active, backups, kept-uninstalled, moved-aside, caches) in `ilium plugin du --json`, and warn once when kept classes exceed 25 percent of the data volume.

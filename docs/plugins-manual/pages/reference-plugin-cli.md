@@ -791,3 +791,8 @@ Every command here follows the output model above. Synopses are in the table; sh
 ## Production additions (round 12)
 
 - **[PRP-005]** The system must provide ilium plugin fmt that rewrites ilium-plugin.toml into one canonical layout preserving comments, is idempotent and never changes the parsed manifest value, and with --check exits 1 listing files that would change.
+
+## Production additions (round 13)
+
+- **[PRO-009]** The system must offer ilium plugin dev --scratch-session, which starts a disposable session with its own state, runtime and socket folders and a fixture tree of 3 panes, installs the plugin only there, never contacts or reads any other session, and removes the session on exit; the first dev run in a project with no --session must print a notice that the plugin runs in the live session and name this flag.
+- **[PRO-011]** The system must resolve --baseline from an explicit package file, or else from the highest non-yanked stable version of the same id in the configured registry. With no baseline it must exit 0 with baseline.none-first-release, when the registry is unreachable it must fail with registry.unreachable unless a file was given, and the resolved baseline version and SHA-256 must appear in the summary record.

@@ -159,3 +159,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions (round 12)
 
 - **[PRP-016]** The system must, when the plugin data root or its recorded volume is absent or mismatched at server start, avoid creating the root or installing defaults, start with third-party plugins off, show one banner naming the path and cause, and log host.data-root-missing once.
+
+## Production additions (round 13)
+
+- **[PRO-023]** The system must, when the data volume becomes unavailable or read-only while running, within 10 seconds show one banner, stop starting new third-party activations, keep running plugins alive with writes returning io unavailable (never counted as plugin failures), log host.data-root-lost once, and resume with host.data-root-restored and a single drained-write report when the same volume identity returns, or require restart if the identity differs.

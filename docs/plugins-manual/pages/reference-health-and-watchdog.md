@@ -304,3 +304,7 @@ Target behaviour of the production plugin system.
 ## Production additions (round 12)
 
 - **[PRP-017]** The system must persist a compact per-plugin operations history across restarts, at most 1 MiB and 90 days per plugin, readable with ilium plugin history, surviving SIGKILL up to a 5 second fsync interval, and containing no secret values, pane text or storage values.
+
+## Production additions (round 13)
+
+- **[PRO-025]** The system must record, per plugin version, activation time, peak memory, failure count and quota-hit count for the first 24 hours of activity, and show the delta against the previous version in `ilium plugin history` and `plugin status --json` (fields prev_version and delta), flagging a regression when activation time or peak memory is more than 50 percent above the previous version.

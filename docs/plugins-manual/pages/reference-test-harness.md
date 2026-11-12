@@ -744,3 +744,7 @@ API checked against `ilium:plugin@0.1.0`.
 ## Production additions (round 11)
 
 - **[PRQ-029]** The system must provide session.stub_service and session.fail_service with modes absent, crash-mid-call, deadline and major-mismatch so a test can assert the consumer reaches its fallback and reports services.unavailable or services.deadline identically in FakeHost and the embedded host.
+
+## Production additions (round 13)
+
+- **[PRO-014]** The system must provide host.verify_service_provider(service, version) in the harness (verifyServiceProvider in TypeScript). It must call every method of the provider schema with generated valid params, fail with harness.service-result-invalid naming the method when a result does not match the result schema, and fail with harness.service-method-missing for a declared method the plugin does not implement. The seed must be reproducible with ILIUM_PLUGIN_TEST_SEED.

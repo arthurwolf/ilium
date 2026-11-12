@@ -102,3 +102,7 @@ The log shows the deadline trap as the cause. The operator then reads the plugin
 ## Production additions (round 12)
 
 - **[PRP-018]** The system must carry one operation id through every lifecycle operation and host-to-plugin call chain, appearing in host.log lines, plugin log lines, audit records and CLI JSONL records, and usable to filter with ilium plugin logs --op and in the support bundle.
+
+## Production additions (round 13)
+
+- **[PRO-022]** The system must provide `ilium plugin host-status --json` that prints one record with safe_mode, crash_marks_in_window, disk_step, revocation_age_seconds, plugins_by_health counts, update_pending count and last_backup_age_seconds when a backup directory is configured, with a documented exit code 0 healthy, 1 degraded, 2 critical, and stable field names under the CLI output stability policy.

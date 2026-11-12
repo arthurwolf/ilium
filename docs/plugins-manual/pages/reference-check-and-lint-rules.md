@@ -306,3 +306,8 @@ API checked against `ilium:plugin@0.1.0`.
 ## Production additions (round 12)
 
 - **[PRP-003]** The system must provide lint.dependency-license that reads SPDX identifiers of locked dependencies from SBOM data, fails check and publish naming the dependency and licence when it is outside allowed_licenses or copyleft-incompatible with the declared license, and reports lint.dependency-license-unknown when licence data is missing.
+
+## Production additions (round 13)
+
+- **[PRO-010]** The system must make ilium plugin check --baseline and publish report the grant delta against the baseline version as check.grant-added or check.grant-removed records. A version that adds any grant with a patch-level bump must fail with lint.semver-bump-too-small, and a high-risk grant addition must print a warning that every installed user will be asked again.
+- **[PRO-013]** The system must make ilium plugin lint compare every i18n/<tag>.json with i18n/en.json and report lint.i18n-placeholder-mismatch (error), lint.i18n-key-missing (warn), lint.i18n-key-unused (warn) and lint.i18n-plural-category-invalid for the language (error), each naming file, key and tag. A fixture with one flaw of each kind must give exactly four findings, and a correct fixture none.

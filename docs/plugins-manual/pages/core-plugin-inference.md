@@ -806,3 +806,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 11)
 
 - **[PRQ-010]** The system must show in the Inference tab one table listing every core and installed plugin that made a model request in the last 30 days, with provider, data class and last-used time, and let the user disable each row so the plugin receives not-permitted reason user-disabled.
+
+## Production additions (round 13)
+
+- **[PRO-005]** When a request names a model that the provider's catalogue no longer lists, the Inference plugin must fail it without sending prompt text with not-found and detail 'model-withdrawn', must mark the model [unavailable] in the ilium.models catalogue within one refresh interval, must show one dismissible notice per model naming every plugin and setting that selected it, and must not silently substitute another model.

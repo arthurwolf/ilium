@@ -1216,3 +1216,7 @@ A Rust component that is too large starts slowly and takes longer to install. Th
 The build also tells the author when the result is still too big. It measures the optimised component and compares it with a documented threshold, so the warning shows both numbers.
 
 - **[PRX-009]** The Rust template MUST ship a release profile (`opt-level = "s"`, `lto = true`, `codegen-units = 1`, `strip = true`) and a documented post-link optimisation step, and `ilium plugin build` MUST warn `build.component-large` when the optimised component exceeds the documented size threshold, naming the measured size and the threshold.
+
+## Production additions (round 13)
+
+- **[PRO-017]** The system must fail the SDK release pipeline when any public item of ilium-plugin-sdk or @ilium/plugin-sdk has no documentation text, or when a public function that takes a grant lacks a doc line naming that grant, a doc line naming its error codes, and an example that compiles. The failure must name the item.

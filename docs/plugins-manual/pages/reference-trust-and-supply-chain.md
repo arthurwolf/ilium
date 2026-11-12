@@ -295,3 +295,8 @@ A published plugin inherits the risk of the SDK it was built with. [SEC-173] pin
 ## Production additions (round 10)
 
 - **[PRR-019]** The system must record the source and publisher key from which each plugin was first installed and refuse any update or reinstall of the same plugin id from a different source or publisher key with trust.source-changed unless the user or policy explicitly confirms the switch.
+
+## Production additions (round 13)
+
+- **[PRO-027]** The system must refuse a revocation feed, release blocklist or policy blocklist whose `issued` is more than 24 hours after the host clock, with audit `signature-failure` naming both times and without raising the stored last-issued mark; a fixture feed issued 30 days in the future is refused, and a following feed with a normal `issued` time is accepted.
+- **[PRO-028]** The system must measure the revocation staleness age and `max_revocation_age` with the monotonic clock since the last verified refresh, persisted with the boot id. A backward wall-clock change of at least 1 hour must not make the data look fresher, and after a reboot the age must be at least the larger of the persisted elapsed value and the wall-clock difference. A test setting the clock back 30 days on a stale feed must still give `trust.revocation-stale`.
