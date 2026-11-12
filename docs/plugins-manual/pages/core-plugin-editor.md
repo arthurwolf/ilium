@@ -767,3 +767,7 @@ The editor offers a service-provider role, and other plugins call it. A provider
 ## Production additions (round 6)
 
 - **[PRV-001]** The Editor plugin MUST preserve a file's detected encoding, byte order mark and line-ending style (LF or CRLF) on save, MUST refuse to open a file that is not valid in its detected encoding for editing without an explicit user choice of encoding, and MUST show the encoding and line-ending style in the pane status line.
+
+## Production additions (round 7)
+
+- **[PRU-002]** The Editor MUST save by writing a temporary file in the target directory and renaming it over the target, MUST resolve a symlinked path and replace its target rather than the link, and MUST preserve the file mode and owner where the platform allows; if any of these cannot be kept it MUST refuse the save with a visible reason and leave the original file unchanged.

@@ -127,3 +127,7 @@ Before you restore over live data, keep the state you have now. Take a new archi
 
 - **[PRY-027]** `ilium plugin restore` and `--dry-run` MUST refuse an archive that contains two entries whose normalised paths are equal, or differ only in letter case, with error `restore.duplicate-entry`, exit non-zero, and leave every live file unchanged.
 - **[PRY-028]** `ilium plugin restore` MUST abort with `restore.expansion-limit` and roll back all written files when the total uncompressed size of the entries exceeds 64 times the archive size or the free space on the target volume, whichever is smaller.
+
+## Production additions (round 7)
+
+- **[PRU-005]** A restore of an archive older than the current revocation state MUST NOT weaken it: after restore the host MUST re-apply every key revocation, blocklist entry, recall notice and yank recorded before the restore, MUST drop any grant revoked after the archive was written, and MUST write one audit record naming each item re-applied.

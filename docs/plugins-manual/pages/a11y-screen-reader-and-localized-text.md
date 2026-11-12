@@ -148,3 +148,7 @@ Set the language to `en-XA` and `[ui] screen_reader = true`, render the view at 
 ## Production additions (round 4)
 
 - **[PRZ-002]** When the user changes the interface language while plugin views are open, the host MUST deliver locale-changed to each client plugin and MUST render every open plugin view again within 1 frame, and a test MUST assert that no label of the old language remains in the rendered rows after that frame.
+
+## Production additions (round 7)
+
+- **[PRU-009]** When the host truncates a label, title or row text with an ellipsis because it exceeds its box, the full untruncated text MUST remain available to the screen reader mode text output and to a reveal action (focus or hover detail), so no information is lost by truncation alone.

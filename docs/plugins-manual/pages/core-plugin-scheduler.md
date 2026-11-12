@@ -682,3 +682,7 @@ Side basis: `schedule-sources` is server because the server side owns the timers
 ## Production additions (round 6)
 
 - **[PRV-005]** When the target pane of a scheduled input or queued prompt is closed, replaced by another process, or its agent is reclassified, the Scheduler MUST cancel the pending entries for that pane within 1 second, MUST raise one notice listing the cancelled entries with their text shortened to 40 cells, and MUST NOT deliver them to any other pane.
+
+## Production additions (round 7)
+
+- **[PRU-001]** The Scheduler MUST NOT deliver a scheduled input or queued prompt to a pane whose agent activity is awaiting-approval at delivery time; it MUST hold the entry, raise one notice naming the pane, and deliver only when the activity leaves awaiting-approval or the user chooses Send now.

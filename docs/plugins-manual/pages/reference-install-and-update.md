@@ -323,3 +323,7 @@ The user sees a progress line per step, the review dialog and the result. After 
 - **[USR-249]** The host MUST refuse an install or update whose package exceeds 64 MiB compressed or 256 MiB unpacked, before unpacking beyond the limit, with the error `package.too-large`; a policy MAY lower both limits but MUST NOT raise them.
 - **[USR-250]** The size check MUST use the sizes declared in the package header and MUST also count actual bytes while unpacking, so a package that lies about its size is refused with the same error.
 - **[USR-251]** The `package.too-large` text MUST name the plugin, the measured size, the limit that was exceeded and whether the limit comes from the host or from policy, and the review dialog MUST show the same text.
+
+## Production additions (round 7)
+
+- **[PRU-006]** Install MUST read the package bytes exactly once into staging, compute the SHA-256 over that staged copy, show the review dialog for that hash, and record the hash with the grant decision. Activation MUST use only the staged copy and MUST refuse with package.changed-after-review if the hash differs.

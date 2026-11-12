@@ -269,3 +269,7 @@ Watch scopes follow the table in [Sandbox reference](/pages/reference-sandbox/) 
 ## Production additions (round 4)
 
 - **[PRZ-008]** When the operating system refuses to create a watch because its own watch limit is exhausted, `watch` returns `quota-exceeded` with detail `os-watch-limit`, no `fs-changed` event is lost for already-active watches, and the server logs at most one `warn` line per 60 seconds naming the plugin id.
+
+## Production additions (round 7)
+
+- **[PRU-008]** When the operating system reports that it dropped file change events for a watch (kernel queue overflow, or a watch on a file system that cannot report changes), the host MUST deliver one fs-changed event for that watch with the flag resync set, and the plugin MUST treat it as a request to rescan the watched folder; the host MUST NOT silently continue as if no event was lost.

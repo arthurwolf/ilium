@@ -523,3 +523,7 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 5)
 
 - **[PRW-010]** Creating a worktree MUST take a per-repository lock, MUST fail with refused(exists) and change nothing when the target path or branch already exists or another create for the same repository is running, and on any failure MUST remove the partial directory and the branch it created.
+
+## Production additions (round 7)
+
+- **[PRU-003]** The Worktrees plugin MUST refuse to run git in a repository that is not owned by the current user, with refused(unsafe-repository), and MUST run every git command with core.fsmonitor and core.pager disabled and without honouring repository-local program settings, so that repository configuration cannot start a program outside the process.run grant.

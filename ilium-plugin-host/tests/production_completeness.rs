@@ -62,3 +62,5 @@ mod round4;
 mod round5;
 #[path = "production_completeness/round6.rs"]
 mod round6;
+#[path = "production_completeness/round7.rs"]
+mod round7;

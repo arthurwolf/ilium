@@ -660,3 +660,7 @@ The host raises one catch-up notice per affected pane and skips any notice alrea
 ## Production additions (round 6)
 
 - **[PRV-008]** The Notifications plugin MUST suppress desktop notifications and sounds, while still logging them to the durable notice log, whenever the user has set a do-not-disturb schedule or the operating system reports focus or do-not-disturb mode, and MUST deliver a single summary toast with the suppressed count when the period ends.
+
+## Production additions (round 7)
+
+- **[PRU-004]** The Notifications plugin MUST remove every C0 and C1 control character and every ESC-initiated sequence from pane titles, process names and agent text before placing them in a toast, notice or desktop notification, MUST escape markup for the platform notifier, and MUST truncate the body to 256 cells.

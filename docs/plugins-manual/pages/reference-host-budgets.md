@@ -134,3 +134,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions (round 5)
 
 - **[PRW-033]** The host MUST record the activation time of each third-party plugin from load to first successful activate return and MUST show a warning in `ilium plugin doctor` for any plugin whose activation takes more than 500 ms on three consecutive starts.
+
+## Production additions (round 7)
+
+- **[PRU-010]** Server start MUST scale with the number of enabled plugins that activate at startup, not with the number installed: the host MUST read only installed.json and the manifests of installed plugins at start, MUST NOT read or compile the component of a plugin that has not activated, and with 500 installed plugins of which 5 activate at startup the server MUST be ready for input within the same budget as with 5 installed.

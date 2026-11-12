@@ -298,3 +298,7 @@ The review dialog lists plugins that will be installed or updated because of a d
 - **[PKG-358]** The following MUST hold. `ilium plugin pin <id>@<version>` records an exact version. Update commands skip pinned plugins, and the resolver treats a pin as the only allowed version of that id. `ilium plugin unpin <id>` removes it.
 - **[PKG-359]** The following MUST hold. The lock file `ilium-plugins.lock` is JSON: `{ "format": "ilium-lock/1", "plugins": [ { "id", "version", "sha256", "source" } ] }`, sorted by id. `ilium plugin lock` writes it from the installed set. `ilium plugin install --locked <file>` installs exactly those versions. A locked version that no source offers fails with `dependency.unresolved`. A resolution that differs from the lock fails with `dependency.lock-mismatch`.
 - **[PKG-360]** The following MUST hold. A lock file entry whose `sha256` differs from the SHA-256 of the downloaded package is refused with `registry.hash-mismatch`.
+
+## Production additions (round 7)
+
+- **[PRU-007]** A dependency id with no installed copy MUST resolve only from the source and publisher namespace of the requiring plugin, or from a source the administrator lists for that id. A higher version of the same id from another configured source MUST NOT win the tie-break, and the host MUST refuse with dependency.source-mismatch naming both sources.

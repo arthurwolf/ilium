@@ -471,3 +471,7 @@ Checked against `ilium:plugin@0.1.0`.
 
 - **[PRV-009]** A topic subscription MUST deliver only publishes made after the subscription is active; the host MUST NOT replay earlier publishes or hold a last value, and the manual MUST name the pull method a plugin uses to read current state when it starts.
 - **[PRV-012]** The host MUST deliver the messages one plugin sends to one recipient in send order, and MUST state that order across different senders, topics or message kinds is not guaranteed.
+
+## Production additions (round 7)
+
+- **[PRU-011]** A peer message that the host accepted but has not yet delivered MUST NOT be kept across a server stop, a receiver disable, an uninstall or a receiver upgrade or restart: the host MUST discard it, count it in the receiver message-dropped counter with the reason, and report the sender intent outcome as accepted-for-queue only, so that a sender needing delivery must use a reply or a dedup-key acknowledgement from the receiver.
