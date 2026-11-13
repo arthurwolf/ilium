@@ -138,8 +138,14 @@ def validate_retained_windows_cmake(receipt_path, cache_path):
     from build_windows_ort import parse_cmake_cache
     actual = parse_cmake_cache(cache_path)
     recorded = cache.get('values')
+    # Visual Studio generators do not cache the compiler; the build receipt
+    # takes it from CMake's generated CMake{C,CXX}Compiler.cmake files, which
+    # the audit checks against the selected cl.exe. Only those two keys may be
+    # absent from the retained cache; every value the cache does hold must match.
+    generated_only = {'CMAKE_C_COMPILER', 'CMAKE_CXX_COMPILER'}
     require(isinstance(recorded, dict) and recorded and
-            all(actual.get(name) == value for name, value in recorded.items()),
+            all(actual.get(name) == value or (name in generated_only and not actual.get(name))
+                for name, value in recorded.items()),
             'retained Windows CMake cache values differ from source receipt')
     return {'path': 'evidence/windows-ort-CMakeCache.txt', 'sha256': sha(cache_path)}
 

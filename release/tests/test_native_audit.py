@@ -107,6 +107,26 @@ class NativeAuditTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             audit.validate_closure("windows", {"ilium.exe": ["KERNEL32.dll"], "ilium-server.exe": []}, inventory, {"ilium.exe", "ilium-server.exe"})
 
+    def test_retained_windows_cmake_cache_accepts_generated_compiler_identity_only(self):
+        pipeline = self.module("release_pipeline")
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "CMakeCache.txt"
+            cache.write_text("CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022\n"
+                             "CMAKE_MSVC_RUNTIME_LIBRARY:STRING=MultiThreaded\n", encoding="utf-8")
+            digest = hashlib.sha256(cache.read_bytes()).hexdigest()
+            values = {"CMAKE_GENERATOR": "Visual Studio 17 2022",
+                      "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
+                      "CMAKE_C_COMPILER": "C:/VS/bin/Hostx64/x64/cl.exe",
+                      "CMAKE_CXX_COMPILER": "C:/VS/bin/Hostx64/x64/cl.exe"}
+            receipt = Path(directory) / "receipt.json"
+            receipt.write_text(json.dumps({"cmake_cache": {"sha256": digest, "values": values}}), encoding="utf-8")
+            self.assertEqual(pipeline.validate_retained_windows_cmake(receipt, cache)["sha256"], digest)
+            for name, value in (("CMAKE_MSVC_RUNTIME_LIBRARY", "MultiThreadedDLL"), ("CMAKE_GENERATOR_INSTANCE", "C:/VS")):
+                with self.subTest(name=name):
+                    receipt.write_text(json.dumps({"cmake_cache": {"sha256": digest, "values": dict(values, **{name: value})}}), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "values differ"):
+                        pipeline.validate_retained_windows_cmake(receipt, cache)
+
     def test_windows_source_build_allows_reviewed_os_edges_but_never_crt_edges(self):
         audit = self.module("audit_native")
         for name in ("dbghelp.dll", "dxgi.dll", "BCRYPTPRIMITIVES.dll", "PSAPI.DLL", "USERENV.dll"):
