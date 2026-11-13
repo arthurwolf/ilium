@@ -8,7 +8,8 @@
 
 use ilium_plugin_sdk::ilium_plugin;
 use ilium_plugin_sdk::types::{Activation, PluginError};
-use ilium_plugin_sdk::{Lifecycle, NativeEntry};
+use ilium_plugin_sdk::types::{Area, UiTree, ViewTarget};
+use ilium_plugin_sdk::{Lifecycle, NativeEntry, Views};
 use std::any::type_name;
 
 #[ilium_plugin(side = "server")]
@@ -44,6 +45,12 @@ quiet_lifecycle!(
     ClientPlugin,
     ScenePlugin
 );
+
+impl Views for ClientPlugin {
+    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
+        UiTree::default()
+    }
+}
 
 fn assert_native_entry<Plugin: NativeEntry>() {}
 
