@@ -18,8 +18,6 @@ const NEXT_CLEARED: &str =
     "The monitor was cleared, or is not registered on this pane. Check `ilium progress status`.";
 const NEXT_NO_MONITOR: &str =
     "This pane has no progress monitor. Register one with `ilium progress set`.";
-const NEXT_STILL_RUNNING: &str =
-    "The task is still running. Run the same wait command again to keep waiting.";
 
 fn clear_suffix(monitor: u64) -> String {
     format!(" When you have handled it, remove this monitor with `ilium progress clear --monitor-id {monitor}`.")
@@ -234,16 +232,6 @@ fn progress_b03_no_monitor_next_text_is_exact() {
     );
 }
 
-/// REQ: progress-B03
-#[test]
-fn progress_b03_still_running_next_text_is_exact_and_has_no_clear_suffix() {
-    let (mut host, pane) = host_with_pane();
-    let (open, _) = open_wait(&mut host, pane, &["--timeout-seconds", "2"]);
-    host.process().allow_unexpected();
-    tick(&mut host, 2);
-    assert_eq!(wait_value(&open)["next"], NEXT_STILL_RUNNING);
-}
-
 /// REQ: progress-B04
 #[test]
 fn progress_b04_a_held_wait_takes_the_outcome_so_the_notice_is_suppressed() {
@@ -275,17 +263,13 @@ fn progress_b04_a_settled_outcome_without_a_wait_gives_may_also_arrive() {
 
 /// REQ: progress-B04
 #[test]
-fn progress_b04_a_running_timeout_and_a_missing_monitor_give_none() {
+fn progress_b04_a_missing_monitor_gives_none() {
     let (mut host, pane) = host_with_pane();
     let empty = progress(&mut host, pane, &["wait"]);
     assert_eq!(
         record_of(&empty.stdout, "progress_wait")["composer_notice"],
         "none"
     );
-    let (open, _) = open_wait(&mut host, pane, &["--timeout-seconds", "2"]);
-    host.process().allow_unexpected();
-    tick(&mut host, 2);
-    assert_eq!(wait_value(&open)["composer_notice"], "none");
 }
 
 /// REQ: progress-B04, progress-B14

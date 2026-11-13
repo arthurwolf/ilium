@@ -1,0 +1,15 @@
+● Workflow(Audit the feature by lane, close the gaps, then verify the integrated result)
+  ⎿  Running in background · /workflows to monitor and save · medium size (/config)
+
+● The workflow is running in the background. I'll wait for its completion notice.
+
+✻ Waiting for 1 dynamic workflow to finish
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ what's the status of the workflow?
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [CAVEMAN] | Model: Sonnet 5.5 | Cost: $44.19 | ⎇ master
+  Context: [██░░░░░░░░░░░░░░] 125k/1000k (12%) | Weekly: [████░░░░░░░░░░░░] 27.0% used
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 3 agents
+
+  ◯ custom-status-icons-finish  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱  5/7 · 25m56s · ↓ 1.0m tokens

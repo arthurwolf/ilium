@@ -474,6 +474,11 @@ enum FieldCell {
         symbol: String,
         color: Option<Color>,
     },
+    ImageInk {
+        symbol: String,
+        color: Option<Color>,
+        background: Color,
+    },
     Text {
         symbol: String,
         color: Option<Color>,
@@ -522,6 +527,15 @@ fn field_cell(app: &App, column: u16, row: u16, black_backdrop: bool) -> FieldCe
         };
     }
     let symbol = frame.glyph(column, row);
+    if let Some((red, green, blue)) = frame.image_background(column, row) {
+        return FieldCell::ImageInk {
+            symbol: symbol.to_string(),
+            color: frame
+                .cell_color(column, row)
+                .map(|(r, g, b)| Color::Rgb(r, g, b)),
+            background: Color::Rgb(red, green, blue),
+        };
+    }
     if symbol == ' ' {
         return if black_backdrop {
             FieldCell::Black
@@ -748,6 +762,11 @@ fn paint_region_with_field_receipt(
                         color,
                         modifier,
                     } => (symbol, color, None, modifier, 0),
+                    FieldCell::ImageInk {
+                        symbol,
+                        color,
+                        background,
+                    } => (symbol, color, Some(background), Modifier::empty(), 0),
                     FieldCell::BlackInk { symbol, color } => {
                         (symbol, color, Some(Color::Black), Modifier::empty(), 0)
                     }
@@ -766,7 +785,13 @@ fn paint_region_with_field_receipt(
                     } => (symbol, color, background, modifier, 2),
                     FieldCell::Empty | FieldCell::Continuation => continue,
                 };
-            let symbol_width = crate::background_animation::wikipedia_symbol_width(&symbol);
+            // An image can cover a cell whose dithered glyph has no dots.
+            // Permit that exact blank without relaxing validation of text.
+            let symbol_width = if background.is_some() && native_kind == 0 && symbol == " " {
+                Some(1)
+            } else {
+                crate::background_animation::wikipedia_symbol_width(&symbol)
+            };
             let is_braille = symbol_width == Some(1)
                 && symbol.chars().count() == 1
                 && symbol
@@ -782,7 +807,7 @@ fn paint_region_with_field_receipt(
                 if native_kind != 0 {
                     is_native_text
                 } else {
-                    allow_text || is_braille
+                    allow_text || is_braille || (background.is_some() && symbol == " ")
                 }
             }) else {
                 continue;
@@ -914,6 +939,30 @@ mod tests {
     fn paint_all(buffer: &mut Buffer) {
         let area = buffer.area;
         paint_region(buffer, area, None, Color::White, |_, _| '\u{28ff}');
+    }
+
+    #[test]
+    fn image_background_paints_blank_glyph_without_overwriting_terminal_content() {
+        let area = Rect::new(0, 0, 3, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer[(1, 0)].set_char('A').set_fg(Color::Yellow);
+        let original = buffer[(1, 0)].clone();
+        paint_region_with_field(
+            &mut buffer,
+            area,
+            None,
+            Color::White,
+            |_, _| FieldCell::ImageInk {
+                symbol: " ".into(),
+                color: None,
+                background: Color::Rgb(20, 30, 40),
+            },
+            false,
+        );
+        assert_eq!(buffer[(0, 0)].bg, Color::Rgb(20, 30, 40));
+        assert_eq!(buffer[(0, 0)].symbol(), " ");
+        assert_eq!(buffer[(1, 0)], original);
+        assert_eq!(buffer[(2, 0)].bg, Color::Rgb(20, 30, 40));
     }
 
     #[test]

@@ -5612,6 +5612,7 @@ fn cells_from_validated_packed(
                 article_is_continuation: false,
                 article_style: (false, false),
                 article_background: None,
+                image_background: None,
                 article_underline: false,
             }
         })

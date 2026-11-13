@@ -39,24 +39,13 @@ fn f_108_wait_with_an_id_waits_for_that_monitor_and_exits_zero_on_done() {
 
 /// REQ: F-108
 #[test]
-fn f_108_wait_with_a_timeout_exits_six_when_it_elapses() {
+fn f_108_wait_rejects_the_removed_deadline_flag() {
     let (mut host, pane) = host_with_pane();
-    register(
-        &mut host,
-        pane,
-        PROBE,
-        &running("export-1", 0, "Exporting"),
-        &["--interval-seconds", "5"],
-    );
-    host.process().allow_unexpected();
-    let open = start_in_pane(&mut host, pane, &["wait", "--timeout-seconds", "2"]);
-    tick(&mut host, 2);
-    let run = open.read();
-    assert_eq!(run.exit, Some(6));
-    assert_eq!(
-        record_of(&run.stdout, "progress_wait")["outcome"],
-        "still-running"
-    );
+    let run = run_in_pane(&mut host, pane, &["wait", "--timeout-seconds", "2"]);
+    assert_eq!(run.exit, Some(2));
+    assert!(!records(&run.stdout)
+        .iter()
+        .any(|record| record["type"] == "progress_wait"));
 }
 
 /// REQ: F-108

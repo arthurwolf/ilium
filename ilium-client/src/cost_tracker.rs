@@ -110,6 +110,10 @@ pub struct PaneCost {
     pub reported_usd: Option<f64>,
     /// Codex rate-limit windows: name and percent used.
     pub quota: Vec<(String, f64)>,
+    /// Fraction (0..=1) of the model's context window the latest prompt
+    /// filled, when the transcript records both figures. Read by the
+    /// custom status rules (`context-above-percent`).
+    pub context_fill: Option<f64>,
     pub spend_points: Vec<SpendPoint>,
     /// Minute-bucket token spend, retained separately from estimated dollars
     /// because medals recognise the greatest model usage even when a model has
@@ -190,6 +194,7 @@ impl PaneCost {
             tokens: stats.tokens,
             model_costs,
             reported_usd,
+            context_fill: stats.context_fill(),
             quota: stats
                 .rate_limits
                 .iter()

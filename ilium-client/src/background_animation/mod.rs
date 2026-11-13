@@ -826,6 +826,7 @@ impl AnimationFrame {
             } else {
                 self.raster.dots.fill(0.0);
                 self.raster.owner_ids.fill(0);
+                self.raster.image_coverage.clear();
             }
             if width > 0 && height > 0 {
                 let seconds = elapsed.as_secs_f64() * f64::from(settings.speed_percent) / 100.0;
@@ -876,6 +877,7 @@ impl AnimationFrame {
             } else {
                 self.raster.dots.fill(0.0);
                 self.raster.owner_ids.fill(0);
+                self.raster.image_coverage.clear();
             }
             self.colors.fill([0; 3]);
             if width > 0 && height > 0 {

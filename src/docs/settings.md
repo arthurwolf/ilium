@@ -324,7 +324,7 @@ Rules pairing a regular expression with a literal message. When an enabled regex
 
 Create a named profile for Claude or Codex, choose its icon, and optionally set a **Command** and **Arguments** before adding environment rows. The editor groups these into Identity, Launch, Environment and Actions sections; a `Runs:` line previews the resulting command. **Command** replaces the program name (for example `my_claude` instead of `claude`); leave it empty for the default. **Arguments** are extra command-line text such as `--yolo`, inserted right after the program on every start, restart and resume (`my_claude --yolo --resume <id>`). Neither field may contain control characters, and the base agent still decides how sessions are resumed. Select a profile to edit it, or select the add row to create one. Values are masked by default; the editor can reveal them. Select an environment row's remove control to delete it. Save validates the entire draft; duplicate names or keys, invalid keys, and reserved variables are rejected. Empty values and literal spaces, quotes, equals signs, newlines and Unicode are preserved when supported by the platform.
 
-Saved profiles appear as additional icons in the tree toolbar. Use the arrows on that row to reach profiles that do not fit; hover an icon to see its name and click it to launch. With the tree focused, `Alt+Left` and `Alt+Right` select a profile and `Alt+Enter` starts it. Right-click a profile icon to open the new-worktree dialog; selecting an existing worktree before launching opens the existing-worktree dialog. The tree context menu also lists each profile under its Claude or Codex new-agent submenu, with choices for launching here or in a new or existing worktree.
+Saved profiles appear as ordinary buttons in the single icon row of the tree toolbar, ordered and removable in Settings > Toolbar like every built-in button (a new profile is appended once; one you remove stays removed until you add it back). Hover an icon to see its name in the caption row and click it to launch. With the tree focused, `Alt+Left` and `Alt+Right` select a profile and `Alt+Enter` starts it. Right-click a profile icon to open the new-worktree dialog; selecting an existing worktree before launching opens the existing-worktree dialog. The tree context menu also lists each profile under its Claude or Codex new-agent submenu, with choices for launching here or in a new or existing worktree.
 
 The profile values override inherited environment variables. Ilium reserves `TERM`, `ILIUM_PANE_ID`, `ILIUM_SESSION_NAME`, `ILIUM_SESSION_SOCKET`, `ILIUM_WORKTREE`, and `ILIUM_BRANCH`, plus the terminal-filtered `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `TMUX`, `ZELLIJ`, `NO_COLOR`, and variables beginning with `WEZTERM_`, `KITTY_`, `TMUX_` or `ZELLIJ_`. Reserved names are rejected instead of silently ignored.
 
@@ -380,6 +380,7 @@ The file is a set of tables. Only the tables and keys you want to change need to
 | `[kanban_board]` | `card_preview_lines`, `minimum_column_width` |
 | `[inference]` and sub-tables | Provider, title style, token budget, instructions, per-provider settings |
 | `[triggers]` | Event-to-actions lists |
+| `[status_rules]` | Global rules for the Custom agent-monitoring display mode: `version`, `defaults_version`, ordered `rules` and an optional `fallback` icon. Edit them in Settings -> Agent Monitoring -> Configure custom icons; see [Custom status icons](custom-status-icons.md) |
 | `[text_triggers]` | Text trigger rules |
 | `[agent_setup]` | Global instruction file paths and "never ask" choices |
 | `[terminal]` | `scrollback_budget_mib`, `engine_memory_budget_mib`, `new_pane_directory`, `smart_copy_light`, `smart_copy_light_key` |
@@ -403,6 +404,7 @@ Accepted spellings for common enumerated values:
 | `ui.agent_identifier_mode` | `full_name`, `letter`, `icon`, `hidden` |
 | `ui.color_scheme` | `dark`, `light` |
 | `ui.motion_level` | `full`, `reduced`, `off` |
+| `ui.agent_monitoring_mode` | `normal`, `attention`, `custom` |
 | `ui.sidebar_density` | `compact`, `standard`, `comfortable` |
 | `terminal.new_pane_directory` | `project_root`, `focused_terminal`, `last_used` |
 | `terminal.smart_copy_light_key` | `ctrl`, `alt`, `shift` |
@@ -410,6 +412,12 @@ Accepted spellings for common enumerated values:
 | `session.recovery_policy` | `restore_automatically`, `ask_before_restore`, `start_fresh` |
 
 Other `[ui]` keys: `left_panel_fixed_width`, `left_panel_unfocused_width`, `left_panel_focused_width`, `left_panel_minimum_terminal_width`, `claude_agent_icon`, `codex_agent_icon`, `antigravity_agent_icon`, `use_stable_glyphs`, `show_inferred_title_icons`, `show_tree_row_management_controls`, `tree_toolbar_always_visible`, `agent_debug_menu_enabled`, `show_context_menu_icons`, `agent_toolbar_enabled`, `show_toolbar_labels`, `section_frames_enabled`, `last_prompt_enabled`, `last_prompt_max_lines`, `agent_monitoring_mode`, `attention_running_indicator`, `progress_monitor_enabled`, `progress_max_lines`, `completed_progress_hide_after_seconds`, `terminal_text_selection_enabled`, `lock_closed_enabled`, `auto_remove_empty_groups`, `task_progress_frames`.
+
+The `ui.` and other dotted names in this table are also the settings paths that voice control's Settings tool reads, sets and adjusts (`ui.agent_monitoring_mode` accepts `normal`, `attention` and `custom`; any other value is refused with a message listing the three).
+
+### `[status_rules]`
+
+The table holds the rules of the Custom display mode. `version` is the format (currently 1; a file written by a newer format loads with a warning), `defaults_version` records which shipped default set the rules started from, `rules` is the ordered list (first match wins) and `fallback` is the optional icon for panes no rule matches. Each rule has an `id`, a `name`, `enabled`, `any_of` groups (OR) that each hold `all_of` terms (AND, each with `negated` and a `condition`), and a `then` visual with a `kind` and a `style` (`color`, `bold`, `dim`, `pulse`). Loading keeps every readable rule: a broken rule is disabled with a reason, a duplicate id is renamed, an unreadable entry stays in the file untouched, and readable rules beyond 64 are kept unchanged under `unloaded_rules`. Enabled rules may use at most 16 distinct screen patterns of 256 characters each. The editor is the supported way to change the table; [Custom status icons](custom-status-icons.md) documents every condition.
 
 An invalid value (for example a tree width outside 16 to 80, or an unknown enumerated string) makes that table fail validation with a message naming the key; fix or remove the key.
 

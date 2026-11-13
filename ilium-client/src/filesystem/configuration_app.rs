@@ -413,6 +413,7 @@ impl App {
                         }
                         ConfigurationSaved::CustomAgents(settings) => {
                             self.custom_agents = settings;
+                            self.reconcile_toolbar_custom_agents();
                             if let Mode::Settings(state) = &mut self.mode {
                                 if state.tab == crate::app::SettingsTab::CustomAgents
                                     && state.custom_agent_save_pending
@@ -463,6 +464,11 @@ impl App {
                             self.is_project_name_loading = false;
                         }
                         ConfigurationSaved::Plain => {}
+                    }
+                    if matches!(&intent, Some(ConfigurationIntent::Plain { label, .. })
+                        if *label == crate::status_rules_save::STATUS_RULES_SAVE_LABEL)
+                    {
+                        self.custom_status_rules_write_succeeded();
                     }
                     if let Some(ConfigurationIntent::Onboarding { revision, dismiss }) = &intent {
                         if *revision == self.onboarding_revision && *dismiss {
@@ -540,6 +546,9 @@ impl App {
                     if let Some(ConfigurationIntent::Plain { label, .. }) = &intent {
                         if *label == "Git settings" {
                             self.git_settings_error = Some(failure.message.clone());
+                        }
+                        if *label == crate::status_rules_save::STATUS_RULES_SAVE_LABEL {
+                            self.custom_status_rules_write_failed(&failure.message);
                         }
                     }
                     // Readback may reflect publication before a directory flush

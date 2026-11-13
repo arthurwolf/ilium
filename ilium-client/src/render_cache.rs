@@ -33,6 +33,18 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             None
         }
+        ServerEvent::StatusScreenWatchesRejected(rejection) => {
+            // Only a refusal of the current revision matters; its watches
+            // then stay Unknown (never false) until the rules change.
+            let message = rejection.message.clone();
+            if app.custom_status_screen_observations.reject(rejection) {
+                tracing::warn!(%message, "server refused the status screen watches");
+                app.status_message = Some(format!("Screen pattern refused: {message}"));
+                app.status_message_retention = app.processing_derivation_retention.clone();
+                app.bump_tree_version();
+            }
+            None
+        }
         ServerEvent::PaneRecentActivity {
             pane_id,
             revision,
@@ -1310,6 +1322,32 @@ mod tests {
             pane_id, revision, screen_generation: 4, matched: vec![watches[0].id], unknown: vec![],
         }));
         assert_eq!(app.custom_status_screen_observations.observe(pane_id, &pattern), Observation::Unknown);
+    }
+
+    #[test]
+    fn a_refused_screen_watch_revision_is_shown_and_stays_unknown() {
+        use ilium_core::status_rule_expression::{Condition, Observation, ScreenPattern, ScreenRegion};
+        let mut app = app();
+        let pattern = ScreenPattern { pattern: "error".into(), ignore_case: false, region: ScreenRegion::All };
+        let mut rules = ilium_core::status_rule_expression::default_rules();
+        let rule = rules.rules.iter_mut().find(|rule| rule.id == "screen-error-example").unwrap();
+        rule.enabled = true;
+        rule.any_of[0].all_of[0].condition = Condition::ScreenMatches(pattern.clone());
+        app.custom_status_rules = rules;
+        let (revision, watches) = app.custom_status_screen_observations.replace_rules(&app.custom_status_rules);
+        // A stale refusal is ignored without a message.
+        apply(&mut app, ServerEvent::StatusScreenWatchesRejected(ilium_ipc::StatusScreenWatchRejection {
+            revision: revision.wrapping_sub(1), watch_id: None, message: "stale".into(),
+        }));
+        assert!(app.status_message.is_none());
+        let before = app.tree_version;
+        apply(&mut app, ServerEvent::StatusScreenWatchesRejected(ilium_ipc::StatusScreenWatchRejection {
+            revision, watch_id: Some(watches[0].id), message: "Invalid screen watch 0".into(),
+        }));
+        assert_ne!(app.tree_version, before);
+        assert!(app.status_message.as_deref().is_some_and(|message| message.contains("Invalid screen watch 0")));
+        assert_eq!(app.custom_status_screen_observations.rejected_pattern(), Some(&pattern));
+        assert_eq!(app.custom_status_screen_observations.observe(NodeId(1), &pattern), Observation::Unknown);
     }
 
     #[test]

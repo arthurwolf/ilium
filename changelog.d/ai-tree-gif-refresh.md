@@ -1,0 +1,2 @@
+### Changed
+- Demo gallery: the AI Tree recording was re-captured with three real Claude Code agents (Haiku 5.5) working in an isolated project named giant-maps. The default "agent finished work" trigger regrouped the panes by topic through OpenAI gpt-4.1; the recording shows two automatic restructures, the three pane titles checked against their content, and edited pauses (agent-wait cut, short holds).

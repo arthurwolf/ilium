@@ -177,6 +177,14 @@ fn doc_034_traceability_names_the_icon_and_mode_config_keys() {
         .find(|line| line.starts_with("| F-030 |"))
         .expect("row");
     assert!(row30.contains("[ui] agent_monitoring_mode; [detection] custom_signatures"));
+    assert!(
+        row30.contains("Custom"),
+        "the F-030 row names the Custom mode: {row30}"
+    );
+    assert!(
+        row30.contains("client-owned"),
+        "the F-030 row says who owns Custom: {row30}"
+    );
     let row34 = traceability
         .lines()
         .find(|line| line.starts_with("| F-034 |"))

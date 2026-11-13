@@ -1,5 +1,15 @@
 [
   {
+    "id": "CACHE-01",
+    "title": "Agent cache keep-alive",
+    "explanation": "Configure cache refresh during selected waits, with separate intervals for Claude and Codex.",
+    "specimen": "Cache keep-alive: Off\nClaude ping interval: 55 min\nCodex ping interval: 25 min\nWhile a monitor is running: On\nWhile waiting for a command: On\nWhile waiting for a subagent: On",
+    "states": "Disabled by default. Enable the policy and choose one or more wait conditions and the interval for each agent type.",
+    "frames": ["Cache keep-alive: Off\nClaude ping interval: 55 min\nCodex ping interval: 25 min"],
+    "motion": "None.",
+    "caveat": "Provider refresh is not available yet; these settings cannot send pings. Cache lifetime and savings are not guaranteed."
+  },
+  {
     "id": "TOOLBAR-01",
     "title": "Tree toolbar",
     "explanation": "Arrange the tree toolbar and choose how long a terminal remains active after its last output.",
@@ -4645,6 +4655,78 @@
     "frames": [
       "Off: Working agent with failed task → working indicator",
       "On: Working agent with failed task → failed task icon"
+    ]
+  },
+  {
+    "id": "AM-26",
+    "title": "Custom icons editor",
+    "explanation": "Open the editor that chooses which status icon each agent shows in Custom mode. Rules are global, apply to every project and are saved as you edit.",
+    "specimen": "Agent Monitoring -> Display mode ‹ Custom ›\n\nConfigure custom icons ... 12 of 23 rules on\n\nRules | Conditions and icon | Preview\n 1  Needs your approval   [!]\n 2  Task failed           [e]\n 3  Working               [⠋]\n    Otherwise (no rule matches)",
+    "states": "Three columns: the rule list, the selected rule's conditions with its icon, and a live or demo tree. Esc steps back one column at a time; Back returns to the Settings page.",
+    "motion": "None in the editor chrome. Icons in the preview animate according to the Motion setting.",
+    "caveat": "The editor changes only Custom mode. Normal and Attention keep their own icons, and switching mode never deletes your rules.",
+    "frames": [
+      "Agent Monitoring -> Display mode ‹ Custom ›\n\nConfigure custom icons ... 12 of 23 rules on\n\nRules | Conditions and icon | Preview\n 1  Needs your approval   [!]\n 2  Task failed           [e]\n 3  Working               [⠋]\n    Otherwise (no rule matches)"
+    ]
+  },
+  {
+    "id": "AM-27",
+    "title": "Rules list",
+    "explanation": "Rules are checked from top to bottom and the first enabled rule that matches decides the icon. Move a more specific rule above a broader one.",
+    "specimen": "Rules\n 1  Needs your approval      on\n 2  Goal paused               on\n 3  Working                   on\n 4  Screen mentions an error  off\n    Otherwise (no rule matches)\n\nA add  D duplicate  X delete  Alt+Up/Down or [ ] move  U undo",
+    "states": "A rule is on or off. A disabled rule is skipped. A warning badge means the rule has a problem (for example an earlier rule always wins first). The green count shows how many panes the rule decides right now. The Otherwise row is the icon for panes that no rule matches; empty leaves the slot blank.",
+    "motion": "None. Reordering moves the row at once and the tree updates.",
+    "caveat": "New rules start from a template (Agent needs approval, Goal paused, Task failed or Blank). Reset restores the shipped defaults after confirmation and replaces your rules. Twenty undo steps are kept for the editor session.",
+    "frames": [
+      "Rules\n 1  Needs your approval      on\n 2  Goal paused               on\n 3  Working                   on\n 4  Screen mentions an error  off\n    Otherwise (no rule matches)\n\nA add  D duplicate  X delete  Alt+Up/Down or [ ] move  U undo"
+    ]
+  },
+  {
+    "id": "AM-28",
+    "title": "Conditions and icon",
+    "explanation": "A rule has one expression line: conditions joined by AND, groups joined by OR, and NOT on a single condition. AND binds tighter than OR, so A OR B AND C means A OR (B AND C).",
+    "specimen": "IF  agent needs approval\n AND NOT goal is paused\n OR  screen matches /error/i\nTHEN [!] warning, bold\n\nCondition groups in the picker:\n Pane        kind, bookmarked, queued prompts, editor changes\n Agent       class, turn, availability, unread, parked\n Goal        set, active, paused, blocked, usage limited, reached\n Monitors    task status, monitor health, unread result\n Progress    percentage, time estimate\n Terminal    plain terminal output speed\n Screen text regular expression on visible screen\n Pane view   frozen, focused, session cost",
+    "states": "Each condition is true, false or unknown. A fact Ilium cannot observe is unknown, and NOT of unknown is still unknown, so the condition does not match. Screen text is the one regular-expression condition: it searches only the text visible in the pane, never scrollback, in the whole screen, the first lines or the last lines. At most 16 distinct patterns of 256 characters each are checked across all enabled rules; a rule beyond the budget is disabled with a reason, and an invalid pattern cannot be saved.",
+    "motion": "None.",
+    "caveat": "Matching uses match results from the server, not your screen text. Two separate any-monitor conditions joined by AND can be satisfied by different monitors.",
+    "frames": [
+      "IF  agent needs approval\n AND NOT goal is paused\n OR  screen matches /error/i\nTHEN [!] warning, bold\n\nCondition groups in the picker:\n Pane        kind, bookmarked, queued prompts, editor changes\n Agent       class, turn, availability, unread, parked\n Goal        set, active, paused, blocked, usage limited, reached\n Monitors    task status, monitor health, unread result\n Progress    percentage, time estimate\n Terminal    plain terminal output speed\n Screen text regular expression on visible screen\n Pane view   frozen, focused, session cost"
+    ]
+  },
+  {
+    "id": "AM-29",
+    "title": "Icon designer",
+    "explanation": "Choose the symbol a matching rule shows: a built-in status icon, one glyph, a Braille animation, symbol frames or frames driven by task progress, plus colour, bold, dim and pulse.",
+    "specimen": "THEN  ‹ Glyph ›  [!]\n      colour warning  bold on  dim off  pulse on\n\nBuilt-in      the same icons as Normal mode\nGlyph         one printable character\nBraille       spinner, loop, dots, snake, bounce, pulse, bar-fill\nFrames        quarters, moon phases, clock hours, arrows, hearts, blocks\nProgress      frames follow the task percentage",
+    "states": "Colours danger, warning, success, info and muted follow the active colour scheme. Pulse alternates the weight with a dim phase twice a second, once a second at Motion Reduced.",
+    "motion": "Animations and pulse run at the Motion setting: Full normal speed, Reduced two frames per second, Off frozen.",
+    "caveat": "A progress icon without a measurable percent shows its first frame, so an unmeasured task does not look like 0 percent. A monitor that is degraded tints it in the warning colour and a failed monitor in the danger colour.",
+    "frames": [
+      "THEN  ‹ Glyph ›  [!]\n      colour warning  bold on  dim off  pulse on\n\nBuilt-in      the same icons as Normal mode\nGlyph         one printable character\nBraille       spinner, loop, dots, snake, bounce, pulse, bar-fill\nFrames        quarters, moon phases, clock hours, arrows, hearts, blocks\nProgress      frames follow the task percentage"
+    ]
+  },
+  {
+    "id": "AM-30",
+    "title": "Rules preview",
+    "explanation": "Check a rule before relying on it. Live tree shows your real agents; Demo tree shows synthetic example situations that need no running agent.",
+    "specimen": "Preview ‹ Live tree › Demo tree\n\n[!] Codex   build        Needs your approval\n[⠋] Claude  parser       Working\n\nMatches 2 panes now\nWhy this icon: Custom rule 1 \"Needs your approval\": agent needs approval",
+    "states": "Live tree evaluates the actual visible screens. Demo tree evaluates example states with synthetic screen text, so a screen-text condition matches only what the example contains. Hover a pane's status cell in the tree to read the same Why text.",
+    "motion": "Previewed animations follow the Motion setting.",
+    "caveat": "The demo never reads or changes your panes. When no rule matches, the status slot stays empty unless the Otherwise row sets an icon.",
+    "frames": [
+      "Preview ‹ Live tree › Demo tree\n\n[!] Codex   build        Needs your approval\n[⠋] Claude  parser       Working\n\nMatches 2 panes now\nWhy this icon: Custom rule 1 \"Needs your approval\": agent needs approval"
+    ]
+  },
+  {
+    "id": "AM-31",
+    "title": "Blocking errors in Custom mode",
+    "explanation": "Choose how a retained blocking error (a failed action on a pane) appears in Custom mode. Rules only is the default: your rules decide, using the blocking-error and session-error conditions.",
+    "specimen": "Blocking errors in Custom mode ‹ Rules only ›\n\nRules only    the shipped Blocking error rule decides\nOverlay       yellow triangle over the custom icon\nSecond icon   triangle in its own cell right of the icon",
+    "states": "Rules only draws no triangle of its own, so rule order controls whether an error beats other icons. Overlay paints the triangle over the rule icon, ignoring rule order. Second icon keeps the rule icon and adds a one-cell error slot with its own tooltip.",
+    "motion": "None beyond the Motion setting applied to the rule icons.",
+    "caveat": "Only Custom mode is affected. Normal and Attention keep their own error display. A session-wide error marks only the session row, never every pane.",
+    "frames": [
+      "Blocking errors in Custom mode ‹ Rules only ›\n\nRules only    the shipped Blocking error rule decides\nOverlay       yellow triangle over the custom icon\nSecond icon   triangle in its own cell right of the icon"
     ]
   },
   {
