@@ -156,7 +156,8 @@ fn dump_pty_output(session: &PtySession, label: &str) {
         .map(|elapsed| elapsed.as_millis())
         .unwrap_or_default();
     let (rows, columns) = session.with_screen(|screen| screen.size());
-    if let Ok(history) = session.try_output_history_before(u64::MAX, 512 * 1024 * 1024) {
+    {
+        let history = session.output_history_before(u64::MAX, 512 * 1024 * 1024);
         let _ = std::fs::write(
             directory.join(format!("{label}-{stamp}.bin")),
             &history.bytes,
