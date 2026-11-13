@@ -37,6 +37,7 @@ MSI_COMPONENT_CODE = 'A4D07E19-5B83-4C62-B0F1-7E2C9D3A8F46'
 EXE_APP_ID = '{{C3A92E58-7B16-4D0F-8A41-0E5D9F2B6C73}'
 MEMBER_PATTERN = re.compile(r'\A(?:ilium\.exe|ilium-server\.exe|ilium-animation-helper\.exe|beach-1\.0\.0\.iliumanim|carpet-1\.0\.0\.iliumanim|VERSION|THIRD-PARTY\.txt|[A-Za-z0-9_-]+\.dll)\Z')
 VERSION_PATTERN = re.compile(r'\A(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})\Z')
+PREVIEW_PATTERN = re.compile(r'\A[1-9][0-9]{0,3}\Z')
 MAX_MEMBER_BYTES = 1_073_741_824
 MAX_TOTAL_BYTES = 2_000_000_000
 
@@ -68,11 +69,24 @@ def xml_attribute(value):
 
 
 def version_from_tag(tag):
-    require(isinstance(tag, str) and tag.startswith('v') and VERSION_PATTERN.fullmatch(tag[1:]),
-            'installer versions must be plain vMAJOR.MINOR.PATCH (MSI cannot carry a pre-release suffix)')
-    major, minor, patch = (int(part) for part in tag[1:].split('.'))
+    """The full release version: vMAJOR.MINOR.PATCH, optionally -preview.N."""
+    require(isinstance(tag, str) and tag.startswith('v'), 'installer versions must be vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-preview.N')
+    base, separator, preview = tag[1:].partition('-preview.')
+    require(VERSION_PATTERN.fullmatch(base) and (not separator or PREVIEW_PATTERN.fullmatch(preview)),
+            'installer versions must be vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-preview.N')
+    major, minor, patch = (int(part) for part in base.split('.'))
     require(major <= 255 and minor <= 255 and patch <= 65535, 'MSI ProductVersion limits are 255.255.65535')
     return tag[1:]
+
+
+def msi_product_version(version):
+    """MSI ProductVersion is numeric: 0.1.1-preview.6 becomes 0.1.1.6.
+
+    Windows Installer compares only the first three fields, so a preview and
+    the final release of one base version count as the same version; the MSI
+    therefore allows same-version major upgrades (see render_wix)."""
+    base, separator, preview = version.partition('-preview.')
+    return base + '.' + preview if separator else base
 
 
 def extract_package(archive, version, destination):
@@ -109,10 +123,10 @@ def render_wix(package_directory, files, version):
         for index, name in enumerate(sorted(files)))
     return f'''<?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="Ilium" Manufacturer="{xml_attribute(PUBLISHER)}" Version="{version}" UpgradeCode="{MSI_UPGRADE_CODE}" Scope="perUser" Language="1033" InstallerVersion="500" Compressed="yes">
+  <Package Name="Ilium" Manufacturer="{xml_attribute(PUBLISHER)}" Version="{msi_product_version(version)}" UpgradeCode="{MSI_UPGRADE_CODE}" Scope="perUser" Language="1033" InstallerVersion="500" Compressed="yes">
     <SummaryInformation Description="Ilium terminal workspace for AI agents" />
     <Property Id="ARPURLINFOABOUT" Value="{xml_attribute(HOMEPAGE)}" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Ilium is already installed." />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of Ilium is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="IliumPrograms" Name="Programs">

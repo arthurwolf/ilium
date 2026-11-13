@@ -69,11 +69,22 @@ class PackagingTests(unittest.TestCase):
                 with self.assertRaises(release_tool.ReleaseError):
                     installers.extract_package(archive, '0.1.0', Path(temporary) / 'package')
 
-    def test_only_plain_release_versions_are_accepted(self):
+    def test_only_plain_and_preview_release_versions_are_accepted(self):
         self.assertEqual(installers.version_from_tag('v0.1.0'), '0.1.0')
-        for tag in ('0.1.0', 'v0.1', 'v0.1.0-rc1', 'v1.2.3.4', 'v01.2.3', 'v1.2.3+build', 'v256.0.0', 'v1.256.0', 'v1.0.65536'):
+        self.assertEqual(installers.version_from_tag('v0.1.1-preview.6'), '0.1.1-preview.6')
+        for tag in ('0.1.0', 'v0.1', 'v0.1.0-rc1', 'v1.2.3.4', 'v01.2.3', 'v1.2.3+build', 'v256.0.0', 'v1.256.0', 'v1.0.65536',
+                    'v0.1.1-preview.0', 'v0.1.1-preview.06', 'v0.1.1-preview.', 'v0.1.1-preview.6.1', 'v0.1.1-linux.3', 'v0.1.1-preview.12345'):
             with self.subTest(tag), self.assertRaises(release_tool.ReleaseError):
                 installers.version_from_tag(tag)
+
+    def test_msi_product_version_is_numeric_and_upgrades_same_base_versions(self):
+        self.assertEqual(installers.msi_product_version('0.1.0'), '0.1.0')
+        self.assertEqual(installers.msi_product_version('0.1.1-preview.6'), '0.1.1.6')
+        source = installers.render_wix(Path('C:/pkg'), {'ilium.exe': 'a'}, '0.1.1-preview.6')
+        self.assertIn('Version="0.1.1.6"', source)
+        self.assertNotIn('preview', source)
+        self.assertIn('AllowSameVersionUpgrades="yes"', source)
+        self.assertIn('AppVersion=0.1.1-preview.6', installers.render_inno(Path('C:/pkg'), Path('C:/out'), '0.1.1-preview.6'))
 
     def test_wix_source_is_per_user_with_user_path_and_clean_removal(self):
         files = {'ilium.exe': 'a', 'ilium-server.exe': 'b', 'ilium-animation-helper.exe': 'c',
