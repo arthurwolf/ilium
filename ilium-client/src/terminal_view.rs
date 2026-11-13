@@ -1087,7 +1087,7 @@ impl TerminalState {
     fn append_history(&mut self, bytes: &[u8]) {
         // Fixed-size immutable segments bound append peaks independently of the
         // configured journal budget and avoid copying published generations.
-        const SEGMENT_BYTES: usize = 64 * 1024;
+        const SEGMENT_BYTES: usize = HISTORY_SEGMENT_BYTES;
         for chunk in bytes.chunks(SEGMENT_BYTES) {
             let needs_segment = self.history_segments.back().is_none_or(|segment| {
                 Arc::strong_count(&segment.bytes) > 1
@@ -1168,6 +1168,9 @@ impl TerminalState {
         }
     }
 }
+
+/// Largest number of raw output bytes one retained history segment holds.
+const HISTORY_SEGMENT_BYTES: usize = 64 * 1024;
 
 /// Published state contains no mutable parser. Large clones are made only by
 /// the persistent parsing owner; readers share its immutable allocation.
@@ -1566,13 +1569,19 @@ impl TerminalState {
             self.scrollback_total = 0;
             // The fresh segment is uniquely owned, so its exact size is reserved here.
             // Growing it by doubling would charge up to twice the replay's history.
-            if let Some(segment) = self
+            // A segment never holds more than `HISTORY_SEGMENT_BYTES`, and the
+            // reserved capacity is charged now: trimming later subtracts the
+            // segment's whole capacity from `history_allocation_bytes`.
+            let reserved = self
                 .history_segments
                 .back_mut()
                 .and_then(|segment| Arc::get_mut(&mut segment.bytes))
-            {
-                segment.reserve_exact(bytes.len());
-            }
+                .map_or(0, |segment| {
+                    let previous_capacity = segment.capacity();
+                    segment.reserve_exact(bytes.len().min(HISTORY_SEGMENT_BYTES));
+                    segment.capacity().saturating_sub(previous_capacity)
+                });
+            self.history_allocation_bytes = self.history_allocation_bytes.saturating_add(reserved);
             cursor.replay_started = true;
         }
         while cursor.consumed < bytes.len() {

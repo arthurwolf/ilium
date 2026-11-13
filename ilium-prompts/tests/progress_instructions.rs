@@ -53,11 +53,14 @@ fn lifecycle_rules_survive_the_rewrite() {
 fn agents_are_told_to_block_with_the_wait_commands_instead_of_polling() {
     let text = instructions();
     for required in [
-        "ilium progress set --command '<probe>' --interval-seconds <n> --wait",
-        "ilium progress wait <monitor_id>",
+        "ilium progress set --command '<probe>' --interval-seconds <n>",
+        "`--wait` combines registration with a blocking wait",
+        "prefer the native `ilium_wait` tool",
+        "you MUST block with `ilium progress wait <monitor_id>`",
         "never start a second one",
+        "never launch a duplicate wait",
+        "On an unchanged yield, continue silently",
         "takes precedence over any general rule about sleep loops",
-        "MUST use `--wait`",
     ] {
         assert!(text.contains(required), "missing {required}");
     }

@@ -6583,8 +6583,11 @@ const CONFIGURE_BUTTON_INDENT: &str = "  ";
 
 /// The framed Configure button: a rounded three-row box whose middle row
 /// names the action and the rule summary.
-pub(crate) fn configure_button_lines(summary: &str) -> Vec<Line<'static>> {
-    let label = configure_button_label(summary);
+///
+/// `max_width` is the page's content width: the label drops its key hint and
+/// then its rule summary rather than run past the right edge.
+pub(crate) fn configure_button_lines(summary: &str, max_width: u16) -> Vec<Line<'static>> {
+    let label = configure_button_label(summary, max_width);
     let edge = "─".repeat(UnicodeWidthStr::width(label.as_str()));
     let style = theme::selected_style().add_modifier(Modifier::BOLD);
     vec![
@@ -6605,13 +6608,31 @@ pub(crate) fn configure_button_lines(summary: &str) -> Vec<Line<'static>> {
 }
 
 /// Cells from the left edge of the button to its right edge, inclusive.
-pub(crate) fn configure_button_width(summary: &str) -> u16 {
-    let inner = UnicodeWidthStr::width(configure_button_label(summary).as_str());
-    (UnicodeWidthStr::width(CONFIGURE_BUTTON_INDENT) + inner + 2) as u16
+pub(crate) fn configure_button_width(summary: &str, max_width: u16) -> u16 {
+    let inner = UnicodeWidthStr::width(configure_button_label(summary, max_width).as_str());
+    (configure_button_chrome_width() + inner) as u16
 }
 
-fn configure_button_label(summary: &str) -> String {
-    format!(" Configure custom icons · {summary} · press C ")
+/// Cells the button spends outside its label: the indent and both borders.
+fn configure_button_chrome_width() -> usize {
+    UnicodeWidthStr::width(CONFIGURE_BUTTON_INDENT) + 2
+}
+
+/// The longest label that fits `max_width` with the button's frame; the
+/// shortest one is used when even that does not fit.
+fn configure_button_label(summary: &str, max_width: u16) -> String {
+    let available = usize::from(max_width).saturating_sub(configure_button_chrome_width());
+    let candidates = [
+        format!(" Configure custom icons · {summary} · press C "),
+        format!(" Configure custom icons · {summary} "),
+        " Configure custom icons · C ".to_string(),
+        " Configure custom icons ".to_string(),
+    ];
+    let shortest = candidates[candidates.len() - 1].clone();
+    candidates
+        .into_iter()
+        .find(|label| UnicodeWidthStr::width(label.as_str()) <= available)
+        .unwrap_or(shortest)
 }
 
 /// "22 rules, 21 enabled", shown beside the Configure button.
@@ -6858,8 +6879,9 @@ pub(crate) fn agent_monitoring_view(
     {
         let summary = custom_rules_summary(&app.custom_status_rules);
         view.configure_line = Some(view.lines.len() as u16);
-        view.configure_hit_width = configure_button_width(&summary);
-        view.lines.extend(configure_button_lines(&summary));
+        view.configure_hit_width = configure_button_width(&summary, content_width);
+        view.lines
+            .extend(configure_button_lines(&summary, content_width));
     }
     view.lines.push(Line::from(""));
     view.lines.push(Line::from(Span::styled(
@@ -7669,9 +7691,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn configure_button_shortens_its_label_to_fit_narrow_pages() {
+        let summary = "24 rules, 23 enabled";
+        for max_width in [30_u16, 40, 51, 53, 60, 80, 200] {
+            let lines = configure_button_lines(summary, max_width);
+            for line in &lines {
+                let width: usize = line
+                    .spans
+                    .iter()
+                    .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+                    .sum();
+                assert!(width <= usize::from(max_width), "{max_width}: {width}");
+                assert_eq!(
+                    width,
+                    usize::from(configure_button_width(summary, max_width))
+                );
+            }
+            assert!(lines[1].to_string().contains("Configure custom icons"));
+        }
+        assert!(configure_button_lines(summary, 200)[1]
+            .to_string()
+            .contains("press C"));
+        assert!(!configure_button_lines(summary, 53)[1]
+            .to_string()
+            .contains("press C"));
+        assert!(configure_button_lines(summary, 53)[1]
+            .to_string()
+            .contains(summary));
+    }
+
+    #[test]
     fn configure_button_is_a_framed_three_row_box_of_one_width() {
         let summary = "22 rules, 21 enabled";
-        let lines = configure_button_lines(summary);
+        let lines = configure_button_lines(summary, 200);
         assert_eq!(lines.len(), usize::from(CONFIGURE_BUTTON_ROWS));
         let widths: Vec<usize> = lines
             .iter()
@@ -7685,7 +7737,7 @@ mod tests {
         assert!(
             widths
                 .iter()
-                .all(|width| *width == usize::from(configure_button_width(summary))),
+                .all(|width| *width == usize::from(configure_button_width(summary, 200))),
             "every row spans the hit width: {widths:?}"
         );
         assert!(lines[1].to_string().contains("Configure custom icons"));
