@@ -518,7 +518,11 @@ fn scan_claude_listing_leaves_out_notes_and_empty_transcripts() {
     let mut host = server_host();
     let line = claude_session(&Process::claude(), 0, "l");
     put(&mut host, &claude_main_path("-p", "main"), &line);
-    put(&mut host, ".claude/projects/-p/notes.txt", "not a transcript");
+    put(
+        &mut host,
+        ".claude/projects/-p/notes.txt",
+        "not a transcript",
+    );
     put(&mut host, &claude_main_path("-p", "empty"), "");
     let listed = host.list_transcripts("claude");
     assert_eq!(listed.len(), 1, "{listed:?}");
@@ -535,10 +539,7 @@ fn scan_codex_listing_reports_the_rollout_and_archived_paths() {
     put(&mut host, &codex_path("a"), &line);
     put(&mut host, &codex_archived_path("b"), &line);
     let listed = host.list_transcripts("codex");
-    let paths: Vec<&str> = listed
-        .iter()
-        .map(|f| f["path"].as_str().unwrap())
-        .collect();
+    let paths: Vec<&str> = listed.iter().map(|f| f["path"].as_str().unwrap()).collect();
     assert!(paths.iter().any(|p| p.contains("rollout-a")), "{paths:?}");
     assert!(paths.iter().any(|p| p.contains("rollout-b")), "{paths:?}");
 }
@@ -673,7 +674,11 @@ fn scan_duplicate_files_are_both_listed_but_counted_once() {
 fn scan_codex_scan_parses_both_rollouts() {
     let mut host = server_host();
     let process = Process::codex();
-    put(&mut host, &codex_path("live"), &codex_session(&process, 0, "a"));
+    put(
+        &mut host,
+        &codex_path("live"),
+        &codex_session(&process, 0, "a"),
+    );
     put(
         &mut host,
         &codex_archived_path("old"),
@@ -703,7 +708,10 @@ fn scan_exactly_one_current_setting_row_is_in_the_comparison() {
         .scan_agent_homes_with_current("claude", 250_000 + 33_000)
         .expect("scan");
     let rows = report["report"]["comparison"].as_array().unwrap();
-    let current_rows = rows.iter().filter(|r| r["kind"] == "CurrentSetting").count();
+    let current_rows = rows
+        .iter()
+        .filter(|r| r["kind"] == "CurrentSetting")
+        .count();
     assert_eq!(current_rows, 1);
 }
 
@@ -740,10 +748,7 @@ fn scan_event_stream_finishes_exactly_once() {
     let mut host = server_host();
     write_claude_corpus(&mut host, 8);
     let events = host.scan_event_stream("claude");
-    assert_eq!(
-        events.iter().filter(|e| e["type"] == "Finished").count(),
-        1
-    );
+    assert_eq!(events.iter().filter(|e| e["type"] == "Finished").count(), 1);
 }
 
 /// REQ: PORT:ilium-client/src/compaction_scan/tests.rs::a_stop_before_anything_ends_the_scan_without_panicking
@@ -816,7 +821,11 @@ fn scan_a_foreign_cache_is_replaced_by_a_valid_one() {
     let mut host = server_host();
     write_claude_corpus(&mut host, 2);
     let _ = scan(&mut host, "claude");
-    put(&mut host, ".ilium-test-cache/trace-cache.json", "not json at all");
+    put(
+        &mut host,
+        ".ilium-test-cache/trace-cache.json",
+        "not json at all",
+    );
     let _ = scan(&mut host, "claude");
     let third = scan(&mut host, "claude");
     assert_eq!(summary(&third)["files_from_cache"], 2);

@@ -5,14 +5,25 @@
 //! implemented yet; until then the client activates cleanly, accepts events and draws the gallery
 //! heading only.
 
+pub mod control;
+pub mod credit;
+pub mod help;
+pub mod hover;
+pub mod number;
+pub mod panel;
+pub mod rows;
+pub mod semantic;
+pub mod values;
+pub mod visibility;
+
+use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
-use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
+use ilium_plugin_sdk::types::Activation;
+use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{
     Alignment, Area, NodeFlags, ParagraphSpec, Span, Style, UiNode, UiTree, ViewTarget, Widget,
 };
-use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 
 /// The client side of `ilium.core.ambient` (core-plugin-ambient.md, world `ilium:client/base@0.1.0`).
@@ -82,10 +93,16 @@ fn set_setting_reply(method: &str, payload: &str) -> String {
     };
     let text = |name: &str| parsed.get(name).and_then(serde_json::Value::as_str);
     let (Some(tab), Some(key), Some(value)) = (text("tab"), text("key"), text("value")) else {
-        return error_reply("invalid-argument", "tab, key and value are required strings");
+        return error_reply(
+            "invalid-argument",
+            "tab, key and value are required strings",
+        );
     };
     if tab != "animations" {
-        return error_reply("permission-denied", "this plugin owns only the animations tab");
+        return error_reply(
+            "permission-denied",
+            "this plugin owns only the animations tab",
+        );
     }
     let valid = match key {
         "scene" => SCENES.contains(&value),
@@ -96,7 +113,10 @@ fn set_setting_reply(method: &str, payload: &str) -> String {
     if !valid {
         return error_reply("invalid-argument", "the value is not allowed for this key");
     }
-    error_reply("unsupported", "kernel settings cannot be written from the plugin yet")
+    error_reply(
+        "unsupported",
+        "kernel settings cannot be written from the plugin yet",
+    )
 }
 
 /// The gallery panel: a single paragraph naming the tab until the scene list can be read.

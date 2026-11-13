@@ -13,10 +13,10 @@ use serde_json::Value;
 pub const PLUGIN: &str = "ilium.core.scheduler";
 /// The service of the prompt queue (page "Services").
 pub const QUEUE_SERVICE: &str = "ilium.core.scheduler/queue";
-/// Assumed command ids (API_GAPS.md: the manifest lists no commands).
+/// Command ids the tests drive (gap: the manifest lists no commands, see API_GAPS.md).
 pub const SCHEDULE_COMMAND: &str = "ilium.core.scheduler.schedule-input";
 pub const QUEUE_COMMAND: &str = "ilium.core.scheduler.queue-prompt";
-/// Assumed popup view ids (API_GAPS.md).
+/// Popup view ids the tests drive (see API_GAPS.md).
 pub const SCHEDULE_VIEW: &str = "scheduler.schedule";
 pub const QUEUE_VIEW: &str = "scheduler.queue";
 /// Content kinds (ilium-core PaneContentKind).

@@ -316,7 +316,11 @@ fn port_cost_tracker_preparation_queued_fixed_bands_io_holds_no_quota_bytes_afte
         "cache-change-discards-queued-io-under-fixed-bands",
         json!({ "ready": false, "ineligible_tick": "fixed_bands" }),
     );
-    assert_eq!(reply["quota_input_bytes_after_discard"], json!(0), "{reply}");
+    assert_eq!(
+        reply["quota_input_bytes_after_discard"],
+        json!(0),
+        "{reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker/preparation.rs::cache_change_discards_queued_io_when_display_is_disabled
@@ -326,7 +330,11 @@ fn port_cost_tracker_preparation_queued_disabled_display_io_holds_no_quota_bytes
         "cache-change-discards-queued-io-when-display-is-disabled",
         json!({ "ready": false, "ineligible_tick": "disabled" }),
     );
-    assert_eq!(reply["quota_input_bytes_after_discard"], json!(0), "{reply}");
+    assert_eq!(
+        reply["quota_input_bytes_after_discard"],
+        json!(0),
+        "{reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker/preparation.rs::cache_change_discards_queued_io_without_home
@@ -336,7 +344,11 @@ fn port_cost_tracker_preparation_queued_no_home_io_holds_no_quota_bytes_after_di
         "cache-change-discards-queued-io-without-home",
         json!({ "ready": false, "ineligible_tick": "no_home" }),
     );
-    assert_eq!(reply["quota_input_bytes_after_discard"], json!(0), "{reply}");
+    assert_eq!(
+        reply["quota_input_bytes_after_discard"],
+        json!(0),
+        "{reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker/preparation.rs::cache_change_discards_ready_io_under_fixed_bands
@@ -346,7 +358,11 @@ fn port_cost_tracker_preparation_ready_fixed_bands_io_holds_no_quota_bytes_after
         "cache-change-discards-ready-io-under-fixed-bands",
         json!({ "ready": true, "ineligible_tick": "fixed_bands" }),
     );
-    assert_eq!(reply["quota_input_bytes_after_discard"], json!(0), "{reply}");
+    assert_eq!(
+        reply["quota_input_bytes_after_discard"],
+        json!(0),
+        "{reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker/preparation.rs::cache_change_discards_ready_io_when_display_is_disabled
@@ -356,7 +372,11 @@ fn port_cost_tracker_preparation_ready_disabled_display_io_holds_no_quota_bytes_
         "cache-change-discards-ready-io-when-display-is-disabled",
         json!({ "ready": true, "ineligible_tick": "disabled" }),
     );
-    assert_eq!(reply["quota_input_bytes_after_discard"], json!(0), "{reply}");
+    assert_eq!(
+        reply["quota_input_bytes_after_discard"],
+        json!(0),
+        "{reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker/preparation.rs::cache_change_discards_ready_io_without_home
@@ -366,7 +386,11 @@ fn port_cost_tracker_preparation_ready_no_home_io_holds_no_quota_bytes_after_dis
         "cache-change-discards-ready-io-without-home",
         json!({ "ready": true, "ineligible_tick": "no_home" }),
     );
-    assert_eq!(reply["quota_input_bytes_after_discard"], json!(0), "{reply}");
+    assert_eq!(
+        reply["quota_input_bytes_after_discard"],
+        json!(0),
+        "{reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker/preparation.rs::cache_change_releases_installed_generation_after_independent_last_reader
@@ -376,7 +400,11 @@ fn port_cost_tracker_preparation_generation_is_released_once_the_independent_rea
         "cache-change-releases-installed-generation-after-independent-last-reader",
         json!({ "entries": 1, "independent_reader": true, "new_cache_path": "new-cache.json" }),
     );
-    assert_eq!(reply["reader_entries_after_reader_drop"], json!(0), "{reply}");
+    assert_eq!(
+        reply["reader_entries_after_reader_drop"],
+        json!(0),
+        "{reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker/preparation.rs::changing_history_cache_path_fences_an_already_captured_cpu_generation
@@ -386,7 +414,11 @@ fn port_cost_tracker_preparation_captured_cpu_generation_is_not_admitted_after_p
         "changing-history-cache-path-fences-an-already-captured-cpu-generation",
         json!({ "new_cache_path": "/worker879/new-history-cache" }),
     );
-    assert_eq!(reply["cpu_generation_admitted_after_change"], json!(false), "{reply}");
+    assert_eq!(
+        reply["cpu_generation_admitted_after_change"],
+        json!(false),
+        "{reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker/preparation.rs::completed_history_receipt_drains_before_a_new_cpu_admission_at_original_limits
@@ -396,7 +428,11 @@ fn port_cost_tracker_preparation_pending_receipt_is_charged_the_original_64_mib_
         "completed-history-receipt-drains-before-a-new-cpu-admission-at-original-limits",
         json!({ "transcript_lines": ["{\"type\":\"user\",\"message\":{\"content\":\"hi\"}}", "{\"type\":\"cost-state\",\"sessionId\":\"only\",\"totalCostUSD\":1.0}", "{\"type\":\"assistant\",\"message\":{\"content\":[]}}"], "input_byte_limit_mib": 512 }),
     );
-    assert_eq!(reply["receipt_limit_bytes"], json!(64 * 1024 * 1024), "{reply}");
+    assert_eq!(
+        reply["receipt_limit_bytes"],
+        json!(64 * 1024 * 1024),
+        "{reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker/preparation.rs::ordinary_cancelled_rescan_preserves_the_previous_complete_generation

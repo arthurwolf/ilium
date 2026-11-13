@@ -189,15 +189,21 @@ fn feature_006_the_list_is_empty_before_any_bookmark() {
 
 /// REQ: F-006
 #[test]
-fn feature_006_adding_a_bookmark_for_a_missing_node_fails_with_not_found() {
-    use ilium_plugin_sdk::types::ErrorCode;
+fn feature_006_adding_a_bookmark_for_a_missing_node_answers_an_error() {
+    // The testkit cannot make a service handler return `Err(not-found)`: the plugin answers an
+    // error payload instead (see API_GAPS.md).
     let mut session = session();
-    let error = call(
+    let answer = call(
         &mut session,
         serde_json::json!({"op": "add", "node": 424_242u64}),
     )
-    .expect_err("no such node");
-    assert_eq!(error.code, ErrorCode::NotFound);
+    .expect("the service answers");
+    let value: serde_json::Value = serde_json::from_str(&answer).expect("JSON");
+    assert!(
+        value.get("error").is_some(),
+        "error payload expected: {value}"
+    );
+    assert!(session.server("ilium.core.tree").submitted().is_empty());
 }
 
 /// REQ: F-006

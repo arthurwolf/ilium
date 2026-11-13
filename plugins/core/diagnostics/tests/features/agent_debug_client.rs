@@ -1,5 +1,5 @@
 //! Ported tests of the client side of the agent debug history (ilium-client app, render_cache, ui,
-//! F-032). Assumed methods: record, open, mirror, save_prompt. See API_GAPS.md item 1.
+//! F-032). Methods used: record, open, mirror, save_prompt. See API_GAPS.md item 1.
 
 use ilium_plugin_sdk::testing::FakeSession;
 use serde_json::{json, Value};

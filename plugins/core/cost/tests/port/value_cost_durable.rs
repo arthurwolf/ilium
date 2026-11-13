@@ -87,7 +87,10 @@ fn port_value_cost_durable_failed_save_names_the_disk_error_in_the_notice() {
     );
     host.settle();
     let notice = host.last_notice().unwrap_or_default();
-    assert!(notice.contains("disk full"), "the notice names the error: {notice}");
+    assert!(
+        notice.contains("disk full"),
+        "the notice names the error: {notice}"
+    );
     assert_eq!(
         host.kernel_settings().tab("cost"),
         Some(json!({ "calibration": "budget" }))

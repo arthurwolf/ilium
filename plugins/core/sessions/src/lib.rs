@@ -5,6 +5,8 @@
 //! stop and the attach-aware poll need the SDK `host()` calls (agent session, pane list, timers),
 //! which the SDK lane has not implemented yet.
 
+pub mod recovery;
+
 use std::collections::BTreeSet;
 
 use ilium_plugin_sdk::generated::types::events::Event;

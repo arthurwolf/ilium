@@ -14,7 +14,9 @@ use ilium_plugin_sdk::types::NodeId;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, JobRunner, Lifecycle, Views};
 
+pub mod analysis;
 mod redact;
+pub mod remote;
 mod runner;
 
 /// The server side of `ilium.core.compaction` (core-plugin-compaction.md, world `ilium:server/base@0.1.0`).

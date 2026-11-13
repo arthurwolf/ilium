@@ -69,9 +69,15 @@ impl ProgressOutcome {
 
     /// Parses a wire name.
     pub fn parse(name: &str) -> Option<Self> {
-        [Self::Running, Self::Success, Self::Failure, Self::Unknown, Self::Cleared]
-            .into_iter()
-            .find(|outcome| outcome.name() == name)
+        [
+            Self::Running,
+            Self::Success,
+            Self::Failure,
+            Self::Unknown,
+            Self::Cleared,
+        ]
+        .into_iter()
+        .find(|outcome| outcome.name() == name)
     }
 }
 

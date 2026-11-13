@@ -6,6 +6,9 @@
 //! `create-split` and `resize-pane` intents.
 
 pub mod new_split;
+pub mod padding;
+pub mod padding_rows;
+pub mod tree_layout_rows;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

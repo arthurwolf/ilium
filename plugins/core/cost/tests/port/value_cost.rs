@@ -95,7 +95,9 @@ fn port_value_cost_selectors_offer_the_full_metric_and_calibration_catalogs() {
 /// REQ: PORT:ilium-client/src/value_cost.rs::budget_rejects_changed_units_and_keeps_exact_valid_intermediates
 #[test]
 fn port_value_cost_budget_accepts_a_fresh_value_without_touching_the_metric() {
-    let reply = edit(json!({ "settings": { "calibration": "budget" }, "row": "budget", "set_number": "0.5" }));
+    let reply = edit(
+        json!({ "settings": { "calibration": "budget" }, "row": "budget", "set_number": "0.5" }),
+    );
     assert_eq!(reply["ok"], json!(true));
     assert_eq!(reply["settings"]["budget_usd"], json!(0.5));
     assert_ne!(reply["settings"]["metric"], json!("quota"));
@@ -113,7 +115,9 @@ fn port_value_cost_fixed_preset_one_applies_its_cuts() {
 /// REQ: PORT:ilium-client/src/value_cost.rs::hidden_rows_invalid_numbers_and_unknown_options_never_mutate
 #[test]
 fn port_value_cost_valid_history_days_applies_after_rejected_inputs() {
-    let reply = edit(json!({ "settings": { "history_days": 30 }, "row": "history_days", "set_number": "90" }));
+    let reply = edit(
+        json!({ "settings": { "history_days": 30 }, "row": "history_days", "set_number": "90" }),
+    );
     assert_eq!(reply["ok"], json!(true));
     assert_eq!(reply["settings"]["history_days"], json!(90));
 }
@@ -122,7 +126,8 @@ fn port_value_cost_valid_history_days_applies_after_rejected_inputs() {
 #[test]
 fn port_value_cost_metric_selector_rejects_an_unknown_metric_id() {
     let settings = json!({ "metric": "cost" });
-    let reply = edit(json!({ "settings": settings.clone(), "row": "metric", "set_choice": "unknown" }));
+    let reply =
+        edit(json!({ "settings": settings.clone(), "row": "metric", "set_choice": "unknown" }));
     assert_eq!(reply["ok"], json!(false));
     assert_eq!(reply["settings"], settings);
 }

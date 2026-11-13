@@ -9,5 +9,7 @@ mod sound_preview;
 mod sounds;
 mod svc_server;
 mod svc_sounds;
+mod synthesis;
+mod sound_model;
 mod tasks;
 mod texts;

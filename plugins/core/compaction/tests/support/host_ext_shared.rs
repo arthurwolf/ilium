@@ -7,7 +7,9 @@
 
 use ilium_plugin_sdk::host::Bucket;
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ActionKind, Event, Intent, UiAction, ViewTarget, ViewVisibilityEvent};
+use ilium_plugin_sdk::types::{
+    ActionKind, Event, Intent, UiAction, ViewTarget, ViewVisibilityEvent,
+};
 use serde_json::Value;
 
 /// Topic the plugin publishes once per scan it starts.
@@ -41,7 +43,9 @@ impl CompactionSharedHostExt for FakeHost {
             .get(Bucket::Global, RECOMMENDATION_KEY)
             .expect("set_recommendation seeds the recommendation before it is read");
         let value: Value = serde_json::from_slice(&bytes).expect("the recommendation is JSON");
-        value["tokens"].as_u64().expect("the recommendation holds tokens")
+        value["tokens"]
+            .as_u64()
+            .expect("the recommendation holds tokens")
     }
 
     /// Picks the agent target (`claude` or `codex`) on the optimiser panel.

@@ -101,7 +101,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "tree.restructure",
       "extensions.provide:ilium.core.tree/before-move",
       "extensions.provide:ilium.core.tree/before-close",
-      "extensions.provide:ilium.core.tree/node-sorts"
+      "extensions.provide:ilium.core.tree/node-sorts",
+      "services.provide:ilium.core.tree/bookmarks"
     ],
     "client": [
       "tree.read"
@@ -117,13 +118,35 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "payload_schema": {
           "type": "object",
           "properties": {
-            "node": {"type": "string"},
-            "from_parent": {"type": "string"},
-            "to_parent": {"type": "string"},
-            "index": {"type": "integer"},
-            "source": {"type": "string", "enum": ["mouse", "keys", "command", "plugin"]}
+            "node": {
+              "type": "string"
+            },
+            "from_parent": {
+              "type": "string"
+            },
+            "to_parent": {
+              "type": "string"
+            },
+            "index": {
+              "type": "integer"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "mouse",
+                "keys",
+                "command",
+                "plugin"
+              ]
+            }
           },
-          "required": ["node", "from_parent", "to_parent", "index", "source"]
+          "required": [
+            "node",
+            "from_parent",
+            "to_parent",
+            "index",
+            "source"
+          ]
         },
         "risk": "standard",
         "deadline_ms": 20,
@@ -138,11 +161,21 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "payload_schema": {
           "type": "object",
           "properties": {
-            "node": {"type": "string"},
-            "kind": {"type": "string"},
-            "has_children": {"type": "boolean"}
+            "node": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "has_children": {
+              "type": "boolean"
+            }
           },
-          "required": ["node", "kind", "has_children"]
+          "required": [
+            "node",
+            "kind",
+            "has_children"
+          ]
         },
         "risk": "standard",
         "deadline_ms": 20,
@@ -156,18 +189,86 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "entry_schema": {
           "type": "object",
           "properties": {
-            "id": {"type": "string"},
-            "title": {"type": "string"},
-            "slot": {"type": "string"}
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "slot": {
+              "type": "string"
+            }
           },
-          "required": ["id", "title", "slot"]
+          "required": [
+            "id",
+            "title",
+            "slot"
+          ]
         },
         "risk": "standard",
         "max_entries": 64,
         "dynamic": false,
         "version": "0.1.0"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "id": "move-up",
+        "title": "Move up",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "move-down",
+        "title": "Move down",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "set-bookmark",
+        "title": "Set bookmark",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "set-locked-closed",
+        "title": "Lock closed",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "indent",
+        "title": "Indent",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "outdent",
+        "title": "Outdent",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      }
+    ],
+    "services": {
+      "provides": [
+        {
+          "name": "ilium.core.tree/bookmarks",
+          "version": "0.1.0",
+          "schema": "schemas/bookmarks.json"
+        }
+      ]
+    },
+    "topics": {
+      "publishes": [
+        "ilium.core.tree/changed"
+      ]
+    }
   },
   "activation": [
     "startup"
@@ -597,6 +698,10 @@ Other plugins change what `ilium.core.tree` does through the points below. The p
 **Topics** (list under `contributes.topics.subscribes`):
 
 - `ilium.core.tree/changed`: { node, change } after any structural change
+
+The bookmarks service takes a JSON request `{"op": "list"}`, `{"op": "add", "node": <id>}` or `{"op": "remove", "node": <id>}`. `list` answers `{"bookmarks": [<id>, ...]}` in tree order. `add` and `remove` answer `{"ok": true, "node": <id>, "bookmarked": <bool>}`, or `{"error": "<text>"}` when the node does not exist. The topic `changed` carries `change` as `added` (first seen), `updated` or `removed`.
+
+**Commands** (server side, category Tree): `move-up`, `move-down`, `set-bookmark`, `set-locked-closed`, `indent` and `outdent`. The first four take `{"node": <id>}`, the two switches also `"on": <bool>`; the tree context menu invokes them. `indent` and `outdent` act on the node of the command context. A move at the outer boundary of the tree submits nothing.
 
 Decoration slots, row actions and display modes of every plugin are drawn by the tree.
 

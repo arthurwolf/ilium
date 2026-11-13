@@ -35,3 +35,8 @@ Tests are in tests/features/. Items the skeleton or harness does not offer yet:
 - Editor plugin: Markdown view decodes BMP images from `project:` files (PORT:ilium-client/src/markdown/render.rs::local_image_paints_its_color_into_the_buffer) and paints them as half-block cells with `Color::Rgb(0xRRGGBB)` background; the image cell representation is not on the page.
 - ilium-plugin-testkit `Screen`: no accessor for the raster size of a pixel heading; raster tier size twins (markdown/raster.rs) assert only relative row layout.
 - Close confirmation (app.rs) and the identity tooltip (ui.rs) are kernel UI; twins assert the dirty flag of the buffers-service `list` they derive from.
+
+## Port wave notes (workspace group)
+
+- Moved as a pure module with tests: `src/open_target.rs` (URL scheme gate, lexical normalization, cwd/home confinement, file-or-directory classification from the host's answer). Tests: `tests/port/open_target_pure.rs`. Token detection (`terminal_links::link_at`) stays in the terminal plugin.
+- Not moved yet: `markdown/`, `syntax/`, `buffer/`, `chrome/`, `document.rs`, `agent_from_line.rs`, `close_dirty.rs` (templates copy), the service schema, and the `contributes.extensions` entry for `ilium.core.terminal/open-link`. The editor pane kind is G14, file access is G10 (`fs`, `editor`, `clipboard`), scrolling and text edit in views are G8, agent creation from a line is G3.

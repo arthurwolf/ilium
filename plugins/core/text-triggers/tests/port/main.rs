@@ -15,6 +15,7 @@ mod client_preview;
 mod client_save_failures;
 mod client_trigger_settings;
 mod ipc_text_trigger;
+mod rules;
 mod server_config;
 mod server_connection;
 mod server_integration;

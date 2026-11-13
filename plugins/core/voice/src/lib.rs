@@ -1,7 +1,16 @@
 //! Core plugin `ilium.core.voice` (manual page core-plugin-voice.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Minimal conforming bodies: no contributions are produced until the feature logic moves here.
+//! The pure parts of the voice feature live in the modules below: PCM16 conversion and resampling (`pcm`), the
+//! audio device catalogue limits (`device_catalogue`), and the OpenAI Realtime protocol as data (`realtime`:
+//! endpoint guard, session payload, event parsing, credential-free diagnostics, tool call extraction). The
+//! microphone, speaker and WebSocket belong to the host (foundation gaps G10 audio/http); the two sides below
+//! stay minimal until those host interfaces exist.
+
+pub mod credentials;
+pub mod device_catalogue;
+pub mod error;
+pub mod pcm;
+pub mod realtime;
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;

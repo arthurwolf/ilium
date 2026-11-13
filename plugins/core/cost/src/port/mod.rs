@@ -8,9 +8,7 @@ mod model_ops;
 mod timeline_ops;
 
 use ilium_plugin_sdk::generated::types::events::Event;
-use ilium_plugin_sdk::generated::types::intents::{
-    Intent, MessageSpec, MessageTarget, Submission,
-};
+use ilium_plugin_sdk::generated::types::intents::{Intent, MessageSpec, MessageTarget, Submission};
 use ilium_plugin_sdk::types::PluginId;
 use serde_json::Value;
 

@@ -452,7 +452,10 @@ fn port_cost_settings_always_visible_option_leaves_other_options_on_hover() {
         json!([adjust("visibility:meter", 0), { "probe": { "option": "level_glyph", "hovered": false } }]),
     );
     assert_eq!(reply["settings"]["meter"]["visibility"], json!("always"));
-    assert_eq!(reply["settings"]["level_glyph"]["visibility"], json!("hover"));
+    assert_eq!(
+        reply["settings"]["level_glyph"]["visibility"],
+        json!("hover")
+    );
     assert_eq!(reply["probes"][0], json!(false));
 }
 
@@ -544,7 +547,10 @@ fn port_cost_settings_fixed_presets_wrap_upwards_from_the_last_rung() {
     assert_eq!(presets["fixed_presets"].as_array().map(Vec::len), Some(5));
     let last = presets["fixed_presets"][4].clone();
     let first = presets["fixed_presets"][0].clone();
-    let reply = apply(json!({ "fixed_cuts": last }), json!([adjust("fixed_preset", 1)]));
+    let reply = apply(
+        json!({ "fixed_cuts": last }),
+        json!([adjust("fixed_preset", 1)]),
+    );
     assert_eq!(reply["settings"]["fixed_cuts"], first);
 }
 
@@ -553,14 +559,20 @@ fn port_cost_settings_fixed_presets_wrap_upwards_from_the_last_rung() {
 fn port_cost_settings_quota_window_toggle_leaves_the_budget_percent_unchanged() {
     let quota = apply(json!({}), json!([adjust("metric:dollars", 1)]));
     let before = quota["settings"]["quota_budget_percent"].clone();
-    let toggled = apply(quota["settings"].clone(), json!([adjust("quota_window", 0)]));
+    let toggled = apply(
+        quota["settings"].clone(),
+        json!([adjust("quota_window", 0)]),
+    );
     assert_eq!(toggled["settings"]["quota_budget_percent"], before);
 }
 
 /// REQ: PORT:ilium-client/src/cost_settings.rs::rows_follow_the_selected_calibration
 #[test]
 fn port_cost_settings_budget_calibration_drops_the_burn_rate_rows() {
-    let reply = client("settings.rows", json!({ "settings": { "calibration": "budget" } }));
+    let reply = client(
+        "settings.rows",
+        json!({ "settings": { "calibration": "budget" } }),
+    );
     let rows = reply["rows"].as_array().cloned().unwrap_or_default();
     assert!(!rows.contains(&json!("burn_preset")));
 }
@@ -615,5 +627,8 @@ fn port_cost_settings_toml_round_trip_keeps_custom_price_rows() {
         "settings.toml-round-trip",
         json!({ "settings": reply["settings"].clone() }),
     );
-    assert_eq!(round["settings"]["prices"]["gpt-reserve"]["output"], json!(2.0));
+    assert_eq!(
+        round["settings"]["prices"]["gpt-reserve"]["output"],
+        json!(2.0)
+    );
 }

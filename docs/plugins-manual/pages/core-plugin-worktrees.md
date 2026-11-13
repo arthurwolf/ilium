@@ -50,7 +50,7 @@ The kernel never runs Git itself. The plugin runs `git worktree add` through pro
 
 This block is a fragment. It lists the contributions. The whole manifest is in [Complete manifest](#complete-manifest).
 
-The contract version is 0.1. The grants follow the file scope rules: the worktree folder is the `worktrees` scope, and Git is a named program.
+The contract version is 0.1. The grants follow the file scope rules: the worktree folder is the `worktrees` scope, and Git is a named program. The server reads the `git` tab (`settings.read-kernel:git`) for its defaults, and the client side writes it.
 
 ```json
 {
@@ -61,11 +61,11 @@ The contract version is 0.1. The grants follow the file scope rules: the worktre
       "panes.create", "panes.read",
       "fs.read:project", "fs.write:worktrees"
     ],
-    "client": ["ui.panels"]
+    "client": ["ui.panels", "settings.write-kernel:git"]
   },
   "contributes": {
     "commands": [{ "id": "new-agent", "title": "New agent in worktree", "category": "Git" }],
-    "keybindings": [{ "command": "new-agent", "chord": "w", "mode": "prefix" }]
+    "keybindings": [{ "command": "new-agent", "chord": "W", "mode": "prefix" }]
   }
 }
 ```
@@ -87,6 +87,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "entry": "server.wasm",
     "world": "ilium:server/base@0.1.0"
   },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
   "capabilities": {
     "server": [
       "workspace.manage",
@@ -96,13 +100,14 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.read",
       "fs.read:project",
       "fs.write:worktrees",
-      "settings.write-kernel:git",
+      "settings.read-kernel:git",
       "extensions.provide:ilium.core.worktrees/before-create",
       "extensions.provide:ilium.core.worktrees/post-create-steps",
       "extensions.provide:ilium.core.worktrees/before-remove"
     ],
     "client": [
-      "ui.panels"
+      "ui.panels",
+      "settings.write-kernel:git"
     ]
   },
   "activation": [
@@ -120,7 +125,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "keybindings": [
       {
         "command": "new-agent",
-        "chord": "w",
+        "chord": "W",
         "mode": "prefix"
       }
     ],
@@ -131,22 +136,39 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "mode": "transform",
         "title": "Choose the branch name or refuse a new worktree",
         "payload_schema": {
-            "type": "object",
-            "properties": {
-              "repo": { "type": "string" },
-              "branch": { "type": "string" },
-              "base": { "type": "string" },
-              "agent": { "type": "string" }
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string"
             },
-            "required": ["repo", "branch", "base", "agent"]
+            "branch": {
+              "type": "string"
+            },
+            "base": {
+              "type": "string"
+            },
+            "agent": {
+              "type": "string"
+            }
           },
+          "required": [
+            "repo",
+            "branch",
+            "base",
+            "agent"
+          ]
+        },
         "reply_schema": {
-            "type": "object",
-            "properties": {
-              "branch": { "type": "string" }
-            },
-            "required": ["branch"]
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": "string"
+            }
           },
+          "required": [
+            "branch"
+          ]
+        },
         "risk": "standard",
         "deadline_ms": 20,
         "max_handlers": 8,
@@ -157,15 +179,28 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "kind": "collect",
         "title": "Add a step that runs after a worktree is created",
         "entry_schema": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" },
-              "title": { "type": "string" },
-              "command": { "type": "string" },
-              "working_directory": { "type": "string" }
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
             },
-            "required": ["id", "title", "command", "working_directory"]
+            "title": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "working_directory": {
+              "type": "string"
+            }
           },
+          "required": [
+            "id",
+            "title",
+            "command",
+            "working_directory"
+          ]
+        },
         "risk": "high",
         "max_entries": 64,
         "dynamic": false,
@@ -177,15 +212,28 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "mode": "veto",
         "title": "Refuse removing a worktree",
         "payload_schema": {
-            "type": "object",
-            "properties": {
-              "path": { "type": "string" },
-              "branch": { "type": "string" },
-              "dirty": { "type": "boolean" },
-              "merged": { "type": "boolean" }
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
             },
-            "required": ["path", "branch", "dirty", "merged"]
+            "branch": {
+              "type": "string"
+            },
+            "dirty": {
+              "type": "boolean"
+            },
+            "merged": {
+              "type": "boolean"
+            }
           },
+          "required": [
+            "path",
+            "branch",
+            "dirty",
+            "merged"
+          ]
+        },
         "risk": "standard",
         "deadline_ms": 20,
         "max_handlers": 8,
@@ -211,7 +259,7 @@ If the plugin is disabled, the tab stays in the rail with its stored values show
 
 #### New agent in a worktree (Ctrl+B W)
 
-The command carries a keybinding in prefix mode, so the user presses the prefix key and then `w`. On `command-invoked` the client side sends the selected branch to the server side. See [commands](/pages/api-commands/), [the command palette](/pages/api-command-palette/), [events](/pages/api-events/) and [messages and topics](/pages/api-messages-and-topics/).
+The command carries a keybinding in prefix mode, so the user presses the prefix key and then `W`. On `command-invoked` the client side sends the selected branch to the server side. See [commands](/pages/api-commands/), [the command palette](/pages/api-command-palette/), [events](/pages/api-events/) and [messages and topics](/pages/api-messages-and-topics/).
 
 **Rust**
 

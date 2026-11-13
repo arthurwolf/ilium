@@ -20,11 +20,177 @@
       "tree.write",
       "tree.metadata",
       "tree.decorate",
-      "tree.restructure"
+      "tree.restructure",
+      "extensions.provide:ilium.core.tree/before-move",
+      "extensions.provide:ilium.core.tree/before-close",
+      "extensions.provide:ilium.core.tree/node-sorts",
+      "services.provide:ilium.core.tree/bookmarks"
     ],
     "client": [
       "tree.read"
     ]
+  },
+  "contributes": {
+    "extension_points": [
+      {
+        "id": "before-move",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before a node is moved",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "node": {
+              "type": "string"
+            },
+            "from_parent": {
+              "type": "string"
+            },
+            "to_parent": {
+              "type": "string"
+            },
+            "index": {
+              "type": "integer"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "mouse",
+                "keys",
+                "command",
+                "plugin"
+              ]
+            }
+          },
+          "required": [
+            "node",
+            "from_parent",
+            "to_parent",
+            "index",
+            "source"
+          ]
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-close",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before a pane or group is closed",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "node": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "has_children": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "node",
+            "kind",
+            "has_children"
+          ]
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "node-sorts",
+        "kind": "collect",
+        "title": "Tree sort orders",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "slot": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "slot"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
+    "commands": [
+      {
+        "id": "move-up",
+        "title": "Move up",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "move-down",
+        "title": "Move down",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "set-bookmark",
+        "title": "Set bookmark",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "set-locked-closed",
+        "title": "Lock closed",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "indent",
+        "title": "Indent",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "outdent",
+        "title": "Outdent",
+        "palette": false,
+        "side": "server",
+        "category": "Tree"
+      }
+    ],
+    "services": {
+      "provides": [
+        {
+          "name": "ilium.core.tree/bookmarks",
+          "version": "0.1.0",
+          "schema": "schemas/bookmarks.json"
+        }
+      ]
+    },
+    "topics": {
+      "publishes": [
+        "ilium.core.tree/changed"
+      ]
+    }
   },
   "activation": [
     "startup"

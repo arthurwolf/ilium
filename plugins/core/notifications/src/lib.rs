@@ -4,6 +4,9 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! Bodies follow the manual; behaviour beyond activation is driven by host events.
 
+pub mod sound;
+pub mod synthesis;
+
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;

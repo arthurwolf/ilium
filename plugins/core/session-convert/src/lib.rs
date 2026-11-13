@@ -1,8 +1,21 @@
 //! Core plugin `ilium.core.session-convert` (manual page core-plugin-session-convert.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Lifecycle and handler bodies keep the
-//! activation state and answer event batches with no submissions.
+//! The pure conversion core lives in the modules below (`rollout` parses a Codex rollout, `claude_writer` maps its
+//! items to Claude content, `paths` names the Claude project directory, `error` holds the one-line failure texts).
+//! Reading and writing the transcripts, the `codex app-server` import and the ledger are host work (foundation
+//! gaps G10 fs/process and G17 jobs); the two sides below keep the activation state and answer event batches with
+//! no submissions until those host interfaces exist.
+
+pub mod claude_writer;
+pub mod error;
+pub mod lenient_json;
+pub mod paths;
+pub mod prompts;
+pub mod rollout;
+
+/// Tool results longer than this are cut while the source is parsed, so one command dump can neither dominate
+/// the replayed context nor sit in memory.
+pub const MAX_TOOL_RESULT_CHARS: usize = 30_000;
 
 use ilium_plugin_sdk::generated::exports::menu_provider::MenuContext;
 use ilium_plugin_sdk::generated::exports::menu_provider::MenuEntry;

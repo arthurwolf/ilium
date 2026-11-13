@@ -79,7 +79,11 @@ fn run_session(locality: Locality, ending: Ending) -> SessionObservation {
     configure(&mut host, "input_mode", json!("push_to_talk"));
     configure(&mut host, "enabled", json!(true));
     let settings_text = host
-        .render(ViewTarget::SettingsPage("voice-control".to_string()), 80, 40)
+        .render(
+            ViewTarget::SettingsPage("voice-control".to_string()),
+            80,
+            40,
+        )
         .text();
     let settings_names_provider =
         settings_text.contains(provider) && settings_text.to_lowercase().contains("provider");

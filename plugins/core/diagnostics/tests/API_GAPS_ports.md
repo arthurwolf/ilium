@@ -1,6 +1,6 @@
 # API gaps of the diagnostics port tests
 
-Assumed, on top of API_GAPS.md item 1 (service `ilium.core.diagnostics/agent-debug`):
+Taken as given, on top of API_GAPS.md item 1 (service `ilium.core.diagnostics/agent-debug`):
 
 - `log_request` { request, session?, name?, ok, error? } -> { logged }: the server writes a request line
   `request_name="<request>"`, plus `request failed` and the error text when `ok` is false. `enable` also writes the

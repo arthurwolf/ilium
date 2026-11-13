@@ -1,12 +1,12 @@
-# API gaps found by the terminal features tests
+# API gaps found by the terminal tests
 
-- ilium-plugin-testkit: `impl FakeHost { pub fn terminal(&mut self) -> &mut FakeTerminal }` with `FakeTerminal::set_screen(&mut self, pane: u64, rows: &[&str], revision: u64)` and `FakeTerminal::set_history(&mut self, pane: u64, text: &str)` (F-017, WIT terminal.read-screen / terminal.history): a fake terminal pane the plugin reads; also reachable as `session.server(id).terminal()`.
-- ilium-plugin-testkit: `impl FakeHost { pub fn published_topics(&self) -> Vec<(String, String)> }` (F-013, topic `ilium.core.terminal/screen-changed`): `(topic, payload_json)` of every topic publication the plugin made, in order.
-- ilium-plugin-testkit: `impl FakeSession { pub fn call_extension(&mut self, point: &str, payload_json: &str) -> Result<Vec<String>, HarnessError> }` (EXT-052, EXT-055): runs a chain of an extension point owned by an installed plugin and returns the replies of the contributors, empty when none contributes.
-- dev-dependency of ilium-plugin-core-terminal: `regex = "1"` (F-015): the link-detector regex of the manifest is compiled in the tests.
-- manual (F-017): the JSON request of the service `ilium.core.terminal/transfer` is not specified; the tests assume `{"method":"send-screen","source":<pane>,"target":<pane>}` and the dedup key `transfer-<source>-<target>-<revision>` from the page sample. The manual must state the shape or the tests change with it.
-- manual (F-017): the order of history and visible screen in one paste is not specified; the tests assume history first (scrollback precedes the visible screen), joined with `\n`.
-- manual (F-015): the manifest declares `link_detectors[0].command = "link-open"` but has no `contributes.commands` entry for it; EXT-050 says a command field must name a declared command. The tests cover the `link-activated` handler only.
-- manual (SEC-293): the page marks `open-link` as `standard` while `reference-extension-security.md` marks it `high`; `sec_293_open_link_risk_on_the_page_equals_the_security_table` fails until one of them is corrected.
-- manual (F-013, F-014): the page lists no settings rows, commands, keybindings or menu items for the plugin (the manifest has none), and no `terminal-Bnn` behaviour ids exist; the kernel tab validation (scrollback 4 to 512 step 4, engine memory 0 or 256 to 16384) is owned by the kernel parity tests.
-- dev-dependency of ilium-plugin-core-terminal: regex = "1" (port twins of terminal_links.rs); tests/port is a second test target needing [[test]] name = "port" path = "tests/port/main.rs" in Cargo.toml (features target is likewise declared by the parent).
+Open gaps (the terminal plugin is written against the real host API; these block only its tests):
+
+- ilium-plugin-testkit: `HostTerminal` (`read_screen`, `history_text`, `take_history`) is unmodelled in the bridge. `read_screen` answers `None` and `history_text` answers `Err(Unsupported)`, so `FakeTerminal::set_screen` / `set_history` write fields nothing reads. The F-017 transfer tests (tests/features/transfer.rs) cannot pass until the bridge reads them: `read_screen(pane, part, max_rows)` from `set_screen`, `history_text` returning a `RequestId` that completes as `Event::RequestCompleted(RequestRef::Call(id))` with `take_history` answering `set_history`.
+- ilium-plugin-testkit: `HostIntentsHost::submit` is unmodelled and answers `Err`. The `send-text` method and the history-less `send-screen` fallback submit through it. It should record the submission so `session.server(id).submitted()` returns it.
+- ilium-plugin-testkit: timers are recorded (`active_timers`) but not fired; the screen-changed tests deliver `Event::TimerFired` by hand.
+- ilium-plugin-testkit: `FakeSession::call_extension(point, payload_json)` (EXT-052, EXT-055) runs a chain of an extension point owned by an installed plugin; not needed by the current tests.
+- foundation G5: no consumer routes a link click to the plugin, so `ilium-client/src/terminal_links.rs` stays (port-keep) next to `plugins/core/terminal/src/links.rs`.
+- foundation G4: topics and services reach only plugins on the same side, so a client plugin cannot call the server `transfer` service or subscribe to `screen-changed` yet.
+- foundation G14: the kernel keeps the terminal pane kind; `screen_diff` is the repaint rule only, the renderer is not moved.
+- manual (F-015): `link_detectors[0].command = "link-open"` has no `contributes.commands` entry; EXT-050 says a command field must name a declared command.

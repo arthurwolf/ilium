@@ -158,7 +158,8 @@ fn cor_950_a_failed_provider_call_logs_neither_the_prompt_nor_the_error_body() {
 #[test]
 fn cor_950_the_audit_log_holds_no_prompt_or_reply_text() {
     let mut host = server_host_with(ollama_settings_with_retention());
-    host.http().expect("POST", OLLAMA_URL, ollama_ok(REPLY_MARK));
+    host.http()
+        .expect("POST", OLLAMA_URL, ollama_ok(REPLY_MARK));
     complete_with(&mut host, 20, PROMPT_MARK).expect("accepted");
     host.settle();
     let records = service_text(&mut host, "audit", "records");
@@ -172,7 +173,8 @@ fn cor_950_the_audit_log_holds_no_prompt_or_reply_text() {
 #[test]
 fn cor_950_the_privacy_log_holds_metadata_but_no_prompt_or_reply_text() {
     let mut host = server_host_with(ollama_settings_with_retention());
-    host.http().expect("POST", OLLAMA_URL, ollama_ok(REPLY_MARK));
+    host.http()
+        .expect("POST", OLLAMA_URL, ollama_ok(REPLY_MARK));
     complete_with(&mut host, 21, PROMPT_MARK).expect("accepted");
     host.settle();
     let entries = service_text(&mut host, "privacy", "entries");

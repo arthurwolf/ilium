@@ -79,7 +79,11 @@ fn port_029_a_text_draft_is_refused_and_the_saved_budget_stays() {
         .expect("saved");
     let error = host
         .kernel_settings()
-        .set("inference", "restructure_prompt_token_limit", json!("not a number"))
+        .set(
+            "inference",
+            "restructure_prompt_token_limit",
+            json!("not a number"),
+        )
         .expect_err("refused");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
     assert_eq!(

@@ -1,243 +1,202 @@
-//! Twins of ilium-client/src/terminal_links.rs tests. The original resolves a link at a cell
-//! column; the plugin exposes the `path-line` detector regex (manifest) and the `link-activated`
-//! handler (editor-open, project scope, split, zero-based line).
+//! Twins of the ilium-client/src/terminal_links.rs tests: the plugin owns link discovery now
+//! (`links::link_at`), so each kernel test is re-run against the moved functions with the exact
+//! expected values of the original, plus the manifest-detector rows (`links::detect`).
 
-use ilium_plugin_core_terminal::TerminalClient;
-use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{
-    EditorOpenSpec, EditorPlacement, Event, FsPath, Intent, LinkActivatedEvent, NodeId,
-};
-use regex::Regex;
+use ilium_plugin_core_terminal::links::{detect, link_at, parse_path_line, TerminalLink};
+use std::path::{Path, PathBuf};
 
-fn detector() -> Regex {
-    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/manifest.json"))
-        .expect("manifest readable");
-    let json: serde_json::Value = serde_json::from_str(&text).expect("manifest json");
-    let source = json["contributes"]["link_detectors"][0]["regex"]
-        .as_str()
-        .expect("regex")
-        .to_string();
-    Regex::new(&source).expect("regex compiles")
+mod kernel_twins {
+    use super::*;
+
+    /// REQ: PORT:ilium-client/src/terminal_links.rs::recognizes_url_and_file_line
+    #[test]
+    fn recognizes_url_and_file_line() {
+        assert!(matches!(
+            link_at("see https://example.test/a.", 10, Path::new("/tmp"), None),
+            Some(TerminalLink::Url(_))
+        ));
+        assert!(matches!(
+            link_at("src/main.rs:42:7", 4, Path::new("/repo"), None),
+            Some(TerminalLink::File {
+                line: Some(42),
+                column: Some(7),
+                ..
+            })
+        ));
+    }
+
+    /// REQ: PORT:ilium-client/src/terminal_links.rs::keeps_relative_references_relative_instead_of_becoming_absolute
+    #[test]
+    fn keeps_relative_references_relative_instead_of_becoming_absolute() {
+        // A leading '.' must survive trimming: "../src/main.rs" collapsing
+        // to "/src/main.rs" would silently turn a relative reference into
+        // an absolute path to a completely different file.
+        let link = link_at(
+            "see ../src/main.rs for details",
+            4,
+            Path::new("/repo"),
+            None,
+        );
+        assert_eq!(
+            link,
+            Some(TerminalLink::File {
+                path: PathBuf::from("/repo/../src/main.rs"),
+                line: None,
+                column: None,
+            })
+        );
+    }
+
+    /// REQ: PORT:ilium-client/src/terminal_links.rs::expands_home_relative_references_against_the_injected_home_dir
+    #[test]
+    fn expands_home_relative_references_against_the_injected_home_dir() {
+        let link = link_at(
+            "~/.bashrc",
+            0,
+            Path::new("/repo"),
+            Some(Path::new("/home/user")),
+        );
+        assert_eq!(
+            link,
+            Some(TerminalLink::File {
+                path: PathBuf::from("/home/user/.bashrc"),
+                line: None,
+                column: None,
+            })
+        );
+    }
+
+    /// REQ: PORT:ilium-client/src/terminal_links.rs::keeps_a_non_numeric_middle_segment_attached_to_the_path
+    #[test]
+    fn keeps_a_non_numeric_middle_segment_attached_to_the_path() {
+        // "a/b:c.txt:42": the middle segment isn't a line number, so the
+        // whole "a/b:c.txt" must remain the path instead of losing "a/b".
+        let link = link_at("a/b:c.txt:42", 0, Path::new("/repo"), None);
+        assert_eq!(
+            link,
+            Some(TerminalLink::File {
+                path: PathBuf::from("/repo/a/b:c.txt"),
+                line: Some(42),
+                column: None,
+            })
+        );
+    }
+
+    /// REQ: PORT:ilium-client/src/terminal_links.rs::strips_markdown_backticks_around_a_fenced_path
+    #[test]
+    fn strips_markdown_backticks_around_a_fenced_path() {
+        // Markdown-fenced paths (`` `docs/guide.md` ``) are the dominant form
+        // in editor buffers and agent chat output. Leaving the backticks
+        // attached would make the resolved path never exist on disk.
+        let link = link_at(
+            "see `docs/guide.md` for details",
+            5,
+            Path::new("/repo"),
+            None,
+        );
+        assert_eq!(
+            link,
+            Some(TerminalLink::File {
+                path: PathBuf::from("/repo/docs/guide.md"),
+                line: None,
+                column: None,
+            })
+        );
+    }
+
+    /// REQ: PORT:ilium-client/src/terminal_links.rs::strips_a_matching_opening_bracket_from_a_wrapped_url
+    #[test]
+    fn strips_a_matching_opening_bracket_from_a_wrapped_url() {
+        // "(https://example.test/docs)": the opening '(' must be stripped
+        // from the token's start (matching the closing ')' already
+        // stripped from its end), or the leftover '(' prefix would make
+        // the URL fail its "https://" prefix check and go undetected.
+        let link = link_at(
+            "see (https://example.test/docs) for details",
+            6,
+            Path::new("/repo"),
+            None,
+        );
+        assert_eq!(
+            link,
+            Some(TerminalLink::Url("https://example.test/docs".to_string()))
+        );
+    }
+
+    /// REQ: PORT:ilium-client/src/terminal_links.rs::recognizes_a_bare_project_local_file_with_trailing_prose_punctuation
+    #[test]
+    fn recognizes_a_bare_project_local_file_with_trailing_prose_punctuation() {
+        let link = link_at(
+            "Read STYLE.md, before continuing",
+            6,
+            Path::new("/repo"),
+            None,
+        );
+        assert_eq!(
+            link,
+            Some(TerminalLink::File {
+                path: PathBuf::from("/repo/STYLE.md"),
+                line: None,
+                column: None,
+            })
+        );
+    }
+
+    /// REQ: PORT:ilium-client/src/terminal_links.rs::accounts_for_multi_byte_glyphs_when_mapping_a_cell_column
+    #[test]
+    fn accounts_for_multi_byte_glyphs_when_mapping_a_cell_column() {
+        // "→ " is 4 bytes (a 3-byte arrow plus a space) but only 2 cells,
+        // so cell column 2 (the 's' of the path) must not be treated as
+        // byte offset 2, which would land inside the arrow's own encoding.
+        let link = link_at("→ src/main.rs:42", 2, Path::new("/repo"), None);
+        assert_eq!(
+            link,
+            Some(TerminalLink::File {
+                path: PathBuf::from("/repo/src/main.rs"),
+                line: Some(42),
+                column: None,
+            })
+        );
+    }
 }
 
-fn found(text: &str) -> Option<String> {
-    detector().find(text).map(|m| m.as_str().to_string())
-}
+mod detectors {
+    use super::*;
 
-fn open(text: &str) -> Vec<Intent> {
-    let mut host = FakeHost::for_manifest(concat!(env!("CARGO_MANIFEST_DIR"), "/manifest.json"))
-        .expect("manifest loads")
-        .side("client")
-        .build();
-    host.activate::<TerminalClient>();
-    let event = Event::LinkActivated(LinkActivatedEvent {
-        node: NodeId(1),
-        detector_id: "path-line".to_string(),
-        text: text.to_string(),
-    });
-    host.deliver(vec![event])
-        .into_iter()
-        .map(|s| s.intent)
-        .collect()
-}
+    #[test]
+    fn path_line_detector_matches_the_manifest_regex_cases() {
+        let found = detect("see ../src/main.rs:3 for details");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].detector_id, "path-line");
+        assert_eq!(found[0].text, "../src/main.rs:3");
+        assert_eq!(parse_path_line(&found[0].text), Some(("../src/main.rs", 3)));
+    }
 
-fn expect_open(path: &str, line: u32) -> Vec<Intent> {
-    vec![Intent::EditorOpen(EditorOpenSpec {
-        path: FsPath {
-            scope: "project".to_string(),
-            path: path.to_string(),
-        },
-        line: Some(line),
-        placement: EditorPlacement::Split,
-    })]
-}
+    #[test]
+    fn a_path_line_inside_a_url_is_one_url_link() {
+        let found = detect("open https://host.test/a/b.rs:12 now");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].detector_id, "url");
+        assert_eq!(found[0].text, "https://host.test/a/b.rs:12");
+    }
 
-/// REQ: PORT:ilium-client/src/terminal_links.rs::recognizes_url_and_file_line
-#[test]
-fn port_links_recognizes_url_and_file_line() {
-    assert_eq!(
-        found("src/main.rs:42:7"),
-        Some("src/main.rs:42".to_string())
-    );
-    assert_eq!(open("src/main.rs:42"), expect_open("src/main.rs", 41));
-    // Bare URLs carry no :line and are outside the path-line detector.
-    assert_eq!(found("see https://example.test/a."), None);
-}
+    #[test]
+    fn parse_path_line_refuses_non_numeric_and_empty_parts() {
+        assert_eq!(parse_path_line("a.rs:"), None);
+        assert_eq!(parse_path_line(":4"), None);
+        assert_eq!(parse_path_line("a.rs:x"), None);
+        assert_eq!(parse_path_line("a.rs:99999999999"), None);
+        assert_eq!(parse_path_line("a/b:c.rs:7"), Some(("a/b:c.rs", 7)));
+    }
 
-/// REQ: PORT:ilium-client/src/terminal_links.rs::keeps_relative_references_relative_instead_of_becoming_absolute
-#[test]
-fn port_links_keeps_relative_references_relative() {
-    assert_eq!(
-        found("see ../src/main.rs:3 for details"),
-        Some("../src/main.rs:3".to_string())
-    );
-    assert_eq!(open("../src/main.rs:3"), expect_open("../src/main.rs", 2));
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::expands_home_relative_references_against_the_injected_home_dir
-#[test]
-fn port_links_home_relative_reference_keeps_its_tilde_path() {
-    assert_eq!(open("~/.bashrc:3"), expect_open("~/.bashrc", 2));
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::keeps_a_non_numeric_middle_segment_attached_to_the_path
-#[test]
-fn port_links_non_numeric_middle_segment_stays_in_the_path() {
-    assert_eq!(open("a/b:c.txt:42"), expect_open("a/b:c.txt", 41));
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::strips_markdown_backticks_around_a_fenced_path
-#[test]
-fn port_links_backticks_are_not_part_of_the_match() {
-    assert_eq!(
-        found("see `docs/guide.md:5` for details"),
-        Some("docs/guide.md:5".to_string())
-    );
-    assert_eq!(open("docs/guide.md:5"), expect_open("docs/guide.md", 4));
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::strips_a_matching_opening_bracket_from_a_wrapped_url
-#[test]
-fn port_links_wrapped_url_is_not_a_path_line_match() {
-    assert_eq!(found("see (https://example.test/docs) for details"), None);
-    assert_eq!(
-        found("see (src/lib.rs:9) for details"),
-        Some("src/lib.rs:9".to_string())
-    );
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::recognizes_a_bare_project_local_file_with_trailing_prose_punctuation
-#[test]
-fn port_links_bare_file_with_prose_punctuation_has_no_line_so_no_match() {
-    assert_eq!(found("Read STYLE.md, before continuing"), None);
-    assert_eq!(
-        found("Read STYLE.md:12, before continuing"),
-        Some("STYLE.md:12".to_string())
-    );
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::accounts_for_multi_byte_glyphs_when_mapping_a_cell_column
-#[test]
-fn port_links_multi_byte_glyph_before_the_path_is_not_matched() {
-    assert_eq!(
-        found("→ src/main.rs:42"),
-        Some("src/main.rs:42".to_string())
-    );
-    assert_eq!(open("src/main.rs:42"), expect_open("src/main.rs", 41));
-}
-
-/// REQ: PORT:ilium-client/src/keys.rs::normal_tree_paste_uses_the_retained_bounded_replay
-#[test]
-fn port_normal_tree_paste_uses_the_retained_bounded_replay() {
-    let mut host = FakeHost::for_manifest(concat!(env!("CARGO_MANIFEST_DIR"), "/manifest.json"))
-        .expect("manifest loads")
-        .side("client")
-        .build();
-    host.activate::<TerminalClient>();
-    // Assumed command `terminal.paste` with the pasted text in its arguments: a paste into the focused pane is
-    // one bounded `send-input` with pasted delivery, never one input per key.
-    let text = "line one\nline two ".repeat(200);
-    let submissions = host.deliver_one(Event::CommandInvoked(
-        ilium_plugin_sdk::types::CommandInvokedEvent {
-            command: "terminal.paste".to_string(),
-            arguments_json: serde_json::json!({ "text": text }).to_string(),
-            origin: ilium_plugin_sdk::types::CommandOrigin::Palette,
-            context: ilium_plugin_sdk::types::CommandContext {
-                pane: Some(NodeId(1)),
-                ..Default::default()
-            },
-        },
-    ));
-    let sends: Vec<_> = submissions
-        .iter()
-        .filter_map(|s| match &s.intent {
-            Intent::SendInput(spec) => Some(spec.clone()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(sends.len(), 1);
-    assert_eq!(sends[0].text, text);
-    assert_eq!(sends[0].delivery, ilium_plugin_sdk::types::Delivery::Pasted);
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::recognizes_url_and_file_line
-#[test]
-fn port_links_line_one_maps_to_zero_based_line_zero() {
-    assert_eq!(open("src/main.rs:1"), expect_open("src/main.rs", 0));
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::keeps_relative_references_relative_instead_of_becoming_absolute
-#[test]
-fn port_links_dot_slash_reference_keeps_its_prefix() {
-    assert_eq!(open("./src/lib.rs:10"), expect_open("./src/lib.rs", 9));
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::expands_home_relative_references_against_the_injected_home_dir
-#[test]
-fn port_links_home_reference_with_two_digit_line_maps_to_zero_based() {
-    assert_eq!(open("~/notes/a.md:10"), expect_open("~/notes/a.md", 9));
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::keeps_a_non_numeric_middle_segment_attached_to_the_path
-#[test]
-fn port_links_colon_inside_the_file_name_stays_in_the_path() {
-    assert_eq!(open("x:y.rs:3"), expect_open("x:y.rs", 2));
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::strips_markdown_backticks_around_a_fenced_path
-#[test]
-fn port_links_backtick_wrapped_path_match_excludes_the_backticks() {
-    assert_eq!(
-        found("`src/a.rs:7`"),
-        Some("src/a.rs:7".to_string())
-    );
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::strips_a_matching_opening_bracket_from_a_wrapped_url
-#[test]
-fn port_links_square_bracketed_path_line_is_matched_without_brackets() {
-    assert_eq!(
-        found("[src/x.rs:2]"),
-        Some("src/x.rs:2".to_string())
-    );
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::recognizes_a_bare_project_local_file_with_trailing_prose_punctuation
-#[test]
-fn port_links_file_line_before_a_semicolon_is_matched_without_it() {
-    assert_eq!(
-        found("Edit main.rs:3; then rerun"),
-        Some("main.rs:3".to_string())
-    );
-}
-
-/// REQ: PORT:ilium-client/src/terminal_links.rs::accounts_for_multi_byte_glyphs_when_mapping_a_cell_column
-#[test]
-fn port_links_emoji_before_a_readme_reference_is_skipped_by_the_match() {
-    assert_eq!(
-        found("✅ README.md:1"),
-        Some("README.md:1".to_string())
-    );
-    assert_eq!(open("README.md:1"), expect_open("README.md", 0));
-}
-
-/// REQ: PORT:ilium-client/src/keys.rs::normal_tree_paste_uses_the_retained_bounded_replay
-#[test]
-fn port_normal_tree_paste_without_a_pane_sends_no_input() {
-    let mut host = FakeHost::for_manifest(concat!(env!("CARGO_MANIFEST_DIR"), "/manifest.json"))
-        .expect("manifest loads")
-        .side("client")
-        .build();
-    host.activate::<TerminalClient>();
-    let submissions = host.deliver_one(Event::CommandInvoked(
-        ilium_plugin_sdk::types::CommandInvokedEvent {
-            command: "terminal.paste".to_string(),
-            arguments_json: serde_json::json!({ "text": "abc" }).to_string(),
-            origin: ilium_plugin_sdk::types::CommandOrigin::Palette,
-            context: ilium_plugin_sdk::types::CommandContext::default(),
-        },
-    ));
-    assert!(submissions
-        .iter()
-        .all(|s| !matches!(s.intent, Intent::SendInput(_))));
+    #[test]
+    fn link_display_joins_path_line_and_column() {
+        let link = TerminalLink::File {
+            path: PathBuf::from("/repo/a.rs"),
+            line: Some(4),
+            column: Some(2),
+        };
+        assert_eq!(link.display(), "/repo/a.rs:4:2");
+        assert_eq!(link_at("", 0, Path::new("/"), None), None);
+    }
 }

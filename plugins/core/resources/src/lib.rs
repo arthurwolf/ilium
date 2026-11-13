@@ -3,6 +3,8 @@
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
+pub mod identity;
+
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;

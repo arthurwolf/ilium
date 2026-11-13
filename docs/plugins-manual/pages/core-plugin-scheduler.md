@@ -94,7 +94,8 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     "server": ["terminal.write", "terminal.raw-input", "terminal.input-lock",
                "agent.read", "journal.read",
                "extensions.provide:ilium.core.scheduler/schedule-sources",
-               "extensions.provide:ilium.core.scheduler/before-send-scheduled"],
+               "extensions.provide:ilium.core.scheduler/before-send-scheduled",
+               "topics.subscribe:ilium.core.agent-detect/activity-changed"],
     "client": ["ui.panels"]
   },
   "contributes": {
@@ -106,7 +107,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 }
 ```
 
-`terminal.raw-input` is a high-risk grant, and the user confirms it at install.
+`terminal.raw-input` is a high-risk grant, and the user confirms it at install. `topics.subscribe:ilium.core.agent-detect/activity-changed` feeds the send-when-idle rule: the server sends the head of a pane's queue only after the agent reports a finished turn. The client section `scheduled-input-icons` adds the `scheduled_input` row that turns the scheduled-input icon in the tree on or off.
 
 ### Complete manifest
 
@@ -137,7 +138,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "agent.read",
       "journal.read",
       "extensions.provide:ilium.core.scheduler/schedule-sources",
-      "extensions.provide:ilium.core.scheduler/before-send-scheduled"
+      "extensions.provide:ilium.core.scheduler/before-send-scheduled",
+      "topics.subscribe:ilium.core.agent-detect/activity-changed"
     ],
     "client": [
       "ui.panels"
@@ -182,6 +184,19 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "deadline_ms": 20,
         "max_handlers": 8,
         "version": "0.1.0"
+      }
+    ],
+    "settings": [
+      {
+        "kind": "section",
+        "id": "scheduled-input-icons",
+        "tab": "icons",
+        "placement": "end",
+        "title": "Scheduled input",
+        "scope": "client",
+        "rows": [
+          { "type": "toggle", "key": "scheduled_input", "title": "Scheduled input icon", "default": true }
+        ]
       }
     ],
     "panels": [

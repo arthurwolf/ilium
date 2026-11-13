@@ -20,15 +20,103 @@
       "terminal.raw-input",
       "terminal.input-lock",
       "agent.read",
-      "journal.read"
+      "journal.read",
+      "extensions.provide:ilium.core.scheduler/schedule-sources",
+      "extensions.provide:ilium.core.scheduler/before-send-scheduled",
+      "topics.subscribe:ilium.core.agent-detect/activity-changed"
     ],
     "client": [
       "ui.panels"
     ]
   },
   "contributes": {
+    "extension_points": [
+      {
+        "id": "schedule-sources",
+        "kind": "collect",
+        "title": "Trigger sources",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "service"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-send-scheduled",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before a scheduled or queued input is sent",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "text_length": {
+              "type": "integer"
+            },
+            "schedule": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane",
+            "text_length",
+            "schedule",
+            "source"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ],
+    "settings": [
+      {
+        "kind": "section",
+        "id": "scheduled-input-icons",
+        "tab": "icons",
+        "placement": "end",
+        "title": "Scheduled input",
+        "scope": "client",
+        "rows": [
+          {
+            "type": "toggle",
+            "key": "scheduled_input",
+            "title": "Scheduled input icon",
+            "default": true
+          }
+        ]
+      }
+    ],
     "panels": [
-      { "id": "scheduler.queue", "title": "Scheduler queue", "modal": false }
+      {
+        "id": "queue",
+        "title": "Scheduler queue",
+        "modal": false
+      }
     ]
   },
   "activation": [

@@ -434,10 +434,7 @@ fn rset_short_multibyte_prompt_is_kept_whole() {
 fn rset_control_characters_never_reach_the_stored_prompt() {
     let host = host();
     let cleaned = sanitize(&host, json!({"custom_prompt": "a\u{1}b"}));
-    assert!(!cleaned["custom_prompt"]
-        .as_str()
-        .unwrap()
-        .contains('\u{1}'));
+    assert!(!cleaned["custom_prompt"].as_str().unwrap().contains('\u{1}'));
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::toggles_flip_and_report_the_change

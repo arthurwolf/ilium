@@ -116,7 +116,7 @@ fn manifest_050_every_side_with_grants_has_a_component_pkg_025_grant_side() {
 
 /// REQ: COR-050, F-067
 #[test]
-fn manifest_050_server_grants_are_the_seven_of_the_page_in_order() {
+fn manifest_050_server_grants_are_the_eleven_of_the_page_in_order() {
     assert_eq!(
         grants("server"),
         [
@@ -126,7 +126,11 @@ fn manifest_050_server_grants_are_the_seven_of_the_page_in_order() {
             "panes.create",
             "panes.read",
             "fs.read:project",
-            "fs.write:worktrees"
+            "fs.write:worktrees",
+            "settings.read-kernel:git",
+            "extensions.provide:ilium.core.worktrees/before-create",
+            "extensions.provide:ilium.core.worktrees/post-create-steps",
+            "extensions.provide:ilium.core.worktrees/before-remove"
         ]
     );
 }
@@ -190,10 +194,10 @@ fn manifest_050_one_command_new_agent_in_the_git_category() {
 
 /// REQ: COR-050, F-067
 #[test]
-fn manifest_050_the_keybinding_is_w_in_prefix_mode_for_the_command() {
+fn manifest_050_the_keybinding_is_shift_w_in_prefix_mode_for_the_command() {
     assert_eq!(
         manifest_value()["contributes"]["keybindings"],
-        json!([{"command": "new-agent", "chord": "w", "mode": "prefix"}])
+        json!([{"command": "new-agent", "chord": "W", "mode": "prefix"}])
     );
 }
 
@@ -238,14 +242,24 @@ fn manifest_050_contributes_no_settings_the_git_tab_is_a_kernel_tab() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_contributes_nothing_but_commands_and_keybindings() {
+fn manifest_050_contributes_commands_keybindings_and_the_three_extension_points() {
     let manifest = manifest_value();
     let keys: Vec<&String> = manifest["contributes"]
         .as_object()
         .expect("contributes")
         .keys()
         .collect();
-    assert_eq!(keys, ["commands", "keybindings"]);
+    assert_eq!(keys, ["commands", "keybindings", "extension_points"]);
+    let points: Vec<&str> = manifest["contributes"]["extension_points"]
+        .as_array()
+        .expect("extension points")
+        .iter()
+        .map(|point| point["id"].as_str().expect("id"))
+        .collect();
+    assert_eq!(
+        points,
+        ["before-create", "post-create-steps", "before-remove"]
+    );
 }
 
 /// REQ: COR-050

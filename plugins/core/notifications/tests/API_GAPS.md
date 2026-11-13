@@ -19,3 +19,10 @@
 - ports (tests/port): ilium-plugin-sdk `AgentActivity` has no waiting-background or background-task case (ilium-server/src/notifications.rs ports); the twins drive both as `Working`, which is what the original NowSignal projection does (busy), so `working_to_waiting_background_*`, `waiting_background_to_*` and `background_task_still_running_*` are asserted as Working transitions.
 - ports (tests/port): ilium-plugin-testkit `FakeHost` cannot change the `goal` of an agent already in the tree (`TreeNode.agent.goal` is set only at `add`); the goal twins create the pane with a goal and cannot assert the "goal clears on completion" half of `agent_with_goal_working_to_plain_agent_done_notifies_when_goal_clears_on_completion`. Needed: `FakeTree::set_goal(id: u64, goal: Option<&str>)` and an `Event::AgentGoalChanged` delivery (reference-wit.md 4.13).
 - ports (tests/port): the plugin API gives no session name and no long pane description; the twins read the long description from `AgentView.objective` (assumed) and assert the `Session "` prefix only.
+
+## Ported modules and what is still open (agents wave)
+
+- `src/synthesis.rs` (the deterministic PCM and WAV renderer) and `src/sound.rs` (settings model, `Activity` to `SoundEvent` mapping) are ported with twins in `tests/port/synthesis.rs` and `tests/port/sound_model.rs`. Written without a compiler: unverified until the first ni-build run.
+- Not ported yet: `ilium-server/src/notifications.rs` rules (39 rows), `sounds.rs` rules (9 rows), `sound_settings_storage.rs`, and the discovery tests of `ilium-sound` (need the `fs` import, G10).
+- G3: `Notify`, `PlaySound` and `Toast` intents are not routed, so the plugin cannot raise an alert yet.
+- G4: the plugin cannot subscribe to `ilium.core.agent-detect/activity-changed` across sides yet.

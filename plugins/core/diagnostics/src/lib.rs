@@ -1,8 +1,7 @@
 //! Core plugin `ilium.core.diagnostics` (manual page core-plugin-diagnostics.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
+//! The pure agent-debug journal, report text, recorder state and report service live in the modules below;
+//! the two sides are thin ServiceProvider/Views shells over them.
 
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
@@ -15,10 +14,21 @@ use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 
+pub mod export;
+pub mod logging;
+pub mod redact;
+pub mod report;
+pub mod server_debug;
+pub mod service;
+pub mod view;
+pub mod warnings;
+
 /// The server side of `ilium.core.diagnostics` (core-plugin-diagnostics.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["service-provider"])]
 #[derive(Default)]
-pub struct DiagnosticsServer;
+pub struct DiagnosticsServer {
+    service: service::ReportService,
+}
 
 impl Lifecycle for DiagnosticsServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
@@ -33,8 +43,14 @@ impl Handler for DiagnosticsServer {
 }
 
 impl ServiceProvider for DiagnosticsServer {
-    fn handle(&mut self, _call: ServiceCall) -> ServiceReply {
-        ServiceReply::Done("{}".to_string())
+    fn handle(&mut self, call: ServiceCall) -> ServiceReply {
+        match self
+            .service
+            .handle(&call.caller.0, &call.method, &call.payload_json)
+        {
+            Ok(reply) => ServiceReply::Done(reply),
+            Err(message) => ServiceReply::Done(serde_json::json!({ "error": message }).to_string()),
+        }
     }
 }
 

@@ -185,4 +185,3 @@ pub fn work_ribbon(stats: &SessionStats, start_ms: i64, end_ms: i64, columns: us
     }
     ribbon
 }
-

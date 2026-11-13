@@ -1,15 +1,20 @@
 //! Core plugin `ilium.core.inference` (manual page core-plugin-inference.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! Bodies follow the manual; behaviour beyond activation is driven by host events.
+//! One struct per side declared in `manifest.json`, each implementing the lifecycle, the handler and the exports
+//! its manifest lists. The pure inference logic moved from `ilium-inference` and `ilium-kilo-gateway` lives in the
+//! modules below; the HTTP exchanges run on the host `http` import.
+
+pub mod kilo;
+pub mod redact;
+pub mod request;
+pub mod settings;
 
 use ilium_plugin_sdk::exports::ProviderCall;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::host::catalogs::{CatalogPage, CatalogQuery};
-use ilium_plugin_sdk::types::{Activation, CatalogItem, ErrorCode};
 use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::{Activation, CatalogItem, ErrorCode};
 use ilium_plugin_sdk::types::{Area, UiTree, ViewTarget};
 use ilium_plugin_sdk::{
     ilium_plugin, CatalogProvider, Handler, InferenceProvider, Lifecycle, Views,
@@ -26,8 +31,8 @@ pub struct InferenceServer {
 impl Lifecycle for InferenceServer {
     fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
         validate_settings(&context.settings_json)?;
-        self.settings = serde_json::from_str(&context.settings_json)
-            .unwrap_or(serde_json::Value::Null);
+        self.settings =
+            serde_json::from_str(&context.settings_json).unwrap_or(serde_json::Value::Null);
         Ok(())
     }
 }

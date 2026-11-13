@@ -8,7 +8,7 @@ use super::{float, number, numbers};
 use crate::model::{
     budget_fill, burn_usd_per_hour, calibrate, format_amount, format_quota, format_rate,
     format_tokens, format_usd, format_usd_per_hour, format_window, is_burn_spike, meter_string,
-    parse_window_minutes, percent_rank, percentile, spend_cells, sparkline_glyphs, Calibration,
+    parse_window_minutes, percent_rank, percentile, sparkline_glyphs, spend_cells, Calibration,
     CalibrationInputs, CalibrationNote, CostLevel, CostMetric, LevelScale, ModelPrice, PriceTable,
     QuotaWindow, ScaleBasis, SpendPoint,
 };
@@ -43,7 +43,8 @@ fn enum_field<T: serde::de::DeserializeOwned + Default>(value: &Value) -> T {
 }
 
 fn price_table(overrides: &Value) -> PriceTable {
-    let map: BTreeMap<String, ModelPrice> = serde_json::from_value(overrides.clone()).unwrap_or_default();
+    let map: BTreeMap<String, ModelPrice> =
+        serde_json::from_value(overrides.clone()).unwrap_or_default();
     PriceTable::with_overrides(&map)
 }
 
@@ -73,11 +74,16 @@ pub(super) fn run(name: &str, request: &Value) -> Value {
         )),
         "format-usd-per-hour" => json!(format_usd_per_hour(number(request, "usd"))),
         "format-tokens" => json!(format_tokens(request["tokens"].as_u64().unwrap_or(0))),
-        "format-window" => json!(format_window(request["minutes"].as_u64().unwrap_or(0) as u32)),
+        "format-window" => json!(format_window(
+            request["minutes"].as_u64().unwrap_or(0) as u32
+        )),
         "parse-window-minutes" => parse_window_minutes(request["text"].as_str().unwrap_or(""))
             .map_or(Value::Null, |minutes| json!(minutes)),
         "quota-window-key" => json!(enum_field::<QuotaWindow>(&request["window"]).key()),
-        "budget-fill" => float(budget_fill(number(request, "total"), number(request, "budget"))),
+        "budget-fill" => float(budget_fill(
+            number(request, "total"),
+            number(request, "budget"),
+        )),
         "burn_usd_per_hour" => float(burn_usd_per_hour(
             &points(&request["points"]),
             request["now_ms"].as_i64().unwrap_or(0),
@@ -101,8 +107,14 @@ pub(super) fn run(name: &str, request: &Value) -> Value {
             .collect(),
         ),
         "sparkline-glyphs" => json!(sparkline_glyphs(&numbers(&request["values"]))),
-        "percentile" => float(percentile(&numbers(&request["sorted"]), number(request, "fraction"))),
-        "percent-rank" => float(percent_rank(&numbers(&request["sorted"]), number(request, "value"))),
+        "percentile" => float(percentile(
+            &numbers(&request["sorted"]),
+            number(request, "fraction"),
+        )),
+        "percent-rank" => float(percent_rank(
+            &numbers(&request["sorted"]),
+            number(request, "value"),
+        )),
         "scale-level" => json!(LevelScale {
             cuts: cuts(&request["cuts"])
         }
@@ -110,12 +122,17 @@ pub(super) fn run(name: &str, request: &Value) -> Value {
         .index()),
         "level-meter" => json!(meter_string(level(&request["level"]))),
         "meter-string" => json!(meter_string(level(&request["level"]))),
-        "level-glyph" => level(&request["level"]).map_or(Value::Null, |level| json!(level.glyph().to_string())),
+        "level-glyph" => {
+            level(&request["level"]).map_or(Value::Null, |level| json!(level.glyph().to_string()))
+        }
         "price-lookup" => price_table(&request["overrides"])
             .lookup(request["model"].as_str().unwrap_or(""))
             .map_or(Value::Null, |price| json!(price)),
         "price-cost" => price_table(&request["overrides"])
-            .cost(request["model"].as_str().unwrap_or(""), &tokens(&request["tokens"]))
+            .cost(
+                request["model"].as_str().unwrap_or(""),
+                &tokens(&request["tokens"]),
+            )
             .map_or(Value::Null, float),
         "price-estimate" => {
             let models: Vec<ModelUsage> =
@@ -129,7 +146,10 @@ pub(super) fn run(name: &str, request: &Value) -> Value {
         }
         "calibrate" => {
             let peers = numbers(&request["peer_totals"]);
-            let history = request.get("history_sorted").filter(|v| !v.is_null()).map(numbers);
+            let history = request
+                .get("history_sorted")
+                .filter(|v| !v.is_null())
+                .map(numbers);
             let inputs = CalibrationInputs {
                 fixed_cuts: cuts(&request["fixed_cuts"]),
                 burn_cuts: cuts(&request["burn_cuts"]),

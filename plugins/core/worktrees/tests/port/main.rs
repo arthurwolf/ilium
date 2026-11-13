@@ -3,8 +3,10 @@
 mod app;
 #[path = "../shared/common.rs"]
 mod common;
+mod git_pure;
 mod git_status;
 mod git_text_setting;
+mod rules;
 mod support;
 mod ui_twins;
 mod worktree_cli;

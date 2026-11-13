@@ -153,6 +153,44 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "id": "list",
         "title": "Sessions"
       }
+    ],
+    "settings": [
+      {
+        "kind": "section",
+        "id": "session-recovery",
+        "tab": "session",
+        "placement": "end",
+        "title": "Recovery",
+        "scope": "server",
+        "rows": [
+          {
+            "type": "toggle",
+            "key": "backups_enabled",
+            "title": "Back up the session snapshot",
+            "default": true
+          },
+          {
+            "type": "choice",
+            "key": "recovery_policy",
+            "title": "After a crash",
+            "default": "restore_automatically",
+            "options": [
+              {
+                "value": "restore_automatically",
+                "title": "Restore automatically"
+              },
+              {
+                "value": "ask_before_restore",
+                "title": "Ask before restoring"
+              },
+              {
+                "value": "start_fresh",
+                "title": "Start fresh"
+              }
+            ]
+          }
+        ]
+      }
     ]
   },
   "activation": [

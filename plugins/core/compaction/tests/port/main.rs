@@ -8,15 +8,25 @@ mod host_ext;
 #[path = "../support/host_ext_shared.rs"]
 mod host_ext_shared;
 
+mod analysis_golden;
+mod analysis_parse_fixtures;
+mod analysis_pick_rules;
+mod analysis_pipeline;
+mod analysis_rework;
+mod analysis_stats_fixture;
 mod app_flow;
 mod misc_client;
 mod remote_app;
+mod remote_common;
 mod remote_dialog;
 mod remote_flow;
+mod remote_live_resume;
 mod remote_native;
+mod remote_pipeline;
 mod remote_settings;
 mod remote_settings_ui;
 mod remote_worker;
+mod remote_writers;
 mod report_engine;
 mod scan_engine;
 mod ui_pages;

@@ -24,7 +24,10 @@ fn send_screen(
     target: u64,
 ) -> Result<ServiceReply, ilium_plugin_sdk::types::PluginError> {
     let request = format!("{{\"method\":\"send-screen\",\"source\":{source},\"target\":{target}}}");
-    session.call_service("ilium.core.kanban", SERVICE, "^0.1", &request)
+    let reply = session.call_service("ilium.core.kanban", SERVICE, "^0.1", &request);
+    // The history of the source arrives as a request completion; deliver it before the caller looks.
+    let _ = session.pump();
+    reply
 }
 
 fn pasted(text: &str, target: u64) -> Intent {

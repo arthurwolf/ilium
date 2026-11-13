@@ -1,7 +1,7 @@
 //! F-083 Agent auto-compact trigger reader: the plugin reads the trigger each agent uses (never writes it) and the Remote compaction tab
 //! shows it next to the CLI default and warns when the agent would compact first (user doc Settings, Remote compaction).
 //!
-//! Assumed windows are the defaults of the existing implementation: Claude Code 1 000 000 tokens, Codex 258 400 tokens.
+//! The context windows used are the defaults of the existing implementation: Claude Code 1 000 000 tokens, Codex 258 400 tokens.
 
 use ilium_plugin_sdk::testing::FakeSession;
 use ilium_plugin_sdk::types::{Event, ViewTarget, ViewVisibilityEvent};

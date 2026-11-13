@@ -167,8 +167,7 @@ fn f_032_disabled_recorder_has_no_replay_for_a_pane() {
     let mut session = session();
     enable(&mut session, false);
     append(&mut session, 4, "pty", "prompt-submitted", "hidden prompt");
-    let error =
-        agent_debug(&mut session, "replay", json!({ "pane": 4 })).expect_err("no journal");
+    let error = agent_debug(&mut session, "replay", json!({ "pane": 4 })).expect_err("no journal");
     assert_eq!(error.code, ErrorCode::NotFound);
 }
 
@@ -177,8 +176,18 @@ fn f_032_disabled_recorder_has_no_replay_for_a_pane() {
 fn f_032_repeated_non_detection_events_are_all_accepted() {
     let mut session = session();
     enable(&mut session, false);
-    assert!(observe(&mut session, "pty", "prompt-submitted", "same prompt"));
-    assert!(observe(&mut session, "pty", "prompt-submitted", "same prompt"));
+    assert!(observe(
+        &mut session,
+        "pty",
+        "prompt-submitted",
+        "same prompt"
+    ));
+    assert!(observe(
+        &mut session,
+        "pty",
+        "prompt-submitted",
+        "same prompt"
+    ));
 }
 
 /// REQ: PORT:ilium-server/src/agent_debug.rs::enabling_the_ui_journal_after_file_logging_still_records_a_baseline

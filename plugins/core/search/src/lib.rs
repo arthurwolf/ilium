@@ -4,6 +4,9 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! a minimal real implementation: it activates cleanly and acknowledges events without submissions until the host calls it needs exist.
 
+pub mod matching;
+pub mod results;
+
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
 use ilium_plugin_sdk::generated::types::events::Event;
@@ -205,7 +208,7 @@ mod spec_tests {
         let binding = &document["contributes"]["keybindings"][0];
         assert_eq!(open_command_id, "open");
         assert_eq!(binding["command"], json!("ilium.core.search/open"));
-        assert_eq!(binding["chord"], json!("/"));
+        assert_eq!(binding["chord"], json!("f"));
         assert_eq!(binding["mode"], json!("prefix"));
     }
 

@@ -34,13 +34,87 @@
     "startup"
   ],
   "contributes": {
-    "cli": [{
-      "name": "resource",
-      "summary": "Shared resource queues and reservations",
-      "output": "jsonl",
-      "requires_server": true,
-      "aliases": ["ressource"]
-    }]
+    "cli": [
+      {
+        "name": "resource",
+        "summary": "Shared resource queues and reservations",
+        "output": "jsonl",
+        "requires_server": true,
+        "aliases": [
+          "ressource"
+        ]
+      }
+    ],
+    "panels": [
+      {
+        "id": "resource",
+        "title": "Resource",
+        "modal": false
+      }
+    ],
+    "extension_points": [
+      {
+        "id": "resource-kinds",
+        "kind": "collect",
+        "title": "Add a kind of resource, such as a test rig or a licence seat",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "identity_hint": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "identity_hint"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-grant",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before a reservation is granted ownership",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "resource": {
+              "type": "string"
+            },
+            "reservation": {
+              "type": "string"
+            },
+            "pane": {
+              "type": "string"
+            },
+            "estimate_seconds": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "resource",
+            "reservation",
+            "pane",
+            "estimate_seconds"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ]
   },
   "limits_tier": "first-party"
 }

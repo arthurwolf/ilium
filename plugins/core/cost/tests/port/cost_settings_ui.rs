@@ -345,7 +345,7 @@ fn port_cost_settings_ui_shared_cost_chrome_renders_and_hits_every_numeric_and_c
 #[test]
 fn port_cost_settings_ui_cost_tab_keyboard_selects_toggles_steps_and_scrolls_the_selection_into_view(
 ) {
-    // Assumed op `settings-ui.keyboard`: replays chords against the page and answers the settings and scroll.
+    // Expected op `settings-ui.keyboard`: replays chords against the page and answers the settings and scroll.
     let reply = client(
         "settings-ui.keyboard",
         json!({ "settings": {}, "width": 110, "height": 12, "select": "calibration", "chords": ["right"] }),
@@ -446,7 +446,9 @@ fn port_cost_settings_ui_malformed_typed_budget_keeps_the_stored_budget() {
         json!({ "settings": { "calibration": "budget" }, "row": "budget", "click": "open", "draft_keys": "abc", "confirm": true }),
     );
     assert_eq!(reply["dialog_kind"], json!("number"));
-    assert!(reply["error"].as_str().is_some_and(|error| !error.is_empty()));
+    assert!(reply["error"]
+        .as_str()
+        .is_some_and(|error| !error.is_empty()));
     assert_eq!(reply["settings"]["budget_usd"], json!(10.0));
 }
 
@@ -549,10 +551,7 @@ fn port_cost_settings_ui_keyboard_right_then_left_returns_the_sparkline_window()
         "settings-ui.keyboard",
         json!({ "settings": {}, "width": 110, "height": 12, "select": "sparkline_window", "chords": ["right", "left"] }),
     );
-    assert_eq!(
-        reply["settings"]["sparkline_window_minutes"],
-        json!(360)
-    );
+    assert_eq!(reply["settings"]["sparkline_window_minutes"], json!(360));
 }
 
 /// REQ: PORT:ilium-client/src/keys.rs::cost_window_accepts_an_exact_typed_value_and_keeps_the_field_open_on_a_typo

@@ -6,4 +6,5 @@ mod client_app;
 mod client_chatroom;
 mod client_ui;
 mod common;
+mod rules;
 mod server_router;

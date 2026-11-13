@@ -23,3 +23,14 @@ Items the tests call that the skeleton lacks, or manual details the tests had to
 - Manual gap: the trigger event actions tab (originals trigger_settings*.rs) is assumed to be `ViewTarget::SettingsPage("trigger-events")` over config table `[triggers]` with list settings `startup_complete`, `agent_waiting_background`, `agent_approval_required`, `agent_prompt_submitted`, `agent_finished_work` holding `retitle_element`, `restructure_project`, `restructure_all_projects`; toggle action keys are `<event>/<action>` and `<event>/none`; defaults as in the monolith. Requirement PORT:ilium-client/src/trigger_settings.rs and trigger_settings_ui.rs.
 - Manual gap: an invalid source in the `[text_triggers]` table (not a table, missing patterns, non-list, bad regexp, empty pattern, multiline reply, duplicate ids, over 512 KiB) keeps the last valid rules and is not rewritten; an identical rewrite changes nothing. Requirement PORT:ilium-server/src/text_trigger_config.rs.
 - ilium-plugin-testkit: `FakeHost::tree()` returns a handle with `add(TreeNode) -> u64` (used by the existing features tests); the ports additionally add a plain terminal pane with `agent: None`.
+
+## Port wave notes (pure modules)
+
+Moved into the plugin crate: `src/config.rs` (rule fields, defaults, table parsing, identity and candidate validation), `src/matching.rs` (instance identity, settle and resize windows, alternate screen tables, target filter, delivery ordering by due time; milliseconds instead of `Instant`, logical lines instead of a `vt100` screen). `regex = "1.13.0"` is added (already in `Cargo.lock`, G18). Plain tests in `tests/port/rules.rs`.
+
+Not moved: `preview.rs`, `rows.rs` (client dialog and tab rows: G2 and G8, text entry), `lease.rs` (the session lease is a file lock beside the IPC socket, an OS decision that stays in `ilium-platform`), the matching job scheduling of `matching.rs` (kernel execution lanes). The FakeHost tests under `tests/features` and the other `tests/port` files stay red until real plugin wiring exists.
+
+- G3: the server side cannot submit input, so `Tracker::evaluate` results are not yet delivered.
+- G4: `ilium.core.terminal/screen-changed` and the terminal `transfer` service are same-side only for now, so the screen cannot be read.
+- G10: the delay timer needs the wave-two clock import.
+- G2/G8: the rules list is shown read-only.

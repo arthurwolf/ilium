@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::common::{invoke_menu, set_flag, set_text, SCHEDULE_COMMAND, SCHEDULE_VIEW};
 
-/// Assumed command id that clears a queue (API_GAPS.md).
+/// Command id that clears a queue (gap: the manifest lists no commands, see API_GAPS.md).
 pub const CLEAR_COMMAND: &str = "ilium.core.scheduler.clear-queue";
 
 /// Content kind of a kanban board pane (ilium-core PaneContentKind).

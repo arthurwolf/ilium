@@ -1,5 +1,5 @@
 //! Ported tests of the agent debug report and its viewer text (ilium-client agent_debug_export and
-//! agent_debug_ui, F-032). Assumed methods: report, save, sanitize, view, filter. See API_GAPS.md item 1.
+//! agent_debug_ui, F-032). Methods used: report, save, sanitize, view, filter. See API_GAPS.md item 1.
 
 use ilium_plugin_sdk::types::ErrorCode;
 use serde_json::{json, Value};
@@ -236,7 +236,10 @@ fn f_032_multiline_field_value_occupies_one_line_of_the_report() {
         "context": { "class": "codex", "activity": "idle", "process_id": 1, "session_id": "s", "title_generation": 0 }
     });
     let text = report(&mut session, "pane", vec![entry]);
-    let decision_lines = text.lines().filter(|line| line.contains("Activity decision")).count();
+    let decision_lines = text
+        .lines()
+        .filter(|line| line.contains("Activity decision"))
+        .count();
     assert_eq!(decision_lines, 1, "{text}");
     assert!(!text.lines().any(|line| line == "second line"), "{text}");
 }
@@ -245,7 +248,11 @@ fn f_032_multiline_field_value_occupies_one_line_of_the_report() {
 #[test]
 fn f_032_report_of_only_tree_animation_resizes_keeps_its_pane_header() {
     let mut session = session();
-    let entries = vec![resize_entry(1, "tree animation resize", Some("tree-panel-animation"))];
+    let entries = vec![resize_entry(
+        1,
+        "tree animation resize",
+        Some("tree-panel-animation"),
+    )];
     let text = report(&mut session, "Codex pane", entries);
     assert!(text.contains("Pane: Codex pane"), "{text}");
     assert!(!text.contains("tree animation resize"), "{text}");

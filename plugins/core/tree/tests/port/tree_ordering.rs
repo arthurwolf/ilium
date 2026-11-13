@@ -1,155 +1,155 @@
-//! Twins of the tests in ilium-client/src/tree_ordering.rs. The plugin expresses order as one
-//! `sort-key` per node (page sample "Order the tree"); the kernel applies it per Order By mode.
+//! Twins of the tests in ilium-client/src/tree_ordering.rs, run against the plugin's pure
+//! `ordering::ordered`. The kernel tree is replaced by a list of entries in manual order; ids grow
+//! in creation order, as node ids do in the kernel.
 
-use ilium_plugin_sdk::types::NodeClass;
+use std::collections::HashMap;
 
-use crate::common::{add_node, order_keys, server_host, sorted_by_key};
+use ilium_plugin_core_tree::ordering::{ordered, Entry, EntryKind, TreeOrder};
+
+fn entry(id: u64, name: &str, kind: EntryKind) -> Entry {
+    Entry {
+        id,
+        name: name.to_string(),
+        kind,
+    }
+}
+
+fn names(children: &[Entry], ids: &[u64]) -> Vec<String> {
+    ids.iter()
+        .filter_map(|id| children.iter().find(|entry| entry.id == *id))
+        .map(|entry| entry.name.clone())
+        .collect()
+}
+
+fn run(
+    children: &[Entry],
+    sortable: bool,
+    order: TreeOrder,
+    ranks: &HashMap<u64, f64>,
+) -> Vec<String> {
+    names(children, &ordered(children, sortable, order, ranks))
+}
 
 /// REQ: PORT:ilium-client/src/tree_ordering.rs::cost_descending_sorts_by_rank_and_keeps_manual_order_for_ties
 #[test]
 fn port_tree_ordering_cost_descending_ties_keep_manual_order() {
-    let mut host = server_host();
-    let group = add_node(&mut host, None, "work", NodeClass::Container);
-    let free_first = add_node(&mut host, Some(group), "free-a", NodeClass::Pane);
-    let free_second = add_node(&mut host, Some(group), "free-b", NodeClass::Pane);
-    host.settle();
-    let submitted = host.submitted();
-    let keys = order_keys(&submitted);
-    let key_of = |id: u64| {
-        keys.iter()
-            .find(|(node, _)| node.0 == id)
-            .and_then(|(_, key)| *key)
-    };
-    // Unranked siblings tie on the key, so the kernel falls back to the manual (creation) order.
-    assert_eq!(key_of(free_first), key_of(free_second));
+    let children = vec![
+        entry(2, "cheap", EntryKind::Terminal),
+        entry(3, "free-a", EntryKind::Terminal),
+        entry(4, "pricey", EntryKind::Terminal),
+        entry(5, "free-b", EntryKind::Terminal),
+    ];
+    let ranks = HashMap::from([(2, 1.5), (4, 40.0)]);
     assert_eq!(
-        sorted_by_key(&submitted, &[free_second, free_first]),
-        vec![free_first, free_second]
+        run(&children, true, TreeOrder::CostDescending, &ranks),
+        ["pricey", "cheap", "free-a", "free-b"],
+        "unranked nodes keep their manual order after every ranked one"
+    );
+    // Without ranks the mode degrades to the manual order.
+    assert_eq!(
+        run(&children, true, TreeOrder::CostDescending, &HashMap::new()),
+        ["cheap", "free-a", "pricey", "free-b"]
     );
 }
 
 /// REQ: PORT:ilium-client/src/tree_ordering.rs::manual_and_age_modes_preserve_or_reverse_creation_order
 #[test]
-fn port_tree_ordering_keys_do_not_depend_on_creation_order() {
-    let mut host = server_host();
-    let group = add_node(&mut host, None, "work", NodeClass::Container);
-    let old = add_node(&mut host, Some(group), "old", NodeClass::Pane);
-    let middle = add_node(&mut host, Some(group), "middle", NodeClass::Pane);
-    let new = add_node(&mut host, Some(group), "new", NodeClass::Pane);
-    host.settle();
-    let submitted = host.submitted();
-    // Manual and age modes use the creation order, which the plugin must not disturb: the keys follow titles only.
+fn port_tree_ordering_manual_and_age_modes_preserve_or_reverse_creation_order() {
+    let children = vec![
+        entry(2, "old", EntryKind::Terminal),
+        entry(3, "middle", EntryKind::Terminal),
+        entry(4, "new", EntryKind::Terminal),
+    ];
+    let none = HashMap::new();
     assert_eq!(
-        sorted_by_key(&submitted, &[old, middle, new]),
-        vec![middle, new, old]
+        run(&children, true, TreeOrder::Manual, &none),
+        ["old", "middle", "new"]
     );
-}
-
-/// REQ: PORT:ilium-client/src/tree_ordering.rs::name_modes_apply_inside_each_group_but_never_reorder_split_members
-#[test]
-fn port_tree_ordering_name_keys_ignore_case() {
-    let mut host = server_host();
-    let group = add_node(&mut host, None, "work", NodeClass::Container);
-    let zebra = add_node(&mut host, Some(group), "Zebra", NodeClass::Pane);
-    let alpha = add_node(&mut host, Some(group), "alpha", NodeClass::Pane);
-    host.settle();
-    let submitted = host.submitted();
-    // Ascending name order puts alpha before Zebra; descending is the reverse of the same keys.
     assert_eq!(
-        sorted_by_key(&submitted, &[zebra, alpha]),
-        vec![alpha, zebra]
+        run(&children, true, TreeOrder::AgeAscending, &none),
+        ["new", "middle", "old"]
+    );
+    assert_eq!(
+        run(&children, true, TreeOrder::AgeDescending, &none),
+        ["old", "middle", "new"]
     );
 }
 
 /// REQ: PORT:ilium-client/src/tree_ordering.rs::type_mode_groups_every_visible_node_kind_then_orders_names
 #[test]
-fn port_tree_ordering_names_inside_one_kind_follow_title_keys() {
-    let mut host = server_host();
-    let parent = add_node(&mut host, None, "work", NodeClass::Container);
-    let roadmap = add_node(&mut host, Some(parent), "roadmap", NodeClass::Pane);
-    let shell = add_node(&mut host, Some(parent), "shell", NodeClass::Pane);
-    let codex = add_node(&mut host, Some(parent), "codex", NodeClass::Pane);
-    let editor = add_node(&mut host, Some(parent), "editor", NodeClass::Pane);
-    let assets = add_node(&mut host, Some(parent), "assets", NodeClass::Folder);
-    let nested = add_node(&mut host, Some(parent), "nested", NodeClass::Container);
-    host.settle();
-    let submitted = host.submitted();
+fn port_tree_ordering_type_mode_groups_every_visible_node_kind_then_orders_names() {
+    // The kernel test adds a board, a shell (moved into the split), a Codex agent, an editor, a
+    // folder, a split view and a nested group; the shell is no longer a direct child.
+    let children = vec![
+        entry(2, "roadmap", EntryKind::Board),
+        entry(4, "codex", EntryKind::Agent(EntryKind::agent_rank("codex"))),
+        entry(5, "editor", EntryKind::Editor),
+        entry(6, "assets", EntryKind::Folder),
+        entry(7, "split", EntryKind::OtherContainer),
+        entry(8, "nested", EntryKind::Group),
+    ];
     assert_eq!(
-        sorted_by_key(&submitted, &[roadmap, shell, codex, editor, assets, nested]),
-        vec![assets, codex, editor, nested, roadmap, shell]
+        run(&children, true, TreeOrder::Type, &HashMap::new()),
+        ["nested", "split", "assets", "codex", "editor", "roadmap"]
     );
 }
 
 /// REQ: PORT:ilium-client/src/tree_ordering.rs::type_mode_also_sorts_a_projects_direct_children
 #[test]
-fn port_tree_ordering_direct_children_of_a_top_level_node_get_keys() {
-    let mut host = server_host();
-    let project = add_node(&mut host, None, "project", NodeClass::Container);
-    let shell = add_node(&mut host, Some(project), "shell", NodeClass::Pane);
-    let nested = add_node(&mut host, Some(project), "nested", NodeClass::Container);
-    host.settle();
-    let submitted = host.submitted();
+fn port_tree_ordering_type_mode_also_sorts_a_projects_direct_children() {
+    let children = vec![
+        entry(2, "shell", EntryKind::Terminal),
+        entry(3, "nested", EntryKind::Group),
+    ];
     assert_eq!(
-        sorted_by_key(&submitted, &[shell, nested]),
-        vec![nested, shell]
-    );
-}
-
-/// REQ: PORT:ilium-client/src/tree_ordering.rs::manual_and_age_modes_preserve_or_reverse_creation_order
-#[test]
-fn nodes_with_equal_titles_get_equal_keys_whatever_their_creation_order() {
-    let mut host = server_host();
-    let group = add_node(&mut host, None, "work", NodeClass::Container);
-    let older = add_node(&mut host, Some(group), "same", NodeClass::Pane);
-    let newer = add_node(&mut host, Some(group), "same", NodeClass::Pane);
-    host.settle();
-    let submitted = host.submitted();
-    let keys = order_keys(&submitted);
-    let key_of = |id: u64| {
-        keys.iter()
-            .rev()
-            .find(|(node, _)| node.0 == id)
-            .and_then(|(_, key)| *key)
-    };
-    assert!(key_of(older).is_some());
-    assert_eq!(key_of(older), key_of(newer));
-    assert_eq!(
-        sorted_by_key(&submitted, &[newer, older]),
-        vec![older, newer]
+        run(&children, true, TreeOrder::Type, &HashMap::new()),
+        ["nested", "shell"]
     );
 }
 
 /// REQ: PORT:ilium-client/src/tree_ordering.rs::name_modes_apply_inside_each_group_but_never_reorder_split_members
 #[test]
-fn titles_sharing_their_first_four_bytes_keep_manual_order() {
-    let mut host = server_host();
-    let group = add_node(&mut host, None, "work", NodeClass::Container);
-    let longer = add_node(&mut host, Some(group), "alphanumeric", NodeClass::Pane);
-    let shorter = add_node(&mut host, Some(group), "alphabet", NodeClass::Pane);
-    host.settle();
-    let submitted = host.submitted();
+fn port_tree_ordering_name_modes_apply_inside_each_group_but_never_reorder_split_members() {
+    let split_members = vec![
+        entry(2, "Zebra", EntryKind::Terminal),
+        entry(3, "alpha", EntryKind::Terminal),
+    ];
+    // A split view does not accept normal children: its structural order stays.
     assert_eq!(
-        sorted_by_key(&submitted, &[shorter, longer]),
-        vec![longer, shorter]
+        run(
+            &split_members,
+            false,
+            TreeOrder::NameAscending,
+            &HashMap::new()
+        ),
+        ["Zebra", "alpha"]
+    );
+    let group_children = vec![entry(4, "split", EntryKind::OtherContainer)];
+    assert_eq!(
+        run(
+            &group_children,
+            true,
+            TreeOrder::NameDescending,
+            &HashMap::new()
+        ),
+        ["split"]
     );
 }
 
-/// REQ: PORT:ilium-client/src/tree_ordering.rs::type_mode_groups_every_visible_node_kind_then_orders_names
+/// REQ: PORT:ilium-client/src/tree_ordering.rs::name_modes_apply_inside_each_group_but_never_reorder_split_members
 #[test]
-fn node_class_does_not_change_the_sort_key_of_a_title() {
-    let mut host = server_host();
-    let group = add_node(&mut host, None, "work", NodeClass::Container);
-    let folder = add_node(&mut host, Some(group), "notes", NodeClass::Folder);
-    let pane = add_node(&mut host, Some(group), "notes", NodeClass::Pane);
-    host.settle();
-    let submitted = host.submitted();
-    let keys = order_keys(&submitted);
-    let key_of = |id: u64| {
-        keys.iter()
-            .rev()
-            .find(|(node, _)| node.0 == id)
-            .and_then(|(_, key)| *key)
-    };
-    assert!(key_of(folder).is_some());
-    assert_eq!(key_of(folder), key_of(pane));
+fn port_tree_ordering_name_order_ignores_case_and_descending_reverses_it() {
+    let children = vec![
+        entry(2, "Zebra", EntryKind::Terminal),
+        entry(3, "alpha", EntryKind::Terminal),
+    ];
+    let none = HashMap::new();
+    assert_eq!(
+        run(&children, true, TreeOrder::NameAscending, &none),
+        ["alpha", "Zebra"]
+    );
+    assert_eq!(
+        run(&children, true, TreeOrder::NameDescending, &none),
+        ["Zebra", "alpha"]
+    );
 }

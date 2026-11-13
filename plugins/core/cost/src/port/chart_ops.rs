@@ -35,7 +35,12 @@ pub(super) fn run(name: &str, request: &Value) -> Value {
             let values = numbers(&request["values"]);
             let width = usize_field(request, "width");
             let mode = downsample(request["downsample"].as_str().unwrap_or("interpolate"));
-            Value::Array(resample(&values, width, mode).into_iter().map(float).collect())
+            Value::Array(
+                resample(&values, width, mode)
+                    .into_iter()
+                    .map(float)
+                    .collect(),
+            )
         }
         _ => Value::Null,
     }
@@ -55,7 +60,10 @@ fn plot_reply(request: &Value) -> Value {
         include_zero: config["include_zero"].as_bool().unwrap_or(false),
         label_formatter: None,
     };
-    if let Some(formatter) = config.get("label_formatter").filter(|value| value.is_object()) {
+    if let Some(formatter) = config
+        .get("label_formatter")
+        .filter(|value| value.is_object())
+    {
         let suffix: &'static str = match formatter["suffix"].as_str().unwrap_or("") {
             "k" => "k",
             "M" => "M",

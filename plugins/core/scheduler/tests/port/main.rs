@@ -13,6 +13,7 @@ mod client_scheduled_input;
 mod client_tree_ui;
 mod client_ui;
 mod pty_tui_smoke;
+mod rules;
 mod server_ordered_owner_regressions;
 mod server_scheduled_input;
 mod server_smoke;

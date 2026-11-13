@@ -8,6 +8,10 @@
 //! publishing the `chatroom` topic) needs the SDK `host()` calls, which the SDK lane has not
 //! implemented yet; see the report of the implementation lane.
 
+pub mod messages;
+pub mod root;
+pub mod router;
+
 use std::cell::RefCell;
 
 use ilium_plugin_sdk::exports::VirtualRowChild;
@@ -15,7 +19,7 @@ use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, Activation, Alignment, Area, BlockSpec, BlockTitle, BorderType,
     Borders, Constraint, Direction, ErrorCode, Event, Flex, Intent, LayoutSpec, Margin,
     MessageSpec, MessageTarget, NodeFlags, Padding, ParagraphSpec, PluginError, PluginId,
-    PluginSide, RichSpan, ScrollViewSpec, SeparatorSpec, Span, SpanTarget, Spacing, Style,
+    PluginSide, RichSpan, ScrollViewSpec, SeparatorSpec, Spacing, Span, SpanTarget, Style,
     Submission, TextInputSpec, TitlePosition, UiNode, UiTree, ViewTarget, Widget,
 };
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views, VirtualRowsProvider};
@@ -258,8 +262,8 @@ impl Handler for ChatroomClient {
         for event in batch {
             match event {
                 Event::TopicPublished(published) if published.topic == TOPIC => {
-                    let record = payload_text(&published.payload_json)
-                        .and_then(|text| parse_record(&text));
+                    let record =
+                        payload_text(&published.payload_json).and_then(|text| parse_record(&text));
                     if let Some(record) = record {
                         CLIENT.with(|cell| cell.borrow_mut().records.push(record));
                     }
@@ -452,7 +456,12 @@ fn build_view(state: &ClientState, columns: usize) -> UiTree {
             node(Some(SCROLL_KEY), Widget::ScrollView(scroll), vec![3], true),
             node(None, Widget::Paragraph(paragraph), vec![], false),
             node(None, Widget::Separator(separator), vec![], false),
-            node(Some(COMPOSER_KEY), Widget::TextInput(composer), vec![], true),
+            node(
+                Some(COMPOSER_KEY),
+                Widget::TextInput(composer),
+                vec![],
+                true,
+            ),
         ],
         root: 0,
     }

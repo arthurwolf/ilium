@@ -1,6 +1,6 @@
 //! Twins of the Move mode tests of `ilium-client/src/keys.rs` (indent and outdent). The plugin expresses a
 //! move as one `move-node` intent (page core-plugin-tree.md, "Moving, reordering and renaming entries").
-//! Assumed command ids `tree.indent` and `tree.outdent` carry the focused node in the command context.
+//! The commands `ilium.core.tree/indent` and `ilium.core.tree/outdent` carry the focused node in the command context.
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
@@ -36,7 +36,7 @@ fn port_001_indent_moves_into_the_nearest_preceding_sibling_group() {
     let top = add_node(&mut host, None, "top", NodeClass::Container);
     let sibling = add_node(&mut host, Some(top), "sibling", NodeClass::Container);
     let pane = add_node(&mut host, Some(top), "pane", NodeClass::Pane);
-    let moves = invoke(&mut host, "tree.indent", pane);
+    let moves = invoke(&mut host, "ilium.core.tree/indent", pane);
     assert_eq!(
         moves,
         vec![MoveNodeSpec {
@@ -55,7 +55,7 @@ fn port_002_outdent_moves_out_into_the_parent_group_right_after_the_current_grou
     let inner = add_node(&mut host, Some(top), "inner", NodeClass::Container);
     let pane = add_node(&mut host, Some(inner), "pane", NodeClass::Pane);
     add_node(&mut host, Some(top), "other", NodeClass::Pane);
-    let moves = invoke(&mut host, "tree.outdent", pane);
+    let moves = invoke(&mut host, "ilium.core.tree/outdent", pane);
     assert_eq!(
         moves,
         vec![MoveNodeSpec {
@@ -72,7 +72,7 @@ fn port_003_outdent_at_the_top_level_is_a_no_op() {
     let mut host = server_host();
     let top = add_node(&mut host, None, "top", NodeClass::Container);
     assert_eq!(
-        invoke(&mut host, "tree.outdent", top),
+        invoke(&mut host, "ilium.core.tree/outdent", top),
         Vec::<MoveNodeSpec>::new()
     );
 }
@@ -84,7 +84,7 @@ fn port_004_outdent_rejects_leaving_a_pane_parentless_at_the_top_level() {
     let top = add_node(&mut host, None, "top", NodeClass::Container);
     let pane = add_node(&mut host, Some(top), "pane", NodeClass::Pane);
     assert_eq!(
-        invoke(&mut host, "tree.outdent", pane),
+        invoke(&mut host, "ilium.core.tree/outdent", pane),
         Vec::<MoveNodeSpec>::new()
     );
 }
@@ -97,7 +97,7 @@ fn indent_skips_a_preceding_pane_to_reach_the_nearest_group() {
     let group = add_node(&mut host, Some(top), "group", NodeClass::Container);
     add_node(&mut host, Some(top), "pane before", NodeClass::Pane);
     let pane = add_node(&mut host, Some(top), "pane", NodeClass::Pane);
-    let moves = invoke(&mut host, "tree.indent", pane);
+    let moves = invoke(&mut host, "ilium.core.tree/indent", pane);
     assert_eq!(
         moves,
         vec![MoveNodeSpec {
@@ -115,7 +115,7 @@ fn outdent_of_a_second_top_level_group_is_a_no_op() {
     add_node(&mut host, None, "first", NodeClass::Container);
     let second = add_node(&mut host, None, "second", NodeClass::Container);
     assert_eq!(
-        invoke(&mut host, "tree.outdent", second),
+        invoke(&mut host, "ilium.core.tree/outdent", second),
         Vec::<MoveNodeSpec>::new()
     );
 }
@@ -128,7 +128,7 @@ fn outdent_moves_only_the_focused_node_and_leaves_its_sibling_in_place() {
     let inner = add_node(&mut host, Some(top), "inner", NodeClass::Container);
     let pane = add_node(&mut host, Some(inner), "pane", NodeClass::Pane);
     add_node(&mut host, Some(inner), "sibling", NodeClass::Pane);
-    let moves = invoke(&mut host, "tree.outdent", pane);
+    let moves = invoke(&mut host, "ilium.core.tree/outdent", pane);
     assert_eq!(moves.len(), 1);
     assert_eq!(moves[0].node, NodeId(pane));
     assert_eq!(moves[0].target, NodeId(inner));
@@ -141,7 +141,7 @@ fn rejected_outdent_submits_no_move_intent_at_all() {
     let mut host = server_host();
     let top = add_node(&mut host, None, "top", NodeClass::Container);
     let pane = add_node(&mut host, Some(top), "pane", NodeClass::Pane);
-    let moves = invoke(&mut host, "tree.outdent", pane);
+    let moves = invoke(&mut host, "ilium.core.tree/outdent", pane);
     assert!(moves.is_empty());
     assert!(host
         .submitted()

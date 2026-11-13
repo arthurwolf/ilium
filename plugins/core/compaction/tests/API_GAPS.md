@@ -18,5 +18,5 @@ Format: crate, signature, requirement id, why.
 ## Assumptions the manual leaves open
 
 - The channel carrying trigger data from the server (fs.read:agent-homes) to the client tab is unspecified; tests read it through the rendered tab.
-- Assumed windows: Claude Code 1 000 000 and Codex 258 400 tokens, from the existing implementation.
+- Context windows used: Claude Code 1 000 000 and Codex 258 400 tokens, from the existing implementation.
 - Exact optimiser confirmation text follows the existing client implementation.

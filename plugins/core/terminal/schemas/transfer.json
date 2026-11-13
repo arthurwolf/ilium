@@ -3,28 +3,96 @@
     "params": {
       "type": "object",
       "properties": {
-        "from": {
-          "type": "integer"
+        "source": {
+          "type": "integer",
+          "minimum": 0
         },
-        "to": {
-          "type": "integer"
+        "target": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
-        "from",
-        "to"
+        "source",
+        "target"
       ]
     },
     "result": {
       "type": "object",
       "properties": {
-        "bytes": {
+        "queued": {
+          "type": "boolean"
+        },
+        "lines": {
           "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "read-screen": {
+    "params": {
+      "type": "object",
+      "properties": {
+        "pane": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
-        "bytes"
+        "pane"
       ]
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "send-text": {
+    "params": {
+      "type": "object",
+      "properties": {
+        "pane": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pane",
+        "text"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "queued": {
+          "type": "boolean"
+        },
+        "lines": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
     }
   }
 }

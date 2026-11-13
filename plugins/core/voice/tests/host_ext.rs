@@ -14,7 +14,12 @@ const REALTIME: &str = "ilium.core.voice/realtime";
 const DEMO: &str = "ilium.core.voice/onboarding-demo";
 
 /// Calls `method` of `service` and parses the JSON reply.
-fn ask(host: &mut FakeHost, service: &str, method: &str, payload: Value) -> Result<Value, PluginError> {
+fn ask(
+    host: &mut FakeHost,
+    service: &str,
+    method: &str,
+    payload: Value,
+) -> Result<Value, PluginError> {
     let text = host.call_service(service, method, &payload.to_string())?;
     serde_json::from_str(&text).map_err(|error| {
         PluginError::new(
@@ -33,14 +38,18 @@ fn read(host: &mut FakeHost, service: &str, method: &str, payload: Value) -> Val
 fn strings(value: &Value, key: &str) -> Vec<String> {
     value[key]
         .as_array()
-        .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 fn text_of(value: &Value, key: &str) -> Option<String> {
     value[key].as_str().map(str::to_string)
 }
-
 
 /// One tool the realtime session exposes to the model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,23 +136,41 @@ impl Realtime<'_> {
     }
     /// Sets the agent pane the tools target.
     pub fn set_active_agent(&mut self, agent: &str) {
-        read(self._host, REALTIME, "set-active-agent", json!({ "agent": agent }));
+        read(
+            self._host,
+            REALTIME,
+            "set-active-agent",
+            json!({ "agent": agent }),
+        );
     }
     /// The system prompt sent to the model.
     pub fn system_prompt(&mut self) -> String {
-        text_of(&read(self._host, REALTIME, "system-prompt", json!({})), "text").unwrap_or_default()
+        text_of(
+            &read(self._host, REALTIME, "system-prompt", json!({})),
+            "text",
+        )
+        .unwrap_or_default()
     }
     /// The target context text, if any.
     pub fn target_context(&mut self) -> Option<String> {
-        text_of(&read(self._host, REALTIME, "target-context", json!({})), "text")
+        text_of(
+            &read(self._host, REALTIME, "target-context", json!({})),
+            "text",
+        )
     }
     /// Tool call names in order.
     pub fn tool_calls(&mut self) -> Vec<String> {
-        strings(&read(self._host, REALTIME, "tool-calls", json!({})), "names")
+        strings(
+            &read(self._host, REALTIME, "tool-calls", json!({})),
+            "names",
+        )
     }
     /// Texts typed into the target pane.
     pub fn typed_text(&mut self) -> Vec<String> {
-        strings(&read(self._host, REALTIME, "typed-text", json!({})), "texts")
+        strings(
+            &read(self._host, REALTIME, "typed-text", json!({})),
+            "texts",
+        )
     }
 }
 
@@ -157,7 +184,10 @@ impl OnboardingDemo<'_> {
     /// Tool names of the demo.
     pub fn tools(&mut self) -> Vec<String> {
         let name = self._name.clone();
-        strings(&read(self._host, DEMO, "tools", json!({ "demo": name })), "tools")
+        strings(
+            &read(self._host, DEMO, "tools", json!({ "demo": name })),
+            "tools",
+        )
     }
     /// Calls a demo tool: `(call_id, name, arguments_json)`.
     pub fn call(

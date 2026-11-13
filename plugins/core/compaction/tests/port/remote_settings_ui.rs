@@ -360,7 +360,9 @@ fn rsui_page_keeps_its_title_at_narrow_width() {
 fn rsui_custom_technique_row_names_its_own_instructions() {
     let mut host = dismissed();
     host.settings_set_value("technique:other", json!("custom"));
-    assert!(host.settings_page_text(120).contains("Your own instructions"));
+    assert!(host
+        .settings_page_text(120)
+        .contains("Your own instructions"));
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::custom_prompt_row_previews_the_text_and_its_length

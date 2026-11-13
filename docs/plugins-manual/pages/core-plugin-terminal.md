@@ -523,7 +523,7 @@ function onTitle(event: Event): Submission | undefined {
 
 #### Screen transfer between panes
 
-The visible screen and the history of one pane are pasted into another. The server reads rows with `terminal.read-screen` and asks for the history, trims trailing blank rows, then submits `send-input` with `delivery: pasted` to the target. `history-text` answers later through `take-history`. Pages: [terminal reads](/pages/primitives-terminal-reads/), [read-screen](/pages/capability-terminal-read-screen/), [history](/pages/capability-terminal-history/), [terminal input](/pages/primitives-terminal-input/), [terminal.write](/pages/capability-terminal-write/), [events](/pages/api-events/) and [send-input](/pages/api-intent-send-input/).
+The visible screen and the history of one pane are pasted into another. The server reads rows with `terminal.read-screen` and asks for the history, trims trailing blank rows, then submits `send-input` with `delivery: pasted` to the target. `history-text` answers later through `take-history`. The history comes first in the paste, then the visible screen, joined by one newline; when the history cannot be read the visible screen alone is pasted. A paste is keyed `transfer-<source>-<target>-<revision>`, so the same screen revision between the same two panes pastes once. Pages: [terminal reads](/pages/primitives-terminal-reads/), [read-screen](/pages/capability-terminal-read-screen/), [history](/pages/capability-terminal-history/), [terminal input](/pages/primitives-terminal-input/), [terminal.write](/pages/capability-terminal-write/), [events](/pages/api-events/) and [send-input](/pages/api-intent-send-input/).
 
 - **[COR-004]** Screen transfer MUST paste the plain text of the source pane's current visible screen into the destination as one paste without appending Enter, MUST be offered only between two live terminal panes that share an edge in the split, and MUST NOT be offered next to an editor or board pane (proposed, owner to confirm).
 
@@ -719,11 +719,11 @@ Other plugins change what `ilium.core.terminal` does through the points below. T
 
 **Services** (grant `services.use:<name>`):
 
-- `ilium.core.terminal/transfer`: send-screen: copy the visible screen of one pane to another pane
+- `ilium.core.terminal/transfer`: `send-screen` (`{ source, target }`) pastes the history and the visible screen of one pane into another and answers `{ queued, lines }`, `read-screen` (`{ pane }`) answers `{ rows, revision }`, `send-text` (`{ pane, text }`) pastes text into a pane. A failed call answers `{ error }`
 
 **Topics** (list under `contributes.topics.subscribes`):
 
-- `ilium.core.terminal/screen-changed`: { pane, first-row, last-row, revision } when visible rows change, at most 10 per second
+- `ilium.core.terminal/screen-changed`: { pane, first-row, last-row, revision, generation } when visible rows change, at most 10 per second for each pane; a change inside the quiet window is kept and published when it ends, with the rows of every deferred change joined. `generation` repeats `revision`
 
 Link detectors from `contributes.link_detectors` feed the `link-actions` point.
 

@@ -1,0 +1,13 @@
+{{#if earlier_summary}}Earlier summary, carried forward unchanged:
+{{earlier_summary}}
+
+{{/if}}{{#if partial_summary}}Summary of the first part of the history, produced before the summarizer became unavailable:
+{{partial_summary}}
+
+{{/if}}The rest of this summary was assembled mechanically from the transcript because the summarizing model could not be used. It lists what was asked and what was done, not why.
+
+User requests, oldest first (the last one is the current task):
+{{#each user_requests}}- {{this}}
+{{/each}}
+{{#if ledger}}
+{{ledger}}{{/if}}

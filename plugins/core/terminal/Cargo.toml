@@ -15,13 +15,14 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk" }
 serde_json = "1.0.151"
+# Link detection (src/links.rs) and repaint planning (src/screen_diff.rs).
+regex = "1.13.0"
+unicode-width = "0.2.2"
 
 [dev-dependencies]
 ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk", features = ["testing"] }
 serde_json = "1.0.151"
 proptest = "1"
-# Link patterns of the terminal feature tests (tests/features/links.rs, tests/port/terminal_links.rs).
-regex = "1.13.0"
 
 [features]
 # Component builds (wasm32-wasip2): `#[ilium_plugin]` emits the component glue of one side.

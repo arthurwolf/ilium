@@ -3,6 +3,9 @@
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
+pub mod config;
+pub mod matching;
+
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
@@ -114,10 +117,7 @@ mod spec_tests {
         let manifest = manifest();
         assert_eq!(
             string_list(&manifest["activation"]),
-            vec![
-                "startup",
-                "view:ilium.core.text-triggers/rules"
-            ]
+            vec!["startup", "view:ilium.core.text-triggers/rules"]
         );
     }
 
@@ -198,10 +198,7 @@ mod spec_tests {
         assert!(activation.is_empty());
         assert_ne!(
             activation,
-            vec![
-                "startup",
-                "view:ilium.core.text-triggers/rules"
-            ]
+            vec!["startup", "view:ilium.core.text-triggers/rules"]
         );
     }
 }

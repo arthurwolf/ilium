@@ -14,8 +14,11 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk" }
-serde_json = "1.0.151"
-ilium-remote-compaction = { version = "0.1.1", path = "../../../ilium-remote-compaction" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["raw_value"] }
+thiserror = "2.0.18"
+handlebars = "6.4.2"
+chrono = { version = "0.4.45", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk", features = ["testing"] }

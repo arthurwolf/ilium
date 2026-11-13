@@ -176,6 +176,102 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "id": "presets",
         "title": "Layout presets"
       }
+    ],
+    "settings": [
+      {
+        "kind": "tab",
+        "id": "padding",
+        "title": "Padding",
+        "scope": "client",
+        "rows": [
+          {
+            "type": "choice",
+            "key": "mode",
+            "title": "Padding",
+            "default": "disabled",
+            "options": [
+              {
+                "value": "disabled",
+                "title": "Disabled"
+              },
+              {
+                "value": "width_dependent",
+                "title": "Size dependent"
+              },
+              {
+                "value": "enabled",
+                "title": "Enabled"
+              }
+            ]
+          },
+          {
+            "type": "number",
+            "key": "width_threshold",
+            "title": "Minimum terminal width",
+            "minimum": 11,
+            "maximum": 1000,
+            "step": 1,
+            "unit": "columns",
+            "default": 200
+          },
+          {
+            "type": "toggle",
+            "key": "right_panels_shared",
+            "title": "Same padding for every right-hand panel",
+            "default": true
+          },
+          {
+            "type": "number",
+            "key": "tree_all",
+            "title": "Tree padding",
+            "minimum": 0,
+            "maximum": 3,
+            "step": 1,
+            "unit": "cells",
+            "default": 1
+          },
+          {
+            "type": "number",
+            "key": "right_shared_all",
+            "title": "Right-hand panels padding",
+            "minimum": 0,
+            "maximum": 3,
+            "step": 1,
+            "unit": "cells",
+            "default": 1
+          }
+        ]
+      },
+      {
+        "kind": "section",
+        "id": "tree-layout",
+        "tab": "user-interface",
+        "placement": "end",
+        "title": "Tree rows",
+        "scope": "client",
+        "rows": [
+          {
+            "type": "choice",
+            "key": "tree_row_preset",
+            "title": "Tree row layout",
+            "default": "default",
+            "options": [
+              {
+                "value": "default",
+                "title": "Default"
+              },
+              {
+                "value": "all_right",
+                "title": "All right"
+              },
+              {
+                "value": "mixed",
+                "title": "Mixed"
+              }
+            ]
+          }
+        ]
+      }
     ]
   },
   "activation": [
@@ -568,6 +664,10 @@ The main manifest grants `extensions.provide:ilium.core.layout/layout-presets` a
 In every state the data is not deleted ([COR-022]). A user who finds the presets missing has lost the plugin that lists them, not the file.
 
 **Limits a replacement must respect.** The kernel checks every layout a Layout plugin proposes ([COR-217]): a pane narrower than 4 cells or shorter than 2 rows, or a node that is missing or duplicated, is rejected with `layout.invalid` and the previous layout stays. The width limit is marked proposed and awaits the owner. A preset that cannot fit the current screen is therefore refused at apply time, not stored as broken; the user sees the error toast and the old arrangement.
+
+### Padding and tree row settings
+
+Layout declares two groups of settings rows (see the complete manifest). The **Padding** tab sets the empty cells between a panel border and its content: `mode` (`disabled`, `width_dependent` or `enabled`), `width_threshold` (11 to 1000 columns, default 200, used only by `width_dependent`), `right_panels_shared`, `tree_all` and `right_shared_all` (0 to 3 cells, default 1). A value outside its range is refused and the stored value stays. A terminal narrower than the padding keeps its full extent on that axis, so padding never removes the last cell of a panel. The **Tree rows** section of the user interface tab chooses the preset `tree_row_preset` (`default`, `all_right` or `mixed`) of the order of the identity, objective, activity and title slots of a tree row; the title cannot be hidden. The fine-tuning dialogs with per-side numbers and the live specimen stay in the kernel until a popup view can edit text.
 
 ### See also
 

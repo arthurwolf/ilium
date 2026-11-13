@@ -15,3 +15,5 @@
 - manual: the manifest names a settings section `first-run` only in a comment; manifest.json has no such section, so the content of the `first-run` step form is not tested beyond title, hints and position text (F-089).
 - manual: "automatic AI stays off until the setup finishes" and "the setup keeps its own state until the user finishes" (page, Guided setup) name no key or channel; not tested (F-089).
 - manual: Forget settings (USR-163), the plugin page tabs and the `[ Open Plugins page ]` link name no view ids or actions; only the page text is tested (F-090).
+
+- Port status: `src/onboarding/state.rs` and `progress.rs` hold the pure wizard navigation and the durable progress record (the in-file tests are the twins of the kernel unit tests; the progress record round-trips through JSON instead of TOML because the plugin has no TOML dependency). `practice.rs` (7 twins), `integration.rs` (18 twins), `value_editor.rs` (2 twins), the `overview` and `appearance` views and the paged tab list are not ported: they need G12 (onboarding), G2 (editable rows), G8 (text input and scrolling) and G10 (`kernel-settings` and `plugins` imports).

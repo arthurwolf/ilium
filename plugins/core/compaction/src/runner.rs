@@ -1,14 +1,14 @@
 //! The `compact` job runner: splits the transcript into chunks, summarises each through the host inference call,
 //! merges the parts and falls back to an offline summary when the model keeps failing (manual page, "Job runner").
 
+use crate::remote::{
+    clean_summary, render_merge_prompt, render_prompt, validate_summary, PromptInputs, Technique,
+};
 use ilium_plugin_sdk::generated::host::{ChatMessage, CompletionRequest};
 use ilium_plugin_sdk::host::{Bucket, HostInference, HostJobs, HostSettings, HostStorage};
 use ilium_plugin_sdk::primitives::HostAgent;
 use ilium_plugin_sdk::types::{ErrorCode, NodeId, PluginError};
 use ilium_plugin_sdk::{host, HostApi};
-use ilium_remote_compaction::{
-    clean_summary, render_merge_prompt, render_prompt, validate_summary, PromptInputs, Technique,
-};
 use serde_json::Value;
 
 use crate::redact::redact;
@@ -54,7 +54,11 @@ fn read_settings(api: &mut dyn HostApi, focused: Option<NodeId>) -> RunnerSettin
         .and_then(|pane| HostAgent::view(api, pane))
         .map(|view| view.signature);
     let row = technique_row(signature.as_deref());
-    let default = if row == "codex_technique" { "codex" } else { "claude_code" };
+    let default = if row == "codex_technique" {
+        "codex"
+    } else {
+        "claude_code"
+    };
     let technique = setting_text(&settings, row)
         .and_then(|id| Technique::from_id(&id))
         .or_else(|| Technique::from_id(default))
@@ -73,8 +77,14 @@ fn read_settings(api: &mut dyn HostApi, focused: Option<NodeId>) -> RunnerSettin
 fn ask(api: &mut dyn HostApi, system: String, user: String, purpose: &str) -> Option<String> {
     let request = CompletionRequest {
         messages: vec![
-            ChatMessage { role: "system".to_string(), content: system },
-            ChatMessage { role: "user".to_string(), content: user },
+            ChatMessage {
+                role: "system".to_string(),
+                content: system,
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: user,
+            },
         ],
         max_output_tokens: Some(MAX_OUTPUT_TOKENS),
         json_schema: None,
@@ -125,13 +135,21 @@ fn split_chunks(text: &str, limit: usize) -> Vec<&str> {
 
 /// A summary built without a model: the first and last lines of the transcript.
 fn offline_summary(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
     let (head, tail): (&[&str], &[&str]) = if lines.len() <= 2 * FALLBACK_LINES {
         (&lines, &[])
     } else {
-        (&lines[..FALLBACK_LINES], &lines[lines.len() - FALLBACK_LINES..])
+        (
+            &lines[..FALLBACK_LINES],
+            &lines[lines.len() - FALLBACK_LINES..],
+        )
     };
-    let mut summary = String::from("Offline summary (the model could not be reached). Start of the conversation:\n");
+    let mut summary = String::from(
+        "Offline summary (the model could not be reached). Start of the conversation:\n",
+    );
     summary.push_str(&head.join("\n"));
     if !tail.is_empty() {
         summary.push_str("\n...\nEnd of the conversation:\n");
@@ -196,9 +214,16 @@ pub fn run_compact(input: &[u8], focused: Option<NodeId>) -> Result<Vec<u8>, Plu
 }
 
 /// One summary from the parts: the part itself, or the merge call's answer, or the parts joined when the merge fails.
-fn merge_partials(api: &mut dyn HostApi, settings: &RunnerSettings, partials: Vec<String>) -> String {
+fn merge_partials(
+    api: &mut dyn HostApi,
+    settings: &RunnerSettings,
+    partials: Vec<String>,
+) -> String {
     if partials.len() <= 1 {
-        return partials.into_iter().next().unwrap_or_else(|| offline_summary(""));
+        return partials
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| offline_summary(""));
     }
     let custom = settings.custom_prompt.as_deref();
     let render = |problem: Option<&str>| {
@@ -206,5 +231,6 @@ fn merge_partials(api: &mut dyn HostApi, settings: &RunnerSettings, partials: Ve
             .map(|prompt| (prompt.system, prompt.user))
             .map_err(|error| PluginError::new(ErrorCode::Internal, error.to_string()))
     };
-    ask_validated(api, settings, "compaction merge", &render).unwrap_or_else(|| partials.join("\n\n"))
+    ask_validated(api, settings, "compaction merge", &render)
+        .unwrap_or_else(|| partials.join("\n\n"))
 }

@@ -1,0 +1,9 @@
+Wrap-up of this Git worktree agent: when your work is finished, or the user asks you to wrap up, close, or clean up this worktree or pane, follow these steps in order.
+
+1. Commit all of your work in this worktree on its branch. Never discard uncommitted changes to make the wrap-up pass.
+2. Merge the branch into its recorded base branch, from inside this worktree. Do not merge into the main checkout unless the user explicitly asks for that merge.
+3. Run `ilium close-pane --worktree remove` last, from this pane. It stops this pane, which also stops the command itself, and removes this worktree only when it is clean, merged, and not in use. The branch is kept.
+
+Never close the pane or remove the worktree with `git worktree remove`, `git worktree prune`, or `git branch -D`: those skip Ilium's ownership and custody checks. If the user asks only to close the pane, run `ilium close-pane --worktree keep` instead. If the user asks to delete the branch too, run `ilium close-pane --worktree remove-and-branch`.
+
+If `ilium close-pane` prints `blocked`, the worktree is kept and its `reasons` say why; fix the cause and run it again. If it prints `uncertain`, inspect the worktree with `git worktree list` and `git status` in its path before doing anything else, and report what you found.

@@ -350,7 +350,10 @@ fn port_cost_tracker_quota_pane_cost_reports_quota_availability() {
         "tracker.settle",
         json!({ "ticks": [{ "settings": quota_settings(), "store": { "first": quota_stats(&[(0, 9.0)], "primary") } }], "agents": ["first"] }),
     );
-    assert_eq!(reply["overlays"][0]["pane_cost"]["first"]["has_quota"], json!(true));
+    assert_eq!(
+        reply["overlays"][0]["pane_cost"]["first"]["has_quota"],
+        json!(true)
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker.rs::overlay_rolls_group_totals_up_and_keeps_loading_agents_unrated

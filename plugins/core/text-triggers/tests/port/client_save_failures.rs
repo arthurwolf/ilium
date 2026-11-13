@@ -1,6 +1,6 @@
 //! Twins of the text trigger save tests of ilium-client/src/keys.rs: a failed durable save keeps the edit
 //! and the stored table, a retry keeps the rule id, and a save never overwrites unrelated rules changed on disk.
-//! Assumed row key `reply-N` (Changed, text) beside the documented `delay-N`; see API_GAPS.md.
+//! The row key `reply-N` (Changed, text) sits beside the documented `delay-N`; see API_GAPS.md.
 
 use ilium_plugin_sdk::types::{ActionKind, ActionValue, ErrorCode, PluginError};
 use serde_json::json;

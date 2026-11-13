@@ -185,6 +185,6 @@ fn manifest_050_the_fake_host_grants_exactly_the_manifest_grants() {
     let value: Value = manifest();
     assert_eq!(
         value["capabilities"]["server"].as_array().map(Vec::len),
-        Some(5)
+        Some(8)
     );
 }

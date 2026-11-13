@@ -14,3 +14,8 @@
 - ilium-plugin-testkit: creating, renaming and deleting cards and columns (keys `n`, `c`, `e`, `d`) needs text entry into the plugin's dialogs (view ids and field keys unspecified); only the confirmation refusal of `d` is tested (F-024).
 - ilium-plugin-testkit (ports): `FakeFs::read(path) -> Option<Vec<u8>>` and `FakeFs::write(path, &[u8])` are assumed to accept the shorthand `scope:path` for folder-column files (`project:board/To do/notes.txt`); the port twins in tests/port/ use it (F-024, PORT:ilium-client/src/board.rs::folder_save_preserves_non_markdown_files_in_column).
 - ilium-plugin-testkit (ports): `FakeHost::inject_failure("fs.write-atomic", Conflict)` is consumed by the next write attempt; the twins for the revision-conflict originals assume one injection per refused attempt (3 attempts), as in the features suite.
+
+## Port wave notes (workspace group)
+
+- Moved as a pure module with tests: `src/board.rs` (Markdown board parse and serialize, folder-card parse and serialize, title validation, checkbox scan, text extract, safe names). Tests: `tests/port/board_pure.rs`.
+- Not moved yet: `BoardPane` editing and rollback, `read_source`/`persist_source` and the revision check (need `fs` with locking, G10), `board_view.rs` column layout, `files.rs`, `documents.rs`, `schemas/set-setting.json`. The board pane kind is G14 and the card detail editor is G8.

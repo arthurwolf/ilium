@@ -32,5 +32,194 @@
   "activation": [
     "startup"
   ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "next",
+        "title": "Next: needs you",
+        "category": "Attention"
+      },
+      {
+        "id": "panel",
+        "title": "Toggle the attention panel",
+        "category": "Attention"
+      },
+      {
+        "id": "overview",
+        "title": "Open the Needs you overview",
+        "category": "Attention"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ilium.core.attention/next",
+        "chord": "i",
+        "mode": "prefix"
+      },
+      {
+        "command": "ilium.core.attention/panel",
+        "chord": "I",
+        "mode": "prefix"
+      },
+      {
+        "command": "ilium.core.attention/overview",
+        "chord": "O",
+        "mode": "prefix"
+      }
+    ],
+    "panels": [
+      {
+        "id": "queue",
+        "title": "Needs you",
+        "modal": false
+      },
+      {
+        "id": "overview",
+        "title": "Needs you overview",
+        "modal": true
+      }
+    ],
+    "settings": [
+      {
+        "kind": "tab",
+        "id": "attention",
+        "title": "Attention",
+        "sections": [
+          {
+            "id": "queue",
+            "title": "Attention queue",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "choice",
+                "key": "mode",
+                "title": "Mode",
+                "default": "shared",
+                "options": [
+                  {
+                    "value": "off",
+                    "title": "Off"
+                  },
+                  {
+                    "value": "instant_only",
+                    "title": "Instant only"
+                  },
+                  {
+                    "value": "shared",
+                    "title": "Shared"
+                  },
+                  {
+                    "value": "turbo",
+                    "title": "Turbo"
+                  }
+                ]
+              },
+              {
+                "type": "toggle",
+                "key": "press_sorts",
+                "title": "Press also sorts",
+                "default": true
+              },
+              {
+                "type": "number",
+                "key": "turbo_concurrency",
+                "title": "Turbo concurrency",
+                "minimum": 1,
+                "maximum": 64,
+                "step": 1,
+                "default": 16
+              },
+              {
+                "type": "number",
+                "key": "expiry_seconds",
+                "title": "Item expiry",
+                "minimum": 60,
+                "maximum": 86400,
+                "step": 60,
+                "default": 1800
+              },
+              {
+                "type": "toggle",
+                "key": "large_buttons",
+                "title": "Large attention buttons",
+                "default": true
+              },
+              {
+                "type": "toggle",
+                "key": "show_briefing",
+                "title": "Show briefing on arrival",
+                "default": true
+              },
+              {
+                "type": "text",
+                "key": "model_override",
+                "title": "Model for attention",
+                "default": ""
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "extension_points": [
+      {
+        "id": "item-sources",
+        "kind": "collect",
+        "title": "Add a source of attention items",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "service"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-jump",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before the queue takes the user to an agent",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "origin": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane",
+            "kind",
+            "origin"
+          ]
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ]
+  },
   "limits_tier": "first-party"
 }

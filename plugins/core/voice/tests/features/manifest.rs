@@ -162,9 +162,7 @@ fn manifest_050_declares_the_voice_toggle_command_named_by_its_activation() {
         .as_array()
         .expect("commands array")
         .clone();
-    assert!(commands
-        .iter()
-        .any(|command| command["id"] == "toggle"));
+    assert!(commands.iter().any(|command| command["id"] == "toggle"));
 }
 
 /// REQ: COR-050

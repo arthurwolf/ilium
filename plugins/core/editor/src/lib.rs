@@ -4,6 +4,8 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
+pub mod open_target;
+
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
 use ilium_plugin_sdk::generated::exports::token_provider::Token;
@@ -56,8 +58,13 @@ impl ServiceProvider for EditorServer {
         let field = |name: &str| payload.get(name).and_then(serde_json::Value::as_str);
         match (field("tab"), field("key"), field("value")) {
             (Some(KERNEL_TAB), Some(_), Some(_)) => ServiceReply::Done("{}".to_string()),
-            (Some(_), Some(_), Some(_)) => error("invalid-argument", "tab is not owned by this plugin"),
-            _ => error("invalid-argument", "tab, key and value are required strings"),
+            (Some(_), Some(_), Some(_)) => {
+                error("invalid-argument", "tab is not owned by this plugin")
+            }
+            _ => error(
+                "invalid-argument",
+                "tab, key and value are required strings",
+            ),
         }
     }
 }

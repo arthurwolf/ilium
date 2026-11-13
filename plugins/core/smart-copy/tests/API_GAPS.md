@@ -12,3 +12,10 @@ Each line: crate | signature | id | why.
 - ilium-plugin-sdk | `Key::named(&str) -> Key`; `MenuEntry` fields `shortcut`, `separator_before`, `disabled_reason`, `is_submenu`, `parent` | F-016 | key events and menu assertions
 - ilium-plugin-sdk (testing) | `ErrorCode` returned by `settings().set` for invalid values with loader message | COR-011 | settings validation
 - ilium-plugin-sdk | `types::Key` (see Key::named line above) and `types::Event::Key(Key)` variant | F-016 | key events
+
+## Port wave notes (workspace group)
+
+- Moved as pure modules with tests: `src/light.rs` (preview clipping, countdown, summary, idle release; time as `u64` milliseconds), `src/tokens.rs` (URL tail trimming, path and hash plausibility, label clipping). Tests: `tests/port/light_pure.rs`, `tests/port/tokens_pure.rs`.
+- Not moved yet: the regex line scanner and `styled_runs` of `smart_copy_tokens.rs` (needs a `regex` dependency in `Cargo.lock` for the wasm build, G18, and screen text input, G10), `smart_copy.rs` ranking and candidate list, `smart_copy_selection.rs`, `smart_copy_workers.rs` (needs `inference`, G10), `menu.rs`. The command popup and the real `Client` wiring stay open.
+- G10: `clipboard` and `inference` host imports are not wired; copying and model ranking cannot run in a plugin yet.
+- G4: no client-side `transfer` of screen text, so the command must take `{"rows": [...]}` in its arguments.

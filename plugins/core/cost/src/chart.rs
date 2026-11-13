@@ -348,4 +348,3 @@ fn interpolate(values: &[f64], count: usize) -> Vec<f64> {
     result.push(values[values.len() - 1]);
     result
 }
-

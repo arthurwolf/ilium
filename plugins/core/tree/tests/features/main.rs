@@ -12,5 +12,6 @@ mod empty_groups;
 mod extension_points;
 mod manifest;
 mod move_rename;
+mod node_commands;
 mod ordering;
 mod topics_services;

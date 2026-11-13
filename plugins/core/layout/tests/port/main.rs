@@ -4,4 +4,7 @@
 #[path = "../shared/split_host.rs"]
 mod common;
 
+mod padding;
 mod split_dialog;
+mod tree_layout_settings;
+mod tree_row_layout;

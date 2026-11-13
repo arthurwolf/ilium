@@ -420,7 +420,10 @@ fn port_session_stats_ui_prompts_tab_omits_the_repeat_note_for_single_prompts() 
         json!({ "tabs": ["prompts"], "prompt": "fix the login bug", "repeats": 1 }),
     );
     assert!(
-        !reply["text"].as_str().unwrap_or("").contains("sent in a row"),
+        !reply["text"]
+            .as_str()
+            .unwrap_or("")
+            .contains("sent in a row"),
         "{reply}"
     );
 }
@@ -460,7 +463,10 @@ fn port_session_stats_ui_failed_refresh_without_retained_metrics_still_flags_inc
             .contains("Statistics may be incomplete"),
         "{reply}"
     );
-    assert!(!reply["text"].as_str().unwrap_or("").contains('$'), "{reply}");
+    assert!(
+        !reply["text"].as_str().unwrap_or("").contains('$'),
+        "{reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/session_stats_ui.rs::formatting_helpers

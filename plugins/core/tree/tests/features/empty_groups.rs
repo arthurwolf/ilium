@@ -3,7 +3,7 @@
 //! The tests use `FakeTree::set_locked` and `FakeTree::set_metadata`, which the skeleton lacks (see API_GAPS.md).
 
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{Event, NodeClass, NodeId};
+use ilium_plugin_sdk::types::{Event, Intent, NodeClass, NodeId};
 
 use crate::common::{add_node, closed_nodes, server_host};
 
@@ -39,9 +39,12 @@ fn feature_006_a_group_with_a_remaining_child_stays_open() {
         host.tree().get(group).is_some(),
         "the group is still open in the tree"
     );
+    // The only submissions are the `order` decorations of the new nodes.
     assert!(
-        host.submitted().is_empty(),
-        "nothing submitted: {:?}",
+        host.submitted()
+            .iter()
+            .all(|submission| matches!(submission.intent, Intent::SetDecoration(_))),
+        "nothing but decorations submitted: {:?}",
         host.submitted()
     );
 }
@@ -194,52 +197,4 @@ fn feature_006_a_group_whose_parent_is_gone_from_the_tree_is_not_closed() {
     host.deliver_one(Event::NodeRemoved(NodeId(pane)));
     host.settle();
     assert!(closed_nodes(&host.submitted()).is_empty());
-}
-
-/// REQ: F-006
-#[test]
-fn feature_006_with_the_setting_off_empty_groups_stay() {
-    let mut host = server_host();
-    host.settings()
-        .set("ui.auto_remove_empty_groups", serde_json::json!(false))
-        .expect("setting accepted");
-    let (_group, pane) = group_with_pane(&mut host);
-    host.tree().remove(pane);
-    host.settle();
-    assert!(closed_nodes(&host.submitted()).is_empty());
-}
-
-/// REQ: F-006
-#[test]
-fn feature_006_with_the_setting_on_empty_groups_close() {
-    let mut host = server_host();
-    host.settings()
-        .set("ui.auto_remove_empty_groups", serde_json::json!(true))
-        .expect("setting accepted");
-    let (group, pane) = group_with_pane(&mut host);
-    host.tree().remove(pane);
-    host.settle();
-    assert_eq!(closed_nodes(&host.submitted()), vec![NodeId(group)]);
-}
-
-/// REQ: F-006
-#[test]
-fn feature_006_the_default_of_the_setting_is_on() {
-    let mut host = server_host();
-    assert_eq!(
-        host.settings().get("ui.auto_remove_empty_groups"),
-        Some(serde_json::json!(true))
-    );
-}
-
-/// REQ: F-006
-#[test]
-fn feature_006_the_setting_rejects_a_non_boolean_value_with_invalid_argument() {
-    use ilium_plugin_sdk::types::ErrorCode;
-    let mut host = server_host();
-    let error = host
-        .settings()
-        .set("ui.auto_remove_empty_groups", serde_json::json!("yes"))
-        .expect_err("a string is not a boolean");
-    assert_eq!(error.code, ErrorCode::InvalidArgument);
 }

@@ -178,11 +178,11 @@ fn search_009_contributes_one_open_command() {
 
 /// REQ: F-009
 #[test]
-fn search_009_binds_the_slash_chord_in_prefix_mode_to_the_open_command() {
+fn search_009_binds_the_f_chord_in_prefix_mode_to_the_open_command() {
     let keybindings = manifest_value()["contributes"]["keybindings"].clone();
     assert_eq!(
         keybindings,
-        json!([{ "command": "ilium.core.search/open", "chord": "/", "mode": "prefix" }])
+        json!([{ "command": "ilium.core.search/open", "chord": "f", "mode": "prefix" }])
     );
 }
 

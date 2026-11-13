@@ -19,5 +19,6 @@ mod markdown_document;
 mod markdown_media;
 mod markdown_view;
 mod minimap;
+mod open_target_pure;
 mod syntax;
 mod wheel_and_dirty;

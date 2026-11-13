@@ -201,7 +201,9 @@ fn remember(screen: Screen) -> Screen {
 fn last_screen() -> Screen {
     SCREEN
         .with(|cell| cell.borrow().clone())
-        .unwrap_or_else(|| panic!("no settings screen was rendered yet; call render_settings first"))
+        .unwrap_or_else(|| {
+            panic!("no settings screen was rendered yet; call render_settings first")
+        })
 }
 
 fn screen_size() -> (u16, u16) {
@@ -246,11 +248,31 @@ pub trait CompactionPortHostExt {
     fn format_value(&self, kind: &str, value: f64) -> String;
     fn format_token_quantiles(&self, count: u32, p25: f64, p50: f64, p75: f64) -> String;
     fn widening_triggers(&self, agent: &str, grid: &[u64], current: u64) -> Vec<u64>;
-    fn scan_agent_homes(&mut self, agent: &str, home: Option<&str>, limit: Option<usize>, timeout_ms: Option<u32>) -> Result<Value, ScanError>;
-    fn scan_agent_homes_growing(&mut self, agent: &str, home: &str, path: &str) -> Result<Value, ScanError>;
-    fn scan_agent_homes_shrinking(&mut self, agent: &str, home: &str, keep: usize) -> Result<Value, ScanError>;
+    fn scan_agent_homes(
+        &mut self,
+        agent: &str,
+        home: Option<&str>,
+        limit: Option<usize>,
+        timeout_ms: Option<u32>,
+    ) -> Result<Value, ScanError>;
+    fn scan_agent_homes_growing(
+        &mut self,
+        agent: &str,
+        home: &str,
+        path: &str,
+    ) -> Result<Value, ScanError>;
+    fn scan_agent_homes_shrinking(
+        &mut self,
+        agent: &str,
+        home: &str,
+        keep: usize,
+    ) -> Result<Value, ScanError>;
     fn scan_agent_homes_vanishing(&mut self, agent: &str, home: &str) -> Result<Value, ScanError>;
-    fn scan_agent_homes_with_current(&mut self, agent: &str, current: u64) -> Result<Value, ScanError>;
+    fn scan_agent_homes_with_current(
+        &mut self,
+        agent: &str,
+        current: u64,
+    ) -> Result<Value, ScanError>;
     fn scan_event_stream(&mut self, agent: &str) -> Vec<Value>;
     fn scan_progress_reports(&mut self, agent: &str) -> Vec<Value>;
     fn list_transcripts(&mut self, agent: &str) -> Vec<Value>;
@@ -262,7 +284,12 @@ pub trait CompactionPortHostExt {
     fn touch(&mut self, agent: &str, path: &str);
     fn disable_inference_and_agent_access(&mut self);
     fn read_bounded_lines(&self, bytes: &[u8], limit: usize) -> Vec<Value>;
-    fn read_bounded_lines_stop_after(&self, bytes: &[u8], limit: usize, stop_after: usize) -> Vec<Value>;
+    fn read_bounded_lines_stop_after(
+        &self,
+        bytes: &[u8],
+        limit: usize,
+        stop_after: usize,
+    ) -> Vec<Value>;
     fn is_scanning(&self, agent: &str) -> bool;
     fn scan_request(&self, index: usize) -> Value;
     fn finish_scans(&mut self);
@@ -286,7 +313,12 @@ pub trait CompactionPortHostExt {
     fn close_confirmation(&mut self);
     fn click_help_anchor(&mut self, target: ViewTarget, topic: &str);
     fn close_view(&mut self, target: ViewTarget);
-    fn confirmation_layout(&mut self, target: ViewTarget, columns: u16, rows: u16) -> ConfirmationLayout;
+    fn confirmation_layout(
+        &mut self,
+        target: ViewTarget,
+        columns: u16,
+        rows: u16,
+    ) -> ConfirmationLayout;
     fn custom_prompt_max_chars(&self) -> usize;
     fn custom_prompt_max_serialized_bytes(&self) -> usize;
     fn declared_help_topics(&self) -> Vec<String>;
@@ -376,7 +408,14 @@ pub trait CompactionPortHostExt {
     fn monitor_record_attempt(&mut self, pane: u64, at_ms: u64);
     fn monitor_record_failure(&mut self, pane: u64);
     fn monitor_record_success(&mut self, pane: u64);
-    fn monitor_should_trigger(&mut self, pane: u64, used: f64, threshold: f64, now_ms: u64, cooldown_ms: u64) -> bool;
+    fn monitor_should_trigger(
+        &mut self,
+        pane: u64,
+        used: f64,
+        threshold: f64,
+        now_ms: u64,
+        cooldown_ms: u64,
+    ) -> bool;
     fn native_trigger_evaluate(&self, agent: &str, state: Value, used: u64, limit: u64) -> Value;
     fn native_trigger_detect(&mut self, agent: &str) -> Value;
     fn dialog_banner_close_width(&self) -> u16;
@@ -388,9 +427,20 @@ pub trait CompactionPortHostExt {
     fn dialog_set_agent_stopped(&mut self, stopped: bool);
     fn dialog_state(&self) -> Value;
     fn dialog_token_bar_lines(&self, state: Value, width: usize) -> Vec<String>;
-    fn worker_annotate_progress_overflow(&self, result: Result<Value, String>, overflow: bool) -> Result<Value, String>;
+    fn worker_annotate_progress_overflow(
+        &self,
+        result: Result<Value, String>,
+        overflow: bool,
+    ) -> Result<Value, String>;
     fn worker_classify_inference_error(&self, error: Value) -> String;
-    fn worker_await_pause(&self, agent: &str, reason: &str, timeout: Duration, poll: Duration, interruptible: bool) -> PauseOutcome;
+    fn worker_await_pause(
+        &self,
+        agent: &str,
+        reason: &str,
+        timeout: Duration,
+        poll: Duration,
+        interruptible: bool,
+    ) -> PauseOutcome;
     fn worker_cancel(&mut self);
     fn worker_cancel_observed(&self, within: Duration) -> bool;
     fn worker_fill_event_queue(&mut self);
@@ -406,46 +456,118 @@ impl CompactionPortHostExt for FakeHost {
     }
     fn price_weights(&self, model: &str) -> Option<Value> {
         let reply = query("price-weights", json!({ "model": model }));
-        if reply.is_null() { None } else { Some(reply) }
+        if reply.is_null() {
+            None
+        } else {
+            Some(reply)
+        }
     }
     fn default_grid(&self, agent: &str) -> Vec<u64> {
-        query("default-grid", json!({ "agent": agent })).as_array().map(|items| items.iter().map(number).collect()).unwrap_or_default()
+        query("default-grid", json!({ "agent": agent }))
+            .as_array()
+            .map(|items| items.iter().map(number).collect())
+            .unwrap_or_default()
     }
     fn format_value(&self, kind: &str, value: f64) -> String {
-        as_text(&query("format-value", json!({ "kind": kind, "value": value })))
+        as_text(&query(
+            "format-value",
+            json!({ "kind": kind, "value": value }),
+        ))
     }
     fn format_token_quantiles(&self, count: u32, p25: f64, p50: f64, p75: f64) -> String {
-        as_text(&query("format-token-quantiles", json!({ "count": count, "p25": p25, "p50": p50, "p75": p75 })))
+        as_text(&query(
+            "format-token-quantiles",
+            json!({ "count": count, "p25": p25, "p50": p50, "p75": p75 }),
+        ))
     }
     fn widening_triggers(&self, agent: &str, grid: &[u64], current: u64) -> Vec<u64> {
-        query("widening-triggers", json!({ "agent": agent, "grid": grid, "current": current })).as_array().map(|items| items.iter().map(number).collect()).unwrap_or_default()
+        query(
+            "widening-triggers",
+            json!({ "agent": agent, "grid": grid, "current": current }),
+        )
+        .as_array()
+        .map(|items| items.iter().map(number).collect())
+        .unwrap_or_default()
     }
-    fn scan_agent_homes(&mut self, agent: &str, home: Option<&str>, limit: Option<usize>, timeout_ms: Option<u32>) -> Result<Value, ScanError> {
-        mutate(self, "scan-agent-homes", json!({ "agent": agent, "home": home, "limit": limit, "timeout_ms": timeout_ms })).map_err(scan_error)
+    fn scan_agent_homes(
+        &mut self,
+        agent: &str,
+        home: Option<&str>,
+        limit: Option<usize>,
+        timeout_ms: Option<u32>,
+    ) -> Result<Value, ScanError> {
+        mutate(
+            self,
+            "scan-agent-homes",
+            json!({ "agent": agent, "home": home, "limit": limit, "timeout_ms": timeout_ms }),
+        )
+        .map_err(scan_error)
     }
-    fn scan_agent_homes_growing(&mut self, agent: &str, home: &str, path: &str) -> Result<Value, ScanError> {
-        mutate(self, "scan-agent-homes-growing", json!({ "agent": agent, "home": home, "path": path })).map_err(scan_error)
+    fn scan_agent_homes_growing(
+        &mut self,
+        agent: &str,
+        home: &str,
+        path: &str,
+    ) -> Result<Value, ScanError> {
+        mutate(
+            self,
+            "scan-agent-homes-growing",
+            json!({ "agent": agent, "home": home, "path": path }),
+        )
+        .map_err(scan_error)
     }
-    fn scan_agent_homes_shrinking(&mut self, agent: &str, home: &str, keep: usize) -> Result<Value, ScanError> {
-        mutate(self, "scan-agent-homes-shrinking", json!({ "agent": agent, "home": home, "keep": keep })).map_err(scan_error)
+    fn scan_agent_homes_shrinking(
+        &mut self,
+        agent: &str,
+        home: &str,
+        keep: usize,
+    ) -> Result<Value, ScanError> {
+        mutate(
+            self,
+            "scan-agent-homes-shrinking",
+            json!({ "agent": agent, "home": home, "keep": keep }),
+        )
+        .map_err(scan_error)
     }
     fn scan_agent_homes_vanishing(&mut self, agent: &str, home: &str) -> Result<Value, ScanError> {
-        mutate(self, "scan-agent-homes-vanishing", json!({ "agent": agent, "home": home })).map_err(scan_error)
+        mutate(
+            self,
+            "scan-agent-homes-vanishing",
+            json!({ "agent": agent, "home": home }),
+        )
+        .map_err(scan_error)
     }
-    fn scan_agent_homes_with_current(&mut self, agent: &str, current: u64) -> Result<Value, ScanError> {
-        mutate(self, "scan-agent-homes-with-current", json!({ "agent": agent, "current": current })).map_err(scan_error)
+    fn scan_agent_homes_with_current(
+        &mut self,
+        agent: &str,
+        current: u64,
+    ) -> Result<Value, ScanError> {
+        mutate(
+            self,
+            "scan-agent-homes-with-current",
+            json!({ "agent": agent, "current": current }),
+        )
+        .map_err(scan_error)
     }
     fn scan_event_stream(&mut self, agent: &str) -> Vec<Value> {
         list(act(self, "scan-event-stream", json!({ "agent": agent })))
     }
     fn scan_progress_reports(&mut self, agent: &str) -> Vec<Value> {
-        list(act(self, "scan-progress-reports", json!({ "agent": agent })))
+        list(act(
+            self,
+            "scan-progress-reports",
+            json!({ "agent": agent }),
+        ))
     }
     fn list_transcripts(&mut self, agent: &str) -> Vec<Value> {
         list(act(self, "list-transcripts", json!({ "agent": agent })))
     }
     fn list_transcripts_with_stop(&mut self, agent: &str) -> Vec<Value> {
-        list(act(self, "list-transcripts-with-stop", json!({ "agent": agent })))
+        list(act(
+            self,
+            "list-transcripts-with-stop",
+            json!({ "agent": agent }),
+        ))
     }
     fn listing_warnings(&self) -> Vec<String> {
         texts(&query("listing-warnings", json!({})))
@@ -457,7 +579,11 @@ impl CompactionPortHostExt for FakeHost {
         as_text(&query("default-cache-path", json!({ "agent": agent })))
     }
     fn single_trace_turns(&mut self, agent: &str, path: &str) -> u64 {
-        number(&act(self, "single-trace-turns", json!({ "agent": agent, "path": path })))
+        number(&act(
+            self,
+            "single-trace-turns",
+            json!({ "agent": agent, "path": path }),
+        ))
     }
     fn touch(&mut self, agent: &str, path: &str) {
         act(self, "touch", json!({ "agent": agent, "path": path }));
@@ -466,18 +592,37 @@ impl CompactionPortHostExt for FakeHost {
         act(self, "disable-inference-and-agent-access", json!({}));
     }
     fn read_bounded_lines(&self, bytes: &[u8], limit: usize) -> Vec<Value> {
-        list(query("read-bounded-lines", json!({ "bytes": bytes, "limit": limit })))
+        list(query(
+            "read-bounded-lines",
+            json!({ "bytes": bytes, "limit": limit }),
+        ))
     }
-    fn read_bounded_lines_stop_after(&self, bytes: &[u8], limit: usize, stop_after: usize) -> Vec<Value> {
-        list(query("read-bounded-lines", json!({ "bytes": bytes, "limit": limit, "stop_after": stop_after })))
+    fn read_bounded_lines_stop_after(
+        &self,
+        bytes: &[u8],
+        limit: usize,
+        stop_after: usize,
+    ) -> Vec<Value> {
+        list(query(
+            "read-bounded-lines",
+            json!({ "bytes": bytes, "limit": limit, "stop_after": stop_after }),
+        ))
     }
     fn is_scanning(&self, agent: &str) -> bool {
         let finished = FINISHED_SCANS.with(|cell| *cell.borrow());
-        self.scans_started().iter().skip(finished).any(|scan| scan["agent"] == agent)
+        self.scans_started()
+            .iter()
+            .skip(finished)
+            .any(|scan| scan["agent"] == agent)
     }
     fn scan_request(&self, index: usize) -> Value {
         let scans = self.scans_started();
-        scans.get(index).cloned().unwrap_or_else(|| panic!("scan request {index} was never started ({} started)", scans.len()))
+        scans.get(index).cloned().unwrap_or_else(|| {
+            panic!(
+                "scan request {index} was never started ({} started)",
+                scans.len()
+            )
+        })
     }
     fn finish_scans(&mut self) {
         act(self, "finish-scans", json!({}));
@@ -497,20 +642,31 @@ impl CompactionPortHostExt for FakeHost {
         act(self, "set-note", json!({ "agent": agent, "note": note }));
     }
     fn set_progress(&mut self, agent: &str, done: u64, total: u64, message: &str) {
-        act(self, "set-progress", json!({ "agent": agent, "done": done, "total": total, "message": message }));
+        act(
+            self,
+            "set-progress",
+            json!({ "agent": agent, "done": done, "total": total, "message": message }),
+        );
     }
     fn set_report(&mut self, report_json: &str) {
-        let report: Value = serde_json::from_str(report_json).unwrap_or_else(|error| panic!("set_report needs JSON: {error}"));
+        let report: Value = serde_json::from_str(report_json)
+            .unwrap_or_else(|error| panic!("set_report needs JSON: {error}"));
         act(self, "set-report", report);
     }
     fn set_revert_record(&mut self, previous: u64, current: u64) {
-        act(self, "set-revert-record", json!({ "previous": previous, "current": current }));
+        act(
+            self,
+            "set-revert-record",
+            json!({ "previous": previous, "current": current }),
+        );
     }
     fn clear_revert_record(&mut self) {
         act(self, "clear-revert-record", json!({}));
     }
     fn transcript_format_for(&self, agent: &str) -> Option<String> {
-        query("transcript-format-for", json!({ "agent": agent })).as_str().map(str::to_owned)
+        query("transcript-format-for", json!({ "agent": agent }))
+            .as_str()
+            .map(str::to_owned)
     }
     fn technique_ids(&self) -> Vec<String> {
         texts(&query("technique-ids", json!({})))
@@ -527,13 +683,19 @@ impl CompactionPortHostExt for FakeHost {
     }
     fn kept_columns(&self, columns: &[(&str, u16, usize)], width: usize) -> Vec<String> {
         let columns: Vec<Value> = columns.iter().map(|(name, priority, minimum)| json!({ "name": name, "priority": priority, "min": minimum })).collect();
-        texts(&query("kept-columns", json!({ "columns": columns, "width": width })))
+        texts(&query(
+            "kept-columns",
+            json!({ "columns": columns, "width": width }),
+        ))
     }
     fn wrap_text(&self, text: &str, width: usize) -> Vec<String> {
         texts(&query("wrap-text", json!({ "text": text, "width": width })))
     }
     fn truncate_to(&self, text: &str, width: usize) -> String {
-        as_text(&query("truncate-to", json!({ "text": text, "width": width })))
+        as_text(&query(
+            "truncate-to",
+            json!({ "text": text, "width": width }),
+        ))
     }
     fn button_is_filled(&mut self, target: ViewTarget, label: &str) -> bool {
         let (columns, rows) = screen_size();
@@ -542,7 +704,8 @@ impl CompactionPortHostExt for FakeHost {
             panic!("button `{label}` is not on the screen:\n{}", screen.text());
         };
         let cell = screen.cell(row, column);
-        cell.background != Color::Role(ColorRole::Foreground) && cell.background != screen.cell(row, 0).background
+        cell.background != Color::Role(ColorRole::Foreground)
+            && cell.background != screen.cell(row, 0).background
     }
     fn close_confirmation(&mut self) {
         act(self, "close-confirmation", json!({}));
@@ -559,10 +722,23 @@ impl CompactionPortHostExt for FakeHost {
         self.click(target, column, *row);
     }
     fn close_view(&mut self, target: ViewTarget) {
-        act(self, "close-view", json!({ "target": target_name(&target) }));
+        act(
+            self,
+            "close-view",
+            json!({ "target": target_name(&target) }),
+        );
     }
-    fn confirmation_layout(&mut self, target: ViewTarget, columns: u16, rows: u16) -> ConfirmationLayout {
-        let layout = act(self, "confirmation-layout", json!({ "target": target_name(&target), "columns": columns, "rows": rows }));
+    fn confirmation_layout(
+        &mut self,
+        target: ViewTarget,
+        columns: u16,
+        rows: u16,
+    ) -> ConfirmationLayout {
+        let layout = act(
+            self,
+            "confirmation-layout",
+            json!({ "target": target_name(&target), "columns": columns, "rows": rows }),
+        );
         ConfirmationLayout {
             text_right: geometry_field(&layout, "text_right"),
             scrollbar_x: geometry_field(&layout, "scrollbar_x"),
@@ -580,53 +756,96 @@ impl CompactionPortHostExt for FakeHost {
         usize::try_from(number(&query("custom-prompt-max-chars", json!({})))).unwrap_or(usize::MAX)
     }
     fn custom_prompt_max_serialized_bytes(&self) -> usize {
-        usize::try_from(number(&query("custom-prompt-max-serialized-bytes", json!({})))).unwrap_or(usize::MAX)
+        usize::try_from(number(&query(
+            "custom-prompt-max-serialized-bytes",
+            json!({}),
+        )))
+        .unwrap_or(usize::MAX)
     }
     fn declared_help_topics(&self) -> Vec<String> {
         texts(&query("declared-help-topics", json!({})))
     }
     fn help_anchor_topics(&mut self, target: ViewTarget) -> Vec<String> {
-        self.help_anchors(target, screen_size().0, screen_size().1).into_iter().map(|(topic, _)| topic).collect()
-    }
-    fn help_anchors(&mut self, target: ViewTarget, columns: u16, rows: u16) -> Vec<(String, u16)> {
-        list(act(self, "help-anchors", json!({ "target": target_name(&target), "columns": columns, "rows": rows })))
+        self.help_anchors(target, screen_size().0, screen_size().1)
             .into_iter()
-            .map(|anchor| (as_text(&anchor["topic"]), geometry_field(&anchor, "row")))
+            .map(|(topic, _)| topic)
             .collect()
     }
+    fn help_anchors(&mut self, target: ViewTarget, columns: u16, rows: u16) -> Vec<(String, u16)> {
+        list(act(
+            self,
+            "help-anchors",
+            json!({ "target": target_name(&target), "columns": columns, "rows": rows }),
+        ))
+        .into_iter()
+        .map(|anchor| (as_text(&anchor["topic"]), geometry_field(&anchor, "row")))
+        .collect()
+    }
     fn help_topic_exists(&self, topic: &str) -> bool {
-        query("help-topic-exists", json!({ "topic": topic })).as_bool().unwrap_or(false)
+        query("help-topic-exists", json!({ "topic": topic }))
+            .as_bool()
+            .unwrap_or(false)
     }
     fn help_topic_is_dialog_only(&self, topic: &str) -> bool {
-        query("help-topic-is-dialog-only", json!({ "topic": topic })).as_bool().unwrap_or(false)
+        query("help-topic-is-dialog-only", json!({ "topic": topic }))
+            .as_bool()
+            .unwrap_or(false)
     }
     fn open_help_topic(&self) -> Option<String> {
-        query("open-help-topic", json!({})).as_str().map(str::to_owned)
+        query("open-help-topic", json!({}))
+            .as_str()
+            .map(str::to_owned)
     }
     fn key_consumed(&mut self, target: ViewTarget, key: &str) -> bool {
-        act(self, "key-consumed", json!({ "target": target_name(&target), "key": key })).as_bool().unwrap_or(false)
+        act(
+            self,
+            "key-consumed",
+            json!({ "target": target_name(&target), "key": key }),
+        )
+        .as_bool()
+        .unwrap_or(false)
     }
     fn max_scroll(&mut self, target: ViewTarget, columns: u16, rows: u16) -> usize {
-        usize::try_from(number(&act(self, "max-scroll", json!({ "target": target_name(&target), "columns": columns, "rows": rows })))).unwrap_or(usize::MAX)
+        usize::try_from(number(&act(
+            self,
+            "max-scroll",
+            json!({ "target": target_name(&target), "columns": columns, "rows": rows }),
+        )))
+        .unwrap_or(usize::MAX)
     }
     fn scroll_offset(&self, target: ViewTarget) -> usize {
-        usize::try_from(number(&query("scroll-offset", json!({ "target": target_name(&target) })))).unwrap_or(usize::MAX)
+        usize::try_from(number(&query(
+            "scroll-offset",
+            json!({ "target": target_name(&target) }),
+        )))
+        .unwrap_or(usize::MAX)
     }
     fn scroll_wheel(&mut self, target: ViewTarget, delta: i32) {
-        act(self, "scroll-wheel", json!({ "target": target_name(&target), "delta": delta }));
+        act(
+            self,
+            "scroll-wheel",
+            json!({ "target": target_name(&target), "delta": delta }),
+        );
     }
     fn open_settings_tab(&mut self, tab: &str) {
         act(self, "open-settings-tab", json!({ "tab": tab }));
     }
     fn render_settings(&mut self, columns: u16, rows: u16) -> Screen {
-        let screen = self.render(ViewTarget::SettingsPage("remote-compaction".to_string()), columns, rows);
+        let screen = self.render(
+            ViewTarget::SettingsPage("remote-compaction".to_string()),
+            columns,
+            rows,
+        );
         remember(screen)
     }
     fn prompt_editor_text(&self) -> Option<String> {
-        query("prompt-editor-text", json!({})).as_str().map(str::to_owned)
+        query("prompt-editor-text", json!({}))
+            .as_str()
+            .map(str::to_owned)
     }
     fn last_settings_command_bytes(&self) -> usize {
-        usize::try_from(number(&query("last-settings-command-bytes", json!({})))).unwrap_or(usize::MAX)
+        usize::try_from(number(&query("last-settings-command-bytes", json!({}))))
+            .unwrap_or(usize::MAX)
     }
     fn icon_assignment_suggestions(&self) -> Vec<String> {
         texts(&query("icon-assignment-suggestions", json!({})))
@@ -635,18 +854,27 @@ impl CompactionPortHostExt for FakeHost {
         act(self, "icon-assignment-set", json!({ "glyph": glyph }));
     }
     fn icon_assignment_click(&mut self, row: &str, action: &str) {
-        act(self, "icon-assignment-click", json!({ "row": row, "action": action }));
+        act(
+            self,
+            "icon-assignment-click",
+            json!({ "row": row, "action": action }),
+        );
     }
     fn icon_assignment_glyph(&self) -> String {
         as_text(&query("icon-assignment-glyph", json!({})))
     }
     fn icon_picker_open(&self) -> bool {
-        query("icon-picker-open", json!({})).as_bool().unwrap_or(false)
+        query("icon-picker-open", json!({}))
+            .as_bool()
+            .unwrap_or(false)
     }
     fn sidebar_last_list_cell(&mut self, columns: u16, rows: u16, label: &str) -> ScreenCell {
         let screen = self.render(ViewTarget::Panel("sidebar".to_string()), columns, rows);
         let Some((row, _)) = screen.find(label) else {
-            panic!("sidebar entry `{label}` is not on the screen:\n{}", screen.text());
+            panic!(
+                "sidebar entry `{label}` is not on the screen:\n{}",
+                screen.text()
+            );
         };
         screen.cell(row, columns - 1)
     }
@@ -654,23 +882,45 @@ impl CompactionPortHostExt for FakeHost {
         Color::Role(ColorRole::Accent)
     }
     fn toolbar_buttons(&self, columns: u16, rows: u16) -> Vec<(String, u16, u16)> {
-        list(query("toolbar-buttons", json!({ "columns": columns, "rows": rows })))
-            .into_iter()
-            .map(|button| (as_text(&button["action"]), geometry_field(&button, "column"), geometry_field(&button, "width")))
-            .collect()
+        list(query(
+            "toolbar-buttons",
+            json!({ "columns": columns, "rows": rows }),
+        ))
+        .into_iter()
+        .map(|button| {
+            (
+                as_text(&button["action"]),
+                geometry_field(&button, "column"),
+                geometry_field(&button, "width"),
+            )
+        })
+        .collect()
     }
     fn toolbar_action_at(&self, columns: u16, rows: u16, column: u16, row: u16) -> Option<String> {
-        query("toolbar-action-at", json!({ "columns": columns, "rows": rows, "column": column, "row": row })).as_str().map(str::to_owned)
+        query(
+            "toolbar-action-at",
+            json!({ "columns": columns, "rows": rows, "column": column, "row": row }),
+        )
+        .as_str()
+        .map(str::to_owned)
     }
     fn status_bar_text(&self, columns: u16) -> String {
         as_text(&query("status-bar-text", json!({ "columns": columns })))
     }
     fn set_codex_reset_watch_expiry(&mut self, in_: Duration, label: &str) {
-        act(self, "set-codex-reset-watch-expiry", json!({ "in_ms": u64::try_from(in_.as_millis()).unwrap_or(u64::MAX), "label": label }));
+        act(
+            self,
+            "set-codex-reset-watch-expiry",
+            json!({ "in_ms": u64::try_from(in_.as_millis()).unwrap_or(u64::MAX), "label": label }),
+        );
     }
     fn set_screen_size(&mut self, columns: u16, rows: u16) {
         SIZE.with(|cell| *cell.borrow_mut() = (columns, rows));
-        act(self, "set-screen-size", json!({ "columns": columns, "rows": rows }));
+        act(
+            self,
+            "set-screen-size",
+            json!({ "columns": columns, "rows": rows }),
+        );
     }
     fn settings_row_geometry(&self, row: &str) -> RowGeometry {
         let geometry = query("settings-row-geometry", json!({ "row": row }));
@@ -689,33 +939,63 @@ impl CompactionPortHostExt for FakeHost {
         }
     }
     fn settings_hit(&self, column: u16, row: u16) -> Option<SettingsHit> {
-        hit_from(&query("settings-hit", json!({ "column": column, "row": row })))
+        hit_from(&query(
+            "settings-hit",
+            json!({ "column": column, "row": row }),
+        ))
     }
     fn settings_hit_after_scroll(&mut self, column: u16, row: u16) -> Option<SettingsHit> {
-        hit_from(&act(self, "settings-hit-after-scroll", json!({ "column": column, "row": row })))
+        hit_from(&act(
+            self,
+            "settings-hit-after-scroll",
+            json!({ "column": column, "row": row }),
+        ))
     }
     fn settings_banner_close_rect(&self) -> Option<CloseRect> {
         close_rect_from(&query("settings-banner-close-rect", json!({})))
     }
     fn settings_banner_close_rect_at(&self, columns: u16) -> Option<CloseRect> {
-        close_rect_from(&query("settings-banner-close-rect", json!({ "columns": columns })))
+        close_rect_from(&query(
+            "settings-banner-close-rect",
+            json!({ "columns": columns }),
+        ))
     }
     fn settings_banner_visible(&self) -> bool {
-        query("settings-banner-visible", json!({})).as_bool().unwrap_or(false)
+        query("settings-banner-visible", json!({}))
+            .as_bool()
+            .unwrap_or(false)
     }
     fn settings_row_span(&self, index: usize) -> RowSpan {
-        RowSpan { last_line: usize::try_from(number(&query("settings-row-span", json!({ "index": index }))["last_line"])).unwrap_or(usize::MAX) }
+        RowSpan {
+            last_line: usize::try_from(number(
+                &query("settings-row-span", json!({ "index": index }))["last_line"],
+            ))
+            .unwrap_or(usize::MAX),
+        }
     }
     fn settings_scroll_for_selection(&self, selected: usize, scroll: usize, rows: usize) -> usize {
-        usize::try_from(number(&query("settings-scroll-for-selection", json!({ "selected": selected, "scroll": scroll, "rows": rows })))).unwrap_or(usize::MAX)
+        usize::try_from(number(&query(
+            "settings-scroll-for-selection",
+            json!({ "selected": selected, "scroll": scroll, "rows": rows }),
+        )))
+        .unwrap_or(usize::MAX)
     }
     fn settings_max_scroll(&self, rows: usize, height: usize) -> usize {
-        usize::try_from(number(&query("settings-max-scroll", json!({ "rows": rows, "height": height })))).unwrap_or(usize::MAX)
+        usize::try_from(number(&query(
+            "settings-max-scroll",
+            json!({ "rows": rows, "height": height }),
+        )))
+        .unwrap_or(usize::MAX)
     }
     fn settings_help_anchors(&self) -> Vec<(String, usize)> {
         list(query("settings-help-anchors", json!({})))
             .into_iter()
-            .map(|anchor| (as_text(&anchor["topic"]), usize::try_from(number(&anchor["row"])).unwrap_or(usize::MAX)))
+            .map(|anchor| {
+                (
+                    as_text(&anchor["topic"]),
+                    usize::try_from(number(&anchor["row"])).unwrap_or(usize::MAX),
+                )
+            })
             .collect()
     }
     fn settings_row_help_id(&self, row: &str) -> String {
@@ -726,11 +1006,19 @@ impl CompactionPortHostExt for FakeHost {
         let columns = columns.min(screen.columns);
         let geometry = self.settings_row_geometry(row);
         let line = screen.row(geometry.control_line);
-        line.chars().skip(usize::from(geometry.control_column)).take(usize::from(columns)).collect()
+        line.chars()
+            .skip(usize::from(geometry.control_column))
+            .take(usize::from(columns))
+            .collect()
     }
     fn settings_painted_glyph(&self, column: u16, row: u16) -> char {
         let screen = last_screen();
-        screen.cell(row, column).symbol.chars().next().unwrap_or(' ')
+        screen
+            .cell(row, column)
+            .symbol
+            .chars()
+            .next()
+            .unwrap_or(' ')
     }
     fn settings_page_lines(&self, columns: u16) -> Vec<String> {
         texts(&query("settings-page-lines", json!({ "columns": columns })))
@@ -739,7 +1027,10 @@ impl CompactionPortHostExt for FakeHost {
         self.settings_page_lines(columns).join("\n")
     }
     fn settings_privacy_banner_text(&self, settings: Value) -> String {
-        as_text(&query("settings-privacy-banner-text", json!({ "settings": settings })))
+        as_text(&query(
+            "settings-privacy-banner-text",
+            json!({ "settings": settings }),
+        ))
     }
     fn settings_row_labels(&self) -> Vec<String> {
         texts(&query("settings-row-labels", json!({})))
@@ -755,29 +1046,45 @@ impl CompactionPortHostExt for FakeHost {
     }
     fn settings_row_index(&self, row: &str) -> usize {
         let rows = self.settings_rows();
-        rows.iter().position(|name| name == row).unwrap_or_else(|| panic!("unknown settings row `{row}`; rows: {rows:?}"))
+        rows.iter()
+            .position(|name| name == row)
+            .unwrap_or_else(|| panic!("unknown settings row `{row}`; rows: {rows:?}"))
     }
     fn settings_save_pending(&self) -> bool {
-        query("settings-save-pending", json!({})).as_bool().unwrap_or(false)
+        query("settings-save-pending", json!({}))
+            .as_bool()
+            .unwrap_or(false)
     }
     fn settings_write_count(&self) -> usize {
         usize::try_from(number(&query("settings-write-count", json!({})))).unwrap_or(usize::MAX)
     }
     fn settings_set_value(&mut self, row: &str, value: Value) {
-        act(self, "settings-set-value", json!({ "row": row, "value": value }));
+        act(
+            self,
+            "settings-set-value",
+            json!({ "row": row, "value": value }),
+        );
     }
     fn settings_value(&self, row: &str) -> Value {
         query("settings-value", json!({ "row": row }))
     }
     fn settings_dialog(&self) -> Option<Value> {
         let dialog = query("settings-dialog", json!({}));
-        if dialog.is_null() { None } else { Some(dialog) }
+        if dialog.is_null() {
+            None
+        } else {
+            Some(dialog)
+        }
     }
     fn settings_dialog_choose(&mut self, option: &str) {
         act(self, "settings-dialog-choose", json!({ "option": option }));
     }
     fn settings_dialog_click_option(&mut self, index: usize) {
-        act(self, "settings-dialog-click-option", json!({ "index": index }));
+        act(
+            self,
+            "settings-dialog-click-option",
+            json!({ "index": index }),
+        );
     }
     fn settings_dialog_key(&mut self, key: &str) {
         act(self, "settings-dialog-key", json!({ "key": key }));
@@ -792,21 +1099,43 @@ impl CompactionPortHostExt for FakeHost {
         act(self, "settings-commit-prompt", json!({ "text": text }));
     }
     fn settings_click(&mut self, column: u16, row: u16) {
-        self.click(ViewTarget::SettingsPage("remote-compaction".to_string()), column, row);
+        self.click(
+            ViewTarget::SettingsPage("remote-compaction".to_string()),
+            column,
+            row,
+        );
         mirror_input("settings-click", json!({ "column": column, "row": row }));
     }
     fn settings_key(&mut self, key: &str) {
-        self.key(ViewTarget::SettingsPage("remote-compaction".to_string()), key);
+        self.key(
+            ViewTarget::SettingsPage("remote-compaction".to_string()),
+            key,
+        );
         mirror_input("settings-key", json!({ "key": key }));
     }
     fn settings_adjust_row(&mut self, row: &str, delta: i32) {
-        act(self, "settings-adjust-row", json!({ "row": row, "delta": delta }));
+        act(
+            self,
+            "settings-adjust-row",
+            json!({ "row": row, "delta": delta }),
+        );
     }
     fn settings_serialized_bound_ok(&self, settings: &Value) -> bool {
-        query("settings-serialized-bound-ok", json!({ "settings": settings })).as_bool().unwrap_or(false)
+        query(
+            "settings-serialized-bound-ok",
+            json!({ "settings": settings }),
+        )
+        .as_bool()
+        .unwrap_or(false)
     }
     fn remote_settings_adjust(&mut self, row: &str, delta: i32) -> bool {
-        act(self, "remote-settings-adjust", json!({ "row": row, "delta": delta })).as_bool().unwrap_or(false)
+        act(
+            self,
+            "remote-settings-adjust",
+            json!({ "row": row, "delta": delta }),
+        )
+        .as_bool()
+        .unwrap_or(false)
     }
     fn remote_settings_current(&self) -> Value {
         query("remote-settings-current", json!({}))
@@ -818,10 +1147,17 @@ impl CompactionPortHostExt for FakeHost {
         texts(&query("remote-settings-help-ids", json!({})))
     }
     fn remote_settings_help_topic_count(&self) -> usize {
-        usize::try_from(number(&query("remote-settings-help-topic-count", json!({})))).unwrap_or(usize::MAX)
+        usize::try_from(number(&query(
+            "remote-settings-help-topic-count",
+            json!({}),
+        )))
+        .unwrap_or(usize::MAX)
     }
     fn remote_settings_options_for(&self, settings: &Value, row: &str) -> Value {
-        query("remote-settings-options-for", json!({ "settings": settings, "row": row }))
+        query(
+            "remote-settings-options-for",
+            json!({ "settings": settings, "row": row }),
+        )
     }
     fn remote_settings_row_ids(&self) -> Vec<String> {
         texts(&query("remote-settings-row-ids", json!({})))
@@ -833,13 +1169,20 @@ impl CompactionPortHostExt for FakeHost {
         act(self, "remote-settings-set", settings);
     }
     fn remote_settings_technique_for(&self, settings: &Value, agent: &str) -> String {
-        as_text(&query("remote-settings-technique-for", json!({ "settings": settings, "agent": agent })))
+        as_text(&query(
+            "remote-settings-technique-for",
+            json!({ "settings": settings, "agent": agent }),
+        ))
     }
     fn default_summarizer_max_output_tokens(&self) -> u64 {
         number(&query("default-summarizer-max-output-tokens", json!({})))
     }
     fn flow_start(&mut self, agent: &str, technique: &str) {
-        act(self, "flow-start", json!({ "agent": agent, "technique": technique }));
+        act(
+            self,
+            "flow-start",
+            json!({ "agent": agent, "technique": technique }),
+        );
     }
     fn flow_event(&mut self, event: Value) {
         act(self, "flow-event", event);
@@ -849,16 +1192,26 @@ impl CompactionPortHostExt for FakeHost {
     }
     fn flow_pending_job(&self) -> Option<Value> {
         let job = query("flow-pending-job", json!({}));
-        if job.is_null() { None } else { Some(job) }
+        if job.is_null() {
+            None
+        } else {
+            Some(job)
+        }
     }
     fn flow_replaces_native_compact(&self, pane: u64) -> bool {
-        query("flow-replaces-native-compact", json!({ "pane": pane })).as_bool().unwrap_or(false)
+        query("flow-replaces-native-compact", json!({ "pane": pane }))
+            .as_bool()
+            .unwrap_or(false)
     }
     fn flow_requests(&self) -> Vec<Value> {
         list(query("flow-requests", json!({})))
     }
     fn flow_set_agent_stopped(&mut self, stopped: bool) {
-        act(self, "flow-set-agent-stopped", json!({ "stopped": stopped }));
+        act(
+            self,
+            "flow-set-agent-stopped",
+            json!({ "stopped": stopped }),
+        );
     }
     fn flow_set_phase(&mut self, phase: &str) {
         act(self, "flow-set-phase", json!({ "phase": phase }));
@@ -867,13 +1220,25 @@ impl CompactionPortHostExt for FakeHost {
         query("flow-state", json!({}))
     }
     fn flow_take_cancel(&mut self) -> bool {
-        act(self, "flow-take-cancel", json!({})).as_bool().unwrap_or(false)
+        act(self, "flow-take-cancel", json!({}))
+            .as_bool()
+            .unwrap_or(false)
     }
     fn flow_try_start(&mut self, pane: u64, force: bool) -> bool {
-        act(self, "flow-try-start", json!({ "pane": pane, "force": force })).as_bool().unwrap_or(false)
+        act(
+            self,
+            "flow-try-start",
+            json!({ "pane": pane, "force": force }),
+        )
+        .as_bool()
+        .unwrap_or(false)
     }
     fn monitor_record_attempt(&mut self, pane: u64, at_ms: u64) {
-        act(self, "monitor-record-attempt", json!({ "pane": pane, "at_ms": at_ms }));
+        act(
+            self,
+            "monitor-record-attempt",
+            json!({ "pane": pane, "at_ms": at_ms }),
+        );
     }
     fn monitor_record_failure(&mut self, pane: u64) {
         act(self, "monitor-record-failure", json!({ "pane": pane }));
@@ -881,11 +1246,21 @@ impl CompactionPortHostExt for FakeHost {
     fn monitor_record_success(&mut self, pane: u64) {
         act(self, "monitor-record-success", json!({ "pane": pane }));
     }
-    fn monitor_should_trigger(&mut self, pane: u64, used: f64, threshold: f64, now_ms: u64, cooldown_ms: u64) -> bool {
+    fn monitor_should_trigger(
+        &mut self,
+        pane: u64,
+        used: f64,
+        threshold: f64,
+        now_ms: u64,
+        cooldown_ms: u64,
+    ) -> bool {
         act(self, "monitor-should-trigger", json!({ "pane": pane, "used": used, "threshold": threshold, "now_ms": now_ms, "cooldown_ms": cooldown_ms })).as_bool().unwrap_or(false)
     }
     fn native_trigger_evaluate(&self, agent: &str, state: Value, used: u64, limit: u64) -> Value {
-        query("native-trigger-evaluate", json!({ "agent": agent, "state": state, "used": used, "limit": limit }))
+        query(
+            "native-trigger-evaluate",
+            json!({ "agent": agent, "state": state, "used": used, "limit": limit }),
+        )
     }
     fn native_trigger_detect(&mut self, agent: &str) -> Value {
         act(self, "native-trigger-detect", json!({ "agent": agent }))
@@ -906,52 +1281,112 @@ impl CompactionPortHostExt for FakeHost {
         act(self, "dialog-open", request);
     }
     fn dialog_render(&self, columns: u16, rows: u16, focus: Option<&str>) -> String {
-        as_text(&query("dialog-render", json!({ "columns": columns, "rows": rows, "focus": focus })))
+        as_text(&query(
+            "dialog-render",
+            json!({ "columns": columns, "rows": rows, "focus": focus }),
+        ))
     }
     fn dialog_set_agent_stopped(&mut self, stopped: bool) {
-        act(self, "dialog-set-agent-stopped", json!({ "stopped": stopped }));
+        act(
+            self,
+            "dialog-set-agent-stopped",
+            json!({ "stopped": stopped }),
+        );
     }
     fn dialog_state(&self) -> Value {
         query("dialog-state", json!({}))
     }
     fn dialog_token_bar_lines(&self, state: Value, width: usize) -> Vec<String> {
-        texts(&query("dialog-token-bar-lines", json!({ "state": state, "width": width })))
+        texts(&query(
+            "dialog-token-bar-lines",
+            json!({ "state": state, "width": width }),
+        ))
     }
-    fn worker_annotate_progress_overflow(&self, result: Result<Value, String>, overflow: bool) -> Result<Value, String> {
+    fn worker_annotate_progress_overflow(
+        &self,
+        result: Result<Value, String>,
+        overflow: bool,
+    ) -> Result<Value, String> {
         let (ok, value) = match &result {
             Ok(value) => (true, value.clone()),
             Err(message) => (false, json!(message)),
         };
-        let reply = query("worker-annotate-progress-overflow", json!({ "ok": ok, "value": value, "overflow": overflow }));
-        if reply["ok"].as_bool().unwrap_or(false) { Ok(reply["value"].clone()) } else { Err(as_text(&reply["value"])) }
+        let reply = query(
+            "worker-annotate-progress-overflow",
+            json!({ "ok": ok, "value": value, "overflow": overflow }),
+        );
+        if reply["ok"].as_bool().unwrap_or(false) {
+            Ok(reply["value"].clone())
+        } else {
+            Err(as_text(&reply["value"]))
+        }
     }
     fn worker_classify_inference_error(&self, error: Value) -> String {
-        as_text(&query("worker-classify-inference-error", json!({ "error": error })))
+        as_text(&query(
+            "worker-classify-inference-error",
+            json!({ "error": error }),
+        ))
     }
-    fn worker_await_pause(&self, agent: &str, reason: &str, timeout: Duration, poll: Duration, interruptible: bool) -> PauseOutcome {
-        let reply = query("worker-await-pause", json!({ "agent": agent, "reason": reason, "timeout_ms": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX), "poll_ms": u64::try_from(poll.as_millis()).unwrap_or(u64::MAX), "interruptible": interruptible }));
-        let result = if reply["ok"].as_bool().unwrap_or(false) { Ok(reply["value"].clone()) } else { Err(as_text(&reply["value"])) };
-        PauseOutcome { result, interrupts: u32::try_from(number(&reply["interrupts"])).unwrap_or(u32::MAX) }
+    fn worker_await_pause(
+        &self,
+        agent: &str,
+        reason: &str,
+        timeout: Duration,
+        poll: Duration,
+        interruptible: bool,
+    ) -> PauseOutcome {
+        let reply = query(
+            "worker-await-pause",
+            json!({ "agent": agent, "reason": reason, "timeout_ms": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX), "poll_ms": u64::try_from(poll.as_millis()).unwrap_or(u64::MAX), "interruptible": interruptible }),
+        );
+        let result = if reply["ok"].as_bool().unwrap_or(false) {
+            Ok(reply["value"].clone())
+        } else {
+            Err(as_text(&reply["value"]))
+        };
+        PauseOutcome {
+            result,
+            interrupts: u32::try_from(number(&reply["interrupts"])).unwrap_or(u32::MAX),
+        }
     }
     fn worker_cancel(&mut self) {
         act(self, "worker-cancel", json!({}));
     }
     fn worker_cancel_observed(&self, within: Duration) -> bool {
-        query("worker-cancel-observed", json!({ "within_ms": u64::try_from(within.as_millis()).unwrap_or(u64::MAX) })).as_bool().unwrap_or(false)
+        query(
+            "worker-cancel-observed",
+            json!({ "within_ms": u64::try_from(within.as_millis()).unwrap_or(u64::MAX) }),
+        )
+        .as_bool()
+        .unwrap_or(false)
     }
     fn worker_fill_event_queue(&mut self) {
         act(self, "worker-fill-event-queue", json!({}));
     }
     fn worker_idle(&self, within: Duration) -> bool {
-        query("worker-idle", json!({ "within_ms": u64::try_from(within.as_millis()).unwrap_or(u64::MAX) })).as_bool().unwrap_or(false)
+        query(
+            "worker-idle",
+            json!({ "within_ms": u64::try_from(within.as_millis()).unwrap_or(u64::MAX) }),
+        )
+        .as_bool()
+        .unwrap_or(false)
     }
     fn worker_pause_probe_cost_input_bytes(&self) -> u64 {
         number(&query("worker-pause-probe-cost-input-bytes", json!({})))
     }
     fn worker_start_pause_job(&mut self, agent: &str, reason: &str, timeout: Duration) {
-        act(self, "worker-start-pause-job", json!({ "agent": agent, "reason": reason, "timeout_ms": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX) }));
+        act(
+            self,
+            "worker-start-pause-job",
+            json!({ "agent": agent, "reason": reason, "timeout_ms": u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX) }),
+        );
     }
     fn worker_wait_interrupt_pending(&self, within: Duration) -> bool {
-        query("worker-wait-interrupt-pending", json!({ "within_ms": u64::try_from(within.as_millis()).unwrap_or(u64::MAX) })).as_bool().unwrap_or(false)
+        query(
+            "worker-wait-interrupt-pending",
+            json!({ "within_ms": u64::try_from(within.as_millis()).unwrap_or(u64::MAX) }),
+        )
+        .as_bool()
+        .unwrap_or(false)
     }
 }

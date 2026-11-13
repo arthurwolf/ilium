@@ -1,0 +1,7 @@
+<partial-summaries>
+{{summaries}}
+</partial-summaries>
+
+The <partial-summaries> above were written one after another while a long conversation was processed in {{part_count}} parts, each one building on the previous. Merge them into one final summary in the required format. Keep every constraint, user directive, file path, identifier, error and unfinished task; remove duplicates; where later parts correct earlier ones, keep the correction. The result must read as a single coherent summary of the whole conversation.
+
+{{#if is_claude_code}}Write an <analysis> block followed by a <summary> block with the nine sections described above.{{/if}}{{#if is_codex}}Write the handoff summary now, as plain text.{{/if}}{{#if is_opencode}}Write the summary now, using exactly the section structure described above.{{/if}}{{#if is_gemini_cli}}Write the <scratchpad> block followed by the <state_snapshot> block now.{{/if}}{{#if is_best_of_all_worlds}}Write the <scratchpad> block followed by the <summary> block with the nine sections now.{{/if}}{{#if is_custom}}Write the summary now, following the instructions above.{{/if}}

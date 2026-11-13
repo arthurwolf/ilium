@@ -71,7 +71,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "contributes": {
     "commands": [{ "id": "open", "title": "Search the workspace", "category": "Search" }],
     "keybindings": [
-      { "command": "ilium.core.search/open", "chord": "/", "mode": "prefix" }
+      { "command": "ilium.core.search/open", "chord": "f", "mode": "prefix" }
     ],
     "panels": [{ "id": "search", "title": "Search", "modal": true }],
     "jobs": [{ "kind": "scan-files", "deadline_ms": 60000, "memory_mib": 128 }]
@@ -243,7 +243,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "keybindings": [
       {
         "command": "ilium.core.search/open",
-        "chord": "/",
+        "chord": "f",
         "mode": "prefix"
       }
     ],

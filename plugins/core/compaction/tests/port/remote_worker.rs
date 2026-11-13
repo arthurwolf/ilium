@@ -168,7 +168,9 @@ fn rwrk_bad_request_saying_the_prompt_is_too_long_asks_for_a_smaller_chunk() {
 fn rwrk_server_error_stays_a_plain_failure() {
     let host = client_host();
     assert_eq!(
-        host.worker_classify_inference_error(json!({"http": {"status": 500, "message": "internal"}})),
+        host.worker_classify_inference_error(
+            json!({"http": {"status": 500, "message": "internal"}})
+        ),
         "failed"
     );
 }

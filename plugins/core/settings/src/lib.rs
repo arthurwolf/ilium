@@ -4,6 +4,8 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Lifecycle and handler bodies keep the
 //! activation state and answer event batches with no submissions.
 
+pub mod onboarding;
+
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
