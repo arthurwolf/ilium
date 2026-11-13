@@ -13,6 +13,7 @@
 - A pane invalidation that swept a suspended terminal command now reports the canceled command, like the other cancellation path; previously the silent sweep raced with it.
 - The Windows dependency audit lists `bcryptprimitives.dll`, `psapi.dll` and `userenv.dll` as Windows system components; current Rust and process-inspection code import them, and the audit had blocked the release candidate.
 - The Windows ONNX Runtime build receipt now passes its own audit: the compiler identity probe no longer suppresses the `cl` banner the audit reads (`/nologo`), and the audit expects the `CMAKE_GENERATOR` variable the build sets beside `CMAKE_GENERATOR_INSTANCE`. Checked against the receipt of a real Windows runner build. The retained CMake cache check likewise accepts that the two compiler paths come from CMake's generated compiler files, not the cache, which Visual Studio generators leave without them.
+- The Windows installer job installs the pinned Inno Setup 6.5.4 even when the runner image already ships a newer one (`--allow-downgrade`).
 - Installer contract fixtures include the animation helper and bundled packs that the Windows installer requires.
 
 ### Changed

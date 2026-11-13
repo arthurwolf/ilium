@@ -103,7 +103,7 @@ jobs:
     - name: Pinned installer toolchain
       run: |
         dotnet tool install --global wix --version 5.0.2
-        choco install innosetup --version=6.5.4 --no-progress -y
+        choco install innosetup --version=6.5.4 --allow-downgrade --no-progress -y
         echo "$USERPROFILE/.dotnet/tools" >> "$GITHUB_PATH"
     - name: Build per-user MSI and setup EXE from the audited ZIP
       run: python release/scripts/build_windows_installers.py build --tag "${{ inputs.release_tag }}" --archive native-windows/ilium-windows-x86_64.zip --work "$RUNNER_TEMP/installer-work" --output windows-installers
