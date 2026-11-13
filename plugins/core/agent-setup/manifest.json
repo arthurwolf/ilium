@@ -70,71 +70,13 @@
       }
     ],
     "services": {
-      "ilium.core.agent-setup/install": {
-        "install": {
-          "params": {
-            "type": "object",
-            "required": [
-              "block",
-              "target"
-            ],
-            "properties": {
-              "block": {
-                "type": "string"
-              },
-              "target": {
-                "type": "string"
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "remove": {
-          "params": {
-            "type": "object",
-            "required": [
-              "block",
-              "target"
-            ],
-            "properties": {
-              "block": {
-                "type": "string"
-              },
-              "target": {
-                "type": "string"
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "status": {
-          "params": {
-            "type": "object"
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "targets": {
-                "type": "array"
-              }
-            }
-          }
+      "provides": [
+        {
+          "name": "ilium.core.agent-setup/install",
+          "version": "0.1.0",
+          "schema": "schemas/install.json"
         }
-      }
+      ]
     },
     "extension_points": [
       {

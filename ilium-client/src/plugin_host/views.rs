@@ -22,6 +22,22 @@ use crate::theme;
 /// Longest status segment and decoration text, in characters.
 const SEGMENT_LIMIT: usize = 48;
 
+/// One row of the Settings plugin list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PluginListRow {
+    /// A plugin with its on/off switch.
+    Plugin(ilium_plugin_host::wiring::PluginRow),
+    /// A contributed panel or onboarding step; activating the row opens it.
+    View {
+        plugin: String,
+        kind: PluginViewKind,
+        name: String,
+        title: String,
+    },
+    /// A settings row a plugin contributes, shown with its default value.
+    Setting(super::host::ContributedSetting),
+}
+
 /// Which kind of plugin view the right-hand area shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PluginViewKind {
@@ -98,6 +114,53 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// The contributed context-menu entries that apply to a tree node (contract section
+    /// 20.7). An entry that names node kinds (`applies_to`, `target`) shows only on a
+    /// matching node; `terminal` entries belong to the terminal pane's own menu and never
+    /// show in the tree menu.
+    pub(crate) fn plugin_context_items(&self, target: ilium_core::NodeId) -> Vec<ChromeItem> {
+        // Contributed tree toolbar buttons and row actions have no drawn button yet, so the
+        // menu is where they are reached: toolbar entries on every node, row actions on the
+        // nodes they apply to.
+        ["context_menu", "tree_toolbar", "row_actions"]
+            .into_iter()
+            .flat_map(|kind| self.plugin_chrome(kind))
+            .filter(|item| self.plugin_item_applies(item, target))
+            .collect()
+    }
+
+    /// Whether a contributed entry applies to a node, by the node kinds it names.
+    pub(crate) fn plugin_item_applies(
+        &self,
+        item: &ChromeItem,
+        target: ilium_core::NodeId,
+    ) -> bool {
+        let Some(kinds) = item.target.as_deref() else {
+            return true;
+        };
+        let node = self.tree.get(target);
+        let is_pane =
+            node.is_some_and(|node| matches!(node.kind, ilium_core::NodeKind::Pane { .. }));
+        let is_agent = node.is_some_and(|node| {
+            matches!(
+                node.kind,
+                ilium_core::NodeKind::Pane {
+                    status: ilium_core::PaneStatus::Agent(_),
+                    ..
+                }
+            )
+        });
+        let is_project = node.is_some_and(ilium_core::Node::is_project);
+        kinds.split(',').map(str::trim).any(|kind| match kind {
+            "pane" => is_pane,
+            "agent" => is_agent,
+            "group" | "folder" => node.is_some() && !is_pane && target != ilium_core::ROOT_ID,
+            "project" => is_project,
+            "tree" | "root" => target == ilium_core::ROOT_ID,
+            _ => false,
+        })
+    }
+
     /// Runs the command of a contributed toolbar button, menu entry or row action. The
     /// arguments name the node the entry was used on, when there is one.
     pub(crate) fn run_plugin_chrome(
@@ -114,6 +177,68 @@ impl App {
             None => "{}".to_owned(),
         };
         self.invoke_plugin_command(command, arguments, origin);
+    }
+
+    /// The rows of the Settings plugin list (contract section 20.6): one switch per plugin,
+    /// then one row per contributed panel and onboarding step that opens it, then the
+    /// settings rows plugins contribute. Drawing, row counting, keys and clicks all read
+    /// this one list, so a row index means the same thing everywhere.
+    pub(crate) fn plugin_list_rows(&self) -> Vec<PluginListRow> {
+        let mut rows: Vec<PluginListRow> = self
+            .wasm_plugin_rows()
+            .into_iter()
+            .map(PluginListRow::Plugin)
+            .collect();
+        let Some(plugins) = self.wasm_plugins.as_ref() else {
+            return rows;
+        };
+        for kind in [PluginViewKind::Panel, PluginViewKind::OnboardingStep] {
+            rows.extend(
+                plugins
+                    .contributed(kind.contribution())
+                    .into_iter()
+                    .map(|item| PluginListRow::View {
+                        plugin: item.plugin,
+                        kind,
+                        name: item.id,
+                        title: item.title,
+                    }),
+            );
+        }
+        rows.extend(
+            plugins
+                .contributed_settings()
+                .into_iter()
+                .map(PluginListRow::Setting),
+        );
+        rows
+    }
+
+    /// Acts on one row of the Settings plugin list: flips a plugin, opens a view, or says
+    /// where a contributed setting is edited. Returns true when Settings must close, because
+    /// the row opened a view in the right-hand area.
+    pub(crate) fn settings_activate_plugin_row(&mut self, row: usize) -> bool {
+        match self.plugin_list_rows().into_iter().nth(row) {
+            Some(PluginListRow::Plugin(_)) => {
+                // Plugin rows come first, so the index is the plugin's own.
+                self.settings_toggle_wasm_plugin(row);
+                false
+            }
+            Some(PluginListRow::View {
+                plugin, kind, name, ..
+            }) => {
+                self.show_plugin_view(&plugin, kind, &name);
+                true
+            }
+            Some(PluginListRow::Setting(setting)) => {
+                self.status_message = Some(format!(
+                    "{} is a setting of {}: its plugin changes it, this list shows the default",
+                    setting.title, setting.plugin
+                ));
+                false
+            }
+            None => false,
+        }
     }
 
     /// Shows a contributed view on the user's request (a menu entry, a key, the plugin list).

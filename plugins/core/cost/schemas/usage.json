@@ -1,0 +1,23 @@
+{
+  "usage": {
+    "params": {
+      "type": "object",
+      "properties": {
+        "window": {
+          "type": "string"
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "panes": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "panes"
+      ]
+    }
+  }
+}

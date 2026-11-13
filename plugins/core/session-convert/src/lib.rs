@@ -259,9 +259,10 @@ mod spec_tests {
     /// REQ: F-077
     #[test]
     fn convert_service_takes_pane_and_only_codex_or_claude_targets() {
-        let manifest_value = manifest();
-        let start = &manifest_value["contributes"]["services"]
-            ["ilium.core.session-convert/convert"]["start"];
+        let schema =
+            serde_json::from_str::<serde_json::Value>(include_str!("../schemas/convert.json"))
+                .expect("the service schema parses");
+        let start = &schema["start"];
         let params = &start["params"];
         assert_eq!(string_list(&params["required"]), vec!["pane", "target"]);
         assert_eq!(params["properties"]["pane"]["type"], "integer");

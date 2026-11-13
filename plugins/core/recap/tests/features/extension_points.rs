@@ -100,7 +100,14 @@ fn doc_f_112_core_points_page_agrees_with_the_plugin_page() {
 /// REQ: F-112
 #[test]
 fn doc_f_112_service_get_takes_panes_and_a_length_of_short_long_or_both() {
-    let get = &manifest_value()["contributes"]["services"]["ilium.core.recap/recap"]["get"];
+    let schema = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/recap.json"),
+        )
+        .expect("the service schema is readable"),
+    )
+    .expect("the service schema parses");
+    let get = &schema["get"];
     assert_eq!(get["params"]["required"], json!(["panes"]));
     assert_eq!(
         get["params"]["properties"]["panes"],

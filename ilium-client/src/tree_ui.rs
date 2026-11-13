@@ -661,6 +661,49 @@ impl PaintedTreeRows {
                 .saturating_add(CUSTOM_ERROR_CELL_OFFSET as u16),
         )
     }
+    /// Paints what plugins attach to tree rows (contract section 20.7). The text goes
+    /// right-aligned into the blank cells at the end of a row's first line, dimmed, with one
+    /// blank cell before it. A row without enough blank cells shows nothing: a decoration
+    /// never covers a title, an icon or a value, and it is not a hit target.
+    pub(crate) fn paint_plugin_decorations(
+        &self,
+        frame: &mut Frame,
+        text_of: impl Fn(NodeId) -> Option<String>,
+    ) {
+        for (hit, _) in &self.rows {
+            if hit.line != 0 || hit.row >= self.list.bottom() || hit.row < self.list.y {
+                continue;
+            }
+            let Some(text) = text_of(hit.id) else {
+                continue;
+            };
+            let width = u16::try_from(UnicodeWidthStr::width(text.as_str())).unwrap_or(u16::MAX);
+            if width == 0 {
+                continue;
+            }
+            // Count the blank cells at the end of the row, as painted.
+            let buffer = frame.buffer_mut();
+            let mut blank: u16 = 0;
+            for column in (self.list.x..self.list.right()).rev() {
+                let is_blank = buffer
+                    .cell(Position::new(column, hit.row))
+                    .is_some_and(|cell| cell.symbol().trim().is_empty());
+                if !is_blank {
+                    break;
+                }
+                blank += 1;
+            }
+            // One blank cell stays on each side of the text.
+            if blank < width.saturating_add(2) {
+                continue;
+            }
+            let start = self.list.right().saturating_sub(width.saturating_add(1));
+            frame.render_widget(
+                Paragraph::new(Span::styled(text, Style::new().add_modifier(Modifier::DIM))),
+                Rect::new(start, hit.row, width, 1),
+            );
+        }
+    }
     /// Custom mode + Second icon: paints the warning glyph into each
     /// blocked pane's reserved error cell, leaving the rule-chosen icon
     /// untouched. Returns the blocked panes that have no such cell this
@@ -3997,8 +4040,8 @@ fn draw_toolbar(
         let custom_profile = action
             .custom_profile_id(layout)
             .and_then(|id| custom.profiles.iter().find(|profile| profile.id == id));
-        let custom_selected = custom_profile
-            .is_some_and(|profile| custom.selected == Some(profile.id.as_str()));
+        let custom_selected =
+            custom_profile.is_some_and(|profile| custom.selected == Some(profile.id.as_str()));
         let style = if is_hovered
             || custom_selected
             || (filter_active && action == TreeToolbarAction::ActivityFilter)
@@ -4010,9 +4053,8 @@ fn draw_toolbar(
         } else {
             Style::new().fg(action.accent())
         };
-        let custom_pending = custom_profile.is_some_and(|profile| {
-            custom.pending.is_some_and(|ids| ids.contains(&profile.id))
-        });
+        let custom_pending = custom_profile
+            .is_some_and(|profile| custom.pending.is_some_and(|ids| ids.contains(&profile.id)));
         let glyph = if pending & action.pending_bit() != 0 || custom_pending {
             let frame_index =
                 (spinner_elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
@@ -4032,7 +4074,10 @@ fn draw_toolbar(
                 .profiles
                 .iter()
                 .find(|profile| profile.id == id)
-                .map_or_else(|| action.description().to_owned(), |profile| profile.name.clone()),
+                .map_or_else(
+                    || action.description().to_owned(),
+                    |profile| profile.name.clone(),
+                ),
             None => action.description().to_owned(),
         };
         let caption = Paragraph::new(Line::from(Span::styled(

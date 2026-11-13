@@ -1542,6 +1542,9 @@ pub enum ContextMenuAction {
     /// *only* mouse entry point into settings (plus the `Settings` leader
     /// action) -- see `Mode::Settings`'s doc comment.
     Settings,
+    /// An entry a plugin contributes (`contributes.context_menu`). The number is the
+    /// entry's place in `ContextMenu::plugin_items`, which holds its title and command.
+    Plugin(u16),
 }
 
 impl ContextMenuAction {
@@ -1587,6 +1590,8 @@ impl ContextMenuAction {
             Self::Settings => (5, 2),
             Self::Restart => (5, 3),
             Self::Close => (6, 0),
+            // Plugin entries form their own last group, in contribution order.
+            Self::Plugin(index) => (8, if index > 255 { 255 } else { index as u8 }),
         }
     }
 
@@ -1611,6 +1616,7 @@ impl ContextMenuAction {
         use crate::icon_settings::IconTarget;
         match self {
             Self::Search => IconTarget::ToolbarSearch,
+            Self::Plugin(_) => IconTarget::Project,
             Self::FocusPane | Self::NewTerminal => IconTarget::Terminal,
             Self::CreateBoardFromMarkdown => IconTarget::Board,
             Self::SchedulePaneInput => IconTarget::WaitingBackground,
@@ -1657,6 +1663,8 @@ impl ContextMenuAction {
     pub fn label(self) -> String {
         match self {
             Self::Search => "Search workspace…".to_string(),
+            // The real title lives in the menu (`ContextMenu::label_of`).
+            Self::Plugin(_) => "Plugin action".to_string(),
             Self::FocusPane => "Focus pane".to_string(),
             Self::CreateBoardFromMarkdown => "Create board from Markdown".to_string(),
             Self::SchedulePaneInput => "Schedule keystrokes…".to_string(),
@@ -1843,9 +1851,22 @@ pub struct ContextMenu {
     pub(crate) row_offset: usize,
     pub submenu: Option<Submenu>,
     pub hover_candidate: Option<(ContextMenuAction, Instant)>,
+    /// The plugin entries of this menu; `ContextMenuAction::Plugin` indexes it.
+    pub(crate) plugin_items: Vec<crate::plugin_host::host::ChromeItem>,
 }
 
 impl ContextMenu {
+    /// The label of one action of this menu: a plugin entry shows its own title.
+    pub(crate) fn label_of(&self, action: ContextMenuAction) -> String {
+        match action {
+            ContextMenuAction::Plugin(index) => self
+                .plugin_items
+                .get(usize::from(index))
+                .map_or_else(|| action.label(), |item| item.title.clone()),
+            other => other.label(),
+        }
+    }
+
     pub(crate) fn layout(&self) -> crate::context_menu_layout::MenuLayout {
         let groups: Vec<_> = self
             .actions
@@ -15181,12 +15202,25 @@ impl App {
             section.extend(actions);
             actions = section;
         }
+        let plugin_items = self.plugin_context_items(target);
+        actions.extend(
+            (0..plugin_items.len())
+                .filter_map(|index| u16::try_from(index).ok())
+                .map(ContextMenuAction::Plugin),
+        );
         if actions.is_empty() {
             return;
         }
         let label_width = actions
             .iter()
-            .map(|action| unicode_width::UnicodeWidthStr::width(action.label().as_str()))
+            .map(|action| match action {
+                ContextMenuAction::Plugin(index) => {
+                    plugin_items.get(usize::from(*index)).map_or(0, |item| {
+                        unicode_width::UnicodeWidthStr::width(item.title.as_str())
+                    })
+                }
+                other => unicode_width::UnicodeWidthStr::width(other.label().as_str()),
+            })
             .max()
             .unwrap_or(0);
         let width = u16::try_from(label_width.saturating_add(10))
@@ -15210,6 +15244,7 @@ impl App {
             row_offset: 0,
             submenu: None,
             hover_candidate: None,
+            plugin_items,
         });
     }
 
@@ -17628,11 +17663,32 @@ impl App {
         ContextMenuAction::ordered(actions)
     }
 
+    /// Executes the chosen entry of a context menu the caller already took out of
+    /// `App::mode`. A plugin entry runs its command with the menu's node as argument;
+    /// every other entry goes through `execute_context_action`.
+    pub(crate) fn execute_menu_action(&mut self, menu: &ContextMenu, action: ContextMenuAction) {
+        let ContextMenuAction::Plugin(index) = action else {
+            self.execute_context_action(action, menu.target);
+            return;
+        };
+        self.mode = Mode::Normal;
+        if let Some(item) = menu.plugin_items.get(usize::from(index)).cloned() {
+            let node = (menu.target != ROOT_ID).then_some(menu.target);
+            self.run_plugin_chrome(
+                &item,
+                node,
+                ilium_plugin_api::generated::types::CommandOrigin::Menu,
+            );
+        }
+    }
+
     /// Executes one context-menu command, then leaves the popup unless the
     /// action opens an explicit sub-mode (e.g. Rename, the file picker).
     pub fn execute_context_action(&mut self, action: ContextMenuAction, target: NodeId) {
         self.mode = Mode::Normal;
         match action {
+            // A plugin entry needs the menu that holds it: `execute_menu_action` runs it.
+            ContextMenuAction::Plugin(_) => {}
             ContextMenuAction::Search => self.action_open_search(),
             ContextMenuAction::FocusPane => self.focus_pane(target),
             ContextMenuAction::CreateBoardFromMarkdown => {

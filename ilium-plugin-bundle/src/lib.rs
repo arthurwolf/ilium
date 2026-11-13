@@ -5,6 +5,17 @@
 //! and writes the catalogue included below. This crate only exposes that catalogue; loading,
 //! validating and precompiling the components is the plugin host's work.
 
+/// One help topic a core plugin ships (`contributes.help` of its manifest).
+#[derive(Debug, Clone, Copy)]
+pub struct HelpTopic {
+    /// The topic id inside the plugin; the global id is `<plugin id>/<id>`.
+    pub id: &'static str,
+    /// The title of the manifest entry.
+    pub title: &'static str,
+    /// The text of the help file.
+    pub markdown: &'static str,
+}
+
 /// One core plugin: its manifest and the component of each side it has.
 #[derive(Debug, Clone, Copy)]
 pub struct BundledPlugin {
@@ -20,6 +31,8 @@ pub struct BundledPlugin {
     pub client: Option<&'static [u8]>,
     /// The scene component, when the manifest has a scene side and it was built.
     pub scene: Option<&'static [u8]>,
+    /// The help topics of the manifest whose file exists in the plugin directory.
+    pub help: &'static [HelpTopic],
 }
 
 impl BundledPlugin {

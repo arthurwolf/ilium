@@ -129,29 +129,13 @@
       }
     ],
     "services": {
-      "ilium.core.cost/usage": {
-        "usage": {
-          "params": {
-            "type": "object",
-            "properties": {
-              "window": {
-                "type": "string"
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "panes": {
-                "type": "object"
-              }
-            },
-            "required": [
-              "panes"
-            ]
-          }
+      "provides": [
+        {
+          "name": "ilium.core.cost/usage",
+          "version": "0.1.0",
+          "schema": "schemas/usage.json"
         }
-      }
+      ]
     },
     "settings": [
       {

@@ -1,0 +1,34 @@
+{
+  "start": {
+    "params": {
+      "type": "object",
+      "required": [
+        "pane",
+        "target"
+      ],
+      "properties": {
+        "pane": {
+          "type": "integer"
+        },
+        "target": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "claude"
+          ]
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "conversion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversion"
+      ]
+    }
+  }
+}

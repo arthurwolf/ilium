@@ -391,3 +391,51 @@ mod tests {
         assert_eq!(decode_entry(b"not json"), None);
     }
 }
+
+/// The wire kind of a status segment a server plugin set (contract section 20.4). It is not
+/// a manifest kind: the server publishes these entries itself, next to the contributions.
+pub const LIVE_SEGMENT_KIND: &str = "live.status_segment";
+
+/// The wire kind of a tree decoration a server plugin set (contract section 20.4).
+pub const LIVE_DECORATION_KIND: &str = "live.decoration";
+
+/// The published entry of a status segment a server plugin set. The payload is the intent's
+/// spec, so the client reads it with the same type its own plugins use.
+pub fn live_segment_entry(
+    plugin: &str,
+    spec: &ilium_plugin_api::generated::types::intents::SetStatusSegmentSpec,
+) -> crate::contributions::Entry {
+    crate::contributions::Entry {
+        plugin: plugin.to_owned(),
+        kind: LIVE_SEGMENT_KIND.to_owned(),
+        name: spec.segment.clone(),
+        side: Some(Side::Server),
+        payload: serde_json::to_value(spec).unwrap_or(Value::Null),
+        order: 0,
+    }
+}
+
+/// The contribution id of a live status segment.
+pub fn live_segment_id(plugin: &str, segment: &str) -> String {
+    format!("{plugin}/{LIVE_SEGMENT_KIND}/{segment}")
+}
+
+/// The published entry of a tree decoration a server plugin set, named `<slot>@<node>`.
+pub fn live_decoration_entry(
+    plugin: &str,
+    spec: &ilium_plugin_api::generated::types::intents::SetDecorationSpec,
+) -> crate::contributions::Entry {
+    crate::contributions::Entry {
+        plugin: plugin.to_owned(),
+        kind: LIVE_DECORATION_KIND.to_owned(),
+        name: format!("{}@{}", spec.slot, spec.node.0),
+        side: Some(Side::Server),
+        payload: serde_json::to_value(spec).unwrap_or(Value::Null),
+        order: 0,
+    }
+}
+
+/// The contribution id of a live tree decoration.
+pub fn live_decoration_id(plugin: &str, slot: &str, node: u64) -> String {
+    format!("{plugin}/{LIVE_DECORATION_KIND}/{slot}@{node}")
+}

@@ -194,9 +194,14 @@ fn manifest_050_job_codex_to_claude_has_a_60_second_deadline_and_256_mib() {
 /// REQ: COR-050, F-077
 #[test]
 fn manifest_050_service_convert_start_takes_pane_and_target_and_returns_conversion() {
-    let manifest = manifest();
-    let service =
-        &manifest["contributes"]["services"]["ilium.core.session-convert/convert"]["start"];
+    let schema = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/convert.json"),
+        )
+        .expect("the service schema is readable"),
+    )
+    .expect("the service schema parses");
+    let service = &schema["start"];
     assert_eq!(service["params"]["required"], json!(["pane", "target"]));
     assert_eq!(
         service["params"]["properties"]["pane"],
@@ -321,7 +326,9 @@ fn manifest_050_every_provide_grant_names_a_contribution_of_the_manifest() {
     let server = strings(&manifest["capabilities"]["server"]);
     let service = "ilium.core.session-convert/convert";
     assert!(server.contains(&format!("services.provide:{service}")));
-    assert!(manifest["contributes"]["services"].get(service).is_some());
+    assert!(manifest["contributes"]["services"]["provides"]
+        .as_array()
+        .is_some_and(|provides| provides.iter().any(|entry| entry["name"] == service)));
     for point in manifest["contributes"]["extension_points"]
         .as_array()
         .unwrap()

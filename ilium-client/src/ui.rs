@@ -1034,6 +1034,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         .collect();
     painted_rows.retain_values(values);
     paint_tree_blocking_errors(frame, app, &mut painted_rows);
+    painted_rows.paint_plugin_decorations(frame, |node| app.plugin_decoration_text(node));
     app.record_composed_tree_rows(painted_rows);
     draw_cost_card(frame, app);
     draw_status_bar(frame, layout.status_area, app);
@@ -1741,7 +1742,7 @@ fn draw_context_menu(
     let lines = popup_rows(&layout, width, |index| {
         let action = menu.actions[index];
         popup_action_line(
-            &action.label(),
+            &menu.label_of(action),
             popup_icon(ui, action.icon_target(), icon_width),
             None,
             action.has_submenu(),

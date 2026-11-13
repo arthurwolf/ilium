@@ -1739,7 +1739,7 @@ fn handle_context_menu_mouse(app: &mut App, mut menu: ContextMenu, mouse: MouseE
         app.mode = Mode::ContextMenu(menu);
         return;
     }
-    app.execute_context_action(action, menu.target);
+    app.execute_menu_action(&menu, action);
 }
 
 /// Handles the source-line popup independently from tree selection state.
@@ -3965,10 +3965,14 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     layout.content_area,
                     state.scroll,
                     position,
-                    app.wasm_plugin_rows().len(),
+                    app.plugin_list_rows().len(),
                 ) {
                     state.selected_row = index;
-                    app.settings_toggle_wasm_plugin(index);
+                    if app.settings_activate_plugin_row(index) {
+                        // The row opened a plugin view: Settings closes so it is visible.
+                        app.mode = Mode::Normal;
+                        return;
+                    }
                 }
             } else if state.tab == crate::app::SettingsTab::Api {
                 if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(

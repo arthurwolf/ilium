@@ -1,0 +1,37 @@
+{
+  "get": {
+    "params": {
+      "type": "object",
+      "required": [
+        "panes"
+      ],
+      "properties": {
+        "panes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "length": {
+          "type": "string",
+          "enum": [
+            "short",
+            "long",
+            "both"
+          ]
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "recaps": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "recaps"
+      ]
+    }
+  }
+}

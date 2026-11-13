@@ -115,8 +115,27 @@ pub struct KernelTree {
 
 /// Whether a plugin holds a capability. An interface unlocks as a whole with any capability
 /// of its family, so each call that needs a specific one checks it here.
+///
+/// A held grant counts when it is the capability itself or a wildcard the grant grammar
+/// allows for its family (`commands.invoke:*`, `topics.subscribe:room/*`, `http:*.host`,
+/// `fs.read:path:/x/**`): the rule is `Grant::covers`, the same one the manifest check uses.
+/// Families without a wildcard form, such as `settings.read-kernel`, match exactly; a
+/// manifest that asks for `settings.read-kernel:*` is refused before it is ever granted
+/// (`manifest.grant-wildcard`).
 fn holds(granted: &[String], name: &str) -> bool {
-    granted.iter().any(|grant| grant == name)
+    if granted.iter().any(|grant| grant == name) {
+        return true;
+    }
+    // Only a held grant with a wildcard can cover a different name, and only a name the
+    // grammar accepts can be covered.
+    let Ok(wanted) = ilium_plugin_api::grants::Grant::parse(name) else {
+        return false;
+    };
+    granted
+        .iter()
+        .filter(|grant| grant.contains('*'))
+        .filter_map(|grant| ilium_plugin_api::grants::Grant::parse(grant).ok())
+        .any(|held| held.covers(&wanted))
 }
 
 /// Most bytes one plugin keeps on one node: the default of the limit `node_metadata_kib`.
@@ -1108,5 +1127,40 @@ impl HostTerminal for KernelTerminal {
 
     fn unlock_input(&mut self, pane: NodeId) {
         self.rest.unlock_input(pane);
+    }
+}
+
+#[cfg(test)]
+mod grant_tests {
+    use super::holds;
+
+    fn granted(grants: &[&str]) -> Vec<String> {
+        grants.iter().map(|grant| (*grant).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_grant_is_held_when_it_is_named_exactly() {
+        assert!(holds(&granted(&["tree.read"]), "tree.read"));
+        assert!(!holds(&granted(&["tree.read"]), "tree.metadata"));
+        assert!(!holds(&[], "tree.read"));
+    }
+
+    #[test]
+    fn a_wildcard_of_the_grant_grammar_covers_its_family() {
+        let held = granted(&["topics.subscribe:*", "commands.invoke:com.example.notes/*"]);
+        assert!(holds(&held, "topics.subscribe:room/news"));
+        assert!(holds(&held, "commands.invoke:com.example.notes/open"));
+        assert!(!holds(&held, "commands.invoke:com.example.other/open"));
+    }
+
+    #[test]
+    fn a_family_without_a_wildcard_form_matches_exactly() {
+        // The manifest check refuses this grant; holding it by accident unlocks nothing.
+        let held = granted(&["settings.read-kernel:*"]);
+        assert!(!holds(&held, "settings.read-kernel:terminal"));
+        assert!(holds(
+            &granted(&["settings.read-kernel:terminal"]),
+            "settings.read-kernel:terminal"
+        ));
     }
 }

@@ -72,30 +72,13 @@
       }
     ],
     "services": {
-      "ilium.core.diagnostics/report": {
-        "build": {
-          "params": {
-            "type": "object",
-            "properties": {
-              "include_log_tail": {
-                "type": "boolean"
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "required": [
-              "text"
-            ],
-            "properties": {
-              "text": {
-                "type": "string",
-                "maxLength": 262144
-              }
-            }
-          }
+      "provides": [
+        {
+          "name": "ilium.core.diagnostics/report",
+          "version": "0.1.0",
+          "schema": "schemas/report.json"
         }
-      }
+      ]
     },
     "extension_points": [
       {

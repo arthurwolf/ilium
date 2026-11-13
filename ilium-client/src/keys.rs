@@ -2059,7 +2059,7 @@ fn handle_context_menu_event(app: &mut App, mut menu: crate::app::ContextMenu, e
                 return;
             }
             app.select_node(menu.target);
-            app.execute_context_action(action, menu.target);
+            app.execute_menu_action(&menu, action);
         }
         _ => app.mode = Mode::ContextMenu(menu),
     }
@@ -3902,7 +3902,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Plugins => {
             state.selected_row =
-                (state.selected_row + 1).min(app.wasm_plugin_rows().len().saturating_sub(1));
+                (state.selected_row + 1).min(app.plugin_list_rows().len().saturating_sub(1));
         }
         KeyCode::Left
         | KeyCode::Char('h')
@@ -3912,7 +3912,11 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         | KeyCode::Char(' ')
             if state.tab == SettingsTab::Plugins =>
         {
-            app.settings_toggle_wasm_plugin(state.selected_row);
+            if app.settings_activate_plugin_row(state.selected_row) {
+                // The row opened a plugin view: Settings closes so the view is visible.
+                app.mode = Mode::Normal;
+                return;
+            }
         }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Debug => {
             state.selected_row =

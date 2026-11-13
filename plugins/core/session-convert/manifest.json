@@ -93,40 +93,13 @@
       }
     ],
     "services": {
-      "ilium.core.session-convert/convert": {
-        "start": {
-          "params": {
-            "type": "object",
-            "required": [
-              "pane",
-              "target"
-            ],
-            "properties": {
-              "pane": {
-                "type": "integer"
-              },
-              "target": {
-                "type": "string",
-                "enum": [
-                  "codex",
-                  "claude"
-                ]
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "conversion": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "conversion"
-            ]
-          }
+      "provides": [
+        {
+          "name": "ilium.core.session-convert/convert",
+          "version": "0.1.0",
+          "schema": "schemas/convert.json"
         }
-      }
+      ]
     },
     "extension_points": [
       {

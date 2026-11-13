@@ -26,6 +26,11 @@
 - Plugin API: a client plugin holding `help.read` can read the built-in help topics as `ilium/<id>`.
 - Plugins: a panel, settings page or onboarding step a client plugin opens is drawn in the right-hand area and takes keys and clicks; status segments a client plugin sets appear in the status bar.
 - Plugin API: `keymap.bindings` lists the user's real leader key bindings; `services.call` reaches a service another plugin on the same side provides, starts that plugin when needed, and supports deferred replies; `sessions.list-live` describes the calling session.
+- Plugins: the Settings plugin list also shows each contributed panel and setup step (Enter opens it beside the tree) and the settings rows plugins contribute, with their default values.
+- Plugins: entries plugins contribute to the tree menu, the tree toolbar and tree rows appear in the right-click menu of the nodes they apply to; text a plugin attaches to a tree row is shown at the end of the row when there is room.
+- Plugins: help topics shipped by core plugins open as `<plugin>/<id>`; status segments and row decorations set by server-side plugins reach the client.
+- Plugin API: `kernel-settings` reads a Settings tab as a JSON object and writes one key of it to `config.toml`; extension points list manifest and run-time entries; wildcard grants (`commands.invoke`, `topics.subscribe`, `http`, `fs.*`) are honoured by the imports.
 
 ### Fixed
+- Core plugins `agent-setup`, `cost`, `diagnostics`, `recap` and `session-convert` declare their services as `contributes.services.provides[]`, so other plugins find them.
 - `ilium plugin kill` writes the audit event `plugin-killed` and an unknown plugin subcommand reports `usage.unknown-command`, the names the manual documents.

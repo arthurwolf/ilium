@@ -111,6 +111,8 @@ struct Publisher {
     state: Weak<ServerState>,
     published: Arc<Mutex<Published>>,
     next_envelope: Arc<AtomicU64>,
+    /// The kernel facade, whose queue holds the chrome server plugins set.
+    facade: Arc<ServerFacade>,
 }
 
 impl Publisher {
@@ -127,7 +129,11 @@ impl Publisher {
 
     /// Broadcasts the contribution increments and state changes since the last call.
     fn flush(&self, runtime: &mut HostRuntime) {
-        let ops = runtime.take_contribution_ops();
+        let mut ops = runtime.take_contribution_ops();
+        // Status segments and decorations of server plugins travel with the contributions,
+        // after them: a `Clear` of a disabled plugin has then already removed its chrome
+        // (contract section 20.4).
+        ops.extend(self.facade.take_live_chrome());
         let observed: Vec<(String, String)> = runtime
             .plugin_ids()
             .into_iter()
@@ -297,6 +303,7 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         state: Arc::downgrade(state),
         published: Arc::new(Mutex::new(Published::default())),
         next_envelope,
+        facade: Arc::clone(&facade),
     };
     let versions = start
         .catalogue

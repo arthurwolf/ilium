@@ -187,9 +187,10 @@ mod spec_tests {
     /// REQ: COR-050
     #[test]
     fn usage_reply_without_panes_violates_declared_result_schema() {
-        let manifest = manifest();
-        let result_schema =
-            &manifest["contributes"]["services"]["ilium.core.cost/usage"]["usage"]["result"];
+        let schema =
+            serde_json::from_str::<serde_json::Value>(include_str!("../schemas/usage.json"))
+                .expect("the service schema parses");
+        let result_schema = &schema["usage"]["result"];
         let required = string_list(&result_schema["required"]);
         assert!(required.contains(&"panes".to_string()));
         let empty_reply = serde_json::json!({});

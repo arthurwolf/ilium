@@ -1,4 +1,4 @@
-//! The contribution registry: one table for the 23 `contributes` kinds of the manifest.
+//! The contribution registry: one table for the 33 `contributes` kinds of the manifest.
 //!
 //! Static entries come from a manifest when its plugin is loaded; run-time entries come from
 //! host imports (`extensions`, `commands`, `ui-host`). Every change is also recorded as a
@@ -11,7 +11,7 @@ use ilium_plugin_api::Side;
 use serde_json::Value;
 
 /// The `contributes` keys of the manifest (reference-manifest.md "Contributions").
-pub const KINDS: [&str; 23] = [
+pub const KINDS: [&str; 33] = [
     "commands",
     "keybindings",
     "settings",
@@ -35,6 +35,18 @@ pub const KINDS: [&str; 23] = [
     "http_routes",
     "jobs",
     "client_requests",
+    // The ten kinds below complete the list the manifest check accepts, so a manifest that
+    // passes validation always loads (foundation contract section 20.1).
+    "status_segments",
+    "toolbar_buttons",
+    "virtual_rows",
+    "output_filters",
+    "editor_line_actions",
+    "sounds",
+    "topics",
+    "extensions",
+    "catalogs",
+    "languages",
 ];
 
 /// One contribution.
@@ -85,7 +97,7 @@ pub enum ContributionOp {
 /// Why a contribution was refused.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ContributionError {
-    /// The kind is not one of the 23 manifest kinds.
+    /// The kind is not one of the 33 manifest kinds.
     #[error("unknown contribution kind {0}")]
     UnknownKind(String),
     /// `contributes` or one of its kinds has the wrong JSON shape.
@@ -295,11 +307,11 @@ mod tests {
     }
 
     #[test]
-    fn there_are_23_distinct_kinds() {
+    fn there_are_33_distinct_kinds() {
         let mut kinds = KINDS.to_vec();
         kinds.sort_unstable();
         kinds.dedup();
-        assert_eq!(kinds.len(), 23);
+        assert_eq!(kinds.len(), 33);
     }
 
     #[test]

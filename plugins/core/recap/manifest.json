@@ -81,43 +81,13 @@
       }
     ],
     "services": {
-      "ilium.core.recap/recap": {
-        "get": {
-          "params": {
-            "type": "object",
-            "required": [
-              "panes"
-            ],
-            "properties": {
-              "panes": {
-                "type": "array",
-                "items": {
-                  "type": "integer"
-                }
-              },
-              "length": {
-                "type": "string",
-                "enum": [
-                  "short",
-                  "long",
-                  "both"
-                ]
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "recaps": {
-                "type": "array"
-              }
-            },
-            "required": [
-              "recaps"
-            ]
-          }
+      "provides": [
+        {
+          "name": "ilium.core.recap/recap",
+          "version": "0.1.0",
+          "schema": "schemas/recap.json"
         }
-      }
+      ]
     },
     "extension_points": [
       {

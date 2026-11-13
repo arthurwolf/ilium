@@ -788,7 +788,7 @@ pub fn settings_help_anchors(
         SettingsTab::About => {}
         SettingsTab::Plugins => {
             // One topic explains the switch every row carries.
-            for index in 0..app.wasm_plugin_rows().len().max(1) {
+            for index in 0..app.plugin_list_rows().len().max(1) {
                 push_help_anchor(
                     &mut anchors,
                     layout,
@@ -6108,7 +6108,7 @@ fn api_lines(settings: &crate::config::ApiSettings, selected: usize) -> Vec<Line
 /// The Plugins tab: one switch row per WebAssembly plugin, in the shared three-line row
 /// shape, so the generic row hit test and help rail line up with it.
 fn plugin_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
-    let rows = app.wasm_plugin_rows();
+    let rows = app.plugin_list_rows();
     if rows.is_empty() {
         return setting_lines(
             &[(
@@ -6121,18 +6121,45 @@ fn plugin_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
     }
     let described: Vec<(String, String, String)> = rows
         .into_iter()
-        .map(|row| {
-            let is_enabled = !ilium_plugin_host::wiring::is_disabled_state(&row.state);
-            let core = if row.essential {
-                " · core, always on"
-            } else {
-                ""
-            };
-            (
-                row.title,
-                crate::value_control::boolean_switch(is_enabled).to_owned(),
-                format!("{} {} · {}{core}", row.id, row.version, row.state),
-            )
+        .map(|row| match row {
+            crate::plugin_host::views::PluginListRow::Plugin(row) => {
+                let is_enabled = !ilium_plugin_host::wiring::is_disabled_state(&row.state);
+                let core = if row.essential {
+                    " · core, always on"
+                } else {
+                    ""
+                };
+                (
+                    row.title,
+                    crate::value_control::boolean_switch(is_enabled).to_owned(),
+                    format!("{} {} · {}{core}", row.id, row.version, row.state),
+                )
+            }
+            crate::plugin_host::views::PluginListRow::View {
+                plugin,
+                kind,
+                title,
+                ..
+            } => {
+                let what = match kind {
+                    crate::plugin_host::views::PluginViewKind::Panel => "panel",
+                    crate::plugin_host::views::PluginViewKind::SettingsPage => "settings page",
+                    crate::plugin_host::views::PluginViewKind::OnboardingStep => "setup step",
+                };
+                (
+                    title,
+                    "open".to_owned(),
+                    format!("{what} of {plugin} · Enter opens it beside the tree"),
+                )
+            }
+            crate::plugin_host::views::PluginListRow::Setting(setting) => (
+                format!("{}: {}", setting.page, setting.title),
+                setting.default,
+                format!(
+                    "{} of {} · key {} · default shown",
+                    setting.row_type, setting.plugin, setting.key
+                ),
+            ),
         })
         .collect();
     let borrowed: Vec<(&str, String, &str)> = described

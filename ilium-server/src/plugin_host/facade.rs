@@ -74,6 +74,11 @@ pub(crate) struct ServerFacade {
     /// What plugins keep on tree nodes, by plugin id and node id. Lives as long as the
     /// server; an entry whose node is gone is dropped the next time the store is written.
     node_metadata: Mutex<BTreeMap<(String, u64), Vec<u8>>>,
+    /// The kernel settings tables: the user's `config.toml` (contract section 20.3).
+    settings: ilium_plugin_host::config_settings::ConfigFileSettings,
+    /// Status segments and tree decorations server plugins set, waiting for the publisher
+    /// (contract section 20.4). The publisher drains them after every runtime job.
+    live_chrome: Mutex<Vec<ilium_plugin_host::contributions::ContributionOp>>,
 }
 
 /// Most nodes one plugin keeps metadata on.
@@ -94,6 +99,9 @@ fn refused(code: ErrorCode, message: impl Into<String>) -> Outcome {
 fn failed(code: ErrorCode, message: impl Into<String>) -> Outcome {
     Outcome::Failed(PluginError::new(code, message.into()))
 }
+
+/// The most chrome changes that wait for the publisher at once.
+const LIVE_CHROME_PENDING_MAX: usize = 4096;
 
 fn unsupported(what: &str) -> Outcome {
     refused(
@@ -302,6 +310,45 @@ impl ServerFacade {
             project_dir: state.session_cwd.clone(),
             session_name: state.session_name.clone(),
             node_metadata: Mutex::new(BTreeMap::new()),
+            settings: ilium_plugin_host::config_settings::ConfigFileSettings::of_user(),
+            live_chrome: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The chrome changes server plugins made since the last call, in order.
+    pub(crate) fn take_live_chrome(&self) -> Vec<ilium_plugin_host::contributions::ContributionOp> {
+        self.live_chrome
+            .lock()
+            .map(|mut pending| std::mem::take(&mut *pending))
+            .unwrap_or_default()
+    }
+
+    /// Queues one chrome change of a plugin for the publisher. Only a plugin has chrome.
+    fn queue_live_chrome(
+        &self,
+        origin: &Origin,
+        change: impl FnOnce(&str) -> ilium_plugin_host::contributions::ContributionOp,
+    ) -> Outcome {
+        let Origin::Plugin { plugin, .. } = origin else {
+            return refused(
+                ErrorCode::NotPermitted,
+                "only a plugin sets status segments and decorations".to_owned(),
+            );
+        };
+        match self.live_chrome.lock() {
+            Ok(mut pending) => {
+                // A plugin that floods is bounded: the oldest change of the burst is dropped,
+                // and the next set of the same segment or decoration replaces it anyway.
+                if pending.len() >= LIVE_CHROME_PENDING_MAX {
+                    pending.remove(0);
+                }
+                pending.push(change(&plugin.0));
+                Outcome::Ok
+            }
+            Err(_) => refused(
+                ErrorCode::Internal,
+                "the chrome queue is poisoned".to_owned(),
+            ),
         }
     }
 
@@ -739,6 +786,28 @@ impl KernelFacade for ServerFacade {
                 ExpandTarget::VirtualRow(_) => unsupported("set-expanded on a virtual row"),
             },
             Intent::Message(spec) => self.message(origin, spec),
+            // Chrome of a server plugin is drawn by the clients: the publisher carries it
+            // to them as `live.*` entries (contract section 20.4).
+            Intent::SetStatusSegment(spec) => self.queue_live_chrome(origin, |plugin| {
+                ilium_plugin_host::contributions::ContributionOp::Put(
+                    ilium_plugin_host::wiring::live_segment_entry(plugin, &spec),
+                )
+            }),
+            Intent::ClearStatusSegment(segment) => self.queue_live_chrome(origin, |plugin| {
+                ilium_plugin_host::contributions::ContributionOp::Remove(
+                    ilium_plugin_host::wiring::live_segment_id(plugin, &segment),
+                )
+            }),
+            Intent::SetDecoration(spec) => self.queue_live_chrome(origin, |plugin| {
+                ilium_plugin_host::contributions::ContributionOp::Put(
+                    ilium_plugin_host::wiring::live_decoration_entry(plugin, &spec),
+                )
+            }),
+            Intent::ClearDecoration(key) => self.queue_live_chrome(origin, |plugin| {
+                ilium_plugin_host::contributions::ContributionOp::Remove(
+                    ilium_plugin_host::wiring::live_decoration_id(plugin, &key.slot, key.node.0),
+                )
+            }),
             // The remaining intents belong to features that are not ported yet; each port adds
             // its arm here together with its handler (foundation contract section 12.4).
             _ => unsupported("this intent"),
@@ -767,6 +836,10 @@ impl KernelFacade for ServerFacade {
 
     fn sessions(&self) -> Option<&dyn SessionAccess> {
         Some(self)
+    }
+
+    fn settings(&self) -> Option<&dyn ilium_plugin_api::kernel::KernelSettings> {
+        Some(&self.settings)
     }
 }
 

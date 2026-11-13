@@ -262,9 +262,10 @@ mod spec_tests {
     /// Failure case: a 262,145-byte text exceeds the declared limit.
     #[test]
     fn report_service_result_is_text_capped_at_256_kib() {
-        let manifest = manifest();
-        let result_schema = &manifest["contributes"]["services"]["ilium.core.diagnostics/report"]
-            ["build"]["result"];
+        let schema =
+            serde_json::from_str::<serde_json::Value>(include_str!("../schemas/report.json"))
+                .expect("the service schema parses");
+        let result_schema = &schema["build"]["result"];
         let limit = result_schema["properties"]["text"]["maxLength"]
             .as_u64()
             .expect("text has a maxLength") as usize;
@@ -279,9 +280,10 @@ mod spec_tests {
     /// no parameter is required.
     #[test]
     fn report_build_params_are_optional_and_include_log_tail_is_boolean() {
-        let manifest = manifest();
-        let params = &manifest["contributes"]["services"]["ilium.core.diagnostics/report"]["build"]
-            ["params"];
+        let schema =
+            serde_json::from_str::<serde_json::Value>(include_str!("../schemas/report.json"))
+                .expect("the service schema parses");
+        let params = &schema["build"]["params"];
 
         assert!(params.get("required").is_none());
         assert_eq!(params["properties"]["include_log_tail"]["type"], "boolean");

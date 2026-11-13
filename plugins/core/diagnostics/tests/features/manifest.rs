@@ -107,10 +107,7 @@ fn cor_050_the_log_folder_grant_is_a_literal_path_not_a_scope_pattern() {
 fn cor_050_activation_triggers_are_startup_and_the_warnings_view() {
     assert_eq!(
         strings(&manifest_json()["activation"]),
-        [
-            "startup",
-            "view:ilium.core.diagnostics/warnings"
-        ]
+        ["startup", "view:ilium.core.diagnostics/warnings"]
     );
 }
 
@@ -164,10 +161,14 @@ fn cor_050_contributes_one_help_topic_logs_and_reports() {
 /// REQ: COR-050
 #[test]
 fn cor_050_the_report_service_has_one_method_build_with_a_bounded_text_result() {
-    let services = &manifest_json()["contributes"]["services"];
-    let report = services["ilium.core.diagnostics/report"]
-        .as_object()
-        .expect("service object");
+    let schema = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/report.json"),
+        )
+        .expect("the service schema is readable"),
+    )
+    .expect("the service schema parses");
+    let report = schema.as_object().expect("service object");
     assert_eq!(report.keys().collect::<Vec<_>>(), ["build"]);
     assert_eq!(
         report["build"]["params"]["properties"]["include_log_tail"]["type"],
@@ -184,8 +185,14 @@ fn cor_050_the_report_service_has_one_method_build_with_a_bounded_text_result() 
 #[test]
 fn cor_050_the_text_limit_of_the_service_result_is_256_kibibytes() {
     assert_eq!(262144, 256 * 1024);
-    let limit = &manifest_json()["contributes"]["services"]["ilium.core.diagnostics/report"]
-        ["build"]["result"]["properties"]["text"]["maxLength"];
+    let schema = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/report.json"),
+        )
+        .expect("the service schema is readable"),
+    )
+    .expect("the service schema parses");
+    let limit = &schema["build"]["result"]["properties"]["text"]["maxLength"];
     assert_eq!(limit.as_u64(), Some(256 * 1024));
 }
 

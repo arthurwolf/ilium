@@ -71,6 +71,21 @@ pub struct ClientPluginStart {
     pub data_dir: PathBuf,
     /// Normal, safe or no plugins. `NoPlugins` starts no host at all.
     pub mode: StartMode,
+    /// The help topics the plugins of the catalogue ship (contract section 20.2).
+    pub help: Vec<PluginHelpTopic>,
+}
+
+/// One help topic a plugin ships. Its global id is `<plugin>/<id>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginHelpTopic {
+    /// The plugin id.
+    pub plugin: String,
+    /// The topic id inside the plugin.
+    pub id: String,
+    /// The title of the manifest entry.
+    pub title: String,
+    /// The Markdown text of the help file.
+    pub markdown: String,
 }
 
 impl ClientPluginStart {
@@ -148,6 +163,75 @@ pub(crate) struct TreeDecoration {
     pub text: String,
     pub icon: Option<String>,
     pub sort_key: i64,
+}
+
+/// One settings row a plugin contributes (contract section 20.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContributedSetting {
+    pub plugin: String,
+    /// The title of the page (`tab` or `section`) the row belongs to.
+    pub page: String,
+    /// The settings key inside the plugin.
+    pub key: String,
+    pub title: String,
+    /// The row type of the manifest (`toggle`, `number`, `choice`, ...).
+    pub row_type: String,
+    /// The default value as display text.
+    pub default: String,
+}
+
+/// The settings rows of one manifest.
+pub(crate) fn contributed_settings(plugin: &str, manifest: &str) -> Vec<ContributedSetting> {
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(manifest) else {
+        return Vec::new();
+    };
+    let text = |entry: &serde_json::Value, field: &str| {
+        entry
+            .get(field)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    let mut rows = Vec::new();
+    let pages = manifest
+        .get("contributes")
+        .and_then(|contributes| contributes.get("settings"))
+        .and_then(serde_json::Value::as_array);
+    for page in pages.into_iter().flatten() {
+        let page_title = text(page, "title")
+            .or_else(|| text(page, "id"))
+            .unwrap_or_default();
+        // A page holds rows directly, or sections that each hold rows.
+        let direct = page.get("rows").and_then(serde_json::Value::as_array);
+        let sectioned = page
+            .get("sections")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|section| section.get("rows").and_then(serde_json::Value::as_array))
+            .flatten();
+        for row in direct.into_iter().flatten().chain(sectioned) {
+            let Some(key) = text(row, "key") else {
+                continue;
+            };
+            let unit = text(row, "unit").unwrap_or_default();
+            let default = match row.get("default") {
+                Some(serde_json::Value::Bool(true)) => "on".to_owned(),
+                Some(serde_json::Value::Bool(false)) => "off".to_owned(),
+                Some(serde_json::Value::String(value)) => value.clone(),
+                Some(serde_json::Value::Null) | None => "not set".to_owned(),
+                Some(other) => format!("{other} {unit}").trim_end().to_owned(),
+            };
+            rows.push(ContributedSetting {
+                plugin: plugin.to_owned(),
+                page: page_title.clone(),
+                title: text(row, "title").unwrap_or_else(|| key.clone()),
+                row_type: text(row, "type").unwrap_or_else(|| "value".to_owned()),
+                key,
+                default,
+            });
+        }
+    }
+    rows
 }
 
 /// One entry of the static chrome a manifest contributes: a toolbar button, a menu entry, a
@@ -260,9 +344,29 @@ struct Shared {
     runtime: Mutex<Option<RuntimeThread>>,
     project_dir: String,
     session_name: String,
+    /// The help topics plugins ship, by global id `<plugin>/<topic>`.
+    help: BTreeMap<String, PluginHelpTopic>,
+    /// The plugins the server last reported as disabled; their help topics are hidden.
+    disabled: Mutex<std::collections::BTreeSet<String>>,
+    /// The kernel settings tables: the user's `config.toml` (contract section 20.3).
+    settings: ilium_plugin_host::config_settings::ConfigFileSettings,
 }
 
 impl Shared {
+    /// Whether the server last reported this plugin as disabled.
+    fn is_disabled(&self, plugin: &str) -> bool {
+        self.disabled
+            .lock()
+            .is_ok_and(|disabled| disabled.contains(plugin))
+    }
+
+    /// The help topic `<plugin>/<topic>` of an enabled plugin.
+    fn plugin_help(&self, id: &str) -> Option<&PluginHelpTopic> {
+        self.help
+            .get(id)
+            .filter(|topic| !self.is_disabled(&topic.plugin))
+    }
+
     fn push(&self, output: Output) {
         if let Ok(mut outbox) = self.outbox.lock() {
             if outbox.len() >= OUTBOX_LIMIT {
@@ -715,6 +819,10 @@ impl KernelFacade for ClientFacade {
         Some(self)
     }
 
+    fn settings(&self) -> Option<&dyn ilium_plugin_api::kernel::KernelSettings> {
+        Some(&self.shared.settings)
+    }
+
     fn help(&self) -> Option<&dyn HelpCatalog> {
         Some(self)
     }
@@ -756,6 +864,9 @@ impl KeymapRead for ClientFacade {
 
 impl HelpCatalog for ClientFacade {
     fn topic(&self, id: &str) -> Option<String> {
+        if let Some(topic) = self.shared.plugin_help(id) {
+            return Some(topic.markdown.clone());
+        }
         let topic = crate::settings_help::catalog::by_id(id.strip_prefix(KERNEL_HELP_PREFIX)?)?;
         let mut markdown = format!("# {}\n\n{}\n", topic.title, topic.explanation);
         if !topic.caveat.is_empty() {
@@ -765,10 +876,18 @@ impl HelpCatalog for ClientFacade {
     }
 
     fn topic_ids(&self) -> Vec<String> {
-        crate::settings_help::catalog::all()
+        let mut ids: Vec<String> = crate::settings_help::catalog::all()
             .iter()
             .map(|topic| format!("{KERNEL_HELP_PREFIX}{}", topic.id))
-            .collect()
+            .collect();
+        ids.extend(
+            self.shared
+                .help
+                .iter()
+                .filter(|(_, topic)| !self.shared.is_disabled(&topic.plugin))
+                .map(|(id, _)| id.clone()),
+        );
+        ids
     }
 }
 
@@ -1117,10 +1236,20 @@ impl ClientPlugins {
             runtime: Mutex::new(None),
             project_dir: session_cwd.to_string_lossy().into_owned(),
             session_name: session_name.to_owned(),
+            help: start
+                .help
+                .iter()
+                .map(|topic| (format!("{}/{}", topic.plugin, topic.id), topic.clone()))
+                .collect(),
+            disabled: Mutex::new(std::collections::BTreeSet::new()),
+            settings: ilium_plugin_host::config_settings::ConfigFileSettings::of_user(),
         });
         let (disabled, warning) = wiring::disabled_at_start(&start.data_dir);
         if let Some(warning) = warning {
             tracing::warn!("installed plugin registry unreadable, every plugin enabled: {warning}");
+        }
+        if let Ok(mut hidden) = shared.disabled.lock() {
+            hidden.extend(disabled.iter().map(ToString::to_string));
         }
         let log: Arc<dyn LogSink> = Arc::new(TracingLog);
         let provider = wiring::import_provider(wiring::ProcessImports {
@@ -1303,6 +1432,13 @@ impl ClientPlugins {
                     .get(&target)
                     .is_none_or(|previous| !wiring::is_disabled_state(previous));
                 self.server_states.insert(target.clone(), state);
+                if let Ok(mut hidden) = self.shared.disabled.lock() {
+                    if enabled {
+                        hidden.remove(&target);
+                    } else {
+                        hidden.insert(target.clone());
+                    }
+                }
                 if enabled != was_enabled {
                     if !enabled {
                         // Nothing of a disabled plugin stays on screen (COR-218).
@@ -1445,7 +1581,21 @@ impl ClientPlugins {
     /// settings page or an onboarding step).
     /// The first frame that draws the view reports its cells with `set_view_area`.
     pub(crate) fn show_view(&self, plugin: &str, view: ViewTarget) {
-        self.shared.open_view(plugin, view, true);
+        // A view renders only while its plugin is active. The user asked for this view, so
+        // the plugin is activated first; activating an active plugin does nothing.
+        let shared = Arc::clone(&self.shared);
+        let owner = plugin.to_owned();
+        let posted = self.shared.post(move |runtime| {
+            if let Err(error) = runtime.activate(&owner) {
+                tracing::warn!("{owner} did not start, its view stays closed: {error}");
+                return;
+            }
+            log_errors("pump", runtime.pump());
+            shared.open_view(&owner, view, true);
+        });
+        if !posted {
+            tracing::debug!("the plugin host is gone, the view of {plugin} stays closed");
+        }
     }
 
     /// Tells the host how many cells a view has. A change asks the plugin for a new tree.
@@ -1541,17 +1691,55 @@ impl ClientPlugins {
 
     /// The status-bar segments plugins set, in the order they were first set.
     pub(crate) fn status_segments(&self) -> Vec<StatusSegment> {
-        self.shared
+        let mut segments = self
+            .shared
             .segments
             .lock()
             .map(|segments| segments.clone())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Segments of server plugins arrive as `live.status_segment` entries (section 20.4).
+        segments.extend(
+            self.server_entries
+                .values()
+                .filter(|entry| entry.kind == wiring::LIVE_SEGMENT_KIND)
+                .filter_map(|entry| {
+                    let spec: ilium_plugin_api::generated::types::intents::SetStatusSegmentSpec =
+                        serde_json::from_value(entry.payload.clone()).ok()?;
+                    Some(StatusSegment {
+                        plugin: entry.plugin.clone(),
+                        segment: spec.segment,
+                        text: spec.content.iter().map(|span| span.text.as_str()).collect(),
+                        tone: spec.tone,
+                    })
+                }),
+        );
+        segments
+    }
+
+    /// The decorations server plugins set, decoded from their `live.decoration` entries.
+    fn server_decorations(&self) -> impl Iterator<Item = TreeDecoration> + '_ {
+        self.server_entries
+            .values()
+            .filter(|entry| entry.kind == wiring::LIVE_DECORATION_KIND)
+            .filter_map(|entry| {
+                let spec: ilium_plugin_api::generated::types::intents::SetDecorationSpec =
+                    serde_json::from_value(entry.payload.clone()).ok()?;
+                Some(TreeDecoration {
+                    plugin: entry.plugin.clone(),
+                    node: spec.node,
+                    slot: spec.slot,
+                    text: spec.content.iter().map(|span| span.text.as_str()).collect(),
+                    icon: spec.icon,
+                    sort_key: spec.sort_key.unwrap_or(0),
+                })
+            })
     }
 
     /// The decorations client-side plugins set on one tree node, by sort key.
     pub(crate) fn decorations_of(&self, node: ilium_core::NodeId) -> Vec<TreeDecoration> {
         let node = to_plugin(node);
-        self.shared
+        let mut found: Vec<TreeDecoration> = self
+            .shared
             .decorations
             .lock()
             .map(|decorations| {
@@ -1561,7 +1749,13 @@ impl ClientPlugins {
                     .cloned()
                     .collect()
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        found.extend(
+            self.server_decorations()
+                .filter(|decoration| decoration.node == node),
+        );
+        found.sort_by_key(|decoration| decoration.sort_key);
+        found
     }
 
     /// Whether any plugin decorates the tree, so the tree drawing can skip the lookup.
@@ -1570,6 +1764,10 @@ impl ClientPlugins {
             .decorations
             .lock()
             .is_ok_and(|decorations| !decorations.is_empty())
+            || self
+                .server_entries
+                .values()
+                .any(|entry| entry.kind == wiring::LIVE_DECORATION_KIND)
     }
 
     /// The entries enabled plugins contribute of one manifest kind (`tree_toolbar`,
@@ -1589,6 +1787,21 @@ impl ClientPlugins {
             .collect();
         items.sort_by_key(|item| item.order);
         items
+    }
+
+    /// The settings rows enabled plugins contribute (`contributes.settings[].rows`), in
+    /// catalogue order, each with the page it belongs to and its default value.
+    pub(crate) fn contributed_settings(&self) -> Vec<ContributedSetting> {
+        self.catalogue
+            .iter()
+            .filter(|plugin| {
+                !self
+                    .server_states
+                    .get(&plugin.id)
+                    .is_some_and(|state| wiring::is_disabled_state(state))
+            })
+            .flat_map(|plugin| contributed_settings(&plugin.id, &plugin.manifest))
+            .collect()
     }
 
     /// The rows of the Settings plugin list.

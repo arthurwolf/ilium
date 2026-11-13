@@ -219,8 +219,14 @@ fn manifest_050_the_help_file_named_by_the_manifest_exists_in_the_plugin_folder(
 /// REQ: COR-050, F-063
 #[test]
 fn manifest_050_the_install_service_has_install_remove_and_status() {
-    let manifest = manifest();
-    let service = &manifest["contributes"]["services"]["ilium.core.agent-setup/install"];
+    let schema = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/install.json"),
+        )
+        .expect("the service schema is readable"),
+    )
+    .expect("the service schema parses");
+    let service = &schema;
     let mut methods: Vec<&String> = service
         .as_object()
         .expect("service object")
@@ -233,8 +239,14 @@ fn manifest_050_the_install_service_has_install_remove_and_status() {
 /// REQ: COR-050, F-063
 #[test]
 fn manifest_050_install_and_remove_require_block_and_target_strings() {
-    let manifest = manifest();
-    let service = &manifest["contributes"]["services"]["ilium.core.agent-setup/install"];
+    let schema = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/install.json"),
+        )
+        .expect("the service schema is readable"),
+    )
+    .expect("the service schema parses");
+    let service = &schema;
     for method in ["install", "remove"] {
         let params = &service[method]["params"];
         assert_eq!(params["required"], json!(["block", "target"]), "{method}");
@@ -250,8 +262,14 @@ fn manifest_050_install_and_remove_require_block_and_target_strings() {
 /// REQ: COR-050, F-063
 #[test]
 fn manifest_050_status_takes_an_object_and_returns_a_targets_array() {
-    let manifest = manifest();
-    let status = &manifest["contributes"]["services"]["ilium.core.agent-setup/install"]["status"];
+    let schema = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/install.json"),
+        )
+        .expect("the service schema is readable"),
+    )
+    .expect("the service schema parses");
+    let status = &schema["status"];
     assert_eq!(status["params"]["type"], "object");
     assert_eq!(status["result"]["properties"]["targets"]["type"], "array");
 }

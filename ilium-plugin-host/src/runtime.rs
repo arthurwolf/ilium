@@ -46,7 +46,7 @@ use crate::imports::backed::{
     RegistryCommands, ResultQueue, SinkLog,
 };
 use crate::imports::clock::ClockImport;
-use crate::imports::extensions::ExtensionsImport;
+use crate::imports::extension_points::{ExtensionBook, PluginExtensions};
 use crate::imports::generated_dispatch::{ImportSet, IMPORT_INTERFACES};
 use crate::imports::services::{BrokeredServices, ServiceBroker};
 use crate::imports::settings::SettingsImport;
@@ -243,6 +243,8 @@ pub struct HostRuntime {
     timer_books: Mutex<BTreeMap<String, TimerBook>>,
     /// Topic messages plugins published since the last pump.
     topic_outbox: TopicOutbox,
+    /// What plugins registered on extension points at run time.
+    extension_book: ExtensionBook,
     /// Service calls between the plugins of this runtime.
     services: ServiceBroker,
     next_instance: u64,
@@ -277,6 +279,7 @@ impl HostRuntime {
             commands: CommandQueue::default(),
             timer_books: Mutex::new(BTreeMap::new()),
             topic_outbox: TopicOutbox::default(),
+            extension_book: ExtensionBook::default(),
             services: ServiceBroker::default(),
             next_instance: 1,
             job_panics: 0,
@@ -411,6 +414,7 @@ impl HostRuntime {
         lock(&self.timer_books).insert(plugin.to_owned(), Arc::clone(&timer_book));
         // A new instance starts without the replies and deferred calls of the last one.
         lock(&self.services).forget_plugin(plugin);
+        self.extension_book.forget_instance(plugin);
         let mut set = ImportSet {
             timers: Some(Box::new(TimersImport::with_book(timer_book))),
             topics: Some(Box::new(PluginTopics::new(
@@ -425,7 +429,12 @@ impl HostRuntime {
             ))),
             clock: Some(Box::new(ClockImport)),
             settings: Some(Box::new(SettingsImport)),
-            extensions: Some(Box::new(ExtensionsImport)),
+            extensions: Some(Box::new(PluginExtensions::new(
+                plugin,
+                &record.granted,
+                Arc::clone(&self.contributions),
+                self.extension_book.clone(),
+            ))),
             tree: Some(Box::new(KernelTree::new(
                 Arc::clone(&self.kernel),
                 plugin,
@@ -624,6 +633,7 @@ impl HostRuntime {
             record.state = PluginState::Failed(trap.code.0.to_string());
         }
         lock(&self.services).forget_plugin(plugin);
+        self.extension_book.forget_instance(plugin);
         RuntimeError::Trapped {
             plugin: plugin.to_owned(),
             code: trap.code.0.to_string(),
@@ -1026,6 +1036,7 @@ impl HostRuntime {
             }
             self.deactivate(plugin, DeactivationReason::Disabled)?;
             lock(&self.contributions).clear(plugin);
+            self.extension_book.forget_plugin(plugin);
             lock(&self.results).retain(|(owner, _)| owner != plugin);
             self.disabled.insert(plugin.to_owned());
             if let Some(record) = self.plugins.get_mut(plugin) {

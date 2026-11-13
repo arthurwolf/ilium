@@ -73,6 +73,8 @@ struct Plugin {
     id: String,
     manifest_path: PathBuf,
     sides: Vec<String>,
+    /// The help topics of the manifest whose file exists: (topic id, title, file path).
+    help: Vec<(String, String, PathBuf)>,
 }
 
 fn main() -> ExitCode {
@@ -321,12 +323,41 @@ fn discover(core: &Path) -> Result<Vec<Plugin>, String> {
             })
             .map(|side| (*side).to_owned())
             .collect();
+        let mut help = Vec::new();
+        let topics = manifest
+            .get("contributes")
+            .and_then(|contributes| contributes.get("help"))
+            .and_then(serde_json::Value::as_array);
+        for topic in topics.into_iter().flatten() {
+            let field = |name: &str| topic.get(name).and_then(serde_json::Value::as_str);
+            let (Some(topic_id), Some(file)) = (field("id"), field("file")) else {
+                continue;
+            };
+            // A help file is a relative path inside the plugin directory, never above it.
+            let inside = Path::new(file)
+                .components()
+                .all(|part| matches!(part, std::path::Component::Normal(_)));
+            let path = directory.join(file);
+            println!("cargo:rerun-if-changed={}", path.display());
+            if inside && path.is_file() {
+                help.push((
+                    topic_id.to_owned(),
+                    field("title").unwrap_or(topic_id).to_owned(),
+                    path,
+                ));
+            } else {
+                println!(
+                    "cargo:warning=plugins/core/{name}: help topic {topic_id} names {file}, which is not a file of the plugin"
+                );
+            }
+        }
         plugins.push(Plugin {
             directory: name,
             package,
             id,
             manifest_path,
             sides,
+            help,
         });
     }
     Ok(plugins)
@@ -590,6 +621,15 @@ fn catalogue(
             };
             let _ = writeln!(text, "        {side}: {value},");
         }
+        let _ = writeln!(text, "        help: &[");
+        for (topic, title, path) in &plugin.help {
+            let _ = writeln!(
+                text,
+                "            HelpTopic {{ id: {topic:?}, title: {title:?}, markdown: include_str!({:?}) }},",
+                path.display().to_string()
+            );
+        }
+        let _ = writeln!(text, "        ],");
         let _ = writeln!(text, "    }},");
     }
     let _ = writeln!(text, "];");

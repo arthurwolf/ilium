@@ -321,8 +321,10 @@ mod spec_tests {
     /// REQ: COR-050
     #[test]
     fn install_and_remove_params_require_block_and_target() {
-        let manifest = manifest();
-        let service = &manifest["contributes"]["services"]["ilium.core.agent-setup/install"];
+        let schema =
+            serde_json::from_str::<serde_json::Value>(include_str!("../schemas/install.json"))
+                .expect("the service schema parses");
+        let service = &schema;
         for operation in ["install", "remove"] {
             let required = string_items(&service[operation]["params"]["required"]);
             assert_eq!(required, vec!["block", "target"], "operation `{operation}`");

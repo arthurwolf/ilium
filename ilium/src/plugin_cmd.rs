@@ -128,6 +128,20 @@ pub fn client_plugin_start() -> Option<ilium_client::plugin_host::host::ClientPl
         catalogue: bundled_catalogue("client"),
         data_dir: directories.data_dir().to_path_buf(),
         mode,
+        help: ilium_plugin_bundle::plugins()
+            .iter()
+            .flat_map(|plugin| {
+                plugin
+                    .help
+                    .iter()
+                    .map(|topic| ilium_client::plugin_host::host::PluginHelpTopic {
+                        plugin: plugin.id.to_owned(),
+                        id: topic.id.to_owned(),
+                        title: topic.title.to_owned(),
+                        markdown: topic.markdown.to_owned(),
+                    })
+            })
+            .collect(),
     })
 }
 

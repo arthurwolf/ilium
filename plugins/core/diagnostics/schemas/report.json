@@ -1,0 +1,24 @@
+{
+  "build": {
+    "params": {
+      "type": "object",
+      "properties": {
+        "include_log_tail": {
+          "type": "boolean"
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 262144
+        }
+      }
+    }
+  }
+}

@@ -270,18 +270,28 @@ fn doc_cor_050_tree_decorate_grant_backs_the_slot_and_the_ordering() {
 /// REQ: COR-050, F-038
 #[test]
 fn doc_cor_050_usage_service_has_one_method_usage() {
-    let manifest = manifest_value();
-    let service = manifest["contributes"]["services"][USAGE_SERVICE]
-        .as_object()
-        .expect("service");
+    let schema = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/usage.json"),
+        )
+        .expect("the service schema is readable"),
+    )
+    .expect("the service schema parses");
+    let service = schema.as_object().expect("service");
     assert_eq!(service.keys().collect::<Vec<_>>(), ["usage"]);
 }
 
 /// REQ: COR-050, F-038
 #[test]
 fn doc_cor_050_usage_params_take_an_optional_string_window() {
-    let manifest = manifest_value();
-    let params = &manifest["contributes"]["services"][USAGE_SERVICE]["usage"]["params"];
+    let schema = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/usage.json"),
+        )
+        .expect("the service schema is readable"),
+    )
+    .expect("the service schema parses");
+    let params = &schema["usage"]["params"];
     assert_eq!(
         params,
         &json!({"type": "object", "properties": {"window": {"type": "string"}}})
@@ -292,8 +302,14 @@ fn doc_cor_050_usage_params_take_an_optional_string_window() {
 /// REQ: COR-050, F-038
 #[test]
 fn doc_cor_050_usage_result_requires_the_panes_object() {
-    let manifest = manifest_value();
-    let result = &manifest["contributes"]["services"][USAGE_SERVICE]["usage"]["result"];
+    let schema = serde_json::from_str::<serde_json::Value>(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas/usage.json"),
+        )
+        .expect("the service schema is readable"),
+    )
+    .expect("the service schema parses");
+    let result = &schema["usage"]["result"];
     assert_eq!(
         result,
         &json!({"type": "object", "properties": {"panes": {"type": "object"}}, "required": ["panes"]})
@@ -306,9 +322,9 @@ fn doc_cor_050_provided_service_grant_names_the_declared_service() {
     let manifest = manifest_value();
     let grant = format!("services.provide:{USAGE_SERVICE}");
     assert!(strings(&manifest["capabilities"]["server"]).contains(&grant));
-    assert!(manifest["contributes"]["services"]
-        .get(USAGE_SERVICE)
-        .is_some());
+    assert!(manifest["contributes"]["services"]["provides"]
+        .as_array()
+        .is_some_and(|provides| provides.iter().any(|entry| entry["name"] == USAGE_SERVICE)));
 }
 
 /// REQ: COR-050, F-040
