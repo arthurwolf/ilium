@@ -247,7 +247,7 @@ fn session_050_a_failed_transcription_submits_no_command() {
 #[test]
 fn session_050_toggle_command_turns_voice_on_and_saves_enabled() {
     let mut host = client_host();
-    host.deliver_one(command_invoked("voice.toggle"));
+    host.deliver_one(command_invoked("toggle"));
     host.settle();
     assert_eq!(
         host.kernel_settings().get("voice-control", "enabled"),
@@ -259,8 +259,8 @@ fn session_050_toggle_command_turns_voice_on_and_saves_enabled() {
 #[test]
 fn session_050_toggle_command_twice_turns_voice_off_again() {
     let mut host = client_host();
-    host.deliver_one(command_invoked("voice.toggle"));
-    host.deliver_one(command_invoked("voice.toggle"));
+    host.deliver_one(command_invoked("toggle"));
+    host.deliver_one(command_invoked("toggle"));
     host.settle();
     assert_eq!(
         host.kernel_settings().get("voice-control", "enabled"),
@@ -293,7 +293,7 @@ fn session_050_semantic_vad_f8_press_toggles_voice_and_release_does_nothing() {
 fn session_050_push_to_talk_toggle_from_off_turns_voice_on_and_a_press_then_records() {
     let mut host = client_host();
     configure(&mut host, "input_mode", json!("push_to_talk"));
-    host.deliver_one(command_invoked("voice.toggle"));
+    host.deliver_one(command_invoked("toggle"));
     host.settle();
     assert_eq!(
         host.kernel_settings().get("voice-control", "enabled"),

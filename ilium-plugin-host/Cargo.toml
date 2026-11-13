@@ -27,6 +27,7 @@ thiserror = "2.0.18"
 tokio = { version = "1", features = ["rt", "sync", "time"] }
 loom = { version = "0.7", optional = true }
 wasmtime = { workspace = true, default-features = false, features = ["async", "cache", "component-model", "cranelift", "parallel-compilation", "runtime", "std"] }
+wasmtime-wasi = { workspace = true }
 wasmparser = "=0.258.3"
 sha2 = "0.10.9"
 flate2 = "1.1.9"

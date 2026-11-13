@@ -148,7 +148,7 @@ mod spec_tests {
         assert!(activation.iter().any(|trigger| trigger == "startup"));
         assert!(activation
             .iter()
-            .any(|trigger| trigger == "view:ilium.core.diagnostics/diagnostics.warnings"));
+            .any(|trigger| trigger == "view:ilium.core.diagnostics/warnings"));
         let panel_ids: Vec<String> = manifest["contributes"]["panels"]
             .as_array()
             .expect("panels is an array")

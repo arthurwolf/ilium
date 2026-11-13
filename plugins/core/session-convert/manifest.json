@@ -51,7 +51,7 @@
   "activation": [
     "command:ilium.core.session-convert/convert",
     "service:convert",
-    "view:ilium.core.session-convert/session-convert.progress"
+    "view:ilium.core.session-convert/progress"
   ],
   "replaceable": true,
   "surface": [

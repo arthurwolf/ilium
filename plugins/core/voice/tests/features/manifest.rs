@@ -137,7 +137,7 @@ fn manifest_050_contributes_the_toggle_command_and_one_jsonl_cli_command_that_ne
     assert_eq!(
         manifest["contributes"],
         json!({
-            "commands": [{ "id": "voice.toggle", "title": "Toggle voice control" }],
+            "commands": [{ "id": "toggle", "title": "Toggle voice control" }],
             "cli": [{ "name": "voice", "summary": "Voice control: say", "output": "jsonl", "requires_server": true }],
             "jobs": [{ "kind": "transcribe", "deadline_ms": 30000, "memory_mib": 512 }],
         })
@@ -164,7 +164,7 @@ fn manifest_050_declares_the_voice_toggle_command_named_by_its_activation() {
         .clone();
     assert!(commands
         .iter()
-        .any(|command| command["id"] == "voice.toggle"));
+        .any(|command| command["id"] == "toggle"));
 }
 
 /// REQ: COR-050

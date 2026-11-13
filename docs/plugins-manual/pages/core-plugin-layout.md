@@ -108,11 +108,21 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "entry_schema": {
           "type": "object",
           "properties": {
-            "id": { "type": "string" },
-            "title": { "type": "string" },
-            "template": { "type": "string" }
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "template": {
+              "type": "string"
+            }
           },
-          "required": ["id", "title", "template"]
+          "required": [
+            "id",
+            "title",
+            "template"
+          ]
         },
         "risk": "standard",
         "max_entries": 64,
@@ -127,28 +137,50 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "payload_schema": {
           "type": "object",
           "properties": {
-            "node": { "type": "string" },
-            "direction": { "type": "string" },
-            "pane_count": { "type": "integer" }
+            "node": {
+              "type": "string"
+            },
+            "direction": {
+              "type": "string"
+            },
+            "pane_count": {
+              "type": "integer"
+            }
           },
-          "required": ["node", "direction", "pane_count"]
+          "required": [
+            "node",
+            "direction",
+            "pane_count"
+          ]
         },
         "risk": "standard",
         "deadline_ms": 20,
         "max_handlers": 8,
         "version": "0.1.0"
       }
+    ],
+    "commands": [
+      {
+        "id": "preset",
+        "title": "Apply layout preset"
+      }
+    ],
+    "panels": [
+      {
+        "id": "presets",
+        "title": "Layout presets"
+      }
     ]
   },
   "activation": [
-    "command:ilium.core.layout/layout.preset",
-    "view:ilium.core.layout/layout.presets"
+    "command:ilium.core.layout/preset",
+    "view:ilium.core.layout/presets"
   ],
   "limits_tier": "first-party"
 }
 ```
 
-The server side holds `panes.create` because the `create-pane` intent that the split samples submit is opened only by that grant ([panes.create](/pages/capability-panes-create/)). The two activation triggers name a command and a view that the plugin registers itself at run time through the command and view registries ([commands](/pages/api-commands/), [UI model](/pages/ui-model/)), not through `contributes`. The trigger `command:ilium.core.layout/layout.preset` starts the plugin when that command is first run, and `view:ilium.core.layout/layout.presets` when the presets panel is first shown. A trigger whose name the plugin never registers never fires, and the plugin then starts only at the next explicit use.
+The server side holds `panes.create` because the `create-pane` intent that the split samples submit is opened only by that grant ([panes.create](/pages/capability-panes-create/)). The two activation triggers name a command and a view that the plugin registers itself at run time through the command and view registries ([commands](/pages/api-commands/), [UI model](/pages/ui-model/)), not through `contributes`. The trigger `command:ilium.core.layout/preset` starts the plugin when that command is first run, and `view:ilium.core.layout/presets` when the presets panel is first shown. A trigger whose name the plugin never registers never fires, and the plugin then starts only at the next explicit use.
 
 ### Samples
 

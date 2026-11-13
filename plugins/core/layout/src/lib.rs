@@ -576,8 +576,8 @@ mod spec_tests {
         assert_eq!(
             string_array(&manifest["activation"]),
             [
-                "command:ilium.core.layout/layout.preset",
-                "view:ilium.core.layout/layout.presets"
+                "command:ilium.core.layout/preset",
+                "view:ilium.core.layout/presets"
             ]
         );
     }

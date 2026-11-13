@@ -1554,6 +1554,12 @@ def build_outputs(root):
     glue_outputs = gen_plugin_wasm_glue.outputs(sys.modules[__name__], model, renderer, root, tree_sha256)
     for path, text in glue_outputs.items():
         outputs[path] = rustfmt(text, path)
+    import gen_plugin_host_dispatch  # sibling module: host-side import dispatch
+
+    glue = gen_plugin_wasm_glue.Glue(sys.modules[__name__], model, renderer, root)
+    dispatch_outputs = gen_plugin_host_dispatch.outputs(sys.modules[__name__], model, renderer, glue, tree_sha256)
+    for path, text in dispatch_outputs.items():
+        outputs[path] = rustfmt(text, path)
     statistics = statistics_of(model)
     statistics["roundtrip_tests"] = roundtrip_tests
     statistics["duplicates"] = duplicates

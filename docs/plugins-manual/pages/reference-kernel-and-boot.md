@@ -136,27 +136,27 @@ The commands that work this way are `ilium panes`, `ilium broadcast`, `ilium rec
 
 ### Startup and lazy activation of the 32 core plugins
 
-In the tables below, a `view:` trigger is written `view:<plugin short name>.<view id>`: the short name is the plugin id without its `ilium:` prefix, and the view id is the `id` declared in the plugin's `panels`, `views` or `overlays`. For Agent detect, `view:ilium.core.agent-detect/agent-detect.panel` is the view declared with the id `panel`.
+In the tables below, a `view:` trigger is written `view:<plugin short name>.<view id>`: the short name is the plugin id without its `ilium:` prefix, and the view id is the `id` declared in the plugin's `panels`, `views` or `overlays`. For Agent detect, `view:ilium.core.agent-detect/panel` is the view declared with the id `panel`.
 
 A plugin that starts at boot costs time in every session. A plugin that starts on first use costs time at the first use. The rule used here: a plugin starts at boot only when it must see events from the first moment, must be present on the first frame, or must restore state that outlives the process. Everything else is lazy. The Plugins screen shows the column **Starts** with `at boot` or `on use`.
 
 | Core plugin | Server side | Client side | Reason |
 |---|---|---|---|
-| Agent detect | `startup` | `view:ilium.core.agent-detect/agent-detect.panel` | Detection needs every screen update from the start |
+| Agent detect | `startup` | `view:ilium.core.agent-detect/panel` | Detection needs every screen update from the start |
 | Agent setup | `settings:setup`, `command:ilium.core.agent-setup/refresh`, `service:install` | `settings:setup` | Used when the user opens Setup |
 | Agent toolbar | `event:agent-activity-changed` | `startup` | Buttons are on the first frame |
 | Ambient look | none | `startup` | The look is applied from the first frame |
 | Attention queue | `startup` | `startup` | The queue is built from agent state from the first moment, and the button is on the first frame |
 | Chatroom | `startup` | `topic:chatroom` | File watch for `CHATROOM.md` and hook text must work without a client |
-| Compaction | `event:agent-activity-changed`, `service:compact` | `view:ilium.core.compaction/compaction.optimizer` | Runs when an agent needs it |
-| Cost | `startup` | `view:ilium.core.cost/cost.panel` | Usage accrues from transcripts while nobody looks |
-| Diagnostics | `startup` | `view:ilium.core.diagnostics/diagnostics.warnings` | Collects warnings from the first line of the log |
+| Compaction | `event:agent-activity-changed`, `service:compact` | `view:ilium.core.compaction/optimizer` | Runs when an agent needs it |
+| Cost | `startup` | `view:ilium.core.cost/panel` | Usage accrues from transcripts while nobody looks |
+| Diagnostics | `startup` | `view:ilium.core.diagnostics/warnings` | Collects warnings from the first line of the log |
 | Editor | none | `pane-kind:editor` | Native in v1 (see D4). In plugin form it starts when a file opens |
 | Fleet | `cli:panes`, `cli:broadcast`, `http:/create_agent`, `service:broadcast` | `command:ilium.core.fleet/ask-for-update` | Used on demand |
 | Inference | `service:ilium:inference/provider` | none | Starts when a consumer calls it |
 | Kanban | none | `pane-kind:board` | Native in v1. In plugin form it starts with a board pane |
 | Keys and help | none | `command:ilium.core.keys-and-help/show-keys`, `command:ilium.core.keys-and-help/show-plugins`, `settings:keyboard` | Used on demand. Bindings work without it |
-| Layout | `command:ilium.core.layout/layout.preset` | `view:ilium.core.layout/layout.presets` | Used on demand. The kernel keeps the geometry |
+| Layout | `command:ilium.core.layout/preset` | `view:ilium.core.layout/presets` | Used on demand. The kernel keeps the geometry |
 | Notifications | `startup` | none | Must catch the first state change |
 | Progress | `startup` | `startup` | Monitors are restored from storage and run without a client |
 | Recap | `cli:recap`, `command:ilium.core.recap/recap` | none | Used on demand |
@@ -164,12 +164,12 @@ A plugin that starts at boot costs time in every session. A plugin that starts o
 | Scenes | none | `scene:*` | Starts when a scene is selected (scene side only) |
 | Scheduler | `startup` | `view:ilium.core.scheduler/scheduler.queue` | Due timers must fire after a restart |
 | Search | `command:ilium.core.search/open`, `job:index` | `view:ilium.core.search/search` | Used on demand |
-| Session convert | `command:ilium.core.session-convert/convert`, `service:convert` | `view:ilium.core.session-convert/session-convert.progress` | Used on demand |
-| Sessions | `startup` | `view:ilium.core.sessions/sessions.list` | Offers the snapshot sections to the kernel writer |
+| Session convert | `command:ilium.core.session-convert/convert`, `service:convert` | `view:ilium.core.session-convert/progress` | Used on demand |
+| Sessions | `startup` | `view:ilium.core.sessions/list` | Offers the snapshot sections to the kernel writer |
 | Settings | none | `startup` | The Settings screen frame and the guided setup |
 | Smart copy | none | `command:ilium.core.smart-copy/smart-copy` | Starts on the copy gesture |
 | Terminal | `event:screen-changed` | `startup` | Links and the context menu need the first frame |
-| Text triggers | `startup` | `view:ilium.core.text-triggers/text-triggers.rules` | The output filter must be in place before the first byte |
+| Text triggers | `startup` | `view:ilium.core.text-triggers/rules` | The output filter must be in place before the first byte |
 | Titles | `startup` | none | Triggers fire on agent events from the start |
 | Tree | `startup` | `startup` | Rows, bookmarks and locks are on the first frame |
 | Voice | `command:ilium.core.voice/toggle`, `cli:voice` | `command:ilium.core.voice/toggle` | The key F8 is a keybinding that fires the command, which starts the plugin |

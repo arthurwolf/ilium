@@ -38,7 +38,7 @@
   },
   "activation": [
     "startup",
-    "view:ilium.core.agent-detect/agent-detect.panel"
+    "view:ilium.core.agent-detect/panel"
   ],
   "contributes": {
     "extension_points": [

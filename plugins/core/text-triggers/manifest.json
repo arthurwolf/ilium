@@ -26,7 +26,15 @@
   },
   "activation": [
     "startup",
-    "view:ilium.core.text-triggers/text-triggers.rules"
+    "view:ilium.core.text-triggers/rules"
   ],
-  "limits_tier": "first-party"
+  "limits_tier": "first-party",
+  "contributes": {
+    "panels": [
+      {
+        "id": "rules",
+        "title": "Text triggers"
+      }
+    ]
+  }
 }

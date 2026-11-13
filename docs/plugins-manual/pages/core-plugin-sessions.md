@@ -104,10 +104,17 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "title": "Snapshot sections",
         "entry_schema": {
           "type": "object",
-          "required": ["id", "max_bytes"],
+          "required": [
+            "id",
+            "max_bytes"
+          ],
           "properties": {
-            "id": { "type": "string" },
-            "max_bytes": { "type": "integer" }
+            "id": {
+              "type": "string"
+            },
+            "max_bytes": {
+              "type": "integer"
+            }
           }
         },
         "risk": "standard",
@@ -122,10 +129,17 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "title": "Before restore",
         "payload_schema": {
           "type": "object",
-          "required": ["session", "pane_count"],
+          "required": [
+            "session",
+            "pane_count"
+          ],
           "properties": {
-            "session": { "type": "string" },
-            "pane_count": { "type": "integer" }
+            "session": {
+              "type": "string"
+            },
+            "pane_count": {
+              "type": "integer"
+            }
           }
         },
         "risk": "standard",
@@ -133,11 +147,17 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "max_handlers": 8,
         "version": "0.1.0"
       }
+    ],
+    "panels": [
+      {
+        "id": "list",
+        "title": "Sessions"
+      }
     ]
   },
   "activation": [
     "startup",
-    "view:ilium.core.sessions/sessions.list"
+    "view:ilium.core.sessions/list"
   ],
   "replaceable": false,
   "limits_tier": "first-party"

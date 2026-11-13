@@ -59,12 +59,32 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "version": "0.1.0",
   "publisher": "Ilium",
   "capabilities": {
-    "server": ["terminal.read-cells", "terminal.read-screen", "inference"],
-    "client": ["terminal.read-screen", "terminal.pointer", "clipboard.write", "inference"]
+    "server": [
+      "terminal.read-cells",
+      "terminal.read-screen",
+      "inference"
+    ],
+    "client": [
+      "terminal.read-screen",
+      "terminal.pointer",
+      "clipboard.write",
+      "inference"
+    ]
   },
   "contributes": {
     "context_menu": [
-      { "id": "smart-copy", "title": "Smart Copy", "command": "smart-copy", "target": "terminal" }
+      {
+        "id": "smart-copy",
+        "title": "Smart Copy",
+        "command": "smart-copy",
+        "target": "terminal"
+      }
+    ],
+    "commands": [
+      {
+        "id": "smart-copy",
+        "title": "Smart Copy"
+      }
     ]
   }
 }
@@ -126,13 +146,29 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "entry_schema": {
           "type": "object",
           "properties": {
-            "id": { "type": "string" },
-            "kind": { "type": "string" },
-            "regex": { "type": "string" },
-            "multiline": { "type": "boolean" },
-            "label": { "type": "string" }
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "regex": {
+              "type": "string"
+            },
+            "multiline": {
+              "type": "boolean"
+            },
+            "label": {
+              "type": "string"
+            }
           },
-          "required": ["id", "kind", "regex", "multiline", "label"]
+          "required": [
+            "id",
+            "kind",
+            "regex",
+            "multiline",
+            "label"
+          ]
         },
         "max_entries": 64,
         "dynamic": false,
@@ -146,23 +182,43 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "payload_schema": {
           "type": "object",
           "properties": {
-            "text": { "type": "string" },
-            "kind": { "type": "string" },
-            "pane": { "type": "string" }
+            "text": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "pane": {
+              "type": "string"
+            }
           },
-          "required": ["text", "kind", "pane"]
+          "required": [
+            "text",
+            "kind",
+            "pane"
+          ]
         },
         "reply_schema": {
           "type": "object",
           "properties": {
-            "text": { "type": "string" }
+            "text": {
+              "type": "string"
+            }
           },
-          "required": ["text"]
+          "required": [
+            "text"
+          ]
         },
         "risk": "high",
         "deadline_ms": 20,
         "max_handlers": 8,
         "version": "0.1.0"
+      }
+    ],
+    "commands": [
+      {
+        "id": "smart-copy",
+        "title": "Smart Copy"
       }
     ]
   },

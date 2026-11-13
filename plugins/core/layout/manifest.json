@@ -87,11 +87,23 @@
         "max_handlers": 8,
         "version": "0.1.0"
       }
+    ],
+    "commands": [
+      {
+        "id": "preset",
+        "title": "Apply layout preset"
+      }
+    ],
+    "panels": [
+      {
+        "id": "presets",
+        "title": "Layout presets"
+      }
     ]
   },
   "activation": [
-    "command:ilium.core.layout/layout.preset",
-    "view:ilium.core.layout/layout.presets"
+    "command:ilium.core.layout/preset",
+    "view:ilium.core.layout/presets"
   ],
   "limits_tier": "first-party"
 }

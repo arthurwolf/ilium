@@ -112,7 +112,7 @@ fn doc_034_the_tab_writes_every_voice_key_except_the_custom_prompt() {
 fn doc_050_activation_triggers_in_the_boot_table_equal_the_manifest() {
     let boot = manual_page("reference-kernel-and-boot.md");
     assert!(boot.contains(
-        "| Voice | `command:voice.toggle`, `cli:voice` | `command:voice.toggle` | The key F8 is a keybinding that fires the command, which starts the plugin |"
+        "| Voice | `command:ilium.core.voice/toggle`, `cli:voice` | `command:ilium.core.voice/toggle` | The key F8 is a keybinding that fires the command, which starts the plugin |"
     ));
 }
 

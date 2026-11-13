@@ -40,7 +40,7 @@
   },
   "activation": [
     "startup",
-    "view:ilium.core.diagnostics/diagnostics.warnings"
+    "view:ilium.core.diagnostics/warnings"
   ],
   "replaceable": true,
   "surface": [

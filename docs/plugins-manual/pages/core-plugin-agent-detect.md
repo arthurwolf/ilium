@@ -132,7 +132,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "activation": [
     "startup",
-    "view:ilium.core.agent-detect/agent-detect.panel"
+    "view:ilium.core.agent-detect/panel"
   ],
   "contributes": {
     "extension_points": [

@@ -165,7 +165,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "menu-provider"
     ]
   },
-  "unstable": ["plugin-services"],
+  "unstable": [
+    "plugin-services"
+  ],
   "capabilities": {
     "server": [
       "panes.read",
@@ -195,7 +197,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "activation": [
     "command:ilium.core.session-convert/convert",
     "service:convert",
-    "view:ilium.core.session-convert/session-convert.progress"
+    "view:ilium.core.session-convert/progress"
   ],
   "replaceable": true,
   "surface": [
@@ -237,7 +239,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "services": {
       "provides": [
-        { "name": "ilium.core.session-convert/convert", "version": "0.1.0", "schema": "schemas/convert.json" }
+        {
+          "name": "ilium.core.session-convert/convert",
+          "version": "0.1.0",
+          "schema": "schemas/convert.json"
+        }
       ]
     },
     "extension_points": [

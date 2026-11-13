@@ -1,6 +1,7 @@
 ### Added
 - Plugin SDK: `#[ilium_plugin]` now emits the WebAssembly component glue on `wasm32-wasip2` when the crate feature `component-server` or `component-client` is on, so a core plugin crate builds into a real component for each side.
 - New crate `ilium-plugin-bundle` that builds the core plugins as WebAssembly components and exposes them as an embedded catalogue (off by default; `ILIUM_PLUGIN_BUNDLE_MODE=lenient` or `strict` turns the build on).
+- Plugin host: a composed runtime (`HostRuntime`) that loads the plugin catalogue, links WASI and the host imports per plugin grant, activates plugins on their triggers, delivers events and commands, renders views and disables or enables a plugin while running; a contribution registry for the 23 manifest contribution kinds. Not yet started by the server or the client.
 
 ### Changed
 - Plugin SDK: events now reach a plugin's `Handler` implementation whether or not `exports` names `handler`, as the manual states; before, such a plugin silently received no events.

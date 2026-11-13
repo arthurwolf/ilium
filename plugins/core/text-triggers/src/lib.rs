@@ -116,7 +116,7 @@ mod spec_tests {
             string_list(&manifest["activation"]),
             vec![
                 "startup",
-                "view:ilium.core.text-triggers/text-triggers.rules"
+                "view:ilium.core.text-triggers/rules"
             ]
         );
     }
@@ -200,7 +200,7 @@ mod spec_tests {
             activation,
             vec![
                 "startup",
-                "view:ilium.core.text-triggers/text-triggers.rules"
+                "view:ilium.core.text-triggers/rules"
             ]
         );
     }

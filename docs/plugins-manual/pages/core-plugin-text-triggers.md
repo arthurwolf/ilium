@@ -104,22 +104,40 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "entry_schema": {
           "type": "object",
           "properties": {
-            "id": { "type": "string" },
-            "title": { "type": "string" },
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
             "rules": {
               "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
-                  "pattern": { "type": "string" },
-                  "reply": { "type": "string" },
-                  "enabled": { "type": "boolean" }
+                  "pattern": {
+                    "type": "string"
+                  },
+                  "reply": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
                 },
-                "required": ["pattern", "reply", "enabled"]
+                "required": [
+                  "pattern",
+                  "reply",
+                  "enabled"
+                ]
               }
             }
           },
-          "required": ["id", "title", "rules"]
+          "required": [
+            "id",
+            "title",
+            "rules"
+          ]
         },
         "risk": "high",
         "max_entries": 64,
@@ -134,23 +152,42 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "payload_schema": {
           "type": "object",
           "properties": {
-            "rule": { "type": "string" },
-            "pane": { "type": "string" },
-            "match": { "type": "string" },
-            "reply_length": { "type": "integer" }
+            "rule": {
+              "type": "string"
+            },
+            "pane": {
+              "type": "string"
+            },
+            "match": {
+              "type": "string"
+            },
+            "reply_length": {
+              "type": "integer"
+            }
           },
-          "required": ["rule", "pane", "match", "reply_length"]
+          "required": [
+            "rule",
+            "pane",
+            "match",
+            "reply_length"
+          ]
         },
         "risk": "high",
         "deadline_ms": 20,
         "max_handlers": 8,
         "version": "0.1.0"
       }
+    ],
+    "panels": [
+      {
+        "id": "rules",
+        "title": "Text triggers"
+      }
     ]
   },
   "activation": [
     "startup",
-    "view:ilium.core.text-triggers/text-triggers.rules"
+    "view:ilium.core.text-triggers/rules"
   ],
   "replaceable": true,
   "surface": [

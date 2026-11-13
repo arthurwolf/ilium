@@ -175,7 +175,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "activation": [
     "startup",
-    "view:ilium.core.diagnostics/diagnostics.warnings"
+    "view:ilium.core.diagnostics/warnings"
   ],
   "replaceable": true,
   "surface": [
@@ -208,7 +208,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "services": {
       "provides": [
-        { "name": "ilium.core.diagnostics/report", "version": "0.1.0", "schema": "schemas/report.json" }
+        {
+          "name": "ilium.core.diagnostics/report",
+          "version": "0.1.0",
+          "schema": "schemas/report.json"
+        }
       ]
     },
     "extension_points": [

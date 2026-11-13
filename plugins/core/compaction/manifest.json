@@ -43,7 +43,7 @@
   "activation": [
     "event:agent-activity-changed",
     "service:compact",
-    "view:ilium.core.compaction/compaction.optimizer"
+    "view:ilium.core.compaction/optimizer"
   ],
   "contributes": {
     "extension_points": [

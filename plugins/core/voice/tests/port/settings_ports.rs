@@ -29,7 +29,7 @@ fn settings_050_toggles_persist_and_do_not_open_a_new_capture() {
 #[test]
 fn settings_050_the_toggle_command_turns_voice_on() {
     let mut host = client_host();
-    host.deliver_one(command_invoked("voice.toggle"));
+    host.deliver_one(command_invoked("toggle"));
     host.settle();
     assert_eq!(
         host.kernel_settings().get("voice-control", "enabled"),
@@ -98,9 +98,9 @@ fn settings_050_terminal_confirmation_switched_off_again_is_stored_and_voice_sta
 #[test]
 fn settings_050_second_toggle_command_turns_voice_back_off() {
     let mut host = client_host();
-    host.deliver_one(command_invoked("voice.toggle"));
+    host.deliver_one(command_invoked("toggle"));
     host.settle();
-    host.deliver_one(command_invoked("voice.toggle"));
+    host.deliver_one(command_invoked("toggle"));
     host.settle();
     assert_eq!(
         host.kernel_settings().get("voice-control", "enabled"),

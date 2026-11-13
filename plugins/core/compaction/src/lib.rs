@@ -158,7 +158,7 @@ mod spec_tests {
             json!([
                 "event:agent-activity-changed",
                 "service:compact",
-                "view:ilium.core.compaction/compaction.optimizer"
+                "view:ilium.core.compaction/optimizer"
             ])
         );
     }

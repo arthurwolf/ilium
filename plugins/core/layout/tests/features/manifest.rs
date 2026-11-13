@@ -103,8 +103,8 @@ fn doc_cor_050_activation_triggers_are_command_and_view() {
     assert_eq!(
         strings(&manifest["activation"]),
         [
-            "command:ilium.core.layout/layout.preset",
-            "view:ilium.core.layout/layout.presets"
+            "command:ilium.core.layout/preset",
+            "view:ilium.core.layout/presets"
         ]
     );
 }

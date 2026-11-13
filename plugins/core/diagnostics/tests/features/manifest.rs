@@ -109,7 +109,7 @@ fn cor_050_activation_triggers_are_startup_and_the_warnings_view() {
         strings(&manifest_json()["activation"]),
         [
             "startup",
-            "view:ilium.core.diagnostics/diagnostics.warnings"
+            "view:ilium.core.diagnostics/warnings"
         ]
     );
 }

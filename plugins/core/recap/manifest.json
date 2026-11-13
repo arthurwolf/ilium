@@ -49,16 +49,18 @@
     "cli:recap"
   ],
   "contributes": {
-    "cli": [{
-      "name": "recap",
-      "summary": "Print short and long recaps of the selected panes",
-      "output": "jsonl",
-      "stdin": "none",
-      "requires_server": true,
-      "argument_groups": [
-        "pane-selector"
-      ]
-    }],
+    "cli": [
+      {
+        "name": "recap",
+        "summary": "Print short and long recaps of the selected panes",
+        "output": "jsonl",
+        "stdin": "none",
+        "requires_server": true,
+        "argument_groups": [
+          "pane-selector"
+        ]
+      }
+    ],
     "jobs": [
       {
         "kind": "recap-pane",
@@ -182,6 +184,12 @@
         "deadline_ms": 20,
         "max_handlers": 8,
         "version": "0.1.0"
+      }
+    ],
+    "commands": [
+      {
+        "id": "recap",
+        "title": "Recap"
       }
     ]
   },

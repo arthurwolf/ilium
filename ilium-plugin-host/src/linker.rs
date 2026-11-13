@@ -1,8 +1,19 @@
 //! Linker construction per world and grant set (reference-host-runtime.md, ABI-023).
 
-use ilium_plugin_api::grants::Grant;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
+use ilium_plugin_api::grants::Grant;
+use wasmtime::component::{Linker, Type, Val};
+use wasmtime::StoreContextMut;
+
+use crate::engine::PluginEngine;
 use crate::error::HostError;
+use crate::imports::generated_dispatch::{
+    DispatchError, ImportFunction, ImportInterface, IMPORT_INTERFACES,
+};
+use crate::store_data::{add_wasi_to_linker, ImportFault, StoreData};
+use crate::wasm_guest::{lift, lower};
 
 /// The three worlds a component targets (reference-wit.md section 9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,11 +70,232 @@ pub fn linker_cache_key(
         hasher.update([0]);
         hasher.update(grant.as_bytes());
     }
-    hasher.finalize().iter().fold(String::new(), |mut hex, byte| {
-        // Writing to a String cannot fail.
-        let _ = write!(hex, "{byte:02x}");
-        hex
-    })
+    hasher
+        .finalize()
+        .iter()
+        .fold(String::new(), |mut hex, byte| {
+            // Writing to a String cannot fail.
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
+}
+
+/// A Wasmtime linker with WASI and every `ilium:` import function defined.
+///
+/// The linker itself is the same for every plugin of a process: each function forwards to
+/// the import set in the calling instance's store data, and an interface that instance was
+/// not granted answers `host.capability-not-requested`. Grants therefore never widen through a
+/// shared linker, and one linker serves every (side, tier, grant set) key.
+pub struct RuntimeLinker {
+    linker: Linker<StoreData>,
+}
+
+impl std::fmt::Debug for RuntimeLinker {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuntimeLinker")
+            .finish_non_exhaustive()
+    }
+}
+
+impl RuntimeLinker {
+    /// A linker without any definition: a component with an import fails to instantiate.
+    pub fn closed(engine: &PluginEngine) -> Self {
+        Self {
+            linker: Linker::new(engine.runtime_engine()),
+        }
+    }
+
+    /// The Wasmtime linker.
+    pub fn linker(&self) -> &Linker<StoreData> {
+        &self.linker
+    }
+}
+
+/// Builds the linker of a process: WASI under the host policy and the generated import
+/// table. Functions with a resource handle in their signature stay undefined, so a
+/// component that imports one fails to instantiate with a missing-implementation error.
+pub fn build_runtime_linker(engine: &PluginEngine) -> Result<RuntimeLinker, HostError> {
+    let mut linker = Linker::<StoreData>::new(engine.runtime_engine());
+    add_wasi_to_linker(&mut linker)?;
+    for interface in IMPORT_INTERFACES {
+        define_interface(&mut linker, interface)?;
+    }
+    Ok(RuntimeLinker { linker })
+}
+
+fn define_interface(
+    linker: &mut Linker<StoreData>,
+    interface: &'static ImportInterface,
+) -> Result<(), HostError> {
+    let failed = |error: wasmtime::Error| {
+        HostError::EngineError(format!("linking {} failed: {error}", interface.instance))
+    };
+    let mut instance = linker.instance(interface.instance).map_err(failed)?;
+    for function in interface.functions {
+        instance
+            .func_new(
+                function.name,
+                move |store: StoreContextMut<'_, StoreData>, signature, parameters, results| {
+                    let parameter_types: Vec<Type> = signature.params().map(|(_, ty)| ty).collect();
+                    let result_type = signature.results().next();
+                    call_import(
+                        store,
+                        interface,
+                        function,
+                        &parameter_types,
+                        result_type.as_ref(),
+                        parameters,
+                        results,
+                    )
+                },
+            )
+            .map_err(failed)?;
+    }
+    Ok(())
+}
+
+fn call_import(
+    mut store: StoreContextMut<'_, StoreData>,
+    interface: &'static ImportInterface,
+    function: &'static ImportFunction,
+    parameter_types: &[Type],
+    result_type: Option<&Type>,
+    parameters: &[Val],
+    results: &mut [Val],
+) -> wasmtime::Result<()> {
+    let abi = || {
+        wasmtime::format_err!(
+            "import {}.{} does not match its WIT signature",
+            interface.instance,
+            function.name
+        )
+    };
+    if parameters.len() != parameter_types.len() || parameters.len() != function.parameters {
+        return Err(abi());
+    }
+    let arguments = parameters
+        .iter()
+        .zip(parameter_types)
+        .map(|(value, ty)| lift(value, ty))
+        .collect::<Result<Vec<_>, ()>>()
+        .map_err(|()| abi())?;
+    let data = store.data_mut();
+    // A panicking host import must not unwind into Wasmtime or end the executor thread: it
+    // becomes a trap of this one call (`host.import-panic`).
+    let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        data.imports
+            .call(interface.instance, function.name, arguments)
+    }));
+    let (error, code) = match called {
+        Ok(Ok(value)) => {
+            return match (result_type, results.first_mut()) {
+                (Some(ty), Some(slot)) => {
+                    *slot = lower(&value, ty).map_err(|()| abi())?;
+                    Ok(())
+                }
+                (None, None) => Ok(()),
+                _ => Err(abi()),
+            };
+        }
+        Ok(Err(DispatchError::NotLinked)) => {
+            // Not granted is the plugin's fault; granted but without an implementation
+            // in this process is a host wiring gap.
+            let code = if interface_unlocked(interface.instance, &data.identity.granted) {
+                "host.engine-error"
+            } else {
+                "host.capability-not-requested"
+            };
+            (Some(DispatchError::NotLinked), code)
+        }
+        Ok(Err(error)) => (Some(error), "trap.abi"),
+        Err(_) => (None, "host.import-panic"),
+    };
+    data.import_fault = Some(ImportFault {
+        error,
+        code,
+        instance: interface.instance.to_owned(),
+        function: function.name.to_owned(),
+    });
+    Err(wasmtime::format_err!(
+        "{code}: import {}.{}",
+        interface.instance,
+        function.name
+    ))
+}
+
+/// Whether an import interface may be used with a set of granted capabilities: an
+/// interface no capability names is always available, any other needs one of its
+/// capabilities (reference-capabilities.md, ABI-023).
+pub fn interface_unlocked(instance: &str, granted: &[String]) -> bool {
+    let mut gated = false;
+    for row in ilium_plugin_api::grants::table() {
+        if !row.world_interfaces.contains(&instance) {
+            continue;
+        }
+        gated = true;
+        let family_granted = granted.iter().any(|grant| {
+            grant
+                .split_once(':')
+                .map_or(grant.as_str(), |(family, _)| family)
+                == row.family
+        });
+        if family_granted {
+            return true;
+        }
+    }
+    !gated
+}
+
+/// Linkers by cache key (HST-070). With the shared design above every key maps to the same
+/// linker; the cache keeps the keyed lookup of the manual so a later per-grant linker needs
+/// no caller change.
+#[derive(Debug, Default)]
+pub struct LinkerCache {
+    shared: Mutex<Option<Arc<RuntimeLinker>>>,
+    keys: Mutex<HashMap<String, u64>>,
+}
+
+impl LinkerCache {
+    /// An empty cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The linker for a key, built on first use.
+    pub fn get(
+        &self,
+        engine: &PluginEngine,
+        side: ilium_plugin_api::Side,
+        tier: ilium_plugin_api::Tier,
+        grants: &[Grant],
+    ) -> Result<Arc<RuntimeLinker>, HostError> {
+        let key = linker_cache_key(side, tier, grants);
+        *self
+            .keys
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .entry(key)
+            .or_insert(0) += 1;
+        let mut shared = self
+            .shared
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(linker) = shared.as_ref() {
+            return Ok(Arc::clone(linker));
+        }
+        let linker = Arc::new(build_runtime_linker(engine)?);
+        *shared = Some(Arc::clone(&linker));
+        Ok(linker)
+    }
+
+    /// How many distinct keys were requested.
+    pub fn distinct_keys(&self) -> usize {
+        self.keys
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .len()
+    }
 }
 
 #[cfg(test)]

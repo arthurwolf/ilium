@@ -3,6 +3,7 @@
 
 pub mod agent;
 pub mod audio;
+pub mod backed;
 pub mod basic;
 pub mod catalogs;
 pub mod cli;
@@ -17,6 +18,7 @@ pub mod editor;
 pub mod extensions;
 pub mod fonts;
 pub mod fs;
+pub mod generated_dispatch;
 pub mod geocode;
 pub mod gpu;
 pub mod help;

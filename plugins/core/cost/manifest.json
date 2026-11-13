@@ -40,7 +40,7 @@
   },
   "activation": [
     "startup",
-    "view:ilium.core.cost/cost.panel"
+    "view:ilium.core.cost/panel"
   ],
   "contributes": {
     "extension_points": [
@@ -198,6 +198,12 @@
             ]
           }
         ]
+      }
+    ],
+    "panels": [
+      {
+        "id": "panel",
+        "title": "Cost"
       }
     ]
   },

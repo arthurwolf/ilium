@@ -286,3 +286,132 @@ fn initial_component_memory_limit_preserves_activation_trap_identity() {
     assert_eq!(error.code().as_str(), "trap.memory");
     assert_eq!(engine.stats().instantiations, 0);
 }
+
+// The linked path: a guest whose `deactivate` calls the imported clock and traps unless
+// the host answered 4242. It proves the generated dispatch really runs behind the linker.
+const CLOCK_CALLER: &str = r#"
+(component
+  (import "ilium:host/clock@0.1.0" (instance $clock
+    (export "now-unix-millis" (func (result u64)))))
+  (core func $now (canon lower (func $clock "now-unix-millis")))
+  (core module $m
+    (import "host" "now" (func $now (result i64)))
+    (memory (export "memory") 1)
+    (func (export "deactivate") (param i32) (result i32)
+      call $now i64.const 4242 i64.ne
+      if unreachable end
+      i32.const 0))
+  (core instance $m (instantiate $m (with "host" (instance (export "now" (func $now))))))
+  (type $reason (enum "shutdown" "disabled" "upgrade" "crash-restart" "revoked" "granted"))
+  (func $deactivate (param "reason" $reason) (result (option (list u8)))
+    (canon lift (core func $m "deactivate") (memory $m "memory")))
+  (instance $lifecycle (export "deactivation-reason" (type $reason)) (export "deactivate" (func $deactivate)))
+  (export "ilium:exports/lifecycle@0.1.0" (instance $lifecycle)))
+"#;
+
+struct FixedClock;
+
+impl ilium_plugin_api::generated::host::clock::HostClock for FixedClock {
+    fn now_unix_millis(&mut self) -> u64 {
+        4242
+    }
+    fn monotonic_millis(&mut self) -> u64 {
+        1
+    }
+}
+
+struct PanickingClock;
+
+impl ilium_plugin_api::generated::host::clock::HostClock for PanickingClock {
+    fn now_unix_millis(&mut self) -> u64 {
+        panic!("host import panics on purpose")
+    }
+    fn monotonic_millis(&mut self) -> u64 {
+        1
+    }
+}
+
+fn linked_guest(
+    text: &str,
+    imports: ilium_plugin_host::imports::generated_dispatch::ImportSet,
+    granted: &[&str],
+) -> Result<WasmGuest, ilium_plugin_host::error::HostError> {
+    let engine = engine();
+    let compiled = compile(&engine, text);
+    let linker = ilium_plugin_host::linker::build_runtime_linker(&engine).expect("runtime linker");
+    WasmGuest::instantiate_linked(
+        engine,
+        &compiled,
+        ResolvedLimits(BTreeMap::new()),
+        &linker,
+        imports,
+        ilium_plugin_host::store_data::GuestIdentity {
+            plugin: "example.probe".to_owned(),
+            side: ilium_plugin_api::Side::Server,
+            granted: granted.iter().map(|grant| (*grant).to_owned()).collect(),
+        },
+    )
+}
+
+#[test]
+fn a_linked_import_reaches_the_host_implementation() {
+    let mut imports = ilium_plugin_host::imports::generated_dispatch::ImportSet::default();
+    imports.clock = Some(Box::new(FixedClock));
+    let mut guest = linked_guest(CLOCK_CALLER, imports, &[]).expect("clock needs no grant");
+    assert_eq!(
+        guest
+            .deactivate(DeactivationReason::Shutdown)
+            .expect("the guest saw 4242"),
+        None
+    );
+}
+
+#[test]
+fn an_unlocked_import_without_an_implementation_traps_as_a_host_error() {
+    let imports = ilium_plugin_host::imports::generated_dispatch::ImportSet::default();
+    let mut guest = linked_guest(CLOCK_CALLER, imports, &[]).expect("clock needs no grant");
+    let error = guest
+        .deactivate(DeactivationReason::Shutdown)
+        .expect_err("nothing implements the clock");
+    assert_eq!(error.code.as_str(), "host.engine-error");
+}
+
+#[test]
+fn a_panicking_host_import_is_a_trap_of_that_call_only() {
+    let mut imports = ilium_plugin_host::imports::generated_dispatch::ImportSet::default();
+    imports.clock = Some(Box::new(PanickingClock));
+    let mut guest = linked_guest(CLOCK_CALLER, imports, &[]).expect("clock needs no grant");
+    let error = guest
+        .deactivate(DeactivationReason::Shutdown)
+        .expect_err("the import panicked");
+    assert_eq!(error.code.as_str(), "host.import-panic");
+}
+
+const TREE_FUNCTION_IMPORT: &str = r#"
+(component
+  (import "ilium:host/tree@0.1.0" (instance (export "probe" (func (result u64))))))
+"#;
+
+#[test]
+fn a_gated_interface_without_its_grant_is_refused_at_instantiation() {
+    let imports = ilium_plugin_host::imports::generated_dispatch::ImportSet::default();
+    let error = linked_guest(TREE_FUNCTION_IMPORT, imports, &[])
+        .err()
+        .expect("tree needs a tree grant");
+    assert!(error.to_string().contains("component.import-ungranted"));
+}
+
+// Uncertain fixture: whether Wasmtime instantiates an instance import that carries only a
+// type against a linker instance of functions has not been run yet.
+const TREE_TYPE_ONLY_IMPORT: &str = r#"
+(component
+  (import "ilium:host/tree@0.1.0" (instance
+    (type $id u64)
+    (export "node-id" (type (eq $id))))))
+"#;
+
+#[test]
+fn an_interface_imported_only_for_its_types_needs_no_grant() {
+    let imports = ilium_plugin_host::imports::generated_dispatch::ImportSet::default();
+    assert!(linked_guest(TREE_TYPE_ONLY_IMPORT, imports, &[]).is_ok());
+}

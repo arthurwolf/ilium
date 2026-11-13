@@ -55,7 +55,7 @@ const CORE_ACTIVATION_TABLE: &[(&str, &[&str], &[&str])] = &[
     (
         "agent-detect",
         &["startup"],
-        &["view:ilium.core.agent-detect/agent-detect.panel"],
+        &["view:ilium.core.agent-detect/panel"],
     ),
     (
         "agent-setup",
@@ -77,13 +77,13 @@ const CORE_ACTIVATION_TABLE: &[(&str, &[&str], &[&str])] = &[
     (
         "compaction",
         &["event:agent-activity-changed", "service:compact"],
-        &["view:ilium.core.compaction/compaction.optimizer"],
+        &["view:ilium.core.compaction/optimizer"],
     ),
-    ("cost", &["startup"], &["view:ilium.core.cost/cost.panel"]),
+    ("cost", &["startup"], &["view:ilium.core.cost/panel"]),
     (
         "diagnostics",
         &["startup"],
-        &["view:ilium.core.diagnostics/diagnostics.warnings"],
+        &["view:ilium.core.diagnostics/warnings"],
     ),
     ("editor", &[], &["pane-kind:editor"]),
     (
@@ -109,8 +109,8 @@ const CORE_ACTIVATION_TABLE: &[(&str, &[&str], &[&str])] = &[
     ),
     (
         "layout",
-        &["command:ilium.core.layout/layout.preset"],
-        &["view:ilium.core.layout/layout.presets"],
+        &["command:ilium.core.layout/preset"],
+        &["view:ilium.core.layout/presets"],
     ),
     ("notifications", &["startup"], &[]),
     ("progress", &["startup"], &["startup"]),
@@ -137,12 +137,12 @@ const CORE_ACTIVATION_TABLE: &[(&str, &[&str], &[&str])] = &[
             "command:ilium.core.session-convert/convert",
             "service:convert",
         ],
-        &["view:ilium.core.session-convert/session-convert.progress"],
+        &["view:ilium.core.session-convert/progress"],
     ),
     (
         "sessions",
         &["startup"],
-        &["view:ilium.core.sessions/sessions.list"],
+        &["view:ilium.core.sessions/list"],
     ),
     ("settings", &[], &["startup"]),
     (
@@ -154,7 +154,7 @@ const CORE_ACTIVATION_TABLE: &[(&str, &[&str], &[&str])] = &[
     (
         "text-triggers",
         &["startup"],
-        &["view:ilium.core.text-triggers/text-triggers.rules"],
+        &["view:ilium.core.text-triggers/rules"],
     ),
     ("titles", &["startup"], &[]),
     ("tree", &["startup"], &["startup"]),

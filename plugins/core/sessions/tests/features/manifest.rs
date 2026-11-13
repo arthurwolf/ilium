@@ -110,7 +110,7 @@ fn manifest_050_activation_is_startup_and_the_list_view() {
     let manifest = manifest_value();
     assert_eq!(
         strings(&manifest["activation"]),
-        ["startup", "view:ilium.core.sessions/sessions.list"]
+        ["startup", "view:ilium.core.sessions/list"]
     );
 }
 

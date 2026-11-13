@@ -58,39 +58,113 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 {
   "api": "ilium:plugin@0.1.0",
   "id": "ilium.core.cost",
-  "server": { "entry": "server.wasm", "world": "ilium:server/base@0.1.0",
-              "exports": ["service-provider"] },
-  "client": { "entry": "client.wasm", "world": "ilium:client/base@0.1.0",
-              "exports": ["views"] },
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
+  },
   "contributes": {
-    "decoration_slots": [ { "id": "cost", "placement": "badge", "priority": 40, "trailing": true } ],
-    "tree_orderings": [ { "id": "by-cost", "title": "Cost, highest first", "slot": "cost" } ],
+    "decoration_slots": [
+      {
+        "id": "cost",
+        "placement": "badge",
+        "priority": 40,
+        "trailing": true
+      }
+    ],
+    "tree_orderings": [
+      {
+        "id": "by-cost",
+        "title": "Cost, highest first",
+        "slot": "cost"
+      }
+    ],
     "services": {
       "provides": [
-        { "name": "ilium.core.cost/usage", "version": "0.1.0", "schema": "schemas/usage.json" }
+        {
+          "name": "ilium.core.cost/usage",
+          "version": "0.1.0",
+          "schema": "schemas/usage.json"
+        }
       ]
     },
     "settings": [
-      { "kind": "section", "id": "cost-display", "tab": "agent-cost", "placement": "end", "title": "Display", "scope": "server",
+      {
+        "kind": "section",
+        "id": "cost-display",
+        "tab": "agent-cost",
+        "placement": "end",
+        "title": "Display",
+        "scope": "server",
         "rows": [
-          { "type": "choice", "key": "unit", "title": "Unit", "default": "dollars",
-            "options": [ { "value": "dollars", "title": "Dollars" },
-                         { "value": "quota", "title": "Quota percent" } ] },
-          { "type": "multi-choice", "key": "display", "title": "Display",
-            "default": ["tree", "status"],
-            "options": [ { "value": "tree", "title": "Tree rows" },
-                         { "value": "status", "title": "Status bar" } ] }
-        ] }
+          {
+            "type": "choice",
+            "key": "unit",
+            "title": "Unit",
+            "default": "dollars",
+            "options": [
+              {
+                "value": "dollars",
+                "title": "Dollars"
+              },
+              {
+                "value": "quota",
+                "title": "Quota percent"
+              }
+            ]
+          },
+          {
+            "type": "multi-choice",
+            "key": "display",
+            "title": "Display",
+            "default": [
+              "tree",
+              "status"
+            ],
+            "options": [
+              {
+                "value": "tree",
+                "title": "Tree rows"
+              },
+              {
+                "value": "status",
+                "title": "Status bar"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "panels": [
+      {
+        "id": "panel",
+        "title": "Cost"
+      }
     ]
   },
   "capabilities": {
     "server": [
-      "agent.read", "agent.transcript", "tree.decorate",
-      "http:status.anthropic.com", "http:status.openai.com",
+      "agent.read",
+      "agent.transcript",
+      "tree.decorate",
+      "http:status.anthropic.com",
+      "http:status.openai.com",
       "services.provide:ilium.core.cost/usage",
-      "settings.contribute:agent-cost", "settings.write-kernel:agent-cost"
+      "settings.contribute:agent-cost",
+      "settings.write-kernel:agent-cost"
     ],
-    "client": ["ui.panels"]
+    "client": [
+      "ui.panels"
+    ]
   }
 }
 ```
@@ -142,7 +216,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "activation": [
     "startup",
-    "view:ilium.core.cost/cost.panel"
+    "view:ilium.core.cost/panel"
   ],
   "contributes": {
     "extension_points": [
@@ -153,14 +227,33 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "entry_schema": {
           "type": "object",
           "properties": {
-            "id": { "type": "string" },
-            "model_pattern": { "type": "string" },
-            "input_per_mtok": { "type": "number" },
-            "output_per_mtok": { "type": "number" },
-            "cache_read_per_mtok": { "type": "number" },
-            "currency": { "type": "string" }
+            "id": {
+              "type": "string"
+            },
+            "model_pattern": {
+              "type": "string"
+            },
+            "input_per_mtok": {
+              "type": "number"
+            },
+            "output_per_mtok": {
+              "type": "number"
+            },
+            "cache_read_per_mtok": {
+              "type": "number"
+            },
+            "currency": {
+              "type": "string"
+            }
           },
-          "required": ["id", "model_pattern", "input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "currency"]
+          "required": [
+            "id",
+            "model_pattern",
+            "input_per_mtok",
+            "output_per_mtok",
+            "cache_read_per_mtok",
+            "currency"
+          ]
         },
         "risk": "standard",
         "max_entries": 64,
@@ -174,11 +267,21 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "entry_schema": {
           "type": "object",
           "properties": {
-            "id": { "type": "string" },
-            "provider": { "type": "string" },
-            "service": { "type": "string" }
+            "id": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
           },
-          "required": ["id", "provider", "service"]
+          "required": [
+            "id",
+            "provider",
+            "service"
+          ]
         },
         "risk": "standard",
         "max_entries": 64,
@@ -203,7 +306,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "services": {
       "provides": [
-        { "name": "ilium.core.cost/usage", "version": "0.1.0", "schema": "schemas/usage.json" }
+        {
+          "name": "ilium.core.cost/usage",
+          "version": "0.1.0",
+          "schema": "schemas/usage.json"
+        }
       ]
     },
     "settings": [
@@ -251,6 +358,12 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
             ]
           }
         ]
+      }
+    ],
+    "panels": [
+      {
+        "id": "panel",
+        "title": "Cost"
       }
     ]
   },

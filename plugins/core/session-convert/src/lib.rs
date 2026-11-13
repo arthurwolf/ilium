@@ -185,7 +185,7 @@ mod spec_tests {
             vec![
                 "command:ilium.core.session-convert/convert",
                 "service:convert",
-                "view:ilium.core.session-convert/session-convert.progress"
+                "view:ilium.core.session-convert/progress"
             ]
         );
         assert_eq!(
@@ -338,6 +338,6 @@ mod spec_tests {
         assert_eq!(panel["title"], "Convert session");
         assert_eq!(panel["modal"], true);
         assert!(string_list(&manifest_value["activation"])
-            .contains(&"view:ilium.core.session-convert/session-convert.progress".to_string()));
+            .contains(&"view:ilium.core.session-convert/progress".to_string()));
     }
 }

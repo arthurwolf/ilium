@@ -125,7 +125,7 @@ mod spec_tests {
         let manifest = manifest();
         let activation = string_list(&manifest["activation"]);
         assert!(activation.contains(&"startup".to_string()));
-        assert!(activation.contains(&"view:ilium.core.cost/cost.panel".to_string()));
+        assert!(activation.contains(&"view:ilium.core.cost/panel".to_string()));
     }
 
     /// REQ: COR-050

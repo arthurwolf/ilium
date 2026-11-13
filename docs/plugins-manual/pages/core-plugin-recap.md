@@ -83,76 +83,11 @@ The contract version is 0.1. The plugin declares two extension points, provides 
   "limits_tier": "first-party",
   "replaceable": true,
   "surface": [
-    "services:recap", "points:fact-sources", "points:before-recap", "cli:recap"
+    "services:recap",
+    "points:fact-sources",
+    "points:before-recap",
+    "cli:recap"
   ],
-  "server": {
-    "entry": "server.wasm",
-    "world": "ilium:server/base@0.1.0",
-    "exports": ["job-runner", "service-provider"]
-  },
-  "client": {
-    "entry": "client.wasm",
-    "world": "ilium:client/base@0.1.0",
-    "exports": []
-  },
-  "capabilities": {
-    "server": [
-      "cli.contribute", "panes.read", "agent.read", "agent.transcript",
-      "terminal.read-screen", "inference", "jobs.run",
-      "settings.read-kernel:inference",
-      "services.provide:ilium.core.recap/recap",
-      "extensions.provide:ilium.core.recap/fact-sources",
-      "extensions.provide:ilium.core.recap/before-recap"
-    ],
-    "client": ["help.read"]
-  },
-  "contributes": {
-    "cli": [{
-      "name": "recap",
-      "summary": "Print short and long recaps of the selected panes",
-      "output": "jsonl",
-      "stdin": "none",
-      "requires_server": true,
-      "argument_groups": ["pane-selector"]
-    }],
-    "jobs": [{ "kind": "recap-pane", "deadline_ms": 5000, "memory_mib": 64 }],
-    "client_requests": [{ "id": "onboarding-state" }],
-    "help": [{ "id": "recap-privacy", "file": "help/recap-privacy.md", "title": "What a recap sends" }],
-    "services": {
-      "provides": [
-        { "name": "ilium.core.recap/recap", "version": "0.1.0", "schema": "schemas/recap.json" }
-      ]
-    },
-    "extension_points": [
-      { "id": "fact-sources", "kind": "collect", "title": "Fact sources",
-        "entry_schema": { "type": "object", "required": ["id", "title", "service"],
-          "properties": { "id": { "type": "string" }, "title": { "type": "string" },
-                          "service": { "type": "string" } } },
-        "max_entries": 16, "dynamic": false, "version": "0.1.0" },
-      { "id": "before-recap", "kind": "hook", "mode": "transform", "title": "Before recap",
-        "payload_schema": { "type": "object", "properties": {
-          "pane": { "type": "integer" }, "kind": { "type": "string", "enum": ["short", "long"] },
-          "text": { "type": "string", "maxLength": 65536 } } },
-        "reply_schema": { "type": "object", "properties": { "text": { "type": "string", "maxLength": 65536 } } },
-        "risk": "standard", "deadline_ms": 20, "max_handlers": 8, "version": "0.1.0" }
-    ]
-  }
-}
-```
-
-### Complete manifest
-
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
-
-```json
-{
-  "api": "ilium:plugin@0.1.0",
-  "id": "ilium.core.recap",
-  "name": "Recap",
-  "version": "0.1.0",
-  "publisher": "Ilium",
-  "description": "A recap is a few factual sentences about what one pane is doing, written once in a short form (at most 40 words) and once in a long form (at most 250 words).",
-  "license": "MIT",
   "server": {
     "entry": "server.wasm",
     "world": "ilium:server/base@0.1.0",
@@ -184,28 +119,19 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "help.read"
     ]
   },
-  "activation": [
-    "cli:recap",
-    "command:ilium.core.recap/recap"
-  ],
-  "replaceable": true,
-  "surface": [
-    "services:recap",
-    "points:fact-sources",
-    "points:before-recap",
-    "cli:recap"
-  ],
   "contributes": {
-    "cli": [{
-      "name": "recap",
-      "summary": "Print short and long recaps of the selected panes",
-      "output": "jsonl",
-      "stdin": "none",
-      "requires_server": true,
-      "argument_groups": [
-        "pane-selector"
-      ]
-    }],
+    "cli": [
+      {
+        "name": "recap",
+        "summary": "Print short and long recaps of the selected panes",
+        "output": "jsonl",
+        "stdin": "none",
+        "requires_server": true,
+        "argument_groups": [
+          "pane-selector"
+        ]
+      }
+    ],
     "jobs": [
       {
         "kind": "recap-pane",
@@ -227,7 +153,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "services": {
       "provides": [
-        { "name": "ilium.core.recap/recap", "version": "0.1.0", "schema": "schemas/recap.json" }
+        {
+          "name": "ilium.core.recap/recap",
+          "version": "0.1.0",
+          "schema": "schemas/recap.json"
+        }
       ]
     },
     "extension_points": [
@@ -295,6 +225,185 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "deadline_ms": 20,
         "max_handlers": 8,
         "version": "0.1.0"
+      }
+    ],
+    "commands": [
+      {
+        "id": "recap",
+        "title": "Recap"
+      }
+    ]
+  }
+}
+```
+
+### Complete manifest
+
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
+
+```json
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.recap",
+  "name": "Recap",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "A recap is a few factual sentences about what one pane is doing, written once in a short form (at most 40 words) and once in a long form (at most 250 words).",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "job-runner",
+      "service-provider"
+    ]
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": []
+  },
+  "capabilities": {
+    "server": [
+      "cli.contribute",
+      "panes.read",
+      "agent.read",
+      "agent.transcript",
+      "terminal.read-screen",
+      "inference",
+      "jobs.run",
+      "settings.read-kernel:inference",
+      "services.provide:ilium.core.recap/recap",
+      "extensions.provide:ilium.core.recap/fact-sources",
+      "extensions.provide:ilium.core.recap/before-recap"
+    ],
+    "client": [
+      "help.read"
+    ]
+  },
+  "activation": [
+    "cli:recap",
+    "command:ilium.core.recap/recap"
+  ],
+  "replaceable": true,
+  "surface": [
+    "services:recap",
+    "points:fact-sources",
+    "points:before-recap",
+    "cli:recap"
+  ],
+  "contributes": {
+    "cli": [
+      {
+        "name": "recap",
+        "summary": "Print short and long recaps of the selected panes",
+        "output": "jsonl",
+        "stdin": "none",
+        "requires_server": true,
+        "argument_groups": [
+          "pane-selector"
+        ]
+      }
+    ],
+    "jobs": [
+      {
+        "kind": "recap-pane",
+        "deadline_ms": 5000,
+        "memory_mib": 64
+      }
+    ],
+    "client_requests": [
+      {
+        "id": "onboarding-state"
+      }
+    ],
+    "help": [
+      {
+        "id": "recap-privacy",
+        "file": "help/recap-privacy.md",
+        "title": "What a recap sends"
+      }
+    ],
+    "services": {
+      "provides": [
+        {
+          "name": "ilium.core.recap/recap",
+          "version": "0.1.0",
+          "schema": "schemas/recap.json"
+        }
+      ]
+    },
+    "extension_points": [
+      {
+        "id": "fact-sources",
+        "kind": "collect",
+        "title": "Fact sources",
+        "entry_schema": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "service"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
+          }
+        },
+        "max_entries": 16,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-recap",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Before recap",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "pane": {
+              "type": "integer"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "short",
+                "long"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          }
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          }
+        },
+        "risk": "standard",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ],
+    "commands": [
+      {
+        "id": "recap",
+        "title": "Recap"
       }
     ]
   },

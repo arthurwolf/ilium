@@ -1,4 +1,5 @@
-//! Dynamic component backend. Imports remain closed until grant-scoped adapters exist.
+//! Dynamic component backend. `instantiate` links nothing; `instantiate_linked` links WASI and
+//! the generated import table and gives the instance its own import set.
 //!
 //! Callers must validate the component world against the package before constructing
 //! this backend. Calls are synchronous at the GuestExports boundary and belong on
@@ -17,81 +18,75 @@ use ilium_plugin_api::{Code, PluginError};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{json, Value};
-use wasmtime::component::{Instance, Linker, Type, Val};
-use wasmtime::{ResourceLimiter, Store, StoreLimits};
+use wasmtime::component::{Instance, Type, Val};
+use wasmtime::Store;
 
 use crate::calls::{batch_call_class, deadline_for, streak_limit, CallClass, ResolvedLimits, Trap};
-use crate::engine::{store_limits, CompiledComponent, PluginEngine};
+use crate::engine::{CompiledComponent, PluginEngine};
 use crate::error::HostError;
+use crate::imports::generated_dispatch::ImportSet;
 use crate::instance::{ExportCall, ExportReply, GuestExports};
+use crate::linker::RuntimeLinker;
+use crate::store_data::{GuestIdentity, StoreData};
 
 const LIFECYCLE: &str = "ilium:exports/lifecycle@0.1.0";
 const HANDLER: &str = "ilium:exports/handler@0.1.0";
-
-struct GuestState {
-    limits: StoreLimits,
-    breach: Option<&'static str>,
-}
-
-impl ResourceLimiter for GuestState {
-    fn memory_growing(
-        &mut self,
-        current: usize,
-        desired: usize,
-        maximum: Option<usize>,
-    ) -> wasmtime::Result<bool> {
-        let result = self.limits.memory_growing(current, desired, maximum);
-        if !matches!(result, Ok(true)) {
-            self.breach = Some("trap.memory");
-        }
-        result
-    }
-    fn table_growing(
-        &mut self,
-        current: usize,
-        desired: usize,
-        maximum: Option<usize>,
-    ) -> wasmtime::Result<bool> {
-        let result = self.limits.table_growing(current, desired, maximum);
-        if !matches!(result, Ok(true)) {
-            self.breach = Some("trap.table");
-        }
-        result
-    }
-    fn memory_grow_failed(&mut self, error: wasmtime::Error) -> wasmtime::Result<()> {
-        self.breach = Some("trap.memory");
-        self.limits.memory_grow_failed(error)
-    }
-    fn table_grow_failed(&mut self, error: wasmtime::Error) -> wasmtime::Result<()> {
-        self.breach = Some("trap.table");
-        self.limits.table_grow_failed(error)
-    }
-    fn instances(&self) -> usize {
-        self.limits.instances()
-    }
-    fn tables(&self) -> usize {
-        self.limits.tables()
-    }
-    fn memories(&self) -> usize {
-        self.limits.memories()
-    }
-}
+const VIEWS: &str = "ilium:exports/views@0.1.0";
+const HOOK_HANDLER: &str = "ilium:exports/hook-handler@0.1.0";
+const JOB_RUNNER: &str = "ilium:exports/job-runner@0.1.0";
+const ANNOTATOR: &str = "ilium:exports/annotator@0.1.0";
+const TOKEN_PROVIDER: &str = "ilium:exports/token-provider@0.1.0";
+const CATALOG_PROVIDER: &str = "ilium:exports/catalog-provider@0.1.0";
+const MENU_PROVIDER: &str = "ilium:exports/menu-provider@0.1.0";
+const VIRTUAL_ROWS_PROVIDER: &str = "ilium:exports/virtual-rows-provider@0.1.0";
+const SERVICE_PROVIDER: &str = "ilium:exports/service-provider@0.1.0";
 
 /// A real Wasmtime store and component instance, with no ambient import authority.
 pub struct WasmGuest {
     engine: Arc<PluginEngine>,
-    store: Store<GuestState>,
+    store: Store<StoreData>,
     instance: Instance,
     limits: ResolvedLimits,
 }
 
 impl WasmGuest {
     /// Instantiates an already validated component without linking any imports.
-    /// Even type-only imports are rejected until their authorization is modeled.
+    /// A component with any import, even a type-only one, is rejected.
     pub fn instantiate(
         engine: Arc<PluginEngine>,
         compiled: &CompiledComponent,
         limits: ResolvedLimits,
+    ) -> Result<Self, HostError> {
+        let runtime = engine.runtime_engine();
+        if let Some((name, _)) = compiled.component.component_type().imports(runtime).next() {
+            return Err(HostError::EngineError(format!(
+                "component import {name} has no effective-grant scoped handler"
+            )));
+        }
+        let linker = RuntimeLinker::closed(&engine);
+        Self::instantiate_linked(
+            engine,
+            compiled,
+            limits,
+            &linker,
+            ImportSet::default(),
+            GuestIdentity::anonymous(),
+        )
+    }
+
+    /// Instantiates an already validated component against the process linker. `imports`
+    /// holds the host implementations this instance may call; an interface missing from
+    /// it traps with `host.capability-not-requested` when called; a component that imports
+    /// such an interface at all is refused here with `component.import-ungranted`.
+    /// An interface the grants unlock but this process does not implement instantiates
+    /// and traps with `host.engine-error` when it is called.
+    pub fn instantiate_linked(
+        engine: Arc<PluginEngine>,
+        compiled: &CompiledComponent,
+        limits: ResolvedLimits,
+        linker: &RuntimeLinker,
+        imports: ImportSet,
+        identity: GuestIdentity,
     ) -> Result<Self, HostError> {
         let runtime = engine.runtime_engine();
         if !wasmtime::Engine::same(runtime, compiled.component.engine()) {
@@ -99,18 +94,30 @@ impl WasmGuest {
                 "component belongs to another engine".into(),
             ));
         }
-        if let Some((name, _)) = compiled.component.component_type().imports(runtime).next() {
-            return Err(HostError::EngineError(format!(
-                "component import {name} has no effective-grant scoped handler"
-            )));
+        for (name, item) in compiled.component.component_type().imports(runtime) {
+            // An interface imported only for its types needs no grant; one imported for
+            // a function does.
+            let has_functions = match &item.ty {
+                wasmtime::component::types::ComponentItem::ComponentInstance(instance) => {
+                    instance.exports(runtime).any(|(_, export)| {
+                        matches!(
+                            export.ty,
+                            wasmtime::component::types::ComponentItem::ComponentFunc(_)
+                        )
+                    })
+                }
+                _ => false,
+            };
+            if has_functions
+                && crate::imports::generated_dispatch::import_interface(name).is_some()
+                && !crate::linker::interface_unlocked(name, &identity.granted)
+            {
+                return Err(HostError::EngineError(format!(
+                    "component.import-ungranted: {name} is not unlocked by any granted capability"
+                )));
+            }
         }
-        let mut store = Store::new(
-            runtime,
-            GuestState {
-                limits: store_limits(&limits),
-                breach: None,
-            },
-        );
+        let mut store = Store::new(runtime, StoreData::new(&limits, imports, identity));
         store.limiter(|state| state);
         // Core start functions execute during instantiation too.
         engine.arm_deadline(
@@ -118,24 +125,26 @@ impl WasmGuest {
             deadline_for(CallClass::Activate, &limits).as_millis() as u64,
             false,
         );
-        let linker = Linker::<GuestState>::new(runtime);
-        let instance = block_on(linker.instantiate_async(&mut store, &compiled.component))
-            .map_err(|error| {
-                if store.data().breach.is_some() || error.downcast_ref::<wasmtime::Trap>().is_some()
-                {
-                    let code = store.data().breach.unwrap_or_else(|| {
-                        match error.downcast_ref::<wasmtime::Trap>() {
-                            Some(wasmtime::Trap::Interrupt) => "trap.deadline",
-                            Some(wasmtime::Trap::MemoryOutOfBounds) => "trap.memory",
-                            Some(wasmtime::Trap::TableOutOfBounds) => "trap.table",
-                            _ => "trap.panic",
-                        }
-                    });
-                    HostError::ActivationTrap(trap(code, LIFECYCLE, "activate"))
-                } else {
-                    HostError::EngineError(error.to_string())
-                }
-            })?;
+        let instance = block_on(
+            linker
+                .linker()
+                .instantiate_async(&mut store, &compiled.component),
+        )
+        .map_err(|error| {
+            if store.data().breach.is_some() || error.downcast_ref::<wasmtime::Trap>().is_some() {
+                let code = store.data().breach.unwrap_or_else(|| {
+                    match error.downcast_ref::<wasmtime::Trap>() {
+                        Some(wasmtime::Trap::Interrupt) => "trap.deadline",
+                        Some(wasmtime::Trap::MemoryOutOfBounds) => "trap.memory",
+                        Some(wasmtime::Trap::TableOutOfBounds) => "trap.table",
+                        _ => "trap.panic",
+                    }
+                });
+                HostError::ActivationTrap(trap(code, LIFECYCLE, "activate"))
+            } else {
+                HostError::EngineError(error.to_string())
+            }
+        })?;
         engine.record_instantiation();
         Ok(Self {
             engine,
@@ -143,6 +152,41 @@ impl WasmGuest {
             instance,
             limits,
         })
+    }
+
+    /// The store data, for the runtime to adjust the import set between calls.
+    pub fn store_data_mut(&mut self) -> &mut StoreData {
+        self.store.data_mut()
+    }
+
+    /// Text the guest wrote to standard output and standard error since the last call.
+    pub fn take_output(&mut self) -> (String, String) {
+        self.store.data_mut().wasi.take_output()
+    }
+
+    /// Sends what the guest wrote to standard output and standard error to its log import
+    /// (HST-077): output lines at info level, error lines (panic messages) at error level.
+    /// Without a log import the text is dropped.
+    fn forward_output(&mut self) {
+        use ilium_plugin_api::generated::host::log::Level;
+        let data = self.store.data_mut();
+        let (output, errors) = data.wasi.take_output();
+        let Some(log) = data.imports.log.as_deref_mut() else {
+            return;
+        };
+        for line in output.lines().filter(|line| !line.trim().is_empty()) {
+            log.log(Level::Info, line.to_owned());
+        }
+        for line in errors.lines().filter(|line| !line.trim().is_empty()) {
+            log.log(Level::Error, line.to_owned());
+        }
+    }
+
+    /// Whether the component exports an interface (by its versioned instance name).
+    pub fn exports(&mut self, interface: &str) -> bool {
+        self.instance
+            .get_export_index(&mut self.store, None, interface)
+            .is_some()
     }
 
     fn invoke(
@@ -182,23 +226,25 @@ impl WasmGuest {
             deadline_for(class, &self.limits).as_millis() as u64,
             streak_limit(class).is_some(),
         );
-        self.store.data_mut().breach = None;
+        self.store.data_mut().begin_call();
         let mut results = [Val::Bool(false)];
         // Wasmtime 49 call_async includes canonical post-return cleanup.
-        block_on(export.call_async(&mut self.store, &arguments, &mut results)).map_err(
-            |error| {
-                let code = self.store.data().breach.unwrap_or_else(|| {
-                    match error.downcast_ref::<wasmtime::Trap>() {
-                        Some(wasmtime::Trap::Interrupt) => "trap.deadline",
-                        Some(wasmtime::Trap::MemoryOutOfBounds) => "trap.memory",
-                        Some(wasmtime::Trap::TableOutOfBounds) => "trap.table",
-                        Some(_) => "trap.panic",
-                        None => "trap.abi",
-                    }
-                });
-                trap(code, interface, function)
-            },
-        )?;
+        let called = block_on(export.call_async(&mut self.store, &arguments, &mut results));
+        self.forward_output();
+        called.map_err(|error| {
+            let data = self.store.data();
+            let import_code = data.import_fault.as_ref().map(|fault| fault.code);
+            let code = data.breach.or(import_code).unwrap_or_else(|| {
+                match error.downcast_ref::<wasmtime::Trap>() {
+                    Some(wasmtime::Trap::Interrupt) => "trap.deadline",
+                    Some(wasmtime::Trap::MemoryOutOfBounds) => "trap.memory",
+                    Some(wasmtime::Trap::TableOutOfBounds) => "trap.table",
+                    Some(_) => "trap.panic",
+                    None => "trap.abi",
+                }
+            });
+            trap(code, interface, function)
+        })?;
         Ok((results.into_iter().next().ok_or_else(invalid)?, result_type))
     }
 
@@ -233,13 +279,106 @@ impl GuestExports for WasmGuest {
         self.invoke_decoded(HANDLER, "on-events", class, &[argument])
     }
 
-    fn render(&mut self, _view: ViewTarget, _area: Area) -> Result<UiTree, Trap> {
-        Err(trap("trap.abi", "ilium:exports/views@0.1.0", "render"))
+    fn render(&mut self, view: ViewTarget, area: Area) -> Result<UiTree, Trap> {
+        let view = encode(&view, VIEWS, "render")?;
+        let area = encode(&area, VIEWS, "render")?;
+        self.invoke_decoded(VIEWS, "render", CallClass::Render, &[view, area])
     }
 
-    fn call_export(&mut self, _call: ExportCall) -> Result<ExportReply, Trap> {
-        // Optional provider interfaces require their own purity and argument guards.
-        Err(trap("trap.abi", "unsupported-provider", "call-export"))
+    fn call_export(&mut self, call: ExportCall) -> Result<ExportReply, Trap> {
+        match call {
+            ExportCall::Hook(call) => {
+                let argument = encode(&call, HOOK_HANDLER, "handle-hook")?;
+                self.invoke_decoded(HOOK_HANDLER, "handle-hook", CallClass::Event, &[argument])
+                    .map(ExportReply::HookResult)
+            }
+            ExportCall::Job { kind, input } => {
+                let kind = encode(&kind, JOB_RUNNER, "run")?;
+                let input = encode(&input, JOB_RUNNER, "run")?;
+                self.invoke_decoded(JOB_RUNNER, "run", CallClass::Job, &[kind, input])
+                    .map(ExportReply::Job)
+            }
+            // WIT `migrator.migrate(from, to)` carries no data, while this call carries the
+            // stored bytes: the two contracts disagree, so the call is refused until one of
+            // them changes (docs/tasks/02-foundation-contract.md section 11).
+            ExportCall::Migrate { .. } => {
+                Err(trap("trap.abi", "ilium:exports/migrator@0.1.0", "migrate"))
+            }
+            ExportCall::Annotate {
+                buffer,
+                revision,
+                first_line,
+                lines,
+            } => {
+                let arguments = [
+                    encode(&buffer, ANNOTATOR, "annotate")?,
+                    encode(&revision, ANNOTATOR, "annotate")?,
+                    encode(&first_line, ANNOTATOR, "annotate")?,
+                    encode(&lines, ANNOTATOR, "annotate")?,
+                ];
+                self.invoke_decoded(ANNOTATOR, "annotate", CallClass::Annotate, &arguments)
+                    .map(ExportReply::Annotations)
+            }
+            ExportCall::Tokens {
+                buffer,
+                first_line,
+                lines,
+                state_in,
+            } => {
+                let arguments = [
+                    encode(&buffer, TOKEN_PROVIDER, "tokens")?,
+                    encode(&first_line, TOKEN_PROVIDER, "tokens")?,
+                    encode(&lines, TOKEN_PROVIDER, "tokens")?,
+                    encode(&state_in, TOKEN_PROVIDER, "tokens")?,
+                ];
+                let (tokens, state_out) =
+                    self.invoke_decoded(TOKEN_PROVIDER, "tokens", CallClass::Tokens, &arguments)?;
+                Ok(ExportReply::Tokens(tokens, state_out))
+            }
+            ExportCall::QueryCatalog(query) => {
+                let argument = encode(&query, CATALOG_PROVIDER, "query-catalog")?;
+                self.invoke_decoded(
+                    CATALOG_PROVIDER,
+                    "query-catalog",
+                    CallClass::QueryCatalog,
+                    &[argument],
+                )
+                .map(ExportReply::CatalogPage)
+            }
+            ExportCall::MenuItems(context) => {
+                let argument = encode(&context, MENU_PROVIDER, "menu-items")?;
+                self.invoke_decoded(
+                    MENU_PROVIDER,
+                    "menu-items",
+                    CallClass::MenuItems,
+                    &[argument],
+                )
+                .map(ExportReply::MenuEntries)
+            }
+            ExportCall::ListVirtualChildren {
+                row_kind,
+                parent,
+                cursor,
+            } => {
+                let arguments = [
+                    encode(&row_kind, VIRTUAL_ROWS_PROVIDER, "list-virtual-children")?,
+                    encode(&parent, VIRTUAL_ROWS_PROVIDER, "list-virtual-children")?,
+                    encode(&cursor, VIRTUAL_ROWS_PROVIDER, "list-virtual-children")?,
+                ];
+                self.invoke_decoded(
+                    VIRTUAL_ROWS_PROVIDER,
+                    "list-virtual-children",
+                    CallClass::ListVirtualChildren,
+                    &arguments,
+                )
+                .map(ExportReply::VirtualChildren)
+            }
+            ExportCall::ServiceHandle(call) => {
+                let argument = encode(&call, SERVICE_PROVIDER, "handle")?;
+                self.invoke_decoded(SERVICE_PROVIDER, "handle", CallClass::Event, &[argument])
+                    .map(ExportReply::ServiceReply)
+            }
+        }
     }
 }
 
@@ -258,7 +397,7 @@ fn trap(code: &'static str, interface: &str, function: &str) -> Trap {
 // Generated records use kebab-case names and externally tagged variants. The
 // runtime type determines order, widths and allowed cases; JSON is only a typed
 // serialization bridge, never a component interpreter. Resources are forbidden.
-fn lower(value: &Value, ty: &Type) -> Result<Val, ()> {
+pub(crate) fn lower(value: &Value, ty: &Type) -> Result<Val, ()> {
     macro_rules! unsigned {
         ($variant:ident, $target:ty) => {
             Val::$variant(<$target>::try_from(value.as_u64().ok_or(())?).map_err(|_| ())?)
@@ -402,7 +541,7 @@ fn tag(value: &Value) -> Result<(&str, Option<&Value>), ()> {
         .ok_or(())
 }
 
-fn lift(value: &Val, ty: &Type) -> Result<Value, ()> {
+pub(crate) fn lift(value: &Val, ty: &Type) -> Result<Value, ()> {
     Ok(match value {
         Val::Bool(v) => json!(v),
         Val::S8(v) => json!(v),

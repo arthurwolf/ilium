@@ -131,7 +131,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "activation": [
     "event:agent-activity-changed",
     "service:compact",
-    "view:ilium.core.compaction/compaction.optimizer"
+    "view:ilium.core.compaction/optimizer"
   ],
   "contributes": {
     "extension_points": [

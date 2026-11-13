@@ -120,7 +120,7 @@ fn manifest_050_activation_is_startup_and_the_rules_view() {
         strings(&manifest()["activation"]),
         [
             "startup",
-            "view:ilium.core.text-triggers/text-triggers.rules"
+            "view:ilium.core.text-triggers/rules"
         ]
     );
 }

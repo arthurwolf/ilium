@@ -70,6 +70,8 @@ repository = "https://github.com/arthurwolf/ilium"
 # local and reproducible until a fixed crate release exists.
 [workspace.dependencies]
 wasmtime = { version = "=49.0.2", default-features = false }
+# Same release as wasmtime: the two crates share component and store types.
+wasmtime-wasi = { version = "=49.0.2" }
 
 [patch.crates-io]
 vt100 = { path = "vendor/vt100" }

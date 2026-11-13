@@ -128,7 +128,7 @@ fn manifest_050_activation_triggers_are_on_demand() {
         [
             "command:ilium.core.session-convert/convert",
             "service:convert",
-            "view:ilium.core.session-convert/session-convert.progress"
+            "view:ilium.core.session-convert/progress"
         ]
     );
 }

@@ -76,11 +76,17 @@
         "max_handlers": 8,
         "version": "0.1.0"
       }
+    ],
+    "panels": [
+      {
+        "id": "list",
+        "title": "Sessions"
+      }
     ]
   },
   "activation": [
     "startup",
-    "view:ilium.core.sessions/sessions.list"
+    "view:ilium.core.sessions/list"
   ],
   "replaceable": false,
   "limits_tier": "first-party"

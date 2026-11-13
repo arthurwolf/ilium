@@ -38,6 +38,12 @@
         "command": "smart-copy",
         "target": "terminal"
       }
+    ],
+    "commands": [
+      {
+        "id": "smart-copy",
+        "title": "Smart Copy"
+      }
     ]
   },
   "limits_tier": "first-party"
