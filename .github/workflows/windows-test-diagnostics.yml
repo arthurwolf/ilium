@@ -90,3 +90,5 @@ jobs:
       run: cargo fmt --all --check && cargo fmt --manifest-path vendor/vt100/Cargo.toml --check
     - name: Vendored vt100 unit tests
       run: cargo test --locked --manifest-path vendor/vt100/Cargo.toml --lib
+    - name: Growth scene render robustness (debug overflow checks)
+      run: cargo test --locked -p ilium-ambient --lib growth

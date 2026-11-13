@@ -553,4 +553,94 @@ mod tests {
         assert_eq!(settings.reseed_seconds, 120);
         assert!(!settings.reserve_edge);
     }
+
+    fn env() -> SceneEnv {
+        SceneEnv {
+            resources: crate::resources::test_resources(),
+            location: crate::location::GeoLocation::new("test", 0.0, 0.0),
+            cache_dir: std::path::PathBuf::from("/nonexistent/growth-never-used"),
+            gpu: None,
+            saved_runtime: std::sync::Arc::new(crate::minecraft::saved_runtime::SavedRuntime::new()),
+            palette: Default::default(),
+        }
+    }
+
+    /// Every pattern and colour mode renders across odd sizes, resizes,
+    /// pointer positions, foreground occupancy and long run times without
+    /// panicking (debug builds check arithmetic overflow).
+    #[test]
+    fn rendering_never_panics_across_sizes_settings_and_time() {
+        let sizes = [
+            (1u16, 1u16),
+            (2, 1),
+            (1, 3),
+            (7, 5),
+            (80, 24),
+            (213, 61),
+            (40, 120),
+        ];
+        let pointers = [
+            None,
+            Some([0.5, 0.5]),
+            Some([0.0, 0.0]),
+            Some([1.0, 1.0]),
+            Some([-3.0, 7.0]),
+            Some([f32::NAN, f32::INFINITY]),
+        ];
+        for pattern in 0..4 {
+            for color_mode in 0..2 {
+                let mut settings = GrowthSettings::default();
+                settings
+                    .set_control("pattern", ControlValue::Index(pattern))
+                    .unwrap();
+                settings
+                    .set_control("color_mode", ControlValue::Index(color_mode))
+                    .unwrap();
+                settings
+                    .set_control("reserve_width", ControlValue::Number(8))
+                    .unwrap();
+                settings
+                    .set_control("seeds", ControlValue::Number(32))
+                    .unwrap();
+                settings
+                    .set_control("seed", ControlValue::Number(9999))
+                    .unwrap();
+                settings
+                    .set_control("reseed_seconds", ControlValue::Number(1))
+                    .unwrap();
+                let mut env = env();
+                env.palette = ScenePalette::default();
+                let mut scene = GrowthScene::new(&settings, &env);
+                let mut raster = crate::raster::Raster::default();
+                let mut colors = Vec::new();
+                let mut step = 0u64;
+                for (index, &(width, height)) in sizes.iter().enumerate() {
+                    raster.resize(usize::from(width) * 2, usize::from(height) * 4);
+                    colors.clear();
+                    colors.resize(usize::from(width) * usize::from(height), [0; 3]);
+                    let mut mask = OccupancyMask::empty(width, height);
+                    if index % 2 == 1 {
+                        mask = OccupancyMask::empty(width / 2 + 1, height / 2 + 1);
+                    }
+                    for pointer in pointers {
+                        scene.pointer(pointer);
+                        scene.occupancy(&mask);
+                        for seconds in [0u64, 1, 2, 3_600, 86_400 * 400, 4_000_000_000] {
+                            step += 1;
+                            scene.render(&mut Frame {
+                                raster: &mut raster,
+                                cell_colors: &mut colors,
+                                width,
+                                height,
+                                time: std::time::Duration::from_secs(seconds)
+                                    + std::time::Duration::from_millis(step % 1000),
+                                wall: std::time::Duration::from_secs(seconds),
+                                now: std::time::SystemTime::UNIX_EPOCH,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

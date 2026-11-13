@@ -1648,17 +1648,36 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // the historical close happened on the next periodic maintenance tick,
     // when the workspace-search poll replaced every non-search mode with
     // Normal while merely checking whether a debounced scan was due.
-    let (_, settings_row) = tui
-        .with_screen(|screen| first_cell_containing(screen, "🎚"))
-        .expect("rendered settings toolbar icon should have a concrete row");
+    // Both cells come from the one capture that satisfied the wait: a
+    // separate later capture can land while the host is mid-way through
+    // rewriting a row.
+    let mut toolbar_cells = None;
+    wait_until(
+        || {
+            toolbar_cells = tui.with_screen(|screen| {
+                Some((
+                    first_cell_containing(screen, "🎚")?,
+                    first_cell_containing(screen, "┬")?,
+                ))
+            });
+            toolbar_cells.is_some()
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    let ((_, settings_row), _) = toolbar_cells.unwrap_or_else(|| {
+        panic!(
+            "rendered settings toolbar icon should have a concrete row: {:?}",
+            tui.screen_text()
+        )
+    });
     // The emoji's vt100 payload can occupy a different cell than ratatui's
     // Unicode-width calculation under load. The Settings hit box is anchored
     // to the tree's right edge, so click its stable interior cell two columns
     // left of the rendered tree/pane divider instead of deriving x from the
     // grapheme-storage cell.
-    let (tree_divider_column, _) = tui
-        .with_screen(|screen| first_cell_containing(screen, "┬"))
-        .expect("tree/pane divider should have a concrete cell");
+    let (_, (tree_divider_column, _)) =
+        toolbar_cells.expect("tree/pane divider should have a concrete cell");
     let settings_column = tree_divider_column.saturating_sub(2);
     tui.write(&sgr_mouse_down(0, settings_column, settings_row))
         .expect("pressing the settings toolbar icon");
@@ -4398,13 +4417,21 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     let menu_column = 8;
     tui.write(&sgr_mouse_click(2, menu_column, default_rows[0]))
         .expect("right-click default group");
+    // The row comes from the capture that satisfied the wait; a separate
+    // later capture can land mid-way through a row rewrite.
+    let mut restart_rows = Vec::new();
     assert!(
-        wait_until(|| tui.screen_text().contains("Restart"), WAIT_TIMEOUT).await,
-        "expected Restart in the real context menu, got: {:?}",
+        wait_until(
+            || {
+                restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
+                restart_rows.len() == 1
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected exactly one Restart row in the real context menu, got: {:?}",
         tui.screen_text()
     );
-    let restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
-    assert_eq!(restart_rows.len(), 1, "expected one rendered Restart row");
     // Restart owns exactly one press/release gesture. The general helper also
     // sends a second legacy release, which is unrelated input after exit and
     // must correctly remain in custody rather than silently disappearing.
@@ -6826,16 +6853,26 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         "expected the nested group to gain its pane, got: {:?}",
         tui.screen_text()
     );
-    if nested_marker('\u{25b6}') {
+    // A left click on a group row toggles it. Click until a capture shows it
+    // expanded, waiting for each click's result rather than trusting one
+    // capture, which can land mid-way through a row rewrite.
+    for _ in 0..3 {
+        if wait_until(|| nested_marker('\u{25bc}'), Duration::from_secs(2)).await {
+            break;
+        }
         // Past the client's 400 ms double-click window, so this is no rename.
         tokio::time::sleep(Duration::from_millis(500)).await;
-        let nested_row = tui.with_screen(|screen| rows_containing(screen, "nested"))[0];
+        let Some(nested_row) = tui
+            .with_screen(|screen| rows_containing(screen, "nested"))
+            .first()
+            .copied()
+        else {
+            continue;
+        };
         tui.write(&sgr_mouse_down(0, 8, nested_row))
             .expect("press collapsed nested group row");
         tui.write(&sgr_mouse_up(8, nested_row))
             .expect("release collapsed nested group row");
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        tui.write(b"\x1b[C").expect("expand nested group");
     }
     // Read both rows from the same settled frame that satisfied the wait; a
     // later separate capture can land mid-repaint (seen under ConPTY).
@@ -8272,8 +8309,16 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
     tui.write(&sgr_mouse_move(icon_column + 60, 42))
         .expect("wander away from the pinned popover");
     tokio::time::sleep(Duration::from_millis(400)).await;
+    // An unpinned preview is already gone by now (the dismissal above takes
+    // one frame) and nothing reopens it, so finding the popover in any
+    // capture of the next second proves it stayed open. A single capture
+    // could land mid-way through a row rewrite.
     assert!(
-        tui.screen_text().contains("Costs & stats"),
+        wait_until(
+            || tui.screen_text().contains("Costs & stats"),
+            Duration::from_secs(1)
+        )
+        .await,
         "a pinned popover must stay open: {:?}",
         tui.screen_text()
     );
