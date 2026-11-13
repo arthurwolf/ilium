@@ -258,6 +258,66 @@ fn a_successful_import_reports_the_thread_and_cleans_up_the_child() {
 }
 
 #[test]
+fn importer_receives_a_bounded_copy_and_original_transcript_is_preserved() {
+    let fixture = Fixture::new();
+    let original = format!(
+        "{}\n{}\n",
+        json!({"type":"user","uuid":"u1","parentUuid":null,"sessionId":CLAUDE_SESSION_ID,"cwd":fixture.project,"message":{"role":"user","content":"keep this request"}}),
+        json!({"type":"user","uuid":"u2","parentUuid":"u1","sessionId":CLAUDE_SESSION_ID,"cwd":fixture.project,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"x".repeat(100_000)}]}}),
+    );
+    std::fs::write(&fixture.transcript, &original).unwrap();
+    let capture = fixture.root.join("imported.jsonl");
+    let scenario = format!(
+        "printf '%s' \"$import_line\" | python3 -c 'import json,sys,shutil,pathlib; source=pathlib.Path(json.load(sys.stdin)[\"params\"][\"migrationItems\"][0][\"details\"][\"sessions\"][0][\"path\"]); assert source.resolve().is_relative_to(pathlib.Path(sys.argv[2]).resolve()); shutil.copyfile(source, sys.argv[1])' '{}' '{}' || exit 1\n{}",
+        capture.display(), fixture.home.join(".claude/projects").display(), fixture.success_scenario()
+    );
+    let executable = fixture.fake_codex(&scenario);
+    let run = run(
+        &fixture.request(&executable),
+        &AtomicBool::new(false),
+        quick_timeouts(),
+    );
+    run.result.expect("import succeeds");
+    assert_eq!(
+        std::fs::read_to_string(&fixture.transcript).unwrap(),
+        original
+    );
+    let imported = std::fs::read_to_string(capture).unwrap();
+    assert!(imported.contains("keep this request"));
+    assert!(imported.len() < original.len());
+    assert!(imported.contains("truncat"));
+    assert!(logs(&run.events)
+        .iter()
+        .any(|line| line.contains("truncat")));
+}
+
+#[test]
+fn undiscoverable_prepared_copy_retries_the_original_transcript() {
+    let fixture = Fixture::new();
+    let scenario = format!(
+        r#"printf '%s\n' '{{"id":2,"result":{{"importId":"first"}}}}'
+printf '%s\n' '{{"method":"externalAgentConfig/import/completed","params":{{"itemTypeResults":[{{"itemType":"SESSIONS","successes":[],"failures":[{{"subErrorType":"session_not_detected","failureStage":"session_missing"}}]}}]}}}}'
+while read -r retry_line; do
+    case "$retry_line" in *externalAgentConfig/import*) break ;; esac
+done
+printf '%s' "$retry_line" | python3 -c 'import json,sys; assert json.load(sys.stdin)["params"]["migrationItems"][0]["details"]["sessions"][0]["path"] == sys.argv[1]' '{}' || exit 1
+{}"#,
+        fixture.transcript.display(),
+        fixture.success_scenario().replace("\"id\":2", "\"id\":3")
+    );
+    let executable = fixture.fake_codex(&scenario);
+    let run = run(
+        &fixture.request(&executable),
+        &AtomicBool::new(false),
+        quick_timeouts(),
+    );
+    run.result.expect("retry succeeds");
+    assert!(logs(&run.events)
+        .iter()
+        .any(|line| line.contains("without preprocessing")));
+}
+
+#[test]
 fn oversized_app_server_line_fails_closed_and_reaps_the_child() {
     let fixture = Fixture::new();
     let executable = fixture.fake_codex(&fixture.oversized_output_scenario());
@@ -321,7 +381,7 @@ fn an_unchanged_transcript_reuses_the_earlier_import() {
         fixture
             .codex_home
             .join("external_agent_session_imports.json"),
-        json!({"records":[{"source_path": fixture.transcript, "imported_thread_id": THREAD_ID}]})
+        json!({"records":[{"source_path": fixture.home.join(".claude/projects/.ilium-conversion").join(format!("{CLAUDE_SESSION_ID}.jsonl")), "imported_thread_id": THREAD_ID}]})
             .to_string(),
     )
     .unwrap();

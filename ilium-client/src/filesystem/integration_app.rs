@@ -299,6 +299,20 @@ impl App {
                                     "Chatroom added; hooks and managed guidance are ready".into(),
                                 );
                             }
+                            IntegrationIntent::RemoveRoom(room) => {
+                                if matches!(self.right_panel_target, RightPanelTarget::Chatroom { project_id } if project_id == room.id)
+                                {
+                                    self.right_panel_target = RightPanelTarget::Empty;
+                                }
+                                if self.tree_state.selected().last().copied()
+                                    == Some(crate::tree_ui::chatroom_node_id(room.id))
+                                {
+                                    self.select_node(room.id);
+                                }
+                                self.chatrooms.remove(&room.id);
+                                self.status_message =
+                                    Some("Chatroom removed; transcript archived in .ilium".into());
+                            }
                             IntegrationIntent::Install {
                                 prompt: Some(prompt),
                                 ..

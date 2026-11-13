@@ -341,7 +341,14 @@ mod tests {
                 for line in [
                     chrome.top_line(width),
                     chrome.title_line("Custom", width),
-                    chrome.framed_line(vec![ratatui::text::Span::raw(" x")], width),
+                    chrome.framed_line(
+                        vec![ratatui::text::Span::raw(
+                            " x".chars()
+                                .take(usize::from(width.saturating_sub(2)))
+                                .collect::<String>(),
+                        )],
+                        width,
+                    ),
                     chrome.bottom_line(width),
                 ] {
                     assert_eq!(

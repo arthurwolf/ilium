@@ -39,7 +39,9 @@ fn show_prompt(app: &mut App, pane_id: NodeId) {
             last_prompt: Some("a prompt".into()),
         },
     );
-    app.take_outbound_requests();
+    assert!(!app.take_outbound_requests().iter().any(|request| matches!(
+        request, ClientRequest::ResizePane { pane_id: id, .. } if *id == pane_id
+    )));
 }
 
 fn show_progress(app: &mut App, pane_id: NodeId) {
@@ -65,11 +67,13 @@ fn show_progress(app: &mut App, pane_id: NodeId) {
             progress_monitors: vec![progress],
         },
     );
-    app.take_outbound_requests();
+    assert!(!app.take_outbound_requests().iter().any(|request| matches!(
+        request, ClientRequest::ResizePane { pane_id: id, .. } if *id == pane_id
+    )));
 }
 
 #[test]
-fn empty_metadata_does_not_reserve_terminal_rows() {
+fn empty_metadata_has_no_interactive_areas() {
     let (app, pane_id) = terminal_app();
     let viewport = app.pane_viewport(pane_id).unwrap();
     assert!(viewport.last_prompt_area.is_none());
@@ -77,7 +81,7 @@ fn empty_metadata_does_not_reserve_terminal_rows() {
 }
 
 #[test]
-fn whitespace_only_prompt_does_not_reserve_terminal_rows() {
+fn whitespace_only_prompt_has_no_interactive_area() {
     let (mut app, pane_id) = terminal_app();
     app.tree
         .set_pane_status(
@@ -100,61 +104,44 @@ fn whitespace_only_prompt_does_not_reserve_terminal_rows() {
 }
 
 #[test]
-fn disabling_visible_metadata_reclaims_rows_and_empty_toggles_do_not_resize() {
+fn disabling_metadata_reclaims_reserved_rows() {
     let (mut app, pane_id) = terminal_app();
-    let empty = app.pane_viewport(pane_id).unwrap().content_area.height;
+    let reserved = app.pane_viewport(pane_id).unwrap().content_area.height;
     app.ui_settings.last_prompt_enabled = false;
     app.ui_settings.progress_monitor_enabled = false;
     app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
-    assert_eq!(
-        app.pane_viewport(pane_id).unwrap().content_area.height,
-        empty
-    );
-    assert!(!app
-        .take_outbound_requests()
-        .iter()
-        .any(|r| matches!(r, ClientRequest::ResizePane { .. })));
-    app.ui_settings.last_prompt_enabled = true;
-    app.ui_settings.progress_monitor_enabled = true;
-    show_prompt(&mut app, pane_id);
-    show_progress(&mut app, pane_id);
-    app.ui_settings.last_prompt_enabled = false;
-    app.ui_settings.progress_monitor_enabled = false;
-    app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
-    assert_eq!(
-        app.pane_viewport(pane_id).unwrap().content_area.height,
-        empty
-    );
-    assert!(app.take_outbound_requests().iter().any(|r| matches!(r, ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == empty)));
+    let reclaimed = app.pane_viewport(pane_id).unwrap().content_area.height;
+    assert!(reclaimed > reserved);
+    assert!(app.take_outbound_requests().iter().any(|request| matches!(request,
+        ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == reclaimed
+    )));
 }
 
 #[test]
-fn resource_wait_alone_allocates_and_releases_footer() {
+fn resource_wait_alone_uses_reserved_footer_without_resizing() {
     let (mut app, pane_id) = terminal_app();
-    let empty = app.pane_viewport(pane_id).unwrap().content_area.height;
-    crate::render_cache::apply(
-        &mut app,
-        ServerEvent::ResourceWaitChanged {
-            pane_id,
-            reservation_id: Some(ilium_core::resource_queue::ReservationId::from("wait")),
-            wait_revision: 1,
-        },
-    );
-    assert!(app.pane_viewport(pane_id).unwrap().content_area.height < empty);
-    app.take_outbound_requests();
-    crate::render_cache::apply(
-        &mut app,
-        ServerEvent::ResourceWaitChanged {
-            pane_id,
-            reservation_id: None,
-            wait_revision: 2,
-        },
-    );
-    assert_eq!(
-        app.pane_viewport(pane_id).unwrap().content_area.height,
-        empty
-    );
-    assert!(app.take_outbound_requests().iter().any(|r| matches!(r, ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == empty)));
+    let baseline = app.pane_viewport(pane_id).unwrap().content_area;
+    for (reservation_id, wait_revision) in [
+        (
+            Some(ilium_core::resource_queue::ReservationId::from("wait")),
+            1,
+        ),
+        (None, 2),
+    ] {
+        crate::render_cache::apply(
+            &mut app,
+            ServerEvent::ResourceWaitChanged {
+                pane_id,
+                reservation_id,
+                wait_revision,
+            },
+        );
+        assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, baseline);
+        assert!(!app
+            .take_outbound_requests()
+            .iter()
+            .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
+    }
 }
 
 #[test]
@@ -277,15 +264,13 @@ fn native_wait_shares_existing_footer_without_resizing_and_retains_saturated_mon
 }
 
 #[test]
-fn metadata_appearance_and_removal_resize_the_terminal() {
+fn metadata_appearance_and_removal_preserve_terminal_geometry() {
     let (mut app, pane_id) = terminal_app();
-    let empty = app.pane_viewport(pane_id).unwrap().content_area.height;
+    let baseline = app.pane_viewport(pane_id).unwrap().content_area;
     show_prompt(&mut app, pane_id);
-    let prompt = app.pane_viewport(pane_id).unwrap().content_area.height;
-    assert!(prompt < empty);
+    assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, baseline);
     show_progress(&mut app, pane_id);
-    let both = app.pane_viewport(pane_id).unwrap().content_area.height;
-    assert!(both < prompt);
+    assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, baseline);
     crate::render_cache::apply(
         &mut app,
         ServerEvent::PaneProgressChanged {
@@ -293,16 +278,6 @@ fn metadata_appearance_and_removal_resize_the_terminal() {
             progress_monitors: Vec::new(),
         },
     );
-    assert_eq!(
-        app.pane_viewport(pane_id).unwrap().content_area.height,
-        prompt
-    );
-    assert!(app
-        .take_outbound_requests()
-        .iter()
-        .any(|request| matches!(request,
-            ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == prompt
-        )));
     crate::render_cache::apply(
         &mut app,
         ServerEvent::PaneLastPromptChanged {
@@ -310,16 +285,11 @@ fn metadata_appearance_and_removal_resize_the_terminal() {
             last_prompt: None,
         },
     );
-    assert_eq!(
-        app.pane_viewport(pane_id).unwrap().content_area.height,
-        empty
-    );
-    assert!(app
+    assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, baseline);
+    assert!(!app
         .take_outbound_requests()
         .iter()
-        .any(|request| matches!(request,
-            ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == empty
-        )));
+        .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
 }
 
 #[test]
@@ -347,7 +317,7 @@ fn detection_and_exit_do_not_change_the_preallocated_terminal_rectangle() {
 }
 
 #[test]
-fn hiding_a_completed_footer_reclaims_its_slot_and_preserves_result() {
+fn hiding_a_completed_footer_preserves_geometry_and_result() {
     let (mut app, pane_id) = terminal_app();
     let progress = PaneProgress::new(
         2,
@@ -376,9 +346,12 @@ fn hiding_a_completed_footer_reclaims_its_slot_and_preserves_result() {
     assert!(app.shows_progress_footer(pane_id));
     assert!(app.tick_completed_progress_display(61_000));
     assert!(!app.shows_progress_footer(pane_id));
-    assert!(app.pane_viewport(pane_id).unwrap().content_area.height > before.content_area.height);
+    assert_eq!(
+        app.pane_viewport(pane_id).unwrap().content_area,
+        before.content_area
+    );
     assert!(!app.tree.pane_progress(pane_id).is_empty());
-    assert!(app
+    assert!(!app
         .take_outbound_requests()
         .iter()
         .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
@@ -703,7 +676,7 @@ fn padding_insets_only_the_terminal_content_not_the_metadata_bars() {
 }
 
 #[test]
-fn losing_a_goal_only_banner_on_session_change_resizes_the_terminal() {
+fn losing_a_goal_only_banner_preserves_terminal_geometry() {
     use crate::session_goal_store::CodexContext;
     use ilium_agent_session::goal_evidence::GoalPhase;
     use std::collections::BTreeMap;
@@ -761,10 +734,42 @@ fn losing_a_goal_only_banner_on_session_change_resizes_the_terminal() {
         };
         crate::render_cache::apply(&mut app, event);
         assert!(!app.shows_last_prompt_banner(pane_id));
-        let height = app.pane_viewport(pane_id).unwrap().content_area.height;
-        assert!(app.take_outbound_requests().iter().any(|request| matches!(
-            request, ClientRequest::ResizePane { pane_id: id, rows, .. }
-                if *id == pane_id && *rows == height
+        assert!(!app.take_outbound_requests().iter().any(|request| matches!(
+            request, ClientRequest::ResizePane { pane_id: id, .. } if *id == pane_id
         )));
+    }
+}
+
+#[test]
+fn metadata_transitions_keep_terminal_geometry_stable() {
+    for height in [9, 40] {
+        let (mut app, pane_id) = terminal_app();
+        app.set_screen_area(Rect::new(0, 0, 120, height));
+        app.take_outbound_requests();
+        let baseline = app.pane_viewport(pane_id).unwrap().content_area;
+        show_prompt(&mut app, pane_id);
+        assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, baseline);
+        show_progress(&mut app, pane_id);
+        assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, baseline);
+        crate::render_cache::apply(
+            &mut app,
+            ServerEvent::PaneProgressChanged {
+                pane_id,
+                progress_monitors: Vec::new(),
+            },
+        );
+        crate::render_cache::apply(
+            &mut app,
+            ServerEvent::PaneLastPromptChanged {
+                pane_id,
+                last_prompt: None,
+            },
+        );
+        assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, baseline);
+        assert!(!app.take_outbound_requests().iter().any(|request| matches!(
+            request,
+            ClientRequest::ResizePane { pane_id: id, .. } if *id == pane_id
+        )));
+        assert!(baseline.height >= 1);
     }
 }

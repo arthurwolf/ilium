@@ -38,3 +38,4 @@
 ### Fixed
 - A refused rules-editor edit from the keyboard (removing a rule's last condition, toggling case on a condition that is not a screen pattern) now shows its reason instead of silently doing nothing.
 - Without a configuration folder, rules-editor edits apply for the session and the editor says they are not saved, instead of reverting the editor while the new rules stayed active.
+- Custom status rules reject joined emoji sequences (zero-width joiners, skin-tone modifiers, tag characters such as flag subdivisions) in glyphs and frames, because terminals disagree on their width; a warning sign with a variation selector stays valid and keeps every title aligned. The tree redraws only for matched animations on rows it actually paints, so a collapsed group, a scrolled-out row or a hidden tree schedules no redraws.

@@ -1243,10 +1243,10 @@ async fn run_inner(
     let conversion_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let conversion_wake = std::sync::Arc::clone(&conversion_notification);
     let conversion_client = execution
-        .client_when_ready(ilium_execution::ClientLimits {
+        .conversion_client_when_ready(ilium_execution::ClientLimits {
             jobs: 1,
             service_jobs: 0,
-            input_bytes: crate::session_conversion::CONVERSION_WORKING_BYTES,
+            input_bytes: crate::execution::CONVERSION_INPUT_BYTES,
             result_bytes: crate::session_conversion::CONVERSION_RESULT_BYTES,
         }).await
         .map_err(|error| {

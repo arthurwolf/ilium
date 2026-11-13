@@ -57,6 +57,7 @@ pub(crate) enum IntegrationJob {
     CheckRoom(RoomTarget),
     Append { room: RoomTarget, message: String },
     AddRoom { room: RoomTarget },
+    RemoveRoom { room: RoomTarget },
     Install { targets: Vec<FeatureTarget> },
 }
 pub(crate) struct RoomResult {
@@ -226,6 +227,10 @@ impl Job for IntegrationJob {
                 ));
                 result.rooms.push(room_result(room, true, false));
             }
+            Self::RemoveRoom { room } => {
+                crate::chatroom::remove(&room.path).map_err(bounded_error)?;
+                result.rooms.push(room_result(room, false, false));
+            }
             Self::Install { targets } => {
                 for target in targets {
                     match install(&target) {
@@ -255,6 +260,7 @@ pub(crate) enum IntegrationIntent {
         draft: String,
     },
     AddRoom(RoomTarget),
+    RemoveRoom(RoomTarget),
     Install {
         targets: Vec<FeatureTarget>,
         prompt: Option<crate::setup_prompt::SetupPromptState>,
@@ -314,6 +320,7 @@ impl IntegrationFiles {
             IntegrationIntent::CheckRoom(room)
             | IntegrationIntent::Append { room, .. }
             | IntegrationIntent::AddRoom(room)
+            | IntegrationIntent::RemoveRoom(room)
                 if room.path.capacity() > 64 * 1024 =>
             {
                 return Err("Chatroom target exceeds retained path limit".into());
@@ -343,6 +350,9 @@ impl IntegrationFiles {
                 message: draft.clone(),
             },
             IntegrationIntent::AddRoom(room) => IntegrationJob::AddRoom { room: room.clone() },
+            IntegrationIntent::RemoveRoom(room) => {
+                IntegrationJob::RemoveRoom { room: room.clone() }
+            }
             IntegrationIntent::Install { targets, .. } => {
                 Maintenance {
                     targets: targets.clone(),
@@ -410,6 +420,7 @@ fn same_explicit(first: &IntegrationIntent, second: &IntegrationIntent) -> bool 
             },
         ) => a == b && a_draft == b_draft,
         (IntegrationIntent::AddRoom(a), IntegrationIntent::AddRoom(b)) => a == b,
+        (IntegrationIntent::RemoveRoom(a), IntegrationIntent::RemoveRoom(b)) => a == b,
         (
             IntegrationIntent::Install {
                 targets: a,

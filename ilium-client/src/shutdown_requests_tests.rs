@@ -10,9 +10,10 @@ use tokio::io::AsyncWrite;
 
 struct Bank(Option<ilium_execution::Execution>);
 impl Bank {
-    fn start() -> (Self, crate::ipc_preparation::IpcPreparation) {
-        let (owner, codec) =
-            crate::ipc_preparation::IpcPreparation::standalone().expect("actual codec bank");
+    async fn start() -> (Self, crate::ipc_preparation::IpcPreparation) {
+        let (owner, codec) = crate::ipc_preparation::IpcPreparation::standalone()
+            .await
+            .expect("actual codec bank");
         (Self(Some(owner)), codec)
     }
 }
@@ -72,7 +73,7 @@ fn sender(
 
 #[tokio::test]
 async fn cancelled_empty_batch_retains_original_flush_receipt_for_cleanup() {
-    let (_bank, codec) = Bank::start();
+    let (_bank, codec) = Bank::start().await;
     let (sender, mut received) = sender(&codec, 1);
     let mut custody = ShutdownRequests::default();
     // Observe the actual FIFO barrier before canceling the borrowed finish
@@ -108,7 +109,7 @@ async fn cancelled_empty_batch_retains_original_flush_receipt_for_cleanup() {
 
 #[tokio::test]
 async fn closed_empty_batch_retains_original_flush_failure_for_cleanup() {
-    let (_bank, codec) = Bank::start();
+    let (_bank, codec) = Bank::start().await;
     let (sender, mut received) = sender(&codec, 1);
     let mut custody = ShutdownRequests::default();
     let acknowledgement = {
@@ -143,7 +144,7 @@ async fn closed_empty_batch_retains_original_flush_failure_for_cleanup() {
 
 #[tokio::test]
 async fn closed_writer_preserves_original_head_tail_and_guards() {
-    let (_bank, codec) = Bank::start();
+    let (_bank, codec) = Bank::start().await;
     let (sender, received) = sender(&codec, 1);
     drop(received);
     let original = batch(&sender.admission);
@@ -213,7 +214,7 @@ async fn closed_writer_preserves_original_head_tail_and_guards() {
 }
 #[tokio::test]
 async fn full_queue_cancellation_preserves_actual_iterator_and_guard_debits() {
-    let (_bank, codec) = Bank::start();
+    let (_bank, codec) = Bank::start().await;
     let (sender, mut received) = sender(&codec, 1);
     sender
         .send(ClientRequest::UpdateDebugLogging { enabled: true })
@@ -316,7 +317,7 @@ fn release(state: &Mutex<StreamState>, fail: bool) {
 }
 #[tokio::test]
 async fn cancelled_flush_keeps_same_receipt_and_wire_order_without_replay() {
-    let (_bank, codec) = Bank::start();
+    let (_bank, codec) = Bank::start().await;
     let (sender, received) = sender(&codec, 4);
     let state = Arc::new(Mutex::new(StreamState::default()));
     let entered = Arc::new(tokio::sync::Notify::new());
@@ -366,7 +367,7 @@ async fn cancelled_flush_keeps_same_receipt_and_wire_order_without_replay() {
 
 #[tokio::test]
 async fn failed_stream_retains_closed_receipt_and_truthful_prefix_uncertainty() {
-    let (_bank, codec) = Bank::start();
+    let (_bank, codec) = Bank::start().await;
     let (sender, received) = sender(&codec, 4);
     let state = Arc::new(Mutex::new(StreamState::default()));
     let entered = Arc::new(tokio::sync::Notify::new());

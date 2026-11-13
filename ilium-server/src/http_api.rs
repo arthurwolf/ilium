@@ -43,6 +43,10 @@ pub(crate) fn spawn(state: Arc<ServerState>, config: HttpApiConfig) -> tokio::ta
             .route("/create_agent", post(create_agent))
             .route("/v1/agents", post(create_agent))
             .merge(crate::http_control::routes())
+            .layer(axum::middleware::from_fn_with_state(
+                Arc::clone(&state),
+                crate::control_access::guard_http,
+            ))
             .with_state(state);
         if let Err(error) = axum::serve(listener, router).await {
             tracing::error!(%address, %error, "loopback HTTP API stopped");
@@ -97,8 +101,23 @@ struct ErrorResponse {
 
 async fn create_agent(
     State(state): State<Arc<ServerState>>,
+    axum::Extension(level): axum::Extension<ilium_control::access::AccessLevel>,
     Json(request): Json<CreateAgentRequest>,
 ) -> Result<Response, ApiError> {
+    crate::control_access::audit(
+        &state,
+        level,
+        None,
+        "create_agent",
+        serde_json::json!(request.project),
+    )
+    .await
+    .map_err(|error| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("audit refused write: {error}"),
+        )
+    })?;
     if request.prompt.trim().is_empty() {
         return Err(api_error(
             StatusCode::BAD_REQUEST,

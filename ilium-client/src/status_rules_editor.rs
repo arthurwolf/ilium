@@ -468,6 +468,9 @@ pub struct EditorState {
     /// The message line under the editor: a refused edit's reason or a
     /// write problem. A refused edit never changes the rules.
     pub save_error: Option<String>,
+    /// A neutral line after an action that can be undone, such as a
+    /// delete. The next key press clears it.
+    pub notice: Option<String>,
     pub confirm_reset: bool,
     pub parameter_draft: Option<String>,
     pub draft_target: DraftTarget,
@@ -490,6 +493,7 @@ impl EditorState {
             deleted: None,
             history: Vec::new(),
             save_error: None,
+            notice: None,
             confirm_reset: false,
             parameter_draft: None,
             draft_target: DraftTarget::Condition,
@@ -754,7 +758,9 @@ impl EditorState {
         let Some(index) = self.rule_index(rules) else {
             return false;
         };
+        let name = rules.rules[index].name.clone();
         self.deleted = Some((index, rules.rules.remove(index)));
+        self.notice = Some(format!("Deleted \"{name}\" · U or Ctrl+Z undoes"));
         self.selected_rule = (!rules.rules.is_empty()).then(|| index.min(rules.rules.len() - 1));
         true
     }
@@ -1250,15 +1256,18 @@ fn rule_summary_line(
     if visual.content.is_empty() {
         visual = Span::styled("∅", Style::new().fg(Color::DarkGray));
     }
-    let budget = usize::from(width).saturating_sub(6 + visual.width());
+    // One cell is kept back for the "…" that marks a clipped expression.
+    let budget = usize::from(width).saturating_sub(7 + visual.width());
     let mut spans = Vec::new();
     let mut used = 0usize;
+    let mut truncated = false;
     let mut add = |text: String, style: Style| {
         let remaining = budget.saturating_sub(used);
         let mut clipped = String::new();
         for ch in text.chars() {
             let cells = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
             if used + cells > budget {
+                truncated = true;
                 break;
             }
             clipped.push(ch);
@@ -1295,6 +1304,9 @@ fn rule_summary_line(
                 Style::new().fg(picker::category_color(term.condition.category())),
             );
         }
+    }
+    if truncated {
+        spans.push(Span::styled("…", dim()));
     }
     spans.push(Span::styled(" THEN ", keyword));
     spans.push(visual);
@@ -1737,6 +1749,12 @@ fn render_condition_column(
                 "Value: {draft}▏  Enter saves · Esc cancels"
             )));
         }
+        if let Some(notice) = &state.notice {
+            details.push(Line::from(Span::styled(
+                notice.clone(),
+                Style::new().fg(Color::LightYellow),
+            )));
+        }
         if let Some(message) = &state.save_error {
             details.push(Line::from(Span::styled(
                 message.clone(),
@@ -1753,6 +1771,12 @@ fn render_condition_column(
         }
     } else {
         details.push(Line::from("Select a rule"));
+        if let Some(notice) = &state.notice {
+            details.push(Line::from(Span::styled(
+                notice.clone(),
+                Style::new().fg(Color::LightYellow),
+            )));
+        }
         if let Some(message) = &state.save_error {
             details.push(Line::from(Span::styled(
                 message.clone(),
@@ -2004,7 +2028,10 @@ mod tests {
             Condition::ContextAbovePercent(100)
         );
         for invalid in ["101", "-1", "", "ninety"] {
-            assert!(editor.set_parameter(&mut rules, invalid).is_err(), "{invalid:?}");
+            assert!(
+                editor.set_parameter(&mut rules, invalid).is_err(),
+                "{invalid:?}"
+            );
         }
         assert_eq!(editor.parameter(&rules).as_deref(), Some("100"));
     }
@@ -2442,6 +2469,23 @@ mod tests {
         assert!(summary.starts_with("IF "));
         assert!(summary.contains(" OR NOT "));
         assert!(summary.contains(" THEN "));
+    }
+
+    #[test]
+    fn a_clipped_rule_line_ends_in_an_ellipsis_and_never_exceeds_its_width() {
+        let app = crate::app::App::new("test".to_string(), std::env::temp_dir());
+        let rules = default_rules();
+        let rule = &rules.rules[0];
+        for width in [20u16, 30, 200] {
+            let text = super::rule_summary_line(rule, width, &app).to_string();
+            let cells = unicode_width::UnicodeWidthStr::width(text.as_str());
+            assert!(cells <= usize::from(width), "width {width}: {text:?}");
+            assert_eq!(
+                text.contains('…'),
+                width < 200,
+                "width {width} clips only when narrow: {text:?}"
+            );
+        }
     }
 
     #[test]

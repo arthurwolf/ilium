@@ -42,6 +42,8 @@ use crate::sounds::PlaybackSender;
 /// `ilium_pty::PtySession`'s own broadcast channel for the identical
 /// tradeoff at the pty layer.
 const EVENT_CHANNEL_CAPACITY: usize = 1024;
+pub(crate) const MONITORING_COALESCE_WINDOW: std::time::Duration =
+    std::time::Duration::from_secs(5);
 
 /// The broadcast ring stores one immutable event allocation and gives each
 /// production writer a shared handle. Owned receivers are only used by unit
@@ -49,14 +51,44 @@ const EVENT_CHANNEL_CAPACITY: usize = 1024;
 pub struct ServerEvents {
     sender: broadcast::Sender<Arc<ServerEvent>>,
     journal: std::sync::OnceLock<event_journal::EventJournal>,
+    pub(crate) monitoring: std::sync::Mutex<crate::monitoring_event_log::MonitoringEventLog>,
+    pub(crate) monitoring_consumers: std::sync::Mutex<std::collections::HashMap<String, u64>>,
+    pub(crate) monitoring_digest_consumers:
+        std::sync::Mutex<ilium_control::digest_consumers::DigestConsumers>,
+    monitoring_changed: tokio::sync::watch::Sender<u64>,
+    pub(crate) resource_monitoring_order: std::sync::Mutex<()>,
+}
+
+/// Wait once for a change, then collect the rest of its burst without polling.
+pub(crate) async fn wait_for_monitoring_change(
+    changes: &mut tokio::sync::watch::Receiver<u64>,
+    window: std::time::Duration,
+) -> Result<u64, tokio::sync::watch::error::RecvError> {
+    changes.changed().await?;
+    tokio::time::sleep(window).await;
+    let cursor = *changes.borrow_and_update();
+    Ok(cursor)
 }
 
 impl ServerEvents {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let (sender, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+        let (monitoring_changed, _) = tokio::sync::watch::channel(0);
         Self {
             sender,
             journal: std::sync::OnceLock::new(),
+            monitoring_changed,
+            monitoring_consumers: std::sync::Mutex::new(std::collections::HashMap::new()),
+            monitoring_digest_consumers: std::sync::Mutex::new(
+                ilium_control::digest_consumers::DigestConsumers::default(),
+            ),
+            resource_monitoring_order: std::sync::Mutex::new(()),
+            // The fixed nonzero limit bounds retained monitoring records per session.
+            monitoring: std::sync::Mutex::new(
+                crate::monitoring_event_log::MonitoringEventLog::new(
+                    std::num::NonZeroUsize::new(4096).expect("fixed capacity is nonzero"),
+                ),
+            ),
         }
     }
 
@@ -114,7 +146,84 @@ impl ServerEvents {
     }
 
     pub(crate) fn publish(&self, event: ServerEvent) {
+        if matches!(
+            event,
+            ServerEvent::TreeSnapshot(_)
+                | ServerEvent::PaneStatusChanged { .. }
+                | ServerEvent::PaneDetectedStateChanged { .. }
+                | ServerEvent::PaneProgressChanged { .. }
+                | ServerEvent::ResourceWaitChanged { .. }
+        ) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+                .unwrap_or(0);
+            let mut monitoring = self
+                .monitoring
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let before = monitoring.latest_cursor();
+            if let Err(error) = monitoring.record_server_event(&event, now) {
+                tracing::error!(?error, "monitoring event publication failed");
+            }
+            if monitoring.latest_cursor() != before {
+                self.monitoring_changed
+                    .send_replace(monitoring.latest_cursor());
+            }
+        }
         let _ = self.sender.send(Arc::new(event));
+    }
+
+    pub(crate) fn record_monitoring(
+        &self,
+        pane_id: Option<NodeId>,
+        kind: ilium_ipc::MonitoringEventKind,
+        summary: &str,
+    ) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+            .unwrap_or(0);
+        let mut monitoring = self
+            .monitoring
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        match monitoring.append(pane_id, kind, now, summary) {
+            Ok(cursor) => {
+                self.monitoring_changed.send_replace(cursor);
+            }
+            Err(error) => tracing::error!(?error, "monitoring event publication failed"),
+        }
+    }
+
+    pub(crate) fn subscribe_monitoring(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.monitoring_changed.subscribe()
+    }
+
+    pub(crate) fn sync_monitoring_tree(&self, tree: &ilium_core::Tree) {
+        self.monitoring
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .replace_tree_context(tree);
+    }
+
+    pub(crate) fn record_resource_revision(&self, revision: u64) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+            .unwrap_or(0);
+        let mut monitoring = self
+            .monitoring
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let before = monitoring.latest_cursor();
+        if let Err(error) = monitoring.record_resource_revision(revision, now) {
+            tracing::error!(?error, "resource monitoring publication failed");
+        }
+        if monitoring.latest_cursor() != before {
+            self.monitoring_changed
+                .send_replace(monitoring.latest_cursor());
+        }
     }
 
     pub(crate) fn subscribe_shared(&self) -> broadcast::Receiver<Arc<ServerEvent>> {
@@ -319,6 +428,9 @@ pub struct ServerState {
     pub(crate) snapshot_io: tokio::sync::OnceCell<crate::snapshot_io::SnapshotIo>,
     /// Finite CPU/I/O bank, started once before interactive coordination.
     pub(crate) execution: std::sync::OnceLock<crate::execution::ServerExecution>,
+    pub(crate) control_tokens: std::sync::OnceLock<ilium_control::access::Tokens>,
+    pub(crate) control_audit_lock: std::sync::Arc<Mutex<()>>,
+    pub(crate) monitoring_signal_refresh: Mutex<usize>,
     /// Native publication owns its path and generations; no process-global path.
     pub(crate) startup_progress: std::sync::OnceLock<Arc<crate::startup_progress::Publisher>>,
     /// Keep applied logging transitions and their IPC broadcasts in one order.
@@ -585,6 +697,9 @@ impl ServerState {
             snapshot_write_lock: std::sync::Arc::new(Mutex::new(())),
             snapshot_io: tokio::sync::OnceCell::new(),
             execution: std::sync::OnceLock::new(),
+            control_tokens: std::sync::OnceLock::new(),
+            control_audit_lock: std::sync::Arc::new(Mutex::new(())),
+            monitoring_signal_refresh: Mutex::new(0),
             startup_progress: std::sync::OnceLock::new(),
             debug_logging_transaction: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
@@ -897,8 +1012,10 @@ impl ServerState {
         errors.push(ilium_ipc::BlockingError {
             node_id,
             operation: operation.to_string(),
-            message,
+            message: message.clone(),
         });
+        self.events
+            .record_monitoring(node_id, ilium_ipc::MonitoringEventKind::Error, &message);
         // Publishing under the short store lock preserves snapshot order:
         // an older failure cannot overtake a newer successful recovery.
         let snapshot = errors.clone();
@@ -1145,8 +1262,137 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn published_agent_status_is_available_to_monitoring_without_subscribers() {
+        let events = ServerEvents::new();
+        events.publish(ServerEvent::PaneStatusChanged {
+            pane_id: NodeId(7),
+            status: ilium_core::PaneStatus::from_activity(
+                ilium_core::AgentClass::Codex,
+                ilium_core::AgentActivity::WaitingApproval,
+                None,
+            ),
+        });
+        let log = events.monitoring.lock().unwrap();
+        let observed = log.read_after(0).unwrap();
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].kind, ilium_ipc::MonitoringEventKind::NeedsInput);
+        assert_eq!(observed[0].pane_id, Some(NodeId(7)));
+    }
+
+    #[test]
+    fn monitoring_preserves_project_title_and_agent_after_the_pane_closes() {
+        let events = ServerEvents::new();
+        let mut tree = Tree::new();
+        let project = tree
+            .ensure_launch_project(PathBuf::from("/tmp/original-project"))
+            .unwrap();
+        let group = tree
+            .ensure_project_default_group(project, "default")
+            .unwrap();
+        let pane = tree
+            .add_pane(
+                group,
+                "original title",
+                ilium_core::PaneContentKind::Terminal,
+            )
+            .unwrap();
+        events.publish(ServerEvent::TreeSnapshot(tree.clone()));
+        events.publish(ServerEvent::PaneStatusChanged {
+            pane_id: pane,
+            status: ilium_core::PaneStatus::from_activity(
+                ilium_core::AgentClass::Codex,
+                ilium_core::AgentActivity::WaitingApproval,
+                None,
+            ),
+        });
+        tree.remove_node(pane).unwrap();
+        events.publish(ServerEvent::TreeSnapshot(tree));
+        let log = events.monitoring.lock().unwrap();
+        let observed = log.read_after(0).unwrap();
+        assert_eq!(observed[0].project.as_deref(), Some("original-project"));
+        assert_eq!(observed[0].title.as_deref(), Some("original title"));
+        assert_eq!(observed[0].agent.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn published_resource_wait_change_is_available_to_monitoring() {
+        let events = ServerEvents::new();
+        events.publish(ServerEvent::ResourceWaitChanged {
+            wait_revision: 1,
+            pane_id: NodeId(7),
+            reservation_id: None,
+        });
+        let log = events.monitoring.lock().unwrap();
+        let observed = log.read_after(0).unwrap();
+        assert_eq!(observed.len(), 1);
+        assert_eq!(
+            observed[0].kind,
+            ilium_ipc::MonitoringEventKind::ResourceChanged
+        );
+    }
+
     fn test_state(directory: &tempfile::TempDir) -> ServerState {
         test_server_state(directory)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn monitoring_wait_coalesces_a_burst_into_one_wakeup() {
+        let events = ServerEvents::new();
+        let mut changes = events.subscribe_monitoring();
+        events.record_monitoring(
+            Some(NodeId(1)),
+            ilium_ipc::MonitoringEventKind::Started,
+            "started",
+        );
+        let waiter = tokio::spawn(async move {
+            let cursor = wait_for_monitoring_change(&mut changes, MONITORING_COALESCE_WINDOW)
+                .await
+                .unwrap();
+            (cursor, changes)
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(std::time::Duration::from_secs(4)).await;
+        assert!(!waiter.is_finished());
+        events.record_monitoring(
+            Some(NodeId(1)),
+            ilium_ipc::MonitoringEventKind::Done,
+            "finished",
+        );
+        tokio::time::advance(std::time::Duration::from_secs(1)).await;
+        let (cursor, changes) = waiter.await.unwrap();
+        assert_eq!(cursor, 2);
+        assert!(!changes.has_changed().unwrap());
+    }
+
+    #[tokio::test]
+    async fn monitoring_subscriber_is_notified_when_an_event_is_recorded() {
+        let events = ServerEvents::new();
+        let mut changes = events.subscribe_monitoring();
+        events.record_monitoring(
+            Some(NodeId(1)),
+            ilium_ipc::MonitoringEventKind::Started,
+            "started",
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(1), changes.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*changes.borrow_and_update(), 1);
+    }
+
+    #[tokio::test]
+    async fn monitoring_records_new_blocking_failure_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = test_state(&directory);
+        state.record_blocking_error(Some(NodeId(5)), "launch", "disk full");
+        state.record_blocking_error(Some(NodeId(5)), "launch", "disk full");
+        let log = state.events.monitoring.lock().unwrap();
+        let observed = log.read_after(0).unwrap();
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].kind, ilium_ipc::MonitoringEventKind::Error);
+        assert_eq!(observed[0].pane_id, Some(NodeId(5)));
+        assert_eq!(observed[0].summary, "disk full");
     }
 
     #[tokio::test]

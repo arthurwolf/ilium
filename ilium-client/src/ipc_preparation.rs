@@ -40,43 +40,66 @@ impl IpcPreparation {
 
     /// One-shot CLI connections own their codec bank explicitly. Interactive
     /// clients inject a tenant of their existing process execution owner.
-    pub(crate) fn standalone() -> Result<(Execution, Self), IpcError> {
+    pub(crate) async fn standalone() -> Result<(Execution, Self), IpcError> {
         let disabled = LaneConfig {
             threads: 0,
             queue_slots: 0,
             priority: None,
             resident_bytes_per_thread: 0,
         };
-        let owner = Execution::start(
-            crate::execution::process_quota(),
-            ExecutionConfig {
-                cpu: LaneConfig {
-                    threads: 1,
-                    queue_slots: 2,
-                    priority: Some(ilium_execution::WorkerPriority::BelowNormal),
-                    resident_bytes_per_thread: 2 * MIB,
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let owner = loop {
+            let started = Execution::start(
+                crate::execution::process_quota(),
+                ExecutionConfig {
+                    cpu: LaneConfig {
+                        threads: 1,
+                        queue_slots: 2,
+                        priority: Some(ilium_execution::WorkerPriority::BelowNormal),
+                        resident_bytes_per_thread: 2 * MIB,
+                    },
+                    io: disabled,
+                    service: disabled,
                 },
-                io: disabled,
-                service: disabled,
-            },
-        )
-        .map_err(|error| IpcError::Io(io::Error::other(error)))?;
-        let decoder_group =
+            );
+            match started {
+                Err(ilium_execution::StartError::Admission(RejectReason::Busy))
+                    if tokio::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+                result => break result.map_err(|error| IpcError::Io(io::Error::other(error)))?,
+            }
+        };
+        let decoder_group = crate::execution::retry_startup_busy(|| {
             crate::execution::codec_admission_group(crate::execution::CodecDirection::Decoder)
-                .map_err(rejected)?;
-        let encoder_group =
+        })
+        .await
+        .map_err(rejected)?;
+        let encoder_group = crate::execution::retry_startup_busy(|| {
             crate::execution::codec_admission_group(crate::execution::CodecDirection::Encoder)
+        })
+        .await
+        .map_err(rejected)?;
+        let decoder = crate::execution::retry_startup_busy(|| {
+            owner.client_in_group(&decoder_group, codec_limits())
+        })
+        .await
+        .map_err(rejected)?;
+        let encoder = crate::execution::retry_startup_busy(|| {
+            owner.client_in_group(&encoder_group, codec_limits())
+        })
+        .await
+        .map_err(rejected)?;
+        let aggregate =
+            crate::execution::retry_startup_busy(crate::execution::general_admission_group)
+                .await
                 .map_err(rejected)?;
-        let decoder = owner
-            .client_in_group(&decoder_group, codec_limits())
-            .map_err(rejected)?;
-        let encoder = owner
-            .client_in_group(&encoder_group, codec_limits())
-            .map_err(rejected)?;
-        let aggregate = crate::execution::general_admission_group().map_err(rejected)?;
-        let outbound = owner
-            .client_in_group(&aggregate, request_limits())
-            .map_err(rejected)?;
+        let outbound = crate::execution::retry_startup_busy(|| {
+            owner.client_in_group(&aggregate, request_limits())
+        })
+        .await
+        .map_err(rejected)?;
         Ok((owner, Self::new(decoder, encoder, outbound)))
     }
 
@@ -244,6 +267,26 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         count.string(&identity.profile_id);
     }
     match request {
+        R::MonitoringEvents { query, .. } => {
+            count.optional_string(&query.since);
+            count.optional_string(&query.consumer);
+            count.optional_string(&query.min_severity);
+            count.vector(&query.kinds);
+            count.optional_string(&query.project);
+            count.optional_string(&query.agent);
+        }
+        R::ControlWrite {
+            token, operation, ..
+        } => {
+            count.string(token);
+            count.string(operation);
+        }
+        R::MonitoringAck {
+            consumer, cursor, ..
+        } => {
+            count.string(consumer);
+            count.string(cursor);
+        }
         R::SetStatusScreenWatches { watches, .. } => {
             count.vector(watches);
             for watch in watches {
@@ -1402,18 +1445,31 @@ mod status_screen_request_tests {
 
     #[test]
     fn screen_watch_request_charges_pattern_and_vector_capacity() {
-        let empty = ClientRequest::SetStatusScreenWatches { revision: 1, watches: Vec::new() };
+        let empty = ClientRequest::SetStatusScreenWatches {
+            revision: 1,
+            watches: Vec::new(),
+        };
         let mut pattern = String::with_capacity(512);
         pattern.push_str("error");
         let pattern_capacity = pattern.capacity();
         let mut watches = Vec::with_capacity(4);
         watches.push(StatusScreenWatch {
             id: 1,
-            pattern: ScreenPattern { pattern, ignore_case: false, region: ScreenRegion::All },
+            pattern: ScreenPattern {
+                pattern,
+                ignore_case: false,
+                region: ScreenRegion::All,
+            },
         });
         let vector_capacity = watches.capacity() * std::mem::size_of::<StatusScreenWatch>();
-        let populated = ClientRequest::SetStatusScreenWatches { revision: 1, watches };
-        assert_eq!(request_retained_bytes(&populated) - request_retained_bytes(&empty), vector_capacity + pattern_capacity);
+        let populated = ClientRequest::SetStatusScreenWatches {
+            revision: 1,
+            watches,
+        };
+        assert_eq!(
+            request_retained_bytes(&populated) - request_retained_bytes(&empty),
+            vector_capacity + pattern_capacity
+        );
     }
 }
 
@@ -1547,5 +1603,58 @@ mod projection_refusal_classification_tests {
             owner.try_reserve_projection(1536),
             Err(StorageRefusal::SourceOverlapTooLarge { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod monitoring_request_tests {
+    use super::request_retained_bytes;
+    use ilium_ipc::{ClientRequest, MonitoringEventKind, MonitoringFormat, MonitoringQuery};
+
+    #[test]
+    fn monitoring_request_retention_counts_filters_and_acknowledgements() {
+        let mut text = String::with_capacity(8192);
+        text.push_str("manager");
+        let capacity = text.capacity();
+        let query = MonitoringQuery {
+            view: ilium_ipc::MonitoringView::Events,
+            since: Some(text.clone()),
+            consumer: Some(text.clone()),
+            follow: false,
+            min_severity: Some(text.clone()),
+            kinds: vec![MonitoringEventKind::Error],
+            project: Some(text.clone()),
+            agent: Some(text),
+            pane_id: None,
+            max_items: 12,
+            max_chars: 4000,
+            format: MonitoringFormat::Compact,
+        };
+        // Cloning a String can shrink its allocation; measure the real owners.
+        let query_capacity = query.since.as_ref().unwrap().capacity()
+            + query.consumer.as_ref().unwrap().capacity()
+            + query.min_severity.as_ref().unwrap().capacity()
+            + query.project.as_ref().unwrap().capacity()
+            + capacity
+            + query.kinds.capacity() * std::mem::size_of::<MonitoringEventKind>();
+        let base = std::mem::size_of::<ClientRequest>();
+        assert_eq!(
+            request_retained_bytes(&ClientRequest::MonitoringEvents {
+                request_id: 1,
+                query,
+            }),
+            base + query_capacity
+        );
+        let consumer = String::with_capacity(1024);
+        let cursor = String::with_capacity(2048);
+        let ack_capacity = consumer.capacity() + cursor.capacity();
+        assert_eq!(
+            request_retained_bytes(&ClientRequest::MonitoringAck {
+                request_id: 2,
+                consumer,
+                cursor,
+            }),
+            base + ack_capacity
+        );
     }
 }

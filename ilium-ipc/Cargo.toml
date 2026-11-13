@@ -13,7 +13,7 @@ ilium-core = { version = "0.1.1", path = "../ilium-core" }
 ilium-sound = { version = "0.1.1", path = "../ilium-sound" }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
-tokio = { version = "1", features = ["io-util", "macros"] }
+tokio = { version = "1", features = ["io-util", "macros", "time"] }
 
 [dev-dependencies]
 # Plugin platform test lanes (test-plan.md section 1.5).

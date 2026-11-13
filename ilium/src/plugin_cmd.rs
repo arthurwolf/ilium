@@ -12,12 +12,19 @@ pub const NO_PLUGINS_ENV: &str = "ILIUM_NO_PLUGINS";
 /// Decides the start mode from the flags and environment values (`--no-plugins` beats
 /// `--safe-plugins`; a variable counts as set when it is non-empty and not `0`).
 pub fn parse_start_mode(
-    _safe_plugins_flag: bool,
-    _no_plugins_flag: bool,
-    _safe_plugins_env: Option<&str>,
-    _no_plugins_env: Option<&str>,
+    safe_plugins_flag: bool,
+    no_plugins_flag: bool,
+    safe_plugins_env: Option<&str>,
+    no_plugins_env: Option<&str>,
 ) -> StartMode {
-    unimplemented!("cli::plugin_cmd::parse_start_mode")
+    let is_set = |value: Option<&str>| value.is_some_and(|text| !text.is_empty() && text != "0");
+    if no_plugins_flag || is_set(no_plugins_env) {
+        StartMode::NoPlugins
+    } else if safe_plugins_flag || is_set(safe_plugins_env) {
+        StartMode::SafePlugins
+    } else {
+        StartMode::Normal
+    }
 }
 
 /// The real environment for a command: directories, working directory, clock and fetcher.

@@ -110,6 +110,9 @@ struct SessionTransitionObservation {
 /// Attribution follows the request contract, never text parsing.
 fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
     match request {
+        ClientRequest::MonitoringEvents { .. }
+        | ClientRequest::MonitoringAck { .. }
+        | ClientRequest::ControlWrite { .. } => None,
         ClientRequest::NewPane { parent_group, .. } => Some(*parent_group),
         ClientRequest::ClosePane { pane_id, .. } => Some(*pane_id),
         ClientRequest::MoveNode { node_id, .. } => Some(*node_id),
@@ -233,6 +236,49 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        ClientRequest::ControlWrite {
+            request_id,
+            token,
+            caller_pane,
+            operation,
+        } => {
+            let result =
+                crate::control_access::authorize_write(state, &token, caller_pane, &operation)
+                    .await;
+            let _ = direct_tx
+                .send(ServerEvent::ControlWrite { request_id, result })
+                .await;
+            false
+        }
+        ClientRequest::MonitoringAck {
+            request_id,
+            consumer,
+            cursor,
+        } => {
+            let result = crate::monitoring_query::acknowledge(&state.events, &consumer, &cursor)
+                .map(|sequence| {
+                    format!(
+                        "{}:{sequence}",
+                        state
+                            .events
+                            .monitoring
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .epoch()
+                    )
+                });
+            let _ = direct_tx
+                .send(ServerEvent::MonitoringAck { request_id, result })
+                .await;
+            false
+        }
+        ClientRequest::MonitoringEvents { request_id, query } => {
+            let result = crate::monitoring_query::read_query_with_state(state, &query).await;
+            let _ = direct_tx
+                .send(ServerEvent::MonitoringEvents { request_id, result })
+                .await;
+            false
+        }
         // Connection-owned subscriptions are intercepted by the reader.
         ClientRequest::SetStatusScreenWatches { .. } => false,
         ClientRequest::Resource {
@@ -7254,6 +7300,13 @@ async fn handle_close_pane_with_spawn_guard(
     }
     drop(panes);
     drop(tree);
+    for id in &descendant_pane_ids {
+        state.events.record_monitoring(
+            Some(*id),
+            ilium_ipc::MonitoringEventKind::Closed,
+            "Pane closed",
+        );
+    }
     for (id, resource) in closed_resources {
         crate::lifecycle_log::record(
             state,
@@ -9445,6 +9498,60 @@ mod tests {
         state.clear_blocking_error(Some(group), "new_pane");
         let events = initial_state_events(&state, false, false).await;
         assert!(events.iter().any(|event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty())));
+    }
+
+    #[tokio::test]
+    async fn closing_a_pane_records_one_monitoring_event() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let pane = {
+            let mut tree = state.tree.write().await;
+            let group = tree.add_group(ilium_core::ROOT_ID, "project").unwrap();
+            tree.add_pane(group, "pane", PaneContentKind::Terminal)
+                .unwrap()
+        };
+        let (sender, _replies) = DirectEventSender::channel(16);
+        handle_close_pane(&state, pane, &sender).await;
+        handle_close_pane(&state, pane, &sender).await;
+        let log = state.events.monitoring.lock().unwrap();
+        let closed = log
+            .read_after(0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == ilium_ipc::MonitoringEventKind::Closed)
+            .collect::<Vec<_>>();
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0].pane_id, Some(pane));
+    }
+
+    #[tokio::test]
+    async fn closing_a_group_records_monitoring_for_each_descendant_pane() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let (group, first, second) = {
+            let mut tree = state.tree.write().await;
+            let group = tree.add_group(ilium_core::ROOT_ID, "project").unwrap();
+            let first = tree
+                .add_pane(group, "first", PaneContentKind::Terminal)
+                .unwrap();
+            let second = tree
+                .add_pane(group, "second", PaneContentKind::Terminal)
+                .unwrap();
+            (group, first, second)
+        };
+        let (sender, _replies) = DirectEventSender::channel(16);
+        handle_close_pane(&state, group, &sender).await;
+        let log = state.events.monitoring.lock().unwrap();
+        let panes = log
+            .read_after(0)
+            .unwrap()
+            .into_iter()
+            .filter(|event| event.kind == ilium_ipc::MonitoringEventKind::Closed)
+            .map(|event| event.pane_id.unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(panes.len(), 2);
+        assert!(panes.contains(&first));
+        assert!(panes.contains(&second));
     }
 
     #[tokio::test]
@@ -12894,7 +13001,9 @@ mod tests {
 
         let done = settle_wait_test_monitor(&state, pane_id, 71).await;
         assert!(hand_outcome_to_progress_waiters(&state, pane_id, 71, &done).await);
-        let outcome = next_wait_reply(&mut receiver).await.expect("actual outcome");
+        let outcome = next_wait_reply(&mut receiver)
+            .await
+            .expect("actual outcome");
         assert_eq!(outcome.monitor_id, 71);
         assert_eq!(outcome.progress, Some(done.clone()));
         assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Settled);

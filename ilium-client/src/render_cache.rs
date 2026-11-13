@@ -826,7 +826,10 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             None
         }
         // One-shot recap consumers own this direct reply; it is not UI state.
-        ServerEvent::PaneRecapScreen { .. } => None,
+        ServerEvent::PaneRecapScreen { .. }
+        | ServerEvent::MonitoringEvents { .. }
+        | ServerEvent::MonitoringAck { .. }
+        | ServerEvent::ControlWrite { .. } => None,
         ServerEvent::RecapUpdated {
             pane_id,
             session_id,
@@ -1283,71 +1286,154 @@ mod tests {
 
     #[test]
     fn screen_observations_update_only_current_tree_panes_and_revisions() {
-        use ilium_core::status_rule_expression::{Condition, Observation, ScreenPattern, ScreenRegion};
+        use ilium_core::status_rule_expression::{
+            Condition, Observation, ScreenPattern, ScreenRegion,
+        };
 
         let mut app = app();
         let mut tree = ilium_core::Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = tree.add_pane(group, "shell", PaneContentKind::Terminal).unwrap();
+        let pane_id = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
-        let pattern = ScreenPattern { pattern: "error".into(), ignore_case: false, region: ScreenRegion::All };
+        let pattern = ScreenPattern {
+            pattern: "error".into(),
+            ignore_case: false,
+            region: ScreenRegion::All,
+        };
         let mut rules = ilium_core::status_rule_expression::default_rules();
-        let rule = rules.rules.iter_mut().find(|rule| rule.id == "screen-error-example").unwrap();
+        let rule = rules
+            .rules
+            .iter_mut()
+            .find(|rule| rule.id == "screen-error-example")
+            .unwrap();
         rule.enabled = true;
         rule.any_of[0].all_of[0].condition = Condition::ScreenMatches(pattern.clone());
         app.custom_status_rules = rules;
-        let (revision, watches) = app.custom_status_screen_observations.replace_rules(&app.custom_status_rules);
+        let (revision, watches) = app
+            .custom_status_screen_observations
+            .replace_rules(&app.custom_status_rules);
         let observation = ilium_ipc::StatusScreenObservation {
-            pane_id, revision, screen_generation: 3, matched: vec![watches[0].id], unknown: vec![],
+            pane_id,
+            revision,
+            screen_generation: 3,
+            matched: vec![watches[0].id],
+            unknown: vec![],
         };
         let before = app.tree_version;
-        apply(&mut app, ServerEvent::StatusScreenObserved(observation.clone()));
-        assert_eq!(app.custom_status_screen_observations.observe(pane_id, &pattern), Observation::True);
+        apply(
+            &mut app,
+            ServerEvent::StatusScreenObserved(observation.clone()),
+        );
+        assert_eq!(
+            app.custom_status_screen_observations
+                .observe(pane_id, &pattern),
+            Observation::True
+        );
         assert_ne!(app.tree_version, before);
         let before_stale = app.tree_version;
-        apply(&mut app, ServerEvent::StatusScreenObserved(ilium_ipc::StatusScreenObservation {
-            revision: revision.wrapping_sub(1), ..observation.clone()
-        }));
-        apply(&mut app, ServerEvent::StatusScreenObserved(ilium_ipc::StatusScreenObservation {
-            pane_id: NodeId(u64::MAX), ..observation
-        }));
+        apply(
+            &mut app,
+            ServerEvent::StatusScreenObserved(ilium_ipc::StatusScreenObservation {
+                revision: revision.wrapping_sub(1),
+                ..observation.clone()
+            }),
+        );
+        apply(
+            &mut app,
+            ServerEvent::StatusScreenObserved(ilium_ipc::StatusScreenObservation {
+                pane_id: NodeId(u64::MAX),
+                ..observation
+            }),
+        );
         assert_eq!(app.tree_version, before_stale);
         let repaired_tree = app.tree.clone();
-        apply(&mut app, ServerEvent::PaneStateSnapshot {
-            tree: repaired_tree,
-            detection_evidence: Vec::new(),
-        });
-        assert_eq!(app.custom_status_screen_observations.observe(pane_id, &pattern), Observation::Unknown);
-        apply(&mut app, ServerEvent::StatusScreenObserved(ilium_ipc::StatusScreenObservation {
-            pane_id, revision, screen_generation: 4, matched: vec![watches[0].id], unknown: vec![],
-        }));
-        assert_eq!(app.custom_status_screen_observations.observe(pane_id, &pattern), Observation::Unknown);
+        apply(
+            &mut app,
+            ServerEvent::PaneStateSnapshot {
+                tree: repaired_tree,
+                detection_evidence: Vec::new(),
+            },
+        );
+        assert_eq!(
+            app.custom_status_screen_observations
+                .observe(pane_id, &pattern),
+            Observation::Unknown
+        );
+        apply(
+            &mut app,
+            ServerEvent::StatusScreenObserved(ilium_ipc::StatusScreenObservation {
+                pane_id,
+                revision,
+                screen_generation: 4,
+                matched: vec![watches[0].id],
+                unknown: vec![],
+            }),
+        );
+        assert_eq!(
+            app.custom_status_screen_observations
+                .observe(pane_id, &pattern),
+            Observation::Unknown
+        );
     }
 
     #[test]
     fn a_refused_screen_watch_revision_is_shown_and_stays_unknown() {
-        use ilium_core::status_rule_expression::{Condition, Observation, ScreenPattern, ScreenRegion};
+        use ilium_core::status_rule_expression::{
+            Condition, Observation, ScreenPattern, ScreenRegion,
+        };
         let mut app = app();
-        let pattern = ScreenPattern { pattern: "error".into(), ignore_case: false, region: ScreenRegion::All };
+        let pattern = ScreenPattern {
+            pattern: "error".into(),
+            ignore_case: false,
+            region: ScreenRegion::All,
+        };
         let mut rules = ilium_core::status_rule_expression::default_rules();
-        let rule = rules.rules.iter_mut().find(|rule| rule.id == "screen-error-example").unwrap();
+        let rule = rules
+            .rules
+            .iter_mut()
+            .find(|rule| rule.id == "screen-error-example")
+            .unwrap();
         rule.enabled = true;
         rule.any_of[0].all_of[0].condition = Condition::ScreenMatches(pattern.clone());
         app.custom_status_rules = rules;
-        let (revision, watches) = app.custom_status_screen_observations.replace_rules(&app.custom_status_rules);
+        let (revision, watches) = app
+            .custom_status_screen_observations
+            .replace_rules(&app.custom_status_rules);
         // A stale refusal is ignored without a message.
-        apply(&mut app, ServerEvent::StatusScreenWatchesRejected(ilium_ipc::StatusScreenWatchRejection {
-            revision: revision.wrapping_sub(1), watch_id: None, message: "stale".into(),
-        }));
+        apply(
+            &mut app,
+            ServerEvent::StatusScreenWatchesRejected(ilium_ipc::StatusScreenWatchRejection {
+                revision: revision.wrapping_sub(1),
+                watch_id: None,
+                message: "stale".into(),
+            }),
+        );
         assert!(app.status_message.is_none());
         let before = app.tree_version;
-        apply(&mut app, ServerEvent::StatusScreenWatchesRejected(ilium_ipc::StatusScreenWatchRejection {
-            revision, watch_id: Some(watches[0].id), message: "Invalid screen watch 0".into(),
-        }));
+        apply(
+            &mut app,
+            ServerEvent::StatusScreenWatchesRejected(ilium_ipc::StatusScreenWatchRejection {
+                revision,
+                watch_id: Some(watches[0].id),
+                message: "Invalid screen watch 0".into(),
+            }),
+        );
         assert_ne!(app.tree_version, before);
-        assert!(app.status_message.as_deref().is_some_and(|message| message.contains("Invalid screen watch 0")));
-        assert_eq!(app.custom_status_screen_observations.rejected_pattern(), Some(&pattern));
-        assert_eq!(app.custom_status_screen_observations.observe(NodeId(1), &pattern), Observation::Unknown);
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("Invalid screen watch 0")));
+        assert_eq!(
+            app.custom_status_screen_observations.rejected_pattern(),
+            Some(&pattern)
+        );
+        assert_eq!(
+            app.custom_status_screen_observations
+                .observe(NodeId(1), &pattern),
+            Observation::Unknown
+        );
     }
 
     #[test]
@@ -2145,12 +2231,12 @@ mod tests {
         );
         assert!(app.shows_last_prompt_banner(pane_id));
         let with_prompt = app.pane_viewport(pane_id).unwrap();
-        assert!(with_prompt.content_area.height < before.content_area.height);
+        assert_eq!(with_prompt.content_area, before.content_area);
         assert_eq!(
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app
+        assert!(!app
             .take_outbound_requests()
             .iter()
             .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
@@ -2214,12 +2300,12 @@ mod tests {
             },
         );
         let with_prompt = app.pane_viewport(pane_id).unwrap();
-        assert!(with_prompt.content_area.height < after_toolbar.content_area.height);
+        assert_eq!(with_prompt.content_area, after_toolbar.content_area);
         assert_eq!(
             with_prompt.last_prompt_area.unwrap().height,
             u16::from(app.ui_settings.last_prompt_max_lines)
         );
-        assert!(app
+        assert!(!app
             .take_outbound_requests()
             .iter()
             .any(|request| matches!(request, ClientRequest::ResizePane { .. })));

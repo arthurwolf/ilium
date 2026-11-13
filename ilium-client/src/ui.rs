@@ -342,7 +342,8 @@ fn draw_osm_attribution(frame: &mut Frame, app: &App) -> Rect {
 /// CrosstermBackend assumes the previous print advanced only one cell. That
 /// writes the blank at x+2 on terminals that honor the glyph's full width.
 /// The glyph itself paints the continuation cell; omit the duplicate write.
-fn skip_vs16_continuation_cells(buffer: &mut Buffer, tree_area: Rect) {
+/// Crate-visible so tree tests can apply the same buffer pass the frame uses.
+pub(crate) fn skip_vs16_continuation_cells(buffer: &mut Buffer, tree_area: Rect) {
     let area = buffer.area;
     for row in area.top()..area.bottom() {
         for column in area.left()..area.right().saturating_sub(1) {
@@ -920,6 +921,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
     let tree_visibility = app.active_tree_projection(std::time::Instant::now());
     // Owned once per frame so the render options can borrow it.
     let blocking_error_facts = app.blocking_error_facts();
+    let pane_view_facts = crate::custom_status_live::PaneViewFacts::from_app(app);
     let mut painted_rows = tree_ui::render(
         frame,
         layout.tree_area,
@@ -973,7 +975,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
             frozen_panes: &app.frozen_panes,
             blocking_errors: Some(&blocking_error_facts),
-            pane_view: Some(crate::custom_status_live::PaneViewFacts::from_app(app)),
+            pane_view: Some(pane_view_facts),
             cost: Some(app.cost_tracker.overlay().as_ref()),
             hover: tree_ui::TreeHoverState {
                 node: app.hovered_tree_node,

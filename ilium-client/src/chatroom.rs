@@ -22,6 +22,7 @@ const HOOK_COMMAND: &str = "ilium chat context --limit 40 --since-last-read --ma
 const HOOK_COMMAND_PREFIX: &str = "ilium chat context";
 /// Archive written when an oversized room is rotated (global working-file rule).
 const CHATROOM_ARCHIVE_IGNORE: &str = "/CHATROOM.archive.md";
+const REMOVED_CHATROOM_IGNORE: &str = "/.ilium/chatroom-removed-*.md";
 /// Unread tracking scans at most this many recent records for the reader's cursor.
 const UNREAD_SCAN_RECORDS: usize = 2_000;
 /// A session start or compaction gets this many times the per-turn byte cap,
@@ -110,6 +111,107 @@ pub fn ensure_integrations(project_root: &Path) -> anyhow::Result<bool> {
         crate::progress_guard::ensure_installed(project_root)?;
         Ok(true)
     })
+}
+
+/// Removes project integrations and preserves the transcript under `.ilium`.
+/// The project lock serializes removal with room creation and appends.
+pub fn remove(project_root: &Path) -> anyhow::Result<PathBuf> {
+    with_project_lock(project_root, || {
+        let room = path_for_project(project_root);
+        let metadata = fs::symlink_metadata(&room)?;
+        if !metadata.file_type().is_file() {
+            anyhow::bail!("chatroom path {} is not a regular file", room.display());
+        }
+        ensure_gitignore(project_root)?;
+        for name in [".claude/settings.local.json", ".codex/hooks.json"] {
+            remove_chat_hooks(&project_root.join(name))?;
+        }
+        for name in ["CLAUDE.md", "AGENTS.md"] {
+            let path = project_root.join(name);
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.file_type().is_file() => {
+                    crate::agent_feature_setup::uninstall(
+                        &path,
+                        crate::agent_feature_setup::AgentFeature::Chatroom,
+                    )?;
+                }
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    let target = fs::canonicalize(&path)?;
+                    if target.starts_with(fs::canonicalize(project_root)?) {
+                        crate::agent_feature_setup::uninstall(
+                            &target,
+                            crate::agent_feature_setup::AgentFeature::Chatroom,
+                        )?;
+                    }
+                }
+                Ok(_) => anyhow::bail!("instruction path {} is not a regular file", path.display()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let archive = project_root
+            .join(".ilium")
+            .join(format!("chatroom-removed-{}.md", uuid::Uuid::new_v4()));
+        fs::hard_link(&room, &archive)?;
+        fs::remove_file(&room)?;
+        Ok(archive)
+    })
+}
+
+fn remove_chat_hooks(path: &Path) -> anyhow::Result<()> {
+    let existing = match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+        Ok(metadata) if metadata.file_type().is_file() => read_existing_or_empty(path)?,
+        Ok(_) => anyhow::bail!("hook path {} is not a regular file", path.display()),
+    };
+    if existing.trim().is_empty() {
+        return Ok(());
+    }
+    let mut root: Value = serde_json::from_str(&existing)?;
+    let object = root
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("{} must contain a JSON object", path.display()))?;
+    let Some(hooks) = object.get_mut("hooks") else {
+        return Ok(());
+    };
+    let hooks = hooks
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("{}.hooks must be an object", path.display()))?;
+    let mut changed = false;
+    for groups in hooks.values_mut() {
+        let groups = groups
+            .as_array_mut()
+            .ok_or_else(|| anyhow::anyhow!("{}.hooks event must be an array", path.display()))?;
+        groups.retain_mut(|group| {
+            if let Some(commands) = group.get_mut("hooks").and_then(Value::as_array_mut) {
+                let before = commands.len();
+                commands.retain(|hook| {
+                    !hook
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .is_some_and(|command| command.starts_with(HOOK_COMMAND_PREFIX))
+                });
+                let removed = before != commands.len();
+                changed |= removed;
+                if removed
+                    && commands.is_empty()
+                    && group.as_object().is_some_and(|object| object.len() == 1)
+                {
+                    return false;
+                }
+            }
+            true
+        });
+    }
+    if changed {
+        publish_integration_file(
+            path,
+            format!("{}\n", serde_json::to_string_pretty(&root)?).as_bytes(),
+            &existing,
+        )?;
+    }
+    Ok(())
 }
 
 /// Appends a single escaped Markdown record. The advisory lock covers the
@@ -490,10 +592,14 @@ pub(crate) fn read_messages_bounded(
 fn ensure_gitignore(project_root: &Path) -> anyhow::Result<()> {
     let path = project_root.join(".gitignore");
     let existing = read_existing_or_empty(&path)?;
-    let missing = ["/CHATROOM.md", CHATROOM_ARCHIVE_IGNORE]
-        .into_iter()
-        .filter(|entry| !existing.lines().any(|line| line.trim() == *entry))
-        .collect::<Vec<_>>();
+    let missing = [
+        "/CHATROOM.md",
+        CHATROOM_ARCHIVE_IGNORE,
+        REMOVED_CHATROOM_IGNORE,
+    ]
+    .into_iter()
+    .filter(|entry| !existing.lines().any(|line| line.trim() == *entry))
+    .collect::<Vec<_>>();
     if missing.is_empty() {
         return Ok(());
     }
@@ -812,6 +918,54 @@ mod tests {
         assert!(std::fs::read_to_string(directory.path().join(".gitignore"))
             .unwrap()
             .contains("/CHATROOM.archive.md"));
+    }
+
+    #[test]
+    fn removal_archives_messages_and_preserves_other_hooks_and_guidance() {
+        let directory = tempfile::tempdir().unwrap();
+        initialize(directory.path()).unwrap();
+        append_message(directory.path(), "agent", "keep this message").unwrap();
+        let instructions = directory.path().join("CLAUDE.md");
+        std::fs::write(&instructions, "# Keep\n").unwrap();
+        crate::agent_feature_setup::install(
+            &instructions,
+            crate::agent_feature_setup::AgentFeature::Chatroom,
+        )
+        .unwrap();
+        let hooks = directory.path().join(".claude/settings.local.json");
+        let mut data: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&hooks).unwrap()).unwrap();
+        data["hooks"]["SessionStart"][0]["hooks"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"type":"command","command":"other-hook"}));
+        std::fs::write(&hooks, serde_json::to_string(&data).unwrap()).unwrap();
+        let archive = super::remove(directory.path()).unwrap();
+        assert!(!exists(directory.path()));
+        assert!(std::fs::read_to_string(directory.path().join(".gitignore"))
+            .unwrap()
+            .lines()
+            .any(|line| line == super::REMOVED_CHATROOM_IGNORE));
+        assert!(std::fs::read_to_string(archive)
+            .unwrap()
+            .contains("keep this message"));
+        let retained = std::fs::read_to_string(&hooks).unwrap();
+        assert!(retained.contains("other-hook"));
+        assert!(!retained.contains("ilium chat context"));
+        let retained = std::fs::read_to_string(instructions).unwrap();
+        assert!(retained.contains("# Keep"));
+        assert!(!retained.contains("ilium-agent-feature: chatroom"));
+    }
+
+    #[test]
+    fn removal_keeps_room_when_hook_configuration_is_invalid() {
+        let directory = tempfile::tempdir().unwrap();
+        initialize(directory.path()).unwrap();
+        let hooks = directory.path().join(".claude/settings.local.json");
+        std::fs::write(&hooks, "invalid json").unwrap();
+        assert!(super::remove(directory.path()).is_err());
+        assert!(exists(directory.path()));
+        assert_eq!(std::fs::read_to_string(hooks).unwrap(), "invalid json");
     }
 
     #[test]
