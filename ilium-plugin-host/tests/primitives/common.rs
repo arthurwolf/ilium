@@ -117,6 +117,7 @@ fn pane_node(id: NodeId, title: &str, content_kind: &str) -> TreeNode {
         agent: None,
         locked: false,
         revision: 1,
+        container: None,
     }
 }
 

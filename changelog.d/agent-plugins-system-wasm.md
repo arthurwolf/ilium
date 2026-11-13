@@ -15,6 +15,8 @@
 - Plugin contract: `wit/` again matches the manual, which adds the `telemetry`, `self-limits` and `self-describe` interfaces, `codec.hmac-sha256` and `codec.constant-time-equal`.
 - Plugin SDK: events now reach a plugin's `Handler` implementation whether or not `exports` names `handler`, as the manual states; before, such a plugin silently received no events.
 - Core plugin manifests declare command and view activation triggers in the global form `command:<plugin-id>/<local-id>` and `view:<plugin-id>/<local-id>`.
+- Plugin API: a tree node now says what kind of container it is (`node-view.container`: project, group, horizontal or vertical split, worktree) and which agent runs in a pane; `tree.children` and `tree.roots` follow the drawn order; `tree-changed` names renamed, moved and reordered nodes, not only new ones.
+- Plugin SDK: every host interface except the three resource ones can be called through `host()`, for example `HostTree::get(&mut *host(), id)`.
 
 ### Fixed
 - `ilium plugin kill` writes the audit event `plugin-killed` and an unknown plugin subcommand reports `usage.unknown-command`, the names the manual documents.

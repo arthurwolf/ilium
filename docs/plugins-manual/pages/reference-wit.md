@@ -265,12 +265,16 @@ interface tree {
   use errors.{plugin-error};
   enum node-class { container, pane, folder }
   enum agent-activity { none, working, idle, awaiting-approval, done, menu }
+  /// A split container shows its children side by side (horizontal) or stacked (vertical).
+  enum container-kind { project, group, split-horizontal, split-vertical, worktree }
   record agent-view { signature: string, activity: agent-activity, objective: option<string>, goal: option<string> }
   record node-view {
     id: node-id, parent: option<node-id>, class: node-class,
     /// "ilium.terminal", "ilium.editor", "ilium.board" or "<plugin-id>.<kind>".
     content-kind: option<string>,
     title: string, cwd: option<string>, agent: option<agent-view>, locked: bool, revision: u64,
+    /// What a container is; absent for a pane and for a folder.
+    container: option<container-kind>,
   }
   record node-query { content-kind: option<string>, signature: option<string>, under: option<node-id> }
   enum primitive-kind { terminal, editor, basic }

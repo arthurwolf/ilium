@@ -11,13 +11,15 @@
 //! envelope and holds the plugin's call until the outcome envelope returns or a short timeout
 //! passes, so a plugin is never told `ok` for something the server did not do.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-use ilium_core::{NodeKind, PaneContentKind, Tree};
+use ilium_core::{
+    ContainerKind as CoreContainerKind, NodeKind, PaneContentKind, SplitOrientation, Tree,
+};
 use ilium_ipc::plugin::{
     ContributionDelta, ContributionOp as WireOp, ControlBody, DeltaKind, EnvelopeBody,
     InstalledPlugin, PluginEnvelope, PluginHello, PluginMessage, Submission as WireSubmission,
@@ -26,7 +28,9 @@ use ilium_ipc::plugin::{
 use ilium_ipc::{ClientRequest, ServerEvent};
 use ilium_plugin_api::generated::host::log::Level;
 use ilium_plugin_api::generated::types::events::MessageEvent;
-use ilium_plugin_api::generated::types::tree::NodeClass;
+use ilium_plugin_api::generated::types::tree::{
+    AgentActivity, AgentView, ContainerKind, NodeClass,
+};
 use ilium_plugin_api::generated::types::{
     ActionKind, Area, CommandContext, CommandOrigin, ErrorCode, Event, Intent, NodeId,
     OpenViewSpec, Outcome, PluginError, PluginId, PluginSide, UiAction, UiTree, ViewTarget,
@@ -506,9 +510,61 @@ fn to_plugin(node: ilium_core::NodeId) -> NodeId {
     NodeId(node.0)
 }
 
+/// The agent of a pane as a plugin sees it. The signature is the provider's lower-case name;
+/// the objective text is not part of the tree and stays absent.
+fn agent_view(state: &ilium_core::AgentState) -> AgentView {
+    let activity = match state.activity() {
+        ilium_core::AgentActivity::Working
+        | ilium_core::AgentActivity::WaitingBackground
+        | ilium_core::AgentActivity::BackgroundTaskStillRunning => AgentActivity::Working,
+        ilium_core::AgentActivity::WaitingApproval => AgentActivity::AwaitingApproval,
+        ilium_core::AgentActivity::Done => AgentActivity::Done,
+        ilium_core::AgentActivity::Idle => AgentActivity::Idle,
+    };
+    let goal = state.goal.map(|goal| {
+        match goal {
+            ilium_core::GoalState::Active => "active",
+            ilium_core::GoalState::Paused => "paused",
+            ilium_core::GoalState::Blocked => "blocked",
+            ilium_core::GoalState::UsageLimited => "usage-limited",
+            ilium_core::GoalState::Reached => "reached",
+        }
+        .to_owned()
+    });
+    AgentView {
+        signature: match &state.class {
+            ilium_core::AgentClass::Claude => "claude".to_owned(),
+            ilium_core::AgentClass::Codex => "codex".to_owned(),
+            ilium_core::AgentClass::Antigravity => "antigravity".to_owned(),
+            ilium_core::AgentClass::Other(name) => name.to_lowercase(),
+        },
+        activity,
+        objective: None,
+        goal,
+    }
+}
+
 /// One tree node as a plugin sees it. The server facade builds the same view from its tree.
 fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
     let node = tree.get(id)?;
+    let container = match &node.kind {
+        NodeKind::Container(container) => Some(match &container.kind {
+            CoreContainerKind::Project { .. } => ContainerKind::Project,
+            CoreContainerKind::Group => ContainerKind::Group,
+            CoreContainerKind::SplitView {
+                orientation: SplitOrientation::Horizontal,
+            } => ContainerKind::SplitHorizontal,
+            CoreContainerKind::SplitView {
+                orientation: SplitOrientation::Vertical,
+            } => ContainerKind::SplitVertical,
+            CoreContainerKind::Worktree { .. } => ContainerKind::Worktree,
+        }),
+        NodeKind::Folder { .. } | NodeKind::Pane { .. } => None,
+    };
+    let agent = match &node.kind {
+        NodeKind::Pane { status, .. } => status.agent_state().map(agent_view),
+        NodeKind::Container(_) | NodeKind::Folder { .. } => None,
+    };
     let (class, content_kind) = match &node.kind {
         NodeKind::Container(_) => (NodeClass::Container, None),
         NodeKind::Folder { .. } => (NodeClass::Folder, None),
@@ -533,11 +589,77 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
         cwd: tree
             .pane_cwd(id)
             .map(|path| path.to_string_lossy().into_owned()),
-        agent: None,
+        agent,
         // `None` for a pane, which has no closed state to lock.
         locked: node.is_locked_closed().unwrap_or(false),
         revision: node.presentation_revision,
+        container,
     })
+}
+
+/// Every node id in pre-order: roots by ascending id, children in the order the tree draws
+/// them. `TreeRead::nodes` promises this order, and `tree.children` and `tree.roots` inherit
+/// their sibling order from it.
+fn preorder_ids(tree: &Tree) -> Vec<ilium_core::NodeId> {
+    let mut roots: Vec<_> = tree
+        .all_ids()
+        .filter(|id| tree.parent_of(*id).is_none())
+        .collect();
+    roots.sort_by_key(|id| id.0);
+    let mut ordered = Vec::new();
+    let mut stack: Vec<_> = roots.into_iter().rev().collect();
+    while let Some(id) = stack.pop() {
+        ordered.push(id);
+        if let Ok(children) = tree.children_of(id) {
+            stack.extend(children.iter().rev().copied());
+        }
+    }
+    // A node no root reaches is still readable by id, so it is still listed, last.
+    let mut stray: Vec<_> = tree.all_ids().filter(|id| !ordered.contains(id)).collect();
+    stray.sort_by_key(|id| id.0);
+    ordered.extend(stray);
+    ordered
+}
+
+/// A fingerprint of everything a plugin can read about one node, plus its place among its
+/// siblings. A node whose fingerprint differs between two snapshots is listed in
+/// `tree-changed`, so a rename, a move, a reorder, an agent change and a lock all reach plugins.
+fn node_mark(tree: &Tree, id: ilium_core::NodeId) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let position = tree.parent_of(id).and_then(|parent| {
+        tree.children_of(parent)
+            .ok()
+            .and_then(|children| children.iter().position(|child| *child == id))
+    });
+    position.hash(&mut hasher);
+    format!("{:?}", node_view(tree, id)).hash(&mut hasher);
+    hasher.finish()
+}
+
+/// The fingerprint of every node of a tree, by node id.
+fn tree_marks(tree: &Tree) -> BTreeMap<u64, u64> {
+    tree.all_ids()
+        .map(|id| (id.0, node_mark(tree, id)))
+        .collect()
+}
+
+/// What changed between two fingerprint maps: one `node-removed` per node that went away, then
+/// one `tree-changed` naming every node that is new or reads differently.
+fn tree_delta(known: &BTreeMap<u64, u64>, current: &BTreeMap<u64, u64>) -> Vec<Event> {
+    let mut batch: Vec<Event> = known
+        .keys()
+        .filter(|id| !current.contains_key(id))
+        .map(|id| Event::NodeRemoved(NodeId(*id)))
+        .collect();
+    batch.push(Event::TreeChanged(
+        current
+            .iter()
+            .filter(|(id, mark)| known.get(id) != Some(mark))
+            .map(|(id, _)| NodeId(*id))
+            .collect(),
+    ));
+    batch
 }
 
 /// The running plugin host of one client. Owned by the `App`; every method returns at once.
@@ -550,7 +672,7 @@ pub(crate) struct ClientPlugins {
     /// Plugin states as the server last reported them.
     server_states: BTreeMap<String, String>,
     /// Node ids of the last mirrored tree, to tell plugins what was removed.
-    known: BTreeSet<u64>,
+    known: BTreeMap<u64, u64>,
     /// The last refusal of an enable or disable request, for the plugin list.
     last_refusal: Option<String>,
 }
@@ -675,7 +797,7 @@ impl ClientPlugins {
             catalogue: manifests,
             server_entries: BTreeMap::new(),
             server_states: BTreeMap::new(),
-            known: BTreeSet::new(),
+            known: BTreeMap::new(),
             last_refusal: None,
         })
     }
@@ -695,12 +817,13 @@ impl ClientPlugins {
     }
 
     /// Refreshes the tree mirror after the client applied a tree snapshot and tells the
-    /// plugins which nodes appeared or went away.
+    /// plugins which nodes appeared, went away or read differently.
     pub(crate) fn sync_tree(&mut self, tree: &Tree, focused: Option<ilium_core::NodeId>) {
-        let mut ids: Vec<_> = tree.all_ids().collect();
-        ids.sort_by_key(|id| id.0);
-        let nodes: Vec<TreeNode> = ids.iter().filter_map(|id| node_view(tree, *id)).collect();
-        let current: BTreeSet<u64> = ids.iter().map(|id| id.0).collect();
+        let nodes: Vec<TreeNode> = preorder_ids(tree)
+            .into_iter()
+            .filter_map(|id| node_view(tree, id))
+            .collect();
+        let current = tree_marks(tree);
         if let Ok(mut mirror) = self.shared.nodes.lock() {
             *mirror = nodes;
         }
@@ -708,17 +831,7 @@ impl ClientPlugins {
             *slot = focused.map(to_plugin);
         }
         self.shared.epoch.fetch_add(1, Ordering::Relaxed);
-        let mut batch: Vec<Event> = self
-            .known
-            .difference(&current)
-            .map(|id| Event::NodeRemoved(NodeId(*id)))
-            .collect();
-        batch.push(Event::TreeChanged(
-            current
-                .difference(&self.known)
-                .map(|id| NodeId(*id))
-                .collect(),
-        ));
+        let batch = tree_delta(&self.known, &current);
         self.known = current;
         self.shared.post(move |runtime| {
             log_errors("event delivery", runtime.broadcast(&batch));

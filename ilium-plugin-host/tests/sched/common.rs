@@ -377,6 +377,7 @@ pub fn pane_node(id: u64) -> NodeView {
         agent: None,
         locked: false,
         revision: 1,
+        container: None,
     }
 }
 

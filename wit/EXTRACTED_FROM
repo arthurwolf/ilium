@@ -1,4 +1,4 @@
 source: docs/plugins-manual/pages/reference-wit.md
-sha256: d9a28197b873ebdf1819321aa67effe1e882d6ebea8875ebd59b3c40ed38b586
+sha256: 0a110765fce36eab549a8db22371830fe07b82a604597a3f7ecb0ce7061db697
 blocks: 86
 tool: tools/extract_wit.py

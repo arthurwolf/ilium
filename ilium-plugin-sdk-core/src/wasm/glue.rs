@@ -1,4 +1,4 @@
-// @generated from wit/ sha256=6920214d06495bdbeebe5f2635790bfcd244bf7a19f95dd9e7a12446f143b4d2
+// @generated from wit/ sha256=0ccb29e2d3d7b0806518a45f30823eb146adf907acc2d16fb94229696c352d22
 // output: ilium-plugin-sdk-core/src/wasm/glue.rs
 //! wasm32 guest glue: wit-bindgen bindings of every import interface, the conversions to
 //! and from the mirror types, the import wrappers and the macros `#[ilium_plugin]` expands.
@@ -95,6 +95,7 @@ world imports {
 "#,
         path: ["../wit/types", "../wit/host", "../wit/primitives", "../wit/anim"],
         generate_all,
+        generate_unused_types: true,
     });
 }
 
@@ -955,6 +956,40 @@ impl IntoMirror<m::types::tree::AgentActivity> for b::ilium::types::tree::AgentA
         }
     }
 }
+impl IntoWit<b::ilium::types::tree::ContainerKind> for m::types::tree::ContainerKind {
+    fn into_wit(self) -> b::ilium::types::tree::ContainerKind {
+        match self {
+            m::types::tree::ContainerKind::Project => b::ilium::types::tree::ContainerKind::Project,
+            m::types::tree::ContainerKind::Group => b::ilium::types::tree::ContainerKind::Group,
+            m::types::tree::ContainerKind::SplitHorizontal => {
+                b::ilium::types::tree::ContainerKind::SplitHorizontal
+            }
+            m::types::tree::ContainerKind::SplitVertical => {
+                b::ilium::types::tree::ContainerKind::SplitVertical
+            }
+            m::types::tree::ContainerKind::Worktree => {
+                b::ilium::types::tree::ContainerKind::Worktree
+            }
+        }
+    }
+}
+impl IntoMirror<m::types::tree::ContainerKind> for b::ilium::types::tree::ContainerKind {
+    fn into_mirror(self) -> m::types::tree::ContainerKind {
+        match self {
+            b::ilium::types::tree::ContainerKind::Project => m::types::tree::ContainerKind::Project,
+            b::ilium::types::tree::ContainerKind::Group => m::types::tree::ContainerKind::Group,
+            b::ilium::types::tree::ContainerKind::SplitHorizontal => {
+                m::types::tree::ContainerKind::SplitHorizontal
+            }
+            b::ilium::types::tree::ContainerKind::SplitVertical => {
+                m::types::tree::ContainerKind::SplitVertical
+            }
+            b::ilium::types::tree::ContainerKind::Worktree => {
+                m::types::tree::ContainerKind::Worktree
+            }
+        }
+    }
+}
 impl IntoWit<b::ilium::types::tree::AgentView> for m::types::tree::AgentView {
     fn into_wit(self) -> b::ilium::types::tree::AgentView {
         b::ilium::types::tree::AgentView {
@@ -987,6 +1022,7 @@ impl IntoWit<b::ilium::types::tree::NodeView> for m::types::tree::NodeView {
             agent: IntoWit::into_wit(self.agent),
             locked: IntoWit::into_wit(self.locked),
             revision: IntoWit::into_wit(self.revision),
+            container: IntoWit::into_wit(self.container),
         }
     }
 }
@@ -1002,6 +1038,7 @@ impl IntoMirror<m::types::tree::NodeView> for b::ilium::types::tree::NodeView {
             agent: IntoMirror::into_mirror(self.agent),
             locked: IntoMirror::into_mirror(self.locked),
             revision: IntoMirror::into_mirror(self.revision),
+            container: IntoMirror::into_mirror(self.container),
         }
     }
 }
@@ -10555,6 +10592,1219 @@ pub mod imports {
             IntoMirror::into_mirror(out)
         }
     }
+
+    /// `ilium:host/tree`.
+    pub mod tree {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn get(a0: m::types::ids::NodeId) -> ::core::option::Option<m::types::tree::NodeView> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::host::tree::get(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn children(a0: m::types::ids::NodeId) -> ::std::vec::Vec<m::types::ids::NodeId> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::host::tree::children(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn roots() -> ::std::vec::Vec<m::types::ids::NodeId> {
+            let out = b::ilium::host::tree::roots();
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn find(a0: m::types::tree::NodeQuery) -> ::std::vec::Vec<m::types::ids::NodeId> {
+            let w0: b::ilium::types::tree::NodeQuery = IntoWit::into_wit(a0);
+            let out = b::ilium::host::tree::find(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn metadata(a0: m::types::ids::NodeId) -> ::core::option::Option<::std::vec::Vec<u8>> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::host::tree::metadata(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn set_metadata(
+            a0: m::types::ids::NodeId,
+            a1: ::std::vec::Vec<u8>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: ::std::vec::Vec<u8> = IntoWit::into_wit(a1);
+            let out = b::ilium::host::tree::set_metadata(w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/panes`.
+    pub mod panes {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn info(a0: m::types::ids::NodeId) -> ::core::option::Option<m::types::tree::PaneInfo> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::host::panes::info(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn focused() -> ::core::option::Option<m::types::ids::NodeId> {
+            let out = b::ilium::host::panes::focused();
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/intents-host`.
+    pub mod intents_host {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn submit(
+            a0: m::types::intents::Submission,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::types::intents::Submission = IntoWit::into_wit(a0);
+            let out = b::ilium::host::intents_host::submit(&w0);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/commands`.
+    pub mod commands {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn set_state(
+            a0: ::std::string::String,
+            a1: bool,
+            a2: ::core::option::Option<bool>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let w1: bool = IntoWit::into_wit(a1);
+            let w2: ::core::option::Option<bool> = IntoWit::into_wit(a2);
+            let out = b::ilium::host::commands::set_state(&w0, w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn invoke(
+            a0: ::std::string::String,
+            a1: ::std::string::String,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let out = b::ilium::host::commands::invoke(&w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/ui-host`.
+    pub mod ui_host {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn invalidate(a0: m::types::ui::ViewTarget) -> () {
+            let w0: b::ilium::types::ui::ViewTarget = IntoWit::into_wit(a0);
+            let out = b::ilium::host::ui_host::invalidate(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn open_panel(
+            a0: ::std::string::String,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let out = b::ilium::host::ui_host::open_panel(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn close_panel(a0: ::std::string::String) -> () {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let out = b::ilium::host::ui_host::close_panel(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn open_popup(
+            a0: ::std::string::String,
+            a1: m::types::ui::PopupAnchor,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let w1: b::ilium::types::ui::PopupAnchor = IntoWit::into_wit(a1);
+            let out = b::ilium::host::ui_host::open_popup(&w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn open_popup_with(
+            a0: ::std::string::String,
+            a1: m::types::ui::PopupAnchor,
+            a2: m::types::ui::PopupOptions,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let w1: b::ilium::types::ui::PopupAnchor = IntoWit::into_wit(a1);
+            let w2: b::ilium::types::ui::PopupOptions = IntoWit::into_wit(a2);
+            let out = b::ilium::host::ui_host::open_popup_with(&w0, &w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn close_popup(a0: ::std::string::String) -> () {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let out = b::ilium::host::ui_host::close_popup(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn get_widget_state(
+            a0: m::types::ui::ViewTarget,
+            a1: ::std::string::String,
+        ) -> ::core::option::Option<m::types::ui::WidgetState> {
+            let w0: b::ilium::types::ui::ViewTarget = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let out = b::ilium::host::ui_host::get_widget_state(&w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn set_widget_state(
+            a0: m::types::ui::ViewTarget,
+            a1: ::std::string::String,
+            a2: m::types::ui::WidgetState,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ui::ViewTarget = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let w2: b::ilium::types::ui::WidgetState = IntoWit::into_wit(a2);
+            let out = b::ilium::host::ui_host::set_widget_state(&w0, &w1, &w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn display_width(a0: ::std::string::String) -> u16 {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let out = b::ilium::host::ui_host::display_width(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn theme() -> m::types::ui::ThemeTokens {
+            let out = b::ilium::host::ui_host::theme();
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn get_theme_extras() -> m::types::ui::ThemeExtras {
+            let out = b::ilium::host::ui_host::get_theme_extras();
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn write_surface(
+            a0: m::types::ui::ViewTarget,
+            a1: ::std::string::String,
+            a2: u32,
+            a3: m::types::ui::PixelFormat,
+            a4: ::std::vec::Vec<u8>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ui::ViewTarget = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let w2: u32 = IntoWit::into_wit(a2);
+            let w3: b::ilium::types::ui::PixelFormat = IntoWit::into_wit(a3);
+            let w4: ::std::vec::Vec<u8> = IntoWit::into_wit(a4);
+            let out = b::ilium::host::ui_host::write_surface(&w0, &w1, w2, w3, &w4);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/sessions`.
+    pub mod sessions {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn list_live() -> ::std::vec::Vec<m::host::sessions::LiveSession> {
+            let out = b::ilium::host::sessions::list_live();
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn send(
+            a0: m::host::sessions::CrossRequest,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::host::sessions::CrossRequest = IntoWit::into_wit(a0);
+            let out = b::ilium::host::sessions::send(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn take_reply(
+            a0: m::types::ids::RequestId,
+        ) -> ::core::option::Option<::std::string::String> {
+            let w0: b::ilium::types::ids::RequestId = IntoWit::into_wit(a0);
+            let out = b::ilium::host::sessions::take_reply(w0);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/kernel-settings`.
+    pub mod kernel_settings {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn read(
+            a0: ::std::string::String,
+        ) -> ::core::result::Result<::std::string::String, m::types::errors::PluginError> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let out = b::ilium::host::kernel_settings::read(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn write(
+            a0: ::std::string::String,
+            a1: ::std::string::String,
+            a2: ::std::string::String,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let w2: ::std::string::String = IntoWit::into_wit(a2);
+            let out = b::ilium::host::kernel_settings::write(&w0, &w1, &w2);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/keymap`.
+    pub mod keymap {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn bindings() -> ::std::vec::Vec<m::host::keymap::Binding> {
+            let out = b::ilium::host::keymap::bindings();
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn chord_label(a0: ::std::string::String) -> ::std::string::String {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let out = b::ilium::host::keymap::chord_label(&w0);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/help`.
+    pub mod help {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn topic(a0: ::std::string::String) -> ::core::option::Option<::std::string::String> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let out = b::ilium::host::help::topic(&w0);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/plugins`.
+    pub mod plugins {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn list() -> ::std::vec::Vec<m::host::plugins::PluginInfo> {
+            let out = b::ilium::host::plugins::list();
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn set_enabled(
+            a0: m::types::ids::PluginId,
+            a1: bool,
+            a2: ::std::string::String,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::PluginId = IntoWit::into_wit(a0);
+            let w1: bool = IntoWit::into_wit(a1);
+            let w2: ::std::string::String = IntoWit::into_wit(a2);
+            let out = b::ilium::host::plugins::set_enabled(&w0, w1, &w2);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/workspace`.
+    pub mod workspace {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn register(
+            a0: m::host::workspace::WorkspaceSpec,
+        ) -> ::core::result::Result<u64, m::types::errors::PluginError> {
+            let w0: b::ilium::host::workspace::WorkspaceSpec = IntoWit::into_wit(a0);
+            let out = b::ilium::host::workspace::register(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn release(a0: u64) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: u64 = IntoWit::into_wit(a0);
+            let out = b::ilium::host::workspace::release(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn list() -> ::std::vec::Vec<m::host::workspace::WorkspaceInfo> {
+            let out = b::ilium::host::workspace::list();
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/clipboard`.
+    pub mod clipboard {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn read_text() -> ::core::option::Option<::std::string::String> {
+            let out = b::ilium::host::clipboard::read_text();
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn write_text(
+            a0: ::std::string::String,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let out = b::ilium::host::clipboard::write_text(&w0);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/telemetry`.
+    pub mod telemetry {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn count(
+            a0: ::std::string::String,
+            a1: i64,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let w1: i64 = IntoWit::into_wit(a1);
+            let out = b::ilium::host::telemetry::count(&w0, w1);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/sounds`.
+    pub mod sounds {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn catalog() -> ::std::vec::Vec<::std::string::String> {
+            let out = b::ilium::host::sounds::catalog();
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/client-requests`.
+    pub mod client_requests {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn request(
+            a0: m::types::ids::ClientId,
+            a1: ::std::string::String,
+            a2: ::std::string::String,
+            a3: u32,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::types::ids::ClientId = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let w2: ::std::string::String = IntoWit::into_wit(a2);
+            let w3: u32 = IntoWit::into_wit(a3);
+            let out = b::ilium::host::client_requests::request(w0, &w1, &w2, w3);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn take_answer(
+            a0: m::types::ids::RequestId,
+        ) -> ::core::option::Option<::std::string::String> {
+            let w0: b::ilium::types::ids::RequestId = IntoWit::into_wit(a0);
+            let out = b::ilium::host::client_requests::take_answer(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn respond(
+            a0: u64,
+            a1: ::core::result::Result<::std::string::String, m::types::errors::PluginError>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: u64 = IntoWit::into_wit(a0);
+            let w1: ::core::result::Result<
+                ::std::string::String,
+                b::ilium::types::errors::PluginError,
+            > = IntoWit::into_wit(a1);
+            let out = b::ilium::host::client_requests::respond(
+                w0,
+                match &w1 {
+                    ::core::result::Result::Ok(value) => ::core::result::Result::Ok(value.as_str()),
+                    ::core::result::Result::Err(error) => ::core::result::Result::Err(error),
+                },
+            );
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/http-api`.
+    pub mod http_api {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn respond(
+            a0: u64,
+            a1: u16,
+            a2: ::std::vec::Vec<(::std::string::String, ::std::string::String)>,
+            a3: ::std::vec::Vec<u8>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: u64 = IntoWit::into_wit(a0);
+            let w1: u16 = IntoWit::into_wit(a1);
+            let w2: ::std::vec::Vec<(::std::string::String, ::std::string::String)> =
+                IntoWit::into_wit(a2);
+            let w3: ::std::vec::Vec<u8> = IntoWit::into_wit(a3);
+            let out = b::ilium::host::http_api::respond(w0, w1, &w2, &w3);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/catalogs`.
+    pub mod catalogs {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn query(
+            a0: m::host::catalogs::CatalogQuery,
+        ) -> ::core::result::Result<m::host::catalogs::CatalogPage, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::host::catalogs::CatalogQuery = IntoWit::into_wit(a0);
+            let out = b::ilium::host::catalogs::query(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn query_async(
+            a0: m::host::catalogs::CatalogQuery,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::host::catalogs::CatalogQuery = IntoWit::into_wit(a0);
+            let out = b::ilium::host::catalogs::query_async(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn take_page(
+            a0: m::types::ids::RequestId,
+        ) -> ::core::option::Option<m::host::catalogs::CatalogPage> {
+            let w0: b::ilium::types::ids::RequestId = IntoWit::into_wit(a0);
+            let out = b::ilium::host::catalogs::take_page(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn lookup(
+            a0: ::std::string::String,
+            a1: ::std::string::String,
+        ) -> ::core::option::Option<m::types::ui::CatalogItem> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let out = b::ilium::host::catalogs::lookup(&w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/vector`.
+    pub mod vector {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn embed(
+            a0: ::std::vec::Vec<::std::string::String>,
+            a1: ::std::string::String,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: ::std::vec::Vec<::std::string::String> = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let out = b::ilium::host::vector::embed(&w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn take_vectors(
+            a0: m::types::ids::RequestId,
+        ) -> ::core::option::Option<::std::vec::Vec<::std::vec::Vec<f32>>> {
+            let w0: b::ilium::types::ids::RequestId = IntoWit::into_wit(a0);
+            let out = b::ilium::host::vector::take_vectors(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn create_index(
+            a0: ::std::string::String,
+            a1: u16,
+        ) -> ::core::result::Result<m::types::ids::IndexId, m::types::errors::PluginError> {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let w1: u16 = IntoWit::into_wit(a1);
+            let out = b::ilium::host::vector::create_index(&w0, w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn upsert(
+            a0: m::types::ids::IndexId,
+            a1: ::std::vec::Vec<(::std::string::String, ::std::vec::Vec<f32>)>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::IndexId = IntoWit::into_wit(a0);
+            let w1: ::std::vec::Vec<(::std::string::String, ::std::vec::Vec<f32>)> =
+                IntoWit::into_wit(a1);
+            let out = b::ilium::host::vector::upsert(w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn remove_entries(
+            a0: m::types::ids::IndexId,
+            a1: ::std::vec::Vec<::std::string::String>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::IndexId = IntoWit::into_wit(a0);
+            let w1: ::std::vec::Vec<::std::string::String> = IntoWit::into_wit(a1);
+            let out = b::ilium::host::vector::remove_entries(w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn top_k(
+            a0: m::types::ids::IndexId,
+            a1: ::std::vec::Vec<f32>,
+            a2: u16,
+        ) -> ::core::result::Result<
+            ::std::vec::Vec<(::std::string::String, f32)>,
+            m::types::errors::PluginError,
+        > {
+            let w0: b::ilium::types::ids::IndexId = IntoWit::into_wit(a0);
+            let w1: ::std::vec::Vec<f32> = IntoWit::into_wit(a1);
+            let w2: u16 = IntoWit::into_wit(a2);
+            let out = b::ilium::host::vector::top_k(w0, &w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn drop_index(a0: m::types::ids::IndexId) -> () {
+            let w0: b::ilium::types::ids::IndexId = IntoWit::into_wit(a0);
+            let out = b::ilium::host::vector::drop_index(w0);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/codec`.
+    pub mod codec {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn inflate(
+            a0: m::host::codec::Compression,
+            a1: ::std::vec::Vec<u8>,
+            a2: u32,
+        ) -> ::core::result::Result<::std::vec::Vec<u8>, m::types::errors::PluginError> {
+            let w0: b::ilium::host::codec::Compression = IntoWit::into_wit(a0);
+            let w1: ::std::vec::Vec<u8> = IntoWit::into_wit(a1);
+            let w2: u32 = IntoWit::into_wit(a2);
+            let out = b::ilium::host::codec::inflate(w0, &w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn deflate(
+            a0: m::host::codec::Compression,
+            a1: ::std::vec::Vec<u8>,
+            a2: u8,
+        ) -> ::core::result::Result<::std::vec::Vec<u8>, m::types::errors::PluginError> {
+            let w0: b::ilium::host::codec::Compression = IntoWit::into_wit(a0);
+            let w1: ::std::vec::Vec<u8> = IntoWit::into_wit(a1);
+            let w2: u8 = IntoWit::into_wit(a2);
+            let out = b::ilium::host::codec::deflate(w0, &w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn get_image_info(
+            a0: ::std::vec::Vec<u8>,
+        ) -> ::core::result::Result<m::host::codec::ImageInfo, m::types::errors::PluginError>
+        {
+            let w0: ::std::vec::Vec<u8> = IntoWit::into_wit(a0);
+            let out = b::ilium::host::codec::get_image_info(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn decode_image(
+            a0: ::std::vec::Vec<u8>,
+            a1: u32,
+            a2: u32,
+        ) -> ::core::result::Result<m::host::codec::DecodedImage, m::types::errors::PluginError>
+        {
+            let w0: ::std::vec::Vec<u8> = IntoWit::into_wit(a0);
+            let w1: u32 = IntoWit::into_wit(a1);
+            let w2: u32 = IntoWit::into_wit(a2);
+            let out = b::ilium::host::codec::decode_image(&w0, w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn sha256(a0: ::std::vec::Vec<u8>) -> ::std::vec::Vec<u8> {
+            let w0: ::std::vec::Vec<u8> = IntoWit::into_wit(a0);
+            let out = b::ilium::host::codec::sha256(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn hmac_sha256(
+            a0: ::std::vec::Vec<u8>,
+            a1: ::std::vec::Vec<u8>,
+        ) -> ::core::result::Result<::std::vec::Vec<u8>, m::types::errors::PluginError> {
+            let w0: ::std::vec::Vec<u8> = IntoWit::into_wit(a0);
+            let w1: ::std::vec::Vec<u8> = IntoWit::into_wit(a1);
+            let out = b::ilium::host::codec::hmac_sha256(&w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn constant_time_equal(a0: ::std::vec::Vec<u8>, a1: ::std::vec::Vec<u8>) -> bool {
+            let w0: ::std::vec::Vec<u8> = IntoWit::into_wit(a0);
+            let w1: ::std::vec::Vec<u8> = IntoWit::into_wit(a1);
+            let out = b::ilium::host::codec::constant_time_equal(&w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn rasterize_text(
+            a0: m::host::codec::RasterText,
+        ) -> ::core::result::Result<m::host::codec::DecodedImage, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::host::codec::RasterText = IntoWit::into_wit(a0);
+            let out = b::ilium::host::codec::rasterize_text(&w0);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/geocode`.
+    pub mod geocode {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn search(
+            a0: m::host::geocode::GeocodeQuery,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::host::geocode::GeocodeQuery = IntoWit::into_wit(a0);
+            let out = b::ilium::host::geocode::search(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn reverse(
+            a0: m::types::geo::GeoPoint,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::types::geo::GeoPoint = IntoWit::into_wit(a0);
+            let out = b::ilium::host::geocode::reverse(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn take_places(
+            a0: m::types::ids::RequestId,
+        ) -> ::core::option::Option<::std::vec::Vec<m::types::geo::GeoPlace>> {
+            let w0: b::ilium::types::ids::RequestId = IntoWit::into_wit(a0);
+            let out = b::ilium::host::geocode::take_places(w0);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/location`.
+    pub mod location {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn current() -> ::core::option::Option<(f64, f64)> {
+            let out = b::ilium::host::location::current();
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/media`.
+    pub mod media {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn open_video(
+            a0: m::types::paths::FsPath,
+        ) -> ::core::result::Result<(u64, m::host::media::VideoInfo), m::types::errors::PluginError>
+        {
+            let w0: b::ilium::types::paths::FsPath = IntoWit::into_wit(a0);
+            let out = b::ilium::host::media::open_video(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn open_video_bytes(
+            a0: ::std::vec::Vec<u8>,
+            a1: ::std::string::String,
+        ) -> ::core::result::Result<(u64, m::host::media::VideoInfo), m::types::errors::PluginError>
+        {
+            let w0: ::std::vec::Vec<u8> = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let out = b::ilium::host::media::open_video_bytes(&w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn open_video_range(
+            a0: m::types::paths::FsPath,
+            a1: u64,
+            a2: ::core::option::Option<u64>,
+        ) -> ::core::result::Result<(u64, m::host::media::VideoInfo), m::types::errors::PluginError>
+        {
+            let w0: b::ilium::types::paths::FsPath = IntoWit::into_wit(a0);
+            let w1: u64 = IntoWit::into_wit(a1);
+            let w2: ::core::option::Option<u64> = IntoWit::into_wit(a2);
+            let out = b::ilium::host::media::open_video_range(&w0, w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn next_frame(
+            a0: u64,
+            a1: u32,
+            a2: u32,
+        ) -> ::core::result::Result<
+            ::core::option::Option<::std::vec::Vec<u8>>,
+            m::types::errors::PluginError,
+        > {
+            let w0: u64 = IntoWit::into_wit(a0);
+            let w1: u32 = IntoWit::into_wit(a1);
+            let w2: u32 = IntoWit::into_wit(a2);
+            let out = b::ilium::host::media::next_frame(w0, w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn seek(a0: u64, a1: u64) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: u64 = IntoWit::into_wit(a0);
+            let w1: u64 = IntoWit::into_wit(a1);
+            let out = b::ilium::host::media::seek(w0, w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn close_video(a0: u64) -> () {
+            let w0: u64 = IntoWit::into_wit(a0);
+            let out = b::ilium::host::media::close_video(w0);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/audio`.
+    pub mod audio {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn devices() -> ::std::vec::Vec<m::host::audio::AudioDevice> {
+            let out = b::ilium::host::audio::devices();
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn open_capture(
+            a0: ::core::option::Option<::std::string::String>,
+            a1: u32,
+            a2: u8,
+        ) -> ::core::result::Result<u64, m::types::errors::PluginError> {
+            let w0: ::core::option::Option<::std::string::String> = IntoWit::into_wit(a0);
+            let w1: u32 = IntoWit::into_wit(a1);
+            let w2: u8 = IntoWit::into_wit(a2);
+            let out = b::ilium::host::audio::open_capture(w0.as_deref(), w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn open_loopback(
+            a0: u32,
+            a1: u8,
+        ) -> ::core::result::Result<u64, m::types::errors::PluginError> {
+            let w0: u32 = IntoWit::into_wit(a0);
+            let w1: u8 = IntoWit::into_wit(a1);
+            let out = b::ilium::host::audio::open_loopback(w0, w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn close_capture(a0: u64) -> () {
+            let w0: u64 = IntoWit::into_wit(a0);
+            let out = b::ilium::host::audio::close_capture(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn play(
+            a0: ::std::vec::Vec<i16>,
+            a1: u32,
+            a2: u8,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: ::std::vec::Vec<i16> = IntoWit::into_wit(a0);
+            let w1: u32 = IntoWit::into_wit(a1);
+            let w2: u8 = IntoWit::into_wit(a2);
+            let out = b::ilium::host::audio::play(&w0, w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/self-limits`.
+    pub mod self_limits {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn limits() -> ::std::vec::Vec<m::host::self_limits::Budget> {
+            let out = b::ilium::host::self_limits::limits();
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:host/self-describe`.
+    pub mod self_describe {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn describe() -> m::host::self_describe::SelfDescription {
+            let out = b::ilium::host::self_describe::describe();
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:primitives/terminal`.
+    pub mod terminal {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn read_screen(
+            a0: m::types::ids::NodeId,
+            a1: m::primitives::terminal::ScreenPart,
+            a2: u32,
+        ) -> ::core::option::Option<m::primitives::terminal::Screen> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: b::ilium::primitives::terminal::ScreenPart = IntoWit::into_wit(a1);
+            let w2: u32 = IntoWit::into_wit(a2);
+            let out = b::ilium::primitives::terminal::read_screen(w0, w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn get_selection(
+            a0: m::types::ids::NodeId,
+        ) -> ::core::option::Option<m::primitives::terminal::Selection> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::terminal::get_selection(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn add_output_filter(
+            a0: m::types::ids::NodeId,
+            a1: m::primitives::terminal::OutputFilter,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: b::ilium::primitives::terminal::OutputFilter = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::terminal::add_output_filter(w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn remove_output_filter(a0: m::types::ids::NodeId, a1: ::std::string::String) -> () {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::terminal::remove_output_filter(w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn claim_pointer(
+            a0: m::types::ids::NodeId,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::terminal::claim_pointer(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn claim_pointer_gesture(
+            a0: m::types::ids::NodeId,
+            a1: m::types::ui::PointerModifiers,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: b::ilium::types::ui::PointerModifiers = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::terminal::claim_pointer_gesture(w0, w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn release_pointer(a0: m::types::ids::NodeId) -> () {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::terminal::release_pointer(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn set_highlights(
+            a0: m::types::ids::NodeId,
+            a1: ::std::string::String,
+            a2: ::std::vec::Vec<m::primitives::terminal::CellRegion>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let w2: ::std::vec::Vec<b::ilium::primitives::terminal::CellRegion> =
+                IntoWit::into_wit(a2);
+            let out = b::ilium::primitives::terminal::set_highlights(w0, &w1, &w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn clear_highlights(a0: m::types::ids::NodeId, a1: ::std::string::String) -> () {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::terminal::clear_highlights(w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn read_cells(
+            a0: m::types::ids::NodeId,
+            a1: m::primitives::terminal::ScreenPart,
+            a2: u32,
+            a3: u32,
+        ) -> ::core::option::Option<m::primitives::terminal::CellRows> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: b::ilium::primitives::terminal::ScreenPart = IntoWit::into_wit(a1);
+            let w2: u32 = IntoWit::into_wit(a2);
+            let w3: u32 = IntoWit::into_wit(a3);
+            let out = b::ilium::primitives::terminal::read_cells(w0, w1, w2, w3);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn modes(
+            a0: m::types::ids::NodeId,
+        ) -> ::core::option::Option<m::primitives::terminal::TerminalMode> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::terminal::modes(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn get_foreground_process(
+            a0: m::types::ids::NodeId,
+        ) -> ::core::option::Option<m::primitives::terminal::ForegroundProcess> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::terminal::get_foreground_process(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn freeze_snapshot(
+            a0: m::types::ids::NodeId,
+        ) -> ::core::result::Result<u64, m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::terminal::freeze_snapshot(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn read_snapshot_cells(
+            a0: u64,
+            a1: u32,
+            a2: u32,
+        ) -> ::core::option::Option<m::primitives::terminal::CellRows> {
+            let w0: u64 = IntoWit::into_wit(a0);
+            let w1: u32 = IntoWit::into_wit(a1);
+            let w2: u32 = IntoWit::into_wit(a2);
+            let out = b::ilium::primitives::terminal::read_snapshot_cells(w0, w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn drop_snapshot(a0: u64) -> () {
+            let w0: u64 = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::terminal::drop_snapshot(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn history_text(
+            a0: m::types::ids::NodeId,
+            a1: u32,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: u32 = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::terminal::history_text(w0, w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn take_history(
+            a0: m::types::ids::RequestId,
+        ) -> ::core::option::Option<::std::string::String> {
+            let w0: b::ilium::types::ids::RequestId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::terminal::take_history(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn search_history(
+            a0: m::types::ids::NodeId,
+            a1: ::std::string::String,
+            a2: u16,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let w2: u16 = IntoWit::into_wit(a2);
+            let out = b::ilium::primitives::terminal::search_history(w0, &w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn take_matches(
+            a0: m::types::ids::RequestId,
+        ) -> ::core::option::Option<::std::vec::Vec<m::primitives::terminal::HistoryMatch>>
+        {
+            let w0: b::ilium::types::ids::RequestId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::terminal::take_matches(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn lock_input(
+            a0: m::types::ids::NodeId,
+            a1: u16,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: u16 = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::terminal::lock_input(w0, w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn unlock_input(a0: m::types::ids::NodeId) -> () {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::terminal::unlock_input(w0);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:primitives/basic`.
+    pub mod basic {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn set_title(
+            a0: m::types::ids::NodeId,
+            a1: ::std::string::String,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::basic::set_title(w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn set_status(
+            a0: m::types::ids::NodeId,
+            a1: m::types::text::StyledText,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: b::ilium::types::text::StyledText = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::basic::set_status(w0, &w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn request_focus(
+            a0: m::types::ids::NodeId,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::basic::request_focus(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn size(a0: m::types::ids::NodeId) -> ::core::option::Option<(u16, u16)> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::basic::size(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn report_activity(
+            a0: m::types::ids::NodeId,
+            a1: m::types::tree::AgentActivity,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: b::ilium::types::tree::AgentActivity = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::basic::report_activity(w0, w1);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn set_dirty(
+            a0: m::types::ids::NodeId,
+            a1: bool,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let w1: bool = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::basic::set_dirty(w0, w1);
+            IntoMirror::into_mirror(out)
+        }
+    }
+
+    /// `ilium:primitives/editor`.
+    pub mod editor {
+        use super::{b, m, IntoMirror, IntoWit};
+
+        pub fn buffers() -> ::std::vec::Vec<m::types::editing::BufferRef> {
+            let out = b::ilium::primitives::editor::buffers();
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn buffer_for_pane(
+            a0: m::types::ids::NodeId,
+        ) -> ::core::option::Option<m::types::editing::BufferRef> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::editor::buffer_for_pane(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn read_lines(
+            a0: m::types::ids::BufferId,
+            a1: u32,
+            a2: u32,
+        ) -> ::core::result::Result<
+            ::std::vec::Vec<::std::string::String>,
+            m::types::errors::PluginError,
+        > {
+            let w0: b::ilium::types::ids::BufferId = IntoWit::into_wit(a0);
+            let w1: u32 = IntoWit::into_wit(a1);
+            let w2: u32 = IntoWit::into_wit(a2);
+            let out = b::ilium::primitives::editor::read_lines(w0, w1, w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn selections(
+            a0: m::types::ids::BufferId,
+        ) -> ::std::vec::Vec<m::types::editing::TextRange> {
+            let w0: b::ilium::types::ids::BufferId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::editor::selections(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn set_decorations(
+            a0: m::types::ids::BufferId,
+            a1: ::std::string::String,
+            a2: ::std::vec::Vec<m::primitives::editor::RangeDecoration>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::BufferId = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let w2: ::std::vec::Vec<b::ilium::primitives::editor::RangeDecoration> =
+                IntoWit::into_wit(a2);
+            let out = b::ilium::primitives::editor::set_decorations(w0, &w1, &w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn set_gutter(
+            a0: m::types::ids::BufferId,
+            a1: ::std::string::String,
+            a2: ::std::vec::Vec<m::primitives::editor::GutterMark>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::BufferId = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let w2: ::std::vec::Vec<b::ilium::primitives::editor::GutterMark> =
+                IntoWit::into_wit(a2);
+            let out = b::ilium::primitives::editor::set_gutter(w0, &w1, &w2);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn create_buffer(
+            a0: ::std::string::String,
+            a1: ::core::option::Option<::std::string::String>,
+        ) -> ::core::result::Result<m::types::ids::BufferId, m::types::errors::PluginError>
+        {
+            let w0: ::std::string::String = IntoWit::into_wit(a0);
+            let w1: ::core::option::Option<::std::string::String> = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::editor::create_buffer(&w0, w1.as_deref());
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn load_file(
+            a0: m::types::paths::FsPath,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::types::paths::FsPath = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::editor::load_file(&w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn take_buffer(
+            a0: m::types::ids::RequestId,
+        ) -> ::core::option::Option<m::types::ids::BufferId> {
+            let w0: b::ilium::types::ids::RequestId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::editor::take_buffer(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn save_buffer(
+            a0: m::types::ids::BufferId,
+            a1: ::core::option::Option<m::types::paths::FsPath>,
+        ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError>
+        {
+            let w0: b::ilium::types::ids::BufferId = IntoWit::into_wit(a0);
+            let w1: ::core::option::Option<b::ilium::types::paths::FsPath> = IntoWit::into_wit(a1);
+            let out = b::ilium::primitives::editor::save_buffer(w0, w1.as_ref());
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn close_buffer(a0: m::types::ids::BufferId) -> () {
+            let w0: b::ilium::types::ids::BufferId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::editor::close_buffer(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn viewport(
+            a0: m::types::ids::NodeId,
+        ) -> ::core::option::Option<m::types::editing::EditorViewport> {
+            let w0: b::ilium::types::ids::NodeId = IntoWit::into_wit(a0);
+            let out = b::ilium::primitives::editor::viewport(w0);
+            IntoMirror::into_mirror(out)
+        }
+
+        pub fn set_minimap_marks(
+            a0: m::types::ids::BufferId,
+            a1: ::std::string::String,
+            a2: ::std::vec::Vec<m::primitives::editor::MinimapMark>,
+        ) -> ::core::result::Result<(), m::types::errors::PluginError> {
+            let w0: b::ilium::types::ids::BufferId = IntoWit::into_wit(a0);
+            let w1: ::std::string::String = IntoWit::into_wit(a1);
+            let w2: ::std::vec::Vec<b::ilium::primitives::editor::MinimapMark> =
+                IntoWit::into_wit(a2);
+            let out = b::ilium::primitives::editor::set_minimap_marks(w0, &w1, &w2);
+            IntoMirror::into_mirror(out)
+        }
+    }
 }
 
 /// `ilium:host/log` for the host type of a component: `on` calls the imports, `off`
@@ -11628,6 +12878,1398 @@ macro_rules! __ilium_wasm_host_journal {
     };
     (scene $host:ident) => {
         $crate::__ilium_wasm_host_journal!(off $host);
+    };
+}
+
+/// `ilium:host/tree` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_tree {
+    (on $host:ident) => {
+        impl $crate::generated::host::tree::HostTree for $host {
+            fn get(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::types::tree::NodeView> {
+                $crate::wasm::imports::tree::get(a0)
+            }
+            fn children(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::std::vec::Vec<$crate::generated::types::ids::NodeId> {
+                $crate::wasm::imports::tree::children(a0)
+            }
+            fn roots(&mut self) -> ::std::vec::Vec<$crate::generated::types::ids::NodeId> {
+                $crate::wasm::imports::tree::roots()
+            }
+            fn find(&mut self, a0: $crate::generated::types::tree::NodeQuery) -> ::std::vec::Vec<$crate::generated::types::ids::NodeId> {
+                $crate::wasm::imports::tree::find(a0)
+            }
+            fn metadata(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<::std::vec::Vec<u8>> {
+                $crate::wasm::imports::tree::metadata(a0)
+            }
+            fn set_metadata(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::vec::Vec<u8>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::tree::set_metadata(a0, a1)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::tree::HostTree for $host {
+            fn get(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::types::tree::NodeView> {
+                <$crate::HostHandle as $crate::generated::host::tree::HostTree>::get(&mut $crate::wasm::detached(), a0)
+            }
+            fn children(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::std::vec::Vec<$crate::generated::types::ids::NodeId> {
+                <$crate::HostHandle as $crate::generated::host::tree::HostTree>::children(&mut $crate::wasm::detached(), a0)
+            }
+            fn roots(&mut self) -> ::std::vec::Vec<$crate::generated::types::ids::NodeId> {
+                <$crate::HostHandle as $crate::generated::host::tree::HostTree>::roots(&mut $crate::wasm::detached())
+            }
+            fn find(&mut self, a0: $crate::generated::types::tree::NodeQuery) -> ::std::vec::Vec<$crate::generated::types::ids::NodeId> {
+                <$crate::HostHandle as $crate::generated::host::tree::HostTree>::find(&mut $crate::wasm::detached(), a0)
+            }
+            fn metadata(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<::std::vec::Vec<u8>> {
+                <$crate::HostHandle as $crate::generated::host::tree::HostTree>::metadata(&mut $crate::wasm::detached(), a0)
+            }
+            fn set_metadata(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::vec::Vec<u8>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::tree::HostTree>::set_metadata(&mut $crate::wasm::detached(), a0, a1)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_tree!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_tree!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_tree!(off $host);
+    };
+}
+
+/// `ilium:host/panes` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_panes {
+    (on $host:ident) => {
+        impl $crate::generated::host::panes::HostPanes for $host {
+            fn info(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::types::tree::PaneInfo> {
+                $crate::wasm::imports::panes::info(a0)
+            }
+            fn focused(&mut self) -> ::core::option::Option<$crate::generated::types::ids::NodeId> {
+                $crate::wasm::imports::panes::focused()
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::panes::HostPanes for $host {
+            fn info(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::types::tree::PaneInfo> {
+                <$crate::HostHandle as $crate::generated::host::panes::HostPanes>::info(&mut $crate::wasm::detached(), a0)
+            }
+            fn focused(&mut self) -> ::core::option::Option<$crate::generated::types::ids::NodeId> {
+                <$crate::HostHandle as $crate::generated::host::panes::HostPanes>::focused(&mut $crate::wasm::detached())
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_panes!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_panes!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_panes!(off $host);
+    };
+}
+
+/// `ilium:host/intents-host` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_intents_host {
+    (on $host:ident) => {
+        impl $crate::generated::host::intents_host::HostIntentsHost for $host {
+            fn submit(&mut self, a0: $crate::generated::types::intents::Submission) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::intents_host::submit(a0)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::intents_host::HostIntentsHost for $host {
+            fn submit(&mut self, a0: $crate::generated::types::intents::Submission) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::intents_host::HostIntentsHost>::submit(&mut $crate::wasm::detached(), a0)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_intents_host!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_intents_host!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_intents_host!(off $host);
+    };
+}
+
+/// `ilium:host/commands` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_commands {
+    (on $host:ident) => {
+        impl $crate::generated::host::commands::HostCommands for $host {
+            fn set_state(&mut self, a0: ::std::string::String, a1: bool, a2: ::core::option::Option<bool>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::commands::set_state(a0, a1, a2)
+            }
+            fn invoke(&mut self, a0: ::std::string::String, a1: ::std::string::String) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::commands::invoke(a0, a1)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::commands::HostCommands for $host {
+            fn set_state(&mut self, a0: ::std::string::String, a1: bool, a2: ::core::option::Option<bool>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::commands::HostCommands>::set_state(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn invoke(&mut self, a0: ::std::string::String, a1: ::std::string::String) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::commands::HostCommands>::invoke(&mut $crate::wasm::detached(), a0, a1)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_commands!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_commands!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_commands!(off $host);
+    };
+}
+
+/// `ilium:host/ui-host` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_ui_host {
+    (on $host:ident) => {
+        impl $crate::generated::host::ui_host::HostUiHost for $host {
+            fn invalidate(&mut self, a0: $crate::generated::types::ui::ViewTarget) -> () {
+                $crate::wasm::imports::ui_host::invalidate(a0)
+            }
+            fn open_panel(&mut self, a0: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::ui_host::open_panel(a0)
+            }
+            fn close_panel(&mut self, a0: ::std::string::String) -> () {
+                $crate::wasm::imports::ui_host::close_panel(a0)
+            }
+            fn open_popup(&mut self, a0: ::std::string::String, a1: $crate::generated::types::ui::PopupAnchor) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::ui_host::open_popup(a0, a1)
+            }
+            fn open_popup_with(&mut self, a0: ::std::string::String, a1: $crate::generated::types::ui::PopupAnchor, a2: $crate::generated::types::ui::PopupOptions) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::ui_host::open_popup_with(a0, a1, a2)
+            }
+            fn close_popup(&mut self, a0: ::std::string::String) -> () {
+                $crate::wasm::imports::ui_host::close_popup(a0)
+            }
+            fn get_widget_state(&mut self, a0: $crate::generated::types::ui::ViewTarget, a1: ::std::string::String) -> ::core::option::Option<$crate::generated::types::ui::WidgetState> {
+                $crate::wasm::imports::ui_host::get_widget_state(a0, a1)
+            }
+            fn set_widget_state(&mut self, a0: $crate::generated::types::ui::ViewTarget, a1: ::std::string::String, a2: $crate::generated::types::ui::WidgetState) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::ui_host::set_widget_state(a0, a1, a2)
+            }
+            fn display_width(&mut self, a0: ::std::string::String) -> u16 {
+                $crate::wasm::imports::ui_host::display_width(a0)
+            }
+            fn theme(&mut self) -> $crate::generated::types::ui::ThemeTokens {
+                $crate::wasm::imports::ui_host::theme()
+            }
+            fn get_theme_extras(&mut self) -> $crate::generated::types::ui::ThemeExtras {
+                $crate::wasm::imports::ui_host::get_theme_extras()
+            }
+            fn write_surface(&mut self, a0: $crate::generated::types::ui::ViewTarget, a1: ::std::string::String, a2: u32, a3: $crate::generated::types::ui::PixelFormat, a4: ::std::vec::Vec<u8>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::ui_host::write_surface(a0, a1, a2, a3, a4)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::ui_host::HostUiHost for $host {
+            fn invalidate(&mut self, a0: $crate::generated::types::ui::ViewTarget) -> () {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::invalidate(&mut $crate::wasm::detached(), a0)
+            }
+            fn open_panel(&mut self, a0: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::open_panel(&mut $crate::wasm::detached(), a0)
+            }
+            fn close_panel(&mut self, a0: ::std::string::String) -> () {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::close_panel(&mut $crate::wasm::detached(), a0)
+            }
+            fn open_popup(&mut self, a0: ::std::string::String, a1: $crate::generated::types::ui::PopupAnchor) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::open_popup(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn open_popup_with(&mut self, a0: ::std::string::String, a1: $crate::generated::types::ui::PopupAnchor, a2: $crate::generated::types::ui::PopupOptions) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::open_popup_with(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn close_popup(&mut self, a0: ::std::string::String) -> () {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::close_popup(&mut $crate::wasm::detached(), a0)
+            }
+            fn get_widget_state(&mut self, a0: $crate::generated::types::ui::ViewTarget, a1: ::std::string::String) -> ::core::option::Option<$crate::generated::types::ui::WidgetState> {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::get_widget_state(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn set_widget_state(&mut self, a0: $crate::generated::types::ui::ViewTarget, a1: ::std::string::String, a2: $crate::generated::types::ui::WidgetState) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::set_widget_state(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn display_width(&mut self, a0: ::std::string::String) -> u16 {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::display_width(&mut $crate::wasm::detached(), a0)
+            }
+            fn theme(&mut self) -> $crate::generated::types::ui::ThemeTokens {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::theme(&mut $crate::wasm::detached())
+            }
+            fn get_theme_extras(&mut self) -> $crate::generated::types::ui::ThemeExtras {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::get_theme_extras(&mut $crate::wasm::detached())
+            }
+            fn write_surface(&mut self, a0: $crate::generated::types::ui::ViewTarget, a1: ::std::string::String, a2: u32, a3: $crate::generated::types::ui::PixelFormat, a4: ::std::vec::Vec<u8>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::ui_host::HostUiHost>::write_surface(&mut $crate::wasm::detached(), a0, a1, a2, a3, a4)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_ui_host!(off $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_ui_host!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_ui_host!(off $host);
+    };
+}
+
+/// `ilium:host/sessions` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_sessions {
+    (on $host:ident) => {
+        impl $crate::generated::host::sessions::HostSessions for $host {
+            fn list_live(&mut self) -> ::std::vec::Vec<$crate::generated::host::sessions::LiveSession> {
+                $crate::wasm::imports::sessions::list_live()
+            }
+            fn send(&mut self, a0: $crate::generated::host::sessions::CrossRequest) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::sessions::send(a0)
+            }
+            fn take_reply(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::string::String> {
+                $crate::wasm::imports::sessions::take_reply(a0)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::sessions::HostSessions for $host {
+            fn list_live(&mut self) -> ::std::vec::Vec<$crate::generated::host::sessions::LiveSession> {
+                <$crate::HostHandle as $crate::generated::host::sessions::HostSessions>::list_live(&mut $crate::wasm::detached())
+            }
+            fn send(&mut self, a0: $crate::generated::host::sessions::CrossRequest) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::sessions::HostSessions>::send(&mut $crate::wasm::detached(), a0)
+            }
+            fn take_reply(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::string::String> {
+                <$crate::HostHandle as $crate::generated::host::sessions::HostSessions>::take_reply(&mut $crate::wasm::detached(), a0)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_sessions!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_sessions!(off $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_sessions!(off $host);
+    };
+}
+
+/// `ilium:host/kernel-settings` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_kernel_settings {
+    (on $host:ident) => {
+        impl $crate::generated::host::kernel_settings::HostKernelSettings for $host {
+            fn read(&mut self, a0: ::std::string::String) -> ::core::result::Result<::std::string::String, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::kernel_settings::read(a0)
+            }
+            fn write(&mut self, a0: ::std::string::String, a1: ::std::string::String, a2: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::kernel_settings::write(a0, a1, a2)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::kernel_settings::HostKernelSettings for $host {
+            fn read(&mut self, a0: ::std::string::String) -> ::core::result::Result<::std::string::String, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::kernel_settings::HostKernelSettings>::read(&mut $crate::wasm::detached(), a0)
+            }
+            fn write(&mut self, a0: ::std::string::String, a1: ::std::string::String, a2: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::kernel_settings::HostKernelSettings>::write(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_kernel_settings!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_kernel_settings!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_kernel_settings!(off $host);
+    };
+}
+
+/// `ilium:host/keymap` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_keymap {
+    (on $host:ident) => {
+        impl $crate::generated::host::keymap::HostKeymap for $host {
+            fn bindings(&mut self) -> ::std::vec::Vec<$crate::generated::host::keymap::Binding> {
+                $crate::wasm::imports::keymap::bindings()
+            }
+            fn chord_label(&mut self, a0: ::std::string::String) -> ::std::string::String {
+                $crate::wasm::imports::keymap::chord_label(a0)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::keymap::HostKeymap for $host {
+            fn bindings(&mut self) -> ::std::vec::Vec<$crate::generated::host::keymap::Binding> {
+                <$crate::HostHandle as $crate::generated::host::keymap::HostKeymap>::bindings(&mut $crate::wasm::detached())
+            }
+            fn chord_label(&mut self, a0: ::std::string::String) -> ::std::string::String {
+                <$crate::HostHandle as $crate::generated::host::keymap::HostKeymap>::chord_label(&mut $crate::wasm::detached(), a0)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_keymap!(off $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_keymap!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_keymap!(off $host);
+    };
+}
+
+/// `ilium:host/help` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_help {
+    (on $host:ident) => {
+        impl $crate::generated::host::help::HostHelp for $host {
+            fn topic(&mut self, a0: ::std::string::String) -> ::core::option::Option<::std::string::String> {
+                $crate::wasm::imports::help::topic(a0)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::help::HostHelp for $host {
+            fn topic(&mut self, a0: ::std::string::String) -> ::core::option::Option<::std::string::String> {
+                <$crate::HostHandle as $crate::generated::host::help::HostHelp>::topic(&mut $crate::wasm::detached(), a0)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_help!(off $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_help!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_help!(off $host);
+    };
+}
+
+/// `ilium:host/plugins` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_plugins {
+    (on $host:ident) => {
+        impl $crate::generated::host::plugins::HostPlugins for $host {
+            fn list(&mut self) -> ::std::vec::Vec<$crate::generated::host::plugins::PluginInfo> {
+                $crate::wasm::imports::plugins::list()
+            }
+            fn set_enabled(&mut self, a0: $crate::generated::types::ids::PluginId, a1: bool, a2: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::plugins::set_enabled(a0, a1, a2)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::plugins::HostPlugins for $host {
+            fn list(&mut self) -> ::std::vec::Vec<$crate::generated::host::plugins::PluginInfo> {
+                <$crate::HostHandle as $crate::generated::host::plugins::HostPlugins>::list(&mut $crate::wasm::detached())
+            }
+            fn set_enabled(&mut self, a0: $crate::generated::types::ids::PluginId, a1: bool, a2: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::plugins::HostPlugins>::set_enabled(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_plugins!(off $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_plugins!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_plugins!(off $host);
+    };
+}
+
+/// `ilium:host/workspace` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_workspace {
+    (on $host:ident) => {
+        impl $crate::generated::host::workspace::HostWorkspace for $host {
+            fn register(&mut self, a0: $crate::generated::host::workspace::WorkspaceSpec) -> ::core::result::Result<u64, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::workspace::register(a0)
+            }
+            fn release(&mut self, a0: u64) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::workspace::release(a0)
+            }
+            fn list(&mut self) -> ::std::vec::Vec<$crate::generated::host::workspace::WorkspaceInfo> {
+                $crate::wasm::imports::workspace::list()
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::workspace::HostWorkspace for $host {
+            fn register(&mut self, a0: $crate::generated::host::workspace::WorkspaceSpec) -> ::core::result::Result<u64, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::workspace::HostWorkspace>::register(&mut $crate::wasm::detached(), a0)
+            }
+            fn release(&mut self, a0: u64) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::workspace::HostWorkspace>::release(&mut $crate::wasm::detached(), a0)
+            }
+            fn list(&mut self) -> ::std::vec::Vec<$crate::generated::host::workspace::WorkspaceInfo> {
+                <$crate::HostHandle as $crate::generated::host::workspace::HostWorkspace>::list(&mut $crate::wasm::detached())
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_workspace!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_workspace!(off $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_workspace!(off $host);
+    };
+}
+
+/// `ilium:host/clipboard` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_clipboard {
+    (on $host:ident) => {
+        impl $crate::generated::host::clipboard::HostClipboard for $host {
+            fn read_text(&mut self) -> ::core::option::Option<::std::string::String> {
+                $crate::wasm::imports::clipboard::read_text()
+            }
+            fn write_text(&mut self, a0: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::clipboard::write_text(a0)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::clipboard::HostClipboard for $host {
+            fn read_text(&mut self) -> ::core::option::Option<::std::string::String> {
+                <$crate::HostHandle as $crate::generated::host::clipboard::HostClipboard>::read_text(&mut $crate::wasm::detached())
+            }
+            fn write_text(&mut self, a0: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::clipboard::HostClipboard>::write_text(&mut $crate::wasm::detached(), a0)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_clipboard!(off $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_clipboard!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_clipboard!(off $host);
+    };
+}
+
+/// `ilium:host/telemetry` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_telemetry {
+    (on $host:ident) => {
+        impl $crate::generated::host::telemetry::HostTelemetry for $host {
+            fn count(&mut self, a0: ::std::string::String, a1: i64) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::telemetry::count(a0, a1)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::telemetry::HostTelemetry for $host {
+            fn count(&mut self, a0: ::std::string::String, a1: i64) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::telemetry::HostTelemetry>::count(&mut $crate::wasm::detached(), a0, a1)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_telemetry!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_telemetry!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_telemetry!(on $host);
+    };
+}
+
+/// `ilium:host/sounds` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_sounds {
+    (on $host:ident) => {
+        impl $crate::generated::host::sounds::HostSounds for $host {
+            fn catalog(&mut self) -> ::std::vec::Vec<::std::string::String> {
+                $crate::wasm::imports::sounds::catalog()
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::sounds::HostSounds for $host {
+            fn catalog(&mut self) -> ::std::vec::Vec<::std::string::String> {
+                <$crate::HostHandle as $crate::generated::host::sounds::HostSounds>::catalog(&mut $crate::wasm::detached())
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_sounds!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_sounds!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_sounds!(off $host);
+    };
+}
+
+/// `ilium:host/client-requests` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_client_requests {
+    (on $host:ident) => {
+        impl $crate::generated::host::client_requests::HostClientRequests for $host {
+            fn request(&mut self, a0: $crate::generated::types::ids::ClientId, a1: ::std::string::String, a2: ::std::string::String, a3: u32) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::client_requests::request(a0, a1, a2, a3)
+            }
+            fn take_answer(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::string::String> {
+                $crate::wasm::imports::client_requests::take_answer(a0)
+            }
+            fn respond(&mut self, a0: u64, a1: ::core::result::Result<::std::string::String, $crate::generated::types::errors::PluginError>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::client_requests::respond(a0, a1)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::client_requests::HostClientRequests for $host {
+            fn request(&mut self, a0: $crate::generated::types::ids::ClientId, a1: ::std::string::String, a2: ::std::string::String, a3: u32) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::client_requests::HostClientRequests>::request(&mut $crate::wasm::detached(), a0, a1, a2, a3)
+            }
+            fn take_answer(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::string::String> {
+                <$crate::HostHandle as $crate::generated::host::client_requests::HostClientRequests>::take_answer(&mut $crate::wasm::detached(), a0)
+            }
+            fn respond(&mut self, a0: u64, a1: ::core::result::Result<::std::string::String, $crate::generated::types::errors::PluginError>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::client_requests::HostClientRequests>::respond(&mut $crate::wasm::detached(), a0, a1)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_client_requests!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_client_requests!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_client_requests!(off $host);
+    };
+}
+
+/// `ilium:host/http-api` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_http_api {
+    (on $host:ident) => {
+        impl $crate::generated::host::http_api::HostHttpApi for $host {
+            fn respond(&mut self, a0: u64, a1: u16, a2: ::std::vec::Vec<(::std::string::String, ::std::string::String, )>, a3: ::std::vec::Vec<u8>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::http_api::respond(a0, a1, a2, a3)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::http_api::HostHttpApi for $host {
+            fn respond(&mut self, a0: u64, a1: u16, a2: ::std::vec::Vec<(::std::string::String, ::std::string::String, )>, a3: ::std::vec::Vec<u8>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::http_api::HostHttpApi>::respond(&mut $crate::wasm::detached(), a0, a1, a2, a3)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_http_api!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_http_api!(off $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_http_api!(off $host);
+    };
+}
+
+/// `ilium:host/catalogs` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_catalogs {
+    (on $host:ident) => {
+        impl $crate::generated::host::catalogs::HostCatalogs for $host {
+            fn query(&mut self, a0: $crate::generated::host::catalogs::CatalogQuery) -> ::core::result::Result<$crate::generated::host::catalogs::CatalogPage, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::catalogs::query(a0)
+            }
+            fn query_async(&mut self, a0: $crate::generated::host::catalogs::CatalogQuery) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::catalogs::query_async(a0)
+            }
+            fn take_page(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<$crate::generated::host::catalogs::CatalogPage> {
+                $crate::wasm::imports::catalogs::take_page(a0)
+            }
+            fn lookup(&mut self, a0: ::std::string::String, a1: ::std::string::String) -> ::core::option::Option<$crate::generated::types::ui::CatalogItem> {
+                $crate::wasm::imports::catalogs::lookup(a0, a1)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::catalogs::HostCatalogs for $host {
+            fn query(&mut self, a0: $crate::generated::host::catalogs::CatalogQuery) -> ::core::result::Result<$crate::generated::host::catalogs::CatalogPage, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::catalogs::HostCatalogs>::query(&mut $crate::wasm::detached(), a0)
+            }
+            fn query_async(&mut self, a0: $crate::generated::host::catalogs::CatalogQuery) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::catalogs::HostCatalogs>::query_async(&mut $crate::wasm::detached(), a0)
+            }
+            fn take_page(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<$crate::generated::host::catalogs::CatalogPage> {
+                <$crate::HostHandle as $crate::generated::host::catalogs::HostCatalogs>::take_page(&mut $crate::wasm::detached(), a0)
+            }
+            fn lookup(&mut self, a0: ::std::string::String, a1: ::std::string::String) -> ::core::option::Option<$crate::generated::types::ui::CatalogItem> {
+                <$crate::HostHandle as $crate::generated::host::catalogs::HostCatalogs>::lookup(&mut $crate::wasm::detached(), a0, a1)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_catalogs!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_catalogs!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_catalogs!(off $host);
+    };
+}
+
+/// `ilium:host/vector` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_vector {
+    (on $host:ident) => {
+        impl $crate::generated::host::vector::HostVector for $host {
+            fn embed(&mut self, a0: ::std::vec::Vec<::std::string::String>, a1: ::std::string::String) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::vector::embed(a0, a1)
+            }
+            fn take_vectors(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::vec::Vec<::std::vec::Vec<f32>>> {
+                $crate::wasm::imports::vector::take_vectors(a0)
+            }
+            fn create_index(&mut self, a0: ::std::string::String, a1: u16) -> ::core::result::Result<$crate::generated::types::ids::IndexId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::vector::create_index(a0, a1)
+            }
+            fn upsert(&mut self, a0: $crate::generated::types::ids::IndexId, a1: ::std::vec::Vec<(::std::string::String, ::std::vec::Vec<f32>, )>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::vector::upsert(a0, a1)
+            }
+            fn remove_entries(&mut self, a0: $crate::generated::types::ids::IndexId, a1: ::std::vec::Vec<::std::string::String>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::vector::remove_entries(a0, a1)
+            }
+            fn top_k(&mut self, a0: $crate::generated::types::ids::IndexId, a1: ::std::vec::Vec<f32>, a2: u16) -> ::core::result::Result<::std::vec::Vec<(::std::string::String, f32, )>, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::vector::top_k(a0, a1, a2)
+            }
+            fn drop_index(&mut self, a0: $crate::generated::types::ids::IndexId) -> () {
+                $crate::wasm::imports::vector::drop_index(a0)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::vector::HostVector for $host {
+            fn embed(&mut self, a0: ::std::vec::Vec<::std::string::String>, a1: ::std::string::String) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::vector::HostVector>::embed(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn take_vectors(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::vec::Vec<::std::vec::Vec<f32>>> {
+                <$crate::HostHandle as $crate::generated::host::vector::HostVector>::take_vectors(&mut $crate::wasm::detached(), a0)
+            }
+            fn create_index(&mut self, a0: ::std::string::String, a1: u16) -> ::core::result::Result<$crate::generated::types::ids::IndexId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::vector::HostVector>::create_index(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn upsert(&mut self, a0: $crate::generated::types::ids::IndexId, a1: ::std::vec::Vec<(::std::string::String, ::std::vec::Vec<f32>, )>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::vector::HostVector>::upsert(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn remove_entries(&mut self, a0: $crate::generated::types::ids::IndexId, a1: ::std::vec::Vec<::std::string::String>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::vector::HostVector>::remove_entries(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn top_k(&mut self, a0: $crate::generated::types::ids::IndexId, a1: ::std::vec::Vec<f32>, a2: u16) -> ::core::result::Result<::std::vec::Vec<(::std::string::String, f32, )>, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::vector::HostVector>::top_k(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn drop_index(&mut self, a0: $crate::generated::types::ids::IndexId) -> () {
+                <$crate::HostHandle as $crate::generated::host::vector::HostVector>::drop_index(&mut $crate::wasm::detached(), a0)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_vector!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_vector!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_vector!(off $host);
+    };
+}
+
+/// `ilium:host/codec` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_codec {
+    (on $host:ident) => {
+        impl $crate::generated::host::codec::HostCodec for $host {
+            fn inflate(&mut self, a0: $crate::generated::host::codec::Compression, a1: ::std::vec::Vec<u8>, a2: u32) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::codec::inflate(a0, a1, a2)
+            }
+            fn deflate(&mut self, a0: $crate::generated::host::codec::Compression, a1: ::std::vec::Vec<u8>, a2: u8) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::codec::deflate(a0, a1, a2)
+            }
+            fn get_image_info(&mut self, a0: ::std::vec::Vec<u8>) -> ::core::result::Result<$crate::generated::host::codec::ImageInfo, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::codec::get_image_info(a0)
+            }
+            fn decode_image(&mut self, a0: ::std::vec::Vec<u8>, a1: u32, a2: u32) -> ::core::result::Result<$crate::generated::host::codec::DecodedImage, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::codec::decode_image(a0, a1, a2)
+            }
+            fn sha256(&mut self, a0: ::std::vec::Vec<u8>) -> ::std::vec::Vec<u8> {
+                $crate::wasm::imports::codec::sha256(a0)
+            }
+            fn hmac_sha256(&mut self, a0: ::std::vec::Vec<u8>, a1: ::std::vec::Vec<u8>) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::codec::hmac_sha256(a0, a1)
+            }
+            fn constant_time_equal(&mut self, a0: ::std::vec::Vec<u8>, a1: ::std::vec::Vec<u8>) -> bool {
+                $crate::wasm::imports::codec::constant_time_equal(a0, a1)
+            }
+            fn rasterize_text(&mut self, a0: $crate::generated::host::codec::RasterText) -> ::core::result::Result<$crate::generated::host::codec::DecodedImage, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::codec::rasterize_text(a0)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::codec::HostCodec for $host {
+            fn inflate(&mut self, a0: $crate::generated::host::codec::Compression, a1: ::std::vec::Vec<u8>, a2: u32) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::codec::HostCodec>::inflate(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn deflate(&mut self, a0: $crate::generated::host::codec::Compression, a1: ::std::vec::Vec<u8>, a2: u8) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::codec::HostCodec>::deflate(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn get_image_info(&mut self, a0: ::std::vec::Vec<u8>) -> ::core::result::Result<$crate::generated::host::codec::ImageInfo, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::codec::HostCodec>::get_image_info(&mut $crate::wasm::detached(), a0)
+            }
+            fn decode_image(&mut self, a0: ::std::vec::Vec<u8>, a1: u32, a2: u32) -> ::core::result::Result<$crate::generated::host::codec::DecodedImage, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::codec::HostCodec>::decode_image(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn sha256(&mut self, a0: ::std::vec::Vec<u8>) -> ::std::vec::Vec<u8> {
+                <$crate::HostHandle as $crate::generated::host::codec::HostCodec>::sha256(&mut $crate::wasm::detached(), a0)
+            }
+            fn hmac_sha256(&mut self, a0: ::std::vec::Vec<u8>, a1: ::std::vec::Vec<u8>) -> ::core::result::Result<::std::vec::Vec<u8>, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::codec::HostCodec>::hmac_sha256(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn constant_time_equal(&mut self, a0: ::std::vec::Vec<u8>, a1: ::std::vec::Vec<u8>) -> bool {
+                <$crate::HostHandle as $crate::generated::host::codec::HostCodec>::constant_time_equal(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn rasterize_text(&mut self, a0: $crate::generated::host::codec::RasterText) -> ::core::result::Result<$crate::generated::host::codec::DecodedImage, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::codec::HostCodec>::rasterize_text(&mut $crate::wasm::detached(), a0)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_codec!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_codec!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_codec!(on $host);
+    };
+}
+
+/// `ilium:host/geocode` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_geocode {
+    (on $host:ident) => {
+        impl $crate::generated::host::geocode::HostGeocode for $host {
+            fn search(&mut self, a0: $crate::generated::host::geocode::GeocodeQuery) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::geocode::search(a0)
+            }
+            fn reverse(&mut self, a0: $crate::generated::types::geo::GeoPoint) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::geocode::reverse(a0)
+            }
+            fn take_places(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::vec::Vec<$crate::generated::types::geo::GeoPlace>> {
+                $crate::wasm::imports::geocode::take_places(a0)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::geocode::HostGeocode for $host {
+            fn search(&mut self, a0: $crate::generated::host::geocode::GeocodeQuery) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::geocode::HostGeocode>::search(&mut $crate::wasm::detached(), a0)
+            }
+            fn reverse(&mut self, a0: $crate::generated::types::geo::GeoPoint) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::geocode::HostGeocode>::reverse(&mut $crate::wasm::detached(), a0)
+            }
+            fn take_places(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::vec::Vec<$crate::generated::types::geo::GeoPlace>> {
+                <$crate::HostHandle as $crate::generated::host::geocode::HostGeocode>::take_places(&mut $crate::wasm::detached(), a0)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_geocode!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_geocode!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_geocode!(on $host);
+    };
+}
+
+/// `ilium:host/location` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_location {
+    (on $host:ident) => {
+        impl $crate::generated::host::location::HostLocation for $host {
+            fn current(&mut self) -> ::core::option::Option<(f64, f64, )> {
+                $crate::wasm::imports::location::current()
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::location::HostLocation for $host {
+            fn current(&mut self) -> ::core::option::Option<(f64, f64, )> {
+                <$crate::HostHandle as $crate::generated::host::location::HostLocation>::current(&mut $crate::wasm::detached())
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_location!(off $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_location!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_location!(on $host);
+    };
+}
+
+/// `ilium:host/media` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_media {
+    (on $host:ident) => {
+        impl $crate::generated::host::media::HostMedia for $host {
+            fn open_video(&mut self, a0: $crate::generated::types::paths::FsPath) -> ::core::result::Result<(u64, $crate::generated::host::media::VideoInfo, ), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::media::open_video(a0)
+            }
+            fn open_video_bytes(&mut self, a0: ::std::vec::Vec<u8>, a1: ::std::string::String) -> ::core::result::Result<(u64, $crate::generated::host::media::VideoInfo, ), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::media::open_video_bytes(a0, a1)
+            }
+            fn open_video_range(&mut self, a0: $crate::generated::types::paths::FsPath, a1: u64, a2: ::core::option::Option<u64>) -> ::core::result::Result<(u64, $crate::generated::host::media::VideoInfo, ), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::media::open_video_range(a0, a1, a2)
+            }
+            fn next_frame(&mut self, a0: u64, a1: u32, a2: u32) -> ::core::result::Result<::core::option::Option<::std::vec::Vec<u8>>, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::media::next_frame(a0, a1, a2)
+            }
+            fn seek(&mut self, a0: u64, a1: u64) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::media::seek(a0, a1)
+            }
+            fn close_video(&mut self, a0: u64) -> () {
+                $crate::wasm::imports::media::close_video(a0)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::media::HostMedia for $host {
+            fn open_video(&mut self, a0: $crate::generated::types::paths::FsPath) -> ::core::result::Result<(u64, $crate::generated::host::media::VideoInfo, ), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::media::HostMedia>::open_video(&mut $crate::wasm::detached(), a0)
+            }
+            fn open_video_bytes(&mut self, a0: ::std::vec::Vec<u8>, a1: ::std::string::String) -> ::core::result::Result<(u64, $crate::generated::host::media::VideoInfo, ), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::media::HostMedia>::open_video_bytes(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn open_video_range(&mut self, a0: $crate::generated::types::paths::FsPath, a1: u64, a2: ::core::option::Option<u64>) -> ::core::result::Result<(u64, $crate::generated::host::media::VideoInfo, ), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::media::HostMedia>::open_video_range(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn next_frame(&mut self, a0: u64, a1: u32, a2: u32) -> ::core::result::Result<::core::option::Option<::std::vec::Vec<u8>>, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::media::HostMedia>::next_frame(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn seek(&mut self, a0: u64, a1: u64) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::media::HostMedia>::seek(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn close_video(&mut self, a0: u64) -> () {
+                <$crate::HostHandle as $crate::generated::host::media::HostMedia>::close_video(&mut $crate::wasm::detached(), a0)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_media!(off $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_media!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_media!(on $host);
+    };
+}
+
+/// `ilium:host/audio` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_audio {
+    (on $host:ident) => {
+        impl $crate::generated::host::audio::HostAudio for $host {
+            fn devices(&mut self) -> ::std::vec::Vec<$crate::generated::host::audio::AudioDevice> {
+                $crate::wasm::imports::audio::devices()
+            }
+            fn open_capture(&mut self, a0: ::core::option::Option<::std::string::String>, a1: u32, a2: u8) -> ::core::result::Result<u64, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::audio::open_capture(a0, a1, a2)
+            }
+            fn open_loopback(&mut self, a0: u32, a1: u8) -> ::core::result::Result<u64, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::audio::open_loopback(a0, a1)
+            }
+            fn close_capture(&mut self, a0: u64) -> () {
+                $crate::wasm::imports::audio::close_capture(a0)
+            }
+            fn play(&mut self, a0: ::std::vec::Vec<i16>, a1: u32, a2: u8) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::audio::play(a0, a1, a2)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::audio::HostAudio for $host {
+            fn devices(&mut self) -> ::std::vec::Vec<$crate::generated::host::audio::AudioDevice> {
+                <$crate::HostHandle as $crate::generated::host::audio::HostAudio>::devices(&mut $crate::wasm::detached())
+            }
+            fn open_capture(&mut self, a0: ::core::option::Option<::std::string::String>, a1: u32, a2: u8) -> ::core::result::Result<u64, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::audio::HostAudio>::open_capture(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn open_loopback(&mut self, a0: u32, a1: u8) -> ::core::result::Result<u64, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::audio::HostAudio>::open_loopback(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn close_capture(&mut self, a0: u64) -> () {
+                <$crate::HostHandle as $crate::generated::host::audio::HostAudio>::close_capture(&mut $crate::wasm::detached(), a0)
+            }
+            fn play(&mut self, a0: ::std::vec::Vec<i16>, a1: u32, a2: u8) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::host::audio::HostAudio>::play(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_audio!(off $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_audio!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_audio!(on $host);
+    };
+}
+
+/// `ilium:host/self-limits` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_self_limits {
+    (on $host:ident) => {
+        impl $crate::generated::host::self_limits::HostSelfLimits for $host {
+            fn limits(&mut self) -> ::std::vec::Vec<$crate::generated::host::self_limits::Budget> {
+                $crate::wasm::imports::self_limits::limits()
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::self_limits::HostSelfLimits for $host {
+            fn limits(&mut self) -> ::std::vec::Vec<$crate::generated::host::self_limits::Budget> {
+                <$crate::HostHandle as $crate::generated::host::self_limits::HostSelfLimits>::limits(&mut $crate::wasm::detached())
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_self_limits!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_self_limits!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_self_limits!(off $host);
+    };
+}
+
+/// `ilium:host/self-describe` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_self_describe {
+    (on $host:ident) => {
+        impl $crate::generated::host::self_describe::HostSelfDescribe for $host {
+            fn describe(&mut self) -> $crate::generated::host::self_describe::SelfDescription {
+                $crate::wasm::imports::self_describe::describe()
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::host::self_describe::HostSelfDescribe for $host {
+            fn describe(&mut self) -> $crate::generated::host::self_describe::SelfDescription {
+                <$crate::HostHandle as $crate::generated::host::self_describe::HostSelfDescribe>::describe(&mut $crate::wasm::detached())
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_self_describe!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_self_describe!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_self_describe!(off $host);
+    };
+}
+
+/// `ilium:primitives/terminal` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_terminal {
+    (on $host:ident) => {
+        impl $crate::generated::primitives::terminal::HostTerminal for $host {
+            fn read_screen(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::primitives::terminal::ScreenPart, a2: u32) -> ::core::option::Option<$crate::generated::primitives::terminal::Screen> {
+                $crate::wasm::imports::terminal::read_screen(a0, a1, a2)
+            }
+            fn get_selection(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::primitives::terminal::Selection> {
+                $crate::wasm::imports::terminal::get_selection(a0)
+            }
+            fn add_output_filter(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::primitives::terminal::OutputFilter) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::terminal::add_output_filter(a0, a1)
+            }
+            fn remove_output_filter(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::string::String) -> () {
+                $crate::wasm::imports::terminal::remove_output_filter(a0, a1)
+            }
+            fn claim_pointer(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::terminal::claim_pointer(a0)
+            }
+            fn claim_pointer_gesture(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::types::ui::PointerModifiers) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::terminal::claim_pointer_gesture(a0, a1)
+            }
+            fn release_pointer(&mut self, a0: $crate::generated::types::ids::NodeId) -> () {
+                $crate::wasm::imports::terminal::release_pointer(a0)
+            }
+            fn set_highlights(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::string::String, a2: ::std::vec::Vec<$crate::generated::primitives::terminal::CellRegion>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::terminal::set_highlights(a0, a1, a2)
+            }
+            fn clear_highlights(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::string::String) -> () {
+                $crate::wasm::imports::terminal::clear_highlights(a0, a1)
+            }
+            fn read_cells(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::primitives::terminal::ScreenPart, a2: u32, a3: u32) -> ::core::option::Option<$crate::generated::primitives::terminal::CellRows> {
+                $crate::wasm::imports::terminal::read_cells(a0, a1, a2, a3)
+            }
+            fn modes(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::primitives::terminal::TerminalMode> {
+                $crate::wasm::imports::terminal::modes(a0)
+            }
+            fn get_foreground_process(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::primitives::terminal::ForegroundProcess> {
+                $crate::wasm::imports::terminal::get_foreground_process(a0)
+            }
+            fn freeze_snapshot(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::result::Result<u64, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::terminal::freeze_snapshot(a0)
+            }
+            fn read_snapshot_cells(&mut self, a0: u64, a1: u32, a2: u32) -> ::core::option::Option<$crate::generated::primitives::terminal::CellRows> {
+                $crate::wasm::imports::terminal::read_snapshot_cells(a0, a1, a2)
+            }
+            fn drop_snapshot(&mut self, a0: u64) -> () {
+                $crate::wasm::imports::terminal::drop_snapshot(a0)
+            }
+            fn history_text(&mut self, a0: $crate::generated::types::ids::NodeId, a1: u32) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::terminal::history_text(a0, a1)
+            }
+            fn take_history(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::string::String> {
+                $crate::wasm::imports::terminal::take_history(a0)
+            }
+            fn search_history(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::string::String, a2: u16) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::terminal::search_history(a0, a1, a2)
+            }
+            fn take_matches(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::vec::Vec<$crate::generated::primitives::terminal::HistoryMatch>> {
+                $crate::wasm::imports::terminal::take_matches(a0)
+            }
+            fn lock_input(&mut self, a0: $crate::generated::types::ids::NodeId, a1: u16) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::terminal::lock_input(a0, a1)
+            }
+            fn unlock_input(&mut self, a0: $crate::generated::types::ids::NodeId) -> () {
+                $crate::wasm::imports::terminal::unlock_input(a0)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::primitives::terminal::HostTerminal for $host {
+            fn read_screen(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::primitives::terminal::ScreenPart, a2: u32) -> ::core::option::Option<$crate::generated::primitives::terminal::Screen> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::read_screen(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn get_selection(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::primitives::terminal::Selection> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::get_selection(&mut $crate::wasm::detached(), a0)
+            }
+            fn add_output_filter(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::primitives::terminal::OutputFilter) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::add_output_filter(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn remove_output_filter(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::string::String) -> () {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::remove_output_filter(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn claim_pointer(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::claim_pointer(&mut $crate::wasm::detached(), a0)
+            }
+            fn claim_pointer_gesture(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::types::ui::PointerModifiers) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::claim_pointer_gesture(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn release_pointer(&mut self, a0: $crate::generated::types::ids::NodeId) -> () {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::release_pointer(&mut $crate::wasm::detached(), a0)
+            }
+            fn set_highlights(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::string::String, a2: ::std::vec::Vec<$crate::generated::primitives::terminal::CellRegion>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::set_highlights(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn clear_highlights(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::string::String) -> () {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::clear_highlights(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn read_cells(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::primitives::terminal::ScreenPart, a2: u32, a3: u32) -> ::core::option::Option<$crate::generated::primitives::terminal::CellRows> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::read_cells(&mut $crate::wasm::detached(), a0, a1, a2, a3)
+            }
+            fn modes(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::primitives::terminal::TerminalMode> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::modes(&mut $crate::wasm::detached(), a0)
+            }
+            fn get_foreground_process(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::primitives::terminal::ForegroundProcess> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::get_foreground_process(&mut $crate::wasm::detached(), a0)
+            }
+            fn freeze_snapshot(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::result::Result<u64, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::freeze_snapshot(&mut $crate::wasm::detached(), a0)
+            }
+            fn read_snapshot_cells(&mut self, a0: u64, a1: u32, a2: u32) -> ::core::option::Option<$crate::generated::primitives::terminal::CellRows> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::read_snapshot_cells(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn drop_snapshot(&mut self, a0: u64) -> () {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::drop_snapshot(&mut $crate::wasm::detached(), a0)
+            }
+            fn history_text(&mut self, a0: $crate::generated::types::ids::NodeId, a1: u32) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::history_text(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn take_history(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::string::String> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::take_history(&mut $crate::wasm::detached(), a0)
+            }
+            fn search_history(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::string::String, a2: u16) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::search_history(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn take_matches(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<::std::vec::Vec<$crate::generated::primitives::terminal::HistoryMatch>> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::take_matches(&mut $crate::wasm::detached(), a0)
+            }
+            fn lock_input(&mut self, a0: $crate::generated::types::ids::NodeId, a1: u16) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::lock_input(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn unlock_input(&mut self, a0: $crate::generated::types::ids::NodeId) -> () {
+                <$crate::HostHandle as $crate::generated::primitives::terminal::HostTerminal>::unlock_input(&mut $crate::wasm::detached(), a0)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_terminal!(on $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_terminal!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_terminal!(off $host);
+    };
+}
+
+/// `ilium:primitives/basic` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_basic {
+    (on $host:ident) => {
+        impl $crate::generated::primitives::basic::HostBasic for $host {
+            fn set_title(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::basic::set_title(a0, a1)
+            }
+            fn set_status(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::types::text::StyledText) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::basic::set_status(a0, a1)
+            }
+            fn request_focus(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::basic::request_focus(a0)
+            }
+            fn size(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<(u16, u16, )> {
+                $crate::wasm::imports::basic::size(a0)
+            }
+            fn report_activity(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::types::tree::AgentActivity) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::basic::report_activity(a0, a1)
+            }
+            fn set_dirty(&mut self, a0: $crate::generated::types::ids::NodeId, a1: bool) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::basic::set_dirty(a0, a1)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::primitives::basic::HostBasic for $host {
+            fn set_title(&mut self, a0: $crate::generated::types::ids::NodeId, a1: ::std::string::String) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::basic::HostBasic>::set_title(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn set_status(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::types::text::StyledText) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::basic::HostBasic>::set_status(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn request_focus(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::basic::HostBasic>::request_focus(&mut $crate::wasm::detached(), a0)
+            }
+            fn size(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<(u16, u16, )> {
+                <$crate::HostHandle as $crate::generated::primitives::basic::HostBasic>::size(&mut $crate::wasm::detached(), a0)
+            }
+            fn report_activity(&mut self, a0: $crate::generated::types::ids::NodeId, a1: $crate::generated::types::tree::AgentActivity) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::basic::HostBasic>::report_activity(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn set_dirty(&mut self, a0: $crate::generated::types::ids::NodeId, a1: bool) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::basic::HostBasic>::set_dirty(&mut $crate::wasm::detached(), a0, a1)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_basic!(off $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_basic!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_basic!(off $host);
+    };
+}
+
+/// `ilium:primitives/editor` for the host type of a component: `on` calls the imports, `off`
+/// answers like a thread without a host and references no import.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ilium_wasm_host_editor {
+    (on $host:ident) => {
+        impl $crate::generated::primitives::editor::HostEditor for $host {
+            fn buffers(&mut self) -> ::std::vec::Vec<$crate::generated::types::editing::BufferRef> {
+                $crate::wasm::imports::editor::buffers()
+            }
+            fn buffer_for_pane(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::types::editing::BufferRef> {
+                $crate::wasm::imports::editor::buffer_for_pane(a0)
+            }
+            fn read_lines(&mut self, a0: $crate::generated::types::ids::BufferId, a1: u32, a2: u32) -> ::core::result::Result<::std::vec::Vec<::std::string::String>, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::editor::read_lines(a0, a1, a2)
+            }
+            fn selections(&mut self, a0: $crate::generated::types::ids::BufferId) -> ::std::vec::Vec<$crate::generated::types::editing::TextRange> {
+                $crate::wasm::imports::editor::selections(a0)
+            }
+            fn set_decorations(&mut self, a0: $crate::generated::types::ids::BufferId, a1: ::std::string::String, a2: ::std::vec::Vec<$crate::generated::primitives::editor::RangeDecoration>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::editor::set_decorations(a0, a1, a2)
+            }
+            fn set_gutter(&mut self, a0: $crate::generated::types::ids::BufferId, a1: ::std::string::String, a2: ::std::vec::Vec<$crate::generated::primitives::editor::GutterMark>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::editor::set_gutter(a0, a1, a2)
+            }
+            fn create_buffer(&mut self, a0: ::std::string::String, a1: ::core::option::Option<::std::string::String>) -> ::core::result::Result<$crate::generated::types::ids::BufferId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::editor::create_buffer(a0, a1)
+            }
+            fn load_file(&mut self, a0: $crate::generated::types::paths::FsPath) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::editor::load_file(a0)
+            }
+            fn take_buffer(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<$crate::generated::types::ids::BufferId> {
+                $crate::wasm::imports::editor::take_buffer(a0)
+            }
+            fn save_buffer(&mut self, a0: $crate::generated::types::ids::BufferId, a1: ::core::option::Option<$crate::generated::types::paths::FsPath>) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::editor::save_buffer(a0, a1)
+            }
+            fn close_buffer(&mut self, a0: $crate::generated::types::ids::BufferId) -> () {
+                $crate::wasm::imports::editor::close_buffer(a0)
+            }
+            fn viewport(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::types::editing::EditorViewport> {
+                $crate::wasm::imports::editor::viewport(a0)
+            }
+            fn set_minimap_marks(&mut self, a0: $crate::generated::types::ids::BufferId, a1: ::std::string::String, a2: ::std::vec::Vec<$crate::generated::primitives::editor::MinimapMark>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                $crate::wasm::imports::editor::set_minimap_marks(a0, a1, a2)
+            }
+        }
+    };
+    (off $host:ident) => {
+        impl $crate::generated::primitives::editor::HostEditor for $host {
+            fn buffers(&mut self) -> ::std::vec::Vec<$crate::generated::types::editing::BufferRef> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::buffers(&mut $crate::wasm::detached())
+            }
+            fn buffer_for_pane(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::types::editing::BufferRef> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::buffer_for_pane(&mut $crate::wasm::detached(), a0)
+            }
+            fn read_lines(&mut self, a0: $crate::generated::types::ids::BufferId, a1: u32, a2: u32) -> ::core::result::Result<::std::vec::Vec<::std::string::String>, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::read_lines(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn selections(&mut self, a0: $crate::generated::types::ids::BufferId) -> ::std::vec::Vec<$crate::generated::types::editing::TextRange> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::selections(&mut $crate::wasm::detached(), a0)
+            }
+            fn set_decorations(&mut self, a0: $crate::generated::types::ids::BufferId, a1: ::std::string::String, a2: ::std::vec::Vec<$crate::generated::primitives::editor::RangeDecoration>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::set_decorations(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn set_gutter(&mut self, a0: $crate::generated::types::ids::BufferId, a1: ::std::string::String, a2: ::std::vec::Vec<$crate::generated::primitives::editor::GutterMark>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::set_gutter(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+            fn create_buffer(&mut self, a0: ::std::string::String, a1: ::core::option::Option<::std::string::String>) -> ::core::result::Result<$crate::generated::types::ids::BufferId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::create_buffer(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn load_file(&mut self, a0: $crate::generated::types::paths::FsPath) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::load_file(&mut $crate::wasm::detached(), a0)
+            }
+            fn take_buffer(&mut self, a0: $crate::generated::types::ids::RequestId) -> ::core::option::Option<$crate::generated::types::ids::BufferId> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::take_buffer(&mut $crate::wasm::detached(), a0)
+            }
+            fn save_buffer(&mut self, a0: $crate::generated::types::ids::BufferId, a1: ::core::option::Option<$crate::generated::types::paths::FsPath>) -> ::core::result::Result<$crate::generated::types::ids::RequestId, $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::save_buffer(&mut $crate::wasm::detached(), a0, a1)
+            }
+            fn close_buffer(&mut self, a0: $crate::generated::types::ids::BufferId) -> () {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::close_buffer(&mut $crate::wasm::detached(), a0)
+            }
+            fn viewport(&mut self, a0: $crate::generated::types::ids::NodeId) -> ::core::option::Option<$crate::generated::types::editing::EditorViewport> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::viewport(&mut $crate::wasm::detached(), a0)
+            }
+            fn set_minimap_marks(&mut self, a0: $crate::generated::types::ids::BufferId, a1: ::std::string::String, a2: ::std::vec::Vec<$crate::generated::primitives::editor::MinimapMark>) -> ::core::result::Result<(), $crate::generated::types::errors::PluginError> {
+                <$crate::HostHandle as $crate::generated::primitives::editor::HostEditor>::set_minimap_marks(&mut $crate::wasm::detached(), a0, a1, a2)
+            }
+        }
+    };
+    (server $host:ident) => {
+        $crate::__ilium_wasm_host_editor!(off $host);
+    };
+    (client $host:ident) => {
+        $crate::__ilium_wasm_host_editor!(on $host);
+    };
+    (scene $host:ident) => {
+        $crate::__ilium_wasm_host_editor!(off $host);
     };
 }
 

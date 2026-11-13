@@ -1127,6 +1127,7 @@ fn tree_node_view(id: u64, node: &ModelNode) -> TreeNode {
         agent: node.agent.clone(),
         locked: node.locked,
         revision: node.revision,
+        container: None,
     }
 }
 

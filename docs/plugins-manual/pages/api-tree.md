@@ -66,10 +66,12 @@ The WIT declaration of the interface, for reference:
 
 ```text
 enum node-class { container, pane, folder }
+enum container-kind { project, group, split-horizontal, split-vertical, worktree }
 record node-view {
   id: node-id, parent: option<node-id>, class: node-class,
   content-kind: option<string>, title: string, cwd: option<string>,
   agent: option<agent-view>, locked: bool, revision: u64,
+  container: option<container-kind>,   // what a container is; none for a pane or a folder
 }
 record node-query {
   content-kind: option<string>, signature: option<string>, under: option<node-id>,

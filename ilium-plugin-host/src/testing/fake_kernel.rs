@@ -1678,6 +1678,7 @@ fn create_node(
             agent: None,
             locked: false,
             revision: 0,
+            container: None,
         },
     );
     changed(state, vec![id]);

@@ -17,6 +17,7 @@ fn node(id: u64, parent: Option<u64>, class: NodeClass) -> TreeNode {
         agent: None,
         locked: false,
         revision: 0,
+        container: None,
     }
 }
 fn kernel() -> FakeKernel {

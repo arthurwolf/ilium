@@ -718,6 +718,7 @@ impl ImportsFixture {
             agent: None,
             locked: false,
             revision: 1,
+            container: None,
         });
         state.sizes.insert(id, (columns, rows));
         state.epoch = state.epoch.saturating_add(1);

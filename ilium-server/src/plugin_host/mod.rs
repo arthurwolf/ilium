@@ -12,7 +12,7 @@
 
 mod facade;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -563,10 +563,6 @@ impl PluginHostHandle {
     }
 }
 
-fn tree_ids(tree: &ilium_core::Tree) -> BTreeSet<u64> {
-    tree.all_ids().map(|id| id.0).collect()
-}
-
 /// Forwards tree changes to the plugins until the event bus closes or the task is aborted.
 /// Terminal output and every other high-rate event are dropped here, before the host.
 pub(crate) fn spawn_feed(
@@ -576,30 +572,26 @@ pub(crate) fn spawn_feed(
     tokio::spawn(async move {
         // Subscribed before the first read so no change between the two is lost.
         let mut events = state.events.subscribe_shared();
-        let mut known = tree_ids(&*state.tree.read().await);
+        let mut known = facade::tree_marks(&*state.tree.read().await);
         loop {
             let batch = match events.recv().await {
                 Ok(event) => match &*event {
                     ServerEvent::TreeSnapshot(tree) => {
-                        let current = tree_ids(tree);
-                        let mut batch: Vec<Event> = known
-                            .difference(&current)
-                            .map(|id| Event::NodeRemoved(NodeId(*id)))
-                            .collect();
-                        batch.push(Event::TreeChanged(
-                            current.difference(&known).map(|id| NodeId(*id)).collect(),
-                        ));
+                        let current = facade::tree_marks(tree);
+                        let batch = facade::tree_delta(&known, &current);
                         known = current;
                         batch
                     }
                     ServerEvent::PaneNodeChanged(node) => {
-                        known.insert(node.id.0);
+                        // The fingerprint is unknown until the next snapshot, which then
+                        // names the node once more: a change is never lost, only repeated.
+                        known.insert(node.id.0, 0);
                         vec![Event::TreeChanged(vec![NodeId(node.id.0)])]
                     }
                     _ => Vec::new(),
                 },
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    known = tree_ids(&*state.tree.read().await);
+                    known = facade::tree_marks(&*state.tree.read().await);
                     vec![Event::TreeChanged(Vec::new())]
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,

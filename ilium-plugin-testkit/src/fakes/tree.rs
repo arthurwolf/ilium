@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use ilium_plugin_sdk_core::generated::types::tree::{ContainerKind, NodeView};
 use ilium_plugin_sdk_core::generated::types::{AgentActivityEvent, Event, NodeId};
 use ilium_plugin_sdk_core::types::{AgentActivity, AgentView, NodeClass};
 
@@ -37,6 +38,7 @@ struct NodeExtras {
     metadata: Option<Vec<u8>>,
     locked: bool,
     worktree: bool,
+    container: Option<ContainerKind>,
 }
 
 /// Handle on the fake tree of a host.
@@ -251,6 +253,47 @@ impl FakeTree {
     /// Locks or unlocks a node against structural edits (lane hook, see manual_gaps_fakes.md; DEV-470).
     pub fn set_locked(&mut self, id: u64, locked: bool) {
         self.extras.entry(id).or_default().locked = locked;
+    }
+
+    /// Says what kind of container a node is (a split and its direction, a project, a worktree).
+    /// A container without one reads as a group.
+    pub fn set_container(&mut self, id: u64, kind: ContainerKind) {
+        self.extras.entry(id).or_default().container = Some(kind);
+    }
+
+    /// The node as `ilium:host/tree.get` gives it to a plugin.
+    pub(crate) fn view(&self, id: u64) -> Option<NodeView> {
+        let node = self.nodes.get(&id)?;
+        let extras = self.extras.get(&id);
+        let container = match node.class {
+            NodeClass::Container => Some(
+                extras
+                    .and_then(|extras| extras.container)
+                    .unwrap_or(ContainerKind::Group),
+            ),
+            NodeClass::Pane | NodeClass::Folder => None,
+        };
+        Some(NodeView {
+            id: NodeId(node.id),
+            parent: node.parent.map(NodeId),
+            class: node.class,
+            content_kind: node.content_kind.clone(),
+            title: node.name.clone(),
+            cwd: extras.and_then(|extras| extras.directory.clone()),
+            agent: node.agent.clone(),
+            locked: extras.is_some_and(|extras| extras.locked),
+            revision: self.revisions.get(&id).copied().unwrap_or(0),
+            container,
+        })
+    }
+
+    /// Ids of the children of a node in ascending id order; of the roots for `None`.
+    pub(crate) fn child_ids(&self, parent: Option<u64>) -> Vec<u64> {
+        self.nodes
+            .iter()
+            .filter(|(_, node)| node.parent == parent)
+            .map(|(id, _)| *id)
+            .collect()
     }
 
     /// Marks a pane as living in a Git worktree (lane hook, see manual_gaps_fakes.md; DEV-470).

@@ -497,6 +497,8 @@ struct PendingRequest {
 }
 
 mod bridge;
+mod bridge_defaults;
+mod bridge_kernel;
 mod delivery;
 mod native;
 mod setup;

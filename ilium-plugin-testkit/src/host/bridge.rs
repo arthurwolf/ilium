@@ -48,12 +48,12 @@ pub(super) fn enter(host: &mut FakeHost) -> BridgeGuard {
     BridgeGuard
 }
 
-struct NativeBridge {
-    host: *mut FakeHost,
+pub(super) struct NativeBridge {
+    pub(super) host: *mut FakeHost,
 }
 
 impl NativeBridge {
-    fn host(&mut self) -> &mut FakeHost {
+    pub(super) fn host(&mut self) -> &mut FakeHost {
         // SAFETY: `enter` is only called with the plugin moved out of the host and the host untouched
         // until the guard drops; the pointer is cleared with the guard, so it is valid and unaliased
         // for every call the plugin makes in between.
@@ -72,7 +72,7 @@ impl NativeBridge {
         self.host().outbox.borrow_mut().push(event);
     }
 
-    fn permit(&mut self, grant: &str) -> Result<(), PluginError> {
+    pub(super) fn permit(&mut self, grant: &str) -> Result<(), PluginError> {
         if self.host().granted.contains(grant) {
             return Ok(());
         }

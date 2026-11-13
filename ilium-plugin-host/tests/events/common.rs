@@ -327,6 +327,7 @@ pub fn node(id: u64, parent: Option<u64>, class: NodeClass, title: &str) -> Node
         agent: None,
         locked: false,
         revision: 1,
+        container: None,
     }
 }
 

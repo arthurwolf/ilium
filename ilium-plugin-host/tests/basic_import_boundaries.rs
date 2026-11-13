@@ -23,6 +23,7 @@ fn kernel() -> Arc<FakeKernel> {
         agent: None,
         locked: false,
         revision: 1,
+        container: None,
     }]);
     kernel.register_pane_kind("test.plugin", "test.plugin.notes", PrimitiveKind::Basic);
     kernel

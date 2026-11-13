@@ -3,10 +3,17 @@
 use crate::generated::anim::FrameInput;
 use crate::generated::exports::{ExportLifecycle, HookCall, HookReply, ServiceCall, ServiceReply};
 use crate::generated::host::{
-    HostClock, HostCli, HostFs, HostHttp, HostInference, HostJobs, HostJournal, HostKeys, HostLog, HostProcess,
-    HostSettings, HostStorage, HostTimers, InstanceState, HostExtensions, HostServices, HostTopics,
+    HostAudio, HostCatalogs, HostClientRequests, HostClipboard, HostCodec, HostCommands,
+    HostGeocode, HostHelp, HostHttpApi, HostIntentsHost, HostKernelSettings, HostKeymap,
+    HostLocation, HostMedia, HostPanes, HostPlugins, HostSelfDescribe, HostSelfLimits,
+    HostSessions, HostSounds, HostTelemetry, HostTree, HostUiHost, HostVector, HostWorkspace,
 };
-use crate::generated::primitives::HostAgent;
+use crate::generated::host::{
+    HostCli, HostClock, HostExtensions, HostFs, HostHttp, HostInference, HostJobs, HostJournal,
+    HostKeys, HostLog, HostProcess, HostServices, HostSettings, HostStorage, HostTimers,
+    HostTopics, InstanceState,
+};
+use crate::generated::primitives::{HostAgent, HostBasic, HostEditor, HostTerminal};
 use crate::generated::types::{
     Activation, DeactivationReason, ErrorCode, Event, PluginError, Submission,
 };
@@ -118,6 +125,34 @@ pub trait HostCalls:
     + HostExtensions
     + HostAgent
     + HostJournal
+    + HostTree
+    + HostPanes
+    + HostIntentsHost
+    + HostCommands
+    + HostUiHost
+    + HostSessions
+    + HostKernelSettings
+    + HostKeymap
+    + HostHelp
+    + HostPlugins
+    + HostWorkspace
+    + HostClipboard
+    + HostTelemetry
+    + HostSounds
+    + HostClientRequests
+    + HostHttpApi
+    + HostCatalogs
+    + HostVector
+    + HostCodec
+    + HostGeocode
+    + HostLocation
+    + HostMedia
+    + HostAudio
+    + HostSelfLimits
+    + HostSelfDescribe
+    + HostTerminal
+    + HostBasic
+    + HostEditor
 {
 }
 impl<T: ?Sized> HostCalls for T where
@@ -138,6 +173,34 @@ impl<T: ?Sized> HostCalls for T where
         + HostExtensions
         + HostAgent
         + HostJournal
+        + HostTree
+        + HostPanes
+        + HostIntentsHost
+        + HostCommands
+        + HostUiHost
+        + HostSessions
+        + HostKernelSettings
+        + HostKeymap
+        + HostHelp
+        + HostPlugins
+        + HostWorkspace
+        + HostClipboard
+        + HostTelemetry
+        + HostSounds
+        + HostClientRequests
+        + HostHttpApi
+        + HostCatalogs
+        + HostVector
+        + HostCodec
+        + HostGeocode
+        + HostLocation
+        + HostMedia
+        + HostAudio
+        + HostSelfLimits
+        + HostSelfDescribe
+        + HostTerminal
+        + HostBasic
+        + HostEditor
 {
 }
 
@@ -153,7 +216,10 @@ pub fn host() -> Box<dyn HostApi> {
 
 /// Error every fallible call returns while no backend is installed.
 pub fn no_host() -> PluginError {
-    PluginError::new(ErrorCode::Unsupported, "no host is installed on this thread")
+    PluginError::new(
+        ErrorCode::Unsupported,
+        "no host is installed on this thread",
+    )
 }
 
 type Backend = std::rc::Rc<std::cell::RefCell<Box<dyn HostApi>>>;
@@ -242,7 +308,11 @@ pub trait NativeEntry: Sized {
     /// Dispatches `on-events`.
     fn native_on_events(&mut self, batch: Vec<Event>) -> Vec<Submission>;
     /// Dispatches `job-runner.run`; `None` when the plugin does not export `job-runner`.
-    fn native_run_job(&mut self, kind: String, input: Vec<u8>) -> Option<Result<Vec<u8>, PluginError>> {
+    fn native_run_job(
+        &mut self,
+        kind: String,
+        input: Vec<u8>,
+    ) -> Option<Result<Vec<u8>, PluginError>> {
         let _ = (kind, input);
         None
     }
