@@ -210,8 +210,8 @@ interface paths {
 
 ```text
 interface editing {
-  use ilium:types/ids@0.1.0.{buffer-id, node-id};
-  use ilium:types/paths@0.1.0.{fs-path};
+  use ids.{buffer-id, node-id};
+  use paths.{fs-path};
   /// Both fields are 0-based. `column` counts Unicode scalar values.
   record text-position { line: u32, column: u32 }
   record text-range { start: text-position, end: text-position }
@@ -261,8 +261,8 @@ interface net {
 
 ```text
 interface tree {
-  use ilium:types/ids@0.1.0.{node-id, plugin-id};
-  use ilium:types/errors@0.1.0.{plugin-error};
+  use ids.{node-id, plugin-id};
+  use errors.{plugin-error};
   enum node-class { container, pane, folder }
   enum agent-activity { none, working, idle, awaiting-approval, done, menu }
   record agent-view { signature: string, activity: agent-activity, objective: option<string>, goal: option<string> }
@@ -300,11 +300,11 @@ The `widget` variant has 51 cases. The order is the order of the families in [Wi
 
 ```text
 interface ui {
-  use ilium:types/ids@0.1.0.{node-id, plugin-id, buffer-id};
-  use ilium:types/text@0.1.0.{color, style, styled-text, styled-lines, rich-text, rich-lines, tooltip, tri-state, tone, preview};
-  use ilium:types/layout@0.1.0.{direction, constraint, flex, spacing, margin, alignment, area};
-  use ilium:types/paths@0.1.0.{fs-path};
-  use ilium:types/geo@0.1.0.{geo-point};
+  use ids.{node-id, plugin-id, buffer-id};
+  use text.{color, style, styled-text, styled-lines, rich-text, rich-lines, tooltip, tri-state, tone, preview};
+  use layout.{direction, constraint, flex, spacing, margin, alignment, area};
+  use paths.{fs-path};
+  use geo.{geo-point};
 
   // ---- layout and containers
   record layout-spec { direction: direction, constraints: list<constraint>, flex: flex, spacing: spacing, margin: margin }
@@ -665,8 +665,8 @@ The enum `orientation` here belongs to `meter`. It has the cases of `direction`,
 
 ```text
 interface requests {
-  use ilium:types/ids@0.1.0.{node-id, request-id};
-  use ilium:types/errors@0.1.0.{plugin-error};
+  use ids.{node-id, request-id};
+  use errors.{plugin-error};
   /// Which request a result belongs to. submission(n) is a submission with correlation n.
   /// call(id) is a slow host call with that request-id.
   variant request-ref { submission(u64), call(request-id) }
@@ -691,12 +691,12 @@ The `intent` variant has 42 cases. The first 19 are the base set. The last 23 we
 
 ```text
 interface intents {
-  use ilium:types/ids@0.1.0.{node-id, plugin-id, buffer-id, client-id};
-  use ilium:types/text@0.1.0.{rich-text, tooltip, styled-text, tone};
-  use ilium:types/paths@0.1.0.{fs-path};
-  use ilium:types/editing@0.1.0.{text-edit};
-  use ilium:types/tree@0.1.0.{placement, split-direction, signal, title-source, agent-activity};
-  use ilium:types/ui@0.1.0.{view-target, pointer-kind, pointer-button, pointer-modifiers};
+  use ids.{node-id, plugin-id, buffer-id, client-id};
+  use text.{rich-text, tooltip, styled-text, tone};
+  use paths.{fs-path};
+  use editing.{text-edit};
+  use tree.{placement, split-direction, signal, title-source, agent-activity};
+  use ui.{view-target, pointer-kind, pointer-button, pointer-modifiers};
 
   record submission { intent: intent, correlation: u64, dedup-key: option<string> }
 
@@ -886,15 +886,15 @@ Payload naming rule: a payload with several fields is a record named `<case>-eve
 
 ```text
 interface events {
-  use ilium:types/ids@0.1.0.{node-id, plugin-id, client-id, buffer-id, request-id, timer-id, watch-id, stream-id, child-id, grab-id, epoch-ms};
-  use ilium:types/errors@0.1.0.{plugin-error};
-  use ilium:types/paths@0.1.0.{fs-path};
-  use ilium:types/net@0.1.0.{header};
-  use ilium:types/editing@0.1.0.{buffer-ref, editor-viewport, text-position};
-  use ilium:types/tree@0.1.0.{pane-info, agent-activity, agent-model, pane-lifecycle-state, title-origin};
-  use ilium:types/ui@0.1.0.{view-target, ui-action, view-pointer, pointer-kind, pointer-button, pointer-modifiers};
-  use ilium:types/requests@0.1.0.{request-result};
-  use ilium:types/intents@0.1.0.{plugin-side};
+  use ids.{node-id, plugin-id, client-id, buffer-id, request-id, timer-id, watch-id, stream-id, child-id, grab-id, epoch-ms};
+  use errors.{plugin-error};
+  use paths.{fs-path};
+  use net.{header};
+  use editing.{buffer-ref, editor-viewport, text-position};
+  use tree.{pane-info, agent-activity, agent-model, pane-lifecycle-state, title-origin};
+  use ui.{view-target, ui-action, view-pointer, pointer-kind, pointer-button, pointer-modifiers};
+  use requests.{request-result};
+  use intents.{plugin-side};
 
   // ---- payload records
   record pane-exited-event { node: node-id, status: option<s32>, signal: option<string> }
@@ -1041,7 +1041,7 @@ The record `header` is declared once in `ilium:types/net`. The events and the `h
 
 ```text
 interface lifecycle {
-  use ilium:types/ids@0.1.0.{plugin-id};
+  use ids.{plugin-id};
   /// The order is the ABI. crash-restart is reserved: the host never delivers it, because a
   /// crashed instance has already stopped and cannot be called. Five reasons are delivered.
   /// revoked and granted precede a re-activation with the changed granted list.

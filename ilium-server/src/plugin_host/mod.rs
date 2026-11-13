@@ -553,7 +553,7 @@ impl PluginHostHandle {
         match tokio::time::timeout(SHUTDOWN_WAIT, join).await {
             Ok(Ok(report)) => tracing::info!(
                 deactivated = report.deactivated.len(),
-                forced = report.forced.len(),
+                abandoned = report.abandoned.len(),
                 "plugin host stopped"
             ),
             Ok(Err(error)) => tracing::warn!("plugin host shutdown task failed: {error}"),

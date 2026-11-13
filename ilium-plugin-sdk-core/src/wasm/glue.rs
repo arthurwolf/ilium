@@ -1,4 +1,4 @@
-// @generated from wit/ sha256=5e7a91fa80dc136ef3f92463f7e511d28d25b4c673d6abcc0ffb0af6ffc2d369
+// @generated from wit/ sha256=cbd0c95eaff12f66df0a1fff3c8053cc6ccf21ab71dfe47c106029b853a42c27
 // output: ilium-plugin-sdk-core/src/wasm/glue.rs
 //! wasm32 guest glue: wit-bindgen bindings of every import interface, the conversions to
 //! and from the mirror types, the import wrappers and the macros `#[ilium_plugin]` expands.

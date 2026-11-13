@@ -7,15 +7,18 @@
 //! without changes a freshness check. The script itself reruns only when `plugins/`, `wit/`,
 //! an SDK crate, `Cargo.lock` or one of its environment variables changes.
 //!
-//! The nested cargo uses the workspace `Cargo.lock` with `--locked` and needs nothing the
-//! outer build did not already need, except the `wasm32-wasip2` standard library (pinned in
-//! `rust-toolchain.toml`) and the wasm32-only crates of the lock file in the registry cache.
+//! The nested cargo uses the workspace `Cargo.lock` (with `--locked` unless the settings say
+//! otherwise) and needs nothing the outer build did not already need, except the
+//! `wasm32-wasip2` standard library (pinned in `rust-toolchain.toml`) and the wasm32-only
+//! crates of the lock file in the registry cache.
 //!
-//! Environment:
+//! Settings come from `bundle-build.conf` beside this script (keys `mode`, `locked`,
+//! `offline`, `target-dir`, described in that file), so a build that cannot pass environment
+//! variables is still configurable from the source tree. An environment variable, when set
+//! and not empty, overrides its key:
 //!   ILIUM_PLUGIN_BUNDLE_MODE        skip | lenient | strict (see `Mode`).
-//!   ILIUM_PLUGIN_BUNDLE_TARGET_DIR  target directory of the nested builds; set it to a
-//!                                   directory that outlives the outer target directory to
-//!                                   keep the wasm build incremental across clean checkouts.
+//!   ILIUM_PLUGIN_BUNDLE_LOCKED      0 drops --locked from the nested cargo.
+//!   ILIUM_PLUGIN_BUNDLE_TARGET_DIR  target directory of the nested builds.
 //!   ILIUM_PLUGIN_BUNDLE_OFFLINE     1 passes --offline to the nested cargo (also implied by
 //!                                   CARGO_NET_OFFLINE=true).
 
@@ -35,9 +38,12 @@ const ALL_SIDES: &[&str] = &["server", "client", "scene"];
 /// Sides without component glue in the SDK yet; their components are reported as pending,
 /// never as missing.
 const PENDING_SIDES: &[&str] = &["scene"];
-/// The mode when ILIUM_PLUGIN_BUNDLE_MODE is unset. No binary consumes the catalogue yet, so
-/// an ordinary workspace build does not pay for the wasm build; the build that wires the
-/// catalogue into the server and the client switches this to `strict`.
+/// The settings file, beside this script.
+const SETTINGS_FILE: &str = "bundle-build.conf";
+/// The keys of the settings file.
+const SETTINGS_KEYS: &[&str] = &["mode", "locked", "offline", "target-dir"];
+/// The mode when neither the settings file nor ILIUM_PLUGIN_BUNDLE_MODE names one: an
+/// ordinary workspace build does not pay for the wasm build.
 const DEFAULT_MODE: &str = "skip";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -48,6 +54,17 @@ enum Mode {
     Lenient,
     /// Build everything; a component that does not compile fails this build.
     Strict,
+}
+
+/// What the settings file and the environment ask of the nested builds.
+struct Settings {
+    mode: Mode,
+    /// Pass `--locked`: the nested cargo refuses to change `Cargo.lock`.
+    locked: bool,
+    /// Pass `--offline`.
+    offline: bool,
+    /// The target directory override, when one is named.
+    target_directory: Option<PathBuf>,
 }
 
 struct Plugin {
@@ -75,7 +92,10 @@ fn run() -> Result<(), String> {
         .parent()
         .ok_or("the crate directory has no parent")?
         .to_path_buf();
-    let mode = mode()?;
+    let settings_path = manifest_directory.join(SETTINGS_FILE);
+    println!("cargo:rerun-if-changed={}", settings_path.display());
+    let settings = settings(&settings_path, &root)?;
+    let mode = settings.mode;
 
     for tracked in [
         "plugins",
@@ -90,6 +110,7 @@ fn run() -> Result<(), String> {
     }
     for variable in [
         "ILIUM_PLUGIN_BUNDLE_MODE",
+        "ILIUM_PLUGIN_BUNDLE_LOCKED",
         "ILIUM_PLUGIN_BUNDLE_TARGET_DIR",
         "ILIUM_PLUGIN_BUNDLE_OFFLINE",
         "CARGO_NET_OFFLINE",
@@ -100,9 +121,12 @@ fn run() -> Result<(), String> {
     let plugins = discover(&root.join("plugins").join("core"))?;
     let mut components: BTreeMap<(String, String), PathBuf> = BTreeMap::new();
     if mode != Mode::Skip {
-        let target_directory = nested_target_directory(&out_directory)?;
+        let target_directory = match &settings.target_directory {
+            Some(directory) => directory.clone(),
+            None => nested_target_directory(&out_directory)?,
+        };
         for side in BUILT_SIDES {
-            let built = build_side(&root, &target_directory, &plugins, side, mode)?;
+            let built = build_side(&root, &target_directory, &plugins, side, &settings)?;
             for (package, artifact) in built {
                 let Some(plugin) = plugins.iter().find(|plugin| plugin.package == package) else {
                     continue;
@@ -153,17 +177,93 @@ fn required_env(name: &str) -> Result<String, String> {
     std::env::var(name).map_err(|_| format!("{name} is not set"))
 }
 
-fn mode() -> Result<Mode, String> {
-    let text =
-        std::env::var("ILIUM_PLUGIN_BUNDLE_MODE").unwrap_or_else(|_| DEFAULT_MODE.to_owned());
-    match text.as_str() {
-        "skip" => Ok(Mode::Skip),
-        "lenient" => Ok(Mode::Lenient),
-        "strict" => Ok(Mode::Strict),
-        other => Err(format!(
-            "ILIUM_PLUGIN_BUNDLE_MODE must be skip, lenient or strict, not `{other}`"
-        )),
+/// The `key = value` lines of the settings file; a missing file is an empty map.
+fn settings_file(path: &Path) -> Result<BTreeMap<String, String>, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    let mut values = BTreeMap::new();
+    for (index, line) in text.lines().enumerate() {
+        let line = line.split('#').next().unwrap_or_default().trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(format!(
+                "{}:{}: expected `key = value`",
+                path.display(),
+                index + 1
+            ));
+        };
+        let key = key.trim();
+        if !SETTINGS_KEYS.contains(&key) {
+            return Err(format!(
+                "{}:{}: unknown key `{key}`",
+                path.display(),
+                index + 1
+            ));
+        }
+        values.insert(key.to_owned(), value.trim().to_owned());
     }
+    Ok(values)
+}
+
+/// The settings: each environment variable when set and not empty, else its key of the
+/// settings file, else the default.
+fn settings(path: &Path, root: &Path) -> Result<Settings, String> {
+    let file = settings_file(path)?;
+    let pick = |variable: &str, key: &str| -> Option<(String, String)> {
+        match std::env::var(variable) {
+            Ok(value) if !value.is_empty() => Some((variable.to_owned(), value)),
+            _ => file
+                .get(key)
+                .filter(|value| !value.is_empty())
+                .map(|value| (format!("`{key}` in {SETTINGS_FILE}"), value.clone())),
+        }
+    };
+    let boolean = |variable: &str, key: &str, default: bool| -> Result<bool, String> {
+        match pick(variable, key) {
+            None => Ok(default),
+            Some((origin, value)) => match value.as_str() {
+                "1" | "true" | "yes" => Ok(true),
+                "0" | "false" | "no" => Ok(false),
+                other => Err(format!("{origin} must be true or false, not `{other}`")),
+            },
+        }
+    };
+    let mode = match pick("ILIUM_PLUGIN_BUNDLE_MODE", "mode") {
+        None => DEFAULT_MODE.to_owned(),
+        Some((_, value)) => value,
+    };
+    let mode = match mode.as_str() {
+        "skip" => Mode::Skip,
+        "lenient" => Mode::Lenient,
+        "strict" => Mode::Strict,
+        other => {
+            return Err(format!(
+                "the bundle mode must be skip, lenient or strict, not `{other}`"
+            ))
+        }
+    };
+    let cargo_offline =
+        std::env::var("CARGO_NET_OFFLINE").is_ok_and(|value| value == "true" || value == "1");
+    let target_directory =
+        pick("ILIUM_PLUGIN_BUNDLE_TARGET_DIR", "target-dir").map(|(_, value)| {
+            let directory = PathBuf::from(value);
+            if directory.is_absolute() {
+                directory
+            } else {
+                root.join(directory)
+            }
+        });
+    Ok(Settings {
+        mode,
+        locked: boolean("ILIUM_PLUGIN_BUNDLE_LOCKED", "locked", true)?,
+        offline: boolean("ILIUM_PLUGIN_BUNDLE_OFFLINE", "offline", false)? || cargo_offline,
+        target_directory,
+    })
 }
 
 fn mode_name(mode: Mode) -> &'static str {
@@ -257,14 +357,10 @@ fn package_name(cargo_toml: &str) -> Option<String> {
     None
 }
 
-/// Where the nested builds keep their output: the override, or `plugin-wasm` beside the
-/// profile directory of the outer build (never inside it, which the outer cargo has locked).
+/// Where the nested builds keep their output when no directory is named: `plugin-wasm`
+/// beside the profile directory of the outer build (never inside it, which the outer cargo
+/// has locked).
 fn nested_target_directory(out_directory: &Path) -> Result<PathBuf, String> {
-    if let Ok(directory) = std::env::var("ILIUM_PLUGIN_BUNDLE_TARGET_DIR") {
-        if !directory.is_empty() {
-            return Ok(PathBuf::from(directory));
-        }
-    }
     // OUT_DIR is <target>[/<triple>]/<profile>/build/<package>-<hash>/out.
     let profile_directory = out_directory
         .ancestors()
@@ -288,8 +384,9 @@ fn build_side(
     target_directory: &Path,
     plugins: &[Plugin],
     side: &str,
-    mode: Mode,
+    settings: &Settings,
 ) -> Result<Vec<(String, PathBuf)>, String> {
+    let mode = settings.mode;
     let selected: Vec<&Plugin> = plugins
         .iter()
         .filter(|plugin| plugin.sides.iter().any(|candidate| candidate == side))
@@ -304,7 +401,6 @@ fn build_side(
         .arg("build")
         .arg("--release")
         .arg("--lib")
-        .arg("--locked")
         .arg("--target")
         .arg(WASM_TARGET)
         .arg("--target-dir")
@@ -316,7 +412,10 @@ fn build_side(
     if mode == Mode::Lenient {
         command.arg("--keep-going");
     }
-    if offline() {
+    if settings.locked {
+        command.arg("--locked");
+    }
+    if settings.offline {
         command.arg("--offline");
     }
     let mut features = Vec::new();
@@ -374,13 +473,6 @@ fn build_side(
         ));
     }
     Ok(built)
-}
-
-fn offline() -> bool {
-    let flag = |name: &str| {
-        std::env::var(name).is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "yes"))
-    };
-    flag("ILIUM_PLUGIN_BUNDLE_OFFLINE") || flag("CARGO_NET_OFFLINE")
 }
 
 /// Removes what cargo set for this build script and would misdirect a nested build for

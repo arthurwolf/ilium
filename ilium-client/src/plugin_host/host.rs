@@ -429,7 +429,8 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
             .pane_cwd(id)
             .map(|path| path.to_string_lossy().into_owned()),
         agent: None,
-        locked: node.is_locked_closed(),
+        // `None` for a pane, which has no closed state to lock.
+        locked: node.is_locked_closed().unwrap_or(false),
         revision: node.presentation_revision,
     })
 }
@@ -791,7 +792,7 @@ impl ClientPlugins {
         match tokio::time::timeout(SHUTDOWN_WAIT, join).await {
             Ok(Ok(report)) => tracing::info!(
                 deactivated = report.deactivated.len(),
-                forced = report.forced.len(),
+                abandoned = report.abandoned.len(),
                 "plugin host stopped"
             ),
             Ok(Err(error)) => tracing::warn!("plugin host shutdown task failed: {error}"),

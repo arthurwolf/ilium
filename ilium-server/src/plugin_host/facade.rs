@@ -12,10 +12,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use ilium_core::{NodeKind, PaneContentKind, Tree};
+use ilium_core::{NodeKind, PaneContentKind, SplitOrientation, Tree};
 use ilium_ipc::{
     ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PaneResizeCause, ServerEvent,
-    SplitOrientation,
 };
 use ilium_plugin_api::generated::types::events::MessageEvent;
 use ilium_plugin_api::generated::types::intents::{
@@ -120,7 +119,8 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
         // Agent identity reaches plugins through the agents accessor, which is not wired yet
         // (foundation contract section 12.4).
         agent: None,
-        locked: node.is_locked_closed(),
+        // `None` for a pane, which has no closed state to lock.
+        locked: node.is_locked_closed().unwrap_or(false),
         revision: node.presentation_revision,
     })
 }

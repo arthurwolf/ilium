@@ -7792,7 +7792,7 @@ mod tests {
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
             "◐", "▢", "▦", "☷", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪",
-            "🎙", "↻", "⚡", "≡", "≔", "⚑", "¶", "✦", "⌕", "⇄", "ⓘ", "⚙",
+            "🎙", "↻", "⚡", "≡", "≔", "⚑", "¶", "✦", "⌕", "⇄", "⬡", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
