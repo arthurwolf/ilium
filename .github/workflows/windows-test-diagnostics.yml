@@ -17,6 +17,7 @@ env:
   RUST_BACKTRACE: '1'
 jobs:
   clippy:
+    if: false
     runs-on: windows-2025
     timeout-minutes: 120
     steps:
@@ -28,6 +29,7 @@ jobs:
     - name: Clippy (warnings as errors, Windows target)
       run: cargo clippy --locked --workspace --exclude 'ilium-plugin-*' --all-targets --keep-going --target x86_64-pc-windows-msvc -- -D warnings
   flake-meter:
+    if: false
     runs-on: windows-2025
     timeout-minutes: 330
     strategy:
@@ -55,3 +57,21 @@ jobs:
       with:
         name: flake-${{ matrix.lane }}-${{ matrix.replica }}
         path: ${{ runner.temp }}/flake-logs
+  width-census:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: 'false'
+    - name: Toolchain
+      run: rustup show active-toolchain || rustup toolchain install
+    - name: vt100 replay of recorded ConPTY output and conhost glyph width census
+      run: |
+        mkdir -p "$RUNNER_TEMP/census"
+        cargo test --locked --target x86_64-pc-windows-msvc -p ilium-pty --test scratch_conpty_replay --test scratch_conhost_widths -- --nocapture --test-threads 1 2>&1 | tee "$RUNNER_TEMP/census/output.txt"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: width-census
+        path: ${{ runner.temp }}/census
