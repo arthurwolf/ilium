@@ -11,6 +11,7 @@
 - Several tests failed on Windows for reasons unrelated to the product: Git converting fixture line endings, short 8.3 temporary paths, the `.exe` suffix in help text, a verbatim `\\?\` path prefix and one racy redraw baseline. The fixtures and assertions now handle these; the earlier Windows-only repaint retries and the looser Settings check are gone. On Windows the terminal UI tests run one at a time, because several ConPTY sessions at once on a small runner lost input.
 - The PowerShell installer can install a partial release, reading checksums from its AVAILABILITY file, and recovery keeps the resolved version.
 - A pane invalidation that swept a suspended terminal command now reports the canceled command, like the other cancellation path; previously the silent sweep raced with it.
+- The Windows dependency audit lists `bcryptprimitives.dll`, `psapi.dll` and `userenv.dll` as Windows system components; current Rust and process-inspection code import them, and the audit had blocked the release candidate.
 - Installer contract fixtures include the animation helper and bundled packs that the Windows installer requires.
 
 ### Changed

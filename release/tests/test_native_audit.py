@@ -109,7 +109,7 @@ class NativeAuditTests(unittest.TestCase):
 
     def test_windows_source_build_allows_reviewed_os_edges_but_never_crt_edges(self):
         audit = self.module("audit_native")
-        for name in ("dbghelp.dll", "dxgi.dll"):
+        for name in ("dbghelp.dll", "dxgi.dll", "BCRYPTPRIMITIVES.dll", "PSAPI.DLL", "USERENV.dll"):
             with self.subTest(name=name):
                 self.assertTrue(audit.system_dependency("windows", name))
         for name in ("MSVCP140.dll", "msvcp140_1.dll", "VCRUNTIME140.dll",
