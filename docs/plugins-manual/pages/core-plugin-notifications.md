@@ -67,7 +67,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -516,9 +516,7 @@ A package adds a `veto` handler. Handlers run until one refuses.
 ```json
 {
   "api": "ilium:plugin@0.1.0",
-  "exports": [
-    "hook-handler"
-  ],
+  "server": { "exports": ["hook-handler"] },
   "capabilities": { "server": ["extensions.contribute:ilium.core.notifications/before-notify"] },
   "contributes": {
     "extensions": [
@@ -672,3 +670,13 @@ The host raises one catch-up notice per affected pane and skips any notice alrea
 ## Production additions (round 11)
 
 - **[PRQ-004]** The system must offer a Settings switch Hide details in desktop notifications that replaces the body and pane title of every desktop notification with a generic line while the durable log keeps the full text, and activating a desktop notification must focus the originating pane or show a notice naming the pane when it no longer exists.
+
+The switch of PRQ-004 is one settings row of this plugin, in the section `desktop` of the Notifications tab:
+
+| Row key | Type | Default | Scope | Stored as | Effect |
+|---|---|---|---|---|---|
+| `hide_details` | `toggle` | `false` | `client` | `[plugins."ilium.core.notifications"] hide_details` | With `true`, the body of every desktop notification is the line `Activity in a pane` and the title is `Ilium`. The change applies to the next notification |
+
+```json
+{ "type": "toggle", "key": "hide_details", "title": "Hide details in desktop notifications", "default": false }
+```

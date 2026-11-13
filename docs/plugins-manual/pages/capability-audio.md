@@ -111,7 +111,7 @@ Any sample rate from 8,000 to 192,000 Hz is accepted. The host resamples to and 
 | `audio.loopback` | H | asked at first activation, and again at later server starts after each **Not now**, at most three prompts in total | unchecked, marked HIGH |
 | `audio.playback` | normal | granted up to the manifest ceiling | checked by default |
 
-A T1 bundled plugin with H capabilities starts without them. The first activation shows one prompt per plugin, listing each H capability with a checkbox. The user can decline and be asked again at the next server start, at most three times. Settings > Plugins grants a capability at any time. There is no prompt per call. A grant stays until it is revoked.
+A T1 bundled plugin with H capabilities starts without them. The first activation shows one prompt per plugin, listing each H capability with a checkbox. The user can decline and be asked again at the next server start. The prompt is shown three times in total, and a third `Not now` ends it ([USR-014](/pages/user-install-and-manage/)). Settings > Plugins grants a capability at any time. There is no prompt per call. A grant stays until it is revoked.
 
 The install dialog for a T2 or T3 plugin lists every grant, one row each, with the wording from the review table:
 

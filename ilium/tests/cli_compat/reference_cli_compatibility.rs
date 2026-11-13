@@ -2,7 +2,7 @@
 
 use crate::common::*;
 
-const OWNERS: [(&str, &str, &[&str]); 5] = [
+const OWNERS: [(&str, &str, &[&str]); 6] = [
     ("chatroom", "ilium.core.chatroom", &["chat"]),
     (
         "fleet",
@@ -11,6 +11,7 @@ const OWNERS: [(&str, &str, &[&str]); 5] = [
     ),
     ("progress", "ilium.core.progress", &["progress"]),
     ("recap", "ilium.core.recap", &["recap"]),
+    ("resources", "ilium.core.resources", &["resource"]),
     ("voice", "ilium.core.voice", &["voice"]),
 ];
 
@@ -83,7 +84,7 @@ fn cor_040_each_command_is_declared_by_exactly_one_owner() {
             }
         }
     }
-    assert_eq!(seen.len(), 8);
+    assert_eq!(seen.len(), 9);
 }
 
 /// REQ: COR-040
@@ -96,6 +97,7 @@ fn cor_040_declared_output_modes_match_the_baseline_formats() {
         ("new-pane", "mixed"),
         ("progress", "jsonl"),
         ("recap", "jsonl"),
+        ("resource", "jsonl"),
         ("voice", "jsonl"),
     ];
     for (dir, _, _) in OWNERS {

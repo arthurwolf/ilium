@@ -37,9 +37,9 @@ fn pdz_010_supervised_heartbeat_and_stall_exit_status_70() {
 /// REQ: PDZ-011
 #[test]
 fn pdz_011_offline_kill_writes_audit_record_with_path_offline() {
-    // Observable: After an offline kill and a restart, `ilium plugin audit --event plugin.killed --plugin example.sync --json` prints one line with `path: \"offline\"`.
+    // Observable: After an offline kill and a restart, `ilium plugin audit --event plugin-killed --plugin example.sync --json` prints one line with `path: \"offline\"`.
     panic!(
-        "PDZ-011 not implemented: An offline kill MUST write one `plugin.killed` audit record with the field `path` set to `offline`, written at the next start if the server was not running."
+        "PDZ-011 not implemented: An offline kill MUST write one `plugin-killed` audit record with the field `path` set to `offline`, written at the next start if the server was not running."
     );
 }
 

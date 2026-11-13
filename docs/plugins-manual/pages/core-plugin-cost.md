@@ -66,13 +66,9 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     "decoration_slots": [ { "id": "cost", "placement": "badge", "priority": 40, "trailing": true } ],
     "tree_orderings": [ { "id": "by-cost", "title": "Cost, highest first", "slot": "cost" } ],
     "services": {
-      "ilium.core.cost/usage": {
-        "usage": {
-          "params": { "type": "object", "properties": { "window": { "type": "string" } } },
-          "result": { "type": "object", "properties": { "panes": { "type": "object" } },
-                      "required": ["panes"] }
-        }
-      }
+      "provides": [
+        { "name": "ilium.core.cost/usage", "version": "0.1.0", "schema": "schemas/usage.json" }
+      ]
     },
     "settings": [
       { "kind": "section", "id": "cost-display", "tab": "agent-cost", "placement": "end", "title": "Display", "scope": "server",
@@ -101,7 +97,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -146,7 +142,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "activation": [
     "startup",
-    "view:cost.panel"
+    "view:ilium.core.cost/cost.panel"
   ],
   "contributes": {
     "extension_points": [
@@ -206,29 +202,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       }
     ],
     "services": {
-      "ilium.core.cost/usage": {
-        "usage": {
-          "params": {
-            "type": "object",
-            "properties": {
-              "window": {
-                "type": "string"
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "panes": {
-                "type": "object"
-              }
-            },
-            "required": [
-              "panes"
-            ]
-          }
-        }
-      }
+      "provides": [
+        { "name": "ilium.core.cost/usage", "version": "0.1.0", "schema": "schemas/usage.json" }
+      ]
     },
     "settings": [
       {
@@ -701,7 +677,7 @@ Other plugins change what `ilium.core.cost` does through the points below. The p
 
 **Services** (grant `services.use:<name>`):
 
-- `ilium.core.cost/usage`: get: spend and tokens per pane, session or day
+- `ilium.core.cost/usage`: usage: spend and tokens per pane, session or day
 
 **Topics** (list under `contributes.topics.subscribes`):
 
@@ -767,3 +743,10 @@ Both points run on the server: the complete manifest grants `extensions.provide`
 ## Production additions (round 14)
 
 - **[PRN-012]** The Cost plugin must show spend for a model with no matching price as 'unpriced', never as zero, and must exclude it from totals and from the budget comparison. It must show one line 'N requests unpriced' with an action that opens the prices setting. The built-in table must carry an issue date, and the plugin must show a stale-prices notice when that date is more than 90 days old. A test sends usage for an unknown model and checks the displayed totals, the unpriced count and that the budget alert does not treat it as free.
+
+## Cache-wait observation and refresh requests
+
+A provider prompt cache expires when an agent waits too long between two requests, and the next request then pays the full input price. The cost plugin watches how long an agent has been waiting, shows it next to the cache timer, and can keep the cache warm by repeating the cached prefix in a request that asks for no output. Both parts handle material that may hold credentials, so their rules are strict.
+
+- **[PRM-516]** The system must derive the wait evidence of a provider cache only from the verified transcript of the live agent process, without keeping prompts or command bodies, and must discard it when the identity of that process changes.
+- **[PRM-517]** A cache refresh request must produce no output tokens and must reuse the account, the endpoint, the headers and the exact cached prefix of the original request. The system must send it only when the original request is known to have created a cache, must never store, log or show the captured request, and must drop the capture when the invocation, the account, the endpoint, the cache prefix or the transport changes.

@@ -99,7 +99,34 @@ Decision needed: whether each release should also publish an attestation bundle,
 
 The host does not re-check the release archive at start. The checks above run once, in the installer, before the files are installed. To see which build is running, use:
 
-- `ilium --version --verbose`, which prints the version and the path of the third-party notices file, or `notices: missing` when that file is absent ([SEC-423](/pages/reference-trust-and-supply-chain/)).
+- `ilium --version --verbose`, which prints the version, the build, the platform, the host API range and the path of the third-party notices file, or `notices: missing` when that file is absent ([SEC-423](/pages/reference-trust-and-supply-chain/)). [Version output](#version-output) lists every line.
+
+### Version output
+
+Support pages, the bug-report template and the security pages ask for the output of `ilium --version --verbose`. This section is the only definition of that output. It needs no session, no plugin and no network, and it exits with code 0.
+
+`ilium --version` prints one line: `ilium <version>`, for example `ilium 0.9.0`.
+
+`ilium --version --verbose` prints that line first and then the lines below, in this order, each as `key: value` with one space after the colon. No line is left out; a value that is not known is printed as the word in the last column.
+
+| Order | Key | Value | When not known |
+|---|---|---|---|
+| 1 | (first line) | `ilium <version>` | always known |
+| 2 | `build` | The commit hash (12 characters) and the build date in UTC, `YYYY-MM-DD` | `unknown` |
+| 3 | `platform` | Operating system, architecture and C library, for example `linux x86_64 gnu` | always known |
+| 4 | `host_api` | The host API range this build serves, for example `1.0 - 1.4` | always known |
+| 5 | `contracts` | The supported plugin contract versions, comma-separated, as `ilium plugin --version` prints them ([DEV-906](/pages/reference-plugin-cli/)) | always known |
+| 6 | `wasmtime` | The pinned Wasmtime version and its licence expression ([SEC-170], [SEC-423](/pages/reference-trust-and-supply-chain/)) | always known |
+| 7 | `channel` | `archive`, the package name, or `unknown` (see [Packages built by others](#packages-built-by-others)) | `unknown` |
+| 8 | `notices` | The absolute path of `THIRD-PARTY-NOTICES` ([SEC-423](/pages/reference-trust-and-supply-chain/)) | `missing` |
+| 9 | `revocation_feed` | The compiled-in feed URL ([Trust and supply chain](/pages/reference-trust-and-supply-chain/)) | `none` |
+| 10 | `security_contact` | The address of [SEC-320](/pages/reference-security-response/) | always known |
+
+`ilium version --json` prints one JSON object with the same ten values under the keys `version`, `build`, `platform`, `host_api`, `contracts`, `wasmtime`, `channel`, `notices`, `revocation_feed` and `security_contact`, followed by the keys other pages add (`support`, `update_available`, `wit_hashes`, `advisories`). `ilium plugin --version` ([DEV-906](/pages/reference-plugin-cli/)) is the version of the plugin command line and prints only its four fields; it is not a substitute in a bug report.
+
+`--version` and `--verbose` here are flags of the `ilium` binary itself, not of `ilium plugin`. The global flags of [DEV-003](/pages/reference-plugin-cli/) apply to `ilium plugin` commands and do not include `--verbose`; `ilium plugin --version --verbose` is a usage error with exit code 2. No line of this output states that the archive was verified ([SEC-436]).
+
+- **[PRM-008]** The system must print, for `ilium --version --verbose`, exactly the ten lines of the table above in that order, each as `key: value` after the first line, and must print the same ten values under the same keys in `ilium version --json`; both commands must exit with code 0 without a session. Test: run both commands with no server, assert the ten keys and their order in the text output, assert equal values in the JSON output, and assert that removing the notices file changes only the line `notices: missing`.
 
 - [SEC-436] The host MUST NOT claim, in `ilium --version --verbose` or in any other output, that its own archive passed verification. Verification belongs to the installer and to the user, before the first run.
 
@@ -205,8 +232,24 @@ Contract: `ilium:plugin@0.1.0`.
 
 The [backwards-compatibility matrix](/pages/guide-backwards-compatibility-test-matrix/) runs a plugin against a host at N-1, N and N+1, so every host minor inside its support period must stay available to a test job. The release record names, for each minor, the copy the project keeps: the signed release archives of that minor, or the source tag with its locked dependency file and the `wit_hashes` of that minor. The location of each copy is listed in the support matrix named in [Release process](/pages/release-process/).
 
+## Unconfirmed proposals and a stable contract
+
+Many rules of the manual end with a marker such as `(proposed, owner to confirm)`. A marker is any text in which the word `proposed` is followed, in the same sentence, by `owner to confirm`, in any letter case, with or without words between them (for example `proposed limit, owner to confirm` or `Proposed, owner to confirm: 300 s`). A marked rule is a proposal: [Host upgrade while plugins run](/pages/host-upgrade-while-plugins-run/#unconfirmed-requirements-for-release-review) says that a release gate must not count it as agreed.
+
+A contract is declared stable when a host or SDK release names an `ilium:plugin` version without a pre-release suffix. That release is gated on the pages that define the contract: `reference-wit`, every page whose file name starts with `api-`, and `reference-errors-and-limits`.
+
+| Step | What the release gate does | Result when it fails |
+|---|---|---|
+| 1 | Searches the gated pages of the release tag for the marker | The release stops. The gate prints one line per hit with the page, the line number and the requirement id |
+| 2 | Reads `proposal-decisions.json` in the release record: one entry per rule that carried a marker in the previous stable release or at any commit since, with `id`, `page`, `decision` (`confirmed`, `changed` or `deferred`), `owner`, `decided_at` (`YYYY-MM-DD`) and, for `changed`, `old_text` and `new_text` | The release stops and names each rule without an entry |
+| 3 | Checks that a `confirmed` or `changed` rule is in the gated pages without the marker, and that a `deferred` rule is absent from the gated pages and from the WIT files of the release | The release stops and names the rule |
+| 4 | Searches the published documentation site of the release for the marker in the gated pages | The release stops |
+
+A `deferred` rule is removed from the gated pages for that release. It may stay, with its marker, in a page outside the gated set. A release with a pre-release suffix is not gated and may carry markers.
+
 ## Requirement statements
 
+- **[PRM-101]** The system must fail the release of a host or SDK that declares an `ilium:plugin` contract version stable while any rule in `reference-wit`, a page named `api-*` or `reference-errors-and-limits` carries an unconfirmed-proposal marker (the word `proposed` followed in the same sentence by `owner to confirm`, in any letter case), must print the page, line and requirement id of each such rule, must require in the release record a `proposal-decisions.json` entry with the decision `confirmed`, `changed` or `deferred`, the owner and the date for every rule that carried a marker since the previous stable release, and must publish those pages with no marker.
 - **[SEC-428]** Every release MUST publish a `SHA256SUMS` file that lists every release archive with its SHA-256 hash, one line per archive.
 - **[SEC-429]** A user who checks a download by hand MUST compare the archive hash with the matching `SHA256SUMS` line and MUST run the attestation check before running the archive.
 - **[SEC-430]** The installer MUST compare the archive hash with `SHA256SUMS` before it decompresses or unpacks the archive, and MUST stop with `Archive SHA-256 mismatch` when the two hashes differ.

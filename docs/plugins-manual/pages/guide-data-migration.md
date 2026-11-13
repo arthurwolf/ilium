@@ -221,7 +221,7 @@ Also test the failure path: feed a corrupt `prefs` value and assert that `migrat
 A `migrate` call has one hard deadline (LIF-105), and the backup of LIF-107 covers the whole update. A plugin whose data takes longer than the deadline to convert, or whose data is larger than `migration_backup_mib`, follows the rules below.
 
 - **[LIF-982]** A `migrate` call that cannot finish before its deadline MUST be able to return `continue` with an opaque cursor. This is a new case of the result of `migrate` (proposed; the owner of reference-wit adds it, and the excerpt at the top of this page changes with it). The host MUST call `migrate(from, to)` again with the cursor until a call returns `done`. The deadline of LIF-105 applies to each call on its own, and each call MUST commit its own chunk atomically. A failed call, or an interruption between two chunks, MUST be handled for the whole run under LIF-108 or LIF-110, with the backup restored.
-- **[LIF-983]** When the data to back up exceeds `migration_backup_mib`, the update MUST stop with `migration.backup-too-large` before any data changes and MUST leave `update.state: "staged"`. The message MUST name three choices: raise `migration_backup_mib`; export the data with `ilium plugin data export <id> --out <file>` and then run the update with `--no-backup`; or run the update with `--no-backup` alone. The host MUST NOT run `migrate` until the user picks one.
+- **[LIF-983]** When the data to back up exceeds `migration_backup_mib`, the update MUST stop with `migration.backup-too-large` before any data changes and MUST leave `update.state: "staged"`. The message MUST name three choices: raise `migration_backup_mib`; export the data with `ilium plugin export <id> --out <file>` and then run the update with `--no-backup`; or run the update with `--no-backup` alone. The host MUST NOT run `migrate` until the user picks one.
 
 ### Edge cases
 
@@ -266,7 +266,7 @@ Without `--from-id`, `import` refuses an archive of another id with `import.id-m
 
 - [DM-1] `ilium plugin import <new-id> --from <file> --from-id <old-id>` MUST accept an archive whose recorded id is `<old-id>`, MUST refuse any other recorded id with `import.from-id-mismatch`, and MUST behave as LIF-292 in every other respect. Test: import an archive of `old.id` into `new.id` with the flag, with a wrong flag value, and without the flag.
 - [DM-2] The import MUST copy no grants, first-use answers, secrets, trusted keys or logs, and MUST NOT modify any file under the data, bucket or settings location of `<old-id>`. Test: hash the old id's folders before and after.
-- [DM-3] The import MUST write one audit record with action `plugin.data-handover`, the old id, the new id, the archive hash, the byte counts and the acting user, and the command MUST print both ids in its result line. Test: read the audit log after the import ([audit log](/pages/reference-audit-log/)).
+- [DM-3] The import MUST write one audit record with the event `data-handover`, the old id, the new id, the archive hash, the byte counts and the acting user, and the command MUST print both ids in its result line. Test: read the audit log after the import ([audit log](/pages/reference-audit-log/)).
 - [DM-4] The import MUST be atomic: on any error the data of `<new-id>` is as before (LIF-292). The new plugin MUST NOT be active while the import runs; an active plugin is stopped for the copy and started again after it, and `activate` sees the imported data.
 
 What the settings `renamed_from` mechanism covers (DEV-986): only a setting key renamed inside the same plugin id, read from the old key when the new one has no value. It does not move values between ids, does not touch buckets or files, and the alias ends after the version in `remove_in`. For a changed id, use the import above. For a renamed bucket key inside the same id, use `migrate` (LIF-104).
@@ -277,14 +277,14 @@ Failure modes: archive unreadable, `export.unknown-plugin`, `import.format-unsup
 
 ### Oldest data version a plugin still migrates
 
-A plugin MUST migrate from any older stamp (LIF-104). A long-lived plugin eventually wants to drop its oldest migration steps. The manifest key `data.min_data_version` declares the lowest stamp that its `migrate(from, to)` still accepts.
+A plugin MUST migrate from any older stamp (LIF-104). A long-lived plugin eventually wants to drop its oldest migration steps. The top-level manifest key `min_data_version` declares the lowest stamp that its `migrate(from, to)` still accepts.
 
 | Key | Type | Default | Rule |
 |---|---|---|---|
-| `data.min_data_version` | unsigned 32-bit integer | 1 | MUST be at least 1 and at most `data_version`. Otherwise the manifest is refused with `manifest.data-version` (LIF-100). |
+| `min_data_version` | unsigned 32-bit integer | 1 | MUST be at least 1 and at most `data_version`. Otherwise the manifest is refused with `manifest.data-version` (LIF-100). |
 
 - [MD-1] When the lowest stamp among the buckets and the data directory in scope is below `min_data_version`, the host MUST NOT call `migrate`, MUST leave all data and the stamps untouched, MUST keep the previous version active, and MUST log and show `migration.too-old` with both numbers (the stamp found and `min_data_version`). Test: stamp 1 data, update to a plugin with `min_data_version = 3`, assert no call and unchanged data.
-- [MD-2] On `migration.too-old` the host MUST offer the two exits of LIF-111: `ilium plugin data export <id> --out <file>` writes the old bytes without changing them (the same archive as LIF-290), and `--discard-data` deletes the plugin's buckets and data directory and then activates the new version with fresh stamps. The user can also stay on the previous version. Test: each exit, and the unchanged state when neither is chosen.
+- [MD-2] On `migration.too-old` the host MUST offer the two exits of LIF-111: `ilium plugin export <id> --out <file>` writes the old bytes without changing them (the same archive as LIF-290), and `--discard-data` deletes the plugin's buckets and data directory and then activates the new version with fresh stamps. The user can also stay on the previous version. Test: each exit, and the unchanged state when neither is chosen.
 - [MD-3] `migration.too-old` is not a migration failure: it MUST NOT restore a backup, MUST NOT count in the failure window (LIF-105), and the update is reported as `held`, exit 1, stage I. A project or session bucket that is too old is reported when its session first activates the plugin (LIF-114), and the other buckets are not blocked.
 - [MD-4] `ilium plugin update <id> --dry-run-migrate` (DEV-985) MUST report `too-old` with the stamp and the minimum before the update is applied, and MUST change nothing.
 

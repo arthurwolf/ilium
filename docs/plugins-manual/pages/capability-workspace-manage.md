@@ -59,7 +59,7 @@ All three functions are synchronous. They return at once, have no request id and
 |---|---|---|---|---|
 | `register` | `workspace::register(spec)` | `register(spec)` | `Result<u64, PluginError>`, `bigint` | Records a worktree and its owner. Returns the new record id. |
 | `release` | `workspace::release(id)` | `release(id)` | `Result<(), PluginError>`, `void` | Removes the custody record. The folder and the branch stay. |
-| `%list` | `workspace::list()` | `list()` | `Vec<WorkspaceInfo>`, `WorkspaceInfo[]` | Returns every record in ascending id order. |
+| `%list` | `workspace::list()` | `list()` | `Vec<WorkspaceInfo>`, `WorkspaceInfo[]` | Returns every record that the calling plugin registered, in ascending id order. Records of other plugins are not returned ([limits and visibility](/pages/api-workspace/#limits-and-visibility)). |
 
 The fields of the two records:
 

@@ -110,7 +110,7 @@ Each plugin has one log, shared by all its sides. The host writes refusals, trap
 | Who can read it | The user who owns the folder. A plugin cannot read its own log |
 | After uninstall | Kept for 7 days, then deleted. `--purge` deletes it at once |
 
-- [USR-204] The host MUST rotate the log at 4 MiB, MUST keep at most four rotated files, and MUST delete rotated files older than 14 days at server start. Test: write 5 MiB of log lines through a test plugin and list the folder; then age `<id>.log.2` by 15 days, restart, and assert it is gone.
+- [USR-204] The host MUST rotate the log at 4 MiB, MUST keep at most four rotated files, and MUST delete rotated files older than 14 days at server start and once every 24 hours ([HST-601](/pages/api-log/)). Test: write 5 MiB of log lines through a test plugin and list the folder; then age `<id>.log.2` by 15 days, restart, and assert it is gone.
 - [USR-205] Each log line MUST have the five columns timestamp, level, side, plugin id and message, with the timestamp in the form `YYYY-MM-DD HH:mm:ss`. Test: read the log and match every line against the pattern.
 
 ### File permissions
@@ -261,7 +261,7 @@ The warning is not an error. Many users keep a project's `.ilium/` folder in a s
 
 **Supported alternative.** Keep all roots local, and do not point `plugins.data_dir` or `XDG_*` variables into a synced folder. Move data between machines with `ilium plugin backup` and `restore` ([HST-652](#production-additions-t10-operations), [HST-653](#production-additions-t10-operations)), or for one plugin with `ilium plugin export` and `import` ([LIF-290]). A synced folder can hold the archive file: the archive is written to `<file>.partial` and renamed, so the sync client sees a finished file. The archive must not be written inside `<data>/plugins/` ([HST-962](#backup-contents-consistency-and-restore-rules)).
 
-Failure modes: a sync client that locks a file during upload makes the host's write fail with `io`, which the host retries as it does any `io` failure; a placeholder file (`.icloud`, OneDrive online-only) that is not downloaded reads as missing and the host reports `data.root-invalid` ([HST-669](#production-additions-t10-operations)) for a root, or opens an empty bucket for a bucket file after the integrity check fails.
+Failure modes: a sync client that locks a file during upload makes the host's write fail with `io`, which the host retries as it does any `io` failure (on Windows the host first retries the locked file for 2 seconds and then reports `io` with a `file-in-use:` message, see [Windows: files held open by another process](/pages/reference-platform-support/#windows-files-held-open-by-another-process)); a placeholder file (`.icloud`, OneDrive online-only) that is not downloaded reads as missing and the host reports `data.root-invalid` ([HST-669](#production-additions-t10-operations)) for a root, or opens an empty bucket for a bucket file after the integrity check fails.
 
 ### Which export to use: formats side by side
 
@@ -297,7 +297,7 @@ Five kinds of copy exist. They answer different questions and are not interchang
 - **[USR-201]** The host MUST keep each item at the location in the table, and MUST create the parent folders on first use.
 - **[USR-202]** The host MUST write `installed.json`, the grant files and the trust store atomically: it writes a temporary sibling file, flushes it and renames it over the target.
 - **[USR-203]** Grants MUST be stored per user and per plugin, and MUST NOT be stored in a project folder.
-- **[USR-204]** The host MUST rotate the log at 4 MiB, MUST keep at most four rotated files, and MUST delete rotated files older than 14 days at server start.
+- **[USR-204]** The host MUST rotate the log at 4 MiB, MUST keep at most four rotated files, and MUST delete rotated files older than 14 days at server start and once every 24 hours ([HST-601](/pages/api-log/)).
 - **[USR-205]** Each log line MUST have the five columns timestamp, level, side, plugin id and message, with the timestamp in the form `YYYY-MM-DD HH:mm:ss`.
 - **[USR-206]** The host MUST create plugin folders with owner-only access and plugin files with owner-only read and write access.
 - **[USR-207]** The host MUST refuse to read a grant file or the trust store when another user can write to it, and MUST treat every third-party plugin as not allowed to run until the file is fixed.

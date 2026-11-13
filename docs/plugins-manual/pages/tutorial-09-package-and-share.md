@@ -201,6 +201,8 @@ ilium plugin inspect dist/com.example.agent-tools-0.1.0.iliumpkg --verify
 
 A clean package prints no `diff` record and exits with 0. A changed file prints one `diff` record per difference, and the command exits with 1 and the code `inspect.hash-mismatch`. The command works offline and needs no running Ilium.
 
+To see the package as a user will see it, run `ilium plugin preview dist/com.example.agent-tools-0.1.0.iliumpkg`. It prints the store detail view and the review dialog of the next section without installing anything, and exits 3 with `lint.preview-field-missing` when, for example, the README or the licence is absent ([PRM-203](/pages/reference-plugin-cli/#preview)).
+
 ### Sign for T2 (optional)
 
 A T2 package is signed by a publisher key that the user trusts. It runs in the same sandbox as a T3 package, and the review dialog shows its signature state. Create the key pair once for each publisher, and keep the private key outside the project tree:

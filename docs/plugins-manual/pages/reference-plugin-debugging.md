@@ -12,7 +12,7 @@ Requirement ids of this page are in the range `DEV-876` to `DEV-878`. The comple
 
 ### Rules
 
-- **[DEV-876]** `ilium plugin build` without `--release` MUST produce a debug component that keeps DWARF information and, for TypeScript, an inline source map, and MUST write `dist/<name>.debug.json` that records the `input_hash` of the build. A debug component MUST NOT be accepted by `pack` or `publish`; they fail with `package.debug-build`.
+- **[DEV-876]** `ilium plugin build` without `--release` MUST produce a debug component that keeps DWARF information and, for TypeScript, an inline source map, and MUST write `dist/<name>.debug.json` that records the `input_hash` of the build. A debug component MUST NOT be accepted by `pack` or `publish`; they fail with `pack.debug-build`.
 
 - **[DEV-877]** `ilium plugin debug <dir>` MUST start the plugin in a session and open a debugger endpoint on a loopback address with a random port. It MUST print the endpoint in an `artifact` record of kind `debug-endpoint`. It MUST refuse to bind a non-loopback address and fail with `debug.not-loopback`. The endpoint MUST close when the session ends.
 

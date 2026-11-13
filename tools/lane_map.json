@@ -555,7 +555,9 @@
         "F-109",
         "F-110",
         "F-113",
-        "F-116"
+        "F-116",
+        "F-119..121",
+        "F-126"
       ],
       "patterns": [],
       "port_plugins": [
@@ -580,6 +582,7 @@
         "F-056",
         "F-084",
         "F-112",
+        "F-124",
         "COR-950..952"
       ],
       "patterns": [],
@@ -602,8 +605,10 @@
     },
     "core-automation": {
       "ranges": [
+        "attention-B01..12",
         "chatroom-B01..17",
         "progress-B01..15",
+        "resources-B01..13",
         "scheduler-B01..21",
         "F-055",
         "F-057",
@@ -613,20 +618,26 @@
         "F-082",
         "F-083",
         "F-108",
-        "F-115"
+        "F-115",
+        "F-117",
+        "F-118"
       ],
       "patterns": [],
       "port_plugins": [
         "scheduler",
         "progress",
         "chatroom",
-        "compaction"
+        "compaction",
+        "attention",
+        "resources"
       ],
       "owns": [
         "plugins/core/scheduler/**",
         "plugins/core/progress/**",
         "plugins/core/chatroom/**",
-        "plugins/core/compaction/**"
+        "plugins/core/compaction/**",
+        "plugins/core/attention/**",
+        "plugins/core/resources/**"
       ]
     },
     "core-sessions": {
@@ -635,7 +646,8 @@
         "F-063",
         "F-067..072",
         "F-076",
-        "F-077"
+        "F-077",
+        "F-125"
       ],
       "patterns": [],
       "port_plugins": [
@@ -658,7 +670,9 @@
         "F-089",
         "F-090",
         "F-095..101",
-        "F-103"
+        "F-103",
+        "F-122",
+        "F-123"
       ],
       "patterns": [],
       "port_plugins": [

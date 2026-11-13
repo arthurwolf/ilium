@@ -38,7 +38,7 @@ fn usr_104_the_contract_names_support_bundle_as_the_only_writing_command() {
     let page = manual_page("core-plugin-diagnostics");
     states(
         &page,
-        "A support bundle MUST be written only by `ilium plugin support-bundle <id> --out <file>`",
+        "A support bundle MUST be written only by `ilium plugin support-bundle`, as `support-bundle <id> --out <file>` for one plugin or `support-bundle --all --out <file>` for the whole install",
     );
     states(
         &page,
@@ -52,11 +52,11 @@ fn usr_104_bundle_commands_that_are_superseded_are_not_a_second_format() {
     let page = manual_page("core-plugin-diagnostics");
     states(
         &page,
-        "an implementation MUST NOT offer `ilium plugin bundle` or `ilium plugin diagnostics --out <file>` as a second bundle format",
+        "`ilium plugin bundle` without `create` or `import`, and `ilium plugin diagnostics --out <file>`, MUST NOT exist and MUST fail with `usage.unknown-command` and exit code 2",
     );
     states(
         &page,
-        "`ilium plugin bundle` (LIF-312); `ilium plugin diagnostics --out <file>` (HST-636)",
+        "`ilium plugin bundle` as a support bundle command (earlier LIF-312); `ilium plugin diagnostics --out <file>`",
     );
 }
 
@@ -71,7 +71,7 @@ fn usr_104_the_cli_dispatch_has_no_bundle_command_other_than_support_bundle() {
         let output = rig.cli(&superseded);
         assert_eq!(
             error_codes(&output),
-            vec!["usage.command-unknown".to_string()],
+            vec!["usage.unknown-command".to_string()],
             "{superseded:?} must be an unknown command"
         );
     }

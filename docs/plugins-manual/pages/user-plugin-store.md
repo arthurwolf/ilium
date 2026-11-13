@@ -53,6 +53,29 @@ Open a row to see the description, the requested grants, the dependencies, the s
 
 - **[USR-018]** The store detail view and `ilium plugin info <plugin-id>` MUST show the plugin's `[privacy]` declaration (`collects`, `retention_days`, `telemetry_hosts`, `contact`) before the install action, and MUST show 'This plugin does not describe what it collects' when the table is absent and the plugin requests an `http:` grant. (proposed, owner to confirm)
 
+### The README, the changelog and the screenshots
+
+The detail view has a **Readme** tab and a **Changelog** tab. They show `README.md` and `CHANGELOG.md` of the package ([Package format](/pages/reference-package-format/)). Ilium draws both in terminal cells. No plugin code runs, and nothing is fetched from the network to draw them. For a registry plugin whose package is not yet on this machine, both tabs show the description and the release notes of the registry entry and the line `The full README is shown after the download`.
+
+The host draws a fixed subset of Markdown. Anything outside the subset is shown as plain text.
+
+| Markdown | How it is shown |
+|---|---|
+| Headings, levels 1 to 6 | Bold line, with one blank line before it |
+| Paragraphs, bold and italic | Wrapped to the width of the view; bold and italic as terminal attributes |
+| Ordered and unordered lists, nested up to 4 levels | Indented by 2 cells per level |
+| Fenced and indented code blocks, inline code | Shown as written, in the code colour, with no syntax colouring; long lines scroll sideways |
+| Tables | Drawn with cell borders and wrapped cells; a table wider than the view is shown as one `column: value` block per row |
+| Links | The link text followed by the URL in round brackets. A link is opened only through the link-consent prompt (USR-083, cited by [USR-349]) |
+| Images | The line `[image: <alt text>]`. The image is never fetched |
+| Raw HTML | Shown as the text that was written |
+
+Control characters and escape sequences are removed before drawing, so a README cannot move the cursor, change colours or set the window title. Each document is shown up to 64 KiB. A longer document ends with the line `Truncated, open the repository`.
+
+The **Screenshots** list shows one line per file of `screenshots/`: the alt text, then the size in pixels, for example `The notes list with two notes (1280 x 720 px)`. The alt text is the `screenshots` text of the manifest in your language ([PKG-706](/pages/reference-manifest/)), or the file name when the manifest gives none. Host-owned views draw no images in 0.1.0, on any terminal, so the picture itself is not shown.
+
+The requirement for this section is PRM-202, at the end of this page.
+
 ## Install, update and remove
 
 Press Install, or run `ilium plugin install com.example.git-tools`. The review dialog opens. The store never installs without it. Update with the Update button or `ilium plugin update <id>`. Details: [Install and update](/pages/reference-install-and-update/).
@@ -107,3 +130,7 @@ The store shows cached results with their age ("Updated 3 days ago"). Install of
 - **[PKG-541]** The store MUST refuse metadata older than the expiry rule and show `registry.metadata-expired`.
 - **[USR-347]** Every error code the user can see in a notice or CLI message MUST have a catalogue entry with a one-sentence cause and a one-sentence next step, and `ilium plugin explain <code>` MUST print them and exit 0, or exit 2 for an unknown code.
 - **[USR-349]** A plugin's Details page MUST show its `contact` and `security_contact` from the manifest as text only (never opened without the link-consent prompt of USR-083), and `ilium plugin report <id>` MUST print them with the version and key fingerprint and send nothing.
+
+## Production additions (round 15)
+
+- **[PRM-202]** The system must render a plugin README and CHANGELOG in the detail view from a fixed Markdown subset (headings, paragraphs, lists, code blocks, tables, links shown as text with the URL), remove control and escape characters, cap the shown text of each document at 64 KiB with the line `Truncated, open the repository`, show each screenshot as its alt text plus its pixel size, and never fetch a remote image.

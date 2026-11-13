@@ -851,8 +851,8 @@ fn req_lif_198_first_start_after_host_upgrade_writes_one_upgraded_record_a() {
     let _old = rig.start_server_with_env("default", &[("ILIUM_TEST_HOST_VERSION", "0.1.0")]);
     install_ok(&rig, &pkg(NOTES, "0.1.0"));
     let _new = rig.start_server_with_env("default", &[("ILIUM_TEST_HOST_VERSION", "0.3.0")]);
-    let records = rig.audit_records("host.upgraded");
-    assert_eq!(records.len(), 1, "exactly one host.upgraded audit record must be written: {records:?}");
+    let records = rig.audit_records("host-upgraded");
+    assert_eq!(records.len(), 1, "exactly one host-upgraded audit record must be written: {records:?}");
     let text = records[0].to_string();
     assert!(
         text.contains(NOTES) && text.contains("0.1.0") && text.contains("0.3.0"),
@@ -867,7 +867,7 @@ fn req_lif_198_later_starts_on_the_same_host_version_write_no_upgraded_record_b(
     let _first = rig.start_server_with_env("default", &[("ILIUM_TEST_HOST_VERSION", "0.3.0")]);
     let _second = rig.start_server_with_env("default", &[("ILIUM_TEST_HOST_VERSION", "0.3.0")]);
     assert!(
-        rig.audit_records("host.upgraded").is_empty(),
-        "a start on an unchanged host version must not write host.upgraded"
+        rig.audit_records("host-upgraded").is_empty(),
+        "a start on an unchanged host version must not write host-upgraded"
     );
 }

@@ -108,13 +108,9 @@ The plugin is replaceable. A replacement must provide the report service and bot
     "panels": [{ "id": "warnings", "title": "Warnings", "icon": "alert-triangle" }],
     "help": [{ "id": "diagnostics", "file": "help/diagnostics.md", "title": "Logs and reports" }],
     "services": {
-      "ilium.core.diagnostics/report": {
-        "build": {
-          "params": { "type": "object", "properties": { "include_log_tail": { "type": "boolean" } } },
-          "result": { "type": "object", "required": ["text"],
-            "properties": { "text": { "type": "string", "maxLength": 262144 } } }
-        }
-      }
+      "provides": [
+        { "name": "ilium.core.diagnostics/report", "version": "0.1.0", "schema": "schemas/report.json" }
+      ]
     },
     "extension_points": [
       { "id": "log-sinks", "kind": "hook", "mode": "observe", "title": "Log sinks",
@@ -134,7 +130,7 @@ The plugin is replaceable. A replacement must provide the report service and bot
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -179,7 +175,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "activation": [
     "startup",
-    "view:diagnostics.warnings"
+    "view:ilium.core.diagnostics/diagnostics.warnings"
   ],
   "replaceable": true,
   "surface": [
@@ -211,30 +207,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       }
     ],
     "services": {
-      "ilium.core.diagnostics/report": {
-        "build": {
-          "params": {
-            "type": "object",
-            "properties": {
-              "include_log_tail": {
-                "type": "boolean"
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "required": [
-              "text"
-            ],
-            "properties": {
-              "text": {
-                "type": "string",
-                "maxLength": 262144
-              }
-            }
-          }
-        }
-      }
+      "provides": [
+        { "name": "ilium.core.diagnostics/report", "version": "0.1.0", "schema": "schemas/report.json" }
+      ]
     },
     "extension_points": [
       {
@@ -622,7 +597,7 @@ A support request needs several facts at once. The bundle gathers them into one 
 
 `ilium plugin support-bundle <id> --out <file>`
 
-- [USR-221] `support-bundle` MUST write one zip archive to `<file>` that holds exactly these entries: `summary.txt` (plugin id, version and digest; Ilium version; operating system; grants; the output of `ilium plugin status` and `ilium plugin doctor`), `log.txt` (the newest 200 log lines of the plugin), `stats.txt` (the output of `ilium plugin stats`) and `crashes.txt` (the crash records under [USR-227]). It MUST NOT hold any other entry.
+- [USR-221] `support-bundle` MUST write one zip archive to `<file>` that holds exactly these entries: `summary.txt` (plugin id, version and digest; Ilium version; operating system; grants; the output of `ilium plugin status` and `ilium plugin doctor`), `log.txt` (the newest 200 log lines of the plugin), `stats.txt` (the output of `ilium plugin stats`) and `crashes.txt` (the crash records under [USR-227]). With `--include-host` it MUST also hold `host-log.txt` ([USR-334]). It MUST NOT hold any other entry.
 - [USR-222] The archive MUST redact every credential header, URL parameter and home-directory path before it is written. A home-directory path MUST appear as `~`. Plugin payloads MUST appear as a byte count only.
 - [USR-223] The archive MUST NOT contain the plugin's data folder, its trace recordings, grant secrets, or file contents.
 - [USR-224] The archive MUST be 8 MiB or smaller. When the log would exceed that limit, the command MUST drop the oldest log lines first and MUST write the number of dropped lines into `summary.txt`.
@@ -695,8 +670,8 @@ A package adds this entry in its manifest. It needs no code.
 
 The support bundle is the file a user attaches to a report after a failure. This section fixes what goes in, what is left out, its size and its life.
 
-- [LIF-312] `ilium plugin bundle` MUST write one archive that holds the report, the last 1000 log records of each plugin, the manifest and the state names of each installed plugin, and the host version. It MUST NOT include plugin storage buckets, secrets, grant tokens or file contents.
-- [LIF-313] Log text and paths in a bundle MUST pass through the same redaction as log sinks, and the home directory MUST be replaced by `~`. The bundle MUST be capped at 5 MiB, and when the cap is reached the oldest log records MUST be dropped first and the bundle MUST name the cut in its index.
+- [LIF-312] The support bundle MUST be written by `ilium plugin support-bundle` with the entries of [USR-221] for one plugin and of the whole-install table for `--all`. It MUST NOT include a manifest, plugin storage buckets, secrets, grant tokens or file contents.
+- [LIF-313] Log text and paths in a bundle MUST pass through the same redaction as log sinks, and the home directory MUST be replaced by `~`. The bundle MUST be capped at 8 MiB ([USR-224]), and when the cap is reached the oldest log records MUST be dropped first and the bundle MUST name the cut in its index.
 - [LIF-314] The host MUST offer a bundle after a plugin enters `failed`, MUST write it only after the user agrees, and MUST delete bundles older than 14 days at the next start. It MUST NOT send a bundle anywhere.
 
 ### See also
@@ -714,9 +689,9 @@ Log sinks receive redacted records ([SEC-249]); see [Secrets](/pages/reference-s
 
 **[USR-332]** After building a support bundle the host MUST show the redacted `summary.txt` and `log.txt` in a viewer, MUST NOT upload a bundle itself, and `ilium plugin support-bundle --dry-run` MUST print the file names, sizes and the count of redactions per rule without writing the zip.
 
-**[USR-334]** A bundle for plugin A MUST NOT contain log lines, stats or crash records of any other plugin, except host lines about A, and `--include-host` MUST add the host log tail (last 500 lines, redacted) and MUST be named in `summary.txt`.
+**[USR-334]** A bundle for plugin A MUST NOT contain log lines, stats or crash records of any other plugin, except host lines about A, and `--include-host` MUST add the host log tail (last 500 lines, redacted) as the entry `host-log.txt` and MUST be named in `summary.txt`.
 
-**[USR-335]** The default bundle name MUST be `ilium-support-<id>-<YYYYMMDD-HHmmss>.zip`, and `summary.txt` MUST list on separate `key: value` lines Ilium version, plugin id, version, tier, state, platform, host API range, failure count, redaction counts, dropped log lines, and a SHA-256 of the other three files.
+**[USR-335]** The default bundle name MUST be `ilium-support-<id>-<YYYYMMDD-HHmmss>.zip`, and `summary.txt` MUST list on separate `key: value` lines Ilium version, plugin id, version, tier, state, platform, host API range, failure count, redaction counts, dropped log lines, and a SHA-256 of every other entry of the archive.
 
 - **[USR-057]** The `<YYYYMMDD-HHmmss>` part of a default bundle name ([USR-335]) MUST be the UTC time at which the build started, and `summary.txt` MUST carry the same instant as `built: <RFC 3339 UTC>`. (proposed, owner to confirm)
 
@@ -729,18 +704,36 @@ Log sinks receive redacted records ([SEC-249]); see [Secrets](/pages/reference-s
 
 ## Production additions: support bundle contract
 
-The bundle is specified in three places (USR-221 to USR-226 above, LIF-312 to LIF-314 in the lifecycle register, and HST-636 in the host telemetry page). They disagree on the command, the line count, the size cap and the contents. This section fixes one contract. Where another requirement differs, the values below apply.
+The bundle is specified in three places (USR-221 to USR-226 above, LIF-312 to LIF-314 in the lifecycle register, and HST-636 in the host telemetry page). They once disagreed on the command, the line count, the size cap and the contents. This section fixes one contract, and LIF-312, LIF-313 and HST-636 now state the same values.
 
-**[USR-104]** A support bundle MUST be written only by `ilium plugin support-bundle <id> --out <file>`. No other command MUST write a bundle, and an implementation MUST NOT offer `ilium plugin bundle` or `ilium plugin diagnostics --out <file>` as a second bundle format with its own contents, line count or cap. The values in the table below are the only values a bundle may use.
+**[USR-104]** A support bundle MUST be written only by `ilium plugin support-bundle`, as `support-bundle <id> --out <file>` for one plugin or `support-bundle --all --out <file>` for the whole install. No other command MUST write a bundle with its own contents, line count or cap. `ilium plugin bundle` without `create` or `import`, and `ilium plugin diagnostics --out <file>`, MUST NOT exist and MUST fail with `usage.unknown-command` and exit code 2. `ilium plugin doctor --bundle <file>` MUST write only `doctor.txt` and `host.txt`, with the same content as those two entries of the whole-install bundle. The offline package commands `ilium plugin bundle create` and `bundle import` ([Air-gapped transfer](/pages/guide-air-gapped-transfer/)) carry packages, not diagnostics, and are not support bundles. The values in the table below are the only values a bundle may use.
 
 | Setting | Governing value | Superseded value |
 |---|---|---|
-| Command | `ilium plugin support-bundle <id> --out <file>` | `ilium plugin bundle` (LIF-312); `ilium plugin diagnostics --out <file>` (HST-636) |
-| Log lines | The newest 200 lines of the plugin (USR-221) | The last 1000 log records (LIF-312); the last 500 lines (HST-636) |
-| Size cap | 8 MiB (USR-224) | 5 MiB (LIF-313) |
-| Entries | `summary.txt`, `log.txt`, `stats.txt`, `crashes.txt` (USR-221), with the summary keys of USR-335 | Report, manifest and state names (LIF-312); health, metrics, limits, manifest and grants (HST-636) |
+| Command | `ilium plugin support-bundle <id> --out <file>` | `ilium plugin bundle` as a support bundle command (earlier LIF-312); `ilium plugin diagnostics --out <file>` with its own contents (earlier HST-636) |
+| Log lines | The newest 200 lines of the plugin (USR-221) | The last 1000 log records (earlier LIF-312); the last 500 plugin log lines (earlier HST-636) |
+| Size cap | 8 MiB (USR-224) | 5 MiB (earlier LIF-313) |
+| Entries | `summary.txt`, `log.txt`, `stats.txt`, `crashes.txt` (USR-221), with the summary keys of USR-335 | Report, manifest and state names (earlier LIF-312); health, metrics, limits, manifest and grants (earlier HST-636) |
 | Redaction | Credential headers, URL parameters and home paths, with `~` for home (USR-222, LIF-313) | None |
 | Owner | The `ilium.core.diagnostics` plugin, which defines this contract and its conformance tests | None |
+
+### The three bundle commands
+
+Three commands that write a diagnostics archive were named on pages of this manual. Two exist, one of them with two scopes, and one does not exist. The table is the only list of what each one holds.
+
+| | `support-bundle <id> --out <file>` | `support-bundle --all --out <file>` | `doctor --bundle <file>` | `diagnostics --out <file>` |
+|---|---|---|---|---|
+| Status | Current. The per-plugin bundle | Current. The whole-install bundle | Current. The doctor subset of the whole-install bundle, for a machine with no session | Does not exist. `usage.unknown-command`, exit code 2. Use `support-bundle --all` |
+| Entries | `summary.txt`, `log.txt`, `stats.txt`, `crashes.txt`; `host-log.txt` only with `--include-host` ([USR-221], [USR-334]) | The entries of [What the archive holds](#what-the-archive-holds) | `doctor.txt` and `host.txt`, as in the whole-install bundle | none |
+| Plugin log lines | The newest 200 lines of that plugin, in `log.txt` | None. A plugin's own log is not in this archive | None | none |
+| Host log lines | None by default. The last 500 lines with `--include-host` | The last 2,000 lines, in `host-log.txt` | None | none |
+| Manifest | Never ([USR-105]) | Never ([USR-105]) | Never ([USR-105]); `doctor.txt` names the lock file hash only | none |
+| Grants | The grant list in `summary.txt` only | The granted permissions in `inventory.json` only | None | none |
+| Redaction | [USR-222], and the environment rule of [DEV-941] | [USR-222], and the environment rule of [DEV-941] | [USR-222], and the environment rule of [DEV-941] | none |
+| Size cap | 8 MiB ([USR-224]) | 8 MiB ([USR-224]) | 8 MiB ([USR-224]) | none |
+| Needs a session | yes | yes | no | none |
+
+- **[PRM-005]** The system must write, for each of `support-bundle <id>`, `support-bundle --all` and `doctor --bundle`, an archive whose entry names equal the list in the table above; none of them may contain a manifest file, or a grant list outside `summary.txt` and `inventory.json`; and `diagnostics --out <file>` must fail with `usage.unknown-command` and exit code 2 and write no file. Test: build each bundle against a fixture plugin that has a manifest and three grants, list the zip entries and assert that they equal the documented list and that no entry holds the manifest bytes or a grant name outside the two named entries; run `diagnostics --out` and assert exit code 2 and no file.
 
 **[USR-105]** A bundle MUST NOT carry the plugin's manifest, the health and metrics of any other plugin, or the state names of other plugins. The grant list appears only inside `summary.txt` (USR-221), and no other entry MUST hold grants. When a conformance test is written against LIF-312 or HST-636 instead of this section, the test MUST be changed to this contract.
 
@@ -832,10 +825,10 @@ Writing the archive MUST NOT change any plugin state, grant, health counter, fai
 ## Requirement statements
 
 - **[EXT-054]** Records written by a log-sinks handler during its call, and the host's extension.* records about log-sinks handlers, MUST NOT be delivered to log-sinks. Records MUST be batched: one chain per 250 ms with up to 64 records.
-- **[LIF-312]** `ilium plugin bundle` MUST write one archive that holds the report, the last 1000 log records of each plugin, the manifest and the state names of each installed plugin, and the host version. It MUST NOT include plugin storage buckets, secrets, grant tokens or file contents.
-- **[LIF-313]** Log text and paths in a bundle MUST pass through the same redaction as log sinks, and the home directory MUST be replaced by `~`. The bundle MUST be capped at 5 MiB, and when the cap is reached the oldest log records MUST be dropped first and the bundle MUST name the cut in its index.
+- **[LIF-312]** The support bundle MUST be written by `ilium plugin support-bundle` with the entries of [USR-221] for one plugin and of the whole-install table for `--all`. It MUST NOT include a manifest, plugin storage buckets, secrets, grant tokens or file contents.
+- **[LIF-313]** Log text and paths in a bundle MUST pass through the same redaction as log sinks, and the home directory MUST be replaced by `~`. The bundle MUST be capped at 8 MiB ([USR-224]), and when the cap is reached the oldest log records MUST be dropped first and the bundle MUST name the cut in its index.
 - **[LIF-314]** The host MUST offer a bundle after a plugin enters `failed`, MUST write it only after the user agrees, and MUST delete bundles older than 14 days at the next start. It MUST NOT send a bundle anywhere.
-- **[USR-221]** `support-bundle <id> --out <file>` MUST write one zip with exactly `summary.txt`, `log.txt`, `stats.txt` and `crashes.txt`.
+- **[USR-221]** `support-bundle <id> --out <file>` MUST write one zip with exactly `summary.txt`, `log.txt`, `stats.txt` and `crashes.txt`, plus `host-log.txt` when `--include-host` is given ([USR-334]).
 - **[USR-222]** The bundle MUST redact credential headers, URL parameters and home-directory paths, show `~` for home paths, and show payloads as a byte count only.
 - **[USR-223]** The bundle MUST NOT contain the plugin data folder, trace recordings, grant secrets or file contents.
 - **[USR-224]** The bundle MUST be 8 MiB or smaller, dropping the oldest log lines first and recording the drop count in `summary.txt`.

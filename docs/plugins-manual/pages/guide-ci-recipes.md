@@ -289,7 +289,7 @@ repo/
 
 ### Per-plugin commands
 
-Every project command accepts `--manifest-path <file>` ([DEV-902]). The project directory is then the parent of that file. Do not also give `<dir>`: the command exits 2 with `usage.conflicting-flags`. Paths in the output records are relative to the plugin folder, not to the runner's working directory, so a log from `plugins/git-tools` and one from `plugins/log-viewer` can be read side by side.
+Every project command accepts `--manifest-path <file>` ([DEV-902]). The project directory is then the parent of that file. Do not also give `<dir>`: the command exits 2 with `usage.conflict`. Paths in the output records are relative to the plugin folder, not to the runner's working directory, so a log from `plugins/git-tools` and one from `plugins/log-viewer` can be read side by side.
 
 ```sh
 P=plugins/git-tools/manifest.json
@@ -385,7 +385,7 @@ test "$actual" = "$version"
 | Symptom | Code | Cause and fix |
 |---|---|---|
 | Second command waits then stops | `build.locked` (exit 1) | Two commands wrote the same `dist/`. Give the plugin one job |
-| Command exits 2 | `usage.conflicting-flags` | Both `<dir>` and `--manifest-path` were given |
+| Command exits 2 | `usage.conflict` | Both `<dir>` and `--manifest-path` were given |
 | Release builds the wrong plugin | none (script bug) | The tag split used the first `-v` instead of the last; ids may contain `-v` |
 | Plugin skipped after a lock file change | none (script bug) | The detection script ignored root lock files |
 

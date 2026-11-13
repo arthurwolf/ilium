@@ -131,7 +131,7 @@ pub fn file_mode(path: &Path) -> u32 {
     }
 }
 
-/// The 30 core plugin ids named by the table of the core plugins page.
+/// The 32 core plugin ids named by the table of the core plugins page.
 pub fn core_plugin_ids_from_manual() -> Vec<String> {
     let page = manual_page("user-core-plugins");
     let pattern = regex::Regex::new(r"`(ilium\.core\.[a-z-]+)`").expect("pattern");

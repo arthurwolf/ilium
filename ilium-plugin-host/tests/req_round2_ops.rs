@@ -66,11 +66,11 @@ fn ops_230_incident_severity_scale_has_four_levels_each_with_owner_and_acknowled
 #[test]
 fn ops_231_policy_file_change_deactivates_newly_blocked_plugins_within_deadline() {
     panic!(
-        "OPS-231 not implemented: while the server runs, a change to the system policy file must \
-         be detected within 10 seconds, and each running plugin blocked by the new effective \
-         policy (plugins.deny_ids, packages.allowed_tiers, packages.allow_third_party or a \
-         publisher rule) must have every running instance deactivated within the HST-517 times \
-         (1 s on the server, 5 s on each attached client) with reason `policy`"
+        "OPS-231 not implemented: while the server runs, a change of the system policy file must \
+         be detected within 10 seconds; the host must keep enforcing the policy loaded at start \
+         (SEC-188), must not stop, start or change any plugin because of the changed file except \
+         a plugin named by a `kill` entry (LIF-303), and must show one notice per changed file \
+         hash saying the policy applies at the next start; `ilium plugin policy status` exits 4"
     );
 }
 
@@ -78,10 +78,11 @@ fn ops_231_policy_file_change_deactivates_newly_blocked_plugins_within_deadline(
 #[test]
 fn ops_232_each_policy_reload_that_changes_effective_policy_writes_hashed_audit_record() {
     panic!(
-        "OPS-232 not implemented: each live reload that changes the effective policy must write \
-         one audit record `policy-reloaded` holding the SHA-256 hash of the system policy file \
-         before the change and after it; two edits with a reload after each must give two records \
-         with the hashes of their own edit"
+        "OPS-232 not implemented: each server start that loads a system policy file whose \
+         SHA-256 hash differs from the one the previous start loaded, and the first start that \
+         loads one, must write one audit record `policy-reloaded` holding the hash before the \
+         change (empty at the first load) and after it; two edits with a server restart after \
+         each must give two more records with the hashes of their own edit"
     );
 }
 

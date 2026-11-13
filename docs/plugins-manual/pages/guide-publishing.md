@@ -112,6 +112,8 @@ ilium plugin verify dist/com.example.git-tools-1.4.2.iliumpkg
 
 `verify` runs the install stages 1 to 7 without installing. A signed package has a `signature` entry that covers the exact bytes of `manifest.json`.
 
+Before you upload, run `ilium plugin preview dist/com.example.git-tools-1.4.2.iliumpkg`. It prints the store detail view and the install review dialog as users will see them, offline and without installing, and exits 3 when a shown field is missing or would be cut ([PRM-203](/pages/reference-plugin-cli/#preview)). Add `--locale <tag>` to check each language you ship.
+
 | Id | Rule |
 |---|---|
 | [PKG-505] | Sign only after the final `pack`. Changing any file after signing makes `manifest.file-hash` or `manifest.signature-invalid`. |

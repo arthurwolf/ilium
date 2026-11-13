@@ -194,8 +194,8 @@ Illustrative, not generated. A signed third-party package refused on Windows, ne
 |---|---|---|---|---|
 | `memory_mib` | 32 | 256 | 128 | instance trapped |
 | `table_elements` | 10,000 | 50,000 | 20,000 | instance trapped |
-| `event_deadline_ms` | 20 | 50 | 20 | instance trapped |
-| `command_deadline_ms` | 50 | 100 | 50 | instance trapped |
+| `event_deadline_ms` | 20 | 50 | 20 | instance trapped (`on-events` batches; see [Call classes](/pages/reference-host-scheduling/#call-classes)) |
+| `command_deadline_ms` | 50 | 100 | 50 | instance trapped (see [Call classes](/pages/reference-host-scheduling/#call-classes)) |
 | `render_deadline_ms` | 10 | 20 | 10 | instance trapped |
 
 ### Worked example: a limit request above the ceiling

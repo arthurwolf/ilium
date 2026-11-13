@@ -99,7 +99,7 @@ A grab ends with no event to the plugin when its pane closes, when its plugin st
 
 ## Risk and tier rules
 
-- `keys.intercept` is high risk (H). A T1 bundled plugin is activated first without it. At first activation the user sees one prompt, "Plugin <name> asks for: <list>", with the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start, at most three times, and then never again. Settings > Plugins can grant it at any time.
+- `keys.intercept` is high risk (H). A T1 bundled plugin is activated first without it. At first activation the user sees one prompt, "Plugin <name> asks for: <list>", with the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start. The prompt is shown three times in total; after the third `Not now` it never appears again ([USR-014](/pages/user-install-and-manage/)). Settings > Plugins can grant it at any time.
 - A T2 or T3 plugin shows the review dialog at install. The grant is listed with the H mark and is unchecked by default.
 - A grant is a standing permission. Nothing asks the user again on each call.
 - Revoke it in Settings > Plugins > <plugin> > Capabilities, or with `ilium plugin grants <id> --revoke keys.intercept`.

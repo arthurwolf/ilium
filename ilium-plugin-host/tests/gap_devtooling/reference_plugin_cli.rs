@@ -113,7 +113,7 @@ fn manifest_path_selects_the_project_and_a_conflicting_directory_is_refused() {
     assert_eq!(conflicting.exit_code, 2, "{:?}", conflicting.stdout_jsonl);
     assert_eq!(
         error_code(&conflicting).as_deref(),
-        Some("usage.conflicting-flags")
+        Some("usage.conflict")
     );
 }
 
@@ -399,7 +399,7 @@ fn invalid_utf8_manifest_fails_with_manifest_encoding_and_byte_offset() {
     let out = run_in_project(&env, "check", &[]);
     assert_eq!(
         error_code(&out).as_deref(),
-        Some("manifest.encoding"),
+        Some("manifest.json-invalid"),
         "{:?}",
         out.stdout_jsonl
     );

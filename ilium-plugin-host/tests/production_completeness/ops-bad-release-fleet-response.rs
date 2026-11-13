@@ -21,7 +21,7 @@ fn pdu_009_containment_recorded_as_actions_taken_line_with_time_and_admin() {
 fn pdu_010_identify_affected_machines_from_central_audit_records() {
     // Observable: Query the collector for `install` and `update` records naming the bad version: the result lists every machine id that installed it, and the incident record's machine list equals that result.
     panic!(
-        "PDU-010 not implemented: The operator MUST identify affected machines from the `install`, `update` and `update.rolled-back` audit records collected centrally, not by asking users."
+        "PDU-010 not implemented: The operator MUST identify affected machines from the `install`, `update` and `update-rolled-back` audit records collected centrally, not by asking users."
     );
 }
 

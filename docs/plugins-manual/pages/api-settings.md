@@ -112,6 +112,7 @@ The keywords that a row's schema may use are fixed. Any other keyword is refused
 | `unit` | `integer`, `number` | Text shown after the value, such as `spaces`. |
 | `pattern`, `maxLength`, `required` | `string`, `object` | Standard JSON-Schema checks. |
 | `secret` | `string` | The field is masked on the page, and the value is redacted from logs. |
+| `setup_required` | `string`, `array` | Boolean, default `false`. `true` means the plugin cannot work until this row has a value. While the value is empty the plugin is not activated and shows `Needs setup` ([PRM-201](/pages/user-install-and-manage/#a-plugin-that-needs-setup)). It is not the JSON-Schema `required` keyword. |
 | `multiline` | `string` | The field is a text area. |
 | `picker` | `string` | `"file"` or `"directory"`, with optional `extensions`. Adds a path chooser. |
 | `x-visible-when` | all value rows | Compiled from `visible_when`. A false condition hides the row. It is a UI annotation and never takes part in validation. |

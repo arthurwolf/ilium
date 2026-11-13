@@ -139,16 +139,9 @@ The plugin is replaceable. A replacement must provide the service and the three 
     "commands": [{ "id": "refresh", "title": "Refresh agent instructions", "category": "Agents" }],
     "help": [{ "id": "agent-setup", "file": "help/agent-setup.md", "title": "Agent setup" }],
     "services": {
-      "ilium.core.agent-setup/install": {
-        "install": { "params": { "type": "object", "required": ["block", "target"],
-          "properties": { "block": { "type": "string" }, "target": { "type": "string" } } },
-          "result": { "type": "object", "properties": { "status": { "type": "string" } } } },
-        "remove": { "params": { "type": "object", "required": ["block", "target"],
-          "properties": { "block": { "type": "string" }, "target": { "type": "string" } } },
-          "result": { "type": "object", "properties": { "status": { "type": "string" } } } },
-        "status": { "params": { "type": "object" },
-          "result": { "type": "object", "properties": { "targets": { "type": "array" } } } }
-      }
+      "provides": [
+        { "name": "ilium.core.agent-setup/install", "version": "0.1.0", "schema": "schemas/install.json" }
+      ]
     },
     "extension_points": [
       { "id": "instruction-blocks", "kind": "collect", "title": "Instruction blocks",
@@ -173,7 +166,7 @@ The plugin is replaceable. A replacement must provide the service and the three 
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -221,7 +214,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "activation": [
     "settings:setup",
-    "command:refresh",
+    "command:ilium.core.agent-setup/refresh",
     "service:install"
   ],
   "replaceable": true,
@@ -248,71 +241,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       }
     ],
     "services": {
-      "ilium.core.agent-setup/install": {
-        "install": {
-          "params": {
-            "type": "object",
-            "required": [
-              "block",
-              "target"
-            ],
-            "properties": {
-              "block": {
-                "type": "string"
-              },
-              "target": {
-                "type": "string"
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "remove": {
-          "params": {
-            "type": "object",
-            "required": [
-              "block",
-              "target"
-            ],
-            "properties": {
-              "block": {
-                "type": "string"
-              },
-              "target": {
-                "type": "string"
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "status": {
-          "params": {
-            "type": "object"
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "targets": {
-                "type": "array"
-              }
-            }
-          }
-        }
-      }
+      "provides": [
+        { "name": "ilium.core.agent-setup/install", "version": "0.1.0", "schema": "schemas/install.json" }
+      ]
     },
     "extension_points": [
       {

@@ -83,6 +83,7 @@ The Plugins tab, `ilium plugin list`, the recovery page and every user page use 
 | Failed | Stopped after 3 failures within 60 seconds ([COR-200]) | `installed-enabled` with a side `stopped-by-failure`, `failed` | Turn on (clears the count), reset failures, remove |
 | Off | Turned off by the user, the CLI or safe mode | `installed-disabled-by-user`, `disabled` | Turn on |
 | Waiting for <owner> | Needs a plugin that is off or missing | `dormant` | Turn on or install the owner |
+| Needs setup | Enabled, but a settings row marked `setup_required` is empty. The plugin is not activated and has no failure count ([PRM-201](/pages/user-install-and-manage/#a-plugin-that-needs-setup)) | `installed-enabled`, `needs-setup` | Open its settings and fill the marked rows |
 | Blocked by policy | An administrator rule forbids it | `disabled-by-policy`, `disabled` | Nothing; ask the administrator |
 | Blocked | Its publisher key was revoked as `compromised`, or a registry takedown names its version | `blocked`, `disabled` | `ilium plugin enable <id> --accept-risk`, or install an update signed by another trusted key |
 | Refused: <reason> | The host refused to run it, for example `no sandbox` | `refused-at-load`, `refused` | Remove, or reinstall a fixed package |
@@ -186,7 +187,7 @@ The plugin ships with Ilium as a first-party (T1) package. `settings.read-all` a
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -693,7 +694,7 @@ The flags act on attach. The precedence is the flag, then the environment variab
 - **[USR-351]** A step whose owner plugin is unavailable (disabled, failed, in safe mode or not installed) MUST be skipped without ending the flow, MUST NOT leave an empty page, and MUST be listed in the closing summary as "skipped: owner plugin unavailable" with the plugin id.
 - **[USR-352]** Steps MUST appear in ascending `order`. Steps with an equal `order` MUST be sorted by `id` in byte order, then by the owner plugin id, so the sequence is the same on every start and on every machine.
 - **[USR-354]** `ilium --onboarding` MUST re-run the flow without losing settings already chosen: each step MUST show the current value as its starting answer, and a value MUST change only when the user changes it in that step.
-- **[USR-355]** The first-start prompt of a bundled plugin (USR-014) MUST NOT appear inside a setup step of another plugin. While the flow runs, such a prompt MUST wait until the flow ends, and the Not now count of USR-014 MUST NOT change because it waited.
+- **[USR-355]** The first-start prompt of a bundled plugin ([USR-014](/pages/user-install-and-manage/): three prompts in total, counted per plugin) MUST NOT appear inside a setup step of another plugin. While the flow runs, such a prompt MUST wait until the flow ends, and the Not now count of USR-014 MUST NOT change because it waited.
 - **[USR-356]** A T3 plugin MUST NOT contribute a setup step unless the user installed it before the first run. A T3 plugin installed later MUST NOT add a step to the first-run flow; it may appear only in a later `ilium --onboarding` run if it declares the `onboarding-steps` contribution and the user holds its grant.
 - **[USR-357]** A release check MUST run the guided setup under the pseudo-locale `en-XA` (USR-316) and at 48 columns (USR-951), and MUST pass only when no step clips, overflows or loses a focusable element, and Next, Back and Skip stay reachable in every step. A failure blocks the release.
 
@@ -709,3 +710,10 @@ The flags act on attach. The precedence is the flag, then the environment variab
 ## Production additions (round 12)
 
 - **[PRP-027]** The system must show a settings row whose backing capability or dependency is unavailable as disabled but visible, with a one-line reason and an action, and expose the same reason through screen-reader text.
+
+## Icon picker and icon search
+
+Every setting whose value is an icon opens the icon picker, a dialog with a search field over the bundled catalogue of about 12,000 icons. The search is by meaning, not by name only: a small embedding model runs on the CPU of the client in background workers. The settings plugin owns the picker and its workers, because every icon row of every settings tab uses it.
+
+- **[PRM-507]** The icon picker must rank the whole icon catalogue for every non-empty query by meaning, with an embedding model that runs on the CPU of the client, and must use no remote inference service, no GPU and no database for it. Loading the model and ranking must run off the UI thread, so the picker stays responsive while a search runs.
+- **[PRM-508]** The icon picker must apply the chosen icon to the setting row that opened it and save it at once, must keep the previous icon when the user cancels, and must show the catalogue unranked with a notice when the search model cannot be loaded.

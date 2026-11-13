@@ -170,7 +170,7 @@ Illustrative, not generated. The log records that a position was known or missin
 
 - **Settings > Location:** the user sets the observer position once. Ambient scenes that use location read the same value.
 - **Install review (T2 and T3 packages):** the review dialog lists `location.observer` as high risk. The box is unchecked by default, and the user must check it to grant the capability.
-- **First activation (T1 bundled plugins):** the plugin starts without the grant. One prompt appears, and location is one checkbox in it. The buttons are `Allow selected` and `Not now`. `Not now` asks again at the next start, at most three times.
+- **First activation (T1 bundled plugins):** the plugin starts without the grant. One prompt appears, and location is one checkbox in it. The buttons are `Allow selected` and `Not now`. `Not now` asks again at the next start. The prompt is shown three times in total, and a third `Not now` ends it ([USR-014](/pages/user-install-and-manage/)).
 - **Revoking:** Settings > Plugins > (plugin) > Capabilities, or `ilium plugin grants <id> --revoke location.observer`.
 
 The prompt for a bundled plugin looks like this:

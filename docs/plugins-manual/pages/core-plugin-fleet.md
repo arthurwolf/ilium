@@ -80,7 +80,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -123,7 +123,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "cli:broadcast",
     "http:/create_agent",
     "service:broadcast",
-    "command:ask-for-update"
+    "command:ilium.core.fleet/ask-for-update"
   ],
   "contributes": {
     "cli": [
@@ -815,3 +815,17 @@ Side basis: `ilium.core.fleet/before-broadcast` is server because it changes a m
 - [Cost](/pages/core-plugin-cost/), which serves the usage figures used above.
 - [Agent detection](/pages/core-plugin-agent-detect/), which decides what counts as an agent pane.
 - [Agent toolbar](/pages/core-plugin-agent-toolbar/), which sends actions to a single agent.
+
+## The `ilium close-pane` command
+
+`ilium close-pane` is how an agent closes its own pane, or another pane of its session, and says what happens to the Git worktree of that pane. Fleet owns the command, as it owns `ilium new-pane`; the worktree itself is inspected and removed by the [Worktrees](/pages/core-plugin-worktrees/) plugin, which refuses anything that would lose work. Flags: `--pane <PANE_ID>` (default: the calling pane), `--worktree keep|remove|remove-and-branch` (default `keep`) and `--timeout-seconds <N>` (default 120).
+
+- **[PRM-503]** `ilium close-pane` must close the pane it runs in, or the pane named by `--pane`, in the session of the calling pane, and must treat the worktree of that pane as `--worktree` says: `keep` (the default) leaves it on disk, `remove` deletes it only when it is clean, merged and unused, and `remove-and-branch` also deletes its creation branch when that is safe. Only a worktree that Ilium created may be removed, and the removal must be done by the worktrees plugin.
+- **[PRM-504]** `ilium close-pane` must never discard uncommitted work. It must exit 0 when the pane was closed and the requested removal was done, 1 when the removal was blocked or its outcome is uncertain, and 2 for a usage error, and it must wait at most the number of seconds of `--timeout-seconds` (default 120) for the answer of the server.
+
+## The `ilium ctl` command
+
+`ilium ctl` is the remote control of a running session for agents and scripts: it reads the tree, projects, nodes, panes and screens, waits for a state, and renames, moves, closes and creates nodes. Fleet owns it because it is the plugin that acts on many panes at once. The subcommands `guide` and `ops` print the built-in manual and one example body per operation.
+
+- **[PRM-505]** `ilium ctl` must give agents and scripts remote control of a running session: read commands must print one document in the format of `--format` (`json`, `jsonl`, `yaml` or `markdown`), and mutations must print JSONL records whose `type` is `result` or `error`. It must exit 0 on success, 2 for bad arguments or a bad selector, 3 when the server rejected or did not confirm the operation and 4 when no session can be reached.
+- **[PRM-506]** Every operation of `ilium ctl op` and the same operation sent to the local HTTP API must be translated to the same request and must give the same result, and `ilium ctl ops` must print one example body for every operation that both accept.

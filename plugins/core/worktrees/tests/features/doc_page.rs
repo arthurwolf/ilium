@@ -182,7 +182,7 @@ fn cor_022_disabling_keeps_the_tab_read_only_with_the_stated_notice_and_fails_th
     let text = page_text();
     assert!(text.contains("\"Worktrees is disabled. Values are kept.\""));
     let boot = page("reference-kernel-and-boot");
-    assert!(boot.contains("| Worktrees | `ilium new-pane --worktree` fails with `cli.owner-disabled` | Plain `ilium new-pane` works |"));
+    assert!(boot.contains("| Worktrees | `ilium new-pane --worktree` fails with `cli.owner-disabled` | Plain `ilium new-pane` works while Fleet is on |"));
 }
 
 /// REQ: COR-011

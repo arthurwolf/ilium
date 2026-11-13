@@ -244,7 +244,7 @@ fn usr_162_two_installs_give_32_rows_with_tier_badges_matching_the_cli_list() {
     rig.install_plugin("com.example.a", "T2");
     rig.install_plugin("com.example.b", "T3");
     rig.open_plugins_tab();
-    assert_eq!(rig.plugin_row_count(), 32);
+    assert_eq!(rig.plugin_row_count(), 34);
     let screen = rig.screen_text();
     assert!(row_with(&screen, "com.example.a").contains("T2"));
     assert!(row_with(&screen, "com.example.b").contains("T3"));
@@ -254,7 +254,7 @@ fn usr_162_two_installs_give_32_rows_with_tier_badges_matching_the_cli_list() {
         list.lines()
             .filter(|line| line.contains("com.example.") || line.contains("ilium.core."))
             .count(),
-        32
+        34
     );
 }
 
@@ -263,7 +263,7 @@ fn usr_162_two_installs_give_32_rows_with_tier_badges_matching_the_cli_list() {
 fn usr_162_a_fresh_profile_shows_30_rows() {
     let mut rig = ScreensRig::new(100, 80);
     rig.open_plugins_tab();
-    assert_eq!(rig.plugin_row_count(), 30);
+    assert_eq!(rig.plugin_row_count(), 32);
 }
 
 // ---- USR-163 ----

@@ -1,0 +1,36 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.attention",
+  "name": "Attention queue",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The attention queue ranks the agents that need the user and takes the user to the next one.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "agent.read",
+      "tree.read",
+      "terminal.read-screen",
+      "inference",
+      "extensions.provide:ilium.core.attention/item-sources"
+    ],
+    "client": [
+      "ui.panels",
+      "ui.chrome",
+      "settings.read-kernel:icons",
+      "extensions.provide:ilium.core.attention/before-jump"
+    ]
+  },
+  "activation": [
+    "startup"
+  ],
+  "limits_tier": "first-party"
+}

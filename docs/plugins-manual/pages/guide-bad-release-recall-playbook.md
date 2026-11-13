@@ -60,4 +60,4 @@ A yank does not reach a bundle or a mirror that already holds a copy of the bad 
 
 ## Production additions (round 3)
 
-- **[PRY-030]** A host that is online MUST fetch a recall notice and disable the recalled version within 15 minutes of its publication, record audit event `recall.applied` with the plugin id and version, and `ilium plugin list --json` MUST show `recalled: true` for that version.
+- **[PRY-030]** A host that is online MUST fetch a recall notice and disable the recalled version within 15 minutes of its publication, record audit event `recall-applied` with the plugin id and version, and `ilium plugin list --json` MUST show `recalled: true` for that version.

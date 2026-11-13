@@ -223,7 +223,7 @@ unchecked until the user checks it.
 
 A T1 bundled plugin is activated first without the grant. On its first activation, the user sees one prompt,
 `Plugin <name> asks for: agent.read-prompts`, with the buttons `Allow selected` and `Not now`. `Not now`
-asks again at the next server start, up to three times. After that, the user can grant it from Settings >
+asks again at the next server start. The prompt is shown three times in total, and a third `Not now` ends it ([USR-014](/pages/user-install-and-manage/)). After that, the user can grant it from Settings >
 Plugins.
 
 Once the banner is running, it looks like this:

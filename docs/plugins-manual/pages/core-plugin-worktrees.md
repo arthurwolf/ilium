@@ -72,7 +72,7 @@ The contract version is 0.1. The grants follow the file scope rules: the worktre
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -106,7 +106,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "command:new-agent",
+    "command:ilium.core.worktrees/new-agent",
     "service:create"
   ],
   "contributes": {
@@ -535,3 +535,11 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 12)
 
 - **[PRP-022]** The system must route a confirmation for a destructive core-plugin action to exactly one client, refuse with exit code 2 and error confirm.no-client when no client is attached and no --yes flag was given, and write one audit record naming the confirming client or the flag.
+
+## Custody, ownership, pruning and setup
+
+Four safeguards stand behind every worktree this plugin creates. Custody: a token on disk says an agent process may still be using the directory. Ownership: a marker in the metadata of Git says that Ilium created the worktree. Pruning: an inventory of retained worktrees, the ones whose panes are gone, from which the user removes those that are safe to remove. Setup: one command of the user that runs once in a new checkout, for example to install dependencies.
+
+- **[PRM-513]** The system must write a durable refusal token for a worktree before any process of an agent starts in it, and must refuse to delete the worktree while a token exists. It must erase a token only after the process lineage is proven stopped and a scan finds no process using the directory.
+- **[PRM-514]** The system must record ownership evidence for every worktree it creates in the per-worktree metadata of Git, not in the checkout, and must list and remove a retained worktree only when that evidence matches. The inventory and the removal of retained worktrees must work when no pane uses the worktree any more.
+- **[PRM-515]** The post-create setup command of a worktree must be one shell command that the user supplied, must run in the new checkout, and its output must not be kept, logged or put into an error message. When the command cannot start or fails, the system must keep the checkout and the copied files and report the failure.

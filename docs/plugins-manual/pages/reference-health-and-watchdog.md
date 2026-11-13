@@ -18,11 +18,12 @@ The health of a plugin is one value of the enum `health-state`. It is computed f
 |---|---|---|---|
 | 1 | `refused` | the package state is `refused-at-load` | load checks, policy |
 | 2 | `disabled` | the package state is `installed-disabled-by-user` or `disabled-by-policy`, or safe mode is on | user, administrator |
-| 3 | `failed` | any side is `stopped-by-failure` | the third counted failure in a window |
-| 4 | `restarting` | any side is `restart-scheduled`, or `activating` after a failure | a counted failure |
-| 5 | `degraded` | any degraded condition below holds | the counters below |
-| 6 | `dormant` | the plugin is enabled and every side is `inactive`, and no side waits for host capacity | no trigger has fired |
-| 7 | `healthy` | none of the above | |
+| 3 | `needs-setup` | the plugin is enabled and a settings row marked `setup_required` is empty; the host does not activate it ([PRM-201](/pages/user-install-and-manage/#a-plugin-that-needs-setup)) | the user's settings |
+| 4 | `failed` | any side is `stopped-by-failure` | the third counted failure in a window |
+| 5 | `restarting` | any side is `restart-scheduled`, or `activating` after a failure | a counted failure |
+| 6 | `degraded` | any degraded condition below holds | the counters below |
+| 7 | `dormant` | the plugin is enabled and every side is `inactive`, and no side waits for host capacity | no trigger has fired |
+| 8 | `healthy` | none of the above | |
 
 A plugin that waits for host capacity (`host-capacity`) is `degraded`, not `dormant`.
 

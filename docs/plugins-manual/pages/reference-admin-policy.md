@@ -41,6 +41,7 @@ All keys are optional. A missing section means no restriction from that section.
 
 ```toml
 version = 1
+rollout_state_dir = "/srv/ilium/rollouts"   # default: unset; absolute path, at most 4096 bytes
 
 [packages]
 allow_third_party = true           # default: true; false refuses every T2 and T3 install
@@ -53,17 +54,40 @@ precompiled_cache = true
 allow_url_installs = false          # default: true; false refuses a bare URL or file path source
 allowed_channels = ["stable"]       # default: ["stable","beta"]
 block_vulnerable_runtime = false
+blocked_versions = ["example.pane-tools@1.4.0"]        # default: none
+pinned_versions  = { "example.compliance" = "2.1.0" }  # default: none
+min_review_level = "A"              # default: "A"; "A" or "B"
+revocation_feed  = true             # default: true; false turns the revocation poll off
+revocation_feed_url = "https://mirror.example.com/ilium/revocations.json"  # default: the built-in feed
+require_fresh_revocation = false    # default: false; true refuses install and update on stale revocation data
+max_revocation_age = "36h"          # default: unset; "<n>h" or "<n>d", "1h" to "365d"
+allow_blocked    = ["bl-2026-0042"] # default: none; blocklist entry ids that are overridden
+allowed_licenses = ["MIT", "Apache-2.0", "BSD-3-Clause"]  # default: unset (no policy restriction)
 
 [publishers]
 trusted_keys = ["3f2a91c07b6d1e44a1b20c9e55d3f7a8b6c102e94d7798af13c56e0bd2f48a19"]
 allow        = ["3f2a91c0…"]          # when set, only these keys may sign T2 packages
 deny         = ["a1b20c9e…"]
+require_verified = false           # default: false
 
 [plugins]
 allow_ids      = ["example.*", "ilium.*"]    # glob on ids; default: all
 deny_ids       = ["example.experimental.*"]
 force_enabled  = ["example.compliance"]      # cannot be disabled by the user
 force_disabled = ["example.fun"]             # cannot be enabled by the user
+revocation_max_age_days    = 7       # default: 7; int, 1 to 365
+auto_rollback_on_probation = false   # default: false
+max_installed    = 256               # default: 256; int, 1 to 256
+max_active_sides = 128               # default: 128; int, 1 to 128
+max_user_plugin_disk_mib = 4096      # default: unset (no cap); int, 16 to 1048576
+max_user_active_plugins  = 64        # default: unset (no cap); int, 1 to 256
+log_level        = "warn"            # default: unset; error, warn, info, debug or trace
+log_level_locked = false             # default: false
+log_keep_days    = 14                # default: 14; int, 1 to 3650
+log_total_mib    = 256               # default: 256; int, 16 to 4096
+
+[plugins.registry]
+offline = false                      # default: false; true never refreshes the registry index
 
 [grants]
 deny              = ["http:*.pastebin.example", "process.run:sh", "terminal.history"]
@@ -85,6 +109,7 @@ offline     = false
 
 [processes]
 deny_env = ["EXAMPLE_INTERNAL_TOKEN"]
+allow_helper_core_dumps = false      # default: false
 
 [settings]
 locked = { "terminal.scrollback" = 20000, "plugins.example.compliance.endpoint" = "https://c.example.com" }
@@ -99,6 +124,29 @@ allow_project_values = false          # plugin values in .ilium/ are always igno
 sink      = "file"                    # "file", "syslog" or "journald"
 max_mib   = 64
 keep_days = 365
+min_retention_days = 365              # default: 365; int, 30 to 3650
+
+[notice]
+contact = "IT service desk, extension 4100"   # default: unset; at most 200 characters
+
+[telemetry]
+plugin_telemetry = true               # default: true; false blocks every plugin telemetry send
+
+[telemetry.forward]
+mode  = "off"                         # default: "off"; "off", "syslog" or "file"
+kinds = ["plugin-trap", "host-crash"] # default: none
+
+[ui]
+language_locked = "en"                # default: unset; a BCP 47 language tag
+
+[[rollout]]                           # 0 to 64 entries; operator staged rollout
+id      = "notes-1-3-0"               # 1 to 64 characters of a-z, 0-9 and -; unique in the file
+plugin  = "example.notes"             # plugin id
+version = "1.3.0"                     # exact version
+stages  = [1.00, 10.00, 50.00, 100.00]  # 1 to 16 cumulative shares in per cent
+halt_failures = 3                     # default: 3; int, 1 to 1000
+halt_hosts    = 2                     # default: 2; int, 1 to 1000
+halt_window_seconds = 600             # default: 600; int, 1 to 86400
 ```
 
 | Key | Type | Default | Effect |
@@ -129,8 +177,50 @@ keep_days = 365
 | `audit.sink`, `max_mib`, `keep_days` | | file, 64, 365 | See [Audit log](/pages/reference-audit-log/) |
 | `packages.blocked_versions` | list of `id@version` | none | Exact versions refused with `policy.version-denied` (proposed, owner to confirm; see [SEC-951]) |
 | `packages.pinned_versions` | table, id to version | none | The only version of that id that may be installed or run (proposed, owner to confirm; see [SEC-952]) |
+| `packages.auto_update_min_age_hours` | integer, 0 to 720 | 0 | Auto-update does not download or install a version published less than this many hours ago, except the `fixed` version of an advisory; a value outside the range makes the file malformed ([SEC-187]). See [Holding back new versions](/pages/reference-install-and-update/#holding-back-new-versions) (PRM-205) |
 | `packages.min_review_level` | `A` or `B` | `A` | Install and update refuse a version whose review level is lower, with `policy.review-level-too-low` (proposed, owner to confirm; see [SEC-207]) |
 | `publishers.require_verified` | bool | `false` | `true` refuses install and update of a publisher whose domain is not verified, with `policy.publisher-unverified` (proposed, owner to confirm; see [SEC-208]) |
+| `packages.precompiled_cache` | bool | true | `false` turns the precompiled module cache off for T2 and T3; modules compile at each load ([Sandbox](/pages/reference-sandbox/)). No notice |
+| `packages.block_vulnerable_runtime` | bool | false | `true` refuses to load T2 and T3 plugins on a runtime with a known advisory, with `sandbox.unavailable` and reason `runtime-vulnerable` ([Trust and supply chain](/pages/reference-trust-and-supply-chain/)) |
+| `packages.revocation_feed` | bool | true | `false` turns the poll of the signed revocation feed off. `ilium plugin status` shows `Revocation feed is off (policy)` |
+| `packages.revocation_feed_url` | string, an `https://` URL or an absolute file path, at most 2,048 characters | the built-in feed | Source of the signed feed. It changes the source only; the feed is verified with the compiled-in key |
+| `plugins.revocation_max_age_days` | int, 1 to 365 | 7 | Age of the last verified revocation data after which it is stale. Stale data is still enforced. Install and update show `Revocation data is N days old`, warn with `trust.revocation-stale` and need a confirmation or `--accept-stale-revocation` ([HST-694], [PRN-002], [PRN-019]) |
+| `packages.require_fresh_revocation` | bool | false | `true` refuses every T2 and T3 install and update while the revocation data is stale, with `trust.revocation-stale` and exit code 8. No confirmation and no flag overrides it. Installed plugins keep running |
+| `packages.max_revocation_age` | string: a whole number and `h` or `d`, from `1h` to `365d` | unset | When the last verified feed is older, the host does not start or activate any T2 or T3 plugin (`trust.revocation-stale`), writes one audit record with the feed age and the limit, and loads them again within 60 s of a verified fresh feed ([PRQ-011]). It must not be lower than `plugins.revocation_max_age_days`, else `policy.invalid` |
+| `packages.allow_blocked` | list of blocklist entry ids, at most 256 | none | The listed blocklist entries are not applied on this machine. Each start that applies an override writes one audit record with the entry id. The Plugins row shows `Blocklist entry <id> overridden by your administrator` ([PRP-012]) |
+| `packages.allowed_licenses` | list of SPDX identifiers, at most 128 | unset | When set, `ilium plugin check` and `publish` on this machine fail with `lint.dependency-license` for a locked dependency whose licence is not in the list ([PRP-003]). It does not affect install |
+| `plugins.auto_rollback_on_probation` | bool | false | `true` rolls a plugin back without asking when it reaches stopped-by-failure within 30 minutes of an update and the previous version is in the store. The notice reads `Rolled back to <version> by policy`; the log line is `update.rolled-back` with reason `probation` |
+| `plugins.max_installed` | int, 1 to 256 | 256 | Ceiling of installed plugins per session server ([HST-510]). An install over it is refused with `policy.blocked`, detail `policy.user-quota` |
+| `plugins.max_active_sides` | int, 1 to 128 | 128 | Ceiling of plugin sides active at once ([HST-510]). A side over it stays enabled and does not run; the notice names `policy.user-quota` |
+| `plugins.max_user_plugin_disk_mib` | int, 16 to 1,048,576 | unset (no cap) | Disk cap of all plugins of one user. An install or update over it is refused with `policy.user-quota`, showing used and allowed MiB ([HST-686]) |
+| `plugins.max_user_active_plugins` | int, 1 to 256 | unset (no cap) | Enabled and running plugins of one user, T1 included. Enabling one more returns `not-permitted` with reason `policy.user-quota` ([HST-686]) |
+| `plugins.log_level`, `log_level_locked`, `log_keep_days`, `log_total_mib` | string, bool, int, int | unset, false, 14, 256 | See [Policy keys for plugin log threshold and retention](#policy-keys-for-plugin-log-threshold-and-retention). The notice is `policy.locked` |
+| `plugins.registry.offline` | bool | false | `true` never refreshes a registry index. It is combined with the user value by logical OR. An expired cached index is used with the stale-data warning ([PKG-951]) |
+| `processes.allow_helper_core_dumps` | bool | false | `true` lets a helper write a core dump to an owner-only directory, deleted after 7 days ([Host helper](/pages/reference-host-helper/)). No notice |
+| `audit.min_retention_days` | int, 30 to 3,650 | 365 | Minimum age of audit records that name a plugin id, key id or blocklist entry of a `trust.*` or `sandbox.unavailable` event. A purge or rotation below that age is refused with `audit.retention-hold` and one `audit-purge-refused` record ([PRP-013]) |
+| `notice.contact` | string, at most 200 characters, no control characters | unset | Appended to every message that says `Blocked by your administrator` ([USR-343]) |
+| `telemetry.plugin_telemetry` | bool | true | `false` blocks every plugin telemetry send. A consent stays as the user set it and the consent dialog shows `Turned off by your administrator` ([OPS-106]) |
+| `telemetry.forward.mode` | `off`, `syslog` or `file` | `off` | Forwards the listed kinds of host records ([HST-994]). No notice |
+| `telemetry.forward.kinds` | list of `plugin-trap`, `plugin-crash`, `host-crash`, `host-scope-line`, `metrics` | none | Kinds that are forwarded. Another value makes the file malformed and the notice names the key |
+| `rollout_state_dir` | string: absolute path, at most 4,096 bytes | unset | Directory of the shared rollout records `rollout-<rollout id>.json` of [Operator upgrades](/pages/guide-operator-upgrades/). It is a top-level key. A file with a `[[rollout]]` entry and no `rollout_state_dir` is malformed (`policy.invalid`) |
+| `rollout` (list of tables `[[rollout]]`), keys `id`, `plugin`, `version`, `stages` | list of 0 to 64 tables; `id` is 1 to 64 characters of `a-z`, `0-9` and `-`, unique in the file; `plugin` is a plugin id; `version` is one exact version; `stages` is a list of 1 to 16 numbers from 0.01 to 100.00 with at most two decimal places, strictly increasing, the last one 100 | none | Assigns the update of `plugin` to `version` to cumulative stage shares ([LIF-306]). A host outside the current stage does not apply the update and reports `held`. The four keys are required in each entry. Two entries for the same plugin and version, a missing key or a `stages` list that breaks a rule is `policy.invalid` |
+| `rollout[].halt_failures`, `halt_hosts`, `halt_window_seconds` | int 1 to 1,000; int 1 to 1,000; int 1 to 86,400 | 3, 2, 600 | The halt threshold of that rollout ([LIF-307]): the rollout halts at `halt_failures` counted failures from at least `halt_hosts` different hosts inside `halt_window_seconds`, or at `halt_failures` counted failures from one host. A value below 1 or above the range is `policy.invalid` |
+| `ui.language_locked` | string, a BCP 47 language tag of at most 35 characters | unset | Pins the language of the host and of every plugin above every other source ([PDT-026]). Settings shows the row locked with `Set by your administrator` |
+
+A policy file may set every key of the block and the table above together. The names below appear in the manual and are not policy keys; a policy file that sets one is malformed ([SEC-187]):
+
+| Name | Why it is not a policy key | Use instead |
+|---|---|---|
+| `plugins.disable_third_party` | One key turns third-party plugins off | `packages.allow_third_party = false` |
+| `offline_revocation` | Replaced by a boolean | `packages.require_fresh_revocation` |
+| `audit_min_retention` | Spelling of an older page | `audit.min_retention_days` |
+| `plugins.data_retention_days` | No key deletes plugin data by age | The commands in the retention section below |
+| `limits.session_memory_mib_max` and other session resource ceilings | [SEC-950] | A user lowers them under `[plugins.limits]` |
+| a key for the SDK channel | `--sdk-channel` is a flag of the developer tools and no policy key gates it. `packages.allowed_channels` covers plugin release channels only | none |
+| `[host] update_check`, `[ui] contrast`, `[ui] screen_reader` and other settings | They are settings, not policy keys | Pin the value in `settings.locked` |
+
+- **[PRM-104]** The system must accept, without `policy.invalid`, a policy file that sets every key of the Schema block and key table of this page, each inside its stated type and range, must refuse a value outside the range or a key that is not in them with `policy.invalid` naming the key, and a release gate must fail when a page of the manual names a policy key that this page does not define.
+- **[PRM-110]** The system must read the operator rollout keys `rollout_state_dir` and `[[rollout]]` (`id`, `plugin`, `version`, `stages`, `halt_failures`, `halt_hosts`, `halt_window_seconds`) from the admin policy with the types, ranges and defaults of the key table of this page. A policy file with a `[[rollout]]` entry and no `rollout_state_dir`, with a `stages` list that does not increase strictly or does not end at 100, or with a halt value outside its range must be refused with `policy.invalid` naming the key, and a host must then apply no update that a rollout entry of that file names.
 
 ## Evaluation
 
@@ -150,13 +240,13 @@ keep_days = 365
 <figcaption>Rendered at 48 columns. Illustrative. A policy-denied row is locked off and cannot be checked.</figcaption>
 </figure>
 
-**[SEC-186]** An installed plugin that violates a new policy rule of the kinds that disable a plugin (`plugins.deny_ids`, `packages.allowed_tiers`, `packages.allow_third_party` and the publisher rules, see [SEC-198]) is disabled at the next start, with a notice `Disabled by your administrator`, and the audit log records `policy-violation`. Its data is kept.
+**[SEC-186]** An installed plugin that violates a new policy rule of the kinds that disable a plugin (`plugins.deny_ids`, `packages.allowed_tiers`, `packages.allow_third_party` and the publisher rules, see [SEC-198]) is disabled at the next start, before any of its code runs. Its row reads `Blocked by policy`, its detail view shows the line `Disabled by your administrator`, the one notice of [PRM-207](/pages/reference-admin-policy/#stopping-a-blocked-plugin-now) names it, and the audit log records `policy-violation`. Its data is kept.
 
 **[SEC-187]** A malformed policy file (TOML error, unknown key, wrong type, `version` not 1) fails **closed** for third parties: T2 and T3 plugins refuse to load with `policy.invalid`, and T1 plugins run normally. The server shows `Admin policy is invalid: <line and message>` and keeps running. A policy file that is missing is not an error (no policy). An unreadable one (permission error) counts as malformed.
 
 - **[SEC-092]** The policy parser MUST accept CRLF line endings and one leading UTF-8 byte-order mark in a policy file, because management tools on Windows write both, and MUST treat any other encoding or a byte-order mark elsewhere as malformed under [SEC-187] (proposed, owner to confirm).
 
-**[SEC-188]** The policy is read at server start only. A change takes effect at the next start. `ilium plugin policy reload` is not part of version 0.1.0.
+**[SEC-188]** The policy is read at server start only. A change takes effect at the next start, with one exception: a `kill` entry takes effect on a running host within 60 s of the file change ([LIF-303](/pages/guide-admin-failure-runbook/)). `ilium plugin policy reload` is not part of version 0.1.0.
 
 **[SEC-189]** Forced states. `plugins.manage` and the Plugins screen MUST NOT enable a plugin in `force_disabled` or disable one in `force_enabled`. The call returns `not-permitted` with reason `policy`, and the screen shows a lock mark. A `force_enabled` plugin that is not installed is reported in `policy show` as `missing` and in the audit log; the server does not install it.
 
@@ -180,22 +270,28 @@ keep_days = 365
 
 ### Stopping a blocked plugin now
 
-Today a policy edit reaches a running server only at its next start ([SEC-188]). A plugin that is already running and that the policy now blocks keeps running until then. The fleet-wide switch that stops every third-party plugin is [SEC-457] in [Enterprise deployment](/pages/guide-enterprise-deployment/). The rules below define a per-plugin path that removes the wait. They are a proposal (proposed, owner to confirm). Until the owner accepts them, [SEC-188] applies unchanged and these rules have no effect.
+A policy edit reaches a running server only at its next start ([SEC-188]). There is no live reload of the policy rules in 0.1.0 and no `ilium plugin policy reload` command. Where another page says "policy reload", it means the read at the next server start. A plugin that is already running and that the new file blocks keeps running until that start. The one exception is a `kill` entry: the server applies it to a running plugin within 60 seconds of the file change ([LIF-301 to LIF-303](/pages/guide-admin-failure-runbook/)). This section says what happens before the restart, what the user sees at the restart, and how to stop a plugin sooner.
 
-- **Trigger.** The server re-reads the system policy file when `ilium plugin policy reload` runs, and when the file's content hash changes. The hash is checked every 10 seconds. The maximum exposure window is 60 seconds from the moment the new file is written to the moment the stop takes effect (proposed value).
-- **Effect on a running plugin.** If the new effective policy blocks a running plugin through `plugins.deny_ids`, `packages.allowed_tiers`, `packages.allow_third_party` or a publisher rule, the server deactivates that plugin at once. Its state becomes `disabled-by-policy` ([plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)). The state is not written to `installed.json`, so the plugin starts again without any user action when the policy stops blocking it. Its data and settings stay on disk.
-- **Calls after the stop.** From the deactivation on, every host call of that plugin returns `not-permitted` with reason `policy`, as in [SEC-184]. The user cannot re-enable it while the policy blocks it. The enable call returns `not-permitted` with the refusal code in its message.
-- **User-visible notice.** The client shows `Disabled by your administrator`, the text of [SEC-186], on the plugin's row and in the notice list. The refusal code is not shown in the notice. It is recorded in the audit log, as [SEC-115] requires.
-- **Audit records.** Two records are written before the stop is reported to the user: `policy-violation` with the matching reason code and the plugin id, and `plugin-state-changed` with reason `policy`. See [Audit log](/pages/reference-audit-log/).
-- **Malformed file at reload.** A live reload that reads a malformed file fails closed in the same way as at start ([SEC-187]). Third-party plugins stop with `policy.invalid`, and the server shows `Admin policy is invalid: <line and message>`.
-- **Relaxing a policy.** A live reload that lifts a block starts again only the plugins that the policy itself stopped. It does not start a plugin that the user disabled.
-- **Until the owner accepts this.** On 0.1.0 the exposure window of a blocked running plugin lasts until the next start on that machine. An administrator can narrow it by running `ilium plugin disable <id> --reason <text>` for each account, which stops the plugin for that account only and does not stop it for other users, or by stopping all third-party plugins with [SEC-457].
+**Before the restart.** The server compares the hash of the system policy file on disk with the hash it loaded, every 10 seconds. When they differ it changes nothing in the running session, apart from applying a new `kill` entry. It shows the user one notice, `Your administrator changed the plugin policy. It applies at the next start of Ilium`, and `ilium plugin policy status` reports `pending_restart: true` with exit code 4 ([PDV-017](/pages/guide-policy-compliance-reporting/)).
 
-Test: deny the id of a running plugin in the system file, run `ilium plugin policy reload`, and assert within 60 seconds that the plugin is `disabled-by-policy`, that its host calls return `not-permitted` with reason `policy`, and that the audit log holds `policy-violation` and `plugin-state-changed`. Then remove the deny entry, reload, and assert that the plugin is enabled again without user action.
+**[OPS-231]** While the server runs, the host MUST detect a change of the system policy file within 10 seconds of the change, MUST keep enforcing the policy that it loaded at start ([SEC-188]), MUST NOT stop, start or change any plugin because of the changed file, except a plugin named by a `kill` entry ([LIF-303](/pages/guide-admin-failure-runbook/)), and MUST show one notice `Your administrator changed the plugin policy. It applies at the next start of Ilium` per changed file hash.
 
-**[OPS-231]** While the server runs, the host MUST detect a change of the system policy file within 10 seconds of the change. For each running plugin that the new effective policy blocks through `plugins.deny_ids`, `packages.allowed_tiers`, `packages.allow_third_party` or a publisher rule, the host MUST deactivate every running instance of that plugin within the times of [HST-517](/pages/reference-requirements-kernel-host/) after the detection, with the reason `policy` (proposed, owner to confirm).
+**[OPS-232]** Each server start that loads a system policy file whose SHA-256 hash differs from the hash that the previous start loaded, and the first start that loads a system policy file, MUST write one audit record `policy-reloaded` that holds the SHA-256 hash of the system policy file before the change (empty at the first load) and after it.
 
-**[OPS-232]** Each live reload that changes the effective policy MUST write one audit record `policy-reloaded` that holds the SHA-256 hash of the system policy file before the change and after it (proposed, owner to confirm).
+**At the first start after the change.** The server reads the new file before it loads any plugin. For every plugin that was enabled at the last run and that the new effective policy blocks through `plugins.deny_ids`, `packages.allowed_tiers`, `packages.allow_third_party`, a publisher rule or a version rule:
+
+- **No code runs.** The plugin is put in the state `disabled-by-policy` ([plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)) before any of its components is instantiated. Its data, settings and grants stay on disk. The state is not written to `installed.json` ([LIF-004](/pages/reference-plugin-lifecycle-states/)), so the plugin runs again, without any user action, at the first start after the policy stops blocking it. A plugin that the user had turned off stays off.
+- **The row.** In the same start, the Plugins row reads `Blocked by policy`, the row word of [Settings, plugin rows](/pages/core-plugin-settings/#plugin-row-states). The detail view of the row shows the line `Disabled by your administrator`, the text of [SEC-186], followed by the `notice.contact` text when the policy sets one ([USR-343](/pages/guide-enterprise-deployment/)). The user cannot turn the plugin on: the enable call returns `not-permitted` with the refusal code in its message ([LIF-007](/pages/reference-plugin-lifecycle-states/)).
+- **One notice.** The client shows one notice for the whole start, not one per plugin: `Your administrator turned off N plugins: <names>`, with the names of the first 5 plugins in id order and `and M more` when there are more. The `notice.contact` text follows when it is set. The action **Open Plugins** opens Settings > Plugins. The refusal code is not shown in the notice. The notice is shown once per changed policy hash, not at every later start.
+- **Audit records.** For each such plugin the server writes one `policy-violation` record with the matching reason code and one `plugin-state-changed` record with reason `policy`, before the notice is shown. See [Audit log](/pages/reference-audit-log/).
+
+A malformed file at that start fails closed as [SEC-187] says: third-party plugins do not load, with `policy.invalid`, and the server shows `Admin policy is invalid: <line and message>`.
+
+**Stopping a plugin before the restart.** A policy edit of `plugins.deny_ids`, the tier rules, the publisher rules or the version rules does not stop a running plugin. Add a `kill` entry for the id ([LIF-301](/pages/guide-admin-failure-runbook/)), or run `ilium plugin kill <id> --reason <text>` on the machine, which stops the plugin within 1 second ([HST-517](/pages/reference-requirements-kernel-host/)), or `ilium plugin disable --all-third-party --reason <text>` ([SEC-457] in [Enterprise deployment](/pages/guide-enterprise-deployment/)). `ilium plugin disable <id> --reason <text>` stops the plugin for one account only.
+
+**Which machines still run the old policy.** Run `ilium plugin policy status --json` on each machine through your management tool. A machine whose output has `pending_restart: true` (exit code 4), or whose `policy_sha256` differs from the hash of the file you pushed, still enforces the old policy. [Policy compliance reporting](/pages/guide-policy-compliance-reporting/#collecting-from-a-fleet) describes the collection.
+
+Test: with a plugin enabled and running, deny its id in the system file. Assert within 10 seconds that the plugin still runs, that the notice of OPS-231 is shown and that the status command exits 4. Restart the server. Assert that no export of the plugin was called, that the row reads `Blocked by policy`, that one notice names the plugin, and that the audit log holds `policy-reloaded`, `policy-violation` and `plugin-state-changed` with reason `policy`. Then remove the deny entry, restart, and assert that the plugin runs again without user action. The requirement for the restart is PRM-207, at the end of this page.
 
 ### Previewing a policy change
 
@@ -238,7 +334,7 @@ Test: write a candidate that denies one installed plugin id and one grant the pl
 
 ### Version rules
 
-**[SEC-951]** (proposed, owner to confirm) An entry of `packages.blocked_versions` has the form `<id>@<version>` with an exact version. A package whose id and version match an entry MUST be refused at install and update with `policy.version-denied`. An installed copy of a blocked version MUST be disabled at the next server start, with the notice `Disabled by your administrator` ([SEC-186]), and its data MUST be kept. The other versions of the same id are not affected. Test: block `example.pane-tools@2.0.0`, assert that 2.0.1 installs, that 2.0.0 is refused, and that an installed 2.0.0 is disabled at the next start.
+**[SEC-951]** (proposed, owner to confirm) An entry of `packages.blocked_versions` has the form `<id>@<version>` with an exact version. A package whose id and version match an entry MUST be refused at install and update with `policy.version-denied`. An installed copy of a blocked version MUST be disabled at the next server start, with the detail line `Disabled by your administrator` and the notice of [SEC-186], and its data MUST be kept. The other versions of the same id are not affected. Test: block `example.pane-tools@2.0.0`, assert that 2.0.1 installs, that 2.0.0 is refused, and that an installed 2.0.0 is disabled at the next start.
 
 **[SEC-952]** (proposed, owner to confirm) An entry of `packages.pinned_versions` names one version for one id. Install and update of that id MUST install only the pinned version, and a different installed version MUST NOT run; the refusal code is `policy.version-pinned`. A pin never removes data. Test: pin `example.pane-tools` to 1.4.2, attempt an update to 2.0.1 and assert the refusal, then remove the pin and assert the update succeeds.
 
@@ -273,13 +369,13 @@ log_total_mib    = 128      # default: 256; int, 16 to 4096
 
 **Precedence.** The effective threshold for a plugin is resolved in this order, first match wins: (1) `plugins.log_level` when `log_level_locked = true`; (2) the per-plugin setting made by `ilium plugin log-level` ([DEV-654]); (3) `ILIUM_PLUGIN_LOG_LEVEL` in the server environment; (4) `plugins.log_level` when not locked; (5) the host default. This keeps [DEV-654] (command beats variable) and puts the policy at the bottom when unlocked and at the top when locked. A user policy file can only make the value stricter by [SEC-181]: for `log_level` the more verbose of the two is not accepted, so the user file cannot lower the threshold the system file sets; `log_level_locked` combines by logical OR; `log_keep_days` and `log_total_mib` take the smaller value.
 
-**What the user sees.** When the threshold is locked, `ilium plugin log-level` prints the effective level and the field `policy.locked`, for example `example.pane-tools  warn  policy.locked`. A set attempt exits with status 1 and prints `policy.locked` with the text `Set by your administrator`, the same code and text as [SEC-186] and the registry rows. The environment variable is ignored under a lock and the server writes one `warn` line to the host log at start, naming the variable. `ilium plugin log-level` with no argument still works and shows the effective value and where it came from (`policy`, `command`, `environment` or `default`).
+**What the user sees.** When the threshold is locked, `ilium plugin log-level` prints the effective level and the field `policy.locked`, for example `example.pane-tools  warn  policy.locked`. A set attempt exits with status 7 (policy) and prints `policy.locked` with the text `Set by your administrator`, the same code and text as [SEC-186] and the registry rows. The environment variable is ignored under a lock and the server writes one `warn` line to the host log at start, naming the variable. `ilium plugin log-level` with no argument still works and shows the effective value and where it came from (`policy`, `command`, `environment` or `default`).
 
 **Scope of retention.** The keys apply to plugin log files only ([Plugin files](/pages/reference-plugin-files/)). They never apply to the audit log: its age and size are owned by `audit.keep_days`, `audit.max_mib` and [SEC-950], [SEC-953] and [SEC-954], and no `plugins.log_*` key can shorten them. A deletion by `plugins.log_keep_days` removes only rotated files; the active file is never deleted. Lowering `log_keep_days` in a later policy takes effect at the next start or 24-hour sweep, and the files removed are counted in one `log.retention-evict` line of the host log, not in the audit log. Raising a threshold or retention never recovers lines already dropped.
 
-**Failure modes.** A value out of range makes the file malformed ([SEC-187]) and the whole policy is refused. A deletion that fails (file in use, permission) is logged once per sweep and retried at the next sweep; it does not stop the server. A policy that sets `log_level = "trace"` with `log_total_mib` smaller than 4 times the 4 MiB rotation size ([HST-600]) is accepted, and the cap then evicts rotated files continuously; `ilium plugin doctor` shows a warning line `log cap smaller than rotation`.
+**Failure modes.** A value out of range makes the file malformed ([SEC-187]) and the whole policy is refused. A deletion that fails (file in use, permission) is logged once per sweep and retried at the next sweep; it does not stop the server. A policy that sets `log_level = "trace"` with `log_total_mib` smaller than the 20 MiB that one plugin may use (the active file and four rotated files of 4 MiB, [HST-600]) is accepted, and the cap then evicts rotated files continuously; `ilium plugin doctor` shows a warning line `log cap smaller than rotation`.
 
-Test: with a fake session and a test policy file, (1) set `log_level = "warn"`, unlocked, with no user setting and `ILIUM_PLUGIN_LOG_LEVEL=debug`: assert the effective level is `debug` and its source `environment`; run `ilium plugin log-level example.pane-tools error` and assert `error`, source `command`. (2) Set `log_level_locked = true` and repeat: assert effective `warn`, the field `policy.locked`, a refused set with exit status 1, and the start-up warning. (3) Set `log_keep_days = 7`; create rotated files aged 3, 8 and 20 days, restart, and assert only the 3-day file remains and the active file is untouched. (4) Set `log_total_mib = 16`, fill the logs above it and assert `log.cap-evict` and that the audit files are unchanged by hash. Read the effective values back after each step with `ilium plugin policy show` and `ilium plugin log-level`.
+Test: with a fake session and a test policy file, (1) set `log_level = "warn"`, unlocked, with no user setting and `ILIUM_PLUGIN_LOG_LEVEL=debug`: assert the effective level is `debug` and its source `environment`; run `ilium plugin log-level example.pane-tools error` and assert `error`, source `command`. (2) Set `log_level_locked = true` and repeat: assert effective `warn`, the field `policy.locked`, a refused set with exit status 7, and the start-up warning. (3) Set `log_keep_days = 7`; create rotated files aged 3, 8 and 20 days, restart, and assert only the 3-day file remains and the active file is untouched. (4) Set `log_total_mib = 16`, fill the logs above it and assert `log.cap-evict` and that the audit files are unchanged by hash. Read the effective values back after each step with `ilium plugin policy show` and `ilium plugin log-level`.
 
 ### Time-based retention of plugin data set by policy
 
@@ -305,7 +401,7 @@ Test: write a policy file containing `plugins.data_retention_days = 30` and asse
 
 ### Notice text
 
-**[SEC-115]** (proposed, owner to confirm) The reason codes are the stable contract for every notice on this page: `policy.invalid`, `policy.tier-denied`, `policy.id-denied`, `policy.publisher-denied`, `policy.source-denied`, `policy.replacement`, `policy.version-denied` and `policy.version-pinned`. The notice and refusal texts are host English text in 0.1.0, with no translation shipped and no locale switch. A localised text MUST map from the code, and support staff MUST match a user's text to the code in the `audit` record. Open item: [SEC-186] gives `Disabled by your administrator`, while the Plugins row label in [Settings, plugin rows](/pages/core-plugin-settings/) is `Blocked by policy`. The owner MUST choose one text per surface before release. Test: for each code, trigger the refusal and assert that the audit record carries the code and not the text.
+**[SEC-115]** (proposed, owner to confirm) The reason codes are the stable contract for every notice on this page: `policy.invalid`, `policy.tier-denied`, `policy.id-denied`, `policy.publisher-denied`, `policy.source-denied`, `policy.replacement`, `policy.version-denied` and `policy.version-pinned`. The notice and refusal texts are host English text in 0.1.0, with no translation shipped and no locale switch. A localised text MUST map from the code, and support staff MUST match a user's text to the code in the `audit` record. One text per surface: the Plugins row word for a policy block is `Blocked by policy` ([Settings, plugin rows](/pages/core-plugin-settings/)), and `Disabled by your administrator` of [SEC-186] is the text of the detail line of that row; the notice that names the plugins is the one of [PRM-207](/pages/reference-admin-policy/#stopping-a-blocked-plugin-now). A surface MUST NOT use the text of the other. Test: for each code, trigger the refusal and assert that the audit record carries the code and not the text.
 
 ## Examples
 
@@ -370,3 +466,7 @@ The Settings page shows the locked value together with the policy source that se
 ## Production additions (round 5)
 
 - **[PRW-044]** `ilium plugin policy check` MUST evaluate the installed set and the lockfile against a candidate policy file without applying it, and MUST print each plugin that would be blocked, disabled or lose a grant, with the rule that matched, and exit 0 only when no plugin is affected.
+
+## Production additions (round 15)
+
+- **[PRM-207]** The system must, on the first start after a policy change that blocks previously enabled plugins, put each such plugin in `disabled-by-policy` before any of its code runs, show its row as `Blocked by policy` with the detail line `Disabled by your administrator` in that same start, show one notice `Your administrator turned off N plugins: <names, first 5>` with the `notice.contact` text ([USR-343]) and an `Open Plugins` action, and write one `plugin-state-changed` audit record with reason `policy` per plugin.

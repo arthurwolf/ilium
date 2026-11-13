@@ -433,9 +433,9 @@ fn sec_978_dependant_is_restored_without_user_action_after_a_fixed_version_is_in
     let rig = OpsRig::new();
     let output = install(&rig, &tier3(&[]).requires_service("com.example.base"));
     assert!(
-        stdout_has_all(&output, &["dependency.restored"]),
+        stdout_has_all(&output, &["dependency-restored"]),
         "SEC-978 not implemented: after a fixed version of B is installed, A must return to its \
-         previous state at the next load and log dependency.restored; stdout {}",
+         previous state at the next load and log dependency-restored; stdout {}",
         output.stdout_raw
     );
 }

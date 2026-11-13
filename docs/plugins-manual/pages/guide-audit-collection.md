@@ -64,4 +64,4 @@ The host also counts the audit bytes and records it writes and shows both counte
 
 ## Production additions (round 4)
 
-- **[PRZ-020]** While `ilium admin audit hold set --reason TEXT` is active, audit retention pruning MUST delete 0 records regardless of age, MUST write one `audit.hold-set` record at set time and one `audit.hold-cleared` record at clear time, and a prune attempted during the hold MUST exit with code 3 and name the hold id.
+- **[PRZ-020]** While `ilium admin audit hold set --reason TEXT` is active, audit retention pruning MUST delete 0 records regardless of age, MUST write one `audit-hold-set` record at set time and one `audit-hold-cleared` record at clear time, and a prune attempted during the hold MUST exit with code 3 and name the hold id.

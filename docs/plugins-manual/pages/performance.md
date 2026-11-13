@@ -55,8 +55,8 @@ The manifest `limits` block sets a value per plugin and side. The host clamps a 
 
 | Key | Default | Ceiling, T1 | Ceiling, T2 and T3 | Effect when breached |
 |---|---|---|---|---|
-| `event_deadline_ms` | 20 | 50 | 20 | Trap |
-| `command_deadline_ms` | 50 | 100 | 50 | Trap |
+| `event_deadline_ms` | 20 | 50 | 20 | Trap, for an `on-events` batch without a command. Hook handlers, detectors and providers have their own deadlines and effects: [Call classes](/pages/reference-host-scheduling/#call-classes) |
+| `command_deadline_ms` | 50 | 100 | 50 | Trap, for a batch with a `command-invoked` event and for a service or inference provider call: [Call classes](/pages/reference-host-scheduling/#call-classes) |
 | `render_deadline_ms` | 10 | 20 | 10 | Trap |
 | `activate_deadline_ms` | 2000 | 5000 | 2000 | Trap |
 | `job_deadline_ms` (CPU) | 2000 | 60000 | 10000 | `failed(timed-out)` |

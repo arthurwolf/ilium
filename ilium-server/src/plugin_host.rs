@@ -24,12 +24,13 @@ use ilium_plugin_api::kernel::{
 use ilium_plugin_api::ProcessKind;
 use ilium_plugin_host::lifecycle::{ShutdownReport, StartMode, StartReport};
 
-/// The thirty core plugins a normal or safe start activates.
-const CORE_PLUGIN_IDS: [&str; 30] = [
+/// The thirty-two core plugins a normal or safe start activates.
+const CORE_PLUGIN_IDS: [&str; 32] = [
     "agent-detect",
     "agent-setup",
     "agent-toolbar",
     "ambient",
+    "attention",
     "chatroom",
     "compaction",
     "cost",
@@ -43,6 +44,7 @@ const CORE_PLUGIN_IDS: [&str; 30] = [
     "notifications",
     "progress",
     "recap",
+    "resources",
     "scenes",
     "scheduler",
     "search",

@@ -27,7 +27,7 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 
 ### Basics
 
-**Do I have to use plugins?** No. All 30 core plugins ship with Ilium and work as before. Third-party plugins are optional. See [Plugins for users](/pages/user-plugins-overview/).
+**Do I have to use plugins?** No. All 32 core plugins ship with Ilium and work as before. Third-party plugins are optional. See [Plugins for users](/pages/user-plugins-overview/).
 
 **Is there a plugin store?** Only if you set up a registry. Ilium ships none and runs no central store (decisions D3 and D27). See [Plugin store](/pages/user-plugin-store/). A plugin is a `.iliumpkg` file that someone gives you. Ilium never searches for plugins. See [Install and manage plugins](/pages/user-install-and-manage/).
 

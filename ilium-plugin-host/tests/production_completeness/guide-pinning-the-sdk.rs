@@ -1,9 +1,9 @@
 /// REQ: PDX-001
 #[test]
 fn pdx_001_commit_lockfile_or_fail_unpinned() {
-    // Observable: Delete Cargo.lock from a Rust template project and run `ilium plugin check --release`: the exit code is non-zero and the output contains `build.unpinned-inputs`.
+    // Observable: Delete Cargo.lock from a Rust template project and run `ilium plugin check --release`: the exit code is non-zero and the output contains `build.unpinned-input`.
     panic!(
-        "PDX-001 not implemented: A plugin project MUST commit its lockfile (`Cargo.lock` for Rust, `bun.lock` for TypeScript), and a release build or `ilium plugin check --release` without one MUST fail with `build.unpinned-inputs` as defined by [DEV-893]."
+        "PDX-001 not implemented: A plugin project MUST commit its lockfile (`Cargo.lock` for Rust, `bun.lock` for TypeScript), and a release build or `ilium plugin check --release` without one MUST fail with `build.unpinned-input` as defined by [DEV-893]."
     );
 }
 

@@ -200,7 +200,7 @@ The suite checks the contract. It does not check:
 
 - the look of a view on a real terminal;
 - the speed on a given machine, except through the budgets above;
-- the behaviour of a core plugin, which has its own tests.
+- the behaviour of a core plugin, which has its own tests. The one exception is the schema cases of [Core extension points](/pages/reference-core-extension-points/#typed-schemas) ([PRM-109]), which the suite runs against the core plugins and their replacements.
 
 ## Using the suite in CI
 
@@ -253,7 +253,7 @@ A pass does not say that the plugin behaves well, is free of defects, is secure,
 
 ### Attaching the report
 
-- To a package: `ilium plugin test --conformance --report conformance.json` writes the `ilium-conformance/1` file, and `ilium plugin package` includes it as `conformance.json` when it exists next to the manifest. The report holds the manifest SHA-256, so the host rejects a report whose hash differs from the package manifest and treats the package as having no report.
+- To a package: `ilium plugin test --conformance --report conformance.json` writes the `ilium-conformance/1` file, and `ilium plugin pack` includes it as `conformance.json` when it exists next to the manifest. The report holds the manifest SHA-256, so the host rejects a report whose hash differs from the package manifest and treats the package as having no report.
 - To a registry listing: a registry that requires the report at publish ([DEV-923]) refuses a version without one. The refusal is returned at upload and names the missing file. A registry that does not require it accepts a version without a report and shows no badge. See [Registry reference](/pages/reference-registry/).
 - The registry checks that the report is well formed, that the plugin id, version and manifest hash match the package, and that no `fail` record is present. It does not run the suite again, so the report is the author's record. A registry that wants proof reruns the suite itself with `--suite-version` ([DEV-924]).
 

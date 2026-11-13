@@ -1,0 +1,46 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.resources",
+  "name": "Shared resources",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "Shared resources give hardware one owner and a first-come, first-served queue across projects.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "cli.contribute",
+      "agent.read",
+      "panes.read",
+      "tree.decorate",
+      "settings.read-kernel:user-interface",
+      "extensions.provide:ilium.core.resources/resource-kinds",
+      "extensions.provide:ilium.core.resources/before-grant"
+    ],
+    "client": [
+      "ui.panels",
+      "ui.chrome",
+      "settings.read-kernel:user-interface"
+    ]
+  },
+  "activation": [
+    "startup"
+  ],
+  "contributes": {
+    "cli": [{
+      "name": "resource",
+      "summary": "Shared resource queues and reservations",
+      "output": "jsonl",
+      "requires_server": true,
+      "aliases": ["ressource"]
+    }]
+  },
+  "limits_tier": "first-party"
+}

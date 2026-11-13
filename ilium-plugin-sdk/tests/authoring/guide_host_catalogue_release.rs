@@ -31,7 +31,7 @@ fn aut_623_project_owns_catalogue_with_english_source_and_all_core_text() {
         &[
             "The Ilium project MUST own the host text catalogue",
             "keep English as its source",
-            "including the text of the 30 bundled core plugins",
+            "including the text of the 32 bundled core plugins",
         ],
     );
 }

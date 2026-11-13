@@ -174,7 +174,7 @@ The manifest may request a limit. The host clamps the request to the ceiling for
 | Key | Default | T1 ceiling | T2 and T3 ceiling | Effect on breach |
 |---|---|---|---|---|
 | `memory_mib` | 32 | 256 | 128 | Trap |
-| `event_deadline_ms` | 20 | 50 | 20 | Trap |
+| `event_deadline_ms` | 20 | 50 | 20 | Trap, for an `on-events` batch without a command. Hook handlers, detectors and providers have their own deadlines and effects: [Call classes](/pages/reference-host-scheduling/#call-classes) |
 | `render_deadline_ms` | 10 | 20 | 10 | Trap |
 | `job_deadline_ms` (CPU) | 2,000 | 60,000 | 10,000 | `failed(timed-out)` |
 | `event_queue` | 1,024 | 4,096 | 1,024 | Stuck plugin restart |
@@ -270,7 +270,7 @@ This plugin runs in the client. It answers its own command with a desktop notice
 
 ```json
 {
-  "client": { "entry": "client.js", "world": "ilium:client/base@0.1.0", "exports": [] },
+  "client": { "entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": [] },
   "capabilities": { "client": ["notify.desktop"] }
 }
 ```

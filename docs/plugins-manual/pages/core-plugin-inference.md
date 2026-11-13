@@ -64,7 +64,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -639,9 +639,7 @@ A package adds a `transform` handler. Each handler gets the previous output and 
 ```json
 {
   "api": "ilium:plugin@0.1.0",
-  "exports": [
-    "hook-handler"
-  ],
+  "server": { "exports": ["hook-handler"] },
   "capabilities": { "server": ["extensions.contribute:ilium.core.inference/before-request"] },
   "contributes": {
     "extensions": [
@@ -810,3 +808,10 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Production additions (round 13)
 
 - **[PRO-005]** When a request names a model that the provider's catalogue no longer lists, the Inference plugin must fail it without sending prompt text with not-found and detail 'model-withdrawn', must mark the model [unavailable] in the ilium.models catalogue within one refresh interval, must show one dismissible notice per model naming every plugin and setting that selected it, and must not silently substitute another model.
+
+## Proxy database for the gateway provider
+
+The gateway provider can be told to send its requests only through paid proxies. The list of proxies is not kept in the Ilium configuration: it is read from a collection of a database that the user names in the Inference tab, together with the names of the fields that hold the address, the credentials and the enabled flag. The inference plugin owns this read, because it is the only consumer.
+
+- **[PRM-511]** The system must read the enabled rows of the paid-proxy collection once at client start, from the database connection and field mapping stored in the settings, and must hand them to the inference workers of the gateway provider. It must never write to that database and must never write the proxy rows to `config.toml`.
+- **[PRM-512]** When the proxy collection cannot be read or holds no enabled row, the system must report it in the Inference tab and in the log, and a provider for which a proxy is forced must fail its requests with `network` instead of connecting directly.

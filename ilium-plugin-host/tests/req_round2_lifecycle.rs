@@ -29,7 +29,7 @@ fn lif_983_backup_over_the_limit_holds_the_update_before_any_data_changes() {
         "LIF-983 not implemented: when the data to back up exceeds migration_backup_mib the \
          update must stop with migration.backup-too-large before any data changes, leave \
          update.state as \"staged\", name the three choices (raise migration_backup_mib; export \
-         with `ilium plugin data export <id> --out <file>` then update with --no-backup; or \
+         with `ilium plugin export <id> --out <file>` then update with --no-backup; or \
          update with --no-backup alone), and must not call migrate until the user picks one"
     );
 }

@@ -254,7 +254,7 @@ fn usr_334_default_bundle_has_no_host_log_tail() {
 fn usr_335_summary_sha256_is_a_64_digit_hex_digest_of_the_other_files() {
     assert_manual_says(
         "core-plugin-diagnostics",
-        "and a SHA-256 of the other three files",
+        "and a SHA-256 of every other entry of the archive",
     );
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0"));

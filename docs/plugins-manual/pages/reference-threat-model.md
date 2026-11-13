@@ -190,7 +190,7 @@ These rows extend the Assets table.
 | R6 | Rollback: serve older metadata | A `snapshot.json` or `timestamp.json` lower than the highest stored version is refused with `registry.rollback` and the stored version does not change | [PKG-816] | A client with no stored version, such as a fresh install |
 | R7 | Exhaust the registry | Per-publisher quota on publishes and per-client limit on metadata and downloads; over the limit gives `429`, `registry.rate-limited` and `Retry-After`; clients wait up to 300 s and otherwise fail; installs from cache or a file are never blocked; a mirror sync stops and keeps verified files | [PKG-704], [PKG-972], [PKG-973] | A distributed flood that stays below each per-address limit |
 | R8 | Fake a review | The level B badge needs a review record that names the reviewer, time and package SHA-256, plus an SBOM and licence files; it is derived from that exact version and hash, so a new version, a different hash or a withdrawn record returns the version to level A | [PKG-680], [PKG-683] | A reviewer who is themselves hostile or careless |
-| R8 | Namespace confusion | A namespace binds to one verified publisher at first publication (`registry.namespace-unowned`); `ilium.` and `core.` are reserved; confusable ids are refused with `registry.name-confusable` after a skeleton check | [PKG-702], [PKG-389] | Names that look alike to a human but pass the skeleton check |
+| R8 | Namespace confusion | A namespace binds to one verified publisher at first publication (`registry.namespace-unowned`); `ilium.` and `core.` are reserved; confusable ids are refused with `registry.confusable` after a skeleton check | [PKG-702], [PKG-389] | Names that look alike to a human but pass the skeleton check |
 | R1 to R8 | Upload automatically recognisable malware | Static analysis on every upload; a version that matches a rule waits in `pending-review` for at most 72 h and is not sent to clients | [SEC-726] | Malware no rule matches |
 
 The user-visible effect of a failed check is always a refusal with the stated error code and an audit entry; there is no "install anyway" button for `registry.rollback`, `trust.log-inconsistent` or `registry.auth`. A user can still install the same package from a file with `--allow-unsigned`, which is the T3 path and is confirmed in an attached client ([SEC-116]).
@@ -269,7 +269,7 @@ Inter-plugin channels bypass grants too. Plugin B can receive scrollback from pl
 
 ## Side channels
 
-**[SEC-370]** Guest-visible clocks (`clock` and the virtualised `wasi:clocks`) for T2 and T3 plugins MUST be coarsened to 1 ms and jittered by up to 1 ms, to limit timing attacks. T1 plugins get the same resolution unless their manifest requests a finer clock.
+**[SEC-370]** Guest-visible clocks (`clock` and the virtualised `wasi:clocks`) MUST have a resolution of 1 ms for every tier, and for T2 and T3 plugins MUST also be jittered by up to 1 ms, to limit timing attacks. No manifest key, grant or tier gives a finer clock.
 
 **[SEC-371]** The `screen-changed` event for a pane is coalesced to 10 per second. It MUST NOT be emitted while the terminal is in no-echo mode (the PTY has echo off, as for a password prompt). Detection uses the PTY ECHO flag. This keeps read grants from timing keystrokes of passwords.
 
@@ -308,7 +308,7 @@ Target behaviour (specified here before the code is written).
 
 ## Production additions: T2-security
 
-- **[SEC-706]** The host MUST validate every component with Wasmtime's validator using the fixed feature set of the ABI (no threads, no relaxed-simd, no unlisted proposals) before compilation; a module using a disabled proposal MUST be refused with `manifest.component-invalid` and detail naming the proposal, and no compilation MUST start.
+- **[SEC-706]** The host MUST validate every component with Wasmtime's validator using the fixed feature set of the ABI (no threads, no relaxed-simd, no unlisted proposals) before compilation; a module using a disabled proposal MUST be refused with `package.component-invalid` and detail naming the proposal, and no compilation MUST start.
 
 - **[SEC-714]** The threat model MUST list for each asset (user files, terminal content, secrets, tokens, trust store, grants, audit log) the actors that can reach it, the control that blocks them and the SEC id of that control, and a CI check MUST fail when a listed SEC id does not exist.
 

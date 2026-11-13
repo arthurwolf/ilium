@@ -47,7 +47,7 @@ All three functions are synchronous. There is no request id and nothing to await
 |---|---|---|---|---|
 | `register` | `workspace::register(spec)` | `register(spec)` | `workspace.manage` | Records a worktree and its owner. Returns the new id. |
 | `release` | `workspace::release(id)` | `release(id)` | `workspace.manage` | Removes the custody record. The folder and branch stay. |
-| `%list` | `workspace::list()` | `list()` | `workspace.manage` | Returns every record, ordered by id. |
+| `%list` | `workspace::list()` | `list()` | `workspace.manage` | Returns every record that the calling plugin registered, ordered by id. Records of other plugins are not returned (see Limits and visibility). |
 
 The fields of the two records:
 
@@ -349,11 +349,13 @@ Illustrative, not generated. Each line is a plugin log entry. The retry in the s
 | `register` | `not-permitted` | The `path` lies outside `fs.write:worktrees`, or `repository` lies outside a read grant. |
 | `register` | `not-found` | The repository is not a Git repository, or the `owner` node does not exist. |
 | `register` | `conflict` | The `path` is already registered. |
-| `register` | `invalid-argument` | The branch name is empty or not a valid Git branch name. |
+| `register` | `invalid-argument` | The branch name is empty or not a valid Git branch name, `branch` or `base` is longer than 255 bytes, or the `path` part of `repository` or `path` is longer than 4,096 bytes. |
+| `register` | `quota-exceeded` | The plugin already holds 64 live records, or the session already holds 256. Release a record and try again. No `retry-after-ms` is set. |
+| `register` | `rate-limited` | More than 10 `register` calls in 1 s by one plugin. `retry-after-ms` is set. |
 | `send` | `not-found` | The target session is not running. |
 | `send` | `not-permitted` | The target has not got the plugin installed and enabled with `sessions.cross` granted, the command is a kernel command, or the command is not one that the plugin declares. |
 | `send` | `invalid-argument` | `arguments-json` is not valid JSON. |
-| `release` | `not-found` | The id is not registered. A second release of the same id gives this too. |
+| `release` | `not-found` | The id is not registered, or another plugin registered it. A second release of the same id gives this too. |
 | `release` | `conflict` | The worktree is in use (see `in_use`). Try again after the process ends. |
 
 Edge cases:
@@ -361,8 +363,32 @@ Edge cases:
 - If `register` fails after git has created the folder, the folder stays on disk with no record. Remove it with `git worktree remove`, then try again.
 - If the owner pane closes while a process still runs, `owner` becomes `None` and `release` returns `conflict` until the process ends.
 - `base` is written to the record and shown in the list. The kernel does not use it. The plugin passes the same `base` it gave `git worktree add`.
-- The records are the kernel's view. A plugin that has forgotten a worktree id can find the record again with `list`, matching on `path`.
+- The records are the kernel's view. A plugin that has forgotten the id of a worktree it registered can find the record again with `list`, matching on `path`.
 - Every refusal is logged with the plugin id and function, and shows in `ilium plugin logs`.
+
+### Limits and visibility
+
+| Limit | Value | Result when it is passed |
+|---|---|---|
+| Live records per plugin | 64 | `register` returns `quota-exceeded` |
+| Live records per session, all plugins together | 256 | `register` returns `quota-exceeded` |
+| `branch` | 1 to 255 bytes of UTF-8, a valid Git branch name | `invalid-argument` |
+| `base` | 1 to 255 bytes of UTF-8 when present | `invalid-argument` |
+| The `path` part of `repository` and of `path` | 1 to 4,096 bytes of UTF-8 | `invalid-argument` |
+| `register` calls | 10 in 1 s per plugin | `rate-limited` with `retry-after-ms` |
+| `release` and `list` calls | no limit of their own; the general host-call budget applies | none |
+
+A live record is one that `register` returned and `release` has not removed. A record whose owner pane closed still counts. The limits are fixed: no manifest `limits` key and no tier raises them. A refused `register` records nothing.
+
+Visibility follows the plugin that registered the record:
+
+- `list` returns only the records that the calling plugin registered. It never shows that another plugin holds a record.
+- `release` of an id that another plugin registered returns `not-found`, the same code as an unknown id.
+- `register` of a `path` that another plugin already registered returns `conflict`. The error message does not name the other plugin.
+- No grant of `ilium:plugin@0.1.0` widens this. The one exception is replacement: a plugin whose manifest `replaces` a core plugin, and that is active in its place, also lists and releases the records that the replaced plugin registered.
+- The user sees every record, whatever plugin registered it, in `ilium plugin status` and in the support bundle.
+
+- **[PRM-103]** The system must refuse `workspace.register` with `quota-exceeded` when the calling plugin holds 64 live records or the session holds 256, with `invalid-argument` when `branch` or `base` is longer than 255 bytes or a path is longer than 4,096 bytes, and with `rate-limited` after 10 calls in 1 s; `workspace.list` must return only the records that the calling plugin registered (plus those of a core plugin it replaces), and `workspace.release` of another plugin's record must return `not-found`.
 
 ### Orphaned worktrees after a crash or reboot
 

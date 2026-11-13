@@ -111,7 +111,7 @@ It holds the same kinds of fields as a plugin crash record (SEC-446): no plugin 
 
 - `ilium plugin doctor` prints the last host crash: its time in UTC (RFC 3339), the Ilium version, the panicking thread and the record path. It prints `none` when no record exists.
 - `ilium plugin crashes --host` lists every host crash record, newest first, one JSONL record per line with the time, version and path. Without `--host` the command lists plugin and helper records only.
-- Host crash records are deleted after 14 days (SEC-447). SEC-955 proposes 30 days and a limit of 200 records, and the owner is to align the two. Uninstalling a plugin never deletes host records, because they belong to no plugin.
+- Host crash records are deleted when more than 30 days old, and when more than 200 crash records exist the oldest are deleted first (SEC-447, SEC-955). Uninstalling a plugin deletes that plugin's crash records at once and never deletes host records, because they belong to no plugin.
 - Nothing is sent anywhere unless you run the explicit export command (SEC-447).
 - **[OPS-237]** `ilium plugin doctor` MUST print the build id of the last host crash on the same line as the time of that crash (proposed, owner to confirm).
 

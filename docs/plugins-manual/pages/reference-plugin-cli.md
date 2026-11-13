@@ -36,7 +36,7 @@ Terms used on this page:
 
 - **[DEV-108]** `ilium plugin --help` MUST list every subcommand with a one-line meaning, `ilium plugin <command> --help` MUST list every flag of that command's flag table with its type, default and meaning, and both MUST end with the line `Codes: ilium plugin explain <code>   Environment: ilium plugin doctor` (proposed, owner to confirm).
 
-- **[DEV-004]** A session command MUST find its session this way: the session named by `--session`, in the project that `--cwd` names, defaulting to the session called `default` of the current directory. No session found at that address MUST fail with `session.unreachable` and exit code 6. A command MUST NOT start a session itself.
+- **[DEV-004]** A session command MUST find its session this way: the session named by `--session`, in the project that `--cwd` names, defaulting to the session called `default` of the current directory. No session found at that address MUST fail with `session.unreachable` and exit code 6. A command MUST NOT start a session itself. The one exception to the exit code is `kill`, which with no session writes the kill state file and exits 0 ([SCU-003](/pages/security-containment-states/)); it still does not start a session.
 - **[DEV-005]** The commands in the offline column of the table below MUST work with no running session, no network and no home-directory configuration beyond the trust store.
 - **[DEV-006]** A session command that cannot reach its session MUST print one `error` record with the code `session.unreachable`, then `summary`, then `result`, and exit with 6. It MUST NOT retry.
 
@@ -59,13 +59,14 @@ Terms used on this page:
 | `doctor` | no | The session check reports `warn` when no session is found. |
 | `install`, `uninstall`, `enable`, `disable`, `grants`, `list` | yes | They change or read the loaded set. |
 | `dev`, `logs`, `log-level`, `trace`, `profile` | yes | They read or drive a live instance. |
-| `kill <id> --reason <text>`, `unkill <id>` | yes | Stop a plugin and keep it from activating until `unkill` ([HST-516], [HST-517]). They work in safe mode and offline. See [If you suspect a plugin is malicious](/pages/user-plugin-security-and-privacy/). |
+| `kill <id> --reason <text>` | no | Stops a plugin and keeps it from activating until `unkill` ([HST-516], [HST-517]). It works in safe mode and without a network. With no session, or with no server reply within 2 s, it writes the kill state file, prints `path: offline` and exits 0 ([SCU-003](/pages/security-containment-states/)). |
+| `unkill <id>` | yes | Clears an admin kill. It works in safe mode and without a network. With no session it exits 6 and changes nothing ([SCU-003](/pages/security-containment-states/)). See [If you suspect a plugin is malicious](/pages/user-plugin-security-and-privacy/). |
 
-The output default of each command is in [Which commands print text](#which-commands-print-text).
+The output default of each command is in [Which commands print text](#which-commands-print-text). Every subcommand, with its session need, output mode, records and exit codes, is in the [Command inventory](#command-inventory).
 
 ## Exit codes
 
-Codes 7 (policy) and 8 (network) are added by [Distribution commands](/pages/reference-plugin-distribution-cli/#exit-codes).
+Codes 7 (policy) and 8 (network) are added by [Distribution commands](/pages/reference-plugin-distribution-cli/#exit-codes). Code 75 (busy) is returned only by `mirror sync` when another run holds the mirror lock (`mirror.sync-busy`, [PRY-035]).
 
 - **[DEV-007]** Every command MUST exit with one of the codes below, and the `exit_code` field of its `result` record MUST equal the process exit code.
 
@@ -122,14 +123,16 @@ Codes 7 (policy) and 8 (network) are added by [Distribution commands](/pages/ref
 | `timing` | `plugin`, `side`, `export`, `calls`, `p50_ms`, `p99_ms`, `max_ms`, `deadline_ms` | `dev --timings`, `profile` |
 | `trace` | `at`, `plugin`, `side`, `kind`, `detail` | `trace --json` |
 | `plugin` | `id`, `version`, `tier`, `state`, `dev`, `sides`, `grants_granted`, `grants_requested` | `list --json` |
+| `preview` | `locale`, `name`, `description`, `publisher`, `grants`, `license`, `contact`, `readme`, `screenshots` | `preview --json` |
 | `grant` | `plugin`, `grant`, `risk`, `state` | `grants --json` |
 | `inspect` | `section`, `data` | `inspect --json` |
 | `doctor-check` | `item`, `status`, `message`, `fix` | `doctor` |
+| the types of [Records added by later requirements](#records-added-by-later-requirements) | see that table | the commands named there |
 | `summary` | `duration_ms`, `warnings`, `errors` | all JSONL commands |
 | `result` | `ok`, `exit_code` | all JSONL commands |
 
-- **[DEV-021]** The `step` field of `progress` MUST be one of `toolchain`, `compile`, `bundle`, `component`, `api-version`, `strip`, `inventory`, `pack`, `sign`, `check`, `lint`, `test`, `install`, `watch`.
-- **[DEV-022]** The `kind` field of `artifact` MUST be one of `component`, `package`, `source-map`, `build-info`, `key`, `public-key`, `signature`, `replay`.
+- **[DEV-021]** The `step` field of `progress` MUST be one of `toolchain`, `compile`, `bundle`, `component`, `api-version`, `strip`, `inventory`, `pack`, `sign`, `check`, `lint`, `test`, `install`, `watch`, `download`, `verify`, `migrate`, `backup`, `restore`, `export`, `import`, `publish`.
+- **[DEV-022]** The `kind` field of `artifact` MUST be one of `component`, `package`, `source-map`, `build-info`, `key`, `public-key`, `signature`, `replay`, `manifest`, `report`, `docs`, `sbom`, `bundle`, `support-bundle`, `debug-endpoint`, `export`, `backup`, `data`.
 - **[DEV-023]** The `severity` field of `check` and `lint` MUST be `error` or `warn`. A `lint` record MAY also use `info`.
 - **[DEV-024]** The `status` field of `test-case` MUST be `pass`, `fail`, `trap` or `skipped`. The `status` field of `doctor-check` MUST be `ok`, `warn` or `fail`.
 - **[DEV-025]** The `side` field MUST be `server`, `client`, `scene` or `host`. `host` marks an entry that the host itself wrote.
@@ -167,6 +170,7 @@ A failed command prints its `error` records, then `summary` with `errors` greate
 | `list`, `trust list`, `grants` | text | `plugin` or `grant` records |
 | `logs`, `trace`, `profile` | text | `log`, `trace` or `timing` records |
 | `inspect`, `doctor` | text | `inspect` or `doctor-check` records |
+| `preview` | text | one `preview` record, and one `lint` record per finding |
 
 Contributed subcommands of the form `ilium <name>` are not `ilium plugin` commands. They are declared in `contributes.cli` and described in [Contributed command-line commands](/pages/api-cli/). There is no `ilium plugin run`. The page on the workspace API uses the contributed form.
 
@@ -352,6 +356,25 @@ Writes the `.iliumpkg` file.
 - **[DEV-135]** `ilium plugin publish <file> --registry <url>` uploads a signed package to a registry. It is defined in [Distribution commands](/pages/reference-plugin-distribution-cli/) (decision D27). Without `--registry` it MUST fail with `usage.missing-argument` and exit 2.
 - **[DEV-136]** A package file, the file `publisher.pub` and the SHA-256 of the package remain a complete way to share a plugin without a registry. An update from a file is found when the user installs a package of the same id with a higher version.
 
+## preview
+
+`ilium plugin preview <package-or-dir> [--locale <tag>] [--json]`
+
+`preview` shows an author what users will see, before anything is published or installed. It reads a package file or a project folder that `pack` would accept. It prints two blocks: the store detail view ([Plugin store](/pages/user-plugin-store/#read-before-you-install)) and the install review dialog ([Install and manage plugins](/pages/user-install-and-manage/#review-the-permissions)). It works offline, needs no session, installs nothing, runs no plugin code and writes no file.
+
+The shown fields are the name and the description in the chosen locale ([PKG-706](/pages/reference-manifest/)), the publisher, every requested grant with its risk level, the SPDX licence expression or `No licence declared`, the support contact (`contact`), the README text drawn with the rules of [PRM-202](/pages/user-plugin-store/#the-readme-the-changelog-and-the-screenshots), and one line per screenshot with its alt text and pixel size. Without `--locale` the command uses the unlocalized values. A `--locale` tag that the manifest does not provide falls back as PKG-706 says, and the output names the tag that was used. With `--json` the command prints one `preview` record whose fields are `locale`, `name`, `description`, `publisher`, `grants` (a list of `grant` and `risk`), `license`, `contact`, `readme` and `screenshots` (a list of `alt`, `width` and `height`).
+
+`preview` reports a finding for each shown field that a user would miss:
+
+| Code | Finding |
+|---|---|
+| `lint.preview-field-missing` | `name`, `description`, `license`, `contact`, `README.md` or the alt text of a screenshot is absent or empty. The `key_path` or `file` of the record names it |
+| `lint.preview-truncated` | `README.md` or `CHANGELOG.md` is longer than the 64 KiB that the detail view shows. The `file` of the record names it |
+
+Each finding is one `lint` record with the code as its `rule` and severity `error`. With a finding the command still prints the preview and exits 3, as a lint rule of severity `error` does ([DEV-011]). With none it exits 0. A path that is neither a package nor a project folder fails with `usage.missing-argument` or `plugin.not-found` as for `pack`.
+
+The requirement is PRM-203, at the end of this page.
+
 ## install, uninstall, enable, disable
 
 `ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable|beta|dev] [--yes] [--grant <grant>]... [--locked] [--dry-run] [--registry <url>] [--from-bundle <dir>] [--no-backup] [--unskip]`
@@ -361,6 +384,8 @@ Writes the `.iliumpkg` file.
 - **[DEV-142]** `install` with no attached client and no `--yes` MUST fail with `install.review-required`.
 - **[DEV-143]** A declined review MUST fail with `install.review-declined`. A declined key trust MUST fail with `trust.declined`. An unsigned package without `--allow-unsigned` MUST fail with `install.unsigned`. A lower version without `--allow-downgrade` MUST fail with `package.downgrade`.
 - **[DEV-144]** A successful `install` MUST print one `plugin` record for the installed plugin and exit with 0. The plugin is enabled after install.
+
+The `plugin` record of `install` and `update` carries the field `license`, the SPDX expression of the manifest or `null`, and `license_previous` when an update changed it ([PRM-206](/pages/user-install-and-manage/#review-the-permissions)).
 
 `ilium plugin uninstall <id> [--purge | --keep-data]`
 
@@ -381,7 +406,7 @@ Writes the `.iliumpkg` file.
 
 `ilium plugin list [--json]` prints the installed plugins.
 
-- **[DEV-165]** `list` text mode MUST print one line per plugin with the id, the version, the tier, the state and the grant count. The state word maps from the lifecycle states: `running` is `installed-enabled` with an active instance, `stopped` is `installed-enabled` with no active instance (including `stopped-by-failure`), `disabled` is `installed-disabled-by-user` or `disabled-by-policy`, and `untrusted` is `disabled-untrusted` or `disabled-blocked`. `list --json` MUST print the lifecycle state name itself (LIF-001). A `[dev]` badge MUST mark a plugin installed by `dev`.
+- **[DEV-165]** `list` text mode MUST print one line per plugin with the id, the version, the tier, the state and the grant count. The state word maps from the lifecycle states: `running` is `installed-enabled` with an active instance, `needs-setup` is `installed-enabled` with the health `needs-setup` ([PRM-201](/pages/user-install-and-manage/#a-plugin-that-needs-setup)), `stopped` is `installed-enabled` with no active instance for any other reason (including `stopped-by-failure`), `disabled` is `installed-disabled-by-user` or `disabled-by-policy`, and `untrusted` is `disabled-untrusted` or `disabled-blocked`. `list --json` MUST print the lifecycle state name itself (LIF-001). A `[dev]` badge MUST mark a plugin installed by `dev`.
 
 <figure>
 <pre class="term"><span class="t-prompt">$</span> ilium plugin list
@@ -527,8 +552,19 @@ These codes are in addition to the `manifest.*` codes of [Packages](/pages/packa
 |---|---|---|---|
 | `usage.unknown-flag` | A flag does not exist | Check `--help` | 2 |
 | `usage.missing-argument` | A required flag or argument is missing | Add it | 2 |
-| `usage.conflict` | Two flags contradict each other | Remove one | 2 |
+| `usage.conflict` | Two flags contradict each other. This is the only code for a refused flag combination, including those of the [install flag matrix](/pages/install-flag-matrix/) | Remove one | 2 |
 | `usage.invalid-value` | A flag value has the wrong form or an unknown rule id | Fix the value | 2 |
+| `usage.unknown-command` | The subcommand is not in the [Command inventory](#command-inventory) ([DEV-093]) | Check `ilium plugin --help` | 2 |
+| `usage.unknown-kind` | `schema <kind>` names a kind that does not exist ([PKG-005]) | Pick a kind from the printed list | 2 |
+| `usage.file-not-found` | An argument that is a file path names nothing, or names a directory ([Distribution commands](/pages/reference-plugin-distribution-cli/)) | Fix the path | 2 |
+| `usage.out-of-range` | A numeric flag value is outside its documented range, such as `--timeout-ms` above 600,000 | Use a value inside the range | 2 |
+| `usage.side-required` | `debug` ran without `--side` on a plugin that declares several sides ([Plugin debugging](/pages/reference-plugin-debugging/)) | Add `--side <side>` | 2 |
+| `usage.host-unavailable` | `check --against` or `preflight --target` names a host version whose archive cannot be fetched and verified | Use a supported host version, or run it where the archive is reachable | 2 |
+| `usage.rules-version-invalid` | `--rules-version` is not `MAJOR.MINOR` ([Check and lint rules](/pages/reference-check-and-lint-rules/)) | Write two integers separated by a dot | 2 |
+| `usage.rules-version-unavailable` | `--rules-version` names a version this CLI does not embed | Pick a version the message lists | 2 |
+| `usage.suite-unavailable` | `--suite-version` names a conformance catalogue this CLI does not embed ([Conformance suite](/pages/reference-conformance-suite/)) | Pick an embedded version | 2 |
+| `usage.subject-unavailable` | `test --conformance` names the subject `sdk` or `host` in a normal install ([DEV-601]) | Use the subject `plugin` | 2 |
+| `usage.release-build-required` | `--conformance` ran on a debug build without `--allow-debug` | Build with `--release` | 2 |
 | `session.unreachable` | No session answers | Start `ilium` in the project, or pass `--session` | 6 |
 | `session.not-found` | The named session does not exist | Use a name from `ilium sessions` | 6 |
 | `session.version-mismatch` | The session runs an older contract | Restart the session | 1 |
@@ -565,6 +601,8 @@ These codes are in addition to the `manifest.*` codes of [Packages](/pages/packa
 | `pack.out-exists` | `--out` names a different file | Choose another path | 1 |
 | `pack.requires-untested` | A host contract version admitted by `requires` is missing from `tested_hosts` | Run `test --conformance` on each listed version | 1 |
 | `lint.fix-dirty-tree` | `lint --fix` would edit a file with uncommitted changes | Commit or stash the file, then run again | 1 |
+| `lint.preview-field-missing` | `preview` found a shown field that is absent or empty | Add the field that the record names | 3 |
+| `lint.preview-truncated` | `preview` found a README or CHANGELOG above 64 KiB | Shorten the file, or move the detail to the repository | 3 |
 | `usage.host-contract-unavailable` | `--host-contract` names a version the CLI does not embed | Run `test --host-contract list` and pick a listed version | 2 |
 | `sign.key-unreadable` | The key file does not parse | Check the file | 1 |
 | `sign.key-permissions` | The key is readable by others | `chmod 600` | 1 |
@@ -645,7 +683,7 @@ API checked against `ilium:plugin@0.1.0`.
 
 - **[DEV-901]** Two commands that write `dist/` in the same project (`build`, `pack`, `sign`, `test --update`, `dev`) MUST serialize through an advisory lock file `dist/.lock`; a second command MUST wait up to 30,000 ms (proposed, owner to confirm) then fail with `build.locked` (exit 1) naming the holder PID. A lock whose PID is dead MUST be broken automatically.
 
-- **[DEV-902]** Every project command MUST accept `--manifest-path <file>` naming a `manifest.json`; the project directory is then that file's parent and `<dir>` MUST NOT also be given (else exit 2 `usage.conflicting-flags`). Relative paths in output records MUST be relative to the project directory, never the caller's working directory.
+- **[DEV-902]** Every project command MUST accept `--manifest-path <file>` naming a `manifest.json`; the project directory is then that file's parent and `<dir>` MUST NOT also be given (else exit 2 `usage.conflict`). Relative paths in output records MUST be relative to the project directory, never the caller's working directory.
 
 - **[DEV-903]** A project MAY contain `ilium-plugin.toml` in its root. The CLI MUST read only the keys `[build] profile`, `[build] extra-args`, `[test] timeout_ms`, `[lint] deny`, `[dev] ignore` and MUST fail with `config.unknown-key` (exit 2) on any other key. A command-line flag MUST override the file, and the file MUST override defaults but never the manifest.
 
@@ -663,7 +701,7 @@ API checked against `ilium:plugin@0.1.0`.
 
 - **[DEV-914]** Every offline command MUST behave identically on Linux, macOS and Windows: paths in records MUST use forward slashes, line endings of generated files MUST be LF, key files MUST be created with owner-only permissions (mode 0600, or an ACL granting only the current user on Windows), and the file watcher MUST fall back to polling every 500 ms (proposed, owner to confirm) when native events are unavailable.
 
-- **[DEV-915]** The CLI MUST write standard output and files as UTF-8 regardless of locale, MUST NOT localise `code` or `rule` fields or JSONL keys, and MUST print text-mode messages in English only. Invalid UTF-8 in a source manifest MUST fail with `manifest.encoding` and the byte offset.
+- **[DEV-915]** The CLI MUST write standard output and files as UTF-8 regardless of locale, MUST NOT localise `code` or `rule` fields or JSONL keys, and MUST print text-mode messages in English only. Invalid UTF-8 in a source manifest MUST fail with `manifest.json-invalid` and the byte offset.
 
 - **[DEV-916]** An interrupt (SIGINT, SIGTERM or Windows Ctrl+C) during `pack` or `sign` MUST leave no partial output: the target file MUST either be unchanged or fully written, no temp file named `*.tmp` may remain, and the command MUST exit 130 after printing `summary` and `result`.
 
@@ -677,7 +715,7 @@ API checked against `ilium:plugin@0.1.0`.
 
 - **[DEV-940]** `pack --sbom` MUST write `dist/<id>-<version>.sbom.json` in CycloneDX 1.5 JSON listing every locked dependency with name, version and SHA-256 or registry checksum from the lock file, MUST be reproducible (DEV-099), and MUST print an `artifact` record of kind `sbom`.
 
-- **[DEV-941]** `ilium plugin doctor --bundle <file>` MUST write a zip of the doctor records, CLI and host versions, the manifest, the lock file hash and the last 200 log lines (proposed, owner to confirm) of the plugin, MUST redact values of environment variables whose names contain `KEY`, `TOKEN` or `SECRET`, and MUST NOT include source files, key files or the data folder.
+- **[DEV-941]** `ilium plugin doctor --bundle <file>` MUST write a zip with exactly `doctor.txt` and `host.txt`, the doctor subset of the whole-install support bundle ([USR-104](/pages/core-plugin-diagnostics/#the-three-bundle-commands)), and MUST work without a session. `doctor.txt` MUST hold the doctor records, the CLI and host versions and the lock file hash. Both entries MUST redact values of environment variables whose names contain `KEY`, `TOKEN` or `SECRET`, and the archive MUST NOT include a manifest, plugin log lines, source files, key files or the data folder.
 
 ## A session that connects but does not answer
 
@@ -692,7 +730,8 @@ API checked against `ilium:plugin@0.1.0`.
 | `doctor` | falls back | Files, trust store and toolchain. The session check reports `fail` with `session.unresponsive`. |
 | `recovery` | falls back | The recovery files of the data folder ([HST-617], [HST-618]). |
 | `list` | falls back | `installed.json`. Each row carries `stale: true`, because the loaded state is unknown. |
-| `kill <id>`, `unkill <id>` | falls back | Writes the kill marker; the server applies it when it answers again ([HST-516]). |
+| `kill <id>` | falls back | Writes the entry to the kill state file `<data>/plugins/kill.json` and sends `cgroup.kill` to the helper cgroup leaf; the server applies the entry when it answers again or at its next start ([HST-516], [PDZ-007]). |
+| `unkill <id>` | refuses | Only a running server can check the policy kill and the block that may still hold the plugin ([SCU-003](/pages/security-containment-states/)). |
 | `log-level`, `trace`, `profile`, `dev` | refuses | They need the live instance ([DEV-014]). |
 | `install`, `uninstall`, `enable`, `disable`, `grants` | refuses | They change the loaded set. |
 
@@ -778,7 +817,210 @@ Every command here follows the output model above. Synopses are in the table; sh
 | `restore.host-newer` | `restore` | 1 | The archive was written by a newer host ([HST-654]). |
 | `backup.inside-live-root` | `backup` | 1 | The target lies inside a folder the backup would read. |
 
+The four commands whose names contain "export" write four different things. Each has one spelling:
+
+| Command | Writes | Read back with |
+|---|---|---|
+| `export <id> --out <file>` | One plugin's data and non-secret settings, as one archive ([LIF-290]) | `import <id> --from <file>` |
+| `data export <id> <dir>` | One plugin's data as plain files in a folder ([HST-656]). It takes a folder, never `--out <file>` | `data import <id> <dir>` |
+| `export-data` | The user's own data across all plugins, for the privacy flow ([USR-245]) | `import-data <folder>` |
+| `export-bundle <dir> <id>...` | Signed packages and registry metadata for an offline machine, with no plugin data ([PKG-412](/pages/reference-registry/)) | `install --from-bundle <dir> <id>` |
+
+- **[PRM-009]** The system must list, in the Command inventory of this page, every `ilium plugin <word>` subcommand that any page of the manual quotes as a command to run, and must list, in the error table of this page, every `usage.<code>` error code that any page cites. The words that the inventory names as not existing (`run`, `watch`, `package`, bare `bundle`, `diagnostics`) and a deliberately misspelt word in a test of [DEV-093] are exempt, and so is a `usage.` string that is an SDK field and not an error code, such as `usage.spend`. Test: a lint test extracts every backticked `ilium plugin <word>` and every `usage.<code>` string from all manual pages, removes the exempt list, and fails naming each word that no inventory row starts with or lists after a `/` or `|`, and each code that has no row in the error table.
+
 - **[HST-691]** The commands in the "yes" rows of the table MUST follow the unreachable and unresponsive rules in [DEV-006].
+
+## Command inventory
+
+This section lists every `ilium plugin` subcommand. A subcommand that is not in the table below does not exist: `ilium plugin run`, `watch`, `package`, `bundle` (without `create` or `import`) and `diagnostics --out` fail with `usage.unknown-command` and exit 2. Every command also takes the global flags of [Conventions](#conventions), and every command that prints text by default prints its records with `--json`. The exit codes are those of [Exit codes](#exit-codes) and of [Distribution commands](/pages/reference-plugin-distribution-cli/#exit-codes), except where a row gives another meaning. The section or requirement in the last column holds the rules of the command.
+
+| Command (after `ilium plugin`) | Needs a session | Default output | JSONL record types | Exit codes | Defined in |
+|---|---|---|---|---|---|
+| `new <dir> [--id <id>] [--lang rust\|ts] [--side <side>]... [--template <name>] [--ci <system>] [--license <spdx-id>] [--sdk-channel stable\|beta]` | no | JSONL | `progress`, `artifact` | 0, 1, 2, 4 | [new](#new) |
+| `build [<dir>] [--release\|--debug] [--side <side>] [--watch] [--manifest-path <file>]` | no | JSONL | `progress`, `artifact` | 0, 1, 2, 4 | [build](#build) |
+| `check [<dir>] [--release] [--deps] [--baseline [<package>]] [--against <host-version>] [--rules-version <v>] [--print-schema] [--allow-secret-path <path>]... [--all]` | no | text | `check` | 0, 2, 3, 4 | [check](#check) |
+| `lint [<dir>] [--deny warnings] [--fix] [--rule <id>]... [--rules-version <v>] [--all]` | no | text | `lint` | 0, 2, 3 | [lint](#lint) |
+| `fmt [<dir>] [--check]` | no | text | `artifact` (kind `manifest`) | 0, 1 with `--check` when a file would change, 2 | PRP-005 |
+| `test [<dir>] [--component] [--fixture <name>] [--update] [--record] [--replay <file>] [--report <file>] [--coverage] [--min-coverage <n>] [--conformance] [--host-contract <host-version>] [--migrate-from <version>] [--colour-depth 8\|16\|256\|truecolor] [--all]` | no | JSONL | `test-case`, `diff`, `submission`, `outcome`, `artifact` | 0, 2, 3, 4 | [test](#test) |
+| `test-report <report.json> --format junit\|json [--out <path>]` | no | text | `artifact` (kind `report`) | 0, 1, 2 | [CI test report formats](/pages/guide-ci-test-report-formats/) |
+| `bench [<dir>] [--fixture <name>] [--iterations <n>] [--baseline <file>] [--max-regression <percent>]` | no | JSONL | `timing` | 0, 2, 3, 4 | DEV-922 |
+| `pack [<dir>] [--out <file>] [--include-src] [--allow-debug] [--allow-secret-path <path>]... [--sbom] [--signed-at <time>] [--all]` | no | JSONL | `progress`, `artifact` | 0, 1, 2 | [pack](#pack) |
+| `keygen --publisher-id <id> --publisher <name> --out <path>` | no | JSONL | `artifact` | 0, 1, 2 | [keygen, sign and trust](#keygen-sign-and-trust) |
+| `sign <package> (--key <file> \| --signer <command> --public-key <file>) [--signed-at <time>]` | no | JSONL | `artifact` | 0, 1, 2, 5 | [keygen, sign and trust](#keygen-sign-and-trust) |
+| `trust add\|remove\|list\|revoke [<file>] [--tier T2\|T3] [--system] [--fingerprint <key_id>] [--rotation <file>] [--additional] [--statement <file>] [--reason <text>] [--force]` | no | JSONL (`trust list`: text) | `trust` | 0, 1, 2, 5, 7 | [Signing and trust](/pages/reference-signing-and-trust/) |
+| `publish <file> [--registry <url>] [--channel stable\|beta] [--notes <file>] [--verify] [--allow-unstable-sdk]` | no | JSONL | `progress`, `publish` | 0, 1, 2, 5, 7, 8 | [Distribution commands](/pages/reference-plugin-distribution-cli/) |
+| `verify-published <id>[@<version>] [--registry <url>]` | no | JSONL | `progress`, `verify` | 0, 1 with `publish.verify-failed`, 2, 5, 8 | PRP-002 |
+| `verify <package>` | no | text | `verify` | 0, 1, 2, 5 | [Distribution commands](/pages/reference-plugin-distribution-cli/) |
+| `verify-build <package>` | no | JSONL | `progress`, `diff` | 0, 1 with `package.build-mismatch`, 2, 4 | PKG-715 |
+| `verify-reproducible [<dir>]` | no | JSONL | `progress`, `diff` | 0, 1 with `build.not-reproducible`, 2, 4 | DEV-892 |
+| `verify-conformance <report> [<artefact>]` | no | text | `verify` | 0, 2, 3 | PDT-043 |
+| `preview [<dir>] [--locale <tag>]` | no | text | `inspect` | 0, 1, 2 | [preview](#preview) |
+| `docs [<dir>] [--out <dir>]` | no | JSONL | `artifact` (kind `docs`) | 0, 1, 2 | DEV-938 |
+| `schema manifest\|fixture\|expectation\|replay\|policy\|record` | no | text (the schema) | none | 0, 2 | [Published schemas](#published-schemas-and-editor-support) |
+| `clean [<dir>] [--all]` | no | JSONL | `artifact` | 0, 1, 2 | DEV-900 |
+| `diff <old.iliumpkg> <new.iliumpkg>` | no | JSONL | `diff` | 0, 2, 3 when the packages differ | DEV-939 |
+| `upgrade-sdk [<dir>] [--to <version>] [--dry-run] [--sdk-channel stable\|beta]` | no | JSONL | `diff` | 0, 1, 2, 4 | DEV-912 |
+| `template verify <path\|git-url> [--lang <lang>]` | no | JSONL | `check` | 0, 2, 3 | [Project templates](/pages/reference-project-templates/) |
+| `completions bash\|zsh\|fish\|powershell` | no | text (the script) | none | 0, 2 | DEV-907 |
+| `explain <code>` | no | text | `explain` | 0, 2 for an unknown code | USR-347 |
+| `symbolize <trap.json> --debug-info <file>` | no | text | `frame` | 0, 1 with `debug.hash-mismatch`, 2 | DEV-878 |
+| `doctor [--fix] [--sandbox] [--bundle <file>] [--clear-crash-marks]` | no | text | `doctor-check`, `check` with `--sandbox` | 0, 4 | [doctor](#trace-profile-inspect-and-doctor) |
+| `inspect <file\|id> [--view <section>] [--verify] [--memory]` | file: no; id: yes | text | `inspect`, `diff` | 0, 1, 2, 5, 6 | [inspect](#trace-profile-inspect-and-doctor) |
+| `install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable\|beta\|dev] [--yes] [--grant <grant>]... [--locked] [--dry-run] [--registry <url>] [--from-bundle <dir>] [--no-backup] [--unskip] [--reinstall] [--system] [--accept-stale-revocation]` | yes | JSONL | `progress`, `plugin` | 0, 1, 2, 4, 5, 6, 7, 8 | [Distribution commands](/pages/reference-plugin-distribution-cli/) |
+| `reinstall <id>` | yes | JSONL | `progress`, `plugin` | 0, 1, 5, 6 | LIF-064 |
+| `uninstall <id> [--keep-data\|--purge] [--yes]` | yes | JSONL | `progress`, `plugin` | 0, 1, 5, 6 | [install, uninstall, enable, disable](#install-uninstall-enable-disable) |
+| `enable <id> [--scope <scope>] [--accept-risk] / enable --all-third-party` | yes | JSONL | `plugin` | 0, 1, 5, 6, 7 | [install, uninstall, enable, disable](#install-uninstall-enable-disable) |
+| `disable <id> [--scope <scope>] [--reason <text>] / disable --all-third-party --reason <text>` | yes | JSONL | `plugin` | 0, 1, 5, 6 | [install, uninstall, enable, disable](#install-uninstall-enable-disable) |
+| `restart <id>` | yes | JSONL | `plugin` | 0, 1, 5, 6 | COR-109 |
+| `kill <id> --reason <text>` | yes; offline it writes `kill.json` and prints `path: offline` | JSONL | `kill` | 0, 2, 5 | SCU-003 |
+| `unkill <id>` | yes | JSONL | `kill` | 0, 5, 6, 7 | SCU-003 |
+| `reset-failures <id>` | yes | JSONL | `plugin` | 0, 5, 6 | LIF-036 |
+| `mute <id> [--off]` | yes | JSONL | `plugin` | 0, 5, 6 | HST-641 |
+| `switch <old-id> --to <successor-id> [--yes]` | yes | JSONL | `progress`, `switch` | 0, 1, 2, 5, 6, 7 | [Install and update](/pages/reference-install-and-update/) |
+| `update [<id>\|--all] [--dry-run] [--dry-run-migrate] [--channel <c>] [--from-registry] [--yes]` | yes | JSONL | `progress`, `plugin` | 0, 1, 2, 5, 6, 7, 8 | [Distribution commands](/pages/reference-plugin-distribution-cli/) |
+| `update-cancel <id>` | yes | JSONL | `plugin` | 0, 1 with `update.in-progress`, 5, 6 | LIF-707 |
+| `outdated [<id>] [--channel <c>]` | yes | text | `outdated` | 0, 6, 8 | PKG, [Registry](/pages/reference-registry/) |
+| `rollback <id> [--restore-backup\|--discard-data]` | yes | JSONL | `progress`, `plugin` | 0, 1, 5, 6 | [Distribution commands](/pages/reference-plugin-distribution-cli/) |
+| `pin <id>@<version> / unpin <id> / channel <id> <channel>` | yes | JSONL | `plugin` | 0, 1, 5, 6 | [Distribution commands](/pages/reference-plugin-distribution-cli/) |
+| `lock [--out <file>] / sync --locked <lockfile> [--from-bundle <dir>] [--registry <url>]` | yes | JSONL | `progress`, `plugin` | 0, 1 with `lock.mismatch`, 2, 6, 7, 8 | [Distribution commands](/pages/reference-plugin-distribution-cli/) |
+| `search <words> [--category <c>] [--limit <n>] [--offset <n>] / info <id>` | no | text | `plugin` | 0, 2, 5, 8 | [Distribution commands](/pages/reference-plugin-distribution-cli/) |
+| `registry add\|remove\|list\|show [--root-key <file>] / mirror <url> [--allow <glob>]... / mirror sync <dir> --registry <url> [--allow <id>...] [--channel stable\|beta]` | no | text | `registry` | 0, 1, 2, 5, 8, and 75 when `mirror sync` finds the mirror lock held (`mirror.sync-busy`) | [Distribution commands](/pages/reference-plugin-distribution-cli/) |
+| `yank <id>@<version> --reason <text> [--confirm-dependents] / unyank / unlist / deprecate <id> --message <text> [--successor <id>] / rollout <id>@<version> --percent <n> / owner add\|remove\|list / transfer <id> --to <publisher> --new-key <file> / advisory publish <id> --file <osv.json>` | no | JSONL | `publish` | 0, 1, 2, 5, 7, 8 | [Distribution commands](/pages/reference-plugin-distribution-cli/) |
+| `export-bundle <dir> <id>[@range]... [--with-deps] / bundle create --out <file> [<id>...] [--with-deps] / bundle import <file>` | no | JSONL | `progress`, `artifact` (kind `bundle`) | 0, 1 on a hash or signature mismatch (`registry.hash-mismatch`, `registry.signature-invalid`, `registry.rollback`, `bundle.root-not-pinned`), 2, 5, 8 | PKG-412, [Air-gapped transfer](/pages/guide-air-gapped-transfer/) (PDV-001, PDV-002) |
+| `list [--inventory] [--refused-abi]` | yes | text | `plugin` | 0, 6 | [list and grants](#list-and-grants) |
+| `grants <id> [--grant <grant>]... [--revoke <grant>]... [--usage] / grant <id> <grant> --until <timestamp>` | yes | text | `grant` | 0, 2 with `grant.expiry-invalid`, 5, 6, 7 | [list and grants](#list-and-grants) |
+| `permissions <id>` | yes | text | `grant` | 0, 5, 6 | COR-221 |
+| `consents <id> [--withdraw <target>]` | yes | text | `consent` | 0, 5, 6 | [Grant review and consent](/pages/reference-grant-review-and-consent/) |
+| `exposure <id> [--since <time>]` | no (reads the audit log and the grant history) | text | `exposure` | 0, 2, 5 | PRN-018 |
+| `policy show / policy check <candidate-file> [--user-file <path>]` | no | JSONL | `policy` | 0, 1 when a system file is ignored or malformed, 2 | [Plugin policy](/pages/reference-admin-policy/) |
+| `audit [--plugin <id>] [--since <time>] [--event <name>] [--kind <kind>] [--limit <n>] [--verify [<file>]] [--export <file>]` | no | JSONL | `audit`, `summary` | 0, 2, 3 on a chain or schema finding | [Audit log](/pages/reference-audit-log/) |
+| `status [<id>] [--safe-mode] [--startup] [--days <n>]` | yes | text | `plugin`, `crash-mark` with `--safe-mode` | 0, 5, 6 | [status](#status) |
+| `host-status` | no (reads state files; a running session adds live counts) | text | `host-status` | 0 healthy, 1 degraded, 2 critical | PRO-022 |
+| `health [<id>]` | yes | text on a terminal, else JSONL | `health` | 0, 1 when any plugin is `degraded`, 2 when any is `failed`, 6 | HST-617 |
+| `alerts [--ack <alert-id>\|--ack --all]` | yes | text | `alert` | 0, 5, 6 | [Health and watchdog](/pages/reference-health-and-watchdog/) |
+| `history [<id>] [--since <time>]` | no | text | `history` | 0, 5 | PRP-017 |
+| `crashes [<id>] [--host]` | no | text | `crash` | 0 | [Audit log](/pages/reference-audit-log/) |
+| `top` | yes | text, refreshed at most once per second | `metric` | 0, 6, 130 | HST-634 |
+| `stats [<id>] [--host] [--cache] / metrics [--host] [--out <file>] / limits [<id>]` | yes | text | `metric`, `limit` | 0, 1, 5, 6 | [Host telemetry](/pages/reference-host-telemetry/) |
+| `logs [<id>] [--follow] [--tail <n>] [--since <time>] [--level <level>] [--side <side>] [--op <operation-id>] [--verify] [--clear <id>] / log-level <id> <level>\|--reset` | yes (`logs` reads the files when no session runs) | text | `log` | 0, 2, 5, 6, and 7 when `log-level` is refused with `policy.locked` | [logs and log-level](#logs-and-log-level) |
+| `dev [<dir>] [--side <side>] [--release] [--timings] [--grant-all] [--replace-installed] [--purge-on-exit] [--scratch-session]` | yes; with `--scratch-session` it starts its own disposable session | JSONL | `progress`, `reload`, `log`, `timing` | 0, 1, 2, 4, 6, 130 | [dev](#dev) |
+| `debug <dir> [--adapter]` | yes | JSONL | `artifact` (kind `debug-endpoint`), `diagnostic` | 0, 1 with `debug.not-loopback`, 6, 130 | DEV-877 |
+| `trace [<id>] [--follow] [--last <n>] [--kinds <list>] [--record <file>] [--unredacted] / profile <id> [--duration <s>] [--side <side>]` | yes | text | `trace`, `timing`, `submission`, `outcome` | 0, 2, 5, 6 | [trace, profile, inspect and doctor](#trace-profile-inspect-and-doctor) |
+| `preflight --target <host-version>` | yes | text | `check` | 0, 3, 6 | DEV-992 |
+| `deprecations` | no | text | `deprecation` | 0 | DEV-969 |
+| `conformance <id>` | yes | text | `test-case` | 0, 3, 5, 6 | COR-205 |
+| `bisect start\|good\|bad\|cancel` | yes | text | `bisect` | 0, 1 with `bisect.state-corrupt`, 6 | USR-346 |
+| `recovery` | no | text | `recovery-item` | 0, 78 while an item is unresolved | HST-660 |
+| `support-bundle <id>\|--all --out <file> [--dry-run] [--submit-to-author]` | yes | JSONL | `artifact` (kind `support-bundle`) | 0, 1, 2 with `support-bundle.exists`, 5, 6 | [Diagnostics](/pages/core-plugin-diagnostics/) |
+| `report <id> [--submit] [--rule <rule>] / report --status <report-id>` | no | text | `report` | 0, 2, 5, 8 | [Reporting a plugin](/pages/user-reporting-a-plugin/) |
+| `incident check <file>` | no | text | `check` | 0, 3 | [Bad release recall](/pages/guide-bad-release-recall-playbook/) |
+| `i18n-coverage [--json] [--language <tag>]` | no | text | bare lines without `type` (the one exception to [DEV-016] and [DEV-017]: exactly one line per installed plugin, no `summary` and no `result` record) | 0, 2 | [Language resolution and coverage](/pages/reference-language-resolution-and-coverage/#coverage-command) (PDT-023) |
+| `export\|import\|backup\|restore\|data\|export-data\|import-data\|erase-data\|du\|config export\|config import` | see the section | JSONL | `progress`, `artifact`, `plan`, `usage`, `restore-summary`, `erase` | 0, 1, 2, 3, 5, 6 | [Data movement commands](#data-movement-commands-export-import-backup-restore-data-export-data-erase-data) |
+| `data-report [<id>]` | no | text | `data-kind` | 0, 5 | USR-322 |
+| `gc --kept-data --older-than <days> [--dry-run]` | no | JSONL | `erase` | 0, 2 | PRO-024 |
+| `log monitor` | no | JSONL | `finding` (code `unexpected-release`), `summary` | 0, 1 when an entry has no matching release record, 2, 8 | [Publisher workflow](/pages/publish-publisher-workflow/) (PRW-039) |
+| `purge-all --yes / admin purge-user <user> --yes` | no; refused with `purge.server-running` or `purge.user-active` while a session server runs | JSONL | `erase` | 0, 1, 2 without `--yes`, 3 with `erase.incomplete` | USR-024, HST-689 |
+| `secret rotate <id> <name> / token rotate [--http\|--lock <id>]` | yes | JSONL | `rotation` | 0, 1, 5, 6 | SEC-451, SEC-452 |
+
+### Flags added by later requirements
+
+| Command | Flag | Type and range | Default | Meaning |
+|---|---|---|---|---|
+| `logs` | `--op <operation-id>` | string, 26 characters | none | Prints only the records that carry this operation id (PRN, [Diagnostics and logs](/pages/ops-diagnostics-and-logs/)) |
+| `support-bundle` | `--submit-to-author` | switch | off | Prints the exact crash payload and, after the user confirms, sends it to the contact address of the signed manifest ([PRR-012]) |
+| `new, upgrade-sdk` | `--sdk-channel stable\|beta` | enum | `stable` | `beta` lets the command select an SDK pre-release ([PRO-012]) |
+| `test` | `--migrate-from <version>` | released version of the same plugin | none | Seeds storage with data of that version and runs `migrate`; fails with `test.migration-incomplete`, exit 3 ([PRP-001]) |
+| `publish` | `--allow-unstable-sdk` | switch | off | Lets a project that uses experimental SDK items publish to a stable channel. Without it the refusal is `lint.sdk-unstable-used`, exit 3 |
+| `doctor` | `--clear-crash-marks` | switch | off | Clears the automatic safe mode crash counter ([PRP-021]) |
+| `gc` | `--kept-data` | switch | required | Selects the kept data of uninstalled plugins. `gc` without it exits 2 with `usage.missing-argument` |
+| `gc` | `--older-than <days>` | integer, 1 to 3,650 | required | Only kept data older than this many days is deleted |
+| `dev` | `--scratch-session` | switch | off | Runs the plugin in a disposable session with its own state, runtime and socket folders ([PRO-009]) |
+| `install, update` | `--accept-stale-revocation` | switch | off | Confirms an install while the revocation data is stale. Refused under the policy key `packages.require_fresh_revocation` |
+| `check, pack` | `--allow-secret-path <path>` | path, repeatable, no globs | none | Accepts one file that looks like a secret |
+| `check` | `--baseline [<package>]` | file, optional | the highest stable version in the registry | Reports the grant and public-surface delta ([PRQ-024], [PRO-010], [PRO-011]) |
+| `check` | `--against <host-version>` | version | the installed host | Checks against the headless host archive of that release |
+| `check, lint` | `--rules-version <v>` | version | the newest embedded catalogue | Runs exactly the rule catalogue of that version |
+| `check` | `--deps`, `--print-schema` | switches | off | Report the SDK dependency state offline; print the manifest schema |
+| `bench` | `--iterations <n>`, `--baseline <file>`, `--max-regression <percent>` | integer 1 to 100,000; file; integer 0 to 1,000 | 100; none; 20 | Iterations after 10 warm-up calls; a baseline to compare with; the regression that makes `bench` exit 3 |
+| `test` | `--colour-depth 8\|16\|256\|truecolor` | enum | `truecolor` | Colour depth of the test host, written into the report |
+| `new` | `--license <spdx-id>` | SPDX identifier | none | Writes `LICENSE` and the manifest `license`; else `new.license-unknown` |
+| `pack` | `--sbom`, `--signed-at <time>` | switch; RFC 3339 UTC time | off; the current time | Write a CycloneDX file; fix the time for a reproducible archive |
+| `sign` | `--signer <command>`, `--public-key <file>` | string; file | none | External signer and its public key (`sign.public-key-required`) |
+| `keygen` | `--publisher-id <id>` | publisher id | required | The id written into the key file |
+| `trust add` | `--tier T2\|T3`, `--system`, `--fingerprint <key_id>`, `--rotation <file>`, `--additional` | enum; switch; key id; file; switch | `T3`; off; none; none; off | See [Signing and trust](/pages/reference-signing-and-trust/) |
+| `trust revoke` | `--statement <file>` | file | none | Imports an `ilium-rev/1` revocation statement |
+| `install` | `--system`, `--channel stable\|beta\|dev`, `--unskip` | switch; enum; switch | off; `stable`; off | System-wide install as root; release channel; clear the `skip` mark of this version |
+| `enable` | `--accept-risk` | switch | off | Needed to enable a `retired` plugin |
+| `enable, disable` | `--all-third-party`, `--scope <scope>` | switch; `user`, `project` or `session` | off; `user` | Every third-party plugin at once; where the choice is stored |
+| `list` | `--inventory`, `--refused-abi` | switches | off | One object per plugin with hash and key id; only plugins refused for their `api` |
+| `grants` | `--usage` | switch | off | Adds the last use and the use count of each grant |
+| `grant` | `--until <timestamp>` | RFC 3339 UTC time, at most 365 days ahead | none | Expiry of the grant; else `grant.expiry-invalid`, exit 2 |
+| `consents` | `--withdraw <target>` | string | none | Removes one stored decision |
+| `audit` | `--event <name>`, `--plugin <id>`, `--limit <n>`, `--export <file>` | string; id; integer 1 to 100,000; file | none; none; 1,000; none | Filters, and export with an `anchor` line |
+| `alerts` | `--ack [<alert-id>]` | string, optional | none | Acknowledges one alert, or all with `--all` |
+| `data` | `--bucket <scope>`, `--project <path>`, `--older-than <days>` | string; path; integer 1 to 3,650 | none | Filters of `data list` and `data prune` |
+| `logs` | `--clear <id>` | plugin id | none | Deletes the log files of one plugin |
+| `status` | `--safe-mode`, `--startup`, `--days <n>` | switch; switch; integer 1 to 30 | off; off; none | Live crash marks; startup phase times; daily summaries |
+| `stats` | `--cache` | switch | off | Size and hit rate of the host caches |
+| `doctor` | `--sandbox`, `--bundle <file>` | switch; file | off; none | Sandbox prerequisites; a zip with `doctor.txt` and `host.txt` ([DEV-941]) |
+| `debug` | `--adapter` | switch | off | Starts the stdio-to-endpoint bridge for a DAP client |
+| `deprecate` | `--message <text>`, `--successor <id>` | string of at most 200 characters; plugin id | required; none | See [Registry](/pages/reference-registry/) |
+| `publish` | `--channel stable\|beta`, `--notes <file>` | enum; file | `stable`; the top section of `CHANGELOG.md` | Release channel and release notes |
+| `report` | `--submit`, `--rule <rule>`, `--status <report-id>` | switch; string; string | off; none; none | See [Reporting a plugin](/pages/user-reporting-a-plugin/) |
+| `restore` | `--merge`, `--replace` | switches, one of them | `--merge` | Keep or remove the plugins that the archive does not hold |
+| `rollback` | `--restore-backup`, `--discard-data` | switches, at most one | off | What to do with data newer than the target version |
+| `search` | `--category <c>`, `--limit <n>`, `--offset <n>` | string; integer 1 to 100; integer 0 to 10,000 | none; 20; 0 | Search filters |
+| `import` | `--from-id <id>` | plugin id | none | Must equal the id inside the archive, else `import.from-id-mismatch` |
+| `policy check` | `--user-file <path>` | path | the user file of this profile | The user file merged with the candidate |
+| `preflight` | `--target <host-version>` | version | required | The host version to test against |
+| `token rotate` | `--http`, `--lock <id>` | switch; lock id | one is required | Which token is rotated |
+| `update` | `--dry-run-migrate`, `--from-registry` | switches | off | Report the migration result without applying; adopt a side-loaded plugin from the registry |
+
+### Records added by later requirements
+
+These types extend [the record catalogue](#the-record-catalogue). Every time is `YYYY-MM-DD HH:mm:ss` in UTC.
+
+| `type` | Fields | Printed by |
+|---|---|---|
+| `alert` | `id`, `severity` (1 to 3), `plugin`, `code`, `raised_at`, `acknowledged` | `alerts --json` |
+| `audit` | the fields of [SEC-221](/pages/reference-audit-log/) | `audit` |
+| `bisect` | `round`, `rounds_max`, `disabled` (list of ids), `suspect` (id or `null`) | `bisect` |
+| `consent` | `plugin`, `version`, `grant`, `decision` (`granted`, `declined`), `at`, `surface` (`dialog`, `cli`, `policy`) | `consents --json` |
+| `crash` | `at`, `plugin`, `side`, `reason`, `export`, `file` | `crashes --json` |
+| `crash-mark` | `at`, `boot_id`, `phase` | `status --safe-mode --json` |
+| `data-kind` | `plugin`, `kind`, `bytes`, `files`, `newest_at` | `data-report --json` |
+| `deprecation` | `kind`, `name`, `since`, `remove_in`, `owner` | `deprecations --json` |
+| `diagnostic` | `code`, `message` | `debug` |
+| `erase` | `kind`, `files`, `bytes`, `remaining` | `erase-data`, `purge-all`, `admin purge-user`, `gc` |
+| `explain` | `code`, `stage`, `exit_code`, `cause`, `fix` | `explain --json` |
+| `exposure` | `plugin`, `from`, `to` (or `null` while enabled), `grants`, `file_roots`, `pane_kinds`, `agent_config_dirs`, `egress_http`, `egress_inference`, `secrets` (names only) | `exposure --json`, one per interval |
+| `frame` | `index`, `function`, optional `file`, `line` | `symbolize --json` |
+| `health` | `id`, `version`, `side`, `state`, `reason`, `restarts_10m` | `health --json` |
+| none (bare line, no `type` key) | `plugin_id`, `language` (the language used for that plugin in this run), `message_count`, `missing_count` (unsigned integers); exactly these four keys | `i18n-coverage --json` ([PDT-023]) |
+| `history` | `plugin`, `at`, `op`, `version`, `outcome`, optional `prev_version`, `delta` | `history --json` |
+| `host-status` | `safe_mode`, `crash_marks_in_window`, `disk_step`, `revocation_age_seconds`, `plugins_by_health` (object of counts), `update_pending`, optional `last_backup_age_seconds` | `host-status --json`, exactly one |
+| `kill` | `plugin`, `state` (`killed`, `released`), `path` (`session`, `offline`) | `kill`, `unkill` |
+| `limit` | `plugin`, `name`, `requested`, `applied`, `source` (`default`, `manifest`, `user`, `policy`), `usage` | `limits --json` |
+| `metric` | `plugin`, `side`, `name`, `value`, optional `limit`, `source`, `bucket_at` | `stats --json`, `metrics`, `top --json` |
+| `outdated` | `id`, `installed`, `latest`, `channel`, `grants_added` (list of `{ grant, risk }`) | `outdated --json` |
+| `plan` | `plugin`, `action` (`restore`, `skip`, `replace`, `remove`), `data_bytes`, `grants`, `secrets` | `restore`, before any change |
+| `policy` | `file`, `status` (`used`, `ignored`, `malformed`, `absent`), optional `key`, `value`, `source` | `policy show`, `policy check` |
+| `publish` | `id`, `version`, `channel`, `action`, `url` | `publish` and the registry owner commands |
+| `recovery-item` | `path`, `code`, `actions` (list of `rebuild`, `restore`, `start-without`) | `recovery --json` |
+| `registry` | `url`, `name`, `state`, `index_age_seconds` | `registry list --json` |
+| `report` | `report_id`, `status` (`pending`, `accepted`, `rejected`), optional `decision` | `report --json` |
+| `restore-summary` | `plugins`: list of `{ id, data_restored, grants_to_review, secrets_to_enter, trust_state (`kept`, `tampered-renamed`), left_disabled }` | `restore` and `restore --dry-run`, exactly one, before `summary` |
+| `rotation` | `plugin`, `name`, `kind` (`secret`, `http-token`, `lock-token`) | `secret rotate`, `token rotate` |
+| `switch` | `from`, `to`, `migrated_keys`, `unmatched_keys` | `switch` |
+| `trust` | `key_id`, `publisher_id`, `tier`, `store` (`user`, `system`), `state` | `trust list --json` |
+| `usage` | `plugin`, `store_bytes`, `data_bytes`, `storage_bytes`, `cache_bytes`, `logs_bytes`, `backups_bytes`, and one final record with `class_totals` (`active`, `backups`, `kept-uninstalled`, `moved-aside`, `caches`) | `du --json` |
+| `verify` | `subject`, `step`, `ok`, optional `code` | `verify`, `verify-published`, `verify-conformance` |
+
+The enumerations of DEV-021, DEV-022 and DEV-024 hold the values that these commands use. The `status` values of a record in this table are the ones listed in its row.
+
+- **[PRM-106]** The system must list every `ilium plugin` subcommand in the Command inventory of this page with its synopsis, its flags with type, default and meaning, whether it needs a session, its default output mode, its JSONL record types with their fields, and its exit codes. A test must compare the subcommands and flags of `ilium plugin --help` and of every `ilium plugin <command> --help` with this inventory and must fail naming each subcommand or flag that is in only one of them.
+
+- **[PRM-107]** The system must print, from every `ilium plugin` command, only JSONL record types that the record catalogue of this page lists, with only the listed fields and enumerated values. The golden-output test of each command must validate each printed record against its catalogue entry and must fail on an unlisted record type, field or enumerated value.
 
 ## Production additions (round 10)
 
@@ -800,3 +1042,7 @@ Every command here follows the output model above. Synopses are in the table; sh
 ## Production additions (round 14)
 
 - **[PRN-006]** The system must publish a signed, machine-readable feed of known host defects. Each entry must carry affected host versions, the error codes or log events that signal it, a workaround and the fixing version. `ilium plugin doctor` must print every entry that matches the installed host and the project's last failing run, and must label the entry as a host defect rather than a plugin defect.
+
+## Production additions (round 15)
+
+- **[PRM-203]** The system must provide `ilium plugin preview <package-or-dir> [--locale <tag>] [--json]`, which prints, offline and without installing, what the store detail view and the install review dialog would show (name and description in the chosen locale, grants with risk levels, README text, screenshot alt text, support contact, licence expression), and exits 3 with `lint.preview-field-missing` or `lint.preview-truncated` when a shown field is missing or would be truncated.

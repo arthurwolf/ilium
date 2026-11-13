@@ -472,7 +472,7 @@ The global id of the pane kind is `@@id@@.board`. The view test renders `ViewTar
   "publisher": "Ilium",
   "limits_tier": "first-party",
   "replaceable": true,
-  "surface": [],
+  "surface": ["points:before-open"],
   "server": { "entry": "server.wasm", "world": "ilium:server/base@0.1.0", "exports": [] },
   "client": { "entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": ["views"] },
   "capabilities": { "server": ["tree.read"], "client": ["ui.panels"] },
@@ -485,7 +485,7 @@ The global id of the pane kind is `@@id@@.board`. The view test renders `ViewTar
 }
 ```
 
-The `surface` list is empty until the plugin defines what a replacement must provide. The tests include a hook test that runs `before-open` against two stub contributors with `FakeSession`.
+The `surface` list names the one declared point, because a replaceable plugin must list at least one entry (`manifest.schema` otherwise, [PKG-029]). Add one entry for each service, point, command, pane kind, topic and CLI command that a replacement must provide. The tests include a hook test that runs `before-open` against two stub contributors with `FakeSession`.
 
 - **[DEV-278]** `core-style` MUST write the file `docs/EXTENDING.md` with the table of the plugin's extension points, so a plugin that extends it has a document to read.
 
@@ -495,7 +495,7 @@ The `surface` list is empty until the plugin defines what a replacement must pro
 {
   "server": { "entry": "server.wasm", "world": "ilium:server/base@0.1.0", "exports": ["service-provider"] },
   "capabilities": { "server": ["services.provide:@@id@@/greeter"] },
-  "contributes": { "services": [{ "provides": ["@@id@@/greeter"] }] }
+  "contributes": { "services": { "provides": [{ "name": "@@id@@/greeter", "version": "0.1.0", "schema": "schemas/greeter.json" }] } }
 }
 ```
 

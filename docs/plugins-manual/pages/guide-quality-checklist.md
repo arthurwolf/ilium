@@ -21,7 +21,7 @@ A release SHOULD pass `ilium plugin lint --deny warnings`, and every suppression
 | Item | Command | Rule |
 |---|---|---|
 | Manifest is valid and complete | `ilium plugin check` | `manifest.*` codes |
-| Components exist for every declared side | `check` | `component.missing`, `component.invalid` |
+| Components exist for every declared side | `check` | `component.missing`, `package.component-invalid` |
 | Exports match the manifest | `check` | `manifest.exports-mismatch` |
 | SDK version matches `api` | `check` | `manifest.api-version` |
 | `description` is one paragraph of 280 characters or less (hard limit 500) | `lint` | `lint.description-missing` |

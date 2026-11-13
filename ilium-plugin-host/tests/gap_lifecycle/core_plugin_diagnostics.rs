@@ -1,4 +1,4 @@
-//! Gap tests for the plugin diagnostics page: the `ilium plugin bundle` archive, its 5 MiB cap
+//! Gap tests for the plugin diagnostics page: the `ilium plugin support-bundle` archive, its 8 MiB cap
 //! and the failure-offer rules (LIF-312..314).
 //!
 //! Assumptions: `bundle_entries` lists the archive member names, `bundle_text` returns the text
@@ -9,13 +9,14 @@ use std::path::PathBuf;
 
 use crate::support::*;
 
-const FIVE_MIB: u64 = 5 * 1024 * 1024;
+/// The cap of LIF-313 and USR-224 is now 8 MiB; the constant keeps its earlier name.
+const FIVE_MIB: u64 = 8 * 1024 * 1024;
 
 /// Builds a bundle for `NOTES` into the rig's scratch directory and returns its path.
 fn build_bundle(rig: &OpsRig) -> PathBuf {
-    let path = rig.scratch_dir().join("bundle.tar");
+    let path = rig.scratch_dir().join("bundle.zip");
     let path_text = path.to_string_lossy().into_owned();
-    let output = rig.cli(&["plugin", "bundle", NOTES, "--out", &path_text]);
+    let output = rig.cli(&["plugin", "support-bundle", NOTES, "--out", &path_text]);
     assert_eq!(
         output.exit_code, 0,
         "bundle must succeed: {}",
@@ -29,7 +30,7 @@ fn build_bundle(rig: &OpsRig) -> PathBuf {
 fn lif_312_bundle_holds_report_logs_manifest_states_and_version_without_secrets() {
     assert_manual_says(
         "core-plugin-diagnostics",
-        "`ilium plugin bundle` MUST write one archive that holds the report",
+        "The support bundle MUST be written by `ilium plugin support-bundle`",
     );
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
@@ -37,14 +38,19 @@ fn lif_312_bundle_holds_report_logs_manifest_states_and_version_without_secrets(
     rig.write_storage(NOTES, "global", "draft", b"STORAGE-BUCKET-VALUE");
     let path = build_bundle(&rig);
     let entries = rig.bundle_entries(&path);
-    for required in ["report", "manifest", "states", "version"] {
+    // LIF-312 now names the USR-221 entries and forbids a manifest; the fn name is kept.
+    assert!(
+        !entries.iter().any(|entry| entry.contains("manifest")),
+        "bundle holds no manifest: {entries:?}"
+    );
+    for required in ["summary.txt", "stats.txt", "crashes.txt"] {
         assert!(
             entries.iter().any(|entry| entry.contains(required)),
             "bundle holds a {required} member: {entries:?}"
         );
     }
     assert!(
-        entries.iter().any(|entry| entry.contains("logs")),
+        entries.iter().any(|entry| entry.contains("log.txt")),
         "bundle holds the log records"
     );
     assert!(
@@ -62,7 +68,7 @@ fn lif_312_bundle_holds_report_logs_manifest_states_and_version_without_secrets(
 fn lif_313_bundle_is_capped_at_5_mib_drops_oldest_logs_and_names_the_cut() {
     assert_manual_says(
         "core-plugin-diagnostics",
-        "The bundle MUST be capped at 5 MiB",
+        "The bundle MUST be capped at 8 MiB",
     );
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
@@ -71,7 +77,7 @@ fn lif_313_bundle_is_capped_at_5_mib_drops_oldest_logs_and_names_the_cut() {
     }
     let path = build_bundle(&rig);
     let size = std::fs::metadata(&path).expect("bundle exists").len();
-    assert!(size <= FIVE_MIB, "bundle is {size} bytes, above 5 MiB");
+    assert!(size <= FIVE_MIB, "bundle is {size} bytes, above 8 MiB");
     let text = rig.bundle_text(&path);
     assert!(
         !text.contains("record-000000"),

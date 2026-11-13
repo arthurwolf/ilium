@@ -64,7 +64,7 @@ The `Config` values are fixed. The same values apply in the release build that p
 | `debug_info(false)` | off | `ilium plugin build --debug` is a plugin-side concern |
 | `cache` | see "Compile cache" | |
 
-- **[HST-055]** The host MUST set `wasm_component_model_async(false)`. A component that needs it MUST be refused at load with `component.invalid`.
+- **[HST-055]** The host MUST set `wasm_component_model_async(false)`. A component that needs it MUST be refused at load with `package.component-invalid`.
 - **[HST-056]** The host MUST fix the `concurrency_support` setting at build time to the value that keeps Wasmtime's concurrency APIs unused, and a test MUST instantiate, call and drop a component under that setting. (Disabling it makes those APIs panic, so the host never calls them.)
 - **[HST-057]** The `Config` values in the table MUST be identical in the release build that produces `.cwasm` and in the host, and the host MUST compute a `config fingerprint` (a hash of Wasmtime version, target triple and every value in the table) and store it in the header of each embedded artifact.
 - **[HST-058]** Epoch interruption MUST be on, and fuel MUST be off.
@@ -204,7 +204,7 @@ Rust components built for `wasm32-wasip2` and TypeScript components built by `co
 | `wasi:cli/stdin` | Always empty |
 | `wasi:cli/environment` | No variables; one argument, the plugin id |
 | `wasi:cli/exit` | A call traps with `wasi.exit` |
-| `wasi:clocks`, `wasi:random` | Allowed. Wall-clock time is the real clock; monotonic time is the host monotonic clock; random bytes come from the operating system |
+| `wasi:clocks`, `wasi:random` | Allowed. Wall-clock time is the real clock and monotonic time is the host monotonic clock, both coarsened to 1 ms and, for T2 and T3 plugins, jittered by up to 1 ms ([SEC-370](/pages/reference-threat-model/), [clock and timers](/pages/api-clock-and-timers/#clock-resolution-and-jitter)); random bytes come from the operating system |
 | `wasi:io` | Allowed |
 | `wasi:filesystem` | Linked, but with preopens only for scopes that an `fs.*` grant makes available, mapped through `ilium-platform` secure file access. With no `fs.*` grant the preopen list is empty |
 | `wasi:sockets` | Refused. A component that imports it is refused at load with `component.wasi-forbidden` |
@@ -295,7 +295,7 @@ pub fn runtime_config() -> wasmtime::Config {
 | Guest memory growth refused | Trap; log line `memory limit <N> MiB reached` | none |
 | Stack overflow | The instance traps | `host.stack-overflow` |
 | Wasmtime internal compile error | Load fails; plugin not activated | `host.engine-error` |
-| Component uses `wasm_component_model_async` | Refused | `component.invalid` |
+| Component uses `wasm_component_model_async` | Refused | `package.component-invalid` |
 | Compile cache unavailable | Compile in memory, log once | `host.cache-unavailable` |
 | System clock jumps during a call | No deadline decision on the jump tick | none |
 | API version section missing | Refused | `package.api-section-missing` |

@@ -361,7 +361,7 @@ The consumer asks for the lowest version it can live with. It does not require 1
   "activation": ["startup"],
   "contributes": {
     "commands": [
-      { "id": "example.glossary-hover/define", "title": "Define a term", "side": "server" }
+      { "id": "define", "title": "Define a term", "side": "server" }
     ],
     "topics": { "publishes": ["example.glossary-hover/definition"] }
   }

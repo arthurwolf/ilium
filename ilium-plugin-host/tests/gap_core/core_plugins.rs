@@ -166,7 +166,7 @@ fn cor_203_the_contract_equals_the_bundled_manifest_and_the_replacement_matrix_r
 fn cor_204_each_core_plugin_has_a_parity_suite_named_for_it() {
     let rig = OpsRig::new();
     let core_ids = rig.core_plugin_ids();
-    assert_eq!(core_ids.len(), 30, "the bundle must hold 30 core plugins");
+    assert_eq!(core_ids.len(), 32, "the bundle must hold 32 core plugins");
     for core_id in core_ids {
         let short = core_id.trim_start_matches("ilium.core.");
         assert_eq!(

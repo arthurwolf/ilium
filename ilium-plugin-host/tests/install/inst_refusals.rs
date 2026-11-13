@@ -65,7 +65,7 @@ fn inst_008_locked_with_channel_refused_a() {
     let fx = Fx::new();
     let out = fx.run(&["install", "com.example.notes", "--locked", "--channel", "beta"]);
     assert_eq!(out.exit_code, 2);
-    assert!(mentions(&out, "usage.conflicting-flags"));
+    assert!(mentions(&out, "usage.conflict"));
 }
 
 /// REQ: INS-008
@@ -86,7 +86,7 @@ fn inst_009_locked_with_local_file_refused_a() {
     let path = package_path(&fx, &spec);
     let out = fx.run(&["install", &path, "--locked"]);
     assert_eq!(out.exit_code, 2);
-    assert!(mentions(&out, "usage.conflicting-flags"));
+    assert!(mentions(&out, "usage.conflict"));
 }
 
 /// REQ: INS-009
@@ -95,7 +95,7 @@ fn inst_009_locked_with_https_url_refused_b() {
     let fx = Fx::new();
     let out = fx.run(&["install", "https://registry.example.test/pkg.iliumpkg", "--locked"]);
     assert_eq!(out.exit_code, 2);
-    assert!(mentions(&out, "usage.conflicting-flags"));
+    assert!(mentions(&out, "usage.conflict"));
     assert!(fx.fetcher.calls().is_empty());
 }
 
@@ -105,7 +105,7 @@ fn inst_010_from_bundle_with_registry_refused_a() {
     let fx = Fx::new();
     let out = fx.run(&["install", "--from-bundle", "./bundle", "--registry", REGISTRY_URL, "com.example.notes"]);
     assert_eq!(out.exit_code, 2);
-    assert!(mentions(&out, "usage.conflicting-flags"));
+    assert!(mentions(&out, "usage.conflict"));
 }
 
 /// REQ: INS-010
@@ -126,7 +126,7 @@ fn inst_012_channel_with_local_file_refused_a() {
     let path = package_path(&fx, &spec);
     let out = fx.run(&["install", &path, "--channel", "beta", "--allow-unsigned", "--yes"]);
     assert_eq!(out.exit_code, 2);
-    assert!(mentions(&out, "usage.conflicting-flags"));
+    assert!(mentions(&out, "usage.conflict"));
 }
 
 /// REQ: INS-012
@@ -146,7 +146,7 @@ fn inst_017_unaccepted_flag_pair_refused_a() {
     let path = package_path(&fx, &spec);
     let out = fx.run(&["install", &path, "--dry-run", "--locked"]);
     assert_eq!(out.exit_code, 2);
-    assert!(mentions(&out, "usage.conflicting-flags"));
+    assert!(mentions(&out, "usage.conflict"));
 }
 
 /// REQ: INS-017

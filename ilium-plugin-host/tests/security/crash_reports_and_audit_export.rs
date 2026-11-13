@@ -36,7 +36,7 @@ fn sec_447_the_audit_log_page_states_the_crash_report_storage_and_expiry_rule() 
         "reference-audit-log.md",
         &[
             "Crash reports MUST be stored with mode 0600 in a 0700 folder beside the audit directory",
-            "MUST be deleted after 14 days or when the plugin is uninstalled",
+            "MUST be deleted when more than 30 days old or when more than 200 exist, oldest first",
             "MUST NOT be sent anywhere unless the user runs the explicit export command",
             "`crash-report` audit record",
         ],

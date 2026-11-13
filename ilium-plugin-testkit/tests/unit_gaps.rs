@@ -1773,7 +1773,7 @@ fn fixture_empty_file_does_not_pass() {
 
 #[test]
 fn core_stubs_table_lists_thirty_stubs() {
-    assert_eq!(ilium_plugin_testkit::core_stubs::table().len(), 30);
+    assert_eq!(ilium_plugin_testkit::core_stubs::table().len(), 32);
 }
 
 #[test]

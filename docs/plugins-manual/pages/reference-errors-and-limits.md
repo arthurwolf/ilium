@@ -242,8 +242,8 @@ The table lists the per-plugin limits. The values belong to API version `ilium:p
 |---|---|---|---|---|
 | `memory_mib` | 32 | 256 | 128 | Trap |
 | `table_elements` | 10,000 | 50,000 | 20,000 | Trap |
-| `event_deadline_ms` | 20 | 50 | 20 | Trap |
-| `command_deadline_ms` | 50 | 100 | 50 | Trap |
+| `event_deadline_ms` | 20 | 50 | 20 | Trap, for an `on-events` batch without a command. Hook handlers, detectors and providers have their own deadlines and effects: [Call classes](/pages/reference-host-scheduling/#call-classes) |
+| `command_deadline_ms` | 50 | 100 | 50 | Trap, for a batch with a `command-invoked` event and for a service or inference provider call: [Call classes](/pages/reference-host-scheduling/#call-classes) |
 | `render_deadline_ms` | 10 | 20 | 10 | Trap |
 | `annotate_deadline_ms` | 10 | 20 | 10 | Late result dropped; third breach in a row traps |
 | `frame_deadline_ms` | frame budget (1,000 ms divided by the effective frame rate, rounded down; 33 ms at 30 fps) | 50 | 50 | Frame skipped; 30 breaches in a row traps |
@@ -408,7 +408,7 @@ Codes of the component checks, of the host runtime and of the grant and trust st
 | `component.custom-section-too-large` | A custom section is over 4 MiB, or the custom sections together are over 8 MiB |
 | `component.import-ungranted` | The component imports a host function whose grant the side does not request |
 | `component.import-unknown` | The component imports an interface that is not in the contract |
-| `component.invalid` | The file is not a valid WebAssembly component |
+| `package.component-invalid` | The file is not a valid WebAssembly component |
 | `component.missing` | A declared side has no component |
 | `component.size-warning` | A component is larger than 8 MiB. Above 32 MiB it is an error |
 | `component.too-large` | The component is larger than 32 MiB |
@@ -419,7 +419,7 @@ Codes of the component checks, of the host runtime and of the grant and trust st
 | `host.cwasm-incompatible` | No `.cwasm` fits the target triple or the engine fingerprint. The component is compiled at load and the start is slower |
 | `host.engine-error` | A Wasmtime engine-level error, or a Store over its limit of 16 instances, 8 tables or 4 memories. The load or instantiation fails and the plugin is not activated |
 | `host.engine-failed` | The Wasmtime engine cannot be created. The process continues without a plugin host, as with `--no-plugins` (HST-037) |
-| `host.grants-unreadable` | The grant store is unreadable at start. The host starts with default grants for T1 only and refuses T2 and T3 packages until the file is repaired |
+| `grants.unreadable` | The grant store is unreadable at start. The host starts with default grants for T1 only and refuses T2 and T3 packages until the file is repaired |
 | `host.import-panic` | A Rust panic inside a host import. Only the calling instance traps (HST-036) |
 | `host.late` | A call finished after a soft or a hard deadline. Written to the telemetry log with the class and the duration |
 | `host.queue-timeout` | The deadline of a call passes while it waits in the queue. The call is abandoned and a breach is counted (HST-216) |
@@ -432,6 +432,11 @@ Codes of the component checks, of the host runtime and of the grant and trust st
 | `grants.unsafe-permissions` | Another user can write the grant file or the trust store. T2 and T3 plugins are refused at load until the file is fixed (USR-207) |
 | `trust.unreadable` | The trust store file cannot be parsed. It is handled like the grant store (SEC-114) |
 | `trust.removed` | A trusted key was removed with `trust remove <key_id> --force`. A plugin that it signed is shown as `Publisher no longer trusted` |
+| `attach.client-limit` | A 17th client attaches to a session that already has 16 attached clients. The attach is refused and the attached clients are not affected ([PRM-308](/pages/reference-persistence-and-restart/)) |
+| `runtime.dir-fallback` | `XDG_RUNTIME_DIR` is unset, not owned by the user or not mode 0700. The kernel uses `<os temp dir>/ilium-<uid>/`, logs the code once with the reason and starts ([PRM-306](/pages/reference-kernel-and-boot/)) |
+| `runtime.dir-unsafe` | The fallback runtime directory or the `ILIUM_SOCKET_DIR` folder is not a real directory owned by the user with mode 0700. The server and the client refuse to start ([PRM-306](/pages/reference-kernel-and-boot/)) |
+| `runtime.socket-path-too-long` | Even the digest file name does not fit the socket path limit of the system. The kernel refuses to start and suggests `ILIUM_SOCKET_DIR` ([PRM-307](/pages/reference-kernel-and-boot/)) |
+| `data.root-unresolved` | No home directory and no variable that names the config, data, cache and state roots. The server and the client refuse to start and name the variables to set ([PRM-314](/pages/reference-platform-support/)) |
 
 ### Install, migration and registry log codes
 
@@ -458,6 +463,8 @@ No new `error-code` case exists. The extended functions reuse the 15 codes. Code
 | `surface.write-glyphs`, `set-owner-ids` | `invalid-argument`, `quota-exceeded`, `unsupported` | none |
 | `media.open-video-bytes` | `invalid-argument` (including more than 16 MiB), `io`, `unsupported` (mime type or codec) | none |
 | `media.open-video-range` | `invalid-argument` (including more than 16 MiB), `io` | none |
+| `workspace.register` | `not-permitted`, `not-found`, `conflict`, `invalid-argument` (branch or base over 255 bytes, a path over 4,096 bytes), `quota-exceeded` (64 live records per plugin, 256 per session), `rate-limited` (10 calls in 1 s) | none |
+| `workspace.release`, `workspace.list` | `not-permitted`, `not-found` and `conflict` (`release` only). `list` returns only the caller's records | none |
 | `fs.write-atomic` | `invalid-argument` (bad path, over 16 MiB), `not-permitted` | `conflict`, `io`, `not-found`, `quota-exceeded` |
 | `fs.propose-agent-config` | `not-permitted` (`scope`: a path outside the folder, a credential file or the deny set), `invalid-argument` (an empty list, two changes to one path, more than 32 changes, more than 16 MiB of new content in total, a title over 80 or a summary over 200 characters), `busy`, `rate-limited` | `not-permitted` (`declined`), `timed-out`, `conflict`, `quota-exceeded` (history entry), `io`, `cancelled` |
 | `fs.tail` | `not-permitted`, `not-found`, `invalid-argument` (`max-bytes` over 1 MiB), `io` | none |

@@ -833,33 +833,41 @@ The manifest `settings` object declares 18 row types. The plugin updates a row's
 
 ```rust
 // Meter row filled from the plugin, and a state banner on a row.
-ui::set_meter("usage.spend", vec![MeterSegment { label: "today".into(), value: 4.2, tone: Tone::Info }])?;
-ui::set_row_state("provider.key", RowState { kind: RowStateKind::Warning, message: "Key expires in 3 days".into() })?;
+ui::set_meter("usage-spend", vec![MeterSegment { label: "today".into(), value: 4.2, tone: Tone::Info }])?;
+ui::set_row_state("provider_key", RowState { kind: RowStateKind::Warning, message: "Key expires in 3 days".into() })?;
 ```
 
 **TypeScript**
 
 ```ts
 // Meter row filled from the plugin, and a state banner on a row.
-setMeter('usage.spend', [{ label: 'today', value: 4.2, tone: 'info' }]);
-setRowState('provider.key', { kind: 'warning', message: 'Key expires in 3 days' });
+setMeter('usage-spend', [{ label: 'today', value: 4.2, tone: 'info' }]);
+setRowState('provider_key', { kind: 'warning', message: 'Key expires in 3 days' });
 ```
 
-The manifest side, identical for both languages:
+The manifest side, identical for both languages. `contributes.settings` is a list of entries; a row key has no dots:
 
 ```json
 {
   "contributes": {
-    "settings": {
-      "sections": [{
-        "id": "usage", "title": "Usage",
-        "rows": [
-          { "id": "usage.spend", "type": "meter", "label": "Spend" },
-          { "id": "provider.key", "type": "text", "label": "API key", "secret": true },
-          { "id": "sky.location", "type": "location", "label": "Location" }
+    "settings": [
+      {
+        "kind": "tab",
+        "id": "usage",
+        "title": "Usage",
+        "sections": [
+          {
+            "id": "usage",
+            "title": "Usage",
+            "rows": [
+              { "type": "meter", "id": "usage-spend", "title": "Spend" },
+              { "type": "text", "key": "provider_key", "title": "API key", "secret": true },
+              { "type": "location", "key": "sky_location", "title": "Location" }
+            ]
+          }
         ]
-      }]
-    }
+      }
+    ]
   }
 }
 ```

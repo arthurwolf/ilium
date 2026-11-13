@@ -64,6 +64,7 @@ const CORE_ACTIVATION_TABLE: &[(&str, &[&str], &[&str])] = &[
         &["startup"],
     ),
     ("ambient", &[], &["startup"]),
+    ("attention", &["startup"], &["startup"]),
     ("chatroom", &["startup"], &["topic:chatroom"]),
     (
         "compaction",
@@ -98,6 +99,7 @@ const CORE_ACTIVATION_TABLE: &[(&str, &[&str], &[&str])] = &[
     ("notifications", &["startup"], &[]),
     ("progress", &["startup"], &["startup"]),
     ("recap", &["cli:recap", "command:recap"], &[]),
+    ("resources", &["startup"], &["startup"]),
     ("scenes", &[], &["scene:*"]),
     ("scheduler", &["startup"], &["view:scheduler.queue"]),
     (

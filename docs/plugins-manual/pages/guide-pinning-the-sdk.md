@@ -28,7 +28,7 @@ Commit `bun.lock` next to `package.json`. Do not replace the tilde range with a 
 
 Several checks in the plugin CLI guard the pin. `ilium plugin check` warns with `lint.sdk-range-open` when a requirement admits a higher minor than the line the author intends. It fails with `lint.sdk-deprecated` as an error when the resolved SDK minor has reached the removal minor of an item the plugin still uses.
 
-`ilium plugin check --release` fails with `build.unpinned-inputs` when the lockfile is missing. `ilium plugin build` fails with `build.sdk-line-mixed` when a plugin uses the Rust and the TypeScript SDK on different lines, and it fails with `build.sdk-host-mismatch` when the manifest `api` is outside the host range of the resolved SDK. The file `dist/build.json` records the resolved SDK version and the lowest and highest host API minors that SDK declares, so the range check can be read after a build. See [Plugin CLI](/pages/reference-plugin-cli/) and [Check and lint rules](/pages/reference-check-and-lint-rules/) for the full output format.
+`ilium plugin check --release` fails with `build.unpinned-input` when the lockfile is missing. `ilium plugin build` fails with `build.sdk-line-mixed` when a plugin uses the Rust and the TypeScript SDK on different lines, and it fails with `build.sdk-host-mismatch` when the manifest `api` is outside the host range of the resolved SDK. The file `dist/build.json` records the resolved SDK version and the lowest and highest host API minors that SDK declares, so the range check can be read after a build. See [Plugin CLI](/pages/reference-plugin-cli/) and [Check and lint rules](/pages/reference-check-and-lint-rules/) for the full output format.
 
 ## Bumping within a line and across lines
 
@@ -46,7 +46,7 @@ A scheduled job can open pull requests for patch updates only. It updates the SD
 
 ## Requirements
 
-- **[PDX-001]** A plugin project MUST commit its lockfile (`Cargo.lock` for Rust, `bun.lock` for TypeScript), and a release build or `ilium plugin check --release` without one MUST fail with `build.unpinned-inputs` as defined by [DEV-893].
+- **[PDX-001]** A plugin project MUST commit its lockfile (`Cargo.lock` for Rust, `bun.lock` for TypeScript), and a release build or `ilium plugin check --release` without one MUST fail with `build.unpinned-input` as defined by [DEV-893].
 - **[PDX-002]** The templates MUST pin the SDK to a tilde-style minor range (Rust `ilium-plugin-sdk = "~0.4.2"`, TypeScript `"~0.4.2"`), and `ilium plugin check` MUST warn with `lint.sdk-range-open` for any requirement that admits a higher minor, such as `*`, `^0.4` or a bare major.
 - **[PDX-003]** `dist/build.json` MUST record the resolved SDK version together with the lowest and highest host API minors that SDK declares, and `ilium plugin build` MUST fail with `build.sdk-host-mismatch` when the manifest `api` is outside that range.
 - **[PDX-004]** When one plugin uses both the Rust and the TypeScript SDK, they MUST resolve to the same SDK line (same major.minor), otherwise `ilium plugin build` MUST fail with `build.sdk-line-mixed`.

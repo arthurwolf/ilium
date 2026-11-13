@@ -216,7 +216,7 @@ fn wide_text_never_overflows() {
 
 ## Built-in and replaced core plugin text
 
-The 30 core plugins that ship with Ilium show their menu labels, settings tab titles, command titles and notices in English. Until the host catalogue of [AUT-623] ships, the user's language setting does not change this text. Each kind of text has one owner.
+The 32 core plugins that ship with Ilium show their menu labels, settings tab titles, command titles and notices in English. Until the host catalogue of [AUT-623] ships, the user's language setting does not change this text. Each kind of text has one owner.
 
 | Text | Who owns it | Who translates it |
 |---|---|---|
@@ -231,7 +231,7 @@ A replacement takes over the surface of a core plugin. The rules below say what 
 
 Decided: the Ilium project owns the host text catalogue. English is its source language. The catalogue holds the menu labels, tab titles, command titles and notices of the host and of the bundled core plugins, and the wording of host dialogs such as the grant review. The Ilium project translates that text itself. Third-party replacements always translate their own text, as [USR-240] states.
 
-- [AUT-623] The Ilium project MUST own the host text catalogue, keep English as its source, and translate into each launch language every host text that is listed above, including the text of the 30 bundled core plugins. Translation is the work of the Ilium project maintainers, and a release MUST NOT ship a launch language with a host text missing from its catalogue unless the missing text falls back to English under the lookup order of [USR-312].
+- [AUT-623] The Ilium project MUST own the host text catalogue, keep English as its source, and translate into each launch language every host text that is listed above, including the text of the 32 bundled core plugins. Translation is the work of the Ilium project maintainers, and a release MUST NOT ship a launch language with a host text missing from its catalogue unless the missing text falls back to English under the lookup order of [USR-312].
 - [AUT-624] The host MUST ship its catalogue in these launch languages: English, German and French (proposed, owner to confirm). A language tag outside this set MUST show English for every host text.
 - [AUT-625] The release candidate MUST pass the `en-XA` pseudo-locale check of [USR-316] over every host dialog and every view of a bundled core plugin, and an `i18n.layout-overflow` finding MUST block the release. The check runs in CI on each release candidate (proposed, owner to confirm).
 

@@ -103,7 +103,7 @@ A scene package has a `scene` entry and no server or client side. Each scene lis
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 The `capabilities` list of this manifest is the grant set of one sample scene package, the one that holds the video, location, GPU and space-weather scenes. The grant table above names the grants of every scene family, including `http:lichess.org`, `http:*.wikipedia.org`, `minecraft-saves`, `codec.inflate` and `jobs`. A scene package declares only the grants of the scenes it contains, so those other grants belong to the packages that ship those scenes and are not in this manifest.
 
@@ -759,3 +759,10 @@ A `scene-packs` entry contributed by another plugin ([Extension points](#extensi
 | Clear the cache from the host | Network caches | Everything else; the scenes refetch |
 
 A replacement that keeps the surface of this plugin MUST read and write the `animation.scene.<scene-id>` and `ilium.core.scenes` sections above unchanged, so the user's choices survive the switch. Test: set a control in three scenes, disable the plugin, check the YAML and snapshot are byte-identical, enable it and check the scene and values return; install and delete a pack file and check the list, the status row and that its saved values remain.
+
+## Location picker and address lookup
+
+The scenes that depend on a place on Earth (the sky, the night lights and the map scenes) take it from a location picker: a modal world map with a crosshair that the arrow keys, `Shift` with the arrow keys for larger steps, and the mouse move, next to an address search field and latitude and longitude controls. The scenes plugin owns the picker and the lookup, which uses the kernel [location](/pages/api-location/) API.
+
+- **[PRM-509]** The location picker must offer an address search and bounded latitude and longitude controls that update the same candidate as the world map, must confirm the candidate with `Enter` or the Use location button, and must store it either as the shared observer or as the independent location of one map scene, as the row that opened it says.
+- **[PRM-510]** An address lookup of the location picker must run off the UI thread, must send only the typed address to the geocoding service, must be refused without the grant `location.geocode`, and a failed or empty lookup must leave the candidate unchanged and show a notice. Coordinate entry and the map crosshair must work with no network.

@@ -210,7 +210,7 @@ The kernel publishes `ilium.progress/finished` when a background job ends. The p
 
 ### What the user sees
 
-The review dialog shows one row per grant. A normal grant is checked by default. A bare `*` is a high-risk row: it is unchecked on a T2 or T3 install, and a T1 bundled plugin asks at first activation, and again at later server starts after each **Not now**, up to three times.
+The review dialog shows one row per grant. A normal grant is checked by default. A bare `*` is a high-risk row: it is unchecked on a T2 or T3 install, and a T1 bundled plugin asks at first activation, and again at later server starts after each **Not now**, three prompts in total ([USR-014](/pages/user-install-and-manage/)).
 
 <figure>
 <pre class="term">╭─<span class="t-hi"> Review permissions </span>───────────────────────────────────────────────────────╮
@@ -225,7 +225,7 @@ The review dialog shows one row per grant. A normal grant is checked by default.
 <figcaption>The review dialog for a package that requests topics.subscribe:build/*, drawn with the client's dialog characters: rounded corners, dotted leaders and the hint bar. Checked rows are granted; a high-risk row starts unchecked.</figcaption>
 </figure>
 
-For a T1 bundled plugin with the high-risk `*` grant, the first activation shows one prompt, "Plugin <name> asks for:", with `Allow selected` and `Not now`. `Not now` asks again at the next server start, up to three times. Settings > Plugins lets the user grant it at any time.
+For a T1 bundled plugin with the high-risk `*` grant, the first activation shows one prompt, "Plugin <name> asks for:", with `Allow selected` and `Not now`. `Not now` asks again at the next server start. The prompt is shown three times in total, and a third `Not now` ends it ([USR-014](/pages/user-install-and-manage/)). Settings > Plugins lets the user grant it at any time.
 
 ### Edge cases and errors
 

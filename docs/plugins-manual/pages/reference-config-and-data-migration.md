@@ -108,6 +108,8 @@ The tables below are the complete list of keys the kernel knows today (see the [
 | `[ui]` toolbar | `agent_toolbar_enabled`, `show_toolbar_labels`, `last_prompt_enabled`, `last_prompt_max_lines` | Agent toolbar | yes |
 | `[ui]` other | `agent_debug_menu_enabled`, `terminal_text_selection_enabled` | Diagnostics, Terminal | yes |
 | `[ui]` progress | `progress_monitor_enabled`, `progress_max_lines`, `completed_progress_hide_after_seconds`, `task_progress_frames` | Progress | yes (server-owned) |
+| `[ui]` resources | `resource_queue_grouping` | Shared resources | yes |
+| `[attention]` | `mode`, `press_sorts`, `turbo_concurrency`, `expiry_seconds`, `large_buttons`, `show_briefing`, `model_override` | Attention queue | yes |
 | `[ui.icons]` | one key per icon role | Tree, Agent toolbar | yes |
 | `[theme]` | `accent_bg`, `accent_fg`, `border_focused`, `border_unfocused` | Kernel theme | yes |
 | `[detection]` | `working_poll_seconds`, `idle_poll_seconds`, `auto_answer_interstitial_prompts`, `[[detection.custom_signatures]]` | Agent detect | yes (server-owned) |

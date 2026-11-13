@@ -36,7 +36,7 @@ Terms:
 | Code | Severity | Reads | Fires when | Fix |
 |---|---|---|---|---|
 | `component.missing` | error | `dist/` | A declared side has no component | Run `ilium plugin build` |
-| `component.invalid` | error | the component | The file is not a valid WebAssembly component | Rebuild |
+| `package.component-invalid` | error | the component | The file is not a valid WebAssembly component | Rebuild |
 | `component.world-mismatch` | error | component, manifest | The world of the component differs from `world` in the manifest | Fix the world in the manifest or the entry |
 | `manifest.api-version` | error | component | The `ilium:api-version` section is absent, malformed or differs from `api` | Rebuild with the current SDK |
 | `manifest.exports-mismatch` | error | component, manifest | The exports differ from the required set plus the listed optional exports | Fix the `exports` list |
@@ -180,6 +180,25 @@ This table lists every `lint` code that the rules on this page or on other pages
 | `lint.text-title-too-long` | warn | Not stated | [Writing user text](/pages/guide-writing-user-text/) |
 | `lint.unstable-feature` | warn | Not stated | This page |
 | `lint.widget-missing-key` | warn | Not stated | This page |
+| `lint.a11y-colour-only-status` | error | Not stated | This page |
+| `lint.a11y-no-label` | error | Not stated | This page |
+| `lint.a11y-unreachable-action` | error | Not stated | This page |
+| `lint.dependency-license` | error | Not stated | This page |
+| `lint.dependency-license-unknown` | warn | Not stated | This page |
+| `lint.grant-denial-untested` | warn | Not stated | [Plugin test strategy](/pages/guide-plugin-test-strategy/) |
+| `lint.hotfix-data-version` | error | Not stated | [Bad release recall playbook](/pages/guide-bad-release-recall-playbook/) |
+| `lint.i18n-key-missing` | warn | Not stated | This page |
+| `lint.i18n-key-unused` | warn | Not stated | This page |
+| `lint.i18n-placeholder-mismatch` | error | Not stated | This page |
+| `lint.i18n-plural-category-invalid` | error | Not stated | This page |
+| `lint.limit-ignored` | warn | Not stated | [Manifest schema](/pages/reference-manifest-schema/) |
+| `lint.preview-field-missing` | error | Not stated | [Plugin CLI](/pages/reference-plugin-cli/) |
+| `lint.preview-truncated` | warn | Not stated | [Plugin CLI](/pages/reference-plugin-cli/) |
+| `lint.sdk-range-open` | warn | Not stated | [Pinning the SDK](/pages/guide-pinning-the-sdk/) |
+| `lint.sdk-unstable-used` | warn | Not stated | [SDK deprecation](/pages/reference-sdk-deprecation/) |
+| `lint.sdk-unsupported` | warn | Not stated | [SDK deprecation](/pages/reference-sdk-deprecation/) |
+| `lint.semver-bump-too-small` | error | Not stated | [Plugin CLI](/pages/reference-plugin-cli/) |
+| `lint.untested-contribution` | warn | Not stated | [Plugin test strategy](/pages/guide-plugin-test-strategy/) |
 
 ## Severity, deny and exit codes
 

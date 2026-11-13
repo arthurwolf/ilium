@@ -64,6 +64,10 @@ The complete list with every error code is in [Install, update and uninstall](/p
 - [USR-011] A failed install MUST leave the installed plugins and their settings unchanged and MUST print one error that names the failed check. Test: install a package with a bad file hash, list plugins before and after, and compare.
 - **[USR-067]** An install, update or uninstall that runs longer than 1 s MUST show the current pipeline step in plain words in the Settings dialog (`Checking the file`, `Checking the signature`, `Unpacking`, `Recording`) and in the plugin row, and the CLI MUST print one `progress` record with step `install` per pipeline step, so the screen never looks frozen. (proposed, owner to confirm)
 
+**Cancel a running install or update.** When you start an install or update in the client, the progress line shows the current step and the action **Cancel**. Press `Esc` to choose it. A download from a URL or a registry adds the step `Downloading`, with the received and the total size. Cancel is offered in every step before `Recording`. `Recording` is the commit of the install ([step 6 of the install transaction](/pages/reference-install-and-update/#the-install-transaction)): from then on there is no Cancel, and you undo the change with **Remove** or `ilium plugin rollback <id>`.
+
+A cancel stops the download, deletes the staging folder of this run and releases the install lock. `installed.json`, every plugin folder and the staging area are then byte for byte as they were before you started. During a cancelled update the old version keeps running and is not restarted. The screen returns to the view you came from within 1 second, with the notice `Install cancelled. Nothing was changed`. The audit log gets one `install` or `update` record with `result` `cancelled`, `reason` `install.cancelled` and the step in `detail` ([Audit log](/pages/reference-audit-log/)). An install started on the command line is cancelled with `Ctrl+C` and follows the same rule, with exit code 130. The requirement is PRM-204, at the end of this page.
+
 Without a client to show the review, for example in a script with no attached Ilium client, the install fails with `install.review-required` unless you pass `--yes`. With a client attached, `--yes` accepts all normal permissions, and a high-risk permission is accepted only if you name it with `--grant`.
 
 <figure>
@@ -112,8 +116,25 @@ After the checks, Ilium shows one dialog with every permission the plugin asks f
 
 A package that fills other plugins' extension points shows an extra group, **Adds to other plugins**. A package that replaces a core plugin asks one more question. Read both carefully: they change what Ilium does by itself. See [The Extensions tab](/pages/user-extensions-tab/).
 
+**The licence line.** Under the publisher, the review dialog shows the line `Licence: <expression>`, where the expression is the SPDX expression of the manifest `license` key ([PKG-019](/pages/reference-manifest/)), for example `Licence: MIT`. A package with no `license` key shows `Licence: No licence declared`. The dialog shows the expression, not the licence text; the text is the `LICENSE` file of the package, which you can read on the plugin's detail page. `ilium plugin install --json` and `ilium plugin update --json` print the same value in the field `license` of the `plugin` record, and `null` when none is declared.
+
+When an update names another expression than the installed version, the dialog adds the line `Licence changed: <old> to <new>`, with `No licence declared` for a missing side. The two expressions are compared as text, ignoring the case of ASCII letters. Such an update always opens the review dialog, also when it asks for no new permission, and `auto_update = install` does not install it by itself: it shows the update notice and waits, as for an update that adds permissions ([PKG-302](/pages/reference-install-and-update/#auto-update)). With `--yes` on the command line the update goes on and the `plugin` record carries `license` and `license_previous`. The requirement is PRM-206, at the end of this page.
+
 - [USR-012] The review dialog MUST list every requested permission, MUST start HIGH rows unchecked, and MUST record exactly the checked rows. Test: install a package with three normal and two HIGH rows, accept the defaults, and assert that the grant file holds three granted and two declined entries.
 - [USR-013] The plugin MUST be on after a successful install, unless the user chose to leave it off. Test: install, then run `ilium plugin list` and assert the state.
+
+### A plugin that needs setup
+
+Some plugins cannot work until you fill a setting, for example an API key or a folder path. The author marks such a row with `setup_required` in the manifest ([Settings schema](/pages/reference-settings-schema/)). A marked row is empty when its value is the empty string, an empty list, or a secret that is not stored.
+
+While a marked row is empty, Ilium does not start the plugin. The plugin is on, it has not failed, and nothing counts against it. This is what you see:
+
+- The row in **Settings > Plugins** reads `Needs setup`. There is no failure count and no crash mark.
+- Right after the install, one notice reads `Installed. <plugin> needs N settings before it works`, where N is the number of empty marked rows. Its action **Open settings** opens the plugin's settings page with the focus on the first empty marked row. At a later start with an empty marked row, for example after a secret was lost ([SEC-963](/pages/reference-secrets/)), the notice reads `<plugin> needs N settings before it works` and has the same action.
+- `ilium plugin list --json` reports `"health":"needs-setup"` with `"state":"installed-enabled"`.
+- When you fill the last empty marked row, Ilium starts the plugin within 1 second and the row reads `On`. You do not restart anything.
+
+Clearing a marked row later stops the plugin and shows `Needs setup` again. Turning the plugin off shows `Off`, as for any plugin.
 
 ### First start of a bundled plugin
 
@@ -145,7 +166,7 @@ Select the plugin in **Settings > Plugins** and press `Space`. Or run `ilium plu
 
 If a plugin keeps failing, Ilium turns it off by itself. It restarts a failing plugin after 1 s, then after 5 s, and at the third failure within 10 minutes it stays off and the row shows the reason. Turning it on again resets the count. See [Lifecycle](/pages/lifecycle/).
 
-Row states in the Plugins tab are defined once, in [Settings, plugin rows](/pages/core-plugin-settings/#plugin-row-states). They are `On`, `Off`, `Failed`, `Restarting`, `Waiting for <owner>`, `Blocked by policy`, `Blocked` (key revoked or registry takedown) and `Refused`. A plugin that shows `Failed` is explained in [Plugin health for users](/pages/user-plugin-health/).
+Row states in the Plugins tab are defined once, in [Settings, plugin rows](/pages/core-plugin-settings/#plugin-row-states). They are `On`, `Off`, `Failed`, `Restarting`, `Waiting for <owner>`, `Needs setup`, `Blocked by policy`, `Blocked` (key revoked or registry takedown) and `Refused`. A plugin that shows `Failed` is explained in [Plugin health for users](/pages/user-plugin-health/).
 
 ### A plugin that shows Blocked
 
@@ -158,7 +179,7 @@ To use the plugin again, run `ilium plugin enable <id> --accept-risk`, or instal
 
 ### Update a plugin
 
-There is no automatic update. To update, get the new package file and install it: `ilium plugin install notes-1.3.iliumpkg`, or **Install from file** in the Plugins tab. Ilium sees that the id is installed and treats it as an update. The review dialog then shows only what is new. Permissions you already gave stay as they are.
+By default there is no automatic update; `[plugins] auto_update` turns it on (USR-125 below, and [Auto-update](/pages/reference-install-and-update/#auto-update)). To update by hand, get the new package file and install it: `ilium plugin install notes-1.3.iliumpkg`, or **Install from file** in the Plugins tab. Ilium sees that the id is installed and treats it as an update. The review dialog then shows only what is new. Permissions you already gave stay as they are.
 
 - A newer version asks for new permissions: only the new rows appear. New HIGH rows start unchecked.
 - The update fails to start: Ilium puts the old version back and shows `Update failed, rolled back`. Your data is restored from the copy made before the update, if a data migration ran.
@@ -333,3 +354,9 @@ API version checked: `ilium:plugin@0.1.0`.
 - **[USR-143]** Plugins that depend on the removed plugin MUST become dormant, not failed, and MUST wake up when it returns.
 - **[USR-173]** An update MUST keep the grants the user already answered and MUST ask only for new ones. A failed update MUST roll back to the previous version. The user-facing rules are USR-123 and USR-124 in [Install and manage plugins](/pages/user-install-and-manage/#update-a-plugin).
 - **[USR-261]** The key trust prompt, the replaces confirmation and the erase-data confirmation MUST be operable with the keyboard alone, MUST show risk and checked state as text as well as colour, MUST wrap the full fingerprint and grant strings so they stay readable at 80 columns, and MUST place keyboard focus on the Cancel action by default.
+
+## Production additions (round 15)
+
+- **[PRM-201]** The system must, when an enabled plugin declares a settings row with `setup_required` and the value of that row is empty, keep the plugin not activated, show it in Settings > Plugins as `Needs setup` with no failure count and no crash mark, show one notice `Installed. <plugin> needs N settings before it works` with an `Open settings` action that puts the focus on the first empty marked row, report health `needs-setup` in `ilium plugin list --json`, and activate the plugin and show `On` within 1 second after the last empty marked row is filled.
+- **[PRM-204]** The system must show, during an install or update started from the client, a progress line with the current step and a Cancel action reachable with `Esc` in every step before the commit step `Recording`. A cancel must leave `installed.json`, the plugin folders and the staging area byte-identical to their state before the start, must write one `install` or `update` audit record with result `cancelled`, reason `install.cancelled` and the step, and must return the screen to the previous view within 1 second.
+- **[PRM-206]** The system must show the SPDX licence expression of the package in the install and update review dialogs, must show `No licence declared` when the manifest has none, must show `Licence changed: <old> to <new>` and require the review dialog (no automatic install) when the expression of an update differs from the installed version, and must carry the same value in the `license` field of `ilium plugin install --json`.

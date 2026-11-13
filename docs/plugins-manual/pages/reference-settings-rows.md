@@ -363,6 +363,7 @@ A single-line string. With `secret: true` the row shows `••••`, and with
 | Value | string |
 | Fields | `max_length` (at most 4,096, default 256), `pattern`, `placeholder`, `secret` |
 | Fields | `reveal_last` (0 to 8, only with `secret`), `debounce_ms` (300 to 2,000) |
+| Fields | `setup_required` (default `false`): an empty value keeps the plugin in `Needs setup` ([Settings schema](/pages/reference-settings-schema/)). Also valid on `text-area`, `path` and `list` rows |
 | Validation | `maxLength`, `pattern`, and the optional `settings-validate` export |
 | Written | 600 ms after the last keystroke, or at once on Enter or when the row loses focus |
 

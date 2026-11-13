@@ -11,7 +11,7 @@ This page states what stays in the Ilium kernel when every feature becomes a cor
 Contract version: `ilium:plugin@0.1.0`. The platform is not implemented. This page is the specification that the implementation and its tests follow. Requirement ids have the form `[COR-nnn]` and are collected in [Core plugin parity requirements](/pages/reference-requirements-core-parity/).
 
 <div class="note">
-<p>The word <strong>kernel</strong> means the Ilium code that is not a plugin: the server and client crates, the tree, the terminal engine, the settings store and the plugin host. The word <strong>core plugin</strong> means one of the 30 first-party plugins in the table of <a href="/pages/core-plugins/">Core plugins</a>. A core plugin is bundled, has tier T1 and an id that starts with <code>ilium.core.</code>.</p>
+<p>The word <strong>kernel</strong> means the Ilium code that is not a plugin: the server and client crates, the tree, the terminal engine, the settings store and the plugin host. The word <strong>core plugin</strong> means one of the 32 first-party plugins in the table of <a href="/pages/core-plugins/">Core plugins</a>. A core plugin is bundled, has tier T1 and an id that starts with <code>ilium.core.</code>.</p>
 </div>
 
 ### Contents
@@ -20,7 +20,7 @@ Contract version: `ilium:plugin@0.1.0`. The platform is not implemented. This pa
 - Server boot order
 - Client boot order
 - The CLI-only transient host
-- Startup and lazy activation of the 30 core plugins
+- Startup and lazy activation of the 32 core plugins
 - The minimum kernel
 - Safe start
 - What the user keeps when a plugin is off
@@ -51,7 +51,8 @@ A feature moves into a plugin only when the kernel can still run, draw a frame a
 | The kernel recovery page and the command `kernel.open-recovery` | It must work with every plugin off | None. A plugin cannot remove it |
 | The loopback HTTP listener on the configured API port (default 8872) | One process binds one socket, and the bind must not fail because a plugin is off | `http-api.route` lets a plugin register routes (see below) |
 | Process and OS facts: process tree, runtime dirs, locks, secure files (`ilium-platform`) | Only one crate reaches the operating system | Imports such as `process`, `fs` and `clock` |
-| CLI parsing of kernel commands: attach, `new-session`, `ls`, `kill-session`, `new-pane`, `plugin` | The user needs a way to reach a broken session | `contributes.cli` for every other command |
+| CLI parsing of kernel commands: attach, `new-session`, `ls`, `kill-session`, `plugin` | The user needs a way to reach a broken session | `contributes.cli` for every other command, including `new-pane`, which the Fleet plugin owns |
+| The hidden release probes: the commands that check the bundled embedding model and the animation engines of a release build | They test the binary itself before any plugin loads, and are not shown in `--help` (feature F-111) | None. A plugin cannot add or replace a hidden command |
 
 The HTTP listener is a kernel part because the port setting, the bind and the loopback rule belong to one owner. The Fleet plugin registers the route `POST /create_agent` with the grant `http-api.route:/create_agent`. If Fleet is off, the kernel answers `404` with `{"code":"not-found"}` for that path and keeps the socket open. See [HTTP API](/pages/api-http-api/).
 
@@ -79,7 +80,7 @@ The server start in [Host architecture](/pages/reference-host-architecture/) has
 | 1 | Client kernel | Enter the alternate screen, read the theme and the keymap, connect to the socket, complete the handshake |
 | 2 | Client kernel | Receive the tree, the pane viewports and the retained contribution replica |
 | 3 | Client kernel | Draw the first frame with kernel chrome only. The tree uses its kernel rows (name and status glyph) until `ilium.core.tree` has drawn |
-| 4 | Plugin host | Activate every client side with the `startup` trigger, in dependency order. The core plugins in this group are Tree, Settings, Ambient look, Agent toolbar, Terminal and Progress |
+| 4 | Plugin host | Activate every client side with the `startup` trigger, in dependency order. The core plugins in this group are Tree, Settings, Ambient look, Agent toolbar, Terminal, Progress, Attention queue and Shared resources |
 | 5 | Client kernel | Redraw with the plugin contributions. A plugin that is slow keeps its previous frame, and the client never waits for a plugin to draw |
 | 6 | Plugin host | Activate other plugins when their trigger fires |
 
@@ -133,44 +134,46 @@ A command from a plugin that declares `requires_server: false` can run with no s
 
 The commands that work this way are `ilium panes`, `ilium broadcast`, `ilium recap` and `ilium voice say` (the last one only for its argument check). `ilium chat`, `ilium progress` and `ilium wait` need the session of the pane they run in and use the socket from `ILIUM_SESSION_SOCKET`. They set `requires_server: true`.
 
-### Startup and lazy activation of the 30 core plugins
+### Startup and lazy activation of the 32 core plugins
 
-In the tables below, a `view:` trigger is written `view:<plugin short name>.<view id>`: the short name is the plugin id without its `ilium:` prefix, and the view id is the `id` declared in the plugin's `panels`, `views` or `overlays`. For Agent detect, `view:agent-detect.panel` is the view declared with the id `panel`.
+In the tables below, a `view:` trigger is written `view:<plugin short name>.<view id>`: the short name is the plugin id without its `ilium:` prefix, and the view id is the `id` declared in the plugin's `panels`, `views` or `overlays`. For Agent detect, `view:ilium.core.agent-detect/agent-detect.panel` is the view declared with the id `panel`.
 
 A plugin that starts at boot costs time in every session. A plugin that starts on first use costs time at the first use. The rule used here: a plugin starts at boot only when it must see events from the first moment, must be present on the first frame, or must restore state that outlives the process. Everything else is lazy. The Plugins screen shows the column **Starts** with `at boot` or `on use`.
 
 | Core plugin | Server side | Client side | Reason |
 |---|---|---|---|
-| Agent detect | `startup` | `view:agent-detect.panel` | Detection needs every screen update from the start |
-| Agent setup | `settings:setup`, `command:refresh`, `service:install` | `settings:setup` | Used when the user opens Setup |
+| Agent detect | `startup` | `view:ilium.core.agent-detect/agent-detect.panel` | Detection needs every screen update from the start |
+| Agent setup | `settings:setup`, `command:ilium.core.agent-setup/refresh`, `service:install` | `settings:setup` | Used when the user opens Setup |
 | Agent toolbar | `event:agent-activity-changed` | `startup` | Buttons are on the first frame |
 | Ambient look | none | `startup` | The look is applied from the first frame |
+| Attention queue | `startup` | `startup` | The queue is built from agent state from the first moment, and the button is on the first frame |
 | Chatroom | `startup` | `topic:chatroom` | File watch for `CHATROOM.md` and hook text must work without a client |
-| Compaction | `event:agent-activity-changed`, `service:compact` | `view:compaction.optimizer` | Runs when an agent needs it |
-| Cost | `startup` | `view:cost.panel` | Usage accrues from transcripts while nobody looks |
-| Diagnostics | `startup` | `view:diagnostics.warnings` | Collects warnings from the first line of the log |
+| Compaction | `event:agent-activity-changed`, `service:compact` | `view:ilium.core.compaction/compaction.optimizer` | Runs when an agent needs it |
+| Cost | `startup` | `view:ilium.core.cost/cost.panel` | Usage accrues from transcripts while nobody looks |
+| Diagnostics | `startup` | `view:ilium.core.diagnostics/diagnostics.warnings` | Collects warnings from the first line of the log |
 | Editor | none | `pane-kind:editor` | Native in v1 (see D4). In plugin form it starts when a file opens |
-| Fleet | `cli:panes`, `cli:broadcast`, `http:/create_agent`, `service:broadcast` | `command:ask-for-update` | Used on demand |
+| Fleet | `cli:panes`, `cli:broadcast`, `http:/create_agent`, `service:broadcast` | `command:ilium.core.fleet/ask-for-update` | Used on demand |
 | Inference | `service:ilium:inference/provider` | none | Starts when a consumer calls it |
 | Kanban | none | `pane-kind:board` | Native in v1. In plugin form it starts with a board pane |
-| Keys and help | none | `command:keys-and-help.open`, `settings:keyboard` | Used on demand. Bindings work without it |
-| Layout | `command:layout.preset` | `view:layout.presets` | Used on demand. The kernel keeps the geometry |
+| Keys and help | none | `command:ilium.core.keys-and-help/show-keys`, `command:ilium.core.keys-and-help/show-plugins`, `settings:keyboard` | Used on demand. Bindings work without it |
+| Layout | `command:ilium.core.layout/layout.preset` | `view:ilium.core.layout/layout.presets` | Used on demand. The kernel keeps the geometry |
 | Notifications | `startup` | none | Must catch the first state change |
 | Progress | `startup` | `startup` | Monitors are restored from storage and run without a client |
-| Recap | `cli:recap`, `command:recap` | none | Used on demand |
+| Recap | `cli:recap`, `command:ilium.core.recap/recap` | none | Used on demand |
+| Shared resources | `startup` | `startup` | Queues and owners are restored from storage, and the resource rows are on the first frame |
 | Scenes | none | `scene:*` | Starts when a scene is selected (scene side only) |
-| Scheduler | `startup` | `view:scheduler.queue` | Due timers must fire after a restart |
-| Search | `command:search`, `job:index` | `view:search.panel` | Used on demand |
-| Session convert | `command:convert`, `service:convert` | `view:session-convert.progress` | Used on demand |
-| Sessions | `startup` | `view:sessions.list` | Offers the snapshot sections to the kernel writer |
+| Scheduler | `startup` | `view:ilium.core.scheduler/scheduler.queue` | Due timers must fire after a restart |
+| Search | `command:ilium.core.search/open`, `job:index` | `view:ilium.core.search/search` | Used on demand |
+| Session convert | `command:ilium.core.session-convert/convert`, `service:convert` | `view:ilium.core.session-convert/session-convert.progress` | Used on demand |
+| Sessions | `startup` | `view:ilium.core.sessions/sessions.list` | Offers the snapshot sections to the kernel writer |
 | Settings | none | `startup` | The Settings screen frame and the guided setup |
-| Smart copy | none | `command:smart-copy` | Starts on the copy gesture |
+| Smart copy | none | `command:ilium.core.smart-copy/smart-copy` | Starts on the copy gesture |
 | Terminal | `event:screen-changed` | `startup` | Links and the context menu need the first frame |
-| Text triggers | `startup` | `view:text-triggers.rules` | The output filter must be in place before the first byte |
+| Text triggers | `startup` | `view:ilium.core.text-triggers/text-triggers.rules` | The output filter must be in place before the first byte |
 | Titles | `startup` | none | Triggers fire on agent events from the start |
 | Tree | `startup` | `startup` | Rows, bookmarks and locks are on the first frame |
-| Voice | `command:voice.toggle`, `cli:voice` | `command:voice.toggle` | The key F8 is a keybinding that fires the command, which starts the plugin |
-| Worktrees | `command:new-agent`, `service:create` | none | Used on demand. `new-pane --worktree` calls the service |
+| Voice | `command:ilium.core.voice/toggle`, `cli:voice` | `command:ilium.core.voice/toggle` | The key F8 is a keybinding that fires the command, which starts the plugin |
+| Worktrees | `command:ilium.core.worktrees/new-agent`, `service:create` | none | Used on demand. `new-pane --worktree` calls the service |
 
 [COR-020] and [COR-021] state the rules that make this table testable: the plugins marked `startup` appear in the activated list at boot, and the others do not appear until their trigger fires.
 
@@ -225,12 +228,13 @@ A core plugin can be off for four reasons: the user turned it off, the restart r
 | Agent setup | The Setup tab is gone. Managed blocks are not installed or refreshed | Blocks already on disk stay |
 | Agent toolbar | No buttons on tree rows or agent frames | Palette commands of other plugins still work |
 | Ambient look | The animation uses the kernel default look | Stored look values stay and apply when the plugin returns |
+| Attention queue | No Next: needs you button, queue panel, overview or briefing box. The three chords do nothing | The attention marks of Notifications stay. The stored queue is kept |
 | Chatroom | `ilium chat` fails with `cli.owner-disabled`. Hooks print nothing | `CHATROOM.md` is untouched |
 | Compaction | No compact action, no Optimization tab behaviour | Stored technique settings stay |
 | Cost | No spend or quota decorations, no cost sort key. The Agent Cost and Reset planning tabs are read-only | Stored prices stay |
 | Diagnostics | No report builder, no warnings panel | The kernel still writes the log file when the Debug switch is on |
 | Editor | Files open through `open-external` | The editor is native in v1; its Plugins switch still works and the file opens externally |
-| Fleet | `ilium panes`, `ilium broadcast` and `POST /create_agent` fail | `ilium new-pane` is a kernel command and stays |
+| Fleet | `ilium panes`, `ilium broadcast`, `ilium new-pane`, `ilium close-pane`, `ilium ctl` and `POST /create_agent` fail | Panes are still created and closed from the tree and with the kernel keys |
 | Inference | AI features report `inference.unavailable` and use their non-AI path | Provider settings stay |
 | Kanban | Board panes show a placeholder. No new board | Board files stay on disk. In v1 the board is native |
 | Keys and help | No key panel, hint bar or help browser | The keymap is kernel and works |
@@ -238,6 +242,7 @@ A core plugin can be off for four reasons: the user turned it off, the restart r
 | Notifications | No sound, toast or desktop notice for agents | Kernel messages still show |
 | Progress | `ilium progress` and `ilium wait` fail. Running monitors stop | Monitors registered before are restored when it returns |
 | Recap | `ilium recap` fails | None |
+| Shared resources | `ilium resource` fails. No reservation is granted, released or recovered, and the resource rows leave the tree | Definitions, links, owners and queues stay in storage with their order |
 | Scenes | No renderers. The background is blank | The look settings stay |
 | Scheduler | Pending scheduled input does not fire and stays stored. Queued prompts are not sent when a turn finishes. The tree still shows "scheduled input pending" from the stored section | The section `ilium.core.scheduler` stays in the snapshot and fires on return, marked `late` |
 | Search | No workspace search | None |
@@ -250,7 +255,7 @@ A core plugin can be off for four reasons: the user turned it off, the restart r
 | Titles | No automatic naming | Manual rename is a kernel command |
 | Tree | Rows show the node name and a status glyph only | HST-042 |
 | Voice | No voice. F8 is unbound | None |
-| Worktrees | `ilium new-pane --worktree` fails with `cli.owner-disabled` | Plain `ilium new-pane` works |
+| Worktrees | `ilium new-pane --worktree` fails with `cli.owner-disabled` | Plain `ilium new-pane` works while Fleet is on |
 
 The tree and the Settings screen are the only two core plugins whose absence changes the main screen. The kernel keeps a fallback for each, so the user can always reach the recovery page.
 
@@ -292,7 +297,7 @@ These variables are read by the platform. Variables that Ilium sets inside panes
 | `ILIUM_NO_PLUGINS` | `ilium`, server | unset | `1` is the same as `--no-plugins` |
 | `ILIUM_SAFE_MODE` | `ilium`, server | unset | `1` is the same as `third-party`, and `--safe-plugins` is an alias of `--safe-mode=third-party` (SEC-328). Ignored when `ILIUM_NO_PLUGINS` is `1` |
 | `ILIUM_CONFIG_DIR` | kernel | platform default | Folder of `config.toml`. Grants live in `$XDG_STATE_HOME/ilium/grants.json`, not here |
-| `ILIUM_SOCKET_DIR` | kernel | runtime default | Folder of session sockets. Cross-session commands list this folder |
+| `ILIUM_SOCKET_DIR` | kernel | runtime default | Folder of session sockets. Cross-session commands list this folder. Resolution and checks are in [Runtime directory and socket path](#runtime-directory-and-socket-path) |
 | `ILIUM_DEBUG_LOG_DIR` | kernel | platform default | Root of debug logs. The `log` import of a plugin writes there when Debug logging is on |
 | `ILIUM_PLUGIN_LOG_LEVEL` | server | `info` | Default log threshold of plugins |
 | `ILIUM_TRUST_STORE` | plugin CLI | per user | Absolute file path of the trust store |
@@ -302,6 +307,27 @@ These variables are read by the platform. Variables that Ilium sets inside panes
 | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR` | kernel | system | Move the roots (see [Plugin files](/pages/reference-plugin-files/)) |
 
 A plugin cannot read these variables. The `process` import passes only the environment that the manifest `process.run` grant allows, and nothing else (see [process.run](/pages/capability-process-run/)). A flag overrides the variable that has the same effect.
+
+### Runtime directory and socket path
+
+The runtime directory holds the session sockets and the owner-only files beside them, such as `http-api.token` and `http-api.port`. Other pages write it as `$XDG_RUNTIME_DIR/ilium/`; they mean the directory that this section resolves. On Windows the session channel is a named pipe, which has no directory check and no path length limit of this kind, so the rules for the socket apply to Linux and macOS only.
+
+`XDG_RUNTIME_DIR` is often missing: in a container, after `su` or `sudo`, in a cron job, and in an SSH login without a login manager. The kernel resolves the directory in this order and uses the first that passes the check:
+
+| Order | Candidate | Used when |
+|---|---|---|
+| 1 | `ILIUM_SOCKET_DIR` | It is set. A value that fails the check stops the start; the kernel does not fall through, because the user named the folder |
+| 2 | `$XDG_RUNTIME_DIR/ilium/` | `XDG_RUNTIME_DIR` is set, is owned by the current user and has mode 0700 |
+| 3 | `<os temp dir>/ilium-<uid>/` | Fallback. The kernel creates it with mode 0700 when it does not exist |
+
+The check is the same for every candidate: the path is a real directory and not a symbolic link, its owner is the current user, and its mode is exactly 0700. The kernel never changes the owner or mode of a directory it did not create. When candidate 2 fails, the kernel uses candidate 3, writes the log line `runtime.dir-fallback` once per process with the reason (`unset`, `not-owner` or `bad-mode`), and starts. When candidate 3 exists and fails the check, another user could have created it, so the kernel refuses to start with `runtime.dir-unsafe` and names the path. The server and the client resolve the directory by the same rule, so a client started in the same environment finds the server's socket.
+
+A Unix socket path has a fixed maximum length: 104 bytes on macOS and 108 bytes on Linux, including the final zero byte. The socket file name is a readable slug of the project path plus a digest of the canonical project path and the session name. When the full path would exceed the limit of the platform, the kernel drops the slug and uses the digest alone (32 hexadecimal characters) as the file name. It never cuts a path to fit, because two cut paths could name the same socket. When the directory is so long that even the digest name does not fit, the kernel refuses to start with `runtime.socket-path-too-long`, and the message names the directory, its length and the limit, and suggests `ILIUM_SOCKET_DIR`.
+
+`ilium plugin doctor` prints the resolved runtime directory, which candidate it came from, whether the fallback is in use and why, and the socket path of the current project session with its length and the platform limit.
+
+- **[PRM-306]** When `XDG_RUNTIME_DIR` is unset, is not owned by the current user or does not have mode 0700, the system must use `<os temp dir>/ilium-<uid>/`, created with mode 0700, must log `runtime.dir-fallback` once with the reason, and must start. It must verify that every runtime directory it uses is a real directory, owned by the current user, with mode 0700, and must refuse to start with `runtime.dir-unsafe` when the fallback directory or the `ILIUM_SOCKET_DIR` folder fails that check. Test: start the server and a client with `XDG_RUNTIME_DIR` unset and assert that the client attaches, that the fallback directory has mode 0700 and that the log holds one `runtime.dir-fallback` line; replace the fallback directory with a symbolic link and assert `runtime.dir-unsafe`.
+- **[PRM-307]** When the session socket path would exceed the platform limit (104 bytes on macOS, 108 on Linux), the system must use a file name made only of the digest of the canonical project path and session name, must never truncate a path, and must refuse to start with `runtime.socket-path-too-long` when the digest name does not fit either. `ilium plugin doctor` must print the runtime directory, its source and the socket path with its length. Test: start a session in a project whose path is 200 bytes long, assert that the server starts, that a client attaches, that the socket file name is the digest and that `ilium plugin doctor` prints that path, its length and the runtime directory with its source; set `ILIUM_SOCKET_DIR` to a 100 byte path and assert `runtime.socket-path-too-long`.
 
 ### Live reload and restart
 
@@ -338,6 +364,9 @@ Code that reads a restart-only value gets the value that was current at the star
 | `config.toml` fails to parse at boot | Left unchanged, defaults used for the run, recovery page opens | `config.parse-error` |
 | A startup plugin takes longer than `HOST-START` | Boot continues. The plugin is reported late | `host.start-slow` (logged) |
 | A scene side declares `extensions.provide` | Install refused | `manifest.grant-side` |
+| `XDG_RUNTIME_DIR` is unset, not owned by the user or not mode 0700 | The per-user folder under the OS temp dir is used and the start continues | `runtime.dir-fallback` (logged once) |
+| The fallback folder or the `ILIUM_SOCKET_DIR` folder is a symbolic link, has another owner or is not mode 0700 | The server and the client refuse to start and name the path | `runtime.dir-unsafe` |
+| The socket path is too long even with the digest file name | The server and the client refuse to start and name the folder, its length and the limit | `runtime.socket-path-too-long` |
 
 ### Requirements
 

@@ -303,4 +303,4 @@ A published plugin inherits the risk of the SDK it was built with. [SEC-173] pin
 
 ## Production additions (round 14)
 
-- **[PRN-019]** The system must, when revocation data is stale per EXT-072, show a line `Revocation data is N days old` in the install and update review dialog and in `ilium plugin install --json` as `revocation_age_days`. It must require `--accept-stale-revocation` for a non-interactive T2 install or update, and must refuse with exit 8 when the admin policy sets `require_fresh_revocation = true`. Test: age the list by 8 days and assert the notice, the flag requirement and the policy refusal.
+- **[PRN-019]** The system must, when revocation data is stale per EXT-072, show a line `Revocation data is N days old` in the install and update review dialog and in `ilium plugin install --json` as `revocation_age_days`. It must require `--accept-stale-revocation` for a non-interactive T2 install or update, and must refuse with exit 8 when the admin policy sets `[packages] require_fresh_revocation = true`. Test: age the list by 8 days and assert the notice, the flag requirement and the policy refusal.

@@ -66,7 +66,40 @@ A **hash chain** links each record to the one before it by including the previou
 | `audit-reset` | The server recreated a deleted log file, with `prev_hash` of zeros |
 | `audit-dropped` | Records were dropped while the disk was full ([SEC-225]); written when space returns, with the count |
 | `advisory-acknowledged` | A user acknowledges a host advisory that names data loss or corruption, with the advisory id and the time ([USR-968] of [User troubleshooting](/pages/user-troubleshooting/)) |
-| `policy-reloaded` | A live reload of the system policy file changes the effective policy, with the file hash before and after ([Stopping a blocked plugin now](/pages/reference-admin-policy/#stopping-a-blocked-plugin-now)) |
+| `update-held` | Auto-update holds back a version that is younger than `packages.auto_update_min_age_hours`, once per version per machine, with the plugin id, the version and the `held_until` time ([Holding back new versions](/pages/reference-install-and-update/#holding-back-new-versions)) |
+| `policy-reloaded` | A server start loads a system policy file whose hash differs from the one the previous start loaded, or loads one for the first time, with the file hash before and after ([OPS-232](/pages/reference-admin-policy/#stopping-a-blocked-plugin-now)). There is no live reload of the policy rules in 0.1.0 ([SEC-188](/pages/reference-admin-policy/)); only a `kill` entry applies to a running server |
+| `plugin-killed` | `ilium plugin kill <id> --reason <text>` stops a plugin ([HST-517]). One record per kill command, also for a second kill of a killed plugin ([SCU-010](/pages/security-containment-states/)). An offline kill is written at the next server start ([PDZ-011](/pages/ops-out-of-band-kill-and-stuck-server/)) |
+| `policy-kill` | A loaded policy lists the plugin under its `kill` key, once per plugin id and policy load ([LIF-301](/pages/guide-admin-failure-runbook/)) |
+| `trust-key-revoked` | A signing key becomes revoked on this machine, by the revocation feed or by a bundle import, once per newly revoked key ([PDV-005](/pages/guide-air-gapped-transfer/)) |
+| `bundle-import` | `ilium plugin bundle import <file>` ends, also when it is refused ([PDV-006](/pages/guide-air-gapped-transfer/)) |
+| `grant-expired` | The host finds a grant whose expiry has passed, once per expiry ([PDY-015](/pages/reference-audit-grant-events/)) |
+| `suspected-escape` | A helper ends with a sandbox violation and the plugin is quarantined ([PRN-020](/pages/reference-sandbox/)) |
+| `host-upgraded` | First start after the host version changes ([LIF-198](/pages/host-upgrade-while-plugins-run/)) |
+| `update-rolled-back` | An update is rolled back to the previous version, with the plugin id and both versions ([PDU-010](/pages/ops-bad-release-fleet-response/)) |
+| `recall-applied` | A recall notice disables an installed version ([PRY-030](/pages/guide-bad-release-recall-playbook/)) |
+| `rollout-held`, `rollout-applied`, `rollout-halt` | A staged rollout holds, applies or halts an update on this host ([Operator upgrades](/pages/guide-operator-upgrades/)) |
+| `dependency-restored` | A dependant returns to its previous state after a blocked dependency is replaced ([SEC-978](/pages/reference-dependency-resolution/)) |
+| `data-handover` | A successor plugin imports the data of the plugin it replaces ([Data migration](/pages/guide-data-migration/)) |
+| `audit-hold-set`, `audit-hold-cleared`, `audit-auto-hold` | A retention hold on the audit log is set, cleared, or set by the host itself ([Audit collection](/pages/guide-audit-collection/)) |
+
+### Event names and the fields of the containment events
+
+An `event` value is one lower-case word or several joined by hyphens, for example `trust-add` and `plugin-killed`. An `event` value never contains a dot. A dotted code, such as `trust.key-revoked` or `registry.takedown`, is an error or refusal code, and in an audit record it appears only in the `reason` field. The same string is therefore never both an event name and a refusal code.
+
+The catalogue of [SEC-222], with the sections of this page that extend it, is the only list of event names. Another page may describe an event in more detail, as [Audit events for grants](/pages/reference-audit-grant-events/) does, but it may not add a name that is absent here.
+
+| Event | Fields added to the schema of [SEC-221] |
+|---|---|
+| `plugin-killed` | `plugin_id`; `actor` (the administrator); `reason` (the `--reason` text); `detail` holds `path=server` or `path=offline` |
+| `update-held` | `plugin_id`; `version` (the held version); `actor` `policy`; `reason` `policy`; `detail` holds `held_until=<YYYY-MM-DD HH:mm:ss>` in UTC |
+| `install`, `update` with `result` `cancelled` | `reason` `install.cancelled`; `detail` holds `step=<step name>` when the user cancelled a running install or update ([PRM-204](/pages/user-install-and-manage/#install-from-a-file)) |
+| `policy-kill` | `plugin_id`; `actor` `policy`; `reason` `policy`; `detail` holds the version range of the policy entry |
+| `trust-key-revoked` | `target` (the key id); `actor` `feed` or `bundle`; `reason` `trust.key-revoked` |
+| `bundle-import` | `target` (the bundle path); `detail` holds `sha256`, `member_count` and `result` (`ok` or `refused`); `reason` holds the refusal code when refused |
+| `grant-expired` | `plugin_id`, `grant`, `expired_at`, `detected_at` |
+| `suspected-escape` | `plugin_id`; `detail` holds the signal or denial class and the cgroup id of the helper |
+
+- **[PRM-003]** The system must write only hyphenated `event` values, must keep dotted codes for the `reason` field, and must list in the catalogue of [SEC-222] every event name that any page of this manual requires, including `plugin-killed`, `policy-kill`, `trust-key-revoked`, `bundle-import`, `grant-expired` and `suspected-escape`. Test: a conformance test collects every event name that the manual quotes as an audit record or as an `--event` value and asserts that each one is in the catalogue and contains no dot.
 
 - **[SEC-096]** The kernel MUST write only `event` values listed in the catalogue of [SEC-222] or in a section of this page that extends it, and the catalogue MUST list every event the kernel can write, including `plugin-state-changed`, `crash-report`, `audit-torn`, `audit-retention-deleted`, the reasoned kill of [SEC-458] and the data-movement events, each with its trigger (proposed, owner to confirm).
 - **[SEC-131]** The kernel MUST write one `server-start` record at each server start, with `detail` holding the host version, the host API range and `prev=clean` or `prev=unclean` according to whether the previous run wrote `server-stop`, and one `server-stop` record at each orderly shutdown with `reason` set to `shutdown` or `kill-session`; both are added to the catalogue of [SEC-222] (proposed, owner to confirm).
@@ -116,7 +149,7 @@ Target behaviour (specified here before the code is written).
 
 - [SEC-445] The server and every plugin helper MUST disable core dumps for themselves (`RLIMIT_CORE` 0 and the non-dumpable flag on Linux, the equivalent on macOS and Windows) so that a crash cannot write plugin secrets, granted file contents or tokens into a core file.
 - [SEC-446] The crash report the server writes for itself or a helper MUST contain only the plugin id, the error code, the host version and a stack of host frames. It MUST NOT contain memory, argument values, secret values, granted data or file contents, and a redaction test MUST run over every report before it is stored.
-- [SEC-447] Crash reports MUST be stored with mode 0600 in a 0700 folder beside the audit directory, MUST be deleted after 14 days or when the plugin is uninstalled, and MUST NOT be sent anywhere unless the user runs the explicit export command. Each report written MUST add one `crash-report` audit record ([SEC-222]) naming the file.
+- [SEC-447] Crash reports MUST be stored with mode 0600 in a 0700 folder beside the audit directory, MUST be deleted when more than 30 days old, when more than 200 records exist (oldest first, [SEC-955]) or when the plugin is uninstalled, and MUST NOT be sent anywhere unless the user runs the explicit export command. Each report written MUST add one `crash-report` audit record ([SEC-222]) naming the file.
 
 ## Edge cases
 
@@ -139,7 +172,7 @@ Contract: `ilium:plugin@0.1.0`.
 ## Production additions: T2-security
 
 - **[SEC-730]** The audit log MUST be tamper-evident: each record MUST carry the SHA-256 of the previous record, `ilium plugin audit --verify` MUST report the first broken index with exit code 3, and rotation MUST write the last hash as the first record of the next file.
-- **[SEC-955]** Crash record retention. One period and one count apply to every crash record of [SEC-447]: a crash record MUST be deleted once it is more than 30 days old (proposed, owner to confirm), and when more than 200 crash records exist the oldest MUST be deleted first until 200 remain (proposed, owner to confirm). The 14-day period in [SEC-447] is superseded by this rule and the owner MUST align that text; [USR-228], [USR-236] and [USR-348] already state 30 days and 200 records. `ilium plugin uninstall <id>`, with or without `--purge`, MUST delete every crash record of that plugin at once, so the `--purge` question for crash records is closed. Crash records are not deleted by `--keep-data`, which keeps data and storage only.
+- **[SEC-955]** Crash record retention. One period and one count apply to every crash record of [SEC-447]: a crash record MUST be deleted once it is more than 30 days old (proposed, owner to confirm), and when more than 200 crash records exist the oldest MUST be deleted first until 200 remain (proposed, owner to confirm). [SEC-447], [USR-228], [USR-236] and [USR-348] state the same 30 days and 200 records, for plugin, helper and host crash records alike. `ilium plugin uninstall <id>`, with or without `--purge`, MUST delete every crash record of that plugin at once, so the `--purge` question for crash records is closed. Crash records are not deleted by `--keep-data`, which keeps data and storage only.
 - **[SEC-956]** Damaged final record. If the audit file ends in a line that is not a complete JSON object followed by a newline (a crash or power loss during a write leaves one), the server MUST, at its next start and before it appends any record: move those partial bytes to `audit-torn-<seq>.jsonl` in the audit directory, where `<seq>` is the `seq` the next record will take; truncate `audit.jsonl` to the end of its last complete record; append one `audit-torn` record (a new event, listed here and added to the catalogue of [SEC-222]) with `prev_hash` equal to the hash of that last complete record and `reason` naming the moved file. The partial bytes are not part of the chain and MUST NOT be hashed. The server MUST write this record once per moved file, and MUST NOT drop the partial bytes without moving them aside.
 - **[SEC-957]** Verification of a damaged final record. `ilium plugin audit --verify` MUST report a partial final line as `torn-tail` with its byte offset, and MUST NOT report it as a broken chain or as tampering. The chain check covers complete records only. A wrong `seq` or `prev_hash` in a complete record MUST still be reported as the first broken `seq` with exit code 3 ([SEC-730]). When the only finding is a `torn-tail` line, the command exits 0 (proposed, owner to confirm).
 
@@ -158,11 +191,13 @@ Two pages gave two answers for where a crash record lives. [USR-229] says the se
 - Each record written adds one `crash-report` audit record ([SEC-447], [SEC-222]) with `target` set to the file name.
 - **[OPS-235]** Every host crash record MUST contain the build id of the running server binary and the commit hash of its source. For host records these two fields extend the field list of [SEC-446], and the redaction test of SEC-446 still applies (proposed, owner to confirm).
 
-**Retention.** The rule is [SEC-955]: a record is deleted when more than 30 days old, and when more than 200 exist the oldest are deleted until 200 remain ([USR-228]). Both values are proposed, owner to confirm. The 14 days in [SEC-447] are superseded. `ilium plugin uninstall <id>`, with or without `--purge`, deletes every crash record of that plugin at once ([SEC-955]); `--keep-data` does not keep them. Host records (`host-host-<time>.json`) belong to no plugin and are removed only by age or count.
+**Retention.** The rule is [SEC-955]: a record is deleted when more than 30 days old, and when more than 200 exist the oldest are deleted until 200 remain ([USR-228]). [SEC-447] states the same values. `ilium plugin uninstall <id>`, with or without `--purge`, deletes every crash record of that plugin at once ([SEC-955]); `--keep-data` does not keep them. Host records (`host-host-<time>.json`) belong to no plugin and are removed only by age or count.
 
 **Who reads the folder.** `ilium plugin crashes` and the support bundle ([USR-229]) read only `<state>/crashes/`. `ilium plugin crashes --host` lists the host records. A record outside this folder is not listed and not bundled. A crash record is never sent anywhere unless the user runs the export command or attaches it to a bundle ([SEC-447]). If the folder is missing, the command lists nothing and exits 0; the server recreates it with mode 0700 at the next crash. If the record cannot be written (disk full), the server keeps running, writes the `crash-report` audit record with `result` `failed` and `reason` `crash-write-failed`, and shows a notice.
 
-**Requirements table change.** The row for [SEC-447] in the security-policy requirements file should read "Crash reports MUST be mode 0600 in `<state>/crashes/`, never be sent unprompted, and add a `crash-report` audit record; the 14-day period and the 'beside the audit directory' path are superseded by [SEC-955] and this section." The wording of [USR-229] stays valid.
+**One retention, checked.** The row for [SEC-447] in the security-policy requirements file states the same path and the same 30 days and 200 records as this section. The wording of [USR-229] stays valid.
+
+- **[PRM-006]** The system must delete every crash record, whether of a plugin, a helper or the host, when it is more than 30 days old, and must keep at most 200 records by deleting the oldest first; no page may state another period or count for crash records. Test: write 205 fixture crash records, 3 of them dated 31 days back, start the server and assert that 200 remain and that none is older than 30 days; a documentation check asserts that every page that names a crash record retention states 30 days and 200 records.
 
 ## Audit records for data movement and erasure
 
@@ -217,7 +252,7 @@ If the key does not exist at the first start, the kernel creates it in the secre
 ## Requirement statements
 
 - **[SEC-446]** Crash reports MUST contain only plugin id, error code, host version and host frames, and MUST pass a redaction test.
-- **[SEC-447]** Crash reports MUST be mode 0600, expire after 14 days, never be sent unprompted, and add a `crash-report` audit record.
+- **[SEC-447]** Crash reports MUST be mode 0600 in `<state>/crashes/`, MUST be deleted when more than 30 days old or when more than 200 exist, oldest first ([SEC-955]), MUST never be sent unprompted, and MUST add a `crash-report` audit record.
 
 ## Production additions (round 5)
 
@@ -234,8 +269,8 @@ If the key does not exist at the first start, the kernel creates it in the secre
 
 ## Production additions (round 12)
 
-- **[PRP-013]** The system must keep every audit record mentioning a plugin id, key id or blocklist entry involved in a trust.* or sandbox.unavailable event for at least audit_min_retention (default 365 days) despite rotation or size limits, and must fail a purge below that age with audit.retention-hold and an audit-purge-refused record.
+- **[PRP-013]** The system must keep every audit record mentioning a plugin id, key id or blocklist entry involved in a trust.* or sandbox.unavailable event for at least the policy key `audit.min_retention_days` (default 365 days) despite rotation or size limits, and must fail a purge below that age with audit.retention-hold and an audit-purge-refused record.
 
 ## Production additions (round 13)
 
-- **[PRO-029]** The system must, when a plugin is disabled by blocklist, key revocation or `sandbox.unavailable self-test-failed`, exempt every audit record naming that plugin id from keep_days pruning for 365 further days (or until the user clears it), and write one `audit.auto-hold` record naming the plugin and trigger; a fixture with 400-day-old records for a blocked plugin keeps those records after pruning while unrelated records are pruned.
+- **[PRO-029]** The system must, when a plugin is disabled by blocklist, key revocation or `sandbox.unavailable self-test-failed`, exempt every audit record naming that plugin id from keep_days pruning for 365 further days (or until the user clears it), and write one `audit-auto-hold` record naming the plugin and trigger; a fixture with 400-day-old records for a blocked plugin keeps those records after pruning while unrelated records are pruned.

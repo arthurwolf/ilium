@@ -6,10 +6,10 @@ permalink: /pages/core-plugins/
 
 ## Core plugins
 
-A core plugin is the plugin form of a feature Ilium has today. Ilium ships and maintains all 30 of them, and each one has an id of the form `ilium.core.<name>`. Where a feature is native to the kernel, such as starting a process in a pane, the terminal emulator, the layout solver, the keymap or snapshots, the page says so and shows the plugin driving that kernel surface through contract version 0.1. See [What a plugin is](/pages/getting-started-overview/) and [Worlds and sides](/pages/worlds-and-sides/) for the background.
+A core plugin is the plugin form of a feature Ilium has today. Ilium ships and maintains all 32 of them, and each one has an id of the form `ilium.core.<name>`. Where a feature is native to the kernel, such as starting a process in a pane, the terminal emulator, the layout solver, the keymap or snapshots, the page says so and shows the plugin driving that kernel surface through contract version 0.1. See [What a plugin is](/pages/getting-started-overview/) and [Worlds and sides](/pages/worlds-and-sides/) for the background.
 
 <figure>
-<svg viewBox="0 0 860 210" role="img" aria-label="The 30 core plugins grouped into five areas">
+<svg viewBox="0 0 860 210" role="img" aria-label="The 32 core plugins grouped into five areas">
 <text x="8" y="24" font-weight="bold" font-size="13" fill="currentColor">Tree and panes</text>
 <rect x="150" y="10" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="198" y="27" text-anchor="middle" font-size="10" fill="currentColor">Tree</text>
 <rect x="250" y="10" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="298" y="27" text-anchor="middle" font-size="10" fill="currentColor">Layout</text>
@@ -24,12 +24,14 @@ A core plugin is the plugin form of a feature Ilium has today. Ilium ships and m
 <rect x="450" y="50" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="498" y="67" text-anchor="middle" font-size="10" fill="currentColor">Fleet</text>
 <rect x="550" y="50" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="598" y="67" text-anchor="middle" font-size="10" fill="currentColor">Cost</text>
 <rect x="650" y="50" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="698" y="67" text-anchor="middle" font-size="10" fill="currentColor">Titles</text>
+<rect x="750" y="50" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="798" y="67" text-anchor="middle" font-size="10" fill="currentColor">Shared resources</text>
 <text x="8" y="104" font-weight="bold" font-size="13" fill="currentColor">AI and alerts</text>
 <rect x="150" y="90" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="198" y="107" text-anchor="middle" font-size="10" fill="currentColor">Inference</text>
 <rect x="250" y="90" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="298" y="107" text-anchor="middle" font-size="10" fill="currentColor">Notifications</text>
 <rect x="350" y="90" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="398" y="107" text-anchor="middle" font-size="10" fill="currentColor">Voice</text>
 <rect x="450" y="90" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="498" y="107" text-anchor="middle" font-size="10" fill="currentColor">Scheduler</text>
 <rect x="550" y="90" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="598" y="107" text-anchor="middle" font-size="10" fill="currentColor">Text triggers</text>
+<rect x="650" y="90" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="698" y="107" text-anchor="middle" font-size="10" fill="currentColor">Attention queue</text>
 <text x="8" y="144" font-weight="bold" font-size="13" fill="currentColor">Work and sessions</text>
 <rect x="150" y="130" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="198" y="147" text-anchor="middle" font-size="10" fill="currentColor">Progress</text>
 <rect x="250" y="130" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="298" y="147" text-anchor="middle" font-size="10" fill="currentColor">Chatroom</text>
@@ -46,10 +48,10 @@ A core plugin is the plugin form of a feature Ilium has today. Ilium ships and m
 <rect x="550" y="170" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="598" y="187" text-anchor="middle" font-size="10" fill="currentColor">Scenes</text>
 <rect x="650" y="170" width="96" height="26" rx="6" fill="none" stroke="currentColor"/><text x="698" y="187" text-anchor="middle" font-size="10" fill="currentColor">Diagnostics</text>
 </svg>
-<figcaption>The 30 core plugins in five areas (6, 6, 5, 7 and 6 boxes): tree and panes, agents, AI and alerts, work and sessions, settings and look.</figcaption>
+<figcaption>The 32 core plugins in five areas (6, 7, 6, 7 and 6 boxes): tree and panes, agents, AI and alerts, work and sessions, settings and look.</figcaption>
 </figure>
 
-[COR-050] Each of the 30 pages in the table MUST have a Complete manifest section, and the number of rows in this table MUST equal the number of core-plugin pages. The traceability of every Ilium feature to these plugins is in [feature traceability](/pages/reference-feature-traceability/), and the tests are in [core parity requirements](/pages/reference-requirements-core-parity/).
+[COR-050] Each of the 32 pages in the table MUST have a Complete manifest section, and the number of rows in this table MUST equal the number of core-plugin pages. The traceability of every Ilium feature to these plugins is in [feature traceability](/pages/reference-feature-traceability/), and the tests are in [core parity requirements](/pages/reference-requirements-core-parity/).
 
 ### All core plugins
 
@@ -72,6 +74,8 @@ A core plugin is the plugin form of a feature Ilium has today. Ilium ships and m
 | [Scheduler](/pages/core-plugin-scheduler/) | `ilium.core.scheduler` | both | Scheduled input, the prompt queue and multi-stage input. |
 | [Text triggers](/pages/core-plugin-text-triggers/) | `ilium.core.text-triggers` | both | Rules that watch terminal output and send text. |
 | [Progress](/pages/core-plugin-progress/) | `ilium.core.progress` | both | Progress monitors, ilium wait and the progress footer. |
+| [Attention queue](/pages/core-plugin-attention/) | `ilium.core.attention` | both | The ranked queue of agents that need the user, its button, panel, overview and briefing box. |
+| [Shared resources](/pages/core-plugin-resources/) | `ilium.core.resources` | both | Shared hardware with one owner and a first-come, first-served queue, and `ilium resource`. |
 | [Chatroom](/pages/core-plugin-chatroom/) | `ilium.core.chatroom` | both | The shared CHATROOM.md, ilium chat and the message view. |
 | [Worktrees](/pages/core-plugin-worktrees/) | `ilium.core.worktrees` | both | Agents in Git worktrees and their branch status. |
 | [Sessions](/pages/core-plugin-sessions/) | `ilium.core.sessions` | server | Snapshots, restore, recovery and detach and reattach. |
@@ -88,7 +92,7 @@ A core plugin is the plugin form of a feature Ilium has today. Ilium ships and m
 
 ### Which core plugins can be disabled
 
-26 of the 30 core plugins can be disabled. The four essential plugins cannot be: `ilium.core.tree`, `ilium.core.layout`, `ilium.core.settings` and `ilium.core.sessions`. Safe mode keeps the essential set running ([Safe mode and recovery](/pages/user-safe-mode-and-troubleshooting/)). The Plugins screen shows a lock in the "Can you turn it off" column for them. Failures never disable an essential plugin: its third and later failures restart it after 5 s and raise the essential-failure banner ([LIF-042]). [LIF-276]
+28 of the 32 core plugins can be disabled. The four essential plugins cannot be: `ilium.core.tree`, `ilium.core.layout`, `ilium.core.settings` and `ilium.core.sessions`. Safe mode keeps the essential set running ([Safe mode and recovery](/pages/user-safe-mode-and-troubleshooting/)). The Plugins screen shows a lock in the "Can you turn it off" column for them. Failures never disable an essential plugin: its third and later failures restart it after 5 s and raise the essential-failure banner ([LIF-042]). [LIF-276]
 
 - [LIF-276] The Plugins screen MUST not offer a disable switch for the four essential plugins, and MUST offer one for every other core plugin, including `ilium.core.editor`. Test: render the list and press Space on each.
 
@@ -102,7 +106,7 @@ Every user-visible feature of Ilium maps to exactly one core plugin. Each plugin
 
 ### How the samples teach the ABI
 
-The samples on these pages are short and focused. Together they illustrate the whole ABI: the matrix assigns each ABI area (API pages, widgets, settings row types, services, events and intents) one primary plugin, and that plugin's samples use it. Across the 30 pages the "ABI used" sections hold 394 links to ABI pages (link occurrences, not distinct pages; the same page is linked by several plugins), between 8 and 20 per plugin. Each sample is given in Rust and in TypeScript, and every name in it appears on the linked ABI page. The `calendar` and `api-gpu` areas are unstable and the samples say so.
+The samples on these pages are short and focused. Together they illustrate the whole ABI: the matrix assigns each ABI area (API pages, widgets, settings row types, services, events and intents) one primary plugin, and that plugin's samples use it. Across the 32 pages the "ABI used" sections hold 419 links to ABI pages (link occurrences, not distinct pages; the same page is linked by several plugins), between 8 and 21 per plugin. Each sample is given in Rust and in TypeScript, and every name in it appears on the linked ABI page. The `calendar` and `api-gpu` areas are unstable and the samples say so.
 
 Renders and samples marked Illustrative are not test oracles. When a page differs from `src/docs` at the baseline commit, `src/docs` wins and the page is a defect. The exact values a test uses are in the "Behaviour contract" table of the pages that have one (currently the scheduler, chatroom and progress pages; the other core-plugin pages state their values in prose): a table with one row per rule, an id of the form `<plugin>-B<nn>`, the exact value or text, and the baseline source (`src/docs/<file>.md#<anchor>`, or the source file of the baseline crate when the user documentation is silent). The test oracle for a plugin is that table, checked against the baseline binary through the golden outputs in [CLI compatibility](/pages/reference-cli-compatibility/).
 
@@ -129,7 +133,7 @@ Replacement of core plugins follows [SEC-300] to [SEC-306] in [Extension securit
 ## Production additions: T6-core-plugins
 
 - [COR-203] Every core plugin page MUST contain a Contract section listing exactly: owned services, owned topics, owned extension points, owned commands, owned CLI names, owned stored sections, and the essential/disableable/replaceable flags, and these MUST equal the manifest and the replacement matrix row.
-- [COR-204] Each of the 30 core plugins MUST ship a conformance test suite named ilium-core-<name>-parity that runs against the plugin or its replacement and covers every Contract entry, and the host MUST fail the build with exit code 1 when a core plugin has no suite.
+- [COR-204] Each of the 32 core plugins MUST ship a conformance test suite named ilium-core-<name>-parity that runs against the plugin or its replacement and covers every Contract entry, and the host MUST fail the build with exit code 1 when a core plugin has no suite.
 - [COR-205] The command ilium plugin conformance <id> MUST run the parity suite of the named core plugin against the currently active owner, print one line per test as pass or fail, and exit 0 only when all pass.
 - [COR-208] Disabling a core plugin that other enabled plugins require MUST be refused with core.has-dependents listing every dependent, unless the request carries cascade=true, in which case dependents MUST be disabled in reverse dependency order and be re-enabled together on enable.
 - [COR-209] Disabling or enabling a disableable core plugin MUST take effect within 2 seconds without restarting the server, MUST drop the plugin's UI contributions in the same frame as deactivation, and MUST emit one plugin.state-changed event.
@@ -160,7 +164,7 @@ Test: place a copy of `ilium.core.titles` with an incompatible ABI in the plugin
 
 ### Retiring a core plugin
 
-The project may remove one of the 30 bundled core plugins in a host release. It follows the same notice rule as a plugin feature ([DEV-885]) and the end-of-life display of [PKG-710].
+The project may remove one of the 32 bundled core plugins in a host release. It follows the same notice rule as a plugin feature ([DEV-885]) and the end-of-life display of [PKG-710].
 
 1. **Notice.** The plugin is marked `deprecated` for at least two minor releases before the release that drops it. The mark shows in the Plugins tab (a "Deprecated" badge with the removal release and the successor id, if any), in `ilium plugin list`, and in `ilium plugin deprecations`, and the release notes name it. A deprecated plugin keeps working and keeps its capabilities.
 2. **Dropping release.** The release removes the bundled plugin. The count of core plugins and the table above change in the same release, and [COR-050] is updated with them.
@@ -236,7 +240,7 @@ A plugin whose platform backend is absent reports it in `ilium plugin info`; it 
 
 ## Localisation of core plugin text
 
-This section sets the rules for the text the 30 core plugins show, the times and numbers they display, and whether their detection depends on language. The authoring rules for third-party plugins are in [Internationalisation](/pages/guide-internationalisation/) and [Localisation and text direction](/pages/api-ui/#localisation-and-text-direction). The rules below apply them to core plugins. They add no requirement IDs.
+This section sets the rules for the text the 32 core plugins show, the times and numbers they display, and whether their detection depends on language. The authoring rules for third-party plugins are in [Internationalisation](/pages/guide-internationalisation/) and [Localisation and text direction](/pages/api-ui/#localisation-and-text-direction). The rules below apply them to core plugins. They add no requirement IDs.
 
 ### Which text is translatable
 
@@ -288,12 +292,12 @@ Detection does not depend on the language that Ilium shows.
 
 - **[CAP-885]** The `notifications` core plugin MUST always deliver the in-app text for an event, and a `refused` or `failed` result on the sound or desktop channel MUST NOT remove the other channels.
 - **[COR-043]** Every manifest and sample on a core-plugin page MUST pass `ilium plugin check` with the `ilium:plugin@0.1.0` rules.
-- **[COR-050]** Each of the 30 core-plugin pages MUST hold a Complete manifest section whose sides, worlds, grants and contributions match its tables; the core-plugins index MUST state 30.
+- **[COR-050]** Each of the 32 core-plugin pages MUST hold a Complete manifest section whose sides, worlds, grants and contributions match its tables; the core-plugins index MUST state 32.
 - **[COR-097]** A plugin that replaces a core plugin's owned feature MUST declare every CLI command, Settings key and data section of the replaced plugin, and the host MUST reject the replacement at enable time, with the missing items listed, when any is absent.
 - **[COR-098]** A replacement MUST read the existing stored data of the replaced plugin without loss, and the host MUST run the parity test of the replaced plugin against the replacement before it becomes the owner.
 - **[COR-099]** Disabling or removing a replacement MUST return ownership to the core plugin with the data written during the replacement still readable by it, or the host MUST refuse the replacement at enable time because it cannot guarantee that.
 - **[COR-203]** Every core plugin page MUST contain a Contract section listing exactly: owned services, owned topics, owned extension points, owned commands, owned CLI names, owned stored sections, and the essential/disableable/replaceable flags, and these MUST equal the manifest and the replacement matrix row.
-- **[COR-204]** Each of the 30 core plugins MUST ship a conformance test suite named ilium-core-<name>-parity that runs against the plugin or its replacement and covers every Contract entry, and the host MUST fail the build with exit code 1 when a core plugin has no suite.
+- **[COR-204]** Each of the 32 core plugins MUST ship a conformance test suite named ilium-core-<name>-parity that runs against the plugin or its replacement and covers every Contract entry, and the host MUST fail the build with exit code 1 when a core plugin has no suite.
 - **[COR-205]** The command ilium plugin conformance <id> MUST run the parity suite of the named core plugin against the currently active owner, print one line per test as pass or fail, and exit 0 only when all pass.
 - **[COR-208]** Disabling a core plugin that other enabled plugins require MUST be refused with core.has-dependents listing every dependent, unless the request carries cascade=true, in which case dependents MUST be disabled in reverse dependency order and be re-enabled together on enable.
 - **[COR-209]** Disabling or enabling a disableable core plugin MUST take effect within 2 seconds without restarting the server, MUST drop the plugin's UI contributions in the same frame as deactivation, and MUST emit one plugin.state-changed event.

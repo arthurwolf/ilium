@@ -192,8 +192,8 @@ fn sec_955_the_audit_log_page_sets_thirty_days_and_two_hundred_crash_records() {
         "the page must state the 200-record count with oldest removed first"
     );
     assert!(
-        page.contains("The 14-day period in [SEC-447] is superseded"),
-        "the page must state that the 14-day period is superseded"
+        page.contains("[SEC-447], [USR-228], [USR-236] and [USR-348] state the same 30 days and 200 records"),
+        "the page must state that one period and one count apply to every crash record"
     );
 }
 

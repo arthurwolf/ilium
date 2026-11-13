@@ -136,8 +136,8 @@ fn prz_019_a_damaged_board_file_is_preserved_and_never_overwritten() {
 /// REQ: PRZ-020
 #[test]
 fn prz_020_legal_hold_suspends_audit_pruning() {
-    // Observable: With a hold set and records older than keep_days present, a prune run deletes 0 records and exits with code 3 naming the hold id, and the log holds exactly one `audit.hold-set` record and, after clearing, one `audit.hold-cleared` record.
-    panic!("PRZ-020 not implemented: While `ilium admin audit hold set --reason TEXT` is active, audit retention pruning MUST delete 0 records regardless of age, MUST write one `audit.hold-set` record at set time and one `audit.hold-cleared` record at clear time, and a prune attempted during the hold MUST exit with code 3 and name the hold id.");
+    // Observable: With a hold set and records older than keep_days present, a prune run deletes 0 records and exits with code 3 naming the hold id, and the log holds exactly one `audit-hold-set` record and, after clearing, one `audit-hold-cleared` record.
+    panic!("PRZ-020 not implemented: While `ilium admin audit hold set --reason TEXT` is active, audit retention pruning MUST delete 0 records regardless of age, MUST write one `audit-hold-set` record at set time and one `audit-hold-cleared` record at clear time, and a prune attempted during the hold MUST exit with code 3 and name the hold id.");
 }
 
 /// REQ: PRZ-021

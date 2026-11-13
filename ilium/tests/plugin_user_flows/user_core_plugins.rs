@@ -13,7 +13,7 @@ fn usr_040_list_shows_30_core_rows_with_tier_t1() {
         .iter()
         .filter(|row| row.id.starts_with("ilium.core."))
         .collect();
-    assert_eq!(core.len(), 30);
+    assert_eq!(core.len(), 32);
     assert!(core.iter().all(|row| row.tier == "T1"));
 }
 

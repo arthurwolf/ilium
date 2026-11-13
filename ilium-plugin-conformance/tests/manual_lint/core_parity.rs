@@ -75,10 +75,10 @@ fn complete_manifest(text: &str) -> Option<Value> {
 
 /// REQ: COR-002
 #[test]
-fn cor_002_traceability_has_116_rows_with_unique_ids_and_a_non_empty_owner() {
+fn cor_002_traceability_has_126_rows_with_unique_ids_and_a_non_empty_owner() {
     let (header, rows) = table_rows(&page("reference-feature-traceability"), "Id");
     let (id, owner) = (column(&header, "Id"), column(&header, "Owner"));
-    assert_eq!(rows.len(), 116);
+    assert_eq!(rows.len(), 126);
     let mut seen = BTreeMap::new();
     for row in &rows {
         *seen.entry(row[id].clone()).or_insert(0) += 1;
@@ -156,7 +156,7 @@ fn cor_003_every_config_table_named_appears_in_the_migration_key_table() {
 #[test]
 fn cor_043_every_core_plugin_complete_manifest_passes_check_without_manifest_errors() {
     let pages = core_plugin_pages();
-    assert_eq!(pages.len(), 30);
+    assert_eq!(pages.len(), 32);
     for name in pages {
         let manifest = complete_manifest(&page(&name))
             .unwrap_or_else(|| panic!("{name}: no parseable Complete manifest block"));
@@ -232,12 +232,12 @@ fn cor_043_a_page_with_a_broken_manifest_would_be_detected() {
 #[test]
 fn cor_050_there_are_30_pages_each_with_a_complete_manifest_and_the_index_states_30() {
     let pages = core_plugin_pages();
-    assert_eq!(pages.len(), 30);
+    assert_eq!(pages.len(), 32);
     for name in &pages {
         assert!(page(name).contains("### Complete manifest"), "{name}");
     }
     let index = page("core-plugins");
-    assert!(index.contains("all 30 of them"));
+    assert!(index.contains("all 32 of them"));
     let (_, rows) = table_rows(&index, "Plugin");
     assert_eq!(rows.len(), pages.len());
 }

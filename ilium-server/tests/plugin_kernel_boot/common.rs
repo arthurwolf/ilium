@@ -52,12 +52,13 @@ pub fn started_in(mode: StartMode, plugins: Vec<PluginSpec>) -> BootRun {
     run
 }
 
-/// The 30 core plugin names (directory names under `plugins/core`).
-pub const CORE_PLUGINS: [&str; 30] = [
+/// The 32 core plugin names (directory names under `plugins/core`).
+pub const CORE_PLUGINS: [&str; 32] = [
     "agent-detect",
     "agent-setup",
     "agent-toolbar",
     "ambient",
+    "attention",
     "chatroom",
     "compaction",
     "cost",
@@ -71,6 +72,7 @@ pub const CORE_PLUGINS: [&str; 30] = [
     "notifications",
     "progress",
     "recap",
+    "resources",
     "scenes",
     "scheduler",
     "search",

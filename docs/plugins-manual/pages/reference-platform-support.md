@@ -85,6 +85,25 @@ A third-party package never carries a `.cwasm` (see [Host runtime](/pages/refere
 - **[HST-385]** The host MUST terminate child processes with SIGTERM then SIGKILL after 2 s on Linux and macOS, and with a job object after 2 s on Windows. Children MUST run inside the job object so that closing the job ends the whole tree.
 - **[HST-386]** A deadline MUST NOT be reported as breached because a suspend gap passed on Windows. The host MUST ignore a tick gap of more than one second.
 
+## Windows: files held open by another process
+
+On Windows a file that another process holds open cannot be renamed, replaced or deleted. Real-time virus scanners, the search indexer and backup tools open new files for a short time, so a rename that follows a write fails now and then with a sharing violation (`ERROR_SHARING_VIOLATION`) or with access denied (`ERROR_ACCESS_DENIED`). Linux and macOS do not have this failure, so the rules below apply to Windows only.
+
+| Step | Rule |
+|---|---|
+| First failure with a sharing violation or access denied | The host retries the same operation. It waits 25 ms before the first retry and doubles the wait each time, up to 400 ms |
+| Total retry time | 2 seconds from the first failure |
+| Result when a retry succeeds | The call succeeds. The plugin or the user sees no error |
+| Result when the 2 seconds end | The operation fails with `io`. The error message starts with `file-in-use:` and names the path |
+| State of the target after a final failure | The previous file is intact. No partial file exists under the target name, and the host has removed its temporary file |
+
+The rule covers the plugin calls `fs.rename`, `fs.remove`, `fs.write` in `replace` mode and `write-atomic` ([fs](/pages/api-fs/)), and every atomic replace the host does itself: package install, update and uninstall, the session snapshot, `installed.json`, `grants.json`, `consents.json`, the trust store and `config.toml`. A plugin does not retry inside its handler; the host has already waited. An `io` error whose message starts with `file-in-use:` is retryable later, like any transient `io` error. The message is for logs and for the user; a plugin decides on the code `io` alone. The retry time counts as host time and not against the handler deadline of the plugin, because the async `fs` call completes later with its outcome.
+
+Access denied that comes from a missing permission, not from an open handle, cannot succeed on retry. The host cannot tell the two apart at the first failure, so it retries both for the same 2 seconds. After the 2 seconds it reports `not-permitted` when the current user has no write access to the target, and `io` with the `file-in-use:` message in every other case.
+
+- **[PRM-304]** On Windows the system must retry a rename, replace or delete that fails with a sharing violation or access denied for up to 2 seconds, with a wait that starts at 25 ms and doubles up to 400 ms, before it returns an error. The rule must apply to `fs.rename`, `fs.remove`, replacing writes and `write-atomic`, and to the host's own writes for install, update, uninstall, the session snapshot, `installed.json`, `grants.json`, `consents.json`, the trust store and `config.toml`. Test: on Windows hold an exclusive handle on the target for 1 second, call `fs.rename` and run an install, and assert that both succeed with no error reported.
+- **[PRM-305]** When the retry time of [PRM-304] ends without success, the system must keep the previous target file intact, must leave no partial file under the target name and no temporary file beside it, and must report `io` with a message that starts with `file-in-use:` and names the path. Test: on Windows hold an exclusive handle on the target for 5 seconds, call `fs.rename`, write `grants.json` and take a snapshot, and assert the `io` error whose message starts with `file-in-use:` and holds the path, the unchanged bytes of each target and the absence of temporary files.
+
 ## What is the same everywhere
 
 - The component model contract `ilium:plugin@0.1.0`, the WIT files, the tier and grant rules.
@@ -139,6 +158,26 @@ A cross-OS restore therefore always needs the user to re-establish trust, even f
 | `sandbox.unavailable` | Platform or prerequisite missing for T2 or T3 | The plugin shows `Cannot start: sandbox unavailable` with the platform |
 | `package.platform-unsupported` | Installed package does not target this platform (restore on another OS, removed platform) | `refused-at-load`; data kept |
 | `host.cwasm-incompatible` | No `.cwasm` for the triple or fingerprint | Compiled at load; start is slower |
+| `io` with a `file-in-use:` message | Windows: another process held the target open for the whole 2 second retry time ([PRM-305]) | The operation fails; the previous file is intact |
+| `data.root-unresolved` | No home directory and no variable that names the roots ([PRM-314]) | The server and the client refuse to start and name the variables to set |
+
+## Running in a container
+
+The support matrix lists a Linux container as Linux. A container changes four facts that a desktop login hides: the server can be process 1, standard input can be something other than a terminal, the root file system can be read-only, and the user id can have no entry in `/etc/passwd` and no home directory. The rules below make each of them a defined case.
+
+| Fact | Behaviour |
+|---|---|
+| The server is PID 1 | It reaps every orphaned child that the kernel hands to it, so no zombie process stays. `SIGTERM` starts the graceful stop of [PRS-002](/pages/lifecycle/) with the same budgets, and the server exits within 10 seconds |
+| No TTY on standard input | The server starts and serves clients as usual; it never reads standard input and never needs a terminal. Commands that do not draw, such as `ilium plugin ...`, work without a terminal ([Plugin CLI](/pages/reference-plugin-cli/)) |
+| Read-only root file system with a writable data volume | The roots are taken from `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` and `XDG_RUNTIME_DIR`, or from `ILIUM_CONFIG_DIR` and `plugins.data_dir`. Roots on the volume are used normally. A root that is not writable follows the read-only mode of [Offline and low disk](/pages/reference-offline-and-low-disk/) (HST-664): installed plugins run and writes fail with `io` |
+| Arbitrary uid with no passwd entry, or `HOME` unset or not writable | The host does not look up the passwd entry when the variables above name the roots. It starts with those roots. The runtime directory follows the fallback of [Runtime directory and socket path](/pages/reference-kernel-and-boot/#runtime-directory-and-socket-path) |
+| No home directory and no variable that names a root | The server and the client refuse to start with `data.root-unresolved`, and the message lists the variables that would fix it. The host never writes into the current directory or `/` as a guess |
+
+`data.root-unresolved` means that the host could not decide where a root is. It differs from `data.root-invalid` (HST-669), which means that a configured plugin data root exists but fails the owner and mode check, and from the read-only mode, which means that a root is known and cannot be written.
+
+- **[PRM-313]** When the server runs as PID 1 it must reap orphaned child processes so that none stays a zombie for more than 1 second, and it must treat `SIGTERM` as the graceful stop of [PRS-002] and exit within 10 seconds. Test: in a container run the server as PID 1, make a pane's child exit after its parent, assert that no zombie remains after 1 second, send `SIGTERM` and assert a clean exit within 10 seconds with acknowledged storage writes on disk.
+- **[PRM-314]** When `HOME` is unset, is not writable or the uid has no passwd entry, the system must start with the roots named by the `XDG_*` variables, `ILIUM_CONFIG_DIR` and `plugins.data_dir`, must use the read-only mode of HST-664 for a root that cannot be written, and must refuse to start with `data.root-unresolved`, naming the variables to set, only when a root can be resolved from neither a home directory nor a variable. Test: start the server in a container with `--read-only`, no TTY, an arbitrary uid and the `XDG_*` variables pointing at a volume, and assert that it starts and a client attaches; unset the variables and assert `data.root-unresolved`.
+- **[PRM-315]** `ilium plugin doctor` must print whether a container was detected, whether the server is PID 1, the uid and whether it has a passwd entry, whether standard input is a TTY, and each resolved root with its writable state. Test: run `ilium plugin doctor` in the container of [PRM-314] and compare the five facts with the container's configuration.
 
 ## Edge cases
 

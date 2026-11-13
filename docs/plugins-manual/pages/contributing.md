@@ -35,7 +35,7 @@ Open an issue with the "Bug report" template. The template has these fields, and
 | Plugin involved | The plugin id and version, or "none". Try `ilium --safe-mode=third-party` first ([Safe mode and troubleshooting](/pages/user-safe-mode-and-troubleshooting/)); say whether the fault stays |
 | Support bundle | The file from `ilium plugin support-bundle <id> --out <file>` when a plugin is involved |
 
-The support bundle is one zip archive with exactly four entries, built under [USR-221], and writing it does not change plugin state ([USR-225]). It is built on your machine and goes nowhere until you attach it. Before you attach it, open the archive and check these points:
+The support bundle is one zip archive with exactly four entries, or five with `--include-host`, built under [USR-221], and writing it does not change plugin state ([USR-225]). It is built on your machine and goes nowhere until you attach it. Before you attach it, open the archive and check these points:
 
 - Remove or replace home folder paths that hold your user name, host names, internal URLs and any token or key that a log line shows. Replace each with `[redacted]`. Do not delete a whole entry; a bundle with a missing entry is treated as incomplete.
 - Do not attach `SECURITY.md`-class material: a bundle that shows a working exploit, a leaked secret or a sandbox escape is a security report, not a bug report. Send it to the contact in [Security response](/pages/reference-security-response/) ([SEC-320]) and do not open a public issue.

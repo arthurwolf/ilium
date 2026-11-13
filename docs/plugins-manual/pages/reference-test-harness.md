@@ -360,6 +360,8 @@ Each stub exposes exactly the extension points of [Core extension points](/pages
 | `ilium.core.scheduler` | `schedule-sources` (collect), `before-send-scheduled` (veto) | `queue` (enqueue, list, cancel) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
 | `ilium.core.text-triggers` | `rule-packs` (collect), `before-fire` (veto) | `test-rule` (test) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
 | `ilium.core.progress` | `footer-segments` (collect), `probe-kinds` (collect) | `report` (start, update, finish) | collect: empty list; service: `{"ok":true}` |
+| `ilium.core.attention` | `item-sources` (collect), `before-jump` (veto) | `queue` (list, next) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
+| `ilium.core.resources` | `resource-kinds` (collect), `before-grant` (veto) | `reservations` (list, status) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
 | `ilium.core.chatroom` | `before-post` (transform), `message-renderers` (collect) | `post` (send), `tail` (get) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
 | `ilium.core.worktrees` | `before-create` (transform), `post-create-steps` (collect), `before-remove` (veto) | `create` (create) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
 | `ilium.core.sessions` | `snapshot-sections` (collect), `before-restore` (observe) | `snapshots` (list, save, restore) | collect: empty list; hooks: `pass`; service: `{"ok":true}` |
@@ -611,6 +613,15 @@ Every dotted code named on this page and on the conformance page is in this tabl
 | `harness.not-a-hook-handler` | `run_hook` on a plugin without a hook handler |
 | `harness.snapshot-invalid` | Storage snapshot file has an unknown shape |
 | `harness.grant-unknown`, `harness.grant-not-declared` | See Setup |
+| `harness.core-component-missing` | A real core plugin was requested ([DEV-146]) and the installed host does not ship its component |
+| `harness.core-needs-component-mode` | A real core plugin was requested ([DEV-146]) in native mode |
+| `harness.import-unfaked` | The plugin called a host import for which the harness has no fake ([DEV-138]) |
+| `harness.locale-invalid` | The locale builder got an invalid locale tag |
+| `harness.time-zone-unknown` | The time zone builder got an unknown zone |
+| `harness.theme-unknown` | The theme builder got an unknown theme name |
+| `harness.real-resource` | The test reached the real network, the real clock or a file outside the test directory |
+| `harness.service-method-missing` | The provider does not implement a method that its service schema declares |
+| `harness.service-result-invalid` | A service result does not match the result schema of the method |
 | `fixture.unknown-key`, `fixture.bad-value`, `fixture.duplicate-id`, `fixture.state-mismatch` | Fixture errors |
 | `replay.diverged`, `replay.version-unsupported` | Replay errors |
 | `toolchain.coverage-tool-missing` | `--coverage` needs `cargo llvm-cov` or `bun test --coverage` |

@@ -200,7 +200,7 @@ fn pro_028_gap_28() {
 #[test]
 fn pro_029_gap_29() {
     // Observable: SEC-224 deletes rotated audit files after `audit.keep_days`. The audit hold (PRZ-020) is only set by an administrator command. When a plugin is blocklisted, its key revoked, or its sandbox self-test fails, nothing keeps the evidence about that plugin from being pruned, which matters on a single-user machine with no administrator.
-    panic!("PRO-029 not implemented: The system must, when a plugin is disabled by blocklist, key revocation or `sandbox.unavailable self-test-failed`, exempt every audit record naming that plugin id from keep_days pruning for 365 further days (or until the user clears it), and write one `audit.auto-hold` record naming the plugin and trigger; a fixture with 400-day-old records for a blocked plugin keeps those records after pruning while unrelated records are pruned.");
+    panic!("PRO-029 not implemented: The system must, when a plugin is disabled by blocklist, key revocation or `sandbox.unavailable self-test-failed`, exempt every audit record naming that plugin id from keep_days pruning for 365 further days (or until the user clears it), and write one `audit-auto-hold` record naming the plugin and trigger; a fixture with 400-day-old records for a blocked plugin keeps those records after pruning while unrelated records are pruned.");
 }
 
 /// REQ: PRO-030

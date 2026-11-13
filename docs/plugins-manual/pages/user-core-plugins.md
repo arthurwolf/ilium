@@ -6,7 +6,7 @@ permalink: /pages/user-core-plugins/
 
 ## Core plugins for users
 
-Everything Ilium does is done by a plugin. The 30 core plugins ship with Ilium, need no install and are maintained by the Ilium project. This page tells you what each one does in plain words, what you lose when you turn it off, which ones other plugins may replace, and what happens to your data when you do. If you write plugins, read [Core plugins](/pages/core-plugins/) instead.
+Everything Ilium does is done by a plugin. The 32 core plugins ship with Ilium, need no install and are maintained by the Ilium project. This page tells you what each one does in plain words, what you lose when you turn it off, which ones other plugins may replace, and what happens to your data when you do. If you write plugins, read [Core plugins](/pages/core-plugins/) instead.
 
 Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]`, collected in [User and administrator requirements](/pages/reference-requirements-user-admin/).
 
@@ -17,7 +17,7 @@ Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]
 ### Contents
 
 - What a core plugin is for you
-- The 30 core plugins
+- The 32 core plugins
 - Turning one off
 - Replacing one
 - What a replacement does to your data
@@ -35,9 +35,9 @@ You do not have to know about core plugins to use Ilium. They are the parts of t
 
 Core plugins have ids of the form `ilium.core.<name>`. They appear in **Settings > Plugins** with the tier T1 and the badge `core`. They do not appear in a package list, because they have no package.
 
-- [USR-040] The Plugins tab and `ilium plugin list` MUST list all 30 core plugins with the tier T1, and MUST NOT offer to install or uninstall one. Test: list plugins on a fresh profile, count 30 rows with ids `ilium.core.*`, and try `ilium plugin uninstall ilium.core.tree`, which must fail with `plugin.not-removable`.
+- [USR-040] The Plugins tab and `ilium plugin list` MUST list all 32 core plugins with the tier T1, and MUST NOT offer to install or uninstall one. Test: list plugins on a fresh profile, count 32 rows with ids `ilium.core.*`, and try `ilium plugin uninstall ilium.core.tree`, which must fail with `plugin.not-removable`.
 
-### The 30 core plugins
+### The 32 core plugins
 
 The column "Can you turn it off" lists the fixed set of plugins that your own switch cannot turn off (safe mode and a confirmed replacement are the only other ways). "Replaceable" says whether a third-party plugin may take over the job with `replaces`.
 
@@ -77,6 +77,8 @@ The column "Can you turn it off" lists the fixed set of plugins that your own sw
 | Plugin | What it does for you | If you turn it off | Can you turn it off | Replaceable |
 |---|---|---|---|---|
 | Progress (`ilium.core.progress`) | Progress monitors and `ilium wait` | Monitors stop reporting | yes | yes |
+| Attention queue (`ilium.core.attention`) | The Next: needs you button, the queue panel, the overview and the briefing box | No queue, button or briefing box; the attention marks in the tree stay | yes | yes |
+| Shared resources (`ilium.core.resources`) | Queues for shared hardware and `ilium resource` | `ilium resource` fails; owners and queues are kept and nothing is granted | yes | yes |
 | Chatroom (`ilium.core.chatroom`) | The shared chat file between agents and `ilium chat` | `ilium chat` fails | yes | yes |
 | Worktrees (`ilium.core.worktrees`) | Agents in Git worktrees and branch status | Worktree features disappear | yes | yes |
 | Sessions (`ilium.core.sessions`) | Snapshots, restore, detach and reattach | Ilium cannot save or restore a session | no | no |
@@ -197,7 +199,7 @@ API version checked: `ilium:plugin@0.1.0`.
 
 ## Requirement statements
 
-- **[USR-040]** The Plugins tab and `ilium plugin list` MUST list all 30 core plugins with the tier T1, and MUST NOT offer to install or uninstall one.
+- **[USR-040]** The Plugins tab and `ilium plugin list` MUST list all 32 core plugins with the tier T1, and MUST NOT offer to install or uninstall one.
 - **[USR-041]** The Plugins tab MUST refuse to turn off a core plugin marked "no" in the table, and MUST say why.
 - **[USR-042]** A request to replace `ilium.core.settings` or `ilium.core.sessions` MUST fail at install with `manifest.replaces-not-replaceable`.
 - **[USR-043]** Ilium MUST ask the user to confirm every `replaces` entry at install, MUST allow at most 4 entries, and MUST NOT replace without a yes.

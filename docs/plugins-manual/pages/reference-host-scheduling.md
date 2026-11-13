@@ -127,6 +127,28 @@ All defaults are the same for every tier. The T1 column is the ceiling that a bu
 | Client-request answer (round trip) | client | request timeout, 5,000 ms | 30,000 ms | 30,000 ms | soft, request level | The request completes `failed(timed-out)` | no |
 | Whole hook chain | owner side | 100 ms | 100 ms | 100 ms | soft | Remaining handlers skipped and logged | no |
 
+### Deadline keys
+
+The table above is ordered by call class. This table maps each deadline key of `limits` to its rows, so that the effect of a key is read from one place. The limit tables of [Errors and limits](/pages/reference-errors-and-limits/#resource-limits-in-the-manifest), [Architecture](/pages/architecture/), [Performance](/pages/performance/) and [Debugging](/pages/debugging/) copy the default and the ceilings from here and link here for the effect.
+
+| Deadline key | Call classes it sets | Default | T1 ceiling | T2/T3 ceiling | Effect on breach |
+|---|---|---|---|---|---|
+| `activate_deadline_ms` | `activate` | 2,000 ms | 5,000 ms | 2,000 ms | Trap; activation fails |
+| `deactivate_deadline_ms` | `deactivate` | 500 ms | 1,000 ms | 500 ms | Instance dropped; no restore bytes kept |
+| `event_deadline_ms` | `on-events`, batch without a command | 20 ms | 50 ms | 20 ms | Trap |
+| `command_deadline_ms` | `on-events`, batch with a `command-invoked` event; `service-provider` call; `inference-provider` call | 50 ms | 100 ms | 50 ms | Trap |
+| `render_deadline_ms` | `views.render` | 10 ms | 20 ms | 10 ms | Trap |
+| `annotate_deadline_ms` | `annotate` | 10 ms | 20 ms | 10 ms | Late result dropped; the third breach in a row traps |
+| `frame_deadline_ms` | `renderer` frame | the frame budget: 1,000 ms divided by the effective frame rate, rounded down, at most 50 ms | 50 ms | 50 ms | Frame skipped; 30 breaches in a row trap |
+| `detector_deadline_ms` | `detector` identify and classify | 20 ms | 50 ms | 20 ms | Previous classification kept; the third breach in a row traps |
+| `migrate_deadline_ms` | `migrate` | 30,000 ms | 60,000 ms | 30,000 ms | Migration fails, backup restored, update rolled back |
+| `job_deadline_ms` (CPU) | `job-runner.run`, CPU time | 2,000 ms | 60,000 ms | 10,000 ms | `failed(timed-out)` |
+| `deadline_ms` of a hook extension (not a `limits` key) | `hook-handler` | 20 ms | 50 ms | 50 ms | Counts as `pass`; the third breach in a row disables the extension |
+
+A hook handler does not run under `event_deadline_ms`. Its deadline is the `deadline_ms` field of the hook extension, 5 to 50 ms for every tier. That is why a T2 or T3 plugin, whose `event_deadline_ms` ceiling is 20 ms, may still declare a hook handler of up to 50 ms. The provider rows with fixed deadlines (`menu-provider`, `catalog-provider`, `virtual-rows-provider`, `token-provider`, `settings-validate`) have no key and cannot be changed.
+
+- **[PRM-011]** The system must apply to every deadline key the default, the two ceilings and the breach effect of the table above, and every other page that shows a deadline key must show the same default and ceilings and must give this effect or link to this section. Test: a documentation test parses this table and the limit tables of the errors-and-limits, architecture, performance and debugging pages and asserts equal defaults and ceilings per key and an effect cell that equals this one or links here; a host test breaches each key once and three times in a row with a fixture plugin and asserts the listed effect.
+
 Notes on the table:
 
 - A `command-invoked` event in a batch selects `command_deadline_ms` for the whole call. A plugin that handles commands therefore gets 50 ms for the batch. This replaces the earlier wording that a command "shares" the 20 ms batch deadline.

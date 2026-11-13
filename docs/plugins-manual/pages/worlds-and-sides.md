@@ -42,7 +42,7 @@ The table below is generated from section 9 of [WIT reference](/pages/reference-
 
 The `ilium:host/messages` interface no longer exists. Sending a message is the `message` intent, and receiving one is the `message` event.
 
-WASI imports are allowed at their Preview 2 versions for `wasi:cli`, `wasi:io`, `wasi:clocks`, `wasi:random` and `wasi:filesystem`. Standard output and error go to the plugin log. A component that imports `wasi:sockets` or `wasi:http` is refused at install.
+WASI imports are allowed at their Preview 2 versions for `wasi:cli`, `wasi:io`, `wasi:clocks`, `wasi:random` and `wasi:filesystem`. `wasi:clocks` is virtualised: it has a resolution of 1 ms ([clock and timers](/pages/api-clock-and-timers/#clock-resolution-and-jitter)). Standard output and error go to the plugin log. A component that imports `wasi:sockets` or `wasi:http` is refused at install.
 
 <figure>
 <svg viewBox="0 0 400 330" role="img" aria-label="Server, client and scene worlds with their imports">

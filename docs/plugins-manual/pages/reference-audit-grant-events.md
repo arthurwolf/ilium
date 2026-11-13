@@ -32,7 +32,7 @@ Use the `ilium plugin audit` command to read grant records. The command takes an
 
 - **[PDY-013]** `grant-given` and `grant-revoked` records MUST carry `actor.kind` (one of `user-tui`, `cli`, `policy`, `expiry`), `grant`, `previous_state` and `epoch`.
 - **[PDY-014]** Revoke all MUST write one `grant-revoked` record per grant plus exactly one `revoke-all` summary record carrying the count.
-- **[PDY-015]** The audit catalogue MUST include `grant-expired` with `plugin_id`, `grant`, `expired_at` and `detected_at`, written once per expiry.
+- **[PDY-015]** The audit catalogue ([SEC-222](/pages/reference-audit-log/)) MUST include `grant-expired` with `plugin_id`, `grant`, `expired_at` and `detected_at`, written once per expiry.
 - **[PDY-016]** A grant refused by policy at install time MUST write one `grant-policy-denied` record per install attempt, naming the grant.
 - **[PDY-017]** Declining a row in the review dialog MUST write one `grant-declined` record with the grant name.
 - **[PDY-018]** Refused runtime calls for grants that are not HIGH MUST be summarised into at most one `grant-refused` record per plugin and grant per minute, carrying `count`; HIGH grants keep their per-call records.

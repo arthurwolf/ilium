@@ -46,8 +46,8 @@ const SAFE_MODE_BANNER: &str = "Safe mode: third-party plugins are off.";
 /// Text of the administrator lock (USR-214).
 const ADMIN_LOCK_TEXT: &str = "Blocked by your administrator";
 
-/// The thirty bundled core plugins of a fresh profile (USR-162).
-const CORE_PLUGINS: [&str; 30] = [
+/// The thirty-two bundled core plugins of a fresh profile (USR-162).
+const CORE_PLUGINS: [&str; 32] = [
     "ilium.core.tree",
     "ilium.core.titles",
     "ilium.core.settings",
@@ -78,6 +78,8 @@ const CORE_PLUGINS: [&str; 30] = [
     "ilium.core.voice",
     "ilium.core.compaction",
     "ilium.core.agent-toolbar",
+    "ilium.core.attention",
+    "ilium.core.resources",
 ];
 
 /// Core plugins that the Plugins tab never switches off (USR-041).

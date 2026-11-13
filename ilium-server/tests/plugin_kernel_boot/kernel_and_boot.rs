@@ -8,23 +8,27 @@ use proptest::prelude::*;
 
 use crate::common::*;
 
-const SERVER_STARTUP: [&str; 11] = [
+const SERVER_STARTUP: [&str; 13] = [
     "agent-detect",
+    "attention",
     "chatroom",
     "cost",
     "diagnostics",
     "notifications",
     "progress",
+    "resources",
     "scheduler",
     "sessions",
     "text-triggers",
     "titles",
     "tree",
 ];
-const CLIENT_STARTUP: [&str; 6] = [
+const CLIENT_STARTUP: [&str; 8] = [
     "agent-toolbar",
     "ambient",
+    "attention",
     "progress",
+    "resources",
     "settings",
     "terminal",
     "tree",
@@ -318,7 +322,7 @@ fn cor_022_the_manual_table_lists_all_thirty_plugins() {
             line.starts_with("| ") && !line.starts_with("| ---") && !line.starts_with("|---")
         })
         .count();
-    assert!(rows >= 31, "header plus 30 rows, found {rows}");
+    assert!(rows >= 33, "header plus 32 rows, found {rows}");
 }
 
 // COR-024

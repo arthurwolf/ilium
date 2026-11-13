@@ -18,7 +18,8 @@ fn hst_600_rotates_one_log_file_per_plugin_at_4_mib_keeping_three() {
         .collect();
     assert_eq!(active_files.len(), 1, "one active log file per plugin id");
     let rotated = files.len() - 1;
-    assert_eq!(rotated, 3, "at most three rotated files per plugin");
+    // HST-600 now keeps four rotated files (20 MiB with the active file); the fn name is kept.
+    assert_eq!(rotated, 4, "at most four rotated files per plugin");
     for path in &files {
         let size = std::fs::metadata(path).expect("log file exists").len();
         assert!(
@@ -151,7 +152,7 @@ fn hst_601_uninstall_without_purge_keeps_the_plugin_log_files() {
     assert_eq!(output.exit_code, 0, "uninstall succeeds");
     assert!(
         !rig.plugin_log_files(NOTES).is_empty(),
-        "log files are kept until an uninstall with purge"
+        "log files are kept for 7 days after an uninstall without purge (HST-601)"
     );
 }
 

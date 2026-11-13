@@ -190,7 +190,7 @@ The manifest changes are:
   "publisher": "Example Labs",
   "api": "ilium:plugin@0.1.0",
   "data_version": 2,
-  "exports": ["migrator"],
+  "server": { "exports": ["migrator"] },
   "capabilities": { "server": ["notify.toast"] },
   "contributes": {
     "commands": [

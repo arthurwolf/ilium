@@ -205,12 +205,31 @@ The server writes frames to each client through one writer. Pane frames (termina
 | Overflow of the plugin queue | Coalescable increments are merged, then `Control::Resync` is flagged for that client |
 | Hard cap | 16 MiB of queued plugin data disconnects the client with `ipc.client-too-slow` |
 
-A client that reconnects after `ipc.client-too-slow` receives a snapshot. Pane output is never dropped by this rule.
+A client that reconnects after `ipc.client-too-slow` receives a snapshot. Pane output is never dropped by this rule: the plugin queue rules merge and drop plugin traffic only. Pane frames for a client that cannot keep up are bounded by the rules of [Slow and stalled clients](#slow-and-stalled-clients).
 
 - **[HST-120]** The writer MUST send PTY frames before plugin envelopes and MUST guarantee one plugin envelope for every eight frames while plugin data is queued.
 - **[HST-121]** The plugin queue MUST be bounded at 4 MiB or 4,096 records. On overflow the server MUST merge coalescable increments first and flag a resync second.
 - **[HST-122]** A client whose queued plugin data exceeds 16 MiB MUST be disconnected with `ipc.client-too-slow`.
 - **[HST-123]** Plugin traffic MUST NOT delay a PTY frame by more than the time to write one plugin envelope.
+
+## Slow and stalled clients
+
+Several clients can be attached to one session, and any of them can stop reading: an SSH link that stalls, a terminal stopped with `SIGSTOP` or by shell job control, a laptop that suspends. The server must treat every client as independently slow. One writer task serves each client, and no part of the server waits for a client's socket.
+
+| Rule | Value |
+|---|---|
+| Pane frame queue, per client | At most one pending frame for each pane. When newer output arrives for a pane that still has a pending frame, the server replaces the pending frame with one frame that carries the current screen state of that pane |
+| Plugin queue, per client | As in [Writer fairness](#writer-fairness): 4 MiB or 4,096 records, hard cap 16 MiB |
+| Server memory for one client's queues | At most 32 MiB (16 MiB of plugin data plus 16 MiB of pending pane frames and bookkeeping) |
+| Stall limit | 30 seconds with queued data and no byte accepted by the client's socket |
+| Effect of the stall limit or of the memory cap | The client is disconnected with `ipc.client-too-slow` |
+| Largest delay one client may cause to anything else | 50 ms |
+
+Replacing a pending pane frame loses nothing. The server keeps the screen state and the scrollback of every pane, and the replacement frame is a full repaint of that pane and not an increment on a frame the client never received, so the slow client sees the latest screen when it catches up and skips only the steps in between. A disconnected client that attaches again receives a full snapshot, as after any attach. The disconnect log line of [HST-523] names the plugin with the largest queued share, as that rule says, and also carries a `cause` field: `plugin-queue` for the 16 MiB cap, `memory-cap` for the 32 MiB cap and `stalled` for the stall limit, so an operator can tell a frozen client from a plugin that floods.
+
+- **[PRM-301]** The system must bound the outbound queue of each attached client: at most one pending pane frame per pane, where newer output replaces the superseded frame with one full repaint of that pane, and the plugin queue of [HST-121]. The server memory held for one client's queues must stay at or below 32 MiB, and a client that would exceed it must be disconnected with `ipc.client-too-slow`. Test: attach a client that never reads, write 1 GiB of output into one pane, and assert that the server memory attributed to that client never exceeds 32 MiB and that a second client shows the final screen.
+- **[PRM-302]** The system must disconnect a client with `ipc.client-too-slow` when data has been queued for it for 30 seconds and its socket accepted no byte in that time, must log the disconnect with the field `cause` set to `stalled` beside the plugin name of [HST-523], and must send a full snapshot when that client attaches again. Test: stop an attached client with `SIGSTOP` while a pane prints, assert the disconnect between 30 and 35 seconds later, continue the client and assert that it re-attaches and shows the current screen.
+- **[PRM-303]** A stalled or slow client must not delay a server-side plugin deadline, a PTY read, or the delivery of a frame to any other attached client by more than 50 ms. Test: attach two clients, stop one with `SIGSTOP`, and assert that the 99th percentile time from pane output to the frame received by the other client grows by less than 50 ms and that no plugin deadline breach is recorded.
 
 ## Payload limits
 
@@ -237,7 +256,7 @@ An oversized item is refused at the sender. The sender's call returns `ipc.paylo
 | `ipc.protocol-mismatch` | Different `plugin_protocol` or `contract` | Rejected; client exits 76 |
 | `ipc.sequence-gap` | A gap in envelope `seq` | Connection closed; client re-attaches |
 | `ipc.payload-too-large` | A cap above is exceeded | Item refused; the sender's call returns this code |
-| `ipc.client-too-slow` | More than 16 MiB queued | Client disconnected |
+| `ipc.client-too-slow` | More than 16 MiB of plugin data queued, more than 32 MiB queued in total, or no byte accepted for 30 seconds while data is queued | Client disconnected; a snapshot is sent when it attaches again |
 | `plugin.version-skew` | Client and server plugin differ | Client half disabled |
 | `plugin.server-missing` | Plugin not installed on the server | Client half disabled |
 

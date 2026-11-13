@@ -147,6 +147,9 @@ These rules apply to the whole file before any key is read.
 | `homepage`, `repository` | string | no | none | An `https://` address of at most 256 characters | PKG-023 |
 | `data_use` | list of object | no | none | At most 8 entries `{ "what", "where", "purpose", "opt_in" }`, strings of at most 200 characters, `opt_in` boolean | SEC-267 |
 | `security_contact` | string | no | none | An email address or an `https://` address, at most 200 characters | SEC-268 |
+| `support_url` | string | no | none | An `https://` address of at most 256 characters, shown as the `Get help` link. `manifest.support-missing` warns when neither it nor `repository` is set | PRP-004 |
+| `imports_from` | list of string | no | none | At most 4 distinct ids of plugins whose kept data this plugin may import once, after the user confirms. See [Lifecycle states](/pages/reference-plugin-lifecycle-states/) | PRO-016 |
+| `accessibility` | table | no | none | `screen_reader`, `high_contrast`, `reduced_motion`, `compact_40_columns` (each `none`, `partial` or `full`) and `languages` (at most 64 tags) | PRX-008 |
 | `server`, `client`, `scene` | object | at least one | none | One component per side, see [Components and exports](#components-and-exports) | PKG-024 |
 | `capabilities` | object | no | none | One grant list per side | PKG-025 |
 | `activation` | list of string | no | lazy | At most 32 distinct triggers | PKG-026 |
@@ -157,6 +160,7 @@ These rules apply to the whole file before any key is read.
 | `contributes` | object | no | none | Static contributions, see [Contributes keys](#contributes-keys) | PKG-030 |
 | `limits` | object | no | host defaults | Requested limits, clamped to the tier ceiling | PKG-031 |
 | `data_version` | integer | no | 1 | 1 to 4,294,967,295 | PKG-032 |
+| `min_data_version` | integer | no | 1 | 1 to `data_version`. The lowest data stamp that `migrate` still accepts. Else `manifest.data-version` | LIF-100 |
 | `limits_tier` | string | no | `"standard"` | `"standard"` or `"first-party"` | PKG-033 |
 | `unstable` | list of string | no | none | At most 8 of `ui-calendar`, `plugin-services`, `gpu-kernels`, `websocket` | PKG-034 |
 | `files` | list | packed only | none | `path`, `length` and `sha256` per entry. See [Package format](/pages/reference-package-format/#the-inventory) | PKG-035 |
@@ -267,8 +271,8 @@ Without `activation`, a plugin starts on the first use of any contribution (lazy
 |---|---|
 | `startup` | on the side that declares the trigger: the server starts and the plugin host has activated its dependencies. The host starts after `restore_snapshot`; see [Persistence and restart](/pages/reference-persistence-and-restart/) |
 | `event:<event-name>` | the first event of that name arrives |
-| `command:<id>` | the global command is invoked, for example `command:example.demo/show` |
-| `view:<id>` | that view opens |
+| `command:<plugin-id>/<local-id>` | the command with that global id is invoked, for example `command:example.demo/show` |
+| `view:<plugin-id>/<local-id>` | the view with that global id opens, for example `view:example.demo/queue` |
 | `pane-kind:<id>` | a pane of that global kind is created |
 | `scene:<id>` | that scene is selected |
 | `cli:<name>` | `ilium <name>` runs |
@@ -282,6 +286,8 @@ Without `activation`, a plugin starts on the first use of any contribution (lazy
 | `language:<id>` | a buffer of a language the plugin supplies becomes visible |
 | `client-request:<kind>` | the server side of the same plugin sends a request to its client side |
 | `durable-timer` | a durable timer of the plugin is due |
+
+A `command:` or `view:` trigger is always written with the global id, the plugin id, a slash and the local id of the entry in `contributes`, also when the entry belongs to the plugin itself. The local id is the `id` of that entry and follows its pattern (`a-z`, `0-9` and `-`). The core plugin pages and the table in [Kernel and boot](/pages/reference-kernel-and-boot/) use this one form.
 
 A lazy plugin that is not active receives no topic events. Use `startup` for a pattern subscription.
 
@@ -347,7 +353,7 @@ Settings rows do not carry a schema of their own. Each value row (`toggle`, `cho
 
 ### Signature entries
 
-`id` is 1 to 64 characters from `[a-z0-9-]`. `process_names` holds 1 to 32 non-empty names of at most 255 bytes, without `/` unless absolute. `aliases` holds at most 32 entries. `actions` holds at most 32, each with `keys` of at most 1 KiB. The global id is `<plugin-id>.<id>`.
+`id` is 1 to 64 characters from `[a-z0-9-]`. `process_names` holds 1 to 32 non-empty names of at most 255 bytes, without `/` unless absolute. `aliases` holds at most 32 entries. `actions` is a map from an action id (1 to 64 characters from `[a-z0-9-]`) to an object, with at most 32 entries; each object has `keys` of at most 1 KiB or `stages`, and an optional `allowed_when` list. A list in place of the map is refused with `manifest.schema`. The global id is `<plugin-id>.<id>`.
 
 ## Chrome and contribution keys
 
@@ -530,6 +536,7 @@ Fields added to the existing row types:
 | `number` | `style`, `steps`, `special_values`, `debounce_ms` | `style` is `stepper` (default) or `slider`. `steps` is an ascending ladder of 2 to 64 numbers. `special_values` is at most 8 `{ value, title }` pairs |
 | `text` | `reveal_last`, `debounce_ms` | `reveal_last` 0 to 8 with `secret: true` shows `••••a1b2` |
 | `text-area` | `debounce_ms` | 300 to 2,000 ms |
+| `text`, `text-area`, `path`, `list` | `setup_required` | Boolean, default `false`. An empty value keeps the plugin in `Needs setup` and not activated ([PRM-201](/pages/user-install-and-manage/#a-plugin-that-needs-setup)) |
 | `list` | `item_format`, `style`, `separator`, `reorderable`, `remote`, `item_status` | `item_format` is `glob`, `url`, `host`, `path`, `regex` or `chord`. Object items may have up to 8 primitive fields |
 | `info` | `rich` | A list of spans `{ text, tone, bold, command }`, at most 120 characters in total |
 | every value row | `visible_when`, `scope`, `applies` | `visible_when` is `{ key, equals \| in \| not }` on one own key. `scope: "project"` stores the value in the project's `.ilium/` settings. `applies: "restart"` draws the `↻` marker |
@@ -613,6 +620,7 @@ Limits are integers in the unit of their name: MiB, milliseconds or a count. The
 | `audio_captures` | 2 | 4 | 2 |
 | `http_streams` | 4 | 16 | 4 |
 | `children` | 2 | 8 | 2 |
+| `cpu_ms_per_s` | 100 | ignored | 1,000 |
 | `durable_timers` | 64 | 256 | 64 |
 | `vector_indexes` | 4 | 16 | 4 |
 | `vector_entries` | 10000 | 200000 | 50000 |

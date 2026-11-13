@@ -25,7 +25,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Authorization epoch.** A counter that the host increases each time a grant is revoked or added. A host call compares the epoch it started with against the current one. A call that is still in flight when the epoch changes returns `revoked`.
 
-**Bundle.** A folder that holds signed registry metadata and the packages of chosen plugins, copied to a machine with no network. `ilium plugin export-bundle` writes it and `install --from-bundle` reads it. See [Registry reference](/pages/reference-registry/).
+**Bundle.** A folder that holds signed registry metadata and the packages of chosen plugins, copied to a machine with no network. `ilium plugin export-bundle` writes it and `install --from-bundle` reads it. `ilium plugin bundle create` writes the same folder as one `.tar` archive and `ilium plugin bundle import` unpacks it; there is one bundle format. See [Registry reference](/pages/reference-registry/).
 
 **Capability.** A named right that a plugin requests in its manifest and the user grants. Each host import and each event is behind one. See [Capability table](/pages/reference-capabilities/).
 
@@ -217,6 +217,14 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 **Trap.** The instance aborts. The host counts one failure and restarts the side after 1 s, then 5 s, and disables it at the third failure within 10 minutes. See [Errors and limits reference](/pages/reference-errors-and-limits/).
 
+**Crash-loop guard.** The host start crash guard: three crashes of the Ilium server during start within 5 minutes make the next start use safe mode, and one start that stays up 5 minutes clears the marks. It is not a plugin rule. See [Stops after repeated failures](/pages/reference-plugin-lifecycle-states/#stops-after-repeated-failures).
+
+**Plugin restart rule.** The rule that restarts a failed plugin side after 1 s and 5 s and stops it at the third failure inside 10 minutes ([HST-400]). An essential core plugin is exempt.
+
+**24-hour failure stop.** The rule that stops a plugin side at its fifth failure within 24 hours, even when the plugin restart rule has not stopped it ([HST-950]). An essential core plugin is exempt.
+
+**Dev reload loop.** The state in which `ilium plugin dev` stops reloading a plugin that crashed on activation 3 times in 60 seconds, reported as `dev.crash-loop`, until the next source change.
+
 **ABI fault and semantic fault.** An ABI fault is a breach of the binary contract, such as a bad pointer or a malformed record, and traps the instance. A semantic fault is a valid call that the host refuses, and it returns an error code to the plugin. See [Errors and limits reference](/pages/reference-errors-and-limits/).
 
 ### Internal decision ids
@@ -229,7 +237,7 @@ These terms appear in the Plugins tab, in dialogs and in `ilium plugin list`. Ea
 
 | Term | What it means for you |
 |---|---|
-| Plugin | A small program that adds a feature to Ilium. Thirty come with Ilium. Others are installed from a `.iliumpkg` file. |
+| Plugin | A small program that adds a feature to Ilium. Thirty-two come with Ilium. Others are installed from a `.iliumpkg` file. |
 | Core plugin | A plugin that comes with Ilium and has an id that starts with `ilium.core.`. Badge `T1`. See [Core plugins for users](/pages/user-core-plugins/). |
 | Package | One `.iliumpkg` file. Ilium has no store. You get the file from the author. |
 | Permission | The plain-language name of a grant: one thing a plugin may do, such as read files in this project. You answer for each one when you install. |
@@ -522,7 +530,7 @@ Grants are listed per side. Each side has its own grant list, and the host check
 
 ## What the user sees
 
-When a plugin's first activation needs high-risk grants, the host shows one prompt per plugin. The user can allow the selected grants or refuse for now. A refusal is asked again at the next server start, at most three times.
+When a plugin's first activation needs high-risk grants, the host shows one prompt per plugin. The user can allow the selected grants or refuse for now. A refusal is asked again at the next server start; the prompt is shown three times in total ([USR-014](/pages/user-install-and-manage/)).
 
 <pre class="term"><span class="t-prompt">$</span> ilium plugin list
 <span class="t-ok">ok</span>   example.demo 0.1.0  tier T2  sides server, client

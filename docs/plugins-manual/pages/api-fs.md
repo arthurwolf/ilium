@@ -384,6 +384,7 @@ The diagram shows how a path is checked. The grant is tested first, and the esca
 | `revoked` | The grant changed during the call. The plugin is re-activated with the reduced grant set. |
 | `cancelled` | The user cancelled the picker. |
 | `busy` | The plugin already shows a picker. |
+| `io` | An operating system error other than a missing file. On Windows, a rename, replace or remove whose target another process held open for the whole 2 second host retry has a message that starts with `file-in-use:` and names the path; the previous file is intact ([Platform support](/pages/reference-platform-support/#windows-files-held-open-by-another-process)). |
 
 Other rules to know:
 

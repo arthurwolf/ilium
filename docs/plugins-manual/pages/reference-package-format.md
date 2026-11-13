@@ -112,7 +112,7 @@ The character set is deliberately ASCII. It removes Unicode normalisation (NFC a
 | `sounds/*` | Sound files. |
 | `screenshots/*` | PNG images for the store. Not loaded by the plugin. |
 | `src/**` | Sources and source maps, for review only. Never loaded. |
-| `README.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE` | Documents shown by Settings > Plugins and the store. |
+| `README.md`, `CHANGELOG.md`, `LICENSE`, `NOTICE` | Documents shown by Settings > Plugins and the store. `README.md` and `CHANGELOG.md` are drawn from a fixed Markdown subset, up to 64 KiB each, and screenshots are listed as alt text and pixel size ([PRM-202](/pages/user-plugin-store/#the-readme-the-changelog-and-the-screenshots)). |
 | `sbom.json` | The software bill of materials. See [Publishing guide](/pages/guide-publishing/). |
 | `build-info.json` | The build record. See [Publishing guide](/pages/guide-publishing/). |
 | `sbom.spdx.json`, `provenance.json` | Optional SPDX dependency and in-toto build statements, listed and hashed as ordinary files (SEC-155). Displayed without establishing trust. |

@@ -83,7 +83,7 @@ The plugin ships with Ilium as a first-party (T1) package. The server side runs 
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -131,7 +131,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "activation": [
     "event:agent-activity-changed",
     "service:compact",
-    "view:compaction.optimizer"
+    "view:ilium.core.compaction/compaction.optimizer"
   ],
   "contributes": {
     "extension_points": [
@@ -552,9 +552,7 @@ A package adds a `veto` handler. Handlers run until one refuses.
 ```json
 {
   "api": "ilium:plugin@0.1.0",
-  "exports": [
-    "hook-handler"
-  ],
+  "server": { "exports": ["hook-handler"] },
   "capabilities": { "server": ["extensions.contribute:ilium.core.compaction/before-compact"] },
   "contributes": {
     "extensions": [

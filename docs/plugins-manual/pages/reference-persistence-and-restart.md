@@ -131,6 +131,39 @@ Failure modes. A kill by `SIGKILL` cannot run any handler, so the terminal is no
 
 Test for terminal restore: spawn the real client under a PTY (`ilium-pty`), wait for the alternate screen, then force a panic and, in a second run, `SIGTERM` the client. Read the PTY output and assert that it contains the reset sequences for mouse reporting, the alternate screen and the cursor, that the terminal attributes read back from the PTY are the saved cooked-mode attributes, that one crash record exists and passes redaction, and that the server's plugin list is identical before and after.
 
+### Client suspend and resume
+
+A shell or a terminal multiplexer can stop the client with job control (`Ctrl+Z`, which sends `SIGTSTP`) and continue it later with `SIGCONT`. The user is then back at the shell prompt in the same terminal, so the terminal must be in its normal state while the client is stopped. This applies to Linux and macOS. Windows has no job-control stop; minimising a ConPTY window sends no signal and changes nothing.
+
+| Moment | What the client does |
+|---|---|
+| `SIGTSTP` arrives | It runs steps 1 to 4 of the terminal restore routine above (mouse reporting off, alternate screen left, raw mode left and attributes restored, cursor shown), and only then stops itself. It writes no crash record, and the connection to the server stays open |
+| While stopped | Nothing runs on the client. The server sees a client that does not read, so the rules of [Slow and stalled clients](/pages/reference-host-ipc/#slow-and-stalled-clients) apply: frames are coalesced, and after 30 seconds with queued data the server disconnects it with `ipc.client-too-slow` |
+| `SIGCONT` arrives | It enters raw mode, the alternate screen and the mouse modes again, reads the current terminal size, and paints the whole screen within 200 ms. If the server disconnected it meanwhile, it attaches again by itself and paints from the snapshot; the 200 ms then start when the snapshot arrives |
+| Size changes around the resume | Any number of `SIGWINCH` signals that arrive within one frame interval cause one size query and one layout, with the last size |
+
+The stopped interval is not plugin time. Client-side deadlines, timers and the failure window run on the monotonic clock (LIF-317), and the client subtracts the interval between `SIGTSTP` and `SIGCONT` from every running client-side deadline, so no plugin is reported late or counted as failed because the user suspended the client. A client timer that came due while stopped fires once after the resume.
+
+- **[PRM-311]** When the client receives `SIGTSTP` it must restore the terminal (mouse reporting off, alternate screen left, raw mode left with the saved attributes, cursor shown) before it stops, and on `SIGCONT` it must enter those modes again, read the current terminal size and repaint the whole screen within 200 ms, applying a burst of `SIGWINCH` signals as one resize. Test: run the real client under a PTY, record the screen, send `SIGTSTP`, assert the reset sequences and cooked-mode attributes, resize the PTY three times, send `SIGCONT`, and assert within 200 ms a full repaint at the last size whose content equals the recorded screen laid out for that size.
+- **[PRM-312]** The client must not report a client-side plugin deadline breach, and must not add to a plugin's failure count, for the interval in which the client was stopped, and a client that the server disconnected while it was stopped must attach again by itself on `SIGCONT`. Test: stop the client for 40 seconds while a pane prints, continue it, and assert that it shows the current screen, that no deadline breach was logged and that every plugin's failure count is unchanged.
+
+### Limits on attached clients and sessions
+
+Several clients can attach to one session, and one user can run several sessions. Both numbers have a tested limit, so that the capacity and the failure are known.
+
+| Item | Value | When it is reached |
+|---|---|---|
+| Clients attached to one session at the same time | 16 | The 17th attach is refused with `attach.client-limit`. The new client prints `This session already has 16 attached clients. Detach one and try again.` and exits with a non-zero exit code. The 16 attached clients and the server are not affected |
+| Concurrent sessions of one user | 32 supported | The limit is a tested capacity, not a refusal. Each session is its own server process and always starts. Plugin memory and threads across all sessions stay under the ceilings of [Host aggregate limits](/pages/reference-host-aggregate-limits/); a plugin whose reservation those ceilings refuse is handled as that page says, and the session itself still runs |
+| Server memory added by one attached client | At most 48 MiB | 32 MiB for the outbound queues ([PRM-301] in [Slow and stalled clients](/pages/reference-host-ipc/#slow-and-stalled-clients)) plus 16 MiB for the client host bookkeeping, outcome records and replicas |
+| Client restore bytes | 1 MiB per plugin, last writer wins (LIF-152, LIF-153) | They are stored per plugin id, not per client, so more clients do not add stored bytes |
+
+A client that detaches or is disconnected frees its slot and its queues at once. Its outcome records are kept for 30 seconds as HST-116 says and are counted in the 16 MiB of bookkeeping. A client disconnected with `ipc.client-too-slow` does not hold a slot while it is away.
+
+- **[PRM-308]** The system must accept 16 simultaneously attached clients on one session and must refuse the 17th attach with `attach.client-limit`, a message that names the limit and a non-zero exit code, without disturbing the attached clients. Test: attach 16 clients, assert that all draw, attach a 17th and assert the refusal, then detach one and assert that the next attach succeeds.
+- **[PRM-309]** The system must support 32 concurrent sessions of one user on the reference machine, each with its own server, socket and snapshot. Test: with the default aggregate ceilings start 32 sessions in 32 project folders, attach one client to each, type into one pane of each and assert that every session echoes the input and writes its own snapshot.
+- **[PRM-310]** Each additional attached client must add at most 48 MiB of server memory, and with 16 clients attached to a 100-pane session the 99th percentile time from pane output to the frame received by the first client must stay under 50 ms and within 1.5 times the value measured with that client alone. Test: measure the frame time and the server memory with 1 client and with 16 clients on a 100-pane session and compare both with the limits.
+
 ### See also
 
 - [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)

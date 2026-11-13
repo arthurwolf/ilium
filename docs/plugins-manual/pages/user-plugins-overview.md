@@ -33,7 +33,7 @@ A plugin is a small program that adds to Ilium. It can add a pane, a setting, a 
 
 Every feature that Ilium has today is also a plugin. Ilium ships and maintains 30 of them, called core plugins, and their ids start with `ilium.core.`. When you read "tree", "layout" or "Smart Copy" in the Ilium documentation, you are reading about a core plugin. You use them exactly as before.
 
-- [USR-001] The user documentation MUST state that all 30 core plugins ship with Ilium and need no install. Test: search the page for the count 30 and the phrase "ship with Ilium".
+- [USR-001] The user documentation MUST state that all 32 core plugins ship with Ilium and need no install. Test: search the page for the count 32 and the phrase "ship with Ilium".
 
 ### The plugins you already have
 
@@ -156,6 +156,6 @@ API version checked: `ilium:plugin@0.1.0`.
 
 ## Requirement statements
 
-- **[USR-001]** The user documentation MUST state that all 30 core plugins ship with Ilium and need no install.
+- **[USR-001]** The user documentation MUST state that all 32 core plugins ship with Ilium and need no install.
 - **[USR-002]** Ilium MUST NOT fetch, list, recommend or update plugins from the network on its own.
 - **[USR-003]** Ilium MUST show every grant a plugin requests before the plugin runs, and a grant the user does not give MUST stay locked.

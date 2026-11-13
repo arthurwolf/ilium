@@ -169,7 +169,7 @@ Fill the pool with three optional plugins: A with a visible view, B with a pendi
 
 Memory and thread ceilings bound what plugins use, but the count of plugins is a limit of its own: startup time, the tree mirror and the settings list all grow with it. The startup budget is set for the 40 bundled plugins only, so a larger set needs an explicit rule.
 
-- **[HST-510]** The host MUST enforce a ceiling of 256 installed plugins and 128 simultaneously active plugin sides per session server. Both values MUST be policy keys that an administrator can lower but not raise above these ceilings.
+- **[HST-510]** The host MUST enforce a ceiling of 256 installed plugins and 128 simultaneously active plugin sides per session server. Both values MUST be policy keys (`[plugins] max_installed` and `[plugins] max_active_sides`) that an administrator can lower but not raise above these ceilings.
 - **[HST-511]** When the active ceiling is reached, the host MUST refuse the next activation with the reason `host-capacity`, MUST keep every active plugin running, and MUST NOT evict an active plugin to make room. Startup activation MUST follow the admission order of the aggregate ceiling, and plugins left inactive MUST be listed by `ilium plugin status`.
 
 ### Limit changes between host releases

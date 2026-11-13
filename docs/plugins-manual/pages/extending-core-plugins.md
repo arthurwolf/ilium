@@ -390,7 +390,7 @@ A replacement carries a real cost. It must keep up with every new point of the c
 
 ### What the user keeps when a core plugin is off
 
-Extending or replacing a core plugin never removes what the user already has. When the plugin is disabled, the kernel fallback applies and the stored data stays. The table for all 30 core plugins is in [kernel and boot](/pages/reference-kernel-and-boot/). A replacement MUST provide the `surface` of the plugin it replaces, and it MUST keep the CLI commands of the replaced plugin (see [CLI compatibility](/pages/reference-cli-compatibility/)). [COR-022] [COR-040]
+Extending or replacing a core plugin never removes what the user already has. When the plugin is disabled, the kernel fallback applies and the stored data stays. The table for all 32 core plugins is in [kernel and boot](/pages/reference-kernel-and-boot/). A replacement MUST provide the `surface` of the plugin it replaces, and it MUST keep the CLI commands of the replaced plugin (see [CLI compatibility](/pages/reference-cli-compatibility/)). [COR-022] [COR-040]
 
 ### Testing and debugging
 

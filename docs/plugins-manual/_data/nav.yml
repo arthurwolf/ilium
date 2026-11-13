@@ -475,6 +475,10 @@
   url: /pages/core-plugin-text-triggers/
 - title: Progress
   url: /pages/core-plugin-progress/
+- title: Attention queue
+  url: /pages/core-plugin-attention/
+- title: Shared resources
+  url: /pages/core-plugin-resources/
 - title: Chatroom
   url: /pages/core-plugin-chatroom/
 - title: Worktrees

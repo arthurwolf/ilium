@@ -75,7 +75,7 @@ pub fn settings_pairs(cell: &str) -> Vec<(String, String)> {
     pairs
 }
 
-/// Every feature id of the table, F-001 to F-116, in order.
+/// Every feature id of the table, F-001 to F-126, in order.
 fn all_feature_ids() -> Vec<String> {
     let page = manual_page("reference-feature-traceability");
     page.lines()
@@ -88,7 +88,7 @@ fn all_feature_ids() -> Vec<String> {
 #[test]
 fn cor_001_the_table_lists_every_feature_f001_to_f116_once() {
     let ids = all_feature_ids();
-    let expected: Vec<String> = (1..=116).map(|n| format!("F-{n:03}")).collect();
+    let expected: Vec<String> = (1..=126).map(|n| format!("F-{n:03}")).collect();
     assert_eq!(ids, expected);
 }
 
@@ -140,8 +140,8 @@ fn cor_001_a_booted_plugin_build_starts_every_core_plugin_the_baseline_has_a_fea
     );
     assert_eq!(
         report.started.len(),
-        30,
-        "30 core plugins: {:?}",
+        32,
+        "32 core plugins: {:?}",
         report.started
     );
 }

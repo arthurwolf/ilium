@@ -92,7 +92,7 @@ Each wave has one named gate test and a list of what stays in the kernel while t
 | Wave | Core plugins delivered | Gate test | What stays native |
 |---|---|---|---|
 | 4a | Agent toolbar buttons, Notifications rules, Text triggers (notify and sound actions), agent signatures, tree sort keys | `wave-4a-parity`: replay the baseline agent fixtures and compare toolbar, sounds and tree order | PTY, tree model, detection loop timing, sound output device |
-| 4b | Fleet, Cost, Titles, Smart Copy, Terminal links, Worktrees, Chatroom, Progress, Recap, Voice, Scheduler, Sessions, Compaction, Settings, Keys and help, Search, Diagnostics, Agent setup, Session convert, Tree, Layout | `wave-4b-cli-and-settings`: run every example of the CLI reference and compare every settings tab with the baseline | Config store, snapshot writer, keymap, HTTP listener, recovery page |
+| 4b | Fleet, Cost, Titles, Smart Copy, Terminal links, Worktrees, Chatroom, Progress, Recap, Voice, Scheduler, Sessions, Compaction, Settings, Keys and help, Search, Diagnostics, Agent setup, Session convert, Tree, Layout, Attention queue, Shared resources | `wave-4b-cli-and-settings`: run every example of the CLI reference and compare every settings tab with the baseline | Config store, snapshot writer, keymap, HTTP listener, recovery page |
 | 4c | Inference, portable scenes, Ambient look | `wave-4c-scene-output`: each scene output equals the native scene by checksum | Look painter, dither, scene host, raster |
 | 4d | Live-data, maps, Wikipedia and image scenes | `wave-4d-scene-budget`: native output within the frame budget | Scene host, network egress policy |
 | 4e | Voxel scene | `wave-4e-saved-world`: fixture saved world renders identically | Scene host |

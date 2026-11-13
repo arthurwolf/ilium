@@ -243,7 +243,7 @@ Two logs record an inference call. Neither holds prompt or reply text ([COR-950]
 | Log | Location (Linux) | Kept | Deleted by |
 |---|---|---|---|
 | Privacy log, `inference.jsonl` | `~/.local/state/ilium/privacy/inference.jsonl` | 90 days or 16 MiB, whichever is smaller. When the cap is reached, the oldest records go first. | Settings > Privacy > Clear |
-| Plugin log, one file per plugin | `<state>/plugins/logs/<session-slug>/<id>.log` (`<state>` is `~/.local/state/ilium` on Linux) | The active file and four rotated files. The file rotates at 4 MiB, and rotated files older than 14 days are removed at server start. After an uninstall, the log is removed 7 days later. | `ilium plugin logs --clear <id>`; `--purge` or `ilium plugin erase-data` |
+| Plugin log, one file per plugin | `<state>/plugins/logs/<session-slug>/<id>.log` (`<state>` is `~/.local/state/ilium` on Linux) | The active file and four rotated files. The file rotates at 4 MiB, and rotated files older than 14 days are removed at server start and once every 24 hours. After an uninstall, the log is removed 7 days later. | `ilium plugin logs --clear <id>`; `--purge` or `ilium plugin erase-data` |
 
 - The privacy log keeps the fields listed in [SEC-265](/pages/user-plugin-security-and-privacy/#the-privacy-log): `purpose`, `provider`, `model` and token counts. Ilium does not redact these fields early. A record leaves the log only by age, by the size cap or by Clear.
 - The plugin log keeps the lines your plugin writes with `log`, plus host lines for refusals and traps. Its limit is 200 lines per second. Extra lines are dropped and counted in one `warn` summary line. Do not write prompt, reply or note text into it.

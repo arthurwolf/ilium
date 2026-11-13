@@ -115,10 +115,10 @@ This plugin asks for a lot. Say so in its description and in this table. The use
   "activation": ["startup"],
   "contributes": {
     "commands": [
-      { "id": "example.swarm/start", "title": "Start a review swarm", "side": "server" },
-      { "id": "example.swarm/cancel", "title": "Cancel the review swarm", "side": "server" }
+      { "id": "start", "title": "Start a review swarm", "side": "server" },
+      { "id": "cancel", "title": "Cancel the review swarm", "side": "server" }
     ],
-    "jobs": [{ "kind": "example.swarm/diff", "deadline_ms": 60000, "memory_mib": 128 }],
+    "jobs": [{ "kind": "diff", "deadline_ms": 60000, "memory_mib": 128 }],
     "topics": {
       "publishes": ["example.swarm/status"],
       "subscribes": ["ilium.core.worktrees/changed"]
@@ -395,7 +395,7 @@ impl Swarm {
                     json!({ "message": "Review the diff against main. List risks only.", "run": run.run }), Waiting::Service),
                 Action::CollectDiff(i) => {
                     let path = run.reviewers[i].worktree.clone().unwrap_or_default();
-                    if let Ok(id) = jobs::start_json("example.swarm/diff", &json!({ "path": path }).to_string()) {
+                    if let Ok(id) = jobs::start_json("diff", &json!({ "path": path }).to_string()) {
                         self.waiting.insert(id, Waiting::Diff(i));
                     }
                 }
@@ -462,7 +462,7 @@ function perform(actions: Action[], out: Submission[]): void {
       call('ilium.core.fleet/broadcast', { message: 'Review the diff against main. List risks only.', run: run.run }, { kind: 'service' });
     } else if (a.kind === 'collect-diff') {
       try {
-        const id = startJson('example.swarm/diff', JSON.stringify({ path: run.reviewers[a.index].worktree ?? '' }));
+        const id = startJson('diff', JSON.stringify({ path: run.reviewers[a.index].worktree ?? '' }));
         waiting.set(id, { kind: 'diff', index: a.index });
       } catch { /* the host logs it */ }
     } else if (a.kind === 'stop-pane') {

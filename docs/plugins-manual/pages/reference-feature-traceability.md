@@ -6,7 +6,7 @@ permalink: /pages/reference-feature-traceability/
 
 ## Feature traceability
 
-This page maps every user-visible Ilium feature to its owner after the move to plugins. The ids F-001 to F-111 are the feature numbers of the feature inventory (`docs/research/plugin-platform/feature-inventory.md`, features 1 to 111). F-112 to F-116 are features the inventory folds into other rows; they get their own rows so each has its own parity test. The "User doc" column names the page in `src/docs/` that describes the feature today. The "Kind" column uses the inventory classification: native-kernel, plugin-wasm, primitive-extended and plugin-js. The "Wave" column uses the phases and waves of the [roadmap](/pages/roadmap/). The COR ids point to [core parity requirements](/pages/reference-requirements-core-parity/).
+This page maps every user-visible Ilium feature to its owner after the move to plugins. The ids F-001 to F-111 are the feature numbers of the feature inventory (`docs/research/plugin-platform/feature-inventory.md`, features 1 to 111). F-112 to F-116 are features the inventory folds into other rows; they get their own rows so each has its own parity test. F-117 to F-126 are features that were added to Ilium after the inventory was written; their last column names the first requirement of the feature. The "User doc" column names the page in `src/docs/` that describes the feature today. The "Kind" column uses the inventory classification: native-kernel, plugin-wasm, primitive-extended and plugin-js. The "Wave" column uses the phases and waves of the [roadmap](/pages/roadmap/). The COR ids point to [core parity requirements](/pages/reference-requirements-core-parity/).
 
 [COR-003] Two checks run over this table. A row whose Kind is `native-kernel` names `kernel` first in its Owner cell. Every table named in the Config keys column appears in the key-by-key table of [config and data migration](/pages/reference-config-and-data-migration/). [COR-001] Every feature in this table MUST keep working with the same behaviour when its owner plugin is enabled. [COR-002] Every row MUST have one primary owner, the first one named in its Owner cell; later names are supporting owners. A feature that two pages claim is listed once, under "Resolved duplicates".
 
@@ -60,7 +60,7 @@ Related pages: [kernel and boot](/pages/reference-kernel-and-boot/), [config and
 | F-027 | Activity classification | `agent-monitoring` | primitive-extended | agent-detect plugin | server | detect.classify | [detection] | none | 4a | COR-011 |
 | F-028 | Pane status signals | `agent-monitoring` | primitive-extended | agent-detect plugin | both | agent.read | none | none | 4b | COR-011 |
 | F-029 | Goal state tracking | `agent-monitoring` | primitive-extended | agent-detect plugin | both | agent.read | none | none | 4b | COR-011 |
-| F-030 | Display modes (Normal, Attention, Custom) and custom signatures | `agent-monitoring` | primitive-extended | agent-detect plugin (Normal, Attention); Custom status rules are client-owned | both | detect.signature | [ui] agent_monitoring_mode; [detection] custom_signatures | none | 4a | COR-011 |
+| F-030 | Display modes (Normal, Attention, Custom) and custom signatures | `agent-monitoring` | primitive-extended | agent-detect plugin (Normal, Attention; the Custom status rules of F-119 are client-owned and run on its client side) | both | detect.signature | [ui] agent_monitoring_mode; [detection] custom_signatures | none | 4a | COR-011 |
 | F-031 | Session stats and popover | `agent-cost` | plugin-wasm | cost plugin | both | agent.read, ui.panels | [cost] | stats store | 4b | COR-011 |
 | F-032 | Agent debug history | `agent-monitoring` | primitive-extended | diagnostics plugin | both | agent.read | [ui] agent_debug_menu_enabled | debug history | 4b | COR-011 |
 | F-033 | Last-prompt banner | `agent-monitoring` | primitive-extended | agent-toolbar plugin | both | agent.transcript, ui.chrome | [ui] last_prompt_enabled, last_prompt_max_lines | none | 4b | COR-011 |
@@ -177,6 +177,16 @@ Related pages: [kernel and boot](/pages/reference-kernel-and-boot/), [config and
 | F-114 | Create agent from editor line | `editors-and-boards` | plugin-wasm | editor plugin | client | ui.menus, panes.create | none | none | 7 | COR-011 |
 | F-115 | Compaction optimiser (Optimization tab) | `settings` | plugin-wasm | compaction plugin | server | settings.write-kernel:optimization | none | none | 4b | COR-011 |
 | F-116 | Reset forecasts and Reset planning tab | `inference-and-privacy` | plugin-wasm | cost plugin | server | settings.write-kernel:reset-planning | [reset_planning] | none | 4b | COR-011 |
+| F-117 | Attention queue: Next: needs you button, panel, overview and briefing box | `attention-queue` | plugin-wasm | attention plugin | both | agent.read, terminal.read-screen, inference, ui.panels, ui.chrome | [attention] | attention queue file | 4b | PRM-401 |
+| F-118 | Shared resource queues (`ilium resource`) | `resource-queues` | plugin-wasm | resources plugin | both | cli.contribute, tree.decorate, agent.read | [ui] resource_queue_grouping | resource catalogue, reservations, `.ilium/resource-project-id` | 4b | PRM-451 |
+| F-119 | Custom status icons (display mode Custom) | `custom-status-icons` | plugin-wasm | agent-detect plugin | both | agent.read, tree.decorate | [ui] agent_monitoring_mode | custom status rules | 4b | PRM-501 |
+| F-120 | ilium close-pane | `cli-reference` | plugin-wasm | fleet plugin; worktrees plugin removes the worktree | CLI | cli.contribute, panes.signal | none | none | 4b | PRM-503 |
+| F-121 | ilium ctl (remote control) | `cli-reference` | plugin-wasm | fleet plugin | CLI | cli.contribute, tree.read, tree.write | none | none | 4b | PRM-505 |
+| F-122 | Icon picker and icon search | `settings` | plugin-wasm | settings plugin | client | ui.panels | none | none | 4b | PRM-507 |
+| F-123 | Location picker and address lookup | `animations-maps-space-and-live-data` | plugin-wasm | scenes plugin | client | ui.panels, location.geocode | none | none | 4b | PRM-509 |
+| F-124 | Provider proxy database | `inference-and-privacy` | plugin-wasm | inference plugin | client | inference | none | none | 4b | PRM-511 |
+| F-125 | Worktree custody, ownership, pruning and setup command | `worktrees` | plugin-wasm | worktrees plugin | server | process.run:git, fs | none | custody tokens, ownership marker in the Git metadata | 4b | PRM-513 |
+| F-126 | Cache-wait observation and cache refresh requests | `agent-cost` | plugin-wasm | cost plugin | server | agent.read, inference | none | none | 4b | PRM-516 |
 
 ### Resolved duplicates
 
@@ -192,7 +202,8 @@ Five features were claimed by two core-plugin pages. Each now has one owner. The
 
 ### Reconciliation with the feature inventory
 
-- The inventory has 111 features. This table has 116 rows: the 111 inventory features plus F-112 to F-116, which the inventory folds into other features. No feature is dropped.
+- The inventory has 111 features. This table has 126 rows: the 111 inventory features, F-112 to F-116, which the inventory folds into other features, and F-117 to F-126, which are newer than the inventory. No feature is dropped.
+- The hidden release probes, the commands that check the embedding model and the animation engines of a release build, are part of F-111 and stay in the kernel (see [kernel and boot](/pages/reference-kernel-and-boot/)).
 - Feature 108 (`ilium wait`) is native-kernel in the inventory. The manual makes it an alias of `ilium progress wait`, so the progress plugin owns it and the Kind is `plugin-wasm`. The kernel keeps no `wait` command.
 - Features 19, 20, 21, 24 and 25 (editors and boards) are native-kernel in the inventory. They become plugins in phase 7, so the table names the editor and kanban plugins as the final owners and gives rows owned only by a plugin (F-020, F-021, F-025, F-107) the Kind `plugin-wasm` (see [roadmap](/pages/roadmap/)).
 - Features 93 and 94 (shared look, dithering and display) stay in the kernel painter. The [ambient look](/pages/core-plugin-ambient/) plugin owns only the controls.
@@ -202,7 +213,7 @@ Five features were claimed by two core-plugin pages. Each now has one owner. The
 
 ## Requirement statements
 
-- **[COR-001]** Every feature F-001 to F-116 MUST behave as in the baseline when its owner is enabled.
+- **[COR-001]** Every feature F-001 to F-126 MUST behave as in the baseline when its owner is enabled.
 - **[COR-002]** Every feature MUST have one primary owner, the first one named in its Owner cell.
 - **[COR-003]** A row of the traceability table with Kind `native-kernel` MUST name `kernel` first in its Owner cell, and every config table named in its Config keys column MUST appear in the key-by-key table of the migration page.
 - **[COR-011]** Every plugin-owned feature MUST keep its settings, keys, CLI output, data files and defaults.

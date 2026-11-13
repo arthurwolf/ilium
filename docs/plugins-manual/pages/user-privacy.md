@@ -131,7 +131,7 @@ Each kind of plugin data that Ilium keeps is listed here with its default retent
 | Spend per day: one key `day/<day>` per day in project storage (see [Cost](/pages/core-plugin-cost/)) | The project's `.ilium` folder | Until deleted. The Cost page gives no pruning rule (owner to confirm) | `--purge` while the project is open, or delete the plugin's files in the `.ilium` folder. See [Delete a plugin's data](#delete-a-plugins-data) |
 
 The search index, and the recap of a shell pane, are made from text on a terminal screen, and a screen can show a token or a typed password. The search index does not filter secrets before it embeds them, as [Workspace search](/pages/core-plugin-search/#index-contents-redaction-and-retention) explains, so treat that index as holding screen text. A default uninstall keeps the search index and the recap text on disk, inert, until `--purge` or `erase-data` removes them. The Cost day totals hold spend figures, not screen text.
-| Plugin logs | The active file and 4 rotated files. Rotated files are deleted after 14 days at server start. After an uninstall, logs are deleted 7 days later | `--purge` deletes them at once, and `erase-data` deletes them ([USR-246]) |
+| Plugin logs | The active file and 4 rotated files. Rotated files older than 14 days are deleted at server start and once every 24 hours. After an uninstall, logs are deleted 7 days later | `--purge` deletes them at once, and `erase-data` deletes them ([USR-246]) |
 | Crash records | 30 days and at most 200 records ([USR-236]; both values are proposed, owner to confirm, see [SEC-955](/pages/reference-audit-log/)) | `ilium plugin uninstall <id>`, with or without `--purge`, deletes all crash records of that plugin. `erase-data` deletes them ([USR-326]) |
 | Pre-migration backups | Only the newest one per plugin, kept after each committed update ([USR-237]) | `--purge` deletes all of them. An uninstall without `--purge` keeps them ([USR-238]). `erase-data` removes them ([USR-326]) |
 | Audit log | `audit.keep_days`, default 365 days ([SEC-224]) | `erase-data` does not delete it before the period ends. Erasure names the kept records ([USR-248]) |
@@ -236,7 +236,7 @@ Core plugins are made by the Ilium project and follow the same permission rules 
 | You revoke a network grant during a request | The request completes as `failed(revoked)` |
 | The audit log | Always on. Install, update, grant, consent, trust and block events are recorded. Plugin data and settings values are not. See [Audit log](/pages/reference-audit-log/) |
 | You share a project folder | Plugin settings and project storage in `.ilium` go with it. Permissions do not |
-| A plugin writes a secret to its log | Ilium cannot detect it. The log rotates at 4 MiB, keeps four rotated files, deletes rotated files older than 14 days at server start, and the logs of an uninstalled plugin are deleted 7 days after uninstall; `--purge` deletes them at once |
+| A plugin writes a secret to its log | Ilium cannot detect it. The log rotates at 4 MiB, keeps four rotated files, deletes rotated files older than 14 days at server start and once every 24 hours, and the logs of an uninstalled plugin are deleted 7 days after uninstall; `--purge` deletes them at once |
 
 ### Who is responsible for your data
 

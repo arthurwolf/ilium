@@ -116,18 +116,12 @@ The contract version is 0.1. The plugin declares two extension points, provides 
       "argument_groups": ["pane-selector"]
     }],
     "jobs": [{ "kind": "recap-pane", "deadline_ms": 5000, "memory_mib": 64 }],
-    "client_requests": [{ "kind": "onboarding-state" }],
+    "client_requests": [{ "id": "onboarding-state" }],
     "help": [{ "id": "recap-privacy", "file": "help/recap-privacy.md", "title": "What a recap sends" }],
     "services": {
-      "ilium.core.recap/recap": {
-        "get": {
-          "params": { "type": "object", "required": ["panes"],
-            "properties": { "panes": { "type": "array", "items": { "type": "integer" } },
-                            "length": { "type": "string", "enum": ["short", "long", "both"] } } },
-          "result": { "type": "object", "properties": { "recaps": { "type": "array" } },
-            "required": ["recaps"] }
-        }
-      }
+      "provides": [
+        { "name": "ilium.core.recap/recap", "version": "0.1.0", "schema": "schemas/recap.json" }
+      ]
     },
     "extension_points": [
       { "id": "fact-sources", "kind": "collect", "title": "Fact sources",
@@ -148,7 +142,7 @@ The contract version is 0.1. The plugin declares two extension points, provides 
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -192,7 +186,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "activation": [
     "cli:recap",
-    "command:recap"
+    "command:ilium.core.recap/recap"
   ],
   "replaceable": true,
   "surface": [
@@ -221,7 +215,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "client_requests": [
       {
-        "kind": "onboarding-state"
+        "id": "onboarding-state"
       }
     ],
     "help": [
@@ -232,43 +226,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       }
     ],
     "services": {
-      "ilium.core.recap/recap": {
-        "get": {
-          "params": {
-            "type": "object",
-            "required": [
-              "panes"
-            ],
-            "properties": {
-              "panes": {
-                "type": "array",
-                "items": {
-                  "type": "integer"
-                }
-              },
-              "length": {
-                "type": "string",
-                "enum": [
-                  "short",
-                  "long",
-                  "both"
-                ]
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "recaps": {
-                "type": "array"
-              }
-            },
-            "required": [
-              "recaps"
-            ]
-          }
-        }
-      }
+      "provides": [
+        { "name": "ilium.core.recap/recap", "version": "0.1.0", "schema": "schemas/recap.json" }
+      ]
     },
     "extension_points": [
       {

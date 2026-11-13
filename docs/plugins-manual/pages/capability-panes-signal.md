@@ -110,7 +110,7 @@ Edge cases to handle in code:
 
 - **H grant.** The user must check it. It is never granted by default.
 - **T2 and T3 packages.** The install review dialog lists it as a HIGH row, unchecked. The plugin installs with the rows the user leaves checked.
-- **T1 bundled plugins.** The plugin activates first without the grant. On first activation the user sees one prompt, `Plugin <name> asks for: <list>`. The prompt has a checkbox per H capability and the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start, at most three times, and then never again. Settings > Plugins can grant it at any time.
+- **T1 bundled plugins.** The plugin activates first without the grant. On first activation the user sees one prompt, `Plugin <name> asks for: <list>`. The prompt has a checkbox per H capability and the buttons `Allow selected` and `Not now`. `Not now` asks again at the next server start. The prompt is shown three times in total; after the third `Not now` it never appears again ([USR-014](/pages/user-install-and-manage/)). Settings > Plugins can grant it at any time.
 - **No prompt per call.** A granted `panes.signal` stays in force until it is revoked.
 
 ## What the user sees
@@ -135,7 +135,7 @@ Edge cases to handle in code:
 <pre class="term"><span class="t-hi">╭─ Plugin demo-signal asks for ────────────────────────────────────────────╮</span>
 │ [ ] HIGH  panes.signal   Interrupt or stop programs in panes             │
 │                                                                          │
-│ Not now asks again at the next server start, up to three times.          │
+│ Not now asks again at the next server start; 3 prompts in all.           │
 │                 [ Allow selected ]   [ Not now ]                         │
 ╰──────────────────────────────────────────────────────────────────────────╯
 </pre>

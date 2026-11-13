@@ -183,7 +183,7 @@ Every line whose code starts with `host.` is also written to `<state>/host/host.
 
 - **[HST-614]** The histogram buckets MUST use a monotonic clock, MUST count a call in exactly one bucket, and the sum of bucket counts MUST equal the `calls` counter for the same window; a clock step backwards MUST NOT produce a negative duration (clamp to 0).
 
-- **[HST-636]** The diagnostics bundle `ilium plugin diagnostics --out <file>` MUST contain per plugin health, metrics, last 500 log lines, effective limits, manifest and grants, MUST apply redaction (HST-608), MUST NOT contain plugin data directories, and MUST complete within 10 seconds for 64 plugins.
+- **[HST-636]** The diagnostics bundle of the whole install MUST be written by `ilium plugin support-bundle --all --out <file>` ([USR-104](/pages/core-plugin-diagnostics/#the-three-bundle-commands)); `ilium plugin diagnostics --out <file>` MUST NOT exist. The bundle MUST contain per plugin health in `health/<id>.txt`, the host counters, the last 2,000 host log lines and the inventory with granted permissions. It MUST apply redaction (HST-608), MUST NOT contain a manifest or plugin data directories, and MUST complete within 10 seconds for 64 plugins.
 
 - **[HST-638]** A plugin MUST be able to emit a custom counter with `host::telemetry::count(name, delta)` limited to 16 distinct names (proposed, owner to confirm) per plugin side, names matching `^[a-z][a-z0-9_]{0,31}$`, and a 17th name MUST fail with `quota-exceeded`; custom counters MUST appear under the `plugin.` prefix in stats.
 

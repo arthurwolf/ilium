@@ -73,7 +73,7 @@ At install the host evaluates the policy at the policy step (step 7 of the 11 st
 Grants are not checked at install. A user can make the result stricter with their own declines, never looser. Core plugins ignore every `packages`, `plugins` and `publishers` key, because they ship with Ilium. They do respect `grants.deny` for third-party callers only.
 
 - [USR-217] The host MUST check the policy keys in the order above and report the first failing key as the detail code. Test: write a policy that fails four keys at once and assert the detail code is the first in the order.
-- [USR-218] The policy MUST NOT stop a core plugin or a bundled T1 plugin from running. Test: set `packages.allow_third_party = false` and `packages.allowed_tiers = []`; assert all 30 core plugins still start.
+- [USR-218] The policy MUST NOT stop a core plugin or a bundled T1 plugin from running. Test: set `packages.allow_third_party = false` and `packages.allowed_tiers = []`; assert all 32 core plugins still start.
 
 ### What the user sees
 

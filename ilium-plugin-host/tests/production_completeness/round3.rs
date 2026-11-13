@@ -206,8 +206,8 @@ fn pry_029_host_behaviour_when_the_syslog_collector_is_unreachable() {
 /// REQ: PRY-030
 #[test]
 fn pry_030_recall_propagation_deadline_and_operator_acknowledgement() {
-    // Observable: Publish a recall for an installed version on the fake registry and assert that within 15 minutes the version is disabled, the audit log holds `recall.applied` with id and version, and `ilium plugin list --json` shows `recalled: true`.
-    panic!("PRY-030 not implemented: A host that is online MUST fetch a recall notice and disable the recalled version within 15 minutes of its publication, record audit event `recall.applied` with the plugin id and version, and `ilium plugin list --json` MUST show `recalled: true` for that version.");
+    // Observable: Publish a recall for an installed version on the fake registry and assert that within 15 minutes the version is disabled, the audit log holds `recall-applied` with id and version, and `ilium plugin list --json` shows `recalled: true`.
+    panic!("PRY-030 not implemented: A host that is online MUST fetch a recall notice and disable the recalled version within 15 minutes of its publication, record audit event `recall-applied` with the plugin id and version, and `ilium plugin list --json` MUST show `recalled: true` for that version.");
 }
 
 /// REQ: PRY-031

@@ -16,7 +16,7 @@ struct BundledArtifact {
     cwasm: &'static [u8],
 }
 
-// Release generation must replace this with 30 actual built artifacts. An empty
+// Release generation must replace this with 32 actual built artifacts. An empty
 // catalogue is honest and fail-closed; manufacturing placeholder cwasm is unsafe.
 const BUNDLED: &[BundledArtifact] = &[];
 

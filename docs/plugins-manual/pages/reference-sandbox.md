@@ -316,7 +316,7 @@ Contract: `ilium:plugin@0.1.0`.
 
 **[SEC-710]** A guest that exhausts its fuel or epoch budget N consecutive times (default 3 within 60 s) (proposed, owner to confirm) MUST be disabled with notice `Plugin stopped: repeated limit hits`, an audit line `limit-disable`, and MUST NOT be restarted automatically until the user re-enables it.
 
-**[SEC-711]** Timers and clocks exposed to guests MUST be coarsened to 100 microseconds (proposed, owner to confirm) for T3 plugins without the `high-resolution-time` grant, and the host MUST NOT expose a shared-memory counter or SharedArrayBuffer-like primitive to any guest.
+**[SEC-711]** Timers and clocks exposed to guests MUST be coarsened to 1 ms for every tier as [SEC-370](/pages/reference-threat-model/) states, no grant MUST give a finer clock, and the host MUST NOT expose a shared-memory counter or SharedArrayBuffer-like primitive to any guest.
 
 **[SEC-712]** On kernels that support it (Linux 5.13 or later (proposed, owner to confirm)) the helper MUST additionally apply a Landlock ruleset equal to its mount view, and a Landlock failure MUST be audited as `sandbox-degraded` but MUST NOT by itself prevent loading when namespaces and seccomp succeeded.
 

@@ -3511,6 +3511,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ilium-plugin-core-attention"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
 name = "ilium-plugin-core-chatroom"
 version = "0.1.1"
 dependencies = [
@@ -3620,6 +3629,15 @@ dependencies = [
 
 [[package]]
 name = "ilium-plugin-core-recap"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-resources"
 version = "0.1.1"
 dependencies = [
  "ilium-plugin-sdk",

@@ -159,7 +159,7 @@ The manifest declares the panel, a command that opens it, and the `views` export
 
 ```json
 {
-  "id": "example-plugin",
+  "id": "example.plugin",
   "client": { "entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": ["views"] },
   "capabilities": { "client": ["ui.panels"] },
   "contributes": {
@@ -172,7 +172,7 @@ The manifest declares the panel, a command that opens it, and the `views` export
 }
 ```
 
-The command id is `example-plugin/open-run-log`, because the local id gets the plugin id as prefix.
+The command id is `example.plugin/open-run-log`, because the local id gets the plugin id as prefix.
 
 **Rust**
 
@@ -196,7 +196,7 @@ impl Handler for RunLog {
         for event in batch {
             match event {
                 Event::CommandInvoked(command)
-                    if command.command == "example-plugin/open-run-log" =>
+                    if command.command == "example.plugin/open-run-log" =>
                 {
                     if ui::open_panel("run-log").is_err() {
                         log::log(Level::Warn, "the run log panel could not be opened");

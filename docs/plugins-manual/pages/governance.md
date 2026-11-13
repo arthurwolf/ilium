@@ -19,7 +19,7 @@ Everything the Ilium repository ships is under one licence, the MIT licence, SPD
 | Part | Licence (SPDX) | Where the text lives |
 |---|---|---|
 | Ilium host, the `ilium` command, `ilium-server` and `ilium-client` binaries | `MIT` | `LICENSE` at the repository root |
-| The 30 core plugins under `plugins/core` | `MIT` | the same `LICENSE`; each core manifest carries `license = "MIT"` |
+| The 32 core plugins under `plugins/core` | `MIT` | the same `LICENSE`; each core manifest carries `license = "MIT"` |
 | Rust `ilium-plugin-sdk` crate (with `ilium-plugin-sdk-core` and `ilium-plugin-sdk-macros`) | `MIT` | the same `LICENSE`; the crate metadata inherits it |
 | `@ilium/plugin-sdk` package | `MIT` | `LICENSE` inside the published package; its `package.json` declares the same SPDX id |
 | WIT contract files under `wit/` | `MIT` | the same `LICENSE`; the files are generated from [reference-wit](/pages/reference-wit/) |
@@ -123,7 +123,7 @@ The seller answers refunds, disputes and support for a paid plugin. The registry
 
 ### What the buyer sees
 
-The plugin page shows `Requires a licence key` when the manifest declares a key check, and it shows the seller's contact. The install dialog is not yet specified for end-user terms: the project has not decided whether it shows the terms text or only a link to it. Until it decides, the buyer reads the terms file named in the README before installing.
+The plugin page shows `Requires a licence key` when the manifest declares a key check, and it shows the seller's contact. The install and update review dialogs show the SPDX licence expression of the package, or `No licence declared`, and an update that changes the expression shows `Licence changed: <old> to <new>` and always asks for review ([PRM-206](/pages/user-install-and-manage/#review-the-permissions)). The dialogs do not show the terms text. The buyer reads the `LICENSE` file or the terms file named in the README ([PUB-070]) on the plugin's detail page before installing.
 
 ### Edge cases
 

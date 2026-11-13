@@ -27,7 +27,7 @@ Nothing runs after a restart until the host activates the plugin again. The host
 - A plugin side that was stopped by failure stays stopped. The server side is stored in `installed.json` as `failure_stopped`, so it survives a server restart. A client or scene side is held only in memory and is dropped when its client detaches. See [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/).
 - A restart timer that was scheduled is cancelled when the server stops. It is not carried over to the next start. See [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/).
 - The failure metrics reset when the server restarts. See [Health and watchdog](/pages/reference-health-and-watchdog/).
-- **[LIF-198]** At the first start after the host version changes, the host MUST write one audit record `host.upgraded` with the previous and new host versions, the previous and new API windows, and the ids of every plugin whose state became `Incompatible`, before any plugin activates. (proposed, owner to confirm)
+- **[LIF-198]** At the first start after the host version changes, the host MUST write one audit record `host-upgraded` with the previous and new host versions, the previous and new API windows, and the ids of every plugin whose state became `Incompatible`, before any plugin activates. (proposed, owner to confirm)
 
 ### Deactivate reason and timeout
 

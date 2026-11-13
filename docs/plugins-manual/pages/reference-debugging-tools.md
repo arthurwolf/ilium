@@ -67,7 +67,7 @@ Logs live at `<state>/plugins/logs/<session-slug>/<plugin-id>.log`, with rotated
 | `uninstall --purge` | Deletes the logs at once |
 | Permissions | Owner only |
 
-- **[DEV-660]** When the active file reaches 4 MiB, the host MUST rename `.log.3` to `.log.4`, `.log.2` to `.log.3`, `.log.1` to `.log.2`, the active file to `.log.1`, and start a new file. The oldest file is deleted. At server start the host also deletes rotated files older than 14 days (USR-204).
+- **[DEV-660]** When the active file reaches 4 MiB, the host MUST rename `.log.3` to `.log.4`, `.log.2` to `.log.3`, `.log.1` to `.log.2`, the active file to `.log.1`, and start a new file. The oldest file is deleted. At server start and once every 24 hours the host also deletes rotated files older than 14 days (USR-204).
 - **[DEV-661]** The host MUST delete the logs of an uninstalled plugin 7 days after the uninstall, unless the plugin is installed again.
 - **[DEV-662]** `ilium plugin logs` MUST read the files oldest first across rotation, so the output is in time order.
 - **[DEV-663]** The log folder MUST be created with owner-only access.

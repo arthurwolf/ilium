@@ -61,6 +61,7 @@ Any keyword outside this table fails the install with `manifest.schema-keyword`.
 | `items`, `maxItems` | Array of one primitive type, or of objects of up to eight primitive fields, for `list` rows. |
 | `x-visible-when`, `x-scope`, `x-applies` | Annotations from `visible_when`, `scope: "project"` and `applies: "restart"`. They hide the row, store its value per project, and draw `↻`. |
 | `x-steps`, `x-special-values` | Annotations from `steps` and `special_values` of a number row. |
+| `setup_required` | The plugin cannot work until this text, path or list field has a value. While it is empty the plugin shows `Needs setup` and is not activated ([PRM-201](/pages/user-install-and-manage/#a-plugin-that-needs-setup)). |
 
 A settings tab for the example plugin looks like this:
 

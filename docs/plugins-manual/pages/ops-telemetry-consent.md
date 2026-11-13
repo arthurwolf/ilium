@@ -55,13 +55,12 @@ The telemetry line of `ilium plugin grants` and the `--plugin` filter of `ilium 
 ### Edge cases
 
 - **The user has declined and the plugin keeps sending.** That is a plugin fault. Disable the plugin ([plugin disable](/pages/reference-plugin-cli/)) and report it through [Security response](/pages/reference-security-response/).
-- **The policy blocks telemetry and the user has granted it.** The policy wins. The state stays `granted` in the user's store, and the host sends nothing (OPS-106).
+- **The policy blocks telemetry and the user has granted it.** The policy key is `[telemetry] plugin_telemetry = false` ([Admin policy](/pages/reference-admin-policy/#schema)). The policy wins. The state stays `granted` in the user's store, and the host sends nothing (OPS-106).
 - **The audit file is damaged.** The consent state is still read from the consent store. The damaged-record rule of [SEC-956](/pages/reference-audit-log/) applies to the history.
 
 ### Decisions for the owner to confirm
 
 - Whether the three states of OPS-102 are shown to the user as `not asked`, `granted` and `declined`, or as on and off.
-- Whether a policy key to block all plugin telemetry is added, and its name. Until then, SEC-457 (disable all third-party plugins) is the only control.
 - Whether `ilium plugin audit --plugin <id>` is the command an operator uses to read the consent history, or whether a dedicated command is added.
 
 ### See also

@@ -24,11 +24,11 @@ The output does not include values from the user file that are not stricter than
 
 The `policy_sha256` value is the SHA-256 hash of the system policy file bytes, as the server read them at start. Compute it with `sha256sum` on the system policy file, for example `/etc/ilium/policy.toml` on Linux, right after the server starts. The value must match the `policy_sha256` field from the status command.
 
-The same hash appears in the audit log. The `after` field of the latest `policy-reloaded` audit record holds this value. Auditors can therefore tie a running server to the exact bytes of the file that it loaded. The audit record format is described in [Audit log](/pages/reference-audit-log/).
+The same hash appears in the audit log. The `after` field of the latest `policy-reloaded` audit record holds this value; the record is written at each start that loads a changed file, and at the first load ([OPS-232](/pages/reference-admin-policy/#stopping-a-blocked-plugin-now)). Auditors can therefore tie a running server to the exact bytes of the file that it loaded. The audit record format is described in [Audit log](/pages/reference-audit-log/).
 
 ## Drift detection
 
-Drift means that the file on disk no longer matches the policy that the server loaded. This happens when an administrator edits the file but has not yet restarted the server or reloaded the policy.
+Drift means that the file on disk no longer matches the policy that the server loaded. This happens when an administrator edits the file but has not yet restarted the server. The policy is read at server start only ([SEC-188](/pages/reference-admin-policy/)).
 
 To detect drift, append a comment line to the system policy file while the server runs, then run the status command. The JSON must then show `pending_restart: true`, and the command must exit with code 4. Drift is detected by comparing the hash of the file on disk with the loaded hash. Any difference, even one comment line, counts as drift.
 
@@ -44,7 +44,7 @@ When the system policy file is ignored, the status command reports the problem i
 
 To test this case, make the system policy file world-writable and start the server. The status command must print `policy: "ignored"` with a `reason` that names the permission problem, and it must exit with code 3. Fix the file mode, restart the server and run the command again to confirm that the policy is loaded.
 
-Drift and ignored policy need different responses. Drift with exit code 4 means that the administrator should restart the server or reload the policy so that the loaded policy matches the file. An ignored policy with exit code 3 means that the server does not enforce the system file at all, so the file ownership and mode must be corrected first.
+Drift and ignored policy need different responses. Drift with exit code 4 means that the administrator should restart the server so that the loaded policy matches the file. An ignored policy with exit code 3 means that the server does not enforce the system file at all, so the file ownership and mode must be corrected first.
 
 ## Requirements
 

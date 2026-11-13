@@ -267,9 +267,9 @@ When the user chooses the server, as with an Overpass or tile mirror, the manife
 
 ```json
 {
-  "contributes": { "settings": { "sections": [ { "id": "feed", "rows": [
-    { "key": "feed_host", "type": "text", "label": "Feed server", "item_format": "host", "default": "feed.example.com" }
-  ] } ] } },
+  "contributes": { "settings": [ { "kind": "tab", "id": "feed", "title": "Feed", "sections": [ { "id": "server", "rows": [
+    { "type": "text", "key": "feed_host", "title": "Feed server", "item_format": "host", "default": "feed.example.com" }
+  ] } ] } ] },
   "capabilities": { "client": ["http:setting:feed_host"] }
 }
 ```

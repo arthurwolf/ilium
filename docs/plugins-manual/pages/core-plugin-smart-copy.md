@@ -72,7 +72,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -107,7 +107,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "command:smart-copy"
+    "command:ilium.core.smart-copy/smart-copy"
   ],
   "contributes": {
     "context_menu": [
@@ -484,9 +484,7 @@ A package adds a `transform` handler. Each handler gets the previous output and 
 ```json
 {
   "api": "ilium:plugin@0.1.0",
-  "exports": [
-    "hook-handler"
-  ],
+  "server": { "exports": ["hook-handler"] },
   "capabilities": { "server": ["extensions.contribute:ilium.core.smart-copy/after-copy"] },
   "contributes": {
     "extensions": [

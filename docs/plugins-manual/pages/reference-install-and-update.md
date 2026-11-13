@@ -145,7 +145,21 @@ An update is an install of a higher version of an installed id.
 | [PKG-304] | A notice lists the plugin, the old and new version, the new grants and the link to the changelog. The user can **Update**, **Later** (which hides the notice for that version for 7 days) or **Skip this version**. |
 | [PKG-305] | Auto-update is a policy item. An administrator can set `off` and lock it. |
 
+An update whose manifest `license` differs from the installed version is treated like an update that adds grants under [PKG-302]: auto-install does not install it, shows the notice with the line `Licence changed: <old> to <new>` and waits for the review ([PRM-206](/pages/user-install-and-manage/#review-the-permissions)).
+
 - **[PKG-099]** For an id listed in `packages.pinned_versions` ([SEC-952]), an auto-update check MUST NOT show a notice for, download or install any version other than the pinned one, and the plugin's row on the Plugins screen MUST read `Pinned by your administrator` with the pinned version (proposed, owner to confirm).
+
+### Holding back new versions
+
+An administrator who runs `auto_update = install` on many machines can make every machine wait before it takes a new version, so a bad release is seen on a few machines, or withdrawn, before it reaches all of them. The policy key is `packages.auto_update_min_age_hours` ([Admin policy](/pages/reference-admin-policy/#schema)), an integer from 0 to 720 with the default 0, which means no wait.
+
+- **What is held.** While the key is above 0, an auto-update check does not download or install a version whose `published` time in the signed registry entry is younger than the value. A version with no `published` time is held as long as the key is above 0. The age is measured against the machine clock in UTC.
+- **What is not held.** A version named in the `fixed` field of an advisory that affects the installed version ([Publisher security advisories](/pages/reference-registry/#publisher-security-advisories-for-a-plugin-version)) is installed at the next check, whatever its age, when [PKG-302] allows an automatic install. An update that the user starts by hand (`ilium plugin update <id>`, the **Update** button) is not held. Use `packages.pinned_versions` ([PKG-099]) to forbid a version outright.
+- **What the user sees.** The update notice of [PKG-304] and the Plugins row add the line `Held back until YYYY-MM-DD HH:mm:ss`, in local time. `ilium plugin list --json` carries the same moment in the field `held_until`, as `YYYY-MM-DD HH:mm:ss` in UTC, and `null` when no version is held.
+- **Audit.** The first check that holds a version writes one `update-held` audit record with the plugin id, the held version and the `held_until` time. Later checks of the same version on the same machine write nothing more.
+- **After the wait.** The first check after `held_until` treats the version as any other update. A version that was yanked in the meantime is never installed ([PKG-533](/pages/user-plugin-store/)).
+
+The requirement is PRM-205, at the end of this page.
 
 ## Update of plugins installed from a file or a URL
 
@@ -218,7 +232,7 @@ The result line has `action` `installed` for the successor and a second line wit
 | `install.not-installed` | The id is not installed |
 | `install.no-previous` | There is no earlier version for a rollback |
 | `install.bundled` | The target is a bundled plugin |
-| `install.cancelled` | The user closed the review dialog |
+| `install.cancelled` | The user closed the review dialog, or cancelled the install or update in the client before the commit step ([PRM-204](/pages/user-install-and-manage/#install-from-a-file)) |
 | `package.downgrade` | A lower version without `--allow-downgrade` |
 | `package.version-reused` | The same version with a different hash |
 | `package.platform-unsupported` | T2 or T3 on a platform with no sandbox |
@@ -248,7 +262,7 @@ If the power fails after progress step 6, `installed.json` says 1.3.0 and `store
 
 ## What the user sees
 
-The user sees a progress line per step, the review dialog and the result. After an update the plugin shows **restart pending** in Settings > Plugins if the old version is still running. See [Finding and installing plugins](/pages/user-plugin-store/).
+The user sees a progress line per step, the review dialog and the result. In the client the progress line has a **Cancel** action (`Esc`) in every step before step 6, Commit; a cancel leaves `installed.json`, `store/` and `staging/` as they were before the start ([PRM-204](/pages/user-install-and-manage/#install-from-a-file)). After an update the plugin shows **restart pending** in Settings > Plugins if the old version is still running. A plugin whose health is `failed` or `restarting` shows `Version X.Y.Z is available. Update?` when the cached registry data lists a newer version that policy allows ([PRM-208](/pages/user-plugin-health/#when-a-fix-is-available)). See [Finding and installing plugins](/pages/user-plugin-store/).
 
 ## Package size limit requirements
 
@@ -331,3 +345,7 @@ The user sees a progress line per step, the review dialog and the result. After 
 ## Production additions (round 12)
 
 - **[PRP-010]** The system must load a compiled-cache entry only after verifying an integrity tag covering the component SHA-256, engine id and entry bytes, and must delete, recompile and audit as cache-integrity-failure any mismatching, truncated or foreign-owner entry.
+
+## Production additions (round 15)
+
+- **[PRM-205]** The system must support the policy key `packages.auto_update_min_age_hours` (0 to 720, default 0). While it is above 0, auto-update must not download or install a version whose registry publish time is younger than the value, must show `Held back until YYYY-MM-DD HH:mm:ss` in the update notice and the time in the field `held_until` of `ilium plugin list --json`, must still install at the next check a version named as `fixed` by an advisory for the installed version, and must write one `update-held` audit record per held version per machine.

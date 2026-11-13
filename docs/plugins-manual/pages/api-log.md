@@ -68,12 +68,14 @@ Each plugin writes to one log file per session, in `<state>/plugins/logs/<sessio
 | Rotation size | 4 MiB | When the active `<id>.log` passes 4 MiB, it becomes `<id>.log.1`, and each older rotated file moves up one number |
 | Rotated files kept | 4 (`.log.1` to `.log.4`) | The old `.log.4` is deleted at each rotation |
 | Maximum disk use per plugin and session | about 20 MiB (5 files) | The active file and the four rotated files together |
-| Rotated file age | 14 days | Rotated files older than 14 days are deleted at server start |
-| Logs after uninstall | Kept 7 days, then deleted | `uninstall --purge` deletes them at once |
+| Rotated file age | 14 days | Rotated files older than 14 days are deleted at server start and once every 24 hours while the server runs |
+| Logs after uninstall | Kept 7 days, then deleted at the next sweep | `uninstall --purge` deletes them within 1 minute |
 
 No manifest key or `config.toml` key changes these values in this version. The only log key is the rate limit above. To see how many bytes a plugin's log uses, run `ilium plugin du <id>`, which reports logs beside the store, data, storage, cache and backups.
 
-The proposed rules [HST-600](#production-additions-t8-observability-perf) and [HST-601](#production-additions-t8-observability-perf) below would change these numbers: 3 rotated files and a 16 MiB total, and a daily sweep. Until the owner chooses one set, the table above is the set that the user pages publish.
+[HST-600](#production-additions-t8-observability-perf) and [HST-601](#production-additions-t8-observability-perf) below, [USR-204](/pages/reference-plugin-files/) and [DEV-660](/pages/reference-debugging-tools/) state these same numbers: rotation at 4 MiB, four rotated files, about 20 MiB per plugin and session, and a sweep at server start and every 24 hours.
+
+- **[PRM-007]** The system must keep, for one plugin in one session, at most the active log file and four rotated files of 4 MiB each, must delete rotated files older than 14 days at server start and once every 24 hours, and must delete the log files of an uninstalled plugin 7 days after a plain uninstall and within 1 minute of `uninstall --purge`. Test: write 25 MiB of log lines through a fixture plugin and assert that exactly five files exist and that they total at most 20 MiB; age one rotated file by 15 days, advance the fake clock by 24 hours without a restart and assert that it is gone; uninstall with `--purge` and assert that no log file of the plugin exists after 1 minute.
 
 To delete a plugin's old log before any rule changes, first keep a copy if you need one, with `ilium plugin logs <id> > <file>`. The copy is plain text, so read it before you share it. Then choose one of these commands:
 
@@ -311,8 +313,8 @@ Log lines are redacted of secrets ([SEC-243]). See [Secrets](/pages/reference-se
 
 ## Production additions: T8-observability-perf
 
-- **[HST-600]** The host MUST store each plugin's log as one file per plugin id and MUST rotate it when it reaches 4 MiB (4,194,304 bytes) (proposed, owner to confirm), keeping at most 3 rotated files (proposed, owner to confirm) per plugin, so total log disk use per plugin is at most 16 MiB (proposed, owner to confirm).
-- **[HST-601]** The host MUST delete rotated plugin log files older than 14 days (proposed, owner to confirm) at server start and once every 24 hours (proposed, owner to confirm), and MUST delete a plugin's log files within 1 minute (proposed, owner to confirm) of uninstall with purge.
+- **[HST-600]** The host MUST store each plugin's log as one file per plugin id and MUST rotate it when it reaches 4 MiB (4,194,304 bytes) (proposed, owner to confirm), keeping at most 4 rotated files per plugin and session, so total log disk use per plugin and session is at most 20 MiB (the active file and four rotated files).
+- **[HST-601]** The host MUST delete rotated plugin log files older than 14 days (proposed, owner to confirm) at server start and once every 24 hours (proposed, owner to confirm), MUST delete a plugin's log files within 1 minute (proposed, owner to confirm) of `uninstall --purge`, and after an uninstall without `--purge` MUST keep them for 7 days and delete them at the first sweep after that.
 - **[HST-602]** Each plugin log line MUST be written as one JSON object per line when the file is read by `ilium plugin logs <id> --json`, with the fields `ts` (RFC 3339 UTC, millisecond precision), `level`, `plugin`, `side`, `instance`, `code` (may be null), `message`, and a line MUST never contain a raw newline inside `message` (newlines are escaped as \n).
 - **[HST-604]** A log call with a message that is not valid UTF-8 or contains NUL MUST be accepted, the invalid bytes MUST be replaced by U+FFFD and NUL by U+2400, and the host MUST count the event in `log_sanitized` for the plugin side.
 - **[HST-605]** The host MUST apply the log level filter before the rate limit, so a line below the configured minimum level (default `info`; `debug` and `trace` are off) MUST NOT consume the 200-lines-per-second budget and MUST NOT be stored.

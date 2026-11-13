@@ -1,4 +1,4 @@
-//! The 30 bundled core plugin stubs of `FakeSession::install_core` (reference-test-harness.md "Core stubs").
+//! The 32 bundled core plugin stubs of `FakeSession::install_core` (reference-test-harness.md "Core stubs").
 
 /// One core stub: its name, the extension points it exposes and the services it provides.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +45,8 @@ const STUB_ROWS: &[StubRow] = &[
     ("ilium.core.scheduler", &["schedule-sources", "before-send-scheduled"], &["queue"]),
     ("ilium.core.text-triggers", &["rule-packs", "before-fire"], &["test-rule"]),
     ("ilium.core.progress", &["footer-segments", "probe-kinds"], &["report"]),
+    ("ilium.core.attention", &["item-sources", "before-jump"], &["queue"]),
+    ("ilium.core.resources", &["resource-kinds", "before-grant"], &["reservations"]),
     ("ilium.core.chatroom", &["before-post", "message-renderers"], &["post", "tail"]),
     ("ilium.core.worktrees", &["before-create", "post-create-steps", "before-remove"], &["create"]),
     ("ilium.core.sessions", &["snapshot-sections", "before-restore"], &["snapshots"]),
@@ -74,7 +76,7 @@ mod spec_tests {
     #[test]
     fn dev_483_table_has_thirty_stubs_in_manual_order() {
         let stubs = table();
-        assert_eq!(stubs.len(), 30);
+        assert_eq!(stubs.len(), 32);
         assert_eq!(stubs.first().expect("first row").name, "ilium.core.tree");
         assert_eq!(
             stubs.last().expect("last row").name,

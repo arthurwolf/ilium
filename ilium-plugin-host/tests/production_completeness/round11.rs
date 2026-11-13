@@ -24,7 +24,7 @@ fn prq_003_limited_terminal_degradation() {
 /// REQ: PRQ-004
 #[test]
 fn prq_004_desktop_notification_hide_details() {
-    // Observable: A test enables the hide-details switch, raises a plugin notice, and observes a generic desktop line, full text in the log, and pane focus or a missing-pane notice on activation.
+    // Observable: A test enables the Settings switch Hide details, raises a plugin notice, and observes a generic desktop line, full text in the log, and pane focus or a missing-pane notice on activation.
     panic!("PRQ-004 not implemented: The system must offer a Settings switch Hide details in desktop notifications that replaces the body and pane title of every desktop notification with a generic line while the durable log keeps the full text, and activating a desktop notification must focus the originating pane or show a notice naming the pane when it no longer exists.");
 }
 

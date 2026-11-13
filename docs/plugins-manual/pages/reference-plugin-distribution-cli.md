@@ -94,6 +94,8 @@ A source is a path to a `.iliumpkg` file, an `https://` URL, or a registry id wi
 | `ilium plugin registry list` and `registry remove <url>` | Lists or removes configured registries. |
 | `ilium plugin mirror sync <dir> --registry <url> [--allow <id>...] [--channel stable\|beta]` | Copies signed metadata and the blobs of the allowed plugins to a folder. |
 | `ilium plugin export-bundle <dir> <id>[@range]... [--with-deps]` | Writes an offline bundle. |
+| `ilium plugin bundle create --out <file> [<id>...] [--with-deps]` | Writes the same bundle as one deterministic `.tar` archive ([PDV-001](/pages/guide-air-gapped-transfer/)). |
+| `ilium plugin bundle import <file>` | Verifies such an archive and unpacks it as a bundle directory for `install --from-bundle <dir> <id>` ([PDV-002](/pages/guide-air-gapped-transfer/)). |
 
 | Id | Rule |
 |---|---|
@@ -158,7 +160,7 @@ Each command prints one `result` record with `exit_code` and these fields, plus 
 | [PKG-689] | `rollout` MUST publish the new percentage as a signed `plugins/<id>.json` with a higher version number. A publisher outside the namespace MUST be refused with `registry.namespace-unowned`. A missing or refused token MUST be refused with `registry.auth`. |
 | [PKG-800] | `yank` and `unyank` MUST be signed by a trusted key of the current publisher. Any other signer MUST be refused with `registry.not-owner` and the metadata MUST stay unchanged. |
 | [PKG-801] | `yank` MUST record `yanked_at`, `yanked_by` and `reason`. Without `--reason` it MUST fail with `usage.missing-argument`. |
-| [PKG-802] | `unyank` MUST clear the yanked fields, MUST append a transparency log entry, MUST fail with `registry.not-yanked` when the version is not yanked, and MUST fail with `registry.taken-down` for a version removed by takedown. |
+| [PKG-802] | `unyank` MUST clear the yanked fields, MUST append a transparency log entry, MUST fail with `registry.not-yanked` when the version is not yanked, and MUST fail with `registry.takedown` for a version removed by takedown. |
 | [PKG-819] | `owner add\|remove` MUST be signed by a key of an existing owner, MUST refuse removing the last owner with `registry.last-owner`, and MUST be logged. |
 | [PKG-390] | `transfer` MUST publish a transfer statement signed by a trusted key of the current owner, naming the new publisher id and key. The registry records `transferred_from` in the plugin metadata. |
 | [PKG-823] | `yank` MUST print the number of dependents and MUST require `--confirm-dependents` when it is above 0. Without the flag it MUST change nothing and exit 1. |
@@ -169,7 +171,7 @@ Each command prints one `result` record with `exit_code` and these fields, plus 
 |---|---|---|
 | `registry.not-owner` | The signing key is not a trusted key of the current owner. | 1 |
 | `registry.not-yanked` | `unyank` of a version that is not yanked. | 1 |
-| `registry.taken-down` | `unyank` of a version removed by takedown. | 1 |
+| `registry.takedown` | `unyank` of a version removed by takedown. | 1 |
 | `registry.last-owner` | `owner remove` would leave no owner. | 1 |
 | `registry.namespace-unowned` | The id is outside the namespace of the token. | 1 |
 | `registry.auth` | The token is missing, expired or refused. | 1 |

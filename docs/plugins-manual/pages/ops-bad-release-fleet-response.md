@@ -26,7 +26,7 @@ The good version is pinned in the fleet lockfile during recovery, not during con
 
 ### Find affected machines using audit and health data
 
-Do not ask users which machines installed the release. The collector already holds the audit records that show it. Read the `install`, `update` and `update.rolled-back` records for the bad version. Query the collector for the `install` and `update` records that name the bad version; the machine ids in that result are the affected machines. The machine list in the incident record must equal that result, line for line.
+Do not ask users which machines installed the release. The collector already holds the audit records that show it. Read the `install`, `update` and `update-rolled-back` records for the bad version. Query the collector for the `install` and `update` records that name the bad version; the machine ids in that result are the affected machines. The machine list in the incident record must equal that result, line for line.
 
 Health data from the machines can show problems that the audit records do not show, such as a plugin that traps after it loads. It does not replace the audit query as the source of the machine list. The health reports are described in [Telemetry and plugin health](/pages/reference-health-and-watchdog/).
 
@@ -61,7 +61,7 @@ Level 1 incidents have one more requirement. Acknowledge the incident within the
 
 - **[PDU-008]** The operator MUST contain first, by adding the plugin id to `plugins.deny_ids` or the version to the file named by `packages.blocklist_file`, before any investigation.
 - **[PDU-009]** Containment MUST be recorded as an `Actions taken` line with time and administrator, as the incident runbook requires.
-- **[PDU-010]** The operator MUST identify affected machines from the `install`, `update` and `update.rolled-back` audit records collected centrally, not by asking users.
+- **[PDU-010]** The operator MUST identify affected machines from the `install`, `update` and `update-rolled-back` audit records collected centrally, not by asking users.
 - **[PDU-011]** Recovery by lockfile MUST use `ilium plugin sync --locked`, which downgrades to the locked version without `--allow-downgrade` ([USR-048]).
 - **[PDU-012]** A machine whose plugin data is newer than the old version MUST recover with `ilium plugin rollback <id> --restore-backup`, and the operator MUST first verify the archive with `ilium plugin restore <file> --dry-run`.
 - **[PDU-013]** The incident MUST NOT be closed until every machine in scope reports the fixed version in `ilium plugin list` or reports the plugin as denied.

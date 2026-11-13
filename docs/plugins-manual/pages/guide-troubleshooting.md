@@ -25,7 +25,7 @@ An author SHOULD turn every fixed run-time bug into a test before the next relea
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `component.missing` from `check` | A declared side was not built | Run `ilium plugin build`, and check `side` in the manifest |
-| `component.invalid` | The file is not a WebAssembly component (a plain module) | Use the SDK build command, not `rustc` alone |
+| `package.component-invalid` | The file is not a WebAssembly component (a plain module) | Use the SDK build command, not `rustc` alone |
 | `component.world-mismatch` | The component was built for another world than the manifest names | Make `world` and the SDK entry agree |
 | `manifest.api-version` | The SDK that built the component is another version than `api` | Rebuild with the SDK of the contract you target |
 | `manifest.exports-mismatch` | The exports differ from the manifest list | Update `exports` or the code, then rebuild |

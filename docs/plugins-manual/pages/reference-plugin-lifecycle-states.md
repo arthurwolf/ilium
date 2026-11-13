@@ -29,6 +29,8 @@ A package state decides which instance states are allowed. An instance can be `a
 | `disabled-untrusted` | `installed.json`, `state` | The signing key was removed from the trust store with `trust remove --force`. The files, grants and settings stay. It leaves this state when the key is trusted again, or with `enable <id> --accept-risk`. |
 | `disabled-blocked` | `installed.json`, `state` | The signing key was revoked as `compromised`, or a registry takedown named this version. It leaves this state only with `enable <id> --accept-risk`, or with an update signed by another trusted key of the same publisher. |
 | `disabled-by-policy` | policy file, or the start flags | An administrator rule or safe mode forbids it for this run. Not written to `installed.json`. |
+| `disabled-by-admin` | kill state file `<data>/plugins/kill.json` | An administrator ran `ilium plugin kill <id> --reason <text>` ([HST-516]). The plugin is refused at activation, also after a restart, until `ilium plugin unkill <id>` runs. Not written to `installed.json`, so the user's own enable or disable choice is kept under it. |
+| `quarantined` | `installed.json`, `state`, with `quarantine_reason` | The registry quarantine feed lists this version (`registry.quarantine`, [EXT-058]), or a helper ended as `suspected-escape` ([PRN-020]). The plugin does not run and keeps its data. How it is lifted depends on the reason, see [Containment states](#containment-states). |
 | `refused-at-load` | recomputed at every load | The host checked the package and refused to run it. The reason is a code, for example `package.api-unsupported`, `trust.key-revoked`, `policy.tier-denied`, `package.corrupt` or `policy.blocked`. |
 | `update-staged` | `plugins/store/<id>/<version>/` | A newer version is unpacked and verified, and the swap has not happened. Used only when the new version asks for grants beyond those the user accepted; otherwise the update goes straight to the swap. |
 | `uninstall-pending` | `installed.json`, `state` | The user asked for removal and an instance is still stopping. |
@@ -37,10 +39,45 @@ A package state decides which instance states are allowed. An instance can be `a
 Rules for package states:
 
 - [LIF-001] The host MUST give every installed plugin exactly one package state at any time. Test: list a plugin through every transition below and assert one state in `ilium plugin list --json`.
+
+Several stop mechanisms can be recorded for one plugin at once. The package state that the host reports is then the strongest one, in the order of [Containment states](#containment-states), and the other records stay stored.
 - [LIF-002] A stop by failure belongs to one side, not to the package. It is the instance state `stopped-by-failure` of that side, and the package state stays `installed-enabled`. A stop of the client side MUST NOT stop the server side. Test: trap the client side three times and assert the server side stays `active`.
 - [LIF-003] A package with state `refused-at-load` MUST NOT be instantiated, and the refusal code MUST be shown in `disabled-reason`. Test: install a package whose api window the host does not support and read the list output.
 - [LIF-004] `disabled-by-policy` and safe mode MUST NOT be written to `installed.json`. Test: start in safe mode, stop, start normally and assert the plugin is `installed-enabled` again.
 - [LIF-700] The package-state table MUST contain a state `retired` (stored in `installed.json` `state`, with `retired_at` and `retired_reason` of `end-of-life` or `abandoned`) and `ilium plugin list --json` MUST report it; the host MUST NOT represent a retired plugin as `installed-disabled-by-user`. Test: pass the end-of-life date and assert `state: retired` after restart.
+
+### Containment states
+
+Five mechanisms can keep an installed plugin from running. Each one has its own stored record, so two or more can apply to one plugin at the same time. The table gives the level, the store, the way out and the rank of each. Rank 1 is the strongest. The reported package state and `disabled-reason` are those of the strongest mechanism that applies ([SCU-001](/pages/security-containment-states/)).
+
+| Rank | State | Level | `disabled-reason` | Stored in | Set by | Lifted by |
+|---|---|---|---|---|---|---|
+| 1 | `quarantined` | package | `registry.quarantine` | `installed.json`, `state` and `quarantine_reason` | A registry quarantine feed entry that matches the installed version ([EXT-058]) | Only a newer signed feed entry that withdraws it, or an upgrade to a version the feed does not list ([EXT-059]). `ilium plugin enable` is refused with `registry.quarantine`, also with `--accept-risk`. |
+| 1 | `quarantined` | package | `suspected-escape` | `installed.json`, `state` and `quarantine_reason` | The host, when a helper ends as `suspected-escape` ([PRN-020]) | `ilium plugin enable <id> --accept-risk`, or the kernel dialog that [PRN-020] names. Both show the notice of PRN-020 again and write one `enable` audit record with the reason `accept-risk`. |
+| 2 | `disabled-blocked` | package | `blocked` | `installed.json`, `state` | Key revoked as `compromised`, or a registry takedown of this version (P15) | `ilium plugin enable <id> --accept-risk`, or an update signed by another trusted key of the same publisher (P16) |
+| 3 | `disabled-by-policy` | package | `policy.blocked` | The policy file (`kill`, `plugins.deny_ids`, `packages.blocklist_file`); never `installed.json` | The administrator's policy ([LIF-301]) | Removing the entry and loading the policy again ([LIF-302]) |
+| 4 | `disabled-by-admin` | package | `admin-kill` | The kill state file `<data>/plugins/kill.json` | `ilium plugin kill <id> --reason <text>` ([HST-516]) | `ilium plugin unkill <id>` only, with a session running ([SCU-003](/pages/security-containment-states/)) |
+| 5 | `installed-disabled-by-user` | package | `user` | `installed.json`, `state` | `ilium plugin disable <id>`, or Space on the row | `ilium plugin enable <id>`, or Space on the row |
+
+`disabled-by-admin` and `quarantined` are package states. They are stored on disk, they are keyed by plugin id, and they survive a server restart and a restart of the operating system. While either applies, every side of the plugin has the instance state `inactive`. Neither is an instance state.
+
+The kill state file holds one entry per killed plugin id, with `reason`, `killed_at` (UTC, RFC 3339), `actor` and `path` (`server` or `offline`). The command line writes it through a temporary file in the same folder, then fsync and rename, with mode 0600. A server that finds an entry at start refuses activation of that plugin before any plugin code runs.
+
+- **[PRM-001]** The system must list `disabled-by-admin` and `quarantined` as package states in `ilium plugin list --json`, with `disabled-reason` set to `admin-kill`, `registry.quarantine` or `suspected-escape`. It must store `disabled-by-admin` in the kill state file `<data>/plugins/kill.json` and `quarantined` in `installed.json`, and both must survive a server restart. Test: kill one plugin and quarantine another through a fixture feed, restart the server, and assert that `ilium plugin list --json` shows the two states and reasons and that neither plugin has an `active` side.
+- **[PRM-002]** The system must lift a `quarantined` state with the reason `suspected-escape` only through `ilium plugin enable <id> --accept-risk` or the kernel dialog of [PRN-020], and must refuse `ilium plugin enable <id>` on a plugin with the reason `registry.quarantine` with the code `registry.quarantine` and exit code 1, also when `--accept-risk` is given. Test: trigger a `suspected-escape` on a fixture plugin, run `enable` without the flag and assert the refusal, run it with `--accept-risk` and assert `installed-enabled`. Then quarantine a plugin through the feed and assert that `enable --accept-risk` is refused and the state stays `quarantined`.
+
+### Stops after repeated failures
+
+Four separate mechanisms stop something after repeated failures. They have different thresholds and different resets, so each has its own name. The name "crash-loop guard" belongs only to the first one.
+
+| Name | What it watches | Threshold and window | Effect | Reset | Essential core plugins | Name shown |
+|---|---|---|---|---|---|---|
+| Crash-loop guard (host start crash guard) | Crashes of the Ilium server during start ([LIF-186], [LIF-294](/pages/user-safe-mode-and-troubleshooting/)) | 3 crashes during start within 5 minutes | The next start uses `third-party` safe mode | One start that stays up 5 minutes after startup completed, or a start with `--no-plugins` | Not stopped; safe mode keeps core plugins | Host log lines `crash-guard.*`; `crash-loop.txt` in the whole-install bundle |
+| Plugin restart rule | Failures of one side of one plugin ([HST-400](/pages/reference-errors-and-limits/)) | Third failure inside 10 minutes, after restarts at 1 s and 5 s | The side becomes `stopped-by-failure` | `enable`, `reset-failures` or an update ([LIF-002]) | Exempt: the third and later failures restart after 5 s ([LIF-042]) | `stop_rule: "restart-rule"` |
+| 24-hour failure stop | Failures of one side of one plugin ([HST-950](/pages/reference-errors-and-limits/)) | 5 failures within a sliding 24 hours | The side becomes `stopped-by-failure`, with no restart | `enable`, `reset-failures` or an update | Exempt | `stop_rule: "failure-24h"` |
+| Dev reload loop | Activation crashes of a plugin under `ilium plugin dev` ([DEV-881](/pages/reference-plugin-cli-dev-failure-modes/)) | 3 activation crashes in 60 seconds | `dev` stops reloading the plugin | The next source change | Not exempt; it applies only to the plugin under `dev` | Record code `dev.crash-loop` |
+
+- **[PRM-010]** The system must report which rule stopped a side: a side in `stopped-by-failure` must carry `stop_rule` with the value `restart-rule` or `failure-24h` in `ilium plugin list --json` and in the `plugin-state-changed` log line; the host start guard must log under `crash-guard.*`; and `dev` must emit `dev.crash-loop`. No output may use the name "crash-loop guard" for a rule other than the host start guard. Test: trigger each of the four mechanisms with a fixture (three start crashes, three side failures in 10 minutes, five side failures 11 minutes apart, three activation crashes under `dev`) and assert the name in the last column of the table; repeat the two plugin rules with an essential core plugin and assert that it is not stopped.
 
 ### Instance states
 
@@ -182,15 +219,16 @@ The `reason` is one of `user`, `failure`, `policy`, `update`, `uninstall`, `trig
 
 ### The `plugin-info` record
 
-The record of [help and plugins](/pages/api-help-and-plugins/) has 19 fields, numbered in the table below. `enabled` and `failed` stay as derived fields, so a plugin that reads only them keeps working.
+The record of [help and plugins](/pages/api-help-and-plugins/) has 20 fields, numbered in the table below. `enabled` and `failed` stay as derived fields, so a plugin that reads only them keeps working.
 
 ```text
 enum package-state { not-installed, installed-enabled, installed-disabled-by-user,
                      disabled-untrusted, disabled-blocked, disabled-by-policy,
+                     disabled-by-admin, quarantined, retired,
                      refused-at-load, update-staged, uninstall-pending }
 enum instance-state { inactive, activating, waiting-dependency, active, deactivating,
                       restart-scheduled, stopped-by-failure, stopped }
-enum health-state { healthy, degraded, restarting, failed, disabled, dormant, refused }
+enum health-state { healthy, degraded, restarting, failed, disabled, dormant, refused, needs-setup }
 
 record side-state {
   side: string,                       // "server", "client" or "scene"
@@ -217,6 +255,7 @@ record plugin-info {
   update-available: option<string>,   // newest allowed version, from cached registry data
   deprecated: bool,
   yanked: bool,
+  held-until: option<string>,         // "YYYY-MM-DD HH:mm:ss" in UTC while policy holds back the newest version
 }
 ```
 
@@ -241,12 +280,13 @@ record plugin-info {
 | 17 | `update-available` | option of string | Newest allowed version, from cached registry data. |
 | 18 | `deprecated` | bool | The registry marks the plugin deprecated. |
 | 19 | `yanked` | bool | The registry marks the active version yanked. |
+| 20 | `held-until` | option of string | The time, as `YYYY-MM-DD HH:mm:ss` in UTC, until which auto-update holds back the newest version ([PRM-205](/pages/reference-install-and-update/#holding-back-new-versions)); none when no version is held. |
 
 | Derived field | Rule |
 |---|---|
 | `enabled` | `true` when `state` is `installed-enabled` or `update-staged` |
 | `failed` | `true` when any side has the instance state `stopped-by-failure` |
-| `disabled-reason` | `none` when enabled, otherwise `user`, `untrusted`, `blocked`, `policy.blocked`, `safe-mode` or a refusal code |
+| `disabled-reason` | `none` when enabled, otherwise `user`, `untrusted`, `blocked`, `policy.blocked`, `admin-kill`, `registry.quarantine`, `suspected-escape`, `safe-mode` or a refusal code |
 
 - [LIF-017] `plugins.list` MUST return one record per installed plugin with every field of the `plugin-info` table, in table order. Test: install two plugins, disable one and compare the records with the table.
 - [LIF-018] `enabled` MUST equal the rule above in every state. Test: parametrised over the nine package states.

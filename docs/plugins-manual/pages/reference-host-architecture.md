@@ -329,7 +329,7 @@ The host contains each failure at the smallest unit that owns the broken state. 
 
 ### A core plugin that the restart rule disables
 
-The 30 core plugins (see [Core plugins](/pages/core-plugins/)) carry features of Ilium. The restart rule applies to them like to any plugin, with one change: a core plugin that the rule disables makes the host show the **kernel recovery page**. The page belongs to the kernel, not to a plugin, so it works with every plugin off. It lists every plugin with its tier, state, last failure and an on or off switch, and it shows how to start with `--safe-plugins`.
+The 32 core plugins (see [Core plugins](/pages/core-plugins/)) carry features of Ilium. The restart rule applies to them like to any plugin, with one change: a core plugin that the rule disables makes the host show the **kernel recovery page**. The page belongs to the kernel, not to a plugin, so it works with every plugin off. It lists every plugin with its tier, state, last failure and an on or off switch, and it shows how to start with `--safe-plugins`.
 
 - The session still boots. The disabled state is stored, so the plugin stays off at the next start until the user turns it on.
 - The kernel recovery page opens once, automatically, in the client that is attached when the failure happens, and later through the kernel command `kernel.open-recovery`, which has the default key `Ctrl+Alt+R` in the kernel keymap and cannot be removed by a keymap plugin.
@@ -351,7 +351,7 @@ The 30 core plugins (see [Core plugins](/pages/core-plugins/)) carry features of
 | Two clients disable the same plugin at different times | Each client disables it independently | none |
 | Server host shutdown takes longer than 5 s | Remaining plugins are dropped without `deactivate`; their restore bytes are not kept | `host.shutdown-timeout` (logged) |
 | Panic inside an import | The calling instance traps | `host.import-panic` |
-| The grant store file is unreadable at start | The host starts with default grants for T1 only and refuses T2 and T3 packages until the file is repaired | `host.grants-unreadable` |
+| The grant store file is unreadable at start | The host starts with default grants for T1 only and refuses T2 and T3 packages until the file is repaired | `grants.unreadable` |
 | `--safe-plugins` and `--no-plugins` both given | `--no-plugins` wins | none |
 | A package on disk is changed after install | The content hash check fails and the plugin stays disabled | `package.corrupt` |
 

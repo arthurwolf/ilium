@@ -198,7 +198,7 @@ Further keys: `style` (`"stepper"` or `"slider"`), `steps` (an ascending ladder 
 
 #### text
 
-Keys: `max_length` (default 256, at most 4,096), `pattern`, `placeholder`, `secret` (masked with `••••`). Further keys: `reveal_last` (0 to 8, only with `secret`; `••••a1b2` shows the last characters) and `debounce_ms` (300 to 2,000).
+Keys: `max_length` (default 256, at most 4,096), `pattern`, `placeholder`, `secret` (masked with `••••`). Further keys: `reveal_last` (0 to 8, only with `secret`; `••••a1b2` shows the last characters) and `debounce_ms` (300 to 2,000). Two keys are allowed only with `secret: true`, and fail with `manifest.settings-key` on any other row: `bound_hosts` (a list of 1 to 16 host names of at most 253 characters each, with an optional leading `*.` label; default none; an outbound HTTP request that carries the value to another host is refused with `secret.host-mismatch`, [PRR-014](/pages/reference-secrets/)) and `redact` (`"auto"`, the default, or `"always"`; with `"always"` the host redacts every occurrence of the value and refuses to save a value shorter than 4 characters, [PRQ-014](/pages/reference-secrets/)).
 
 ```json
 { "type": "text", "key": "label", "title": "Label", "max_length": 40, "default": "work" }
@@ -410,6 +410,7 @@ Keys: `id` (required), `segments` (initial, at most 8 of `{ label, value, tone }
 | `title` | all but unlabelled info | 1 to 48 characters. The label column |
 | `description` | all | At most 200 characters |
 | `default` | value rows | Required. Must pass the compiled schema |
+| `setup_required` | text, text-area, path and list rows | Boolean, default `false`. With `true`, an empty value keeps the plugin in `Needs setup` and not activated ([PRM-201](/pages/user-install-and-manage/#a-plugin-that-needs-setup)). The row is empty when its value is the empty string after trimming white space, an empty list, or a `secret` that is unset ([SEC-963](/pages/reference-secrets/)) |
 | `help` | all | An id from `contributes.help`. Adds a `?` |
 | `depends_on` | all | `{ "key", "equals" }`, `{ "key", "in" }` or `{ "key", "not" }`. Own keys only |
 | `keywords` | all | At most 4 terms |

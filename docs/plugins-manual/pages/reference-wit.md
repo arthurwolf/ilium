@@ -1759,7 +1759,7 @@ interface plugins {
     inactive, activating, waiting-dependency, active, deactivating, failed, restart-scheduled,
     stopped-by-failure, stopped,
   }
-  enum health-state { healthy, degraded, restarting, failed, disabled, dormant, refused }
+  enum health-state { healthy, degraded, restarting, failed, disabled, dormant, refused, needs-setup }
   record side-state {
     /// "server", "client" or "scene".
     side: string,
@@ -1780,6 +1780,8 @@ interface plugins {
     publisher: string, publisher-key: option<string>,
     source: string, channel: string, pinned: bool,
     update-available: option<string>, deprecated: bool, yanked: bool,
+    /// "YYYY-MM-DD HH:mm:ss" in UTC while policy holds back the newest version.
+    held-until: option<string>,
   }
   %list: func() -> list<plugin-info>;
   /// scope is "global", "project" or "session".

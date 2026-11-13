@@ -10,7 +10,7 @@ fn sec_457_the_enterprise_guide_states_the_one_step_third_party_disable_keeping_
         "guide-enterprise-deployment.md",
         &[
             "An operator MUST be able to disable all third-party plugins at once",
-            "`[plugins] disable_third_party = true`",
+            "`[packages] allow_third_party = false`",
             "`ilium plugin disable --all-third-party --reason <text>`",
             "Bundled T1 plugins keep running",
         ],
@@ -35,7 +35,7 @@ fn sec_458_the_enterprise_guide_states_the_audited_disable_and_the_explicit_re_e
 fn sec_457_the_emergency_disable_keeps_safe_mode_as_a_separate_switch() {
     assert_page_has(
         "guide-enterprise-deployment.md",
-        &["apart from safe mode", "`[plugins] disable_third_party = true`"],
+        &["apart from safe mode", "`[packages] allow_third_party = false`"],
     );
 }
 

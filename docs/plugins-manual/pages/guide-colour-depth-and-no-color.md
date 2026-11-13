@@ -14,6 +14,24 @@ The colour depth is a property of the terminal that shows the plugin. The host r
 
 When you test a plugin, you choose the depth yourself. The harness takes `--colour-depth` with one of the values `8`, `16`, `256` or `truecolor`. The depth you chose is written into the report file, so a report always names the depth it was made at. See [Testing at each depth](#testing-at-each-depth) below.
 
+## Several clients with different terminals
+
+Several clients can be attached to one session, each in its own terminal: one in a truecolor terminal on the desk, one over SSH inside tmux with 16 colours. Detection is therefore done by each client for its own terminal, never once for the session.
+
+| Fact | Detected by | From |
+|---|---|---|
+| Colour depth | Each client at its start | Its own `COLORTERM` and `TERM` values and the terminal's answers |
+| `NO_COLOR` | Each client at its start | Its own environment. The server's environment is not used |
+| Mouse support | Each client at its start ([PRQ-003](/pages/reference-platform-support/)) | Its own terminal |
+| Background lightness | Each client at its start | The terminal's answer to the background colour query (OSC 11) |
+
+The server sends the same plugin colours (roles, `rgb` and indexed values) to every client. Each client reduces them to its own depth with the rules of this page, so the two clients above show the same view, one with the exact colours and one with the 16-colour mapping, and neither changes what the other paints. A plugin's server side cannot observe the depth of any client.
+
+The background lightness is used for one decision only: the first theme. The theme is a per-client preference that starts from the config file ([PRQ-001](/pages/core-plugin-settings/)). When the config file sets a theme, the client uses it and ignores the detected background. When the config file sets none, or sets the value `auto`, the client asks the terminal for its background colour, waits at most 100 ms for the answer, and starts with the light theme when the relative luminance of the answer is above 0.5 and with the dark theme otherwise. A terminal that does not answer in time gets the dark theme. The client does not ask again while it runs, and a theme that the user picks later always wins.
+
+- **[PRM-316]** The system must detect colour depth, `NO_COLOR` and mouse support separately for each attached client, from that client's own environment and terminal, and must reduce plugin colours per client, so that clients with different terminals attached to one session each get a correct paint. Test: attach one client with `TERM=xterm-256color` and `COLORTERM=truecolor` one with `TERM=xterm` (16 colours) and one with `NO_COLOR=1` to the same session, show a view with an `rgb` span, and assert that the first frame contains the truecolor sequence, the second the nearest 16-colour sequence and the third no colour sequence, with the same text in all three.
+- **[PRM-317]** When the config file sets no theme or sets `auto`, the client must choose its first theme from its own terminal's background: it must send the background colour query, wait at most 100 ms, choose the light theme when the relative luminance of the answer is above 0.5 and the dark theme otherwise or when no answer arrives, and it must never override a theme set in the config file or picked by the user. Test: start the client under a PTY that answers the query with white, with black and not at all, and assert the light, dark and dark themes; repeat with a theme set in the config file and assert that the configured theme is used each time.
+
 ## How roles degrade at 256, 16 and monochrome
 
 A plugin uses the nine colour roles of the theme: `foreground`, `muted`, `accent`, `success`, `warning`, `danger`, `info`, `selection` and `border`. A role takes its colour from the active theme, so the host can reduce it to whatever palette the depth offers. The role keeps its place in the theme at every depth. A `muted` span is still the dimmer text, and a `danger` span is still the alarm colour, even when the colour itself has been reduced.

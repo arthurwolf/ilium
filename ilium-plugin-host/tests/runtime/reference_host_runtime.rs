@@ -721,8 +721,8 @@ fn hst_066_every_embedded_cwasm_deserializes_on_the_host_engine() {
 fn hst_066_embedded_set_has_exactly_the_30_core_plugins() {
     assert_eq!(
         embedded_artifacts().len(),
-        30,
-        "30 core plugins are bundled"
+        32,
+        "32 core plugins are bundled"
     );
 }
 

@@ -321,6 +321,23 @@ export const { lifecycle, handler } = definePlugin({
 });
 ```
 
+### Clock resolution and jitter
+
+Every clock a plugin can read has a resolution of 1 ms. The rule covers `clock.now-unix-millis`, `clock.monotonic-millis` and the virtualised `wasi:clocks` wall clock and monotonic clock. No manifest key, grant or tier gives a finer clock.
+
+| Tier | Resolution | Jitter | What a read returns |
+|---|---|---|---|
+| T1 (bundled) | 1 ms | none | The host clock rounded down to a whole millisecond |
+| T2 and T3 | 1 ms | up to 1 ms | The host clock plus a random offset from 0 to 1 ms, drawn again for each read, rounded down to a whole millisecond |
+
+- `now-unix-millis` and `monotonic-millis` return whole milliseconds, so two reads are equal or differ by 1 ms or more.
+- `wasi:clocks/monotonic-clock.now` and `wasi:clocks/wall-clock.now` return nanoseconds. Every value is a multiple of 1,000,000 ns. `resolution` of both clocks returns 1,000,000 ns (1 ms).
+- A monotonic read never returns a value lower than an earlier read of the same instance, with or without jitter. The wall clock can go backwards only when the system clock is set backwards.
+- Jitter changes when a read moves to the next millisecond. It never moves a value by more than 1 ms from the host clock, so a duration measured with two reads is wrong by at most 2 ms.
+- Timer delays are counted on the host monotonic clock without jitter. The coarsening applies to what a plugin reads, not to when a `timer-fired` is queued.
+
+Measure work that takes less than a few milliseconds by timing many repetitions, or use `ilium plugin profile`. See [SEC-370](/pages/reference-threat-model/) for the reason.
+
 ### What the user sees
 
 Timers draw nothing. The status poll writes only to the plugin log, which `ilium plugin logs` shows. The search box updates its results about 300 ms after the last keystroke. A user who types quickly sees one refresh at the end of the burst.
@@ -374,6 +391,10 @@ Contract: `ilium:plugin@0.1.0`.
 
 - **[API-074]** A timer MUST NOT fire inside the call that set it; the first timer-fired MUST be queued after the delay counted from the return of timers.set; timers.cancel MUST remove a queued, undelivered timer-fired of that timer; cancelling an unknown id MUST be a silent no-op.
 - **[AUT-616]** A plugin MUST store time as UTC milliseconds and MUST state the zone or show relative time when it displays a time.
+
+## Production additions (confirming round)
+
+- **[PRM-102]** The system must return `clock.now-unix-millis`, `clock.monotonic-millis` and both `wasi:clocks` clocks with a resolution of 1 ms for every tier (WASI values are multiples of 1,000,000 ns and `resolution` reports 1,000,000 ns), must add a random offset of up to 1 ms per read for T2 and T3 plugins and none for T1, must never return a monotonic value lower than an earlier read of the same instance, and must offer no manifest key, grant or tier that gives a finer clock.
 
 ## Production additions (round 5)
 

@@ -30,7 +30,7 @@ The project does not state a response time. Nobody is obliged to answer, and a m
 
 A report that lacks these items is answered with a request for them, so include them the first time.
 
-1. The host version from `ilium --version --verbose`, the platform, and the host API range.
+1. The host version, the platform and the host API range. All three are lines of `ilium --version --verbose` ([Version output](/pages/reference-host-release-verification/#version-output)).
 2. What you did, what you expected and what happened, with the error code if one was shown (for example `manifest.unknown-key`).
 3. The full output of `ilium plugin doctor`. It prints one line per check with `ok`, `warn` or `fail`, and it exits 0 only when no line is `fail` ([USR-337]).
 4. For a plugin failure, a redacted support bundle (next section).

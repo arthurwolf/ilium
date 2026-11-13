@@ -90,11 +90,11 @@ The first entry names the export and, for `views.render`, the view. Each backtra
 
 | Deadline | Default | T1 ceiling | Effect when passed |
 |---|---|---|---|
-| `event_deadline_ms` | 20 ms | 50 ms | Trap |
-| `command_deadline_ms` | 50 ms | 100 ms | Trap |
+| `event_deadline_ms` | 20 ms | 50 ms | Trap, for an `on-events` batch without a command. Hook handlers, detectors and providers have their own deadlines and effects: [Call classes](/pages/reference-host-scheduling/#call-classes) |
+| `command_deadline_ms` | 50 ms | 100 ms | Trap, for a batch with a `command-invoked` event and for a service or inference provider call: [Call classes](/pages/reference-host-scheduling/#call-classes) |
 | `render_deadline_ms` (`views.render`) | 10 ms | 20 ms | Trap |
 | `annotate_deadline_ms` | 10 ms | 20 ms | Late result dropped; the third breach in a row traps |
-| `frame_deadline_ms` (scene `render`) | the frame budget | 50 ms | Frame skipped; 30 breaches in a row trap |
+| `frame_deadline_ms` (scene `render`) | the frame budget (1,000 ms divided by the effective frame rate, at most 50 ms) | 50 ms | Frame skipped; 30 breaches in a row trap |
 | `activate_deadline_ms` | 2,000 ms | 5,000 ms | Trap |
 | `deactivate_deadline_ms` | 500 ms | 1,000 ms | Instance dropped; no restore bytes kept |
 
@@ -335,7 +335,7 @@ Ask for the same evidence each time. Only `ilium plugin support-bundle <id> --ou
 
 Collect these items:
 
-1. **Support bundle.** The zip holds exactly `summary.txt`, `log.txt` (the newest 200 lines of the plugin log), `stats.txt` and `crashes.txt` ([USR-221]). `summary.txt` lists the Ilium version, plugin id, version, tier, state, platform, host API range, failure count, redaction counts, dropped log lines and a SHA-256 of the other three entries ([USR-335]). The bundle is capped at 8 MiB. When the cap cuts it, the oldest log lines go first and the summary says so ([USR-224], [DEV-833]). Add `--include-host` only when the host may be the cause. It adds the last 500 host log lines, redacted, and the summary names the addition ([USR-334]).
+1. **Support bundle.** The zip holds exactly `summary.txt`, `log.txt` (the newest 200 lines of the plugin log), `stats.txt` and `crashes.txt` ([USR-221]). `summary.txt` lists the Ilium version, plugin id, version, tier, state, platform, host API range, failure count, redaction counts, dropped log lines and a SHA-256 of every other entry ([USR-335]). The bundle is capped at 8 MiB. When the cap cuts it, the oldest log lines go first and the summary says so ([USR-224], [DEV-833]). Add `--include-host` only when the host may be the cause. It adds the last 500 host log lines, redacted, and the summary names the addition ([USR-334]).
 2. **Versions.** `ilium --version`, and `ilium plugin --version`, which prints the CLI version, the contract version and the supported WIT versions without a session ([DEV-906]).
 3. **Installed package.** The line of `ilium plugin list --json --inventory` for the plugin. It holds the id, version, tier, content hash, signing key id, state and granted permissions, with no paths under the user's home ([USR-341]). `ilium plugin inspect <id> --verify` recomputes the package hashes and prints a `diff` record for each mismatch; a mismatch exits 1 with `inspect.hash-mismatch` ([DEV-801]).
 4. **Environment.** `ilium plugin doctor` as text. Exit 4 means at least one item failed; a warning does not change the exit code ([DEV-811]). The output names state folders, so the user replaces the home folder with `~` before sending it. `doctor` writes text only, never a bundle.

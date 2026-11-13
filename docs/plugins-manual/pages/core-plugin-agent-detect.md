@@ -16,7 +16,7 @@ Walking the process tree and scraping the vt100 screen are kernel-native. The ke
 - Activity classification and status indicators (see Agent monitoring, "Status indicators and their defaults").
 - Pane status signals and the three icon slots in the tree (see Agent monitoring, "The three icon slots in the tree").
 - Goal tracking and the `/goal` badge (see Agent monitoring, "The /goal badge").
-- The Normal and Attention display modes, and custom signatures (see Agent monitoring, "Display modes" and "The Agent Monitoring settings tab").
+- The Normal, Attention and Custom display modes, and custom signatures (see Agent monitoring, "Display modes" and "The Agent Monitoring settings tab", and Custom status icons).
 - Agent icons and identifiers in the tree.
 
 ### See it
@@ -89,7 +89,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -132,7 +132,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "activation": [
     "startup",
-    "view:agent-detect.panel"
+    "view:ilium.core.agent-detect/agent-detect.panel"
   ],
   "contributes": {
     "extension_points": [
@@ -673,7 +673,7 @@ export function render() {
 
 A display mode changes what the tree emphasises. The plugin declares `display_modes` in the manifest and listens for `display-mode-changed` ([events and intents](/pages/events-and-intents/), [events](/pages/api-events/)). In Attention mode the panel lists only agents that need the user or have just finished: those awaiting approval and those whose activity is `done`.
 
-The Custom display mode (`ui.agent_monitoring_mode = "custom"`) is not a plugin display mode. It is client-owned: ordered user rules over shared pane facts choose each pane's status icon, so the manifest declares only Attention. A plugin written like the example below treats any mode it does not recognise, `custom` included, as Normal.
+The Custom display mode (`ui.agent_monitoring_mode = "custom"`) is not declared as a display mode in the manifest, which declares only Attention. It is client-owned: the client side of this plugin evaluates ordered user rules over shared pane facts to choose each pane's status icon (see [Custom status icons](#custom-status-icons)). A plugin written like the example below treats any mode it does not recognise, `custom` included, as Normal.
 
 **Rust**
 
@@ -851,3 +851,10 @@ Risk marks of this plugin's extension points follow the corrected table in [Exte
 ## Requirement statements
 
 - **[COR-219]** When `ilium.core.agent-detect` is off, every pane MUST report agent class `none` and activity `unknown` within one detection interval, and on re-enable all panes MUST be reclassified within 2 seconds (proposed, owner to confirm).
+
+## Custom status icons
+
+Custom is the third display mode of agent monitoring, next to the two built-in ones, and is chosen with `[ui] agent_monitoring_mode = "custom"`. The user writes an ordered list of rules in the rules editor of the Agent Monitoring settings tab; each rule names one icon and an expression over the facts this plugin detects (agent class, activity, goal state, unread output and so on). This plugin owns the rules, their evaluation and their storage, because it owns the facts they read. Hovering a status icon explains which rule chose it.
+
+- **[PRM-501]** In the display mode `custom` the system must evaluate the custom status rules from top to bottom and let the first enabled rule whose expression matches choose the one status icon of a pane, with AND binding tighter than OR, NOT applied to a single condition, and a condition on a fact that cannot be observed counted as unknown, also when negated. When no rule matches, the Otherwise row must decide, and an empty Otherwise row must leave the status slot blank.
+- **[PRM-502]** The custom status rules must be global to every project and session, must be saved as the user edits them in the rules editor, and must be limited to 64 rules, 8 AND groups per rule, 8 conditions per group, 64 conditions per rule and rule names of 48 characters. In the mode `custom` every pane row, including editors and boards, must show exactly one status slot of three cells.

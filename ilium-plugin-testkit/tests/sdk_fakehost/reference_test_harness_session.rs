@@ -13,7 +13,7 @@ use ilium_plugin_testkit::session::FakeSession;
 use crate::common::{assert_fails_with, with_clean_env};
 
 /// Name, extension points, services: the "Core stubs" table of the harness page, row by row.
-const STUB_TABLE: [(&str, &[&str], &[&str]); 30] = [
+const STUB_TABLE: [(&str, &[&str], &[&str]); 32] = [
     (
         "ilium.core.tree",
         &["before-move", "before-close", "node-sorts"],
@@ -84,6 +84,16 @@ const STUB_TABLE: [(&str, &[&str], &[&str]); 30] = [
         &[],
     ),
     (
+        "ilium.core.attention",
+        &["item-sources", "before-jump"],
+        &[],
+    ),
+    (
+        "ilium.core.resources",
+        &["resource-kinds", "before-grant"],
+        &[],
+    ),
+    (
         "ilium.core.chatroom",
         &["before-post", "message-renderers"],
         &[],
@@ -148,7 +158,7 @@ const STUB_TABLE: [(&str, &[&str], &[&str]); 30] = [
 #[test]
 fn dev_483_the_stub_table_has_thirty_rows_in_manual_order() {
     let table = core_stubs::table();
-    assert_eq!(table.len(), 30);
+    assert_eq!(table.len(), 32);
     let names: Vec<&str> = table.iter().map(|stub| stub.name.as_str()).collect();
     let expected: Vec<&str> = STUB_TABLE.iter().map(|row| row.0).collect();
     assert_eq!(names, expected);

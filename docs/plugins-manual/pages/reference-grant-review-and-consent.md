@@ -98,6 +98,8 @@ The fingerprint is the SHA-256 of the raw public key, shown as 64 hex digits in 
 
 **Localisation of dialog text.** The review dialog, consent prompts and notices use the host's own wording for fixed text. Text supplied by the plugin (the grant reason, a toast body) is shown verbatim as data, cut with `…`, and is never translated by the host. Ids stay identifiers. See [Internationalisation](/pages/guide-internationalisation/) ([AUT-618] to [AUT-622]).
 
+**The licence line.** The header of the review dialog shows `Licence: <SPDX expression>` from the manifest `license` key, or `Licence: No licence declared`. An update whose expression differs from the installed version shows `Licence changed: <old> to <new>` and always opens the dialog, also when it adds no grant ([PRM-206](/pages/user-install-and-manage/#review-the-permissions)).
+
 ## Updates
 
 <figure>

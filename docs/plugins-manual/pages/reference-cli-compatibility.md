@@ -34,6 +34,9 @@ The kernel parses these commands before any plugin runs. A plugin MUST NOT decla
 | `ilium new-pane` | fleet | [fleet](/pages/core-plugin-fleet/) | yes | text for plain panes, JSONL for `--worktree` | Worktree creation calls the worktrees service. |
 | `ilium panes` | fleet | [fleet](/pages/core-plugin-fleet/) | no | JSONL | Visits every running session. |
 | `ilium broadcast` | fleet | [fleet](/pages/core-plugin-fleet/) | no | JSONL | Uses the pane selector. |
+| `ilium close-pane` | fleet | [fleet](/pages/core-plugin-fleet/) | yes | JSONL | Worktree removal calls the worktrees service. |
+| `ilium ctl ...` | fleet | [fleet](/pages/core-plugin-fleet/) | yes | the format of `--format` for reads, JSONL for mutations | Remote control of a running session. |
+| `ilium resource ...` | resources | [resources](/pages/core-plugin-resources/) | yes | JSONL | `ilium ressource` is a second declared name. |
 | `ilium chat init`, `send`, `context`, `tail` | chatroom | [chatroom](/pages/core-plugin-chatroom/) | no | text | Works on `CHATROOM.md` directly. |
 | `ilium progress check`, `set`, `wait`, `status`, `clear` | progress | [progress](/pages/core-plugin-progress/) | yes | JSONL | `ilium wait` is a second declared name. |
 | `ilium wait` | progress | [progress](/pages/core-plugin-progress/) | yes | JSONL | Alias of `ilium progress wait`. |

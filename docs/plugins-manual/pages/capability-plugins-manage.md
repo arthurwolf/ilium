@@ -73,13 +73,14 @@ record plugin-info {
   disabled-reason: option<string>, health: health-state,
   publisher: string, publisher-key: option<string>,
   source: string, channel: string, pinned: bool,
-  update-available: option<string>, deprecated: bool, yanked: bool
+  update-available: option<string>, deprecated: bool, yanked: bool,
+  held-until: option<string>
 }
 %list: func() -> list<plugin-info>;
 set-enabled: func(plugin: plugin-id, enabled: bool, scope: string) -> result<_, plugin-error>;
 ```
 
-The record `plugin-info` has nineteen fields. The first six are `id`, `name`, `version`, `tier`, `enabled` and `failed`, as before. Five fields are new: `state` (package state), `side-states` (a list of `side-state` records), `scope` (`global` in 0.1.0), `disabled-reason` and `health`. Eight more describe distribution: `publisher`, `publisher-key` (the key id, none for T3), `source` (`file`, `url` or `registry`), `channel`, `pinned`, `update-available` (the newest allowed version known from cached registry data, never fetched by this call), `deprecated` and `yanked`. Their types and rules are in [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/).
+The record `plugin-info` has twenty fields. The first six are `id`, `name`, `version`, `tier`, `enabled` and `failed`, as before. Five fields are new: `state` (package state), `side-states` (a list of `side-state` records), `scope` (`global` in 0.1.0), `disabled-reason` and `health`. Nine more describe distribution: `publisher`, `publisher-key` (the key id, none for T3), `source` (`file`, `url` or `registry`), `channel`, `pinned`, `update-available` (the newest allowed version known from cached registry data, never fetched by this call), `deprecated`, `yanked` and `held-until` (the time until which auto-update holds back the newest version, none when no version is held). Their types and rules are in [Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/).
 
 The first six fields:
 
@@ -147,7 +148,7 @@ A T2 or T3 package that requests the grant never reaches a dialog. The install s
 | The plugin id is not installed | `set-enabled` returns `not-found`. |
 | The plugin is already in the requested state | `set-enabled` returns `ok` and changes nothing. |
 | The plugin provides a service that a consumer calls | The disable does not cascade. Later `services.call` requests from consumers return `not-found`. |
-| The user declined the prompt with "Not now" | The prompt returns at the next server start, at most three times. After that, the user grants the grant from Settings > Plugins. |
+| The user declined the prompt with "Not now" | The prompt returns at the next server start. The prompt is shown three times in total, and a third `Not now` ends it ([USR-014](/pages/user-install-and-manage/)). After that, the user grants the grant from Settings > Plugins. |
 | The user turns the plugin off in Settings | No notice appears. The footer notice N14 (see [Lifecycle](/pages/lifecycle/#failure-counting-and-restart)) appears only for a plugin the host turned off after failures. |
 
 Universal codes apply as well: any call may return `internal`. A plugin that does not handle `not-permitted` should show the user where to turn the grant on, instead of retrying.

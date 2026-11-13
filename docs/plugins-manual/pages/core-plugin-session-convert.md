@@ -111,19 +111,13 @@ The contract version is 0.1. The plugin is replaceable. A replacement must provi
   },
   "contributes": {
     "commands": [{ "id": "convert", "title": "Convert session", "category": "Agents" }],
-    "context_menu": [{ "id": "pane-convert", "applies_to": ["pane"], "dynamic": true, "command": "convert" }],
+    "context_menu": [{ "id": "pane-convert", "target": "tree-node", "when": "node.kind == \"pane\" && pane.primitive == \"agent\"", "dynamic": true, "command": "convert" }],
     "panels": [{ "id": "progress", "title": "Convert session", "modal": true }],
     "jobs": [{ "kind": "codex-to-claude", "deadline_ms": 60000, "memory_mib": 256 }],
     "services": {
-      "ilium.core.session-convert/convert": {
-        "start": {
-          "params": { "type": "object", "required": ["pane", "target"],
-            "properties": { "pane": { "type": "integer" },
-                            "target": { "type": "string", "enum": ["codex", "claude"] } } },
-          "result": { "type": "object", "properties": { "conversion": { "type": "string" } },
-            "required": ["conversion"] }
-        }
-      }
+      "provides": [
+        { "name": "ilium.core.session-convert/convert", "version": "0.1.0", "schema": "schemas/convert.json" }
+      ]
     },
     "extension_points": [
       { "id": "formats", "kind": "collect", "title": "Transcript formats",
@@ -144,7 +138,7 @@ The contract version is 0.1. The plugin is replaceable. A replacement must provi
 
 ### Complete manifest
 
-This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-30-core-plugins). [COR-050]
+This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest section above shows the contributions in detail; here the required keys, the sides, the `capabilities` per side and the `activation` triggers are all present. Activation follows [startup and lazy activation](/pages/reference-kernel-and-boot/#startup-and-lazy-activation-of-the-32-core-plugins). [COR-050]
 
 ```json
 {
@@ -199,9 +193,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "command:convert",
+    "command:ilium.core.session-convert/convert",
     "service:convert",
-    "view:session-convert.progress"
+    "view:ilium.core.session-convert/session-convert.progress"
   ],
   "replaceable": true,
   "surface": [
@@ -221,9 +215,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "context_menu": [
       {
         "id": "pane-convert",
-        "applies_to": [
-          "pane"
-        ],
+        "target": "tree-node",
+        "when": "node.kind == \"pane\" && pane.primitive == \"agent\"",
         "dynamic": true,
         "command": "convert"
       }
@@ -243,40 +236,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       }
     ],
     "services": {
-      "ilium.core.session-convert/convert": {
-        "start": {
-          "params": {
-            "type": "object",
-            "required": [
-              "pane",
-              "target"
-            ],
-            "properties": {
-              "pane": {
-                "type": "integer"
-              },
-              "target": {
-                "type": "string",
-                "enum": [
-                  "codex",
-                  "claude"
-                ]
-              }
-            }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "conversion": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "conversion"
-            ]
-          }
-        }
-      }
+      "provides": [
+        { "name": "ilium.core.session-convert/convert", "version": "0.1.0", "schema": "schemas/convert.json" }
+      ]
     },
     "extension_points": [
       {

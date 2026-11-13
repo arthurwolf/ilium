@@ -10,13 +10,13 @@ fn doc_usr_001_overview_states_30_core_plugins_ship_with_ilium() {
         page.contains("ship with Ilium"),
         "phrase 'ship with Ilium' missing"
     );
-    assert!(page.contains("30"), "the count 30 is missing");
+    assert!(page.contains("32"), "the count 32 is missing");
     let sentence = page
         .lines()
         .find(|line| line.contains("ship with Ilium"))
         .expect("a line with the phrase");
     assert!(
-        sentence.contains("30"),
+        sentence.contains("32"),
         "the count and the phrase must be in the same statement: {sentence}"
     );
 }
@@ -24,7 +24,7 @@ fn doc_usr_001_overview_states_30_core_plugins_ship_with_ilium() {
 /// REQ: USR-001
 #[test]
 fn doc_usr_001_core_plugin_page_lists_exactly_30_ids() {
-    assert_eq!(core_plugin_ids_from_manual().len(), 30);
+    assert_eq!(core_plugin_ids_from_manual().len(), 32);
 }
 
 /// REQ: USR-001
@@ -36,7 +36,7 @@ fn usr_001_fresh_profile_lists_30_core_plugins_without_any_install() {
         .iter()
         .filter(|row| row.id.starts_with("ilium.core."))
         .collect();
-    assert_eq!(core.len(), 30);
+    assert_eq!(core.len(), 32);
     assert!(
         rows.iter().all(|row| row.id.starts_with("ilium.core.")),
         "a fresh profile lists no third-party plugin"

@@ -18,6 +18,7 @@ A plugin can slow Ilium down or stop working without telling you. Ilium watches 
 |---|---|---|
 | healthy | The plugin works and answers on time | Nothing |
 | dormant | The plugin is on and waits until something needs it | Nothing |
+| needs-setup | The plugin is on, but a setting it cannot work without is empty. It has not started and has not failed | Open its settings and fill the rows marked as needed. See [A plugin that needs setup](/pages/user-install-and-manage/#a-plugin-that-needs-setup) |
 | degraded | The plugin works but is slow, busy or was restarted once | Open the detail and read the reason. Often it needs no action |
 | restarting | The plugin failed and Ilium will start it again in a moment | Wait a few seconds |
 | failed | The plugin failed three times in ten minutes and Ilium turned it off | Read the log. Turn it on again with the Space key when you want to try again |
@@ -73,6 +74,20 @@ The reasons you can see are:
 - **[USR-064]** The detail view of a plugin in state `failed` or `refused` MUST show the sentence of its last failure (the export, the code or trap, and the time as `YYYY-MM-DD HH:mm:ss`) followed by the cause sentence and the next-step sentence of that code from the catalogue ([USR-347]), and MUST NOT show a WebAssembly offset, a backtrace, a host frame or a raw engine message; those go only to the plugin log (proposed, owner to confirm).
 - **[USR-076]** The detail view of a plugin in state `refused` or `blocked` MUST show the code, its cause sentence and its next-step sentence ([USR-347]), and when the cause is a policy it MUST append the administrator's `notice.contact` text ([USR-343]); the state word in the row MUST NOT be the only explanation (proposed, owner to confirm).
 
+## When a fix is available
+
+A plugin that failed may already have a newer version that fixes the problem. Ilium tells you so in the place where you read about the failure, and it uses only what it already knows.
+
+When the health of a plugin is `failed` or `restarting`, the failure notice and the plugin's detail view add the line `Version X.Y.Z is available. Update?` with the action **Update**. X.Y.Z is the newest version that Ilium could install for you now: the value of the field `update-available` of the plugin record ([Plugin lifecycle states](/pages/reference-plugin-lifecycle-states/)), which comes from cached registry data only. The action runs the normal update, with the review dialog when the new version needs one ([Update a plugin](/pages/user-install-and-manage/#update-a-plugin)). If the update fails to start, Ilium puts the old version back, as for any update.
+
+The line is shown only when all of this holds:
+
+- The registry data that Ilium has cached lists a version higher than the installed one, on the channel you selected, that is not yanked.
+- The cached data is not expired ([PKG-541](/pages/user-plugin-store/)).
+- Your administrator's policy allows that version: it is not blocked, it matches a pin if there is one, and it is not held back ([Holding back new versions](/pages/reference-install-and-update/#holding-back-new-versions)).
+
+Otherwise the line is absent, and the notice and the detail view read as before. Ilium makes no network request to find out whether to show the line. With `auto_update = off` it therefore appears only if you opened the store or ran a check yourself and the data is still cached. A plugin installed from a file has no registry data and never shows the line. The requirement is PRM-208, at the end of this page.
+
 ## What happens to what the plugin showed
 
 When a plugin stops, the badges and rows that it added stay on screen for up to 60 seconds, dimmed as stale (HST-254, see [Rendering pipeline for plugins](/pages/reference-host-rendering/)). This lets you keep working. If the plugin comes back, the items refresh. If it does not, they disappear. A dimmed item that you select shows "plugin is restarting".
@@ -101,3 +116,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions: T7-users-privacy-a11y
 
 - **[USR-338]** When a plugin screen's view call fails or exceeds its 100 ms (proposed, owner to confirm) budget the host MUST keep the last good frame dimmed for at most 2 s and then show a placeholder naming the plugin and the code, with the keys Retry and Details, and MUST NOT blank any other window.
+
+## Production additions (round 15)
+
+- **[PRM-208]** The system must, when a plugin's health is `failed` or `restarting` and the cached, unexpired registry metadata lists a newer non-yanked version that policy allows, add the line `Version X.Y.Z is available. Update?` with an Update action to the failure notice and to the plugin detail view. Without such a cached version, or when policy blocks the update, the line must be absent, and no network request may be made only to produce it.

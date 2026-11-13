@@ -217,18 +217,35 @@ fn hst_636_diagnostics_bundle_has_required_parts_is_redacted_and_excludes_data_d
     let out = rig.path_in_scratch("bundle.tar");
     let output = rig.cli(&[
         "plugin",
-        "diagnostics",
+        "support-bundle",
+        "--all",
         "--out",
         out.to_str().expect("utf-8 path"),
     ]);
     assert_eq!(output.exit_code, 0, "diagnostics bundle written");
     let entries = rig.bundle_entry_names(&out);
-    for required in ["health", "metrics", "logs", "limits", "manifest", "grants"] {
+    // HST-636: the whole-install bundle is written by `support-bundle --all --out`; the fn name
+    // is kept from the time the command was `diagnostics --out`.
+    for required in ["health/", "counters.txt", "host-log.txt", "inventory.json"] {
         assert!(
             entries.iter().any(|name| name.contains(required)),
             "bundle contains {required}"
         );
     }
+    assert!(
+        entries.iter().all(|name| !name.contains("manifest")),
+        "no manifest in the bundle"
+    );
+    let removed = rig.cli(&[
+        "plugin",
+        "diagnostics",
+        "--out",
+        out.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(
+        removed.exit_code, 2,
+        "`plugin diagnostics --out` does not exist"
+    );
     assert!(
         entries.iter().all(|name| !name.contains("/data/")),
         "no plugin data directories in the bundle"
@@ -465,7 +482,8 @@ fn hst_636_diagnostics_bundle_completes_within_10_seconds_for_64_plugins() {
     let started = std::time::Instant::now();
     let output = rig.cli(&[
         "plugin",
-        "diagnostics",
+        "support-bundle",
+        "--all",
         "--out",
         out.to_str().expect("utf-8 path"),
     ]);
