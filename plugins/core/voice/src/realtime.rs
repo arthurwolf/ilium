@@ -8,6 +8,17 @@ use serde_json::{json, Value};
 use crate::credentials::redacted_json_credentials;
 use crate::error::VoiceError;
 
+fn stepped_value<T: Copy + PartialEq>(values: &[T], current: T, direction: i32) -> T {
+    if values.is_empty() {
+        return current;
+    }
+    let index = values
+        .iter()
+        .position(|candidate| *candidate == current)
+        .unwrap_or(0) as i32;
+    values[(index + direction.signum()).rem_euclid(values.len() as i32) as usize]
+}
+
 /// The provider endpoint used unless a loopback override is accepted.
 pub const REALTIME_ENDPOINT: &str = "wss://api.openai.com/v1/realtime";
 /// The environment variable the host reads for the loopback override.

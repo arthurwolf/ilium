@@ -64,7 +64,7 @@ fn disabled_or_switched_scene_clears_credit_and_restores_workspace_height_twin()
     let shown = area_for_scene(OPENSTREETMAP_ID, true, screen);
     assert!(!shown.is_empty());
     // The workspace above the strip is the full height minus the footer minus the credit rows.
-    assert_eq!(shown.top(), 22);
+    assert_eq!(shown.y, 22);
     assert!(
         area_for_scene(OPENSTREETMAP_ID, false, screen).is_empty(),
         "disabled"

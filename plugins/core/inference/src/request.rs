@@ -8,9 +8,9 @@ use crate::kilo::GatewayError;
 
 use crate::redact::{is_diagnostic_response_header, redacted_header_value, redacted_url};
 use crate::settings::{
-    ApiKeyProviderSettings, InferenceProviderKind, InferenceSettings, DEFAULT_ANTHROPIC_URL,
-    DEFAULT_OLLAMA_URL, DEFAULT_OPENAI_URL, DEFAULT_OPENROUTER_URL,
-    UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
+    kilo_gateway_model_catalog_url, ApiKeyProviderSettings, InferenceProviderKind,
+    InferenceSettings, DEFAULT_ANTHROPIC_URL, DEFAULT_OLLAMA_URL, DEFAULT_OPENAI_URL,
+    DEFAULT_OPENROUTER_URL, UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
 };
 
 /// The system prompt of every JSON-only helper request (template `json-only.hbs`).
@@ -476,6 +476,7 @@ pub fn inference_http_status(error: &InferenceError) -> Option<u16> {
 
 #[cfg(test)]
 mod tests {
+    const OPENAI_CATALOG_FIXTURE_KEY: &str = "sk-fixture-openai-catalog-secret";
     use super::*;
 
     /// REQ: PORT:ilium-inference/src/lib.rs::openai_official_policy_requires_the_parsed_exact_https_host

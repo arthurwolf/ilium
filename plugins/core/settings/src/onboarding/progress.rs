@@ -88,7 +88,7 @@ mod tests {
         assert!(!loaded.automatic_ai_allowed());
         progress.finish();
         let loaded: OnboardingProgress =
-            toml::from_str(&serde_json::to_string(&progress).unwrap()).unwrap();
+            serde_json::from_str(&serde_json::to_string(&progress).unwrap()).unwrap();
         assert!(!loaded.should_open(false, true));
         assert!(loaded.should_open(true, true));
     }
