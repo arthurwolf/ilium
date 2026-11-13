@@ -61,7 +61,8 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     "server": [
       "terminal.read-screen", "terminal.read-cells", "terminal.history", "terminal.write",
       "panes.read", "panes.signal", "tree.write",
-      "extensions.provide:ilium.core.terminal/before-send-input"
+      "extensions.provide:ilium.core.terminal/before-send-input",
+      "services.provide:ilium.core.terminal/transfer"
     ],
     "client": [
       "terminal.read-screen", "editor.edit",
@@ -72,7 +73,8 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   },
   "contributes": {
     "link_detectors": [
-      { "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" }
+      { "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" },
+      { "id": "url", "regex": "https?://[^\\s]+", "command": "link-open" }
     ],
     "extension_points": [
       {
@@ -188,7 +190,13 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
         "dynamic": false,
         "version": "0.1.0"
       }
-    ]
+    ],
+    "services": {
+      "provides": [
+        { "name": "ilium.core.terminal/transfer", "version": "0.1.0", "schema": "schemas/transfer.json" }
+      ]
+    },
+    "topics": { "publishes": ["ilium.core.terminal/screen-changed"] }
   }
 }
 ```
@@ -208,7 +216,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "license": "MIT",
   "server": {
     "entry": "server.wasm",
-    "world": "ilium:server/base@0.1.0"
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
   },
   "client": {
     "entry": "client.wasm",
@@ -223,7 +234,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.read",
       "panes.signal",
       "tree.write",
-      "extensions.provide:ilium.core.terminal/before-send-input"
+      "extensions.provide:ilium.core.terminal/before-send-input",
+      "services.provide:ilium.core.terminal/transfer"
     ],
     "client": [
       "terminal.read-screen",
@@ -244,6 +256,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       {
         "id": "path-line",
         "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+",
+        "command": "link-open"
+      },
+      {
+        "id": "url",
+        "regex": "https?://[^\\s]+",
         "command": "link-open"
       }
     ],
@@ -361,7 +378,21 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "dynamic": false,
         "version": "0.1.0"
       }
-    ]
+    ],
+    "services": {
+      "provides": [
+        {
+          "name": "ilium.core.terminal/transfer",
+          "version": "0.1.0",
+          "schema": "schemas/transfer.json"
+        }
+      ]
+    },
+    "topics": {
+      "publishes": [
+        "ilium.core.terminal/screen-changed"
+      ]
+    }
   },
   "limits_tier": "first-party"
 }

@@ -8,7 +8,10 @@
   "license": "MIT",
   "server": {
     "entry": "server.wasm",
-    "world": "ilium:server/base@0.1.0"
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
   },
   "client": {
     "entry": "client.wasm",
@@ -22,14 +25,18 @@
       "terminal.write",
       "panes.read",
       "panes.signal",
-      "tree.write"
+      "tree.write",
+      "extensions.provide:ilium.core.terminal/before-send-input",
+      "services.provide:ilium.core.terminal/transfer"
     ],
     "client": [
       "terminal.read-screen",
       "editor.edit",
       "commands.invoke:ilium.core.editor/*",
       "ui.panels",
-      "settings.write-kernel:terminal"
+      "settings.write-kernel:terminal",
+      "extensions.provide:ilium.core.terminal/open-link",
+      "extensions.provide:ilium.core.terminal/link-actions"
     ]
   },
   "activation": [
@@ -42,8 +49,142 @@
         "id": "path-line",
         "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+",
         "command": "link-open"
+      },
+      {
+        "id": "url",
+        "regex": "https?://[^\\s]+",
+        "command": "link-open"
       }
-    ]
+    ],
+    "extension_points": [
+      {
+        "id": "before-send-input",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before input is sent to a terminal pane",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "length": {
+              "type": "integer"
+            },
+            "source": {
+              "type": "string"
+            },
+            "preview": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane",
+            "length",
+            "source",
+            "preview"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "open-link",
+        "kind": "hook",
+        "mode": "first",
+        "title": "How a clicked link opens",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "pane": {
+              "type": "string"
+            },
+            "link_kind": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pane",
+            "link_kind",
+            "text"
+          ]
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "open-external",
+                "run-command",
+                "ignore"
+              ]
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      },
+      {
+        "id": "link-actions",
+        "kind": "collect",
+        "title": "Actions for a detected link in the right-click menu",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "link_kind": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "link_kind",
+            "title",
+            "command"
+          ]
+        },
+        "risk": "standard",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      }
+    ],
+    "services": {
+      "provides": [
+        {
+          "name": "ilium.core.terminal/transfer",
+          "version": "0.1.0",
+          "schema": "schemas/transfer.json"
+        }
+      ]
+    },
+    "topics": {
+      "publishes": [
+        "ilium.core.terminal/screen-changed"
+      ]
+    }
   },
   "limits_tier": "first-party"
 }
