@@ -294,6 +294,8 @@ fn split_geometry_and_real_parents_survive_wait_attach_grouping_and_detach() {
     // is on; this test pins that the grouping setting itself never moves geometry.
     app.ui_settings.progress_monitor_enabled = false;
     let before = app.pane_viewports();
+    // The wait footer only exists while the monitor is on (`shows_progress_footer`).
+    app.ui_settings.progress_monitor_enabled = true;
     app.resources
         .waits
         .insert(first, ReservationId::from("reservation"));
