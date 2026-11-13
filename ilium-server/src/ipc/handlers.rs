@@ -1539,17 +1539,32 @@ impl TerminalOutputSynchronization<'_> {
                 Some(terminal_replay_event(pane_id, replay))
             }
             Self::None => None,
-            Self::RecoverAfter(_) => match session
-                .output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)?
-            {
-                PtyOutputRecovery::Delta(chunk) => Some(ServerEvent::ScreenUpdate {
-                    pane_id,
-                    first_sequence: estimated.after_sequence.saturating_add(1),
-                    sequence: chunk.sequence,
-                    bytes: chunk.bytes.to_vec(),
-                }),
-                PtyOutputRecovery::Replay(replay) => Some(terminal_replay_event(pane_id, replay)),
-            },
+            Self::RecoverAfter(_) => {
+                let recovery = session
+                    .output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)
+                    .or_else(|| {
+                        // The journal moved after the estimate. Rebuild one
+                        // bounded frame no larger than the bytes reserved for
+                        // this pane, so the admitted storage still covers it.
+                        let reserved_bytes = match estimated.estimate {
+                            PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
+                            PtyOutputRecoveryEstimate::Replay(replay) => replay.byte_len,
+                        };
+                        session
+                            .output_recovery_prefix_after(estimated.after_sequence, reserved_bytes)
+                    })?;
+                match recovery {
+                    PtyOutputRecovery::Delta(chunk) => Some(ServerEvent::ScreenUpdate {
+                        pane_id,
+                        first_sequence: estimated.after_sequence.saturating_add(1),
+                        sequence: chunk.sequence,
+                        bytes: chunk.bytes.to_vec(),
+                    }),
+                    PtyOutputRecovery::Replay(replay) => {
+                        Some(terminal_replay_event(pane_id, replay))
+                    }
+                }
+            }
         }
     }
 }
@@ -1929,20 +1944,13 @@ async fn admitted_state_synchronization_events(
         // Revalidate the current tree's measured retained size against the
         // reservation before cloning the retry fence or the queued snapshot.
         // If it grew while admission waited, release and estimate again.
-        let expected_tree = {
-            let tree = state.tree.read().await;
-            let current_tree_bytes = crate::snapshot_io::estimated_tree_bytes(&tree);
-            if current_tree_bytes > snapshot_bytes / 2 {
-                drop(tree);
-                drop(producer_storage);
-                continue;
-            }
-            tree.clone()
-        };
-
+        // The admitted reservation covers the tree size, not one exact tree.
+        // Detection rewrites status strings between ticks, so an equality
+        // check here would retry under ordinary churn. The size check below
+        // is what keeps the snapshot inside the reservation.
         let built = {
             let tree = state.tree.read().await;
-            if *tree != expected_tree {
+            if crate::snapshot_io::estimated_tree_bytes(&tree) > snapshot_bytes / 2 {
                 None
             } else {
                 let panes = state.panes.read().await;
@@ -3854,10 +3862,10 @@ fn clear_progress_monitors(
             return Err(progress_rejection(
                 ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor,
                 format!(
-                "progress monitor {monitor_id} is not registered on this pane (registered: {:?})",
-                runtime.progress_monitor_ids()
-            ),
-            ))
+                    "progress monitor {monitor_id} is not registered on this pane (registered: {:?})",
+                    runtime.progress_monitor_ids()
+                ),
+            ));
         }
         None => runtime.cancel_progress_monitors(),
     };
@@ -11502,7 +11510,7 @@ mod tests {
                         pane_id: event_pane_id,
                         progress_monitors,
                     }) if event_pane_id == pane_id && progress_monitors.len() == 1 => {
-                        break progress_monitors.into_iter().next().unwrap()
+                        break progress_monitors.into_iter().next().unwrap();
                     }
                     Ok(_) => {}
                     Err(error) => panic!("progress event stream closed: {error}"),
