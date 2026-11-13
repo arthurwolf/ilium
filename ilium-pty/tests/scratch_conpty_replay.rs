@@ -23,7 +23,11 @@ fn print_vt100_view_of_recorded_conpty_prefix() {
         for column in 0..120u16 {
             if let Some(cell) = screen.cell(row, column) {
                 if cell.is_wide() || cell.contents().chars().count() > 1 {
-                    println!("row {row} col {column} wide={} {:?}", cell.is_wide(), cell.contents());
+                    println!(
+                        "row {row} col {column} wide={} {:?}",
+                        cell.is_wide(),
+                        cell.contents()
+                    );
                 }
             }
         }
