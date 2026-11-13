@@ -12,6 +12,7 @@
 - The PowerShell installer can install a partial release, reading checksums from its AVAILABILITY file, and recovery keeps the resolved version.
 - A pane invalidation that swept a suspended terminal command now reports the canceled command, like the other cancellation path; previously the silent sweep raced with it.
 - The Windows dependency audit lists `bcryptprimitives.dll`, `psapi.dll` and `userenv.dll` as Windows system components; current Rust and process-inspection code import them, and the audit had blocked the release candidate.
+- The Windows ONNX Runtime build receipt now passes its own audit: the compiler identity probe no longer suppresses the `cl` banner the audit reads (`/nologo`), and the audit expects the `CMAKE_GENERATOR` variable the build sets beside `CMAKE_GENERATOR_INSTANCE`. Checked against the receipt of a real Windows runner build.
 - Installer contract fixtures include the animation helper and bundled packs that the Windows installer requires.
 
 ### Changed

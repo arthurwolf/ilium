@@ -241,7 +241,7 @@ def resolve_msvc_toolchain(probe_directory):
         "vswhere_compiler": compiler_result,
         "selection": {"installation_path": str(installation), "installation_version": versions[0],
                       "toolset_version": toolset_version, "compiler_path": str(compiler)},
-        "cl": command_identity([str(compiler), "/nologo", "/Bv", "/c", str(probe_source), "/Fo" + str(probe_object)]),
+        "cl": command_identity([str(compiler), "/Bv", "/c", str(probe_source), "/Fo" + str(probe_object)]),
         "cmake": command_identity(["cmake", "--version"]),
         "rustc": command_identity(["rustc", "-Vv"]),
         "cargo": command_identity(["cargo", "--version"]),

@@ -229,7 +229,7 @@ def validate_windows_build_receipt(receipt, runtimes, runner="windows-2025", wor
     compiler = receipt_path(toolchain["cl"]["command"][0])
     cl_arguments = toolchain["cl"]["command"][1:]
     compiler_output = toolchain["cl"]["stdout"] + "\n" + toolchain["cl"]["stderr"]
-    require(compiler.is_absolute() and compiler.name.casefold() == "cl.exe" and len(cl_arguments) == 5 and cl_arguments[:3] == ["/nologo", "/Bv", "/c"] and receipt_path(cl_arguments[3]).is_absolute() and cl_arguments[4].startswith("/Fo") and receipt_path(cl_arguments[4][3:]).is_absolute() and re.search(r"Compiler Version [0-9.]+ for x64", compiler_output), "Windows native x64 MSVC identity differs")
+    require(compiler.is_absolute() and compiler.name.casefold() == "cl.exe" and len(cl_arguments) == 4 and cl_arguments[:2] == ["/Bv", "/c"] and receipt_path(cl_arguments[2]).is_absolute() and cl_arguments[3].startswith("/Fo") and receipt_path(cl_arguments[3][3:]).is_absolute() and re.search(r"Compiler Version [0-9.]+ for x64", compiler_output), "Windows native x64 MSVC identity differs")
     installation_path = receipt_path(selection["installation_path"])
     require(same_receipt_path(str(compiler), selection["compiler_path"]) and installation_path in compiler.parents, "Windows compiler probe is not from the selected Visual Studio instance")
     require(toolchain["cmake"]["command"] == ["cmake", "--version"] and re.search(r"(?m)^cmake version [0-9]+\.[0-9]+", toolchain["cmake"]["stdout"]), "Windows CMake identity differs")
@@ -243,7 +243,7 @@ def validate_windows_build_receipt(receipt, runtimes, runner="windows-2025", wor
     require(build_directory.is_absolute() and ".." not in build_directory.parts and re.fullmatch(r"[1-9][0-9]?", ort[10]) and 1 <= int(ort[10]) <= 64, "Windows ORT build directory/parallel evidence differs")
     expected_ort = [ort[0], "--config", "Release", "--build_shared_lib", "--enable_msvc_static_runtime", "--cmake_generator", "Visual Studio 17 2022", "--msvc_toolset", selection["toolset_version"], "--parallel", ort[10], "--skip_submodule_sync", "--build_dir", ort[13]]
     require(ort == expected_ort, "Windows ORT command differs from the reviewed static-CRT shared-runtime recipe")
-    require(receipt.get("ort_environment") == {"CMAKE_GENERATOR_INSTANCE": selection["installation_path"]}, "Windows ORT generator-instance environment differs")
+    require(receipt.get("ort_environment") == {"CMAKE_GENERATOR": "Visual Studio 17 2022", "CMAKE_GENERATOR_INSTANCE": selection["installation_path"]}, "Windows ORT generator-instance environment differs")
     cache = receipt.get("cmake_cache")
     require(isinstance(cache, dict) and receipt_path(cache.get("path", "")).is_absolute() and build_directory in receipt_path(cache["path"]).parents and re.fullmatch(r"[0-9a-f]{64}", cache.get("sha256", "")), "Windows CMake cache identity is malformed")
     values = cache.get("values")
