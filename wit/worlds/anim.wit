@@ -1,0 +1,22 @@
+package ilium:anim@0.1.0;
+
+world base {
+  import ilium:host/log@0.1.0;
+  import ilium:host/clock@0.1.0;
+  import ilium:host/storage@0.1.0;
+  import ilium:host/codec@0.1.0;
+  import ilium:host/fs@0.1.0;
+  import ilium:host/http@0.1.0;
+  import ilium:host/jobs@0.1.0;
+  import ilium:host/audio@0.1.0;
+  import ilium:host/media@0.1.0;
+  import ilium:host/location@0.1.0;
+  import ilium:host/geocode@0.1.0;
+  import ilium:host/gpu@0.1.0;
+  import ilium:anim/surface@0.1.0;
+  import ilium:anim/fonts@0.1.0;
+  export ilium:exports/lifecycle@0.1.0;
+  export ilium:exports/renderer@0.1.0;
+}
+
+world with-jobs { export ilium:exports/job-runner@0.1.0; }

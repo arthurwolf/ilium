@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>intent: send-input stages | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details open><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/" aria-current="page">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Host API</b></p>
+<h1>intent: send-input stages</h1>
+<h2 id="the-send-input-intent-in-depth">The send-input intent in depth</h2>
+<p><code>send-input</code> writes text, bytes or mouse events into a terminal pane as if the user had typed them. Besides a single piece of text with a delivery mode, it supports staged sends with delays, raw bytes, mouse events, a precondition, an input lock and a crash-safe journal. The kernel still owns the parts that are easy to get wrong: the two-stage submit of each agent signature, bracketed paste, and the prompt journal.</p>
+<p><strong>You need:</strong> <code>terminal.write</code> for any <code>send-input</code>. Raw bytes and mouse events also need <code>terminal.raw-input</code> (high risk). <code>lock-user-input</code> needs <code>terminal.input-lock</code> (high risk). <code>agent.read</code> is needed to read the activity that a precondition compares with. The grants belong in the manifest of the side that submits. The base grant is described in <a href="/pages/capability-terminal-write/">terminal.write</a>; the general rules for intents are in <a href="/pages/api-intents/">intents</a>.</p>
+<h3 id="records">Records</h3>
+<pre><code class="language-wit">// Excerpt of ilium:types/intents in reference-wit
+enum delivery { typed, submitted, pasted }
+record input-stage { text: string, delay-ms: u16, delivery: delivery }
+record terminal-mouse { kind: pointer-kind, button: pointer-button, column: u16, row: u16, modifiers: pointer-modifiers }
+record input-precondition { activity: option&lt;agent-activity&gt;, screen-revision: option&lt;u64&gt;, foreground: option&lt;string&gt; }
+
+record send-input-spec {
+  pane: node-id,
+  text: string,                               // ignored when stages is not empty
+  delivery: delivery,
+  prompt-epoch: option&lt;u64&gt;,                  // refused(conflict) when stale
+  // all optional
+  stages: list&lt;input-stage&gt;,                  // at most 16, total delay at most 10 s
+  raw: option&lt;list&lt;u8&gt;&gt;,                      // at most 64 KiB, needs terminal.raw-input
+  mouse: option&lt;list&lt;terminal-mouse&gt;&gt;,        // needs terminal.raw-input
+  if-current: option&lt;input-precondition&gt;,
+  lock-user-input: bool,                      // at most 2 s, needs terminal.input-lock
+  journal: bool,                              // write a journal entry before the PTY write
+}
+</code></pre>
+<p>The mandatory key is the <code>dedup-key</code> of the submission. It follows the format and window rules in <a href="/pages/api-intents/">intents</a>. <code>pointer-kind</code>, <code>pointer-button</code> and <code>pointer-modifiers</code> are the shared types also used by the <code>pointer</code> event: kinds <code>down</code>, <code>up</code>, <code>move</code>, <code>drag</code>, <code>wheel-up</code>, <code>wheel-down</code>, <code>wheel-left</code> and <code>wheel-right</code>; buttons <code>none</code>, <code>left</code>, <code>middle</code> and <code>right</code>; modifiers <code>shift</code>, <code>control</code> and <code>alt</code>.</p>
+<h3 id="fields-and-rules">Fields and rules</h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stages</code></td>
+<td>Replaces <code>text</code> when present. The host sends the stages in order and waits <code>delay-ms</code> before each. A stage uses its own <code>delivery</code>. The two-stage submit rule of the pane's signature still applies to a <code>submitted</code> stage. At most 16 stages and a total delay of at most 10 s, otherwise <code>invalid-argument</code> for the batch.</td>
+</tr>
+<tr>
+<td><code>raw</code></td>
+<td>Bytes written as they are, with no encoding, no bracketed paste and no submit keys. At most 64 KiB. Needs <code>terminal.raw-input</code>.</td>
+</tr>
+<tr>
+<td><code>mouse</code></td>
+<td>The host encodes each event in the protocol the program enabled (for example SGR 1006). <code>refused(unsupported)</code> when mouse reporting is off. Needs <code>terminal.raw-input</code>.</td>
+</tr>
+<tr>
+<td><code>if-current</code></td>
+<td>A precondition. Every field that is set must match, otherwise <code>refused(conflict)</code> before any byte is written. The message names the failed field: <code>activity</code>, <code>screen-revision</code> or <code>foreground</code>.</td>
+</tr>
+<tr>
+<td><code>lock-user-input</code></td>
+<td>Hold the user's keys for the duration of the stages. The lock lasts as long as the stages, so a batch with <code>lock-user-input</code> whose total delay is over 2 s is refused with <code>invalid-argument</code>. Keys the user types meanwhile are queued, not lost.</td>
+</tr>
+<tr>
+<td><code>journal</code></td>
+<td>Write the journal entry before the PTY write. See "Crash safety" below.</td>
+</tr>
+</tbody>
+</table>
+<p>The text of a stage, and <code>text</code> itself, is at most 64 KiB.</p>
+<h3 id="check-order">Check order</h3>
+<p>The kernel runs these checks in order. Steps 1 and 2 run at batch level over the whole list. The others are per submission. The same order, without the <code>mouse</code> step, is in <a href="/pages/api-intents/#send-input-check-order">intents</a>.</p>
+<ol>
+<li>Shape, key present, sizes, stage count, total delay, <code>raw</code> size and the total text across all stages (at most 65,536 bytes). Otherwise the batch is refused with <code>invalid-argument</code>.</li>
+<li>Grants: <code>terminal.write</code>, then <code>terminal.raw-input</code> if <code>raw</code> or <code>mouse</code> is set, then <code>terminal.input-lock</code> if <code>lock-user-input</code> is set. Otherwise the batch is refused with <code>not-permitted</code>.</li>
+<li>Dedup key. A reserved key completes as <code>duplicate</code>.</li>
+<li>The pane exists and is a terminal pane (<code>not-found</code>, <code>unsupported</code>).</li>
+<li>The pane is restored (<code>pane-not-ready</code>).</li>
+<li>The rate limit has room: 20 per second per pane and plugin (<code>rate-limited</code>).</li>
+<li><code>prompt-epoch</code>, if given, equals the pane's epoch (<code>conflict</code>).</li>
+<li><code>mouse</code>: reporting is enabled (<code>unsupported</code>).</li>
+<li><code>if-current</code> matches (<code>conflict</code>, message <code>precondition: &lt;field&gt;</code>).</li>
+<li>The lock is free: another plugin holding the input lock of the pane gives <code>conflict</code> with the message <code>input-locked</code>.</li>
+<li>The input is accepted: the key is reserved, the rate token is taken, the journal entry is written when requested, and the stages are sent. A refused attempt never takes a rate token.</li>
+</ol>
+<figure>
+<svg viewBox="0 0 420 170" role="img" aria-label="Timeline of a two-stage send with an input lock" width="630" height="255">
+  <defs>
+    <marker id="sendinput-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <text x="8" y="16" font-size="11" fill="currentColor">Time</text>
+  <line x1="40" y1="16" x2="410" y2="16" stroke="currentColor" marker-end="url(#sendinput-arrow)"/>
+  <rect x="40" y="34" width="330" height="22" rx="4" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="46" y="49" font-size="10" fill="currentColor">input lock: user keys are queued (at most 2 s)</text>
+  <rect x="40" y="70" width="90" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="85" y="87" font-size="10" text-anchor="middle" fill="currentColor">stage 1 "/compact"</text>
+  <text x="180" y="87" font-size="10" text-anchor="middle" fill="currentColor">delay 120 ms</text>
+  <rect x="230" y="70" width="140" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="300" y="87" font-size="10" text-anchor="middle" fill="currentColor">stage 2 submit (CR)</text>
+  <text x="40" y="118" font-size="10" fill="currentColor">checked before the first byte: grants, key, epoch, if-current, lock</text>
+  <text x="40" y="136" font-size="10" fill="currentColor">journal entry written before stage 1 when journal is true</text>
+  <text x="40" y="154" font-size="10" fill="currentColor">outcome: ok, or ok-epoch(n) on an agent pane</text>
+</svg>
+<figcaption>Stages, delays and the lock run inside the kernel. The plugin is not called between stages.</figcaption>
+</figure>
+
+<h3 id="example-compact-an-agent-only-when-it-is-idle">Example: compact an agent, only when it is idle</h3>
+<p>The plugin sends a slash command in two stages, waits for the agent to be idle, and holds the user's keys while the stages run. The <code>if-current</code> precondition prevents the text from landing in a running turn.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::intents::{InputPrecondition, InputStage, SendInputSpec};
+use ilium_plugin_sdk::types::intents::Delivery;
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+fn compact(pane: NodeId, attempt: u32) -&gt; Submission {
+    let spec = SendInputSpec {
+        pane,
+        text: String::new(),
+        delivery: Delivery::Typed,
+        prompt_epoch: None,
+        stages: vec![
+            InputStage { text: &quot;/compact&quot;.into(), delay_ms: 0, delivery: Delivery::Typed },
+            InputStage { text: String::new(), delay_ms: 120, delivery: Delivery::Submitted },
+        ],
+        raw: None,
+        mouse: None,
+        if_current: Some(InputPrecondition {
+            activity: Some(AgentActivity::Idle),
+            screen_revision: None,
+            foreground: None,
+        }),
+        lock_user_input: true,
+        journal: true,
+    };
+    Submission::keyed(Intent::SendInput(spec), format!(&quot;compact-{pane}-{attempt}&quot;))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { Submission } from '@ilium/plugin-sdk/types';
+
+function compact(pane: bigint, attempt: number): Submission {
+  return {
+    intent: {
+      tag: 'send-input',
+      val: {
+        pane, text: '', delivery: 'typed', promptEpoch: undefined,
+        stages: [
+          { text: '/compact', delayMs: 0, delivery: 'typed' },
+          { text: '', delayMs: 120, delivery: 'submitted' },
+        ],
+        raw: undefined, mouse: undefined,
+        ifCurrent: { activity: 'idle', screenRevision: undefined, foreground: undefined },
+        lockUserInput: true,
+        journal: true,
+      },
+    },
+    correlation: 1n,
+    dedupKey: `compact-${pane}-${attempt}`,
+  };
+}
+</code></pre>
+<h3 id="example-raw-bytes-and-a-mouse-click">Example: raw bytes and a mouse click</h3>
+<p>Send the escape sequence for "cursor up", then click at column 12, row 3. The program must have mouse reporting on, or the click is refused with <code>unsupported</code>. The check of the modes uses the <code>terminal.modes</code> read of the <a href="/pages/primitives-terminal/">terminal primitives</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let spec = SendInputSpec {
+    pane,
+    text: String::new(),
+    delivery: Delivery::Typed,
+    prompt_epoch: None,
+    stages: vec![],
+    if_current: None,
+    lock_user_input: false,
+    journal: false,
+    raw: Some(vec![0x1b, b'[', b'A']),
+    mouse: Some(vec![
+        TerminalMouse { kind: PointerKind::Down, button: PointerButton::Left, column: 12, row: 3, modifiers: PointerModifiers::empty() },
+        TerminalMouse { kind: PointerKind::Up,   button: PointerButton::Left, column: 12, row: 3, modifiers: PointerModifiers::empty() },
+    ]),
+};
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">const val = {
+  pane, text: '', delivery: 'typed' as const, promptEpoch: undefined, stages: [],
+  raw: new Uint8Array([0x1b, 0x5b, 0x41]),
+  mouse: [
+    { kind: 'down', button: 'left', column: 12, row: 3, modifiers: [] },
+    { kind: 'up', button: 'left', column: 12, row: 3, modifiers: [] },
+  ],
+  ifCurrent: undefined, lockUserInput: false, journal: false,
+};
+</code></pre>
+<h3 id="input-lock">Input lock</h3>
+<p><code>terminal.lock-input(pane, millis)</code> and <code>unlock-input(pane)</code> (see <a href="/pages/primitives-terminal/">terminal primitives</a>) hold the user's keys on their own. <code>lock-user-input</code> on <code>send-input</code> does the same for exactly the duration of the stages and releases the lock when the last stage is sent or the intent fails. Only one lock exists per pane. A second plugin asking for it gets <code>conflict</code>. A requested duration over 2,000 ms is <code>invalid-argument</code>. Queued keys are delivered to the program in order after the unlock, so nothing the user typed is lost.</p>
+<h3 id="crash-safety-journal-and-input-uncertain">Crash safety: journal and input-uncertain</h3>
+<p>With <code>journal: true</code> the kernel writes a pane journal entry (kind <code>input-sent</code>, with the dedup key and the delivery result) before the PTY write. A <code>send-input</code> on an agent pane and <code>agent-action</code> always journal their keys, from Phase 5. If the server stops between the write and the recorded outcome, the restarted plugin receives <code>input-uncertain { pane, dedup-key }</code> once, and the kernel never resends silently. The plugin reads the screen, decides whether the text arrived, and resends under a new key if it did not. In the sketches below, <code>screen_shows</code> and <code>screenShows</code> stand for the plugin's own helper that reads cells and looks for the text.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">Event::InputUncertain(InputUncertainEvent { pane, dedup_key }) =&gt; {
+    // read the visible rows with terminal::read_cells (terminal.read-cells), decide, then:
+    if !self.screen_shows(pane, &quot;/compact&quot;) {
+        out.push(compact(pane, 2));   // a new attempt number gives a new key: the old key is reserved and would complete as duplicate
+    }
+    log::log(Level::Warn, &amp;format!(&quot;input {dedup_key} on {pane} was uncertain&quot;));
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">if (event.tag === 'input-uncertain') {
+  // read the visible rows with readCells (terminal.read-cells), decide, then:
+  if (!screenShows(event.val.pane, '/compact')) out.push(compact(event.val.pane, 2));   // new attempt number, new key
+  log('warn', `input ${event.val.dedupKey} on ${event.val.pane} was uncertain`);
+}
+</code></pre>
+<h3 id="the-ok-epoch-outcome">The ok-epoch outcome</h3>
+<p>On an agent pane the outcome is <code>ok-epoch(n)</code>, where <code>n</code> is the new prompt epoch. Store it, and pass it later as <code>prompt-epoch</code> to refuse a send that raced with another prompt. A plugin that tests for <code>ok</code> only keeps working through <code>is_ok()</code> or <code>isOk()</code>.</p>
+<h3 id="staged-signature-actions">Staged signature actions</h3>
+<p>An agent signature in the manifest may declare an action as stages with the same rules, so <code>agent-action</code> uses them too:</p>
+<pre><code class="language-json">{ &quot;actions&quot;: { &quot;compact&quot;: { &quot;stages&quot;: [
+  { &quot;keys&quot;: &quot;/compact&quot;, &quot;delay_ms&quot;: 0 },
+  { &quot;keys&quot;: &quot;\r&quot;, &quot;delay_ms&quot;: 120 } ] } } }
+</code></pre>
+<h3 id="errors-and-limits">Errors and limits</h3>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>More than 16 stages, total delay over 10 s, <code>raw</code> over 64 KiB, <code>lock-user-input</code> with a total stage delay over 2 s</td>
+<td>batch refused, <code>invalid-argument</code></td>
+</tr>
+<tr>
+<td><code>raw</code>, <code>mouse</code> or lock without its grant</td>
+<td>batch refused, <code>not-permitted</code></td>
+</tr>
+<tr>
+<td>Restored pane that has not started</td>
+<td><code>refused(pane-not-ready)</code></td>
+</tr>
+<tr>
+<td>Mouse reporting off</td>
+<td><code>refused(unsupported)</code></td>
+</tr>
+<tr>
+<td><code>if-current</code> mismatch, stale epoch or held lock</td>
+<td><code>refused(conflict)</code>; the message names the failed precondition</td>
+</tr>
+<tr>
+<td>More than 20 sends per second per pane and plugin</td>
+<td><code>refused(rate-limited)</code> with <code>retry-after-ms</code></td>
+</tr>
+<tr>
+<td>Server stops during a journaled send</td>
+<td><code>input-uncertain</code> after restart, no replay</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>While the lock is held the user's keys wait, and a typed line appears after the stages finish. The stages appear in the terminal as typing, with the pauses of <code>delay-ms</code>. The tree shows the lock glyph from the client icon set on the pane for the duration.</p>
+<pre class="term"><span class="t-dim">▼ <span class="w2">📂</span> Ilium</span>
+<span class="t-hi">›   <span class="w2">🦀</span> <span class="w2">🔒</span> ⠋ Fix auth</span>
+<span class="t-dim">›   <span class="w2">🖥️</span>    Shell</span>
+
+<span class="t-dim">pane 7 (claude)  send-input  compact-7-1</span>
+<span class="t-ok">0 ms     stage 1 typed   "/compact"</span>
+<span class="t-ok">120 ms   stage 2 submit  CR</span>
+<span class="t-ok">121 ms   outcome         ok-epoch(5)</span>
+</pre>
+
+<p>Illustrative, not generated: the tree row uses glyphs from the client icon inventory (agent, lock, working spinner); the log lines are an example of the layout, not a capture.</p>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-intents/">Intents</a> for batches, dedup keys and the other intents.</li>
+<li><a href="/pages/api-events/">Events</a> for <code>input-uncertain</code> and <code>request-completed</code>.</li>
+<li><a href="/pages/primitives-terminal/">Terminal primitives</a> and <a href="/pages/primitives-agent/">agent primitives</a> for <code>modes</code>, <code>read-cells</code>, <code>lock-input</code> and the activity states.</li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a> and <a href="/pages/capability-agent-control/">agent.control</a>.</li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-kernel-settings-and-keymap/"><small>Previous</small>kernel settings and keymap reads</a><a class="next" href="/pages/api-intent-pane-lifecycle/"><small>Next</small>intents: pane lifecycle</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#the-send-input-intent-in-depth">The send-input intent in depth</a></li><li class="l3"><a href="#records">Records</a></li><li class="l3"><a href="#fields-and-rules">Fields and rules</a></li><li class="l3"><a href="#check-order">Check order</a></li><li class="l3"><a href="#example-compact-an-agent-only-when-it-is-idle">Example: compact an agent, only when it is idle</a></li><li class="l3"><a href="#example-raw-bytes-and-a-mouse-click">Example: raw bytes and a mouse click</a></li><li class="l3"><a href="#input-lock">Input lock</a></li><li class="l3"><a href="#crash-safety-journal-and-input-uncertain">Crash safety: journal and input-uncertain</a></li><li class="l3"><a href="#the-ok-epoch-outcome">The ok-epoch outcome</a></li><li class="l3"><a href="#staged-signature-actions">Staged signature actions</a></li><li class="l3"><a href="#errors-and-limits">Errors and limits</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

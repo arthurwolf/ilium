@@ -20,6 +20,21 @@ use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, BorderType};
 
+/// Whether the section frame rules are drawn (the `section_frames_enabled`
+/// UI setting). Pure geometry helpers such as the tree panel's list/toolbar
+/// split read it, because they are called from many places that have no
+/// `App`; the app updates it whenever its UI settings change.
+static SECTION_FRAMES_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+pub fn section_frames_enabled() -> bool {
+    SECTION_FRAMES_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_section_frames_enabled(enabled: bool) {
+    SECTION_FRAMES_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Border corners/edges use rounded glyphs everywhere.
 const BORDER_TYPE: BorderType = BorderType::Rounded;
 
@@ -48,6 +63,44 @@ pub struct Theme {
     pub border_focused: Color,
     /// Border color for a panel that does not.
     pub border_unfocused: Color,
+    /// Foregrounds for the semantic status tones custom status rules name.
+    pub status_tones: StatusTones,
+}
+
+/// Foreground colours for the named theme slots of custom status rules
+/// (`danger`, `warning`, `success`, `info`, `muted`; `accent` is
+/// [`Theme::accent_bg`]). The dark preset keeps the terminal's own ANSI
+/// colours; the light preset uses darker values that keep contrast against a
+/// light background.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusTones {
+    pub danger: Color,
+    pub warning: Color,
+    pub success: Color,
+    pub info: Color,
+    pub muted: Color,
+}
+
+impl StatusTones {
+    pub const fn dark() -> Self {
+        Self {
+            danger: Color::Red,
+            warning: Color::Yellow,
+            success: Color::Green,
+            info: Color::Cyan,
+            muted: Color::DarkGray,
+        }
+    }
+
+    pub const fn light() -> Self {
+        Self {
+            danger: Color::Rgb(0xb4, 0x23, 0x18),
+            warning: Color::Rgb(0x8a, 0x5a, 0x00),
+            success: Color::Rgb(0x2b, 0x7a, 0x0b),
+            info: Color::Rgb(0x0b, 0x6e, 0x99),
+            muted: Color::Rgb(0x6b, 0x72, 0x80),
+        }
+    }
 }
 
 impl Default for Theme {
@@ -64,6 +117,7 @@ impl Theme {
             accent_fg: Color::Rgb(0x1a, 0x1b, 0x26),
             border_focused: Color::Cyan,
             border_unfocused: Color::DarkGray,
+            status_tones: StatusTones::dark(),
         }
     }
 
@@ -79,6 +133,7 @@ impl Theme {
             accent_fg: Color::Rgb(0x1a, 0x1b, 0x26),
             border_focused: Color::Rgb(0x3b, 0x5b, 0xdb),
             border_unfocused: Color::Rgb(0x8a, 0x8f, 0x98),
+            status_tones: StatusTones::light(),
         }
     }
 
@@ -173,6 +228,11 @@ pub fn accent_fg() -> Color {
     current().accent_fg
 }
 
+/// The effective semantic status tones, for custom status rule colours.
+pub fn status_tones() -> StatusTones {
+    current().status_tones
+}
+
 /// Border color/weight for a panel, brighter and bold when `focused`.
 pub fn border_style(focused: bool) -> Style {
     let theme = current();
@@ -240,6 +300,13 @@ pub fn chrome_stats_cell(outer_area: ratatui::layout::Rect) -> ratatui::layout::
     ratatui::layout::Position::new(hamburger.x + 2, hamburger.y)
 }
 
+/// The cell of `CHROME_ICONS`' third glyph (the small dot), two cells right of
+/// the big dot: an agent pane makes it the hover/click target of its recap.
+pub fn chrome_recap_cell(outer_area: ratatui::layout::Rect) -> ratatui::layout::Position {
+    let stats = chrome_stats_cell(outer_area);
+    ratatui::layout::Position::new(stats.x + 2, stats.y)
+}
+
 /// Nerd Font powerline round-cap glyphs used to give the status bar rounded
 /// ends: each is rendered with `fg` = the bar's own accent color and no
 /// explicit `bg` (so it blends into whatever sits outside the bar), the
@@ -300,6 +367,17 @@ pub fn muted_accent_bg(scheme: ColorScheme) -> Color {
     mix(current().accent_bg, blend_target, 0.72)
 }
 
+/// The unfilled part of a progress gauge: a half-strength blend of the accent
+/// toward the scheme's dark/light extreme, so it sits visibly between the
+/// banner fill (`muted_accent_bg`) and the saturated filled part.
+pub fn gauge_track_bg(scheme: ColorScheme) -> Color {
+    let blend_target = match scheme {
+        ColorScheme::Dark => Color::Rgb(0, 0, 0),
+        ColorScheme::Light => Color::Rgb(0xff, 0xff, 0xff),
+    };
+    mix(current().accent_bg, blend_target, 0.5)
+}
+
 /// Background fill for the last-prompt banner. No explicit `fg`: the
 /// banner's muted background stays close enough in lightness to an
 /// unstyled cell's implied terminal background that the surrounding
@@ -307,6 +385,23 @@ pub fn muted_accent_bg(scheme: ColorScheme) -> Color {
 /// it, the same assumption `agent_toolbar`'s unstyled buttons already make.
 pub fn last_prompt_style(scheme: ColorScheme) -> Style {
     Style::new().bg(muted_accent_bg(scheme))
+}
+
+/// Background fill for the attention briefing box. A weaker tint than the
+/// last-prompt banner's so the two stacked boxes read as different sections
+/// while both stay dark on the dark scheme.
+pub fn briefing_style(scheme: ColorScheme) -> Style {
+    let blend_target = match scheme {
+        ColorScheme::Dark => Color::Rgb(0, 0, 0),
+        ColorScheme::Light => Color::Rgb(0xff, 0xff, 0xff),
+    };
+    Style::new().bg(mix(current().accent_bg, blend_target, 0.84))
+}
+
+/// Gutter and label colour of the attention briefing box: the focused-border
+/// colour, which differs from the banner's accent gutter.
+pub fn briefing_gutter_style(scheme: ColorScheme) -> Style {
+    briefing_style(scheme).fg(current().border_focused)
 }
 
 #[cfg(test)]

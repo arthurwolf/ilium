@@ -52,6 +52,7 @@ async fn focused_subdirectory_agent_resolves_session_and_persists_its_cwd() {
         &mut client,
         &ClientRequest::Attach {
             session: "worktree-cwd-detection".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -61,6 +62,7 @@ async fn focused_subdirectory_agent_resolves_session_and_persists_its_cwd() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
             working_directory: NewPaneWorkingDirectory::ProjectRoot,
@@ -125,6 +127,7 @@ async fn focused_subdirectory_agent_resolves_session_and_persists_its_cwd() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(command),
             working_directory: NewPaneWorkingDirectory::FocusedTerminal,

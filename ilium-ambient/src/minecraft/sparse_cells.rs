@@ -44,12 +44,13 @@ pub fn prepare(
 ) -> Result<PreparedTile, Error> {
     cancel.check()?;
     if !request.render_chunks().contains(&chunk)
+        || map.loaded().coverage.chunks.is_empty()
         || !map
             .loaded()
             .coverage
             .chunks
-            .is_superset(request.support_chunks())
-        || map.loaded().chunks.len() > super::source_footprint::MAX_REQUESTED_CHUNKS
+            .is_subset(request.support_chunks())
+        || map.loaded().chunks.len() > super::loader::MAX_MERGED_CHUNKS
     {
         return Err(Error::Source);
     }
@@ -118,7 +119,10 @@ pub fn prepare(
                     .filter(|used| *used <= MAX_TILE_CELLS)
                     .ok_or(Error::Limit)?;
                 let position = [x, y, z];
-                let state = map.state(position).ok_or(Error::Source)?;
+                // A missing or unfinished chunk leaves a hole: no state, no cell.
+                let Some(state) = map.state(position) else {
+                    continue;
+                };
                 if state.is_air() {
                     continue;
                 }

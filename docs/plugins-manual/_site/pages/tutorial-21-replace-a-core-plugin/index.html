@@ -1,0 +1,1202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>21. Replace a core plugin: Titles Lite | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details open><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/" aria-current="page">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Tutorials</b></p>
+<h1>21. Replace a core plugin: Titles Lite</h1>
+
+<p>This step replaces a core plugin. The plugin is <code>example.titles-lite</code>. It takes the place of <code>ilium.core.titles</code>, the plugin that names panes from the prompts you send. The replacement is deliberately small. It names a pane once, from the first prompt, with four words or fewer. It keeps every item of the surface of the plugin it replaces, so the services, points and topics that other plugins use keep working. It drops the rest: the preview panel, the tree tidy and the settings tab.</p>
+<p>Replacement is the heaviest of the five ways to work with a core plugin. The built-in plugin is turned off while yours is on, and you must keep up with it. Use it only when no extension point is enough. <a href="/pages/extending-core-plugins/">Extending core plugins</a> compares all five, and <a href="/pages/reference-core-extension-points/">Reference: core extension points</a> lists the surface of each plugin. <a href="/pages/core-plugin-titles/">Core plugin: titles</a> describes the plugin you replace. This page does not repeat those tables.</p>
+<p>You start a fresh plugin. You have finished tutorials 1 to 9 and read <a href="/pages/api-extension-points/">Extension points</a>, <a href="/pages/tutorial-18-add-an-extension-point/">tutorial 18</a> and <a href="/pages/tutorial-19-stop-core-actions-with-hooks/">tutorial 19</a>. Tutorial plugin: <code>example.titles-lite</code>, version 0.1.0, API <code>ilium:plugin@0.1.0</code>. Rust and TypeScript behave the same in every step.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>Rust: stable 1.90 or later with the <code>wasm32-wasip2</code> target, and the crates <code>ilium-plugin-sdk</code> and <code>serde_json</code>. TypeScript: Bun 1.2 or later and <code>@ilium/plugin-sdk</code>.</li>
+<li>Grants, with the reason for each in the table of step 5: <code>inference</code>, <code>agent.read-prompts</code>, <code>tree.read</code>, <code>tree.write</code>, <code>services.provide:ilium.core.titles/suggest</code>, <code>extensions.provide:ilium.core.titles/before-apply-title</code>, <code>extensions.provide:ilium.core.titles/title-styles</code> and <code>topics.subscribe:ilium.extensions/changed</code>.</li>
+<li><code>"unstable": ["plugin-services"]</code>, because <code>suggest</code> is a plugin-defined service (dev mode, T2 and T3).</li>
+<li>An AI provider that the user has set up. The titles come from <a href="/pages/core-plugin-inference/">Inference providers</a>.</li>
+<li>A scratch folder for package inspection: <code>/media/arthur/tmp/titles-lite/</code> with a <code>.scratch-reaper</code> file in it.</li>
+</ul>
+<h3 id="the-surface-this-step-uses">The surface this step uses</h3>
+<p><code>ilium.core.titles</code> is replaceable and lists four surface items. A replacement must provide all four.</p>
+<table>
+<thead>
+<tr>
+<th>Surface item</th>
+<th>What the replacement provides</th>
+<th>Declared as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>services:suggest</code></td>
+<td>A service that returns a title for some text</td>
+<td><code>contributes.services.provides</code> and <code>services.provide:ilium.core.titles/suggest</code></td>
+</tr>
+<tr>
+<td><code>points:before-apply-title</code></td>
+<td>A transform hook, run before a title is applied</td>
+<td><code>contributes.extension_points</code> and <code>extensions.provide:ilium.core.titles/before-apply-title</code></td>
+</tr>
+<tr>
+<td><code>points:title-styles</code></td>
+<td>A collect point of styles with an instruction text</td>
+<td><code>contributes.extension_points</code> and <code>extensions.provide:ilium.core.titles/title-styles</code></td>
+</tr>
+<tr>
+<td><code>topics:title-applied</code></td>
+<td>A topic with <code>{ node, title }</code></td>
+<td><code>contributes.topics.publishes</code></td>
+</tr>
+</tbody>
+</table>
+<p>The replacement uses the names of the plugin it replaces, such as <code>ilium.core.titles/suggest</code>. This is what lets every extension and every caller written for the core plugin go on working. It is allowed only for a plugin that lists the id in <code>replaces</code>. Any other plugin that uses a name with another plugin's id is refused.</p>
+<p>Other parts of the surface of this step: the top-level key <code>"replaces": ["ilium.core.titles"]</code> (at most 4 ids), the host call <code>inference::complete_request</code> for the model, <code>extensions::run_hook_request</code> and <code>take_reply</code> for the hook, and <code>topics::publish</code>.</p>
+<h3 id="the-flow">The flow</h3>
+<p>One prompt becomes one title in four moves. The model proposes, the hook may adjust, the plugin applies and then tells the rest of the product.</p>
+<figure>
+<svg viewBox="0 0 480 330" role="img" aria-label="Sequence of naming a pane" width="720" height="495">
+  <title>Naming a pane with Titles Lite</title>
+  <desc>The user sends a prompt. Titles Lite asks the inference provider for a title. It runs the before-apply-title hook. It renames the pane and publishes the title-applied topic.</desc>
+  <defs>
+    <marker id="t21-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="10" y="8" width="70" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="45" y="25" font-size="11" text-anchor="middle" fill="currentColor">Agent pane</text>
+  <rect x="130" y="8" width="90" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="175" y="25" font-size="11" text-anchor="middle" fill="currentColor">Titles Lite</text>
+  <rect x="270" y="8" width="90" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="315" y="25" font-size="11" text-anchor="middle" fill="currentColor">Inference</text>
+  <rect x="400" y="8" width="70" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="435" y="25" font-size="11" text-anchor="middle" fill="currentColor">Registry</text>
+  <line x1="45" y1="34" x2="45" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="175" y1="34" x2="175" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="315" y1="34" x2="315" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="435" y1="34" x2="435" y2="320" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="45" y1="58" x2="175" y2="58" stroke="currentColor" marker-end="url(#t21-arrow)"/>
+  <text x="110" y="52" font-size="10" text-anchor="middle" fill="currentColor">input-submitted</text>
+  <line x1="175" y1="92" x2="315" y2="92" stroke="currentColor" marker-end="url(#t21-arrow)"/>
+  <text x="245" y="86" font-size="10" text-anchor="middle" fill="currentColor">complete (4 words)</text>
+  <line x1="315" y1="126" x2="175" y2="126" stroke="currentColor" marker-end="url(#t21-arrow)"/>
+  <text x="245" y="120" font-size="10" text-anchor="middle" fill="currentColor">request-completed</text>
+  <line x1="175" y1="168" x2="435" y2="168" stroke="currentColor" marker-end="url(#t21-arrow)"/>
+  <text x="305" y="162" font-size="10" text-anchor="middle" fill="currentColor">run-hook(before-apply-title)</text>
+  <line x1="435" y1="200" x2="175" y2="200" stroke="currentColor" marker-end="url(#t21-arrow)"/>
+  <text x="305" y="194" font-size="10" text-anchor="middle" fill="currentColor">final title</text>
+  <line x1="175" y1="244" x2="45" y2="244" stroke="currentColor" marker-end="url(#t21-arrow)"/>
+  <text x="110" y="238" font-size="10" text-anchor="middle" fill="currentColor">rename-node</text>
+  <line x1="175" y1="286" x2="435" y2="286" stroke="currentColor" stroke-dasharray="5 3" marker-end="url(#t21-arrow)"/>
+  <text x="305" y="280" font-size="10" text-anchor="middle" fill="currentColor">publish title-applied</text>
+</svg>
+<figcaption>The pane's own prompt and the dashed publish are the two ends. The hook is the only place where another plugin can change the title.</figcaption>
+</figure>
+
+<h3 id="step-1-the-manifest">Step 1: the manifest</h3>
+<p>The manifest has the key <code>replaces</code>, the four surface items and the grants. The plugin has a server side only. The core plugin has a client side for its preview panel, and the replacement does not need one.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.titles-lite&quot;,
+  &quot;name&quot;: &quot;Titles Lite&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Developer&quot;,
+  &quot;description&quot;: &quot;Names a pane once, from its first prompt, in four words or fewer.&quot;,
+  &quot;icon&quot;: &quot;tag&quot;,
+  &quot;replaces&quot;: [&quot;ilium.core.titles&quot;],
+  &quot;unstable&quot;: [&quot;plugin-services&quot;],
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: [&quot;service-provider&quot;]
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;inference&quot;,
+      &quot;agent.read-prompts&quot;,
+      &quot;tree.read&quot;,
+      &quot;tree.write&quot;,
+      &quot;services.provide:ilium.core.titles/suggest&quot;,
+      &quot;extensions.provide:ilium.core.titles/before-apply-title&quot;,
+      &quot;extensions.provide:ilium.core.titles/title-styles&quot;,
+      &quot;topics.subscribe:ilium.extensions/changed&quot;
+    ]
+  },
+  &quot;activation&quot;: [&quot;startup&quot;],
+  &quot;contributes&quot;: {
+    &quot;topics&quot;: {
+      &quot;publishes&quot;: [&quot;ilium.core.titles/title-applied&quot;],
+      &quot;subscribes&quot;: [&quot;ilium.extensions/changed&quot;]
+    },
+    &quot;services&quot;: {
+      &quot;provides&quot;: [
+        { &quot;name&quot;: &quot;ilium.core.titles/suggest&quot;, &quot;version&quot;: &quot;0.1.0&quot;, &quot;schema&quot;: &quot;schemas/suggest.json&quot; }
+      ]
+    },
+    &quot;extension_points&quot;: [
+      {
+        &quot;id&quot;: &quot;before-apply-title&quot;,
+        &quot;kind&quot;: &quot;hook&quot;,
+        &quot;mode&quot;: &quot;transform&quot;,
+        &quot;title&quot;: &quot;Before a title is applied&quot;,
+        &quot;version&quot;: &quot;0.1.0&quot;,
+        &quot;deadline_ms&quot;: 20,
+        &quot;payload_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;required&quot;: [&quot;node&quot;, &quot;proposed&quot;, &quot;source&quot;],
+          &quot;properties&quot;: {
+            &quot;node&quot;: { &quot;type&quot;: &quot;integer&quot; },
+            &quot;proposed&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 120 },
+            &quot;source&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;transcript&quot;, &quot;process&quot;, &quot;manual-trigger&quot;] },
+            &quot;previous&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 120 }
+          }
+        },
+        &quot;reply_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;required&quot;: [&quot;proposed&quot;],
+          &quot;properties&quot;: { &quot;proposed&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 120 } }
+        }
+      },
+      {
+        &quot;id&quot;: &quot;title-styles&quot;,
+        &quot;kind&quot;: &quot;collect&quot;,
+        &quot;title&quot;: &quot;Title styles&quot;,
+        &quot;version&quot;: &quot;0.1.0&quot;,
+        &quot;max_entries&quot;: 16,
+        &quot;entry_schema&quot;: {
+          &quot;type&quot;: &quot;object&quot;,
+          &quot;required&quot;: [&quot;id&quot;, &quot;title&quot;, &quot;instruction&quot;],
+          &quot;properties&quot;: {
+            &quot;id&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 64 },
+            &quot;title&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 60 },
+            &quot;instruction&quot;: { &quot;type&quot;: &quot;string&quot;, &quot;maxLength&quot;: 400 }
+          }
+        }
+      }
+    ]
+  }
+}
+</code></pre>
+<p><code>schemas/suggest.json</code> describes the <code>title</code> method: its params are <code>{ "text": string }</code> with a <code>maxLength</code> of 4000, and its result is <code>{ "title": string }</code>.</p>
+<p>Points to notice:</p>
+<ul>
+<li><code>replaces</code> takes ids. Install checks every one. An unknown id fails with <code>manifest.replaces-unknown</code>. A core plugin with <code>replaceable: false</code> fails with <code>manifest.replaces-not-replaceable</code>. Two packages that replace each other fail with <code>manifest.replaces-cycle</code>. No grant is needed for <code>replaces</code>. The consent is the user's, in the review dialog.</li>
+<li>The service, the points and the topic use the id <code>ilium.core.titles</code>, not <code>example.titles-lite</code>. A name with a foreign id is refused in any plugin that does not replace that id.</li>
+<li>The point schemas must be compatible with the core plugin's: the same field names and types, so a handler written for the core plugin sees what it expects. Copy the shape from <a href="/pages/reference-core-extension-points/">Reference: core extension points</a> and the page <a href="/pages/core-plugin-titles/">Core plugin: titles</a>, and keep <code>version</code> at the same number.</li>
+<li>There is no <code>tree.restructure</code>. That high-risk grant belongs to the tree tidy, which the replacement drops. The review dialog is shorter for it.</li>
+<li>The plugin subscribes to <code>ilium.extensions/changed</code> because it owns <code>title-styles</code> and reloads the list when a contributor changes it. That topic goes to the owner only.</li>
+</ul>
+<h3 id="step-2-the-logic">Step 2: the logic</h3>
+<p>The plugin has four jobs. It names a pane from the first prompt. It answers the <code>suggest</code> service. It runs the hook before it applies a title. It publishes the topic. All four share one small state machine, because each step ends in a <code>request-completed</code> event.</p>
+<p>The state is a map from request id to what the request was for.</p>
+<table>
+<thead>
+<tr>
+<th>Pending kind</th>
+<th>Started by</th>
+<th>Ends with</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Inference</code> for a pane</td>
+<td><code>input-submitted</code></td>
+<td>Run the hook with the proposed title</td>
+</tr>
+<tr>
+<td><code>Inference</code> for a service call</td>
+<td>A <code>suggest</code> call</td>
+<td>Reply to the call with the title</td>
+</tr>
+<tr>
+<td><code>Hook</code> for a pane</td>
+<td>End of the inference</td>
+<td>Rename the pane, publish the topic</td>
+</tr>
+</tbody>
+</table>
+<p>Titles Lite keeps a set of panes it has already titled. It names a pane once. A title typed by hand is never replaced, because the host answers <code>refused(conflict)</code> to an inferred rename against a manual title, and the plugin only reads the outcome.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// src/lib.rs
+use std::collections::{HashMap, HashSet};
+
+use ilium_plugin_sdk::dedup;
+use ilium_plugin_sdk::host::extensions;
+use ilium_plugin_sdk::host::inference::{self, ChatMessage, CompletionRequest};
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::host::services;
+use ilium_plugin_sdk::host::topics;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::intents::RenameNodeSpec;
+use ilium_plugin_sdk::types::tree::TitleSource;
+use serde_json::{json, Value};
+
+const BEFORE_APPLY: &amp;str = &quot;ilium.core.titles/before-apply-title&quot;;
+const STYLES: &amp;str = &quot;ilium.core.titles/title-styles&quot;;
+const APPLIED: &amp;str = &quot;ilium.core.titles/title-applied&quot;;
+const DEFAULT_INSTRUCTION: &amp;str = &quot;Reply with a title of at most four words and nothing else.&quot;;
+
+enum Pending {
+    PaneTitle(NodeId),
+    ServiceTitle(u64),
+    Hook { node: NodeId, proposed: String },
+}
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;service-provider&quot;])]
+#[derive(Default)]
+struct TitlesLite {
+    pending: HashMap&lt;RequestId, Pending&gt;,
+    titled: HashSet&lt;NodeId&gt;,
+    instruction: String,
+}
+
+/// Keeps a model reply to at most four plain words.
+pub fn clean_title(raw: &amp;str) -&gt; String {
+    let words: Vec&lt;&amp;str&gt; = raw
+        .trim()
+        .trim_matches(|c: char| c == '&quot;' || c == '\'' || c == '`' || c == '.')
+        .split_whitespace()
+        .take(4)
+        .collect();
+    words.join(&quot; &quot;)
+}
+
+/// The instruction of the first style in run order, or the default.
+pub fn instruction_from(entries_json: &amp;[String]) -&gt; String {
+    entries_json
+        .iter()
+        .filter_map(|entry| serde_json::from_str::&lt;Value&gt;(entry).ok())
+        .find_map(|entry| entry[&quot;instruction&quot;].as_str().map(str::to_string))
+        .unwrap_or_else(|| DEFAULT_INSTRUCTION.to_string())
+}
+
+fn ask(instruction: &amp;str, text: &amp;str) -&gt; Result&lt;RequestId, PluginError&gt; {
+    inference::complete_request(CompletionRequest {
+        messages: vec![
+            ChatMessage { role: &quot;system&quot;.into(), content: instruction.into() },
+            ChatMessage { role: &quot;user&quot;.into(), content: text.chars().take(4000).collect() },
+        ],
+        max_output_tokens: Some(24),
+        json_schema: None,
+        purpose: &quot;pane-title&quot;.into(),
+    })
+}
+
+impl TitlesLite {
+    fn reload_styles(&amp;mut self) {
+        let entries = extensions::list(STYLES).unwrap_or_default();
+        let json_entries: Vec&lt;String&gt; = entries.into_iter().map(|entry| entry.entry_json).collect();
+        self.instruction = instruction_from(&amp;json_entries);
+    }
+}
+
+impl Lifecycle for TitlesLite {
+    fn activate(&amp;mut self) {
+        self.reload_styles();
+    }
+}
+
+impl Handler for TitlesLite {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut submissions = Vec::new();
+        for event in batch {
+            match event {
+                Event::TopicPublished(published) if published.topic == &quot;ilium.extensions/changed&quot; =&gt; {
+                    self.reload_styles();
+                }
+                Event::InputSubmitted(input) if self.titled.insert(input.node) =&gt; {
+                    match ask(&amp;self.instruction, &amp;input.text) {
+                        Ok(id) =&gt; {
+                            self.pending.insert(id, Pending::PaneTitle(input.node));
+                        }
+                        Err(error) =&gt; {
+                            self.titled.remove(&amp;input.node);
+                            log::log(Level::Warn, &amp;format!(&quot;no title: {}&quot;, error.code));
+                        }
+                    }
+                }
+                Event::RequestCompleted(done) =&gt; {
+                    let Some(pending) = self.pending.remove(&amp;done.request) else { continue };
+                    self.finish(pending, done.request, &amp;mut submissions);
+                }
+                _ =&gt; {}
+            }
+        }
+        submissions
+    }
+}
+
+impl TitlesLite {
+    fn finish(&amp;mut self, pending: Pending, request: RequestId, submissions: &amp;mut Vec&lt;Submission&gt;) {
+        match pending {
+            Pending::PaneTitle(node) =&gt; {
+                let proposed = inference::take_completion(request).map(|c| clean_title(&amp;c.text)).unwrap_or_default();
+                if proposed.is_empty() {
+                    self.titled.remove(&amp;node);
+                    return;
+                }
+                let payload = json!({ &quot;node&quot;: node, &quot;proposed&quot;: proposed, &quot;source&quot;: &quot;transcript&quot; }).to_string();
+                match extensions::run_hook_request(BEFORE_APPLY, &amp;payload) {
+                    Ok(id) =&gt; {
+                        self.pending.insert(id, Pending::Hook { node, proposed });
+                    }
+                    Err(_) =&gt; apply(node, &amp;proposed, submissions),
+                }
+            }
+            Pending::ServiceTitle(call) =&gt; {
+                let title = inference::take_completion(request).map(|c| clean_title(&amp;c.text)).unwrap_or_default();
+                let _ = services::reply(call, Ok(json!({ &quot;title&quot;: title }).to_string()));
+            }
+            Pending::Hook { node, proposed } =&gt; {
+                // No handler, or a refused chain, leaves the proposed title as it is.
+                let adjusted = extensions::take_reply(request)
+                    .and_then(|text| serde_json::from_str::&lt;Value&gt;(&amp;text).ok())
+                    .and_then(|value| value[&quot;proposed&quot;].as_str().map(clean_title))
+                    .filter(|title| !title.is_empty());
+                apply(node, &amp;adjusted.unwrap_or(proposed), submissions);
+            }
+        }
+    }
+}
+
+fn apply(node: NodeId, title: &amp;str, submissions: &amp;mut Vec&lt;Submission&gt;) {
+    let key = dedup::key_for(&amp;[&quot;title&quot;, &amp;node.to_string(), title]);
+    submissions.push(Submission::keyed(
+        Intent::RenameNode(RenameNodeSpec { node, title: title.to_string(), source: TitleSource::Inferred, expected_revision: None }),
+        key,
+    ));
+    let payload = json!({ &quot;node&quot;: node, &quot;title&quot;: title }).to_string();
+    if let Err(error) = topics::publish(APPLIED, &amp;payload) {
+        log::log(Level::Warn, &amp;format!(&quot;publish failed: {error:?}&quot;));
+    }
+}
+
+impl ServiceProvider for TitlesLite {
+    fn handle(&amp;mut self, call: ServiceCall) -&gt; ServiceReply {
+        let params: Value = serde_json::from_str(&amp;call.payload_json).unwrap_or(Value::Null);
+        let Some(text) = params[&quot;text&quot;].as_str() else {
+            return ServiceReply::Done(json!({ &quot;title&quot;: &quot;&quot; }).to_string());
+        };
+        match ask(&amp;self.instruction, text) {
+            Ok(id) =&gt; {
+                self.pending.insert(id, Pending::ServiceTitle(call.call));
+                ServiceReply::Deferred
+            }
+            Err(_) =&gt; ServiceReply::Done(json!({ &quot;title&quot;: &quot;&quot; }).to_string()),
+        }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/index.ts
+import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import type { ServiceCall, ServiceReply } from '@ilium/plugin-sdk';
+import { list, runHookRequest, takeReply } from '@ilium/plugin-sdk/host/extensions';
+import { completeRequest, takeCompletion } from '@ilium/plugin-sdk/host/inference';
+import { log } from '@ilium/plugin-sdk/host/log';
+import { reply } from '@ilium/plugin-sdk/host/services';
+import { publish } from '@ilium/plugin-sdk/host/topics';
+
+const BEFORE_APPLY = 'ilium.core.titles/before-apply-title';
+const STYLES = 'ilium.core.titles/title-styles';
+const APPLIED = 'ilium.core.titles/title-applied';
+const DEFAULT_INSTRUCTION = 'Reply with a title of at most four words and nothing else.';
+
+type Pending =
+  | { kind: 'pane'; node: bigint }
+  | { kind: 'service'; call: bigint }
+  | { kind: 'hook'; node: bigint; proposed: string };
+
+const pending = new Map&lt;bigint, Pending&gt;();
+const titled = new Set&lt;bigint&gt;();
+let instruction = DEFAULT_INSTRUCTION;
+let correlation = 1n;
+
+/** Keeps a model reply to at most four plain words. */
+export function cleanTitle(raw: string): string {
+  return raw.trim().replace(/^[&quot;'`.]+|[&quot;'`.]+$/g, '').split(/\s+/).filter(Boolean).slice(0, 4).join(' ');
+}
+
+/** The instruction of the first style in run order, or the default. */
+export function instructionFrom(entriesJson: string[]): string {
+  for (const text of entriesJson) {
+    try {
+      const entry = JSON.parse(text) as { instruction?: unknown };
+      if (typeof entry.instruction === 'string') return entry.instruction;
+    } catch {
+      // A broken entry is skipped.
+    }
+  }
+  return DEFAULT_INSTRUCTION;
+}
+
+function ask(text: string): bigint {
+  return completeRequest({
+    messages: [
+      { role: 'system', content: instruction },
+      { role: 'user', content: text.slice(0, 4000) },
+    ],
+    maxOutputTokens: 24,
+    jsonSchema: undefined,
+    purpose: 'pane-title',
+  });
+}
+
+function reloadStyles(): void {
+  try {
+    instruction = instructionFrom(list(STYLES).map((entry) =&gt; entry.entryJson));
+  } catch {
+    instruction = DEFAULT_INSTRUCTION;
+  }
+}
+
+function apply(node: bigint, title: string, submissions: Submission[]): void {
+  submissions.push({
+    intent: { tag: 'rename-node', val: { node, title, source: 'inferred', expectedRevision: undefined } },
+    correlation: correlation++,
+    dedupKey: `title:${node}:${title}`.slice(0, 128).replace(/[^A-Za-z0-9._:/-]/g, '-'),
+  });
+  try {
+    publish(APPLIED, JSON.stringify({ node: Number(node), title }));
+  } catch (error) {
+    log('warn', `publish failed: ${String(error)}`);
+  }
+}
+
+function finish(request: bigint, kind: Pending, submissions: Submission[]): void {
+  if (kind.kind === 'pane') {
+    const completion = takeCompletion(request);
+    const proposed = completion ? cleanTitle(completion.text) : '';
+    if (proposed === '') {
+      titled.delete(kind.node);
+      return;
+    }
+    try {
+      const id = runHookRequest(BEFORE_APPLY, JSON.stringify({ node: Number(kind.node), proposed, source: 'transcript' }));
+      pending.set(id, { kind: 'hook', node: kind.node, proposed });
+    } catch {
+      apply(kind.node, proposed, submissions);
+    }
+  } else if (kind.kind === 'service') {
+    const completion = takeCompletion(request);
+    const title = completion ? cleanTitle(completion.text) : '';
+    reply(kind.call, { tag: 'ok', val: JSON.stringify({ title }) });
+  } else {
+    // No handler, or a refused chain, leaves the proposed title as it is.
+    let adjusted = '';
+    try {
+      const text = takeReply(request);
+      adjusted = text === undefined ? '' : cleanTitle((JSON.parse(text) as { proposed?: string }).proposed ?? '');
+    } catch {
+      adjusted = '';
+    }
+    apply(kind.node, adjusted || kind.proposed, submissions);
+  }
+}
+
+export const { lifecycle, handler, serviceProvider } = definePlugin({
+  side: 'server',
+  activate() {
+    reloadStyles();
+  },
+  onEvents(batch: Event[]): Submission[] {
+    const submissions: Submission[] = [];
+    for (const event of batch) {
+      if (event.tag === 'topic-published' &amp;&amp; event.val.topic === 'ilium.extensions/changed') {
+        reloadStyles();
+      } else if (event.tag === 'input-submitted' &amp;&amp; !titled.has(event.val.node)) {
+        titled.add(event.val.node);
+        try {
+          pending.set(ask(event.val.text), { kind: 'pane', node: event.val.node });
+        } catch (error) {
+          titled.delete(event.val.node);
+          log('warn', `no title: ${String((error as { code?: string }).code)}`);
+        }
+      } else if (event.tag === 'request-completed') {
+        const entry = pending.get(event.val.request);
+        if (entry === undefined) continue;
+        pending.delete(event.val.request);
+        finish(event.val.request, entry, submissions);
+      }
+    }
+    return submissions;
+  },
+  handle(call: ServiceCall): ServiceReply {
+    const params = JSON.parse(call.payloadJson) as { text?: string };
+    if (typeof params.text !== 'string') return { tag: 'done', val: JSON.stringify({ title: '' }) };
+    try {
+      pending.set(ask(params.text), { kind: 'service', call: call.call });
+      return { tag: 'deferred' };
+    } catch {
+      return { tag: 'done', val: JSON.stringify({ title: '' }) };
+    }
+  },
+});
+</code></pre>
+<p>Points to notice:</p>
+<ul>
+<li><code>clean_title</code> is pure. The model may answer with quotes, a full stop or a sentence. The function keeps at most four words, so the pane title never grows.</li>
+<li>The hook is run with <code>run_hook_request</code>, not <code>run_hook</code>, because the work happens inside <code>on_events</code>, which cannot wait. The completion arrives as a <code>request-completed</code> event, and <code>take_reply</code> returns the final payload. A chain with no handler gives no reply, and the plugin keeps its own proposal.</li>
+<li>The service reply is deferred. <code>suggest</code> returns at once with <code>Deferred</code>, and <code>reply</code> answers when the model has answered. A late <code>reply</code> after the caller's 30 second timeout gives <code>not-found</code>, and the plugin ignores the result. <a href="/pages/tutorial-22-versioned-service-with-fallbacks/">Tutorial 22</a> covers deferred replies in detail.</li>
+<li>The dedup key joins the node and the title. A repeat of the same title for the same pane is a <code>duplicate</code>, not an error.</li>
+<li><code>source: inferred</code> marks the rename. The host never lets an inferred title replace a title the user typed. The plugin does not need its own check.</li>
+</ul>
+<h3 id="step-3-what-happens-to-the-old-plugin">Step 3: what happens to the old plugin</h3>
+<p>When the user turns Titles Lite on, the built-in plugin is turned off. Only one of the two is enabled at a time. The change applies in this order.</p>
+<ol>
+<li>The review dialog at install says what the replacement does. The user confirms.</li>
+<li>The kernel turns <code>ilium.core.titles</code> off and turns <code>example.titles-lite</code> on.</li>
+<li>The registry keeps every contribution that was made to <code>ilium.core.titles/title-styles</code> and <code>before-apply-title</code>. They apply to the replacement, because it provides the points of the same names.</li>
+<li>The settings tab, the commands and the pane kinds of the built-in plugin disappear. The Titles settings tab is not in the rail while the replacement is on. Every command that <code>ilium.core.titles</code> contributes, for example its tree-tidying action, and the preview panel are gone too, unless the replacement contributes a command with the same id.</li>
+<li>Stored data stays on disk. The replacement does not read it. It cannot see the titles history, the style choice or the prompt text of the built-in plugin.</li>
+</ol>
+<p>Turning Titles Lite off, or uninstalling it, turns the built-in plugin back on. It finds its data as it left it. Titles that the replacement applied to panes stay on the panes. A title is a property of the pane, not of the plugin.</p>
+<p>Some parts of the product cannot be replaced.</p>
+<table>
+<thead>
+<tr>
+<th>Plugin</th>
+<th>Replaceable</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ilium.core.titles</code> and the other feature plugins</td>
+<td>yes</td>
+<td>A feature may be swapped.</td>
+</tr>
+<tr>
+<td><code>ilium.core.sessions</code></td>
+<td>no</td>
+<td>It owns saved sessions. A broken replacement could lose them.</td>
+</tr>
+<tr>
+<td><code>ilium.core.settings</code></td>
+<td>no</td>
+<td>It hosts the Plugins screen. Without it the user could not turn a replacement off.</td>
+</tr>
+</tbody>
+</table>
+<p>A package that lists either of these in <code>replaces</code> fails with <code>manifest.replaces-not-replaceable</code>.</p>
+<h3 id="step-4-the-install-errors">Step 4: the install errors</h3>
+<p>The surface check is the main safety rule of replacement. Remove the service from the manifest, or leave out the topic, and run <code>ilium plugin build</code>:</p>
+<figure>
+<pre class="term">
+<span class="t-prompt">$</span> ilium plugin build
+<span class="t-err">error manifest.replaces-surface-incomplete</span>
+  replaces ilium.core.titles
+  missing topics:title-applied
+<span class="t-dim">1 error, 0 warnings</span>
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The error lists every missing item, so one run shows them all.</figcaption>
+</figure>
+
+<h3 id="step-5-grants-risk-and-consent">Step 5: grants, risk and consent</h3>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Risk</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inference</code></td>
+<td>normal</td>
+<td>The titles come from the user's model. The user's AI admission settings apply to the purpose <code>pane-title</code>.</td>
+</tr>
+<tr>
+<td><code>agent.read-prompts</code></td>
+<td>normal</td>
+<td>The plugin reads the prompt to name the pane. It does not store it.</td>
+</tr>
+<tr>
+<td><code>tree.read</code></td>
+<td>normal</td>
+<td>The plugin reads the node it renames.</td>
+</tr>
+<tr>
+<td><code>tree.write</code></td>
+<td>normal</td>
+<td>The plugin renames panes.</td>
+</tr>
+<tr>
+<td><code>services.provide:ilium.core.titles/suggest</code></td>
+<td>normal</td>
+<td>The plugin answers one service.</td>
+</tr>
+<tr>
+<td><code>extensions.provide:</code> two points</td>
+<td>normal</td>
+<td>The plugin owns two points.</td>
+</tr>
+<tr>
+<td><code>topics.subscribe:ilium.extensions/changed</code></td>
+<td>normal</td>
+<td>The plugin reloads its styles.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>A replacement of a core plugin is a trust decision. The built-in plugin is reviewed with Ilium. Yours is reviewed by the user, once, in the dialog. A signed package from a publisher the user trusts is the right shape.</li>
+</ul>
+<h3 id="step-6-test-it">Step 6: test it</h3>
+<p>The fake host described in <a href="/pages/testing/">Testing</a> does not run the model. <code>FakeSession</code> runs the registry and a stub of the core plugin, so test the pure parts, the manifest and the service calls through the session. See <a href="/pages/reference-test-harness/">Test harness reference</a>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_or_quoted_reply_is_shortened() {
+        assert_eq!(clean_title(&quot;\&quot;Fix the login redirect loop today\&quot;.&quot;), &quot;Fix the login redirect&quot;);
+        assert_eq!(clean_title(&quot;  Refactor parser  &quot;), &quot;Refactor parser&quot;);
+        assert_eq!(clean_title(&quot;&quot;), &quot;&quot;);
+    }
+
+    #[test]
+    fn first_style_wins_and_broken_entries_are_skipped() {
+        let entries = vec![&quot;not json&quot;.to_string(), r#&quot;{&quot;id&quot;:&quot;a&quot;,&quot;title&quot;:&quot;A&quot;,&quot;instruction&quot;:&quot;Use verbs.&quot;}&quot;#.to_string()];
+        assert_eq!(instruction_from(&amp;entries), &quot;Use verbs.&quot;);
+        assert_eq!(instruction_from(&amp;[]), DEFAULT_INSTRUCTION);
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/index.test.ts
+import { expect, test } from 'bun:test';
+import { cleanTitle, instructionFrom } from './index';
+
+test('long or quoted reply is shortened', () =&gt; {
+  expect(cleanTitle('&quot;Fix the login redirect loop today&quot;.')).toBe('Fix the login redirect');
+  expect(cleanTitle('  Refactor parser  ')).toBe('Refactor parser');
+  expect(cleanTitle('')).toBe('');
+});
+
+test('first style wins and broken entries are skipped', () =&gt; {
+  const entries = ['not json', '{&quot;id&quot;:&quot;a&quot;,&quot;title&quot;:&quot;A&quot;,&quot;instruction&quot;:&quot;Use verbs.&quot;}'];
+  expect(instructionFrom(entries)).toBe('Use verbs.');
+  expect(instructionFrom([])).toContain('four words');
+});
+</code></pre>
+<p>Then check it in the app, with the steps from <a href="/pages/debugging/">Debugging</a>:</p>
+<ol>
+<li>Pack and install as in <a href="/pages/tutorial-09-package-and-share/">tutorial 9</a>. Read the dialog and confirm.</li>
+<li>Open Settings. The Titles tab must be gone from the rail.</li>
+<li>Send a prompt in an agent pane. The pane gets a title of four words or fewer. A second prompt does not rename it.</li>
+<li>Run <code>ilium plugin logs example.titles-lite --tail 5</code>. A failed model call appears as <code>no title: &lt;code&gt;</code>.</li>
+<li>Turn Titles Lite off in Settings &gt; Plugins. The Titles tab returns and the older settings are still there.</li>
+</ol>
+<h3 id="what-you-see">What you see</h3>
+<p>At install the review dialog has a block for the replacement above the grants.</p>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ Review: example.titles-lite 0.1.0            │
+│                                              │
+│ Replaces Titles and organisation.            │
+│ The built-in plugin is turned off while      │
+│ this one is on.                              │
+│                                              │
+│ Gives up                                     │
+│   Settings tab Titles                        │
+│   Command Tidy the tree                      │
+│   Preview panel                              │
+│                                              │
+│ Grants                                       │
+│   [x] inference                              │
+│   [x] agent.read-prompts                     │
+│   [x] tree.write                             │
+│                                              │
+│   [replace]  [decline]                       │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The words in the first block are fixed by the product. The "Gives up" list names what disappears.</figcaption>
+</figure>
+
+<p>On Settings &gt; Plugins, the plugin shows its Surface, the four items that make it a valid replacement.</p>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ Titles Lite                                  │
+│ Replaces ilium.core.titles                   │
+│                                              │
+│ Surface                                      │
+│   [x] services   suggest                     │
+│   [x] points     before-apply-title          │
+│   [x] points     title-styles                │
+│   [x] topics     title-applied               │
+│                                              │
+│   [x] Enabled      Built-in plugin is off    │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. Turning the toggle off turns the built-in plugin back on.</figcaption>
+</figure>
+
+<h3 id="edge-cases-and-errors-what-can-go-wrong">Edge cases and errors: what can go wrong</h3>
+<table>
+<thead>
+<tr>
+<th>Code or symptom</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.replaces-surface-incomplete</code></td>
+<td>A surface item is missing. The error lists them.</td>
+<td>Provide each missing item.</td>
+</tr>
+<tr>
+<td><code>manifest.replaces-unknown</code></td>
+<td>The id is not an installed core plugin.</td>
+<td>Check the id.</td>
+</tr>
+<tr>
+<td><code>manifest.replaces-not-replaceable</code></td>
+<td>The plugin is <code>ilium.core.sessions</code> or <code>ilium.core.settings</code>.</td>
+<td>Extend it instead.</td>
+</tr>
+<tr>
+<td><code>manifest.replaces-cycle</code></td>
+<td>Two packages replace each other.</td>
+<td>Replace one plugin with one package.</td>
+</tr>
+<tr>
+<td><code>timed-out</code> on <code>suggest</code></td>
+<td>The model took over 30 s.</td>
+<td>The caller shows a plain fallback.</td>
+</tr>
+<tr>
+<td><code>not-found</code> on <code>reply</code></td>
+<td>The call already ended.</td>
+<td>Ignore. The plugin drops the result.</td>
+</tr>
+<tr>
+<td><code>refused(conflict)</code> on rename</td>
+<td>The user typed the title by hand.</td>
+<td>None. This is the rule.</td>
+</tr>
+<tr>
+<td><code>extension.reply-not-allowed</code></td>
+<td>A handler used <code>refuse</code> on this transform point.</td>
+<td>The handler must use <code>replace</code> or <code>pass</code>.</td>
+</tr>
+<tr>
+<td>Title never appears</td>
+<td>No model is set up, or the pane is already in <code>titled</code>.</td>
+<td>Set up a provider. Check the log.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a> for the five ways and the rules of replacement.</li>
+<li><a href="/pages/reference-core-extension-points/">Reference: core extension points</a> for the surface of each core plugin.</li>
+<li><a href="/pages/core-plugin-titles/">Core plugin: titles</a> and <a href="/pages/core-plugin-inference/">Inference providers</a>.</li>
+<li><a href="/pages/api-extension-points/">Extension points</a>, <a href="/pages/services/">services</a> and <a href="/pages/api-inference/">inference</a>.</li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">Tutorial 18</a>, <a href="/pages/tutorial-22-versioned-service-with-fallbacks/">tutorial 22</a>, <a href="/pages/testing/">Testing</a> and <a href="/pages/debugging/">Debugging</a>.</li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p>A replacement inherits no grants and T3 cannot replace ([SEC-300], [SEC-301]). See <a href="/pages/reference-extension-security/">Extension security</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/tutorial-20-extend-six-core-plugins/"><small>Previous</small>20. Extend six core plugins from one package: a team pack</a><a class="next" href="/pages/tutorial-22-versioned-service-with-fallbacks/"><small>Next</small>22. A versioned service with fallbacks</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-surface-this-step-uses">The surface this step uses</a></li><li class="l2"><a href="#the-flow">The flow</a></li><li class="l2"><a href="#step-1-the-manifest">Step 1: the manifest</a></li><li class="l2"><a href="#step-2-the-logic">Step 2: the logic</a></li><li class="l2"><a href="#step-3-what-happens-to-the-old-plugin">Step 3: what happens to the old plugin</a></li><li class="l2"><a href="#step-4-the-install-errors">Step 4: the install errors</a></li><li class="l2"><a href="#step-5-grants-risk-and-consent">Step 5: grants, risk and consent</a></li><li class="l2"><a href="#step-6-test-it">Step 6: test it</a></li><li class="l2"><a href="#what-you-see">What you see</a></li><li class="l2"><a href="#edge-cases-and-errors-what-can-go-wrong">Edge cases and errors: what can go wrong</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

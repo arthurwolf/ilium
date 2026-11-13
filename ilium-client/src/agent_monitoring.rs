@@ -15,10 +15,11 @@ pub enum AgentMonitoringMode {
     #[default]
     Normal,
     Attention,
+    Custom,
 }
 
 impl AgentMonitoringMode {
-    pub const ALL: [Self; 2] = [Self::Normal, Self::Attention];
+    pub const ALL: [Self; 3] = [Self::Normal, Self::Attention, Self::Custom];
 }
 
 /// How Attention mode still shows that an agent is actively working while it
@@ -137,6 +138,7 @@ impl AgentMonitoringMode {
         match self {
             Self::Normal => "normal",
             Self::Attention => "attention",
+            Self::Custom => "custom",
         }
     }
 
@@ -144,6 +146,7 @@ impl AgentMonitoringMode {
         match self {
             Self::Normal => "Normal",
             Self::Attention => "Attention",
+            Self::Custom => "Custom",
         }
     }
 
@@ -151,6 +154,7 @@ impl AgentMonitoringMode {
         match value.trim().to_ascii_lowercase().as_str() {
             "normal" => Some(Self::Normal),
             "attention" => Some(Self::Attention),
+            "custom" => Some(Self::Custom),
             _ => None,
         }
     }
@@ -369,6 +373,18 @@ mod tests {
             progress.attention = ProgressAttention::Acknowledged;
         }
         progress
+    }
+
+    #[test]
+    fn every_mode_round_trips_through_its_key_and_parse_ignores_case() {
+        for mode in AgentMonitoringMode::ALL {
+            assert_eq!(AgentMonitoringMode::parse(mode.key()), Some(mode));
+        }
+        assert_eq!(
+            AgentMonitoringMode::parse(" Custom "),
+            Some(AgentMonitoringMode::Custom)
+        );
+        assert_eq!(AgentMonitoringMode::parse("customised"), None);
     }
 
     #[test]

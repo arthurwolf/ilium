@@ -697,16 +697,13 @@ fn voxel_visual_choices_preserve_available_authored_resource_inventory() {
         // Cover all identified indirect resource selectors.
         assert!(validate_recommendation(&raw, &authored).is_err());
     }
-    let mut invalid_resource = serde_json::to_value(&authored.ambient.voxel_landscape).unwrap();
-    if invalid_resource.get("pack_profile").is_some() {
-        invalid_resource["pack_profile"] = serde_json::json!(usize::MAX);
-        authored.ambient.voxel_landscape = serde_json::from_value(invalid_resource).unwrap();
-        assert!(validate_recommendation(
-            &proposal(AnimationKind::VoxelLandscape, vec![]),
-            &authored
-        )
-        .is_err());
-    }
+    // Deserialize migrates/clamps saved resource selectors. Exercise an
+    // invalid live recommendation input directly, without normalizing it first.
+    authored.ambient.voxel_landscape.pack_profile = usize::MAX;
+    assert!(
+        validate_recommendation(&proposal(AnimationKind::VoxelLandscape, vec![]), &authored,)
+            .is_err()
+    );
     let mut changed_identity = before.clone();
     changed_identity.ambient.voxel_landscape.seed = changed_identity
         .ambient

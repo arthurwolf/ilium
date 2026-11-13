@@ -1,0 +1,12 @@
+╭─ Convert Claude Code to Codex ───────────────╮
+│ ✓ Locate the Claude Code transcript          │
+│ ✓ Inspect the transcript                     │
+│ ✓ Start a private codex app-server           │
+│ ▶ Import the session                         │
+│ ○ Verify the Codex rollout                   │
+│ ○ Stop the app-server                        │
+│                                              │
+│ ████████████░░░░░░░░░░░░ 51%                 │
+│ imported 186 of 364 items                    │
+│ Esc cancels                                  │
+╰──────────────────────────────────────────────╯

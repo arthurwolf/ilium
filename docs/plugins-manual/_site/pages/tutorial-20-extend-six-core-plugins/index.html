@@ -1,0 +1,1098 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>20. Extend six core plugins from one package: a team pack | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details open><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/" aria-current="page">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Tutorials</b></p>
+<h1>20. Extend six core plugins from one package: a team pack</h1>
+
+<p>This step is mostly manifest work. The plugin is <code>example.team-pack</code>, a package that a team installs once. It adds one entry to each of six core plugins: a recogniser for Smart Copy, a rule pack for Text Triggers, a price source for Cost, a palette for Ambient, a key hint for Keys and help, and an instruction block for Agent setup. Almost all of it is data in <code>contributes.extensions</code>, and it needs no code. One part needs code: the per-project rules. The team keeps a file <code>.ilium/team-rules.json</code> in each repository, and the plugin registers its rules at run time with <code>register</code>.</p>
+<p>You start a fresh plugin. You have finished tutorials 1 to 9 and read <a href="/pages/api-extension-points/">Extension points</a>. The points of every core plugin are in <a href="/pages/reference-core-extension-points/">Reference: core extension points</a>. <a href="/pages/extending-core-plugins/">Extending core plugins</a> compares the ways to extend a core feature. <a href="/pages/tutorial-18-add-an-extension-point/">Tutorial 18</a> shows the owner side, and <a href="/pages/tutorial-19-stop-core-actions-with-hooks/">tutorial 19</a> the hook side. This page does not repeat the reference tables.</p>
+<p>Tutorial plugin: <code>example.team-pack</code>, version 0.1.0, API <code>ilium:plugin@0.1.0</code>. Rust and TypeScript behave the same in every step.</p>
+<h3 id="you-will-need">You will need</h3>
+<ul>
+<li>Rust: stable 1.90 or later with the <code>wasm32-wasip2</code> target, and the crates <code>ilium-plugin-sdk</code> and <code>serde_json</code>. TypeScript: Bun 1.2 or later and <code>@ilium/plugin-sdk</code>.</li>
+<li>Seven grants: one <code>extensions.contribute:&lt;point&gt;</code> for each of the six points, and <code>fs.read:project</code> for the rules file. Step 1 lists them.</li>
+<li>A file <code>help/team-style.md</code> in the package. The instruction block points to it.</li>
+<li>A scratch folder for package inspection: <code>/media/arthur/tmp/team-pack/</code> with a <code>.scratch-reaper</code> file in it.</li>
+</ul>
+<h3 id="the-surface-this-step-uses">The surface this step uses</h3>
+<table>
+<thead>
+<tr>
+<th>Core plugin</th>
+<th>Point (global id)</th>
+<th>Kind</th>
+<th>Entry fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Smart Copy</td>
+<td><code>ilium.core.smart-copy/recognisers</code></td>
+<td>collect</td>
+<td><code>id</code>, <code>kind</code>, <code>regex</code>, <code>multiline</code>, <code>label</code></td>
+</tr>
+<tr>
+<td>Text Triggers</td>
+<td><code>ilium.core.text-triggers/rule-packs</code></td>
+<td>collect</td>
+<td><code>id</code>, <code>title</code>, <code>rules</code> (a list of <code>pattern</code>, <code>reply</code>, <code>enabled</code>)</td>
+</tr>
+<tr>
+<td>Cost</td>
+<td><code>ilium.core.cost/price-sources</code></td>
+<td>collect</td>
+<td><code>id</code>, <code>model_pattern</code>, <code>input_per_mtok</code>, <code>output_per_mtok</code>, <code>cache_read_per_mtok</code>, <code>currency</code></td>
+</tr>
+<tr>
+<td>Ambient</td>
+<td><code>ilium.core.ambient/palettes</code></td>
+<td>collect</td>
+<td><code>id</code>, <code>title</code>, <code>stops</code></td>
+</tr>
+<tr>
+<td>Keys and help</td>
+<td><code>ilium.core.keys-and-help/key-hints</code></td>
+<td>collect</td>
+<td><code>id</code>, <code>context</code>, <code>chord</code>, <code>label</code></td>
+</tr>
+<tr>
+<td>Agent setup</td>
+<td><code>ilium.core.agent-setup/instruction-blocks</code></td>
+<td>collect</td>
+<td><code>id</code>, <code>title</code>, <code>marker</code>, <code>file</code></td>
+</tr>
+</tbody>
+</table>
+<p>The host calls are <code>extensions::register</code> and <code>unregister</code> (TypeScript <code>register</code> and <code>unregister</code>) for the run-time part, and <code>fs::read_all</code> for the rules file. The kernel topic <code>ilium.extensions/changed</code> goes to each owner when your entries change.</p>
+<h3 id="the-flow">The flow</h3>
+<p>Install does the six static contributions by itself. The code runs afterwards and adds the per-project rules.</p>
+<figure>
+<svg viewBox="0 0 480 310" role="img" aria-label="Sequence of installing the team pack" width="720" height="465">
+  <title>Installing the team pack</title>
+  <desc>The user installs the package. The kernel checks each entry against the owner's schema and tells each owner. Later the plugin reads the rules file and registers a rule pack with Text Triggers.</desc>
+  <defs>
+    <marker id="t20-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="10" y="8" width="70" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="45" y="25" font-size="11" text-anchor="middle" fill="currentColor">User</text>
+  <rect x="140" y="8" width="90" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="185" y="25" font-size="11" text-anchor="middle" fill="currentColor">Kernel</text>
+  <rect x="290" y="8" width="80" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="330" y="25" font-size="11" text-anchor="middle" fill="currentColor">Team pack</text>
+  <rect x="400" y="8" width="70" height="26" rx="4" fill="none" stroke="currentColor"/>
+  <text x="435" y="25" font-size="11" text-anchor="middle" fill="currentColor">Owners</text>
+  <line x1="45" y1="34" x2="45" y2="300" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="185" y1="34" x2="185" y2="300" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="330" y1="34" x2="330" y2="300" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="435" y1="34" x2="435" y2="300" stroke="currentColor" stroke-dasharray="3 4"/>
+  <line x1="45" y1="60" x2="185" y2="60" stroke="currentColor" marker-end="url(#t20-arrow)"/>
+  <text x="115" y="54" font-size="10" text-anchor="middle" fill="currentColor">install, allow grants</text>
+  <text x="250" y="100" font-size="10" text-anchor="middle" fill="currentColor">check six entries</text>
+  <line x1="185" y1="128" x2="435" y2="128" stroke="currentColor" stroke-dasharray="5 3" marker-end="url(#t20-arrow)"/>
+  <text x="310" y="122" font-size="10" text-anchor="middle" fill="currentColor">changed (one per owner)</text>
+  <line x1="185" y1="168" x2="330" y2="168" stroke="currentColor" marker-end="url(#t20-arrow)"/>
+  <text x="258" y="162" font-size="10" text-anchor="middle" fill="currentColor">activate</text>
+  <text x="330" y="204" font-size="10" text-anchor="middle" fill="currentColor">read team-rules.json</text>
+  <line x1="330" y1="234" x2="435" y2="234" stroke="currentColor" marker-end="url(#t20-arrow)"/>
+  <text x="383" y="228" font-size="10" text-anchor="middle" fill="currentColor">register</text>
+  <line x1="435" y1="272" x2="330" y2="272" stroke="currentColor" stroke-dasharray="5 3" marker-end="url(#t20-arrow)"/>
+  <text x="383" y="266" font-size="10" text-anchor="middle" fill="currentColor">ok or error</text>
+</svg>
+<figcaption>The six static entries are active as soon as their owners exist. The dashed arrows are replies or kernel topics, not calls from your code.</figcaption>
+</figure>
+
+<h3 id="step-1-the-manifest">Step 1: the manifest</h3>
+<p>The manifest is the larger part of the package. It has seven grants, six extensions and one export. It has a <code>server</code> side for the run-time part only. The extensions do not belong to a side: a collect entry is data.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;example.team-pack&quot;,
+  &quot;name&quot;: &quot;Team pack&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Example Developer&quot;,
+  &quot;description&quot;: &quot;Adds the team's patterns, prices, palette, hints and agent notes.&quot;,
+  &quot;icon&quot;: &quot;package&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: []
+  },
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;extensions.contribute:ilium.core.smart-copy/recognisers&quot;,
+      &quot;extensions.contribute:ilium.core.text-triggers/rule-packs&quot;,
+      &quot;extensions.contribute:ilium.core.cost/price-sources&quot;,
+      &quot;extensions.contribute:ilium.core.ambient/palettes&quot;,
+      &quot;extensions.contribute:ilium.core.keys-and-help/key-hints&quot;,
+      &quot;extensions.contribute:ilium.core.agent-setup/instruction-blocks&quot;,
+      &quot;fs.read:project&quot;
+    ]
+  },
+  &quot;activation&quot;: [&quot;startup&quot;],
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [
+      { &quot;id&quot;: &quot;reload-rules&quot;, &quot;title&quot;: &quot;Team pack: reload project rules&quot; }
+    ],
+    &quot;extensions&quot;: [
+      { &quot;point&quot;: &quot;ilium.core.smart-copy/recognisers@0.1.0&quot;, &quot;id&quot;: &quot;ticket&quot;,
+        &quot;entry&quot;: { &quot;id&quot;: &quot;ticket&quot;, &quot;kind&quot;: &quot;ticket&quot;, &quot;regex&quot;: &quot;TEAM-[0-9]{1,6}&quot;,
+                   &quot;multiline&quot;: false, &quot;label&quot;: &quot;Ticket key&quot; } },
+      { &quot;point&quot;: &quot;ilium.core.text-triggers/rule-packs@0.1.0&quot;, &quot;id&quot;: &quot;team-basics&quot;,
+        &quot;entry&quot;: { &quot;id&quot;: &quot;team-basics&quot;, &quot;title&quot;: &quot;Team basics&quot;,
+                   &quot;rules&quot;: [
+                     { &quot;pattern&quot;: &quot;Run the tests\\? \\(y/n\\)&quot;, &quot;reply&quot;: &quot;y\n&quot;, &quot;enabled&quot;: false }
+                   ] } },
+      { &quot;point&quot;: &quot;ilium.core.cost/price-sources@0.1.0&quot;, &quot;id&quot;: &quot;internal-model&quot;,
+        &quot;entry&quot;: { &quot;id&quot;: &quot;internal-model&quot;, &quot;model_pattern&quot;: &quot;^team-llm-.*&quot;,
+                   &quot;input_per_mtok&quot;: 1.5, &quot;output_per_mtok&quot;: 6.0,
+                   &quot;cache_read_per_mtok&quot;: 0.15, &quot;currency&quot;: &quot;EUR&quot; } },
+      { &quot;point&quot;: &quot;ilium.core.ambient/palettes@0.1.0&quot;, &quot;id&quot;: &quot;harbour&quot;,
+        &quot;entry&quot;: { &quot;id&quot;: &quot;harbour&quot;, &quot;title&quot;: &quot;Harbour&quot;,
+                   &quot;stops&quot;: [&quot;#0b1d2a&quot;, &quot;#1f6f8b&quot;, &quot;#99d5c9&quot;, &quot;#f6f1d1&quot;] } },
+      { &quot;point&quot;: &quot;ilium.core.keys-and-help/key-hints@0.1.0&quot;, &quot;id&quot;: &quot;board-new&quot;,
+        &quot;entry&quot;: { &quot;id&quot;: &quot;board-new&quot;, &quot;context&quot;: &quot;pane:board&quot;, &quot;chord&quot;: &quot;n&quot;,
+                   &quot;label&quot;: &quot;New card&quot; } },
+      { &quot;point&quot;: &quot;ilium.core.agent-setup/instruction-blocks@0.1.0&quot;, &quot;id&quot;: &quot;team-style&quot;,
+        &quot;entry&quot;: { &quot;id&quot;: &quot;team-style&quot;, &quot;title&quot;: &quot;Team style notes&quot;,
+                   &quot;marker&quot;: &quot;team-style&quot;, &quot;file&quot;: &quot;help/team-style.md&quot; } }
+    ]
+  }
+}
+</code></pre>
+<p>Points to notice:</p>
+<ul>
+<li>Each extension needs its own grant, and each grant names one point. There is no "contribute to any" grant, and a wildcard fails with <code>manifest.grant-wildcard</code>. A missing grant fails with <code>manifest.grant-missing-extension</code>.</li>
+<li><code>point</code> carries <code>@0.1.0</code>. The version is a caret range: the owner must offer <code>&gt;=0.1.0 &lt;0.2.0</code>. Otherwise the entry stays dormant.</li>
+<li><code>priority</code> is left out. The default is 50. Collect entries are listed in priority order, so priority matters only when two entries compete, such as two recognisers that match the same text.</li>
+<li>Backslashes in a JSON string are doubled. The Text Triggers pattern <code>Run the tests\\? \\(y/n\\)</code> reaches the owner as <code>Run the tests\? \(y/n\)</code>.</li>
+<li>The trigger rule is <code>enabled: false</code>. A rule pack is a set the user turns on. It never starts sending text by itself.</li>
+<li>The price source is data. It makes Cost able to price a model the built-in table does not know. It does not change the prices of known models.</li>
+<li><code>help/team-style.md</code> must exist in the package. A missing file fails with <code>manifest.extension-entry-invalid</code>, because the entry names a file the package does not hold.</li>
+<li><code>reload-rules</code> is a command of the plugin, as in tutorial 3. It reads the file again without a restart.</li>
+<li>The plugin has no <code>hook-handler</code> export. It contributes no hook.</li>
+</ul>
+<h3 id="step-2-what-the-schema-checks">Step 2: what the schema checks</h3>
+<p>The kernel checks each entry against the owner's <code>entry_schema</code> when the package is installed. It does not run any of your code for this. If one entry fails, the whole install fails, and no extension of the package is added.</p>
+<p>Break the price source on purpose. Change <code>"input_per_mtok": 1.5</code> to <code>"input_per_mtok": "1.5"</code> and run <code>ilium plugin build</code>. The error names the entry and the field:</p>
+<figure>
+<pre class="term">
+<span class="t-prompt">$</span> ilium plugin build
+<span class="t-err">error manifest.extension-entry-invalid</span>
+  contributes.extensions[2].entry.input_per_mtok
+  expected number, found string
+  point ilium.core.cost/price-sources
+<span class="t-dim">1 error, 0 warnings</span>
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The path counts extensions from 0, so index 2 is the third entry, the price source.</figcaption>
+</figure>
+
+<p>Restore the number. The same code covers a missing required field, a string over its <code>maxLength</code>, a list over <code>maxItems</code>, an entry over 16 KiB and a field that is not in <code>properties</code> when the schema forbids extra fields. A palette with only one stop fails if the owner's schema requires at least two.</p>
+<h3 id="step-3-the-run-time-part">Step 3: the run-time part</h3>
+<p>Teams keep different rules per repository. Build the rule pack from the file <code>.ilium/team-rules.json</code> of the open project, and register it with <code>register</code>. The file looks like this:</p>
+<pre><code class="language-json">{
+  &quot;packs&quot;: [
+    { &quot;id&quot;: &quot;release&quot;, &quot;title&quot;: &quot;Release checks&quot;,
+      &quot;rules&quot;: [ { &quot;pattern&quot;: &quot;Publish\\? \\(y/n\\)&quot;, &quot;reply&quot;: &quot;n\n&quot;, &quot;enabled&quot;: false } ] }
+  ]
+}
+</code></pre>
+<p>The code has three parts. A pure function turns the file text into entries. A function registers the entries through a callback, so a test can replace the host call. The handler runs both on start and on the command.</p>
+<p>Two facts matter. First, <code>register</code> works only on a point that is <code>dynamic</code>. If the Text Triggers point is static, <code>register</code> fails with <code>extension.not-dynamic</code> (the WIT case <code>not-dynamic</code>, <code>NotDynamic</code> in Rust). The plugin does not crash. It logs one line and keeps the static entries. Second, <code>register</code> validates the entry again, so a bad rule in the file gives <code>schema-mismatch</code> for that pack only, and the other packs still register.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">// src/lib.rs
+use ilium_plugin_sdk::host::extensions;
+use ilium_plugin_sdk::host::fs::{self, FsPath};
+use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::task;
+use serde_json::Value;
+
+const RULE_PACKS: &amp;str = &quot;ilium.core.text-triggers/rule-packs&quot;;
+const RULES_FILE: &amp;str = &quot;.ilium/team-rules.json&quot;;
+const MAX_PACKS: usize = 16;
+
+/// Turns the text of the rules file into (extension id, entry JSON) pairs.
+/// A pack that is not an object with an id is skipped, and the pack count is capped.
+pub fn packs_from_file(text: &amp;str) -&gt; Vec&lt;(String, String)&gt; {
+    let Ok(file) = serde_json::from_str::&lt;Value&gt;(text) else { return Vec::new() };
+    let Some(packs) = file[&quot;packs&quot;].as_array() else { return Vec::new() };
+    packs
+        .iter()
+        .take(MAX_PACKS)
+        .filter_map(|pack| {
+            let id = pack[&quot;id&quot;].as_str()?;
+            // The file is untrusted. Force every rule to disabled.
+            let mut entry = pack.clone();
+            for rule in entry[&quot;rules&quot;].as_array_mut()? {
+                rule[&quot;enabled&quot;] = Value::Bool(false);
+            }
+            Some((format!(&quot;project-{id}&quot;), entry.to_string()))
+        })
+        .collect()
+}
+
+/// Registers every pack. Returns how many were accepted.
+pub fn register_packs(
+    packs: &amp;[(String, String)],
+    register: &amp;mut dyn FnMut(&amp;str, &amp;str) -&gt; Result&lt;(), String&gt;,
+) -&gt; usize {
+    let mut accepted = 0;
+    for (extension, entry_json) in packs {
+        match register(extension, entry_json) {
+            Ok(()) =&gt; accepted += 1,
+            Err(reason) if reason.contains(&quot;NotDynamic&quot;) || reason.contains(&quot;not-dynamic&quot;) =&gt; {
+                log::log(Level::Warn, &quot;rule-packs is not dynamic; project rules skipped&quot;);
+                break;
+            }
+            Err(reason) =&gt; log::log(Level::Warn, &amp;format!(&quot;{extension} refused: {reason}&quot;)),
+        }
+    }
+    accepted
+}
+
+async fn load_project_rules() {
+    let path = FsPath { scope: &quot;project&quot;.into(), path: RULES_FILE.into() };
+    let bytes = match fs::read_all(&amp;path).await {
+        Ok(bytes) =&gt; bytes,
+        Err(code) =&gt; {
+            // A project without the file is normal.
+            log::log(Level::Debug, &amp;format!(&quot;no team rules: {code}&quot;));
+            return;
+        }
+    };
+    let packs = packs_from_file(&amp;String::from_utf8_lossy(&amp;bytes));
+    let mut register = |extension: &amp;str, entry_json: &amp;str| {
+        extensions::register(RULE_PACKS, extension, 50, entry_json).map_err(|error| format!(&quot;{error:?}&quot;))
+    };
+    let accepted = register_packs(&amp;packs, &amp;mut register);
+    log::log(Level::Info, &amp;format!(&quot;{accepted} of {} project packs registered&quot;, packs.len()));
+}
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct TeamPack;
+
+impl Lifecycle for TeamPack {
+    fn activate(&amp;mut self) {
+        task::spawn(load_project_rules());
+    }
+}
+
+impl Handler for TeamPack {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            if let Event::CommandInvoked(invoked) = event {
+                if invoked.command == &quot;example.team-pack/reload-rules&quot; {
+                    task::spawn(load_project_rules());
+                }
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/index.ts
+import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { register } from '@ilium/plugin-sdk/host/extensions';
+import { readAll } from '@ilium/plugin-sdk/host/fs';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+const RULE_PACKS = 'ilium.core.text-triggers/rule-packs';
+const RULES_FILE = '.ilium/team-rules.json';
+const MAX_PACKS = 16;
+
+type Pack = { extension: string; entryJson: string };
+
+/** Turns the text of the rules file into extension ids and entry JSON. */
+export function packsFromFile(text: string): Pack[] {
+  let file: { packs?: Array&lt;{ id?: unknown; rules?: Array&lt;Record&lt;string, unknown&gt;&gt; }&gt; };
+  try {
+    file = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(file.packs)) return [];
+  return file.packs.slice(0, MAX_PACKS).flatMap((pack) =&gt; {
+    if (typeof pack.id !== 'string' || !Array.isArray(pack.rules)) return [];
+    // The file is untrusted. Force every rule to disabled.
+    const rules = pack.rules.map((rule) =&gt; ({ ...rule, enabled: false }));
+    return [{ extension: `project-${pack.id}`, entryJson: JSON.stringify({ ...pack, rules }) }];
+  });
+}
+
+/** Registers every pack. Returns how many were accepted. */
+export function registerPacks(packs: Pack[], put: (extension: string, entryJson: string) =&gt; void): number {
+  let accepted = 0;
+  for (const pack of packs) {
+    try {
+      put(pack.extension, pack.entryJson);
+      accepted += 1;
+    } catch (error) {
+      const code = String((error as { code?: string }).code ?? error);
+      if (code.includes('not-dynamic')) {
+        log('warn', 'rule-packs is not dynamic; project rules skipped');
+        break;
+      }
+      log('warn', `${pack.extension} refused: ${code}`);
+    }
+  }
+  return accepted;
+}
+
+async function loadProjectRules(): Promise&lt;void&gt; {
+  let bytes: Uint8Array;
+  try {
+    bytes = await readAll({ scope: 'project', path: RULES_FILE });
+  } catch (error) {
+    // A project without the file is normal.
+    log('debug', `no team rules: ${String(error)}`);
+    return;
+  }
+  const packs = packsFromFile(new TextDecoder().decode(bytes));
+  const accepted = registerPacks(packs, (extension, entryJson) =&gt; register(RULE_PACKS, extension, 50, entryJson));
+  log('info', `${accepted} of ${packs.length} project packs registered`);
+}
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  activate() {
+    void loadProjectRules();
+  },
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'command-invoked' &amp;&amp; event.val.command === 'example.team-pack/reload-rules') {
+        void loadProjectRules();
+      }
+    }
+    return [];
+  },
+});
+</code></pre>
+<p>Points to notice:</p>
+<ul>
+<li><code>fs.read:project</code> reads one file. The plugin has no write grant, so it cannot change the repository.</li>
+<li>The file belongs to the repository, so anyone who can commit to it can write rules. That is why <code>enabled</code> is forced to <code>false</code>. A cloned repository must not make an agent answer prompts by itself. The user enables a pack on the Text Triggers screen.</li>
+<li>The pack ids start with <code>project-</code>, so they never clash with the static <code>team-basics</code>. Registering an id again replaces that entry, so the command can be run any number of times.</li>
+<li><code>register</code> is bounded. The point has <code>max_entries</code> and a pack has a size cap of 16 KiB. The plugin caps itself at 16 packs and stays inside both.</li>
+<li><code>load_project_rules</code> is async because <code>read_all</code> is async. The activation returns at once, and the work finishes later. A hook does not wait for it.</li>
+<li>Entries registered at run time are not kept when the plugin restarts. <code>activate</code> registers them again.</li>
+<li>To drop a pack that has left the file, keep the ids of the previous load and call <code>unregister</code> for each id that is gone. A plugin can remove only entries it registered.</li>
+</ul>
+<h3 id="step-4-dormant-updated-and-disabled-contributions">Step 4: dormant, updated and disabled contributions</h3>
+<p>The package works only when the owners are present.</p>
+<table>
+<thead>
+<tr>
+<th>Owner state</th>
+<th>Your entry</th>
+<th>What the Plugins screen shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Installed and enabled</td>
+<td>Active</td>
+<td>The entry with its toggle on</td>
+</tr>
+<tr>
+<td>Not installed</td>
+<td>Dormant</td>
+<td><code>waiting for ilium.core.cost</code></td>
+</tr>
+<tr>
+<td>Disabled by the user</td>
+<td>Dormant, toggle kept</td>
+<td><code>waiting for ilium.core.cost</code></td>
+</tr>
+<tr>
+<td>Installed, point version too old</td>
+<td>Dormant</td>
+<td>The version the owner must reach</td>
+</tr>
+<tr>
+<td>Installed, point removed</td>
+<td>Dormant</td>
+<td><code>waiting for ilium.core.cost</code></td>
+</tr>
+</tbody>
+</table>
+<p>Install never fails because an owner is missing. All six owners are bundled core plugins, so in practice they are present.</p>
+<p>When you ship the next version of the package, the kernel checks every entry again. Suppose the Cost owner releases a new major version of its point with a changed schema. Your entry, which asks for <code>@0.1.0</code>, no longer matches, and that entry goes dormant. The other five stay active, and the user sees a line for the entry. Raise your entry to the new version and change its fields.</p>
+<p>When the package is updated, the owners hear <code>ilium.extensions/changed</code> once for each point whose entries changed. A point whose entries did not change hears nothing.</p>
+<h3 id="step-5-pack-review-and-install">Step 5: pack, review and install</h3>
+<p>Build and pack as in <a href="/pages/tutorial-09-package-and-share/">tutorial 9</a>: <code>ilium plugin build</code>, <code>ilium plugin pack</code>, <code>ilium plugin keygen --publisher "Example Developer" --out &lt;dir&gt;</code>, <code>ilium plugin sign &lt;file&gt; --key &lt;publisher.key&gt;</code> and <code>ilium plugin trust add &lt;publisher.pub&gt;</code> once. Then <code>ilium plugin install dist/example.team-pack-0.1.0.iliumpkg</code>. An unsigned package is T3 and needs <code>--allow-unsigned</code>.</p>
+<h4 id="what-you-see">What you see</h4>
+<p>The review dialog lists the six contributions under <strong>Adds to other plugins</strong>, by owner. All six grants are normal risk, so all are checked. The file grant is listed with them.</p>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ Review: example.team-pack 0.1.0              │
+│                                              │
+│ Adds to other plugins                        │
+│   Smart Copy > Recognisers                   │
+│     adds a text pattern                      │
+│   Text triggers > Rule packs                 │
+│     adds a set of rules                      │
+│   Cost > Price sources                       │
+│     adds prices for a model                  │
+│   Ambient > Palettes                         │
+│     adds a colour palette                    │
+│   Keys and help > Key hints                  │
+│     adds a hint for a key                    │
+│   Agent setup > Instruction blocks           │
+│     adds a block to agent files              │
+│                                              │
+│ Reads                                        │
+│   [x] fs.read: project files                 │
+│                                              │
+│   [allow]  [decline]                         │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. Seven grants are checked. None is high risk.</figcaption>
+</figure>
+
+<p>After install, the Extensions tab of the plugin lists what it adds, with a toggle for each. A user who does not want the key hint turns that one off. The others stay on.</p>
+<figure>
+<pre class="term">
+╭──────────────────────────────────────────────╮
+│ Team pack > Extensions                       │
+│                                              │
+│ Smart Copy > Recognisers                     │
+│   [x] ticket                                 │
+│ Text triggers > Rule packs                   │
+│   [x] team-basics                            │
+│   [x] project-release                        │
+│ Cost > Price sources                         │
+│   [x] internal-model                         │
+│ Ambient > Palettes                           │
+│   [x] harbour                                │
+│ Keys and help > Key hints                    │
+│   [ ] board-new                              │
+│ Agent setup > Instruction blocks             │
+│   [x] team-style                             │
+╰──────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The row <code>project-release</code> was registered at run time, and it is listed beside the static entries.</figcaption>
+</figure>
+
+<p>The log of the plugin shows what the run-time part did. Run <code>ilium plugin logs example.team-pack --tail 5</code>:</p>
+<figure>
+<pre class="term">
+<span class="t-dim">2026-10-12 09:30:11 info example.team-pack</span>
+<span class="t-ok">1 of 1 project packs registered</span>
+<span class="t-dim">2026-10-12 09:41:52 warn example.team-pack</span>
+<span class="t-warn">project-broken refused: SchemaMismatch</span>
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The second line shows one bad pack in the file. The others still registered.</figcaption>
+</figure>
+
+<h3 id="step-6-test-it">Step 6: test it</h3>
+<p>The fake host described in <a href="/pages/testing/">Testing</a> has no registry, so it cannot run the owners. Test what you wrote. That is the manifest, the pure function that reads the file and the function that registers the packs.</p>
+<ol>
+<li><strong>Manifest.</strong> Run <code>ilium plugin build</code> with each entry broken in turn: a number as a string, a missing <code>file</code>, and a removed grant. Expect <code>manifest.extension-entry-invalid</code> and <code>manifest.grant-missing-extension</code>.</li>
+<li><strong>File parser.</strong> Feed <code>packs_from_file</code> or <code>packsFromFile</code> a good file, a file that is not JSON, a file without <code>packs</code>, a pack without an id and a pack with 20 entries.</li>
+<li><strong>Registration.</strong> Give <code>register_packs</code> or <code>registerPacks</code> a callback that fails with <code>NotDynamic</code>, one that fails with <code>SchemaMismatch</code> for the first pack only, and one that always succeeds.</li>
+</ol>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GOOD: &amp;str = r#&quot;{&quot;packs&quot;:[{&quot;id&quot;:&quot;release&quot;,&quot;title&quot;:&quot;Release&quot;,&quot;rules&quot;:[{&quot;pattern&quot;:&quot;p&quot;,&quot;reply&quot;:&quot;n\n&quot;,&quot;enabled&quot;:true}]}]}&quot;#;
+
+    #[test]
+    fn every_rule_is_forced_to_disabled() {
+        let packs = packs_from_file(GOOD);
+        assert_eq!(packs.len(), 1);
+        assert_eq!(packs[0].0, &quot;project-release&quot;);
+        assert!(packs[0].1.contains(r#&quot;&quot;enabled&quot;:false&quot;#));
+    }
+
+    #[test]
+    fn bad_files_give_no_packs() {
+        assert!(packs_from_file(&quot;not json&quot;).is_empty());
+        assert!(packs_from_file(&quot;{}&quot;).is_empty());
+        assert!(packs_from_file(r#&quot;{&quot;packs&quot;:[{&quot;title&quot;:&quot;no id&quot;,&quot;rules&quot;:[]}]}&quot;#).is_empty());
+    }
+
+    #[test]
+    fn pack_count_is_capped() {
+        let many = (0..20).map(|n| format!(r#&quot;{{&quot;id&quot;:&quot;p{n}&quot;,&quot;rules&quot;:[]}}&quot;#)).collect::&lt;Vec&lt;_&gt;&gt;().join(&quot;,&quot;);
+        assert_eq!(packs_from_file(&amp;format!(r#&quot;{{&quot;packs&quot;:[{many}]}}&quot;#)).len(), MAX_PACKS);
+    }
+
+    #[test]
+    fn a_static_point_stops_the_loop() {
+        let packs = packs_from_file(GOOD);
+        let mut calls = 0;
+        let mut register = |_: &amp;str, _: &amp;str| {
+            calls += 1;
+            Err(&quot;NotDynamic&quot;.to_string())
+        };
+        assert_eq!(register_packs(&amp;packs, &amp;mut register), 0);
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn one_refused_pack_does_not_stop_the_others() {
+        let two = r#&quot;{&quot;packs&quot;:[{&quot;id&quot;:&quot;a&quot;,&quot;rules&quot;:[]},{&quot;id&quot;:&quot;b&quot;,&quot;rules&quot;:[]}]}&quot;#;
+        let mut register = |extension: &amp;str, _: &amp;str| {
+            if extension == &quot;project-a&quot; { Err(&quot;SchemaMismatch&quot;.to_string()) } else { Ok(()) }
+        };
+        assert_eq!(register_packs(&amp;packs_from_file(two), &amp;mut register), 1);
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">// src/index.test.ts
+import { expect, test } from 'bun:test';
+import { packsFromFile, registerPacks } from './index';
+
+const GOOD = '{&quot;packs&quot;:[{&quot;id&quot;:&quot;release&quot;,&quot;title&quot;:&quot;Release&quot;,&quot;rules&quot;:[{&quot;pattern&quot;:&quot;p&quot;,&quot;reply&quot;:&quot;n\\n&quot;,&quot;enabled&quot;:true}]}]}';
+
+test('every rule is forced to disabled', () =&gt; {
+  const packs = packsFromFile(GOOD);
+  expect(packs.length).toBe(1);
+  expect(packs[0].extension).toBe('project-release');
+  expect(packs[0].entryJson).toContain('&quot;enabled&quot;:false');
+});
+
+test('bad files give no packs', () =&gt; {
+  expect(packsFromFile('not json')).toEqual([]);
+  expect(packsFromFile('{}')).toEqual([]);
+  expect(packsFromFile('{&quot;packs&quot;:[{&quot;title&quot;:&quot;no id&quot;,&quot;rules&quot;:[]}]}')).toEqual([]);
+});
+
+test('pack count is capped', () =&gt; {
+  const many = Array.from({ length: 20 }, (_, n) =&gt; ({ id: `p${n}`, rules: [] }));
+  expect(packsFromFile(JSON.stringify({ packs: many })).length).toBe(16);
+});
+
+test('a static point stops the loop', () =&gt; {
+  let calls = 0;
+  const accepted = registerPacks(packsFromFile(GOOD), () =&gt; {
+    calls += 1;
+    throw Object.assign(new Error('x'), { code: 'extension.not-dynamic' });
+  });
+  expect(accepted).toBe(0);
+  expect(calls).toBe(1);
+});
+
+test('one refused pack does not stop the others', () =&gt; {
+  const two = JSON.stringify({ packs: [{ id: 'a', rules: [] }, { id: 'b', rules: [] }] });
+  const accepted = registerPacks(packsFromFile(two), (extension) =&gt; {
+    if (extension === 'project-a') throw Object.assign(new Error('x'), { code: 'extension.schema-mismatch' });
+  });
+  expect(accepted).toBe(1);
+});
+</code></pre>
+<p>Run <code>cargo test</code> or <code>bun test</code>. Then check it in the app. Install the package, open Settings &gt; Text triggers and look for <code>Team basics</code>. Put the sample file in a project, run <code>Team pack: reload project rules</code> and look for <code>Release checks</code> in the same list, switched off. Copy a line with <code>TEAM-123</code> and check that Smart Copy offers it as a ticket. Open Settings &gt; Plugins, disable Cost, and check that <code>internal-model</code> says <code>waiting for ilium.core.cost</code>.</p>
+<h3 id="security-and-consent">Security and consent</h3>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Risk</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>extensions.contribute:</code> six points</td>
+<td>normal</td>
+<td>Each point is data. None is a hook.</td>
+</tr>
+<tr>
+<td><code>fs.read:project</code></td>
+<td>normal</td>
+<td>The plugin reads one file, <code>.ilium/team-rules.json</code>. It cannot write.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>A rule pack can make Text Triggers send text to a terminal once the user enables it. The package never enables a rule itself, and it forces every project rule to <code>enabled: false</code>.</li>
+<li>The instruction block is text that Agent setup writes into agent files between markers. The user runs Agent setup, and the block is shown before it is written. Keep the file free of secrets and of commands you do not want an agent to follow.</li>
+<li>A price source changes a number that the user reads. A wrong price misleads. Keep prices in the package, signed and reviewed.</li>
+<li>A recogniser can slow Smart Copy if its regex is expensive. Keep patterns anchored and short.</li>
+</ul>
+<h3 id="what-can-go-wrong">What can go wrong</h3>
+<table>
+<thead>
+<tr>
+<th>Code or symptom</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.extension-entry-invalid</code></td>
+<td>An entry fails the owner's <code>entry_schema</code>, or names a file that the package does not hold.</td>
+<td>Match the schema. Include the file.</td>
+</tr>
+<tr>
+<td><code>manifest.grant-missing-extension</code></td>
+<td>An extension has no <code>extensions.contribute</code> grant for its point.</td>
+<td>Add the exact grant.</td>
+</tr>
+<tr>
+<td><code>manifest.grant-wildcard</code></td>
+<td>A grant ends in <code>*</code>.</td>
+<td>Name one point.</td>
+</tr>
+<tr>
+<td><code>manifest.extension-limit</code></td>
+<td>More than 64 extensions in one plugin.</td>
+<td>Merge entries, or split the package.</td>
+</tr>
+<tr>
+<td>Entry shows <code>waiting for &lt;owner&gt;</code></td>
+<td>The owner is disabled, or the point version is too new.</td>
+<td>Enable the owner, or lower <code>@version</code>.</td>
+</tr>
+<tr>
+<td><code>extension.not-dynamic</code></td>
+<td><code>register</code> on a point that is static.</td>
+<td>Put the entry in the manifest.</td>
+</tr>
+<tr>
+<td><code>extension.schema-mismatch</code></td>
+<td>A run-time entry fails the schema.</td>
+<td>Fix the pack in the file.</td>
+</tr>
+<tr>
+<td><code>extension.cap-exceeded</code></td>
+<td>The point holds <code>max_entries</code>, or the entry is over 16 KiB.</td>
+<td>Register fewer or smaller packs.</td>
+</tr>
+<tr>
+<td><code>not-permitted</code> on the file</td>
+<td>No <code>fs.read:project</code>, or the path leaves the project.</td>
+<td>Add the grant. Use a path inside the project.</td>
+</tr>
+<tr>
+<td><code>no team rules: not-found</code></td>
+<td>The project has no rules file.</td>
+<td>Nothing. This is normal.</td>
+</tr>
+<tr>
+<td>Project pack is off</td>
+<td>The plugin forces <code>enabled: false</code>.</td>
+<td>The user enables it.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-extension-points/">Extension points</a> for the mechanism, <code>register</code> and the error codes.</li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a> for the ways to extend a core feature.</li>
+<li><a href="/pages/reference-core-extension-points/">Reference: core extension points</a> for every point and its entry fields.</li>
+<li><a href="/pages/core-plugin-smart-copy/">Core plugin: smart copy</a>, <a href="/pages/core-plugin-text-triggers/">text triggers</a>, <a href="/pages/core-plugin-cost/">cost</a>, <a href="/pages/core-plugin-ambient/">ambient</a>, <a href="/pages/core-plugin-keys-and-help/">keys and help</a> and <a href="/pages/core-plugin-agent-setup/">agent setup</a>.</li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">Tutorial 18</a> and <a href="/pages/tutorial-19-stop-core-actions-with-hooks/">tutorial 19</a>.</li>
+<li><a href="/pages/tutorial-09-package-and-share/">Tutorial 9: package and share</a> and <a href="/pages/reference-manifest/">Manifest reference</a>.</li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p>Rule files under <code>.ilium/</code> must be ignored in untrusted projects and validated ([SEC-315]). See <a href="/pages/reference-extension-security/">Extension security</a>.</p>
+<p><strong>Next:</strong> <a href="/pages/tutorial-21-replace-a-core-plugin/">Tutorial 21, replace a core plugin</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/tutorial-19-stop-core-actions-with-hooks/"><small>Previous</small>19. Stop core actions with hooks: quiet hours</a><a class="next" href="/pages/tutorial-21-replace-a-core-plugin/"><small>Next</small>21. Replace a core plugin: Titles Lite</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-surface-this-step-uses">The surface this step uses</a></li><li class="l2"><a href="#the-flow">The flow</a></li><li class="l2"><a href="#step-1-the-manifest">Step 1: the manifest</a></li><li class="l2"><a href="#step-2-what-the-schema-checks">Step 2: what the schema checks</a></li><li class="l2"><a href="#step-3-the-run-time-part">Step 3: the run-time part</a></li><li class="l2"><a href="#step-4-dormant-updated-and-disabled-contributions">Step 4: dormant, updated and disabled contributions</a></li><li class="l2"><a href="#step-5-pack-review-and-install">Step 5: pack, review and install</a></li><li class="l3"><a href="#what-you-see">What you see</a></li><li class="l2"><a href="#step-6-test-it">Step 6: test it</a></li><li class="l2"><a href="#security-and-consent">Security and consent</a></li><li class="l2"><a href="#what-can-go-wrong">What can go wrong</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

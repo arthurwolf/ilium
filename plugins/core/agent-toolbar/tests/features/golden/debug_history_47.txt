@@ -1,0 +1,6 @@
+╭ Debug history ──────────────────────────────╮
+│ Time      Kind          Detail              │
+│ 14:02:11  input-sent    /compact            │
+│ 14:02:12  activity      idle to working     │
+│ 14:05:40  activity      working to approval │
+╰─────────────────────────────────────────────╯

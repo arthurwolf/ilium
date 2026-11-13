@@ -866,7 +866,7 @@ fn water_occupancy_keeps_the_bed_and_suppresses_internal_same_medium_cube_faces(
     let mesh =
         PreparedMesh::build(&instances, region, bank.identity(), 100, &budget, cancel).unwrap();
     assert_eq!(mesh.faces.len(), 11);
-    assert!(mesh.faces.iter().any(|face| face.position == [0, 0, 0]
+    assert!(mesh.faces.iter().any(|face| face.position() == [0, 0, 0]
         && face.model.quads[usize::from(face.quad_index)].normal == [0.0, 0.0, 1.0]));
     let water_instances = BTreeMap::from([([0, 0, 0], Arc::clone(&water)), ([1, 0, 0], water)]);
     let water_mesh = PreparedMesh::build(
@@ -1731,7 +1731,9 @@ fn fluid_pixels(
 }
 
 // Length is MAX_TRANSLUCENT_LAYERS (12) + 1; the constant is private to surface_raster.
-fn pixel_signature(pixel: &PixelResult) -> (LinearRgba, Option<FaceOwner>, [Option<FaceOwner>; 13]) {
+fn pixel_signature(
+    pixel: &PixelResult,
+) -> (LinearRgba, Option<FaceOwner>, [Option<FaceOwner>; 13]) {
     (pixel.color, pixel.front_owner, pixel.contributors)
 }
 

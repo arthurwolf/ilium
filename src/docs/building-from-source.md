@@ -1,3 +1,5 @@
+For local background commands on aquarelle, apply the scheduling policy in `~/.claude/CLAUDE.md` using `background-run`; existing nice/ionice examples below also require that policy. Remote worker allocation remains separate.
+
 # Building from source
 
 This page shows how to compile Ilium on Linux, macOS and Windows, install the result with `make install`, and place the bundled animations so they are discovered. Building is optional when [release packages](installation.md) are available, and is the only route until a release is published.

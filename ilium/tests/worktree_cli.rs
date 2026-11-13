@@ -121,7 +121,7 @@ impl IsolatedSession {
         let active_log = log_directory.join(".active-log-path");
         let snapshot = project.join(".ilium/sessions/default.json");
         std::fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
-        let server_binary = Path::new(env!("CARGO_BIN_EXE_ilium")).with_file_name("ilium-server");
+        let server_binary = ensure_server_binary();
         assert!(
             server_binary.is_file(),
             "build the matching ilium-server binary before this integration test: {}",
@@ -184,45 +184,64 @@ impl IsolatedSession {
     }
 
     async fn run_cli(&self, arguments: &[&str]) -> (bool, String, String) {
+        self.run_cli_as(arguments, None).await
+    }
+
+    /// Runs the CLI as if from inside pane `pane_id`, with the variables Ilium
+    /// sets in every pane.
+    async fn run_cli_in_pane(&self, pane_id: u64, arguments: &[&str]) -> (bool, String, String) {
+        self.run_cli_as(arguments, Some(pane_id)).await
+    }
+
+    async fn run_cli_as(&self, arguments: &[&str], pane_id: Option<u64>) -> (bool, String, String) {
         let bin = self.root.path().join("bin");
         let path = std::env::join_paths([bin.as_path(), Path::new("/usr/bin"), Path::new("/bin")])
             .expect("isolated PATH");
-        let output = tokio::time::timeout(
-            Duration::from_secs(20),
-            tokio::process::Command::new(env!("CARGO_BIN_EXE_ilium"))
-                .args(arguments)
-                .current_dir(&self.project)
-                .env("PATH", path)
-                .env("SHELL", "/bin/sh")
-                .env("HOME", self.root.path().join("home"))
-                .env("XDG_DATA_HOME", self.root.path().join("data"))
-                .env("XDG_CONFIG_HOME", self.root.path().join("config"))
-                .env("XDG_RUNTIME_DIR", self.root.path().join("runtime"))
-                .env(
-                    ilium_platform::runtime_dir::SOCKET_DIR_ENV,
-                    self.root.path().join("runtime/ilium"),
-                )
-                .env(
-                    ilium_platform::runtime_dir::DEBUG_LOG_DIR_ENV,
-                    self.root.path().join("logs"),
-                )
-                .env(
-                    ilium_platform::paths::CONFIG_DIR_ENV,
-                    self.root.path().join("config"),
-                )
-                .env(
-                    ilium_client::AGENT_SETUP_HOME_ENV,
-                    self.root.path().join("agent-setup"),
-                )
-                .env_remove(ilium_ipc::pane_env::PANE_ID)
-                .env_remove(ilium_ipc::pane_env::SESSION_NAME)
-                .env_remove(ilium_ipc::pane_env::SESSION_SOCKET)
-                .kill_on_drop(true)
-                .output(),
-        )
-        .await
-        .expect("isolated CLI finished before timeout")
-        .expect("run isolated CLI");
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_ilium"));
+        command
+            .args(arguments)
+            .current_dir(&self.project)
+            .env("PATH", path)
+            .env("SHELL", "/bin/sh")
+            .env("HOME", self.root.path().join("home"))
+            .env("XDG_DATA_HOME", self.root.path().join("data"))
+            .env("XDG_CONFIG_HOME", self.root.path().join("config"))
+            .env("XDG_RUNTIME_DIR", self.root.path().join("runtime"))
+            .env(
+                ilium_platform::runtime_dir::SOCKET_DIR_ENV,
+                self.root.path().join("runtime/ilium"),
+            )
+            .env(
+                ilium_platform::runtime_dir::DEBUG_LOG_DIR_ENV,
+                self.root.path().join("logs"),
+            )
+            .env(
+                ilium_platform::paths::CONFIG_DIR_ENV,
+                self.root.path().join("config"),
+            )
+            .env(
+                ilium_client::AGENT_SETUP_HOME_ENV,
+                self.root.path().join("agent-setup"),
+            )
+            .kill_on_drop(true);
+        match pane_id {
+            Some(pane_id) => {
+                command
+                    .env(ilium_ipc::pane_env::PANE_ID, pane_id.to_string())
+                    .env(ilium_ipc::pane_env::SESSION_NAME, SESSION_NAME)
+                    .env(ilium_ipc::pane_env::SESSION_SOCKET, &self.socket);
+            }
+            None => {
+                command
+                    .env_remove(ilium_ipc::pane_env::PANE_ID)
+                    .env_remove(ilium_ipc::pane_env::SESSION_NAME)
+                    .env_remove(ilium_ipc::pane_env::SESSION_SOCKET);
+            }
+        }
+        let output = tokio::time::timeout(Duration::from_secs(20), command.output())
+            .await
+            .expect("isolated CLI finished before timeout")
+            .expect("run isolated CLI");
         (
             output.status.success(),
             String::from_utf8(output.stdout).unwrap(),
@@ -289,6 +308,56 @@ impl IsolatedSession {
         drop(self);
         project_path
     }
+}
+
+/// Locates the `ilium-server` executable beside this package's `ilium` binary. Cargo only exposes
+/// binaries of the package under test, so the server is built on demand into the same target
+/// directory; a build that fails surfaces its stderr rather than a missing-file assertion.
+fn ensure_server_binary() -> PathBuf {
+    let server_binary = Path::new(env!("CARGO_BIN_EXE_ilium")).with_file_name("ilium-server");
+    if server_binary.is_file() {
+        return server_binary;
+    }
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let output = Command::new(cargo)
+        .current_dir(&workspace_root)
+        .args([
+            "build",
+            "-p",
+            "ilium-server",
+            "--bin",
+            "ilium-server",
+            "--message-format=json",
+        ])
+        .output()
+        .expect("run cargo build for ilium-server");
+    assert!(
+        output.status.success(),
+        "cargo build of ilium-server failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Cargo reports the exact executable it wrote; the target folder seen by this test
+    // process is not guaranteed to be the one the nested build used.
+    let built_binary = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|message| {
+            message["reason"] == "compiler-artifact" && message["target"]["name"] == "ilium-server"
+        })
+        .find_map(|message| message["executable"].as_str().map(PathBuf::from))
+        .unwrap_or_else(|| {
+            panic!(
+                "cargo reported no executable for ilium-server:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
+    assert!(
+        built_binary.is_file(),
+        "cargo reported {} but the file is missing",
+        built_binary.display()
+    );
+    built_binary
 }
 
 fn jsonl(stdout: &str) -> Vec<Value> {
@@ -417,6 +486,111 @@ async fn new_pane_worktree_cli_creates_owned_workspace_and_rejects_collision() {
     );
     assert_eq!(session.tree().await.panes().count(), 1);
 
+    let root_path = session.stop().await;
+    assert!(!root_path.exists(), "isolated test tree was not removed");
+}
+
+/// Creates a worktree pane through the CLI and returns its pane ID and worktree path.
+async fn create_worktree_pane(session: &IsolatedSession) -> (u64, PathBuf) {
+    std::fs::write(
+        session.root.path().join("config/config.toml"),
+        "[notifications]\nenabled = false\n[http_api]\nport = 0\n[git]\nsetup_command = \"test -r .local.env && printf setup-ready > setup.done\"\n",
+    )
+    .expect("configure isolated worktree setup");
+    let arguments = ["new-pane", "--worktree", "--branch", BRANCH, "--", "codex"];
+    let (success, stdout, stderr) = session.run_cli(&arguments).await;
+    assert!(success, "new-pane failed: {stdout} {stderr}");
+    let records = jsonl(&stdout);
+    let result = records
+        .iter()
+        .find(|record| record["type"] == "result")
+        .expect("creation result");
+    let pane_id = result["pane_id"].as_u64().expect("pane ID");
+    let worktree_path = PathBuf::from(result["worktree_path"].as_str().expect("worktree path"));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !session.launch_record.exists() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "fake agent never launched in the worktree pane"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    (pane_id, worktree_path)
+}
+
+#[tokio::test]
+async fn close_pane_remove_wraps_up_worktree_agent_from_inside_its_pane() {
+    let session = IsolatedSession::start().await;
+    let (pane_id, worktree_path) = create_worktree_pane(&session).await;
+    // The setup command's marker is untracked output, and `.worktreeinclude` copies the
+    // ignored `.local.env` into the worktree. Removing both makes it pristine.
+    std::fs::remove_file(worktree_path.join("setup.done")).expect("remove setup marker");
+    std::fs::remove_file(worktree_path.join(".local.env")).expect("remove copied local env");
+
+    let (success, stdout, stderr) = session
+        .run_cli_in_pane(pane_id, &["close-pane", "--worktree", "remove"])
+        .await;
+    assert!(success, "close-pane failed: {stdout} {stderr}");
+    let records = jsonl(&stdout);
+    let result = records
+        .iter()
+        .find(|record| record["type"] == "result")
+        .expect("result record");
+    assert_eq!(result["outcome"], "removed");
+    assert_eq!(result["pane_id"], pane_id);
+    assert!(
+        !worktree_path.exists(),
+        "worktree still on disk after removal"
+    );
+    let listing = git(&session.project, &["worktree", "list", "--porcelain"]);
+    assert!(!listing.contains(worktree_path.to_str().unwrap()));
+    assert!(
+        !git(&session.project, &["branch", "--list", BRANCH]).is_empty(),
+        "--worktree remove must keep the branch"
+    );
+    assert!(session
+        .tree()
+        .await
+        .get(ilium_core::NodeId(pane_id))
+        .is_none());
+    let root_path = session.stop().await;
+    assert!(!root_path.exists(), "isolated test tree was not removed");
+}
+
+#[tokio::test]
+async fn close_pane_remove_refuses_dirty_worktree_and_keeps_its_files() {
+    let session = IsolatedSession::start().await;
+    let (pane_id, worktree_path) = create_worktree_pane(&session).await;
+    // setup.done stays untracked, so the worktree is dirty and the removal must be refused.
+
+    let (success, stdout, stderr) = session
+        .run_cli_in_pane(pane_id, &["close-pane", "--worktree", "remove"])
+        .await;
+    assert!(
+        !success,
+        "dirty removal must exit non-zero: {stdout} {stderr}"
+    );
+    let records = jsonl(&stdout);
+    let blocked = records
+        .iter()
+        .find(|record| record["type"] == "blocked")
+        .expect("blocked record");
+    assert_eq!(blocked["outcome"], "blocked");
+    assert!(blocked["reasons"]
+        .as_array()
+        .is_some_and(|reasons| !reasons.is_empty()));
+    assert!(
+        worktree_path.join("setup.done").exists(),
+        "refusal removed files"
+    );
+    let listing = git(&session.project, &["worktree", "list", "--porcelain"]);
+    assert!(listing.contains(worktree_path.to_str().unwrap()));
+    // The untracked-file refusal happens before the pane's processes are stopped, so the pane stays open.
+    assert!(session
+        .tree()
+        .await
+        .get(ilium_core::NodeId(pane_id))
+        .is_some());
     let root_path = session.stop().await;
     assert!(!root_path.exists(), "isolated test tree was not removed");
 }

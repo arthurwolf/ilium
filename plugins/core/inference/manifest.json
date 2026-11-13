@@ -1,0 +1,33 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.inference",
+  "name": "Inference",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "Inference providers is the plugin form of Ilium's AI provider layer.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "inference.provide",
+      "http:api.openai.com",
+      "http:localhost"
+    ],
+    "client": [
+      "ui.panels",
+      "settings.write-kernel:inference",
+      "settings.write-kernel:llm-instructions"
+    ]
+  },
+  "activation": [
+    "service:ilium:inference/provider"
+  ],
+  "limits_tier": "first-party"
+}

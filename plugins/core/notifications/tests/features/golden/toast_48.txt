@@ -1,0 +1,6 @@
+╭─ Build finished ─────────────────────────────╮
+│ Pane claude-api reached done. The report is  │
+│ ready to open.                               │
+│ Open pane · Dismiss                          │
+│ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━───────────────│
+╰──────────────────────────────────────────────╯

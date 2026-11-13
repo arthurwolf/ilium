@@ -1,0 +1,15 @@
+package ilium:host@0.1.0;
+
+interface tree {
+  use ilium:types/ids@0.1.0.{node-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/tree@0.1.0.{node-view, node-query};
+  get: func(node: node-id) -> option<node-view>;
+  children: func(node: node-id) -> list<node-id>;
+  roots: func() -> list<node-id>;
+  /// At most 4,096 ids.
+  find: func(query: node-query) -> list<node-id>;
+  /// The plugin's own metadata map for the node. At most 64 KiB per node.
+  metadata: func(node: node-id) -> option<list<u8>>;
+  set-metadata: func(node: node-id, bytes: list<u8>) -> result<_, plugin-error>;
+}

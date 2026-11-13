@@ -1,0 +1,2 @@
+2026-10-12 09:14:03 WARN section gpu: no reply in 2000 ms
+2026-10-12 09:14:03 ERROR model call failed after three retries with a long explanation

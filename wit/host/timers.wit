@@ -1,0 +1,14 @@
+package ilium:host@0.1.0;
+
+interface timers {
+  use ilium:types/ids@0.1.0.{timer-id, epoch-ms};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// A volatile timer. after-millis and repeat-millis are at least 50. Fires timer-fired.
+  /// Errors: invalid-argument below 50 ms, quota-exceeded above the timer limit.
+  set: func(after-millis: u32, repeat-millis: option<u32>) -> result<timer-id, plugin-error>;
+  cancel: func(timer: timer-id);
+  /// A durable timer, kept in the snapshot. Fires durable-timer-fired, late after a downtime.
+  /// name is 1 to 64 characters and unique per plugin: the same name replaces the earlier timer.
+  at: func(epoch: epoch-ms, name: string) -> result<timer-id, plugin-error>;
+  cancel-durable: func(name: string);
+}

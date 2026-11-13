@@ -182,11 +182,13 @@ pub(super) async fn shutdown_with(
                     .enumerate()
                     .map(|(index, lane)| {
                         format!(
-                            "lane {index}: waiting_or_reserved {}, enqueued {}, service_claims {}, running {}",
+                            "lane {index}: waiting_or_reserved {}, enqueued {}, service_claims {}, running {}, serial_active {}, serial_recovery_pending {}",
                             lane.waiting_or_reserved,
                             lane.enqueued,
                             lane.retained_service_claims,
-                            lane.running
+                            lane.running,
+                            lane.serial_active,
+                            lane.serial_recovery_pending
                         )
                     })
                     .collect::<Vec<_>>()

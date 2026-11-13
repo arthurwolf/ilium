@@ -26,15 +26,23 @@ static FIXTURE_PATH_LOCK: Mutex<()> = Mutex::new(());
 
 struct FixturePath {
     previous: Option<OsString>,
+    previous_zdotdir: Option<OsString>,
     _lock: MutexGuard<'static, ()>,
 }
 
 impl FixturePath {
+    /// Puts the fixture directory first on `PATH` and points `ZDOTDIR` at it.
+    ///
+    /// The pane shell is `$SHELL -c`, and a user `~/.zshenv` can prepend
+    /// `~/.local/bin`-style directories, so the real `claude` on the machine
+    /// would win over the fixture. An empty `ZDOTDIR` (the fixture directory
+    /// holds no `.zshenv`) keeps the pane's `PATH` exactly as the test set it.
     fn prepend(directory: &Path) -> Self {
         let lock = FIXTURE_PATH_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let previous = std::env::var_os("PATH");
+        let previous_zdotdir = std::env::var_os("ZDOTDIR");
         let mut search_paths = vec![directory.to_path_buf()];
         if let Some(previous) = previous.as_deref() {
             search_paths.extend(std::env::split_paths(previous));
@@ -42,8 +50,10 @@ impl FixturePath {
         let path = std::env::join_paths(search_paths)
             .expect("fixture and original directories produce a valid PATH");
         std::env::set_var("PATH", path);
+        std::env::set_var("ZDOTDIR", directory);
         Self {
             previous,
+            previous_zdotdir,
             _lock: lock,
         }
     }
@@ -51,10 +61,13 @@ impl FixturePath {
 
 impl Drop for FixturePath {
     fn drop(&mut self) {
-        if let Some(previous) = self.previous.take() {
-            std::env::set_var("PATH", previous);
-        } else {
-            std::env::remove_var("PATH");
+        match self.previous.take() {
+            Some(previous) => std::env::set_var("PATH", previous),
+            None => std::env::remove_var("PATH"),
+        }
+        match self.previous_zdotdir.take() {
+            Some(previous) => std::env::set_var("ZDOTDIR", previous),
+            None => std::env::remove_var("ZDOTDIR"),
         }
     }
 }
@@ -65,6 +78,7 @@ async fn attach(server: &TestServer, session_name: &str) -> SessionStream {
         &mut client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -77,6 +91,7 @@ async fn create_detected_claude_pane(client: &mut SessionStream) -> NodeId {
     write_frame(
         client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(format!("claude --resume {SESSION_ID}")),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -118,9 +133,12 @@ async fn create_detected_claude_pane(client: &mut SessionStream) -> NodeId {
     .expect("Claude fixture is detected with its requested session ID")
 }
 
-fn write_verified_claude_transcript(server: &TestServer, session_id: &str) {
-    let resolved_cwd = ilium_platform::paths::canonicalize(&server.project_cwd)
-        .unwrap_or_else(|_| server.project_cwd.clone());
+/// Writes the transcript Claude would keep for a session started in `cwd`.
+/// Detection only accepts a session whose transcript names the pane's project,
+/// so a worktree pane needs its own transcript under the worktree's slug.
+fn write_verified_claude_transcript(server: &TestServer, session_id: &str, cwd: &Path) {
+    let resolved_cwd =
+        ilium_platform::paths::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let slug: String = resolved_cwd
         .to_string_lossy()
         .chars()
@@ -139,7 +157,7 @@ fn write_verified_claude_transcript(server: &TestServer, session_id: &str) {
         serde_json::json!({
             "type": "user",
             "sessionId": session_id,
-            "cwd": server.project_cwd,
+            "cwd": cwd,
             "message": {"content": "integration test prompt"}
         })
         .to_string()
@@ -162,22 +180,15 @@ fn run_git(directory: &Path, arguments: &[&str]) {
     );
 }
 
-async fn unfreeze_to_detected_replacement(
-    client: &mut SessionStream,
-    frozen_pane_id: NodeId,
-) -> NodeId {
-    write_frame(
-        client,
-        &ClientRequest::UnfreezePane {
-            pane_id: frozen_pane_id,
-        },
-    )
-    .await
-    .expect("send UnfreezePane");
-
-    wait_for_detected_replacement(client, frozen_pane_id)
-        .await
-        .0
+/// Parent and child index of a pane: the slot a replacement must reoccupy.
+fn tree_slot(tree: &ilium_core::Tree, pane_id: NodeId) -> Option<(NodeId, usize)> {
+    let parent = tree.parent_of(pane_id)?;
+    let index = tree
+        .children_of(parent)
+        .ok()?
+        .iter()
+        .position(|child| *child == pane_id)?;
+    Some((parent, index))
 }
 
 async fn wait_for_detected_replacement(
@@ -239,7 +250,7 @@ async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity(
         auto_answer_interstitial_prompts: true,
     };
     let mut server = TestServer::start_with_detection_config(session_name, detection_config).await;
-    write_verified_claude_transcript(&server, SESSION_ID);
+    write_verified_claude_transcript(&server, SESSION_ID, &server.project_cwd);
     let mut client = attach(&server, session_name).await;
     let frozen_pane_id = create_detected_claude_pane(&mut client).await;
 
@@ -272,11 +283,13 @@ async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity(
         &mut client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await
     .expect("reattach after freezing");
-    let (_, initial_events) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    let (initial_tree, initial_events) =
+        read_initial_state(&mut client, Duration::from_secs(5)).await;
     assert!(
         initial_events.iter().any(|event| matches!(
             event,
@@ -287,13 +300,221 @@ async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity(
         )),
         "reattaching must restore the server's frozen-pane marker"
     );
+    let frozen_slot = tree_slot(&initial_tree, frozen_pane_id)
+        .expect("frozen pane keeps its tree slot before unfreeze");
 
-    let replacement_id = unfreeze_to_detected_replacement(&mut client, frozen_pane_id).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::UnfreezePane {
+            pane_id: frozen_pane_id,
+        },
+    )
+    .await
+    .expect("send UnfreezePane");
+    let (replacement_id, replacement_tree) =
+        wait_for_detected_replacement(&mut client, frozen_pane_id).await;
     assert_ne!(replacement_id, frozen_pane_id);
+    assert_eq!(
+        tree_slot(&replacement_tree, replacement_id),
+        Some(frozen_slot),
+        "the replacement must take the frozen pane's parent and child index"
+    );
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
         .expect("stop test server session");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+#[tokio::test]
+async fn custom_agent_identity_survives_freeze_and_unfreeze() {
+    use ilium_core::custom_agent::CustomAgentIdentity;
+
+    let fixtures = tempfile::tempdir().expect("fixture directory");
+    install(fixtures.path(), "claude", &FixtureBehavior::Idle);
+    let _fixture_path = FixturePath::prepend(fixtures.path());
+    let config_variable = ilium_server::paths::CONFIG_DIR_ENV;
+    let previous_config = std::env::var_os(config_variable);
+    struct RestoreConfig(Option<OsString>);
+    impl Drop for RestoreConfig {
+        fn drop(&mut self) {
+            if let Some(value) = self.0.take() {
+                std::env::set_var(ilium_server::paths::CONFIG_DIR_ENV, value);
+            } else {
+                std::env::remove_var(ilium_server::paths::CONFIG_DIR_ENV);
+            }
+        }
+    }
+    let _restore_config = RestoreConfig(previous_config);
+    std::env::set_var(config_variable, fixtures.path());
+    std::fs::write(fixtures.path().join("config.toml"), "[[custom_agents.profiles]]\nid = 'frozen-profile'\nname = 'Frozen profile'\nicon = '✦'\nbase_provider = 'Claude'\n").expect("write isolated profile");
+    let identity = CustomAgentIdentity {
+        profile_id: "frozen-profile".into(),
+        base_provider: BuiltinAgentProvider::Claude,
+    };
+    let session_name = "custom-frozen-profile-test";
+    let detection_config = DetectionConfig {
+        working_poll_interval: Duration::from_millis(100),
+        idle_poll_interval: Duration::from_millis(100),
+        auto_answer_interstitial_prompts: true,
+    };
+    let mut server = TestServer::start_with_detection_config(session_name, detection_config).await;
+    write_verified_claude_transcript(&server, SESSION_ID, &server.project_cwd);
+    let mut client = attach(&server, session_name).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            request_id: 42,
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::CustomAgent {
+                identity: identity.clone(),
+                initial_input: None,
+            },
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .expect("launch custom profile");
+    let event = common::expect_event(&mut client, Duration::from_secs(20), |event| {
+        matches!(
+            event,
+            ServerEvent::PaneCreateFinished { request_id: 42, .. }
+        )
+    })
+    .await;
+    let ServerEvent::PaneCreateFinished {
+        result: Ok(first_pane),
+        ..
+    } = event
+    else {
+        panic!("custom profile did not launch: {event:?}")
+    };
+    write_frame(
+        &mut client,
+        &ClientRequest::ReplacePaneWithCommand {
+            pane_id: first_pane,
+            command_line: format!("claude --resume {SESSION_ID}"),
+        },
+    )
+    .await
+    .expect("replace with known session");
+    let (frozen_pane, _) = wait_for_detected_replacement(&mut client, first_pane).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::FreezePane {
+            pane_id: frozen_pane,
+            resume_command: format!("claude --resume {SESSION_ID}"),
+        },
+    )
+    .await
+    .expect("freeze custom profile");
+    let event = common::expect_event(
+        &mut client,
+        Duration::from_secs(10),
+        |event| matches!(event, ServerEvent::PaneFrozen { pane_id, .. } if *pane_id == frozen_pane),
+    )
+    .await;
+    assert_eq!(
+        event,
+        ServerEvent::PaneFrozen {
+            pane_id: frozen_pane,
+            result: Ok(())
+        }
+    );
+    drop(client);
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: session_name.into(),
+            hello: Default::default(),
+        },
+    )
+    .await
+    .expect("reattach frozen profile");
+    let (_, events) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    assert!(events.iter().any(|event| matches!(event, ServerEvent::PaneCustomAgentIdentity { pane_id, identity: Some(actual) } if *pane_id == frozen_pane && actual == &identity)));
+    write_frame(
+        &mut client,
+        &ClientRequest::UnfreezePane {
+            pane_id: frozen_pane,
+        },
+    )
+    .await
+    .expect("unfreeze custom profile");
+    let (replacement, _) = wait_for_detected_replacement(&mut client, frozen_pane).await;
+    drop(client);
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: session_name.into(),
+            hello: Default::default(),
+        },
+    )
+    .await
+    .expect("reattach resumed profile");
+    let (_, events) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    assert!(events.iter().any(|event| matches!(event, ServerEvent::PaneCustomAgentIdentity { pane_id, identity: Some(actual) } if *pane_id == replacement && actual == &identity)));
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("stop isolated server");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+    drop(client);
+    drop(server);
+
+    let prompt_record = fixtures.path().join("submitted-prompt");
+    install(
+        fixtures.path(),
+        "codex",
+        &FixtureBehavior::RecordSubmittedPrompt {
+            transcript_path: prompt_record.clone(),
+        },
+    );
+    std::fs::write(fixtures.path().join("config.toml"), "[[custom_agents.profiles]]\nid = 'prompt-profile'\nname = 'Prompt profile'\nicon = '✦'\nbase_provider = 'Codex'\n").expect("write prompt profile");
+    let mut server =
+        TestServer::start_with_detection_config("custom-prompt-test", detection_config).await;
+    let mut client = attach(&server, "custom-prompt-test").await;
+    write_frame(
+        &mut client,
+        &ClientRequest::NewPane {
+            request_id: 43,
+            parent_group: ROOT_ID,
+            kind: NewPaneKind::CustomAgent {
+                identity: CustomAgentIdentity {
+                    profile_id: "prompt-profile".into(),
+                    base_provider: BuiltinAgentProvider::Codex,
+                },
+                initial_input: Some("test initial prompt".into()),
+            },
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .expect("launch profile with initial prompt");
+    let event = common::expect_event(&mut client, Duration::from_secs(20), |event| {
+        matches!(
+            event,
+            ServerEvent::PaneCreateFinished { request_id: 43, .. }
+        )
+    })
+    .await;
+    assert!(
+        matches!(event, ServerEvent::PaneCreateFinished { result: Ok(_), .. }),
+        "prompt profile did not launch: {event:?}"
+    );
+    assert!(
+        common::wait_until(
+            || std::fs::read_to_string(&prompt_record)
+                .is_ok_and(|text| text.contains("test initial prompt")),
+            Duration::from_secs(30)
+        )
+        .await,
+        "profile initial prompt did not reach the provider"
+    );
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("stop prompt test server");
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
@@ -357,7 +578,11 @@ async fn unfreeze_preserves_worktree_ownership() {
         }
         _ => unreachable!("event predicate accepts only workspace results"),
     };
+    // Resumed identity is independently verified against the provider's
+    // transcript in this worktree; argv alone is not proof of session custody.
+    write_verified_claude_transcript(&server, SESSION_ID, &worktree_root);
 
+    write_verified_claude_transcript(&server, SESSION_ID, &worktree_root);
     write_frame(
         &mut client,
         &ClientRequest::ReplacePaneWithCommand {
@@ -370,7 +595,17 @@ async fn unfreeze_preserves_worktree_ownership() {
     let (agent_pane_id, replacement_tree) =
         wait_for_detected_replacement(&mut client, workspace_pane_id).await;
     assert_ne!(agent_pane_id, workspace_pane_id);
-    assert!(replacement_tree.pane_workspace(agent_pane_id).is_some());
+    let original_workspace = replacement_tree
+        .pane_workspace(agent_pane_id)
+        .expect("replacement retains workspace identity")
+        .clone();
+    assert_eq!(
+        original_workspace.worktree_root,
+        std::fs::canonicalize(&worktree_root).unwrap()
+    );
+    assert_eq!(original_workspace.branch, "agent/frozen-session-test");
+    assert!(original_workspace.created_by_ilium);
+    assert!(original_workspace.workspace_id.is_some());
 
     write_frame(
         &mut client,
@@ -396,7 +631,10 @@ async fn unfreeze_preserves_worktree_ownership() {
     let (resumed_pane_id, resumed_tree) =
         wait_for_detected_replacement_after_unfreeze(&mut client, agent_pane_id).await;
     assert_ne!(resumed_pane_id, agent_pane_id);
-    assert!(resumed_tree.pane_workspace(resumed_pane_id).is_some());
+    assert_eq!(
+        resumed_tree.pane_workspace(resumed_pane_id),
+        Some(&original_workspace)
+    );
 
     write_frame(
         &mut client,
@@ -411,18 +649,53 @@ async fn unfreeze_preserves_worktree_ownership() {
     let removal = common::expect_event(&mut client, Duration::from_secs(20), |event| {
         matches!(
             event,
-            ServerEvent::WorkspaceRemoved { request_id: 72, .. }
-                | ServerEvent::WorkspaceRemovalBlocked { request_id: 72, .. }
+            ServerEvent::WorkspaceRemoved { request_id: 72, pane_id }
+                | ServerEvent::WorkspaceRemovalBlocked { request_id: 72, pane_id, .. }
+                if *pane_id == resumed_pane_id
         )
     })
     .await;
-    assert!(
-        matches!(
-            removal,
-            ServerEvent::WorkspaceRemoved { request_id: 72, .. }
-        ),
-        "worktree custody remained unresolved after unfreeze: {removal:?}"
-    );
+    if let ServerEvent::WorkspaceRemovalBlocked { reasons, .. } = &removal {
+        // Restricted procfs cannot establish process custody. Unfreezing must
+        // preserve ownership without bypassing this independent safety gate.
+        assert!(!reasons.is_empty());
+        assert!(
+            reasons.iter().all(|reason| {
+                reason.contains("cannot inspect cwd of process")
+                    && reason.contains("Permission denied")
+                    && !reason.contains("REMOVAL OUTCOME UNCERTAIN")
+            }),
+            "unexpected worktree removal refusal after unfreeze: {removal:?}"
+        );
+        assert!(worktree_root.is_dir());
+        run_git(
+            &server.project_cwd,
+            &[
+                "show-ref",
+                "--verify",
+                "refs/heads/agent/frozen-session-test",
+            ],
+        );
+    } else {
+        assert!(
+            matches!(
+                removal,
+                ServerEvent::WorkspaceRemoved { request_id: 72, .. }
+            ),
+            "worktree custody remained unresolved after unfreeze: {removal:?}"
+        );
+        assert!(!worktree_root.exists());
+        let branch = Command::new("git")
+            .current_dir(&server.project_cwd)
+            .args(["branch", "--list", "agent/frozen-session-test"])
+            .output()
+            .expect("inspect removed fixture branch");
+        assert!(branch.status.success());
+        assert!(
+            branch.stdout.is_empty(),
+            "successful removal must remove the owned branch"
+        );
+    }
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await

@@ -23,6 +23,34 @@ pub enum CostVisibility {
     Hover,
 }
 
+/// Whether the three spending medals compete across every agent or separately
+/// within each provider family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MedalScope {
+    /// The three highest spenders across Claude, Codex, and every other agent.
+    #[default]
+    Global,
+    /// Each provider family receives its own gold, silver, and bronze medal.
+    PerProvider,
+}
+
+impl MedalScope {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Global => "All agents together",
+            Self::PerProvider => "Separate by provider",
+        }
+    }
+
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::Global => Self::PerProvider,
+            Self::PerProvider => Self::Global,
+        }
+    }
+}
+
 impl CostVisibility {
     pub const fn label(self) -> &'static str {
         match self {
@@ -226,6 +254,12 @@ pub struct CostSettings {
     pub burn_marker: DisplayOption,
     /// Order every tree level by descending cost.
     pub sort_by_cost: bool,
+    /// Show gold, silver, and bronze badges beside the biggest spenders.
+    pub medals_enabled: bool,
+    /// Rolling spend period used by the medal ranking; twelve hours by default.
+    pub medal_window_minutes: u32,
+    /// Whether medals are global or awarded independently to each provider.
+    pub medal_scope: MedalScope,
     /// Per-model price overrides (`$` per million tokens), keyed by model
     /// name prefix. Useful for models the built-in table does not know.
     pub prices: BTreeMap<String, ModelPrice>,
@@ -258,6 +292,9 @@ impl Default for CostSettings {
             header_total: DisplayOption::default(),
             burn_marker: DisplayOption::default(),
             sort_by_cost: false,
+            medals_enabled: true,
+            medal_window_minutes: 720,
+            medal_scope: MedalScope::Global,
             prices: BTreeMap::new(),
         }
     }
@@ -320,7 +357,9 @@ impl CostSettings {
 
     /// Whether any indicator is enabled, i.e. whether cost must be tracked.
     pub fn is_any_enabled(&self) -> bool {
-        self.sort_by_cost || CostDisplay::ALL.iter().any(|d| self.option(*d).enabled)
+        self.medals_enabled
+            || self.sort_by_cost
+            || CostDisplay::ALL.iter().any(|d| self.option(*d).enabled)
     }
 
     /// Repairs out-of-range values from a hand-edited file.
@@ -346,6 +385,7 @@ impl CostSettings {
         }
         self.history_days = self.history_days.clamp(1, MAX_HISTORY_DAYS);
         self.sparkline_window_minutes = self.sparkline_window_minutes.clamp(1, MAX_WINDOW_MINUTES);
+        self.medal_window_minutes = self.medal_window_minutes.clamp(1, MAX_WINDOW_MINUTES);
         self.sparkline_cells = self
             .sparkline_cells
             .clamp(SPARKLINE_CELL_RANGE.0, SPARKLINE_CELL_RANGE.1);
@@ -445,6 +485,15 @@ impl CostSettings {
                     i16::from(SPARKLINE_CELL_RANGE.1),
                 ) as u8;
             }
+            CostRow::MedalsEnabled => self.medals_enabled = !self.medals_enabled,
+            CostRow::MedalWindow => {
+                self.medal_window_minutes =
+                    step_ladder(&WINDOW_MINUTE_STEPS, self.medal_window_minutes, direction)
+            }
+            CostRow::MedalScope => self.medal_scope = self.medal_scope.toggled(),
+            // Icon rows open the shared icon picker; they do not mutate cost
+            // settings directly when activated or stepped.
+            CostRow::MedalGoldIcon | CostRow::MedalSilverIcon | CostRow::MedalBronzeIcon => {}
             CostRow::SortByCost => self.sort_by_cost = !self.sort_by_cost,
         }
         *self != before
@@ -536,6 +585,12 @@ pub enum CostRow {
     Visibility(CostDisplay),
     SparklineWindow,
     SparklineCells,
+    MedalsEnabled,
+    MedalWindow,
+    MedalScope,
+    MedalGoldIcon,
+    MedalSilverIcon,
+    MedalBronzeIcon,
     SortByCost,
 }
 
@@ -561,6 +616,12 @@ impl CostRow {
         }
         rows.push(Self::SparklineWindow);
         rows.push(Self::SparklineCells);
+        rows.push(Self::MedalsEnabled);
+        rows.push(Self::MedalWindow);
+        rows.push(Self::MedalScope);
+        rows.push(Self::MedalGoldIcon);
+        rows.push(Self::MedalSilverIcon);
+        rows.push(Self::MedalBronzeIcon);
         rows.push(Self::SortByCost);
         rows
     }
@@ -582,7 +643,21 @@ impl CostRow {
             Self::Display(display) | Self::Visibility(display) => display.help_id(),
             Self::SparklineWindow => "COST-18",
             Self::SparklineCells => "COST-19",
+            Self::MedalsEnabled => "COST-24",
+            Self::MedalWindow => "COST-25",
+            Self::MedalScope => "COST-26",
+            Self::MedalGoldIcon | Self::MedalSilverIcon | Self::MedalBronzeIcon => "COST-27",
             Self::SortByCost => "COST-20",
+        }
+    }
+
+    pub const fn icon_target(self) -> Option<crate::icon_settings::IconTarget> {
+        use crate::icon_settings::IconTarget;
+        match self {
+            Self::MedalGoldIcon => Some(IconTarget::SpendingMedalGold),
+            Self::MedalSilverIcon => Some(IconTarget::SpendingMedalSilver),
+            Self::MedalBronzeIcon => Some(IconTarget::SpendingMedalBronze),
+            _ => None,
         }
     }
 }
@@ -607,6 +682,10 @@ impl CostSettings {
                 minimum: 1,
                 maximum: i128::from(MAX_WINDOW_MINUTES),
             }),
+            CostRow::MedalWindow => Some(NumberSpec::Integer {
+                minimum: 1,
+                maximum: i128::from(MAX_WINDOW_MINUTES),
+            }),
             CostRow::SparklineCells => Some(NumberSpec::Integer {
                 minimum: i128::from(SPARKLINE_CELL_RANGE.0),
                 maximum: i128::from(SPARKLINE_CELL_RANGE.1),
@@ -620,6 +699,7 @@ impl CostSettings {
             CostRow::Budget => Some(self.active_budget().to_string()),
             CostRow::HistoryDays => Some(self.history_days.to_string()),
             CostRow::SparklineWindow => Some(self.sparkline_window_minutes.to_string()),
+            CostRow::MedalWindow => Some(self.medal_window_minutes.to_string()),
             CostRow::SparklineCells => Some(self.sparkline_cells.to_string()),
             _ => None,
         }
@@ -645,6 +725,9 @@ impl CostSettings {
                 direction,
             )
             .to_string(),
+            CostRow::MedalWindow => {
+                step_ladder(&WINDOW_MINUTE_STEPS, self.medal_window_minutes, direction).to_string()
+            }
             CostRow::SparklineCells => (i16::from(self.sparkline_cells)
                 + if direction < 0 { -1 } else { 1 })
             .clamp(
@@ -664,7 +747,7 @@ impl CostSettings {
             .ok_or_else(|| "Select a numeric cost setting".to_string())?;
         // The native sparkline editor accepts durations as well as bare minutes.
         // Keep that grammar when the shared star dialog submits the same field.
-        let value = if row == CostRow::SparklineWindow {
+        let value = if matches!(row, CostRow::SparklineWindow | CostRow::MedalWindow) {
             let minutes = crate::cost_model::parse_window_minutes(text)
                 .ok_or("Enter a window such as 90, 90m, 6h or 2d (1 minute to 1 year).")?;
             let value = NumberValue::Integer(i128::from(minutes));
@@ -686,6 +769,10 @@ impl CostSettings {
                 self.sparkline_window_minutes =
                     u32::try_from(value).map_err(|_| "Invalid sparkline window".to_string())?
             }
+            (CostRow::MedalWindow, NumberValue::Integer(value)) => {
+                self.medal_window_minutes =
+                    u32::try_from(value).map_err(|_| "Invalid medal window".to_string())?
+            }
             (CostRow::SparklineCells, NumberValue::Integer(value)) => {
                 self.sparkline_cells =
                     u8::try_from(value).map_err(|_| "Invalid sparkline width".to_string())?
@@ -705,6 +792,9 @@ mod tests {
         let settings = CostSettings::default();
         assert_eq!(settings.calibration, Calibration::OwnHistory);
         assert_eq!(settings.sparkline_window_minutes, 360);
+        assert!(settings.medals_enabled);
+        assert_eq!(settings.medal_window_minutes, 720);
+        assert_eq!(settings.medal_scope, MedalScope::Global);
         for display in CostDisplay::ALL {
             let option = settings.option(display);
             assert_eq!(option.enabled, display == CostDisplay::Meter, "{display:?}");
@@ -740,7 +830,7 @@ mod tests {
         let rows = CostRow::rows(&settings);
         assert_eq!(
             rows.len(),
-            1 + 1 + 16 + 3,
+            1 + 1 + 16 + 9,
             "metric selector, calibration selector, options, tail"
         );
     }
@@ -754,7 +844,7 @@ mod tests {
             for row in CostRow::rows(&settings) {
                 let id = row.help_id();
                 let number: u32 = id.strip_prefix("COST-").unwrap().parse().unwrap();
-                assert!((1..=23).contains(&number), "{id}");
+                assert!((1..=27).contains(&number), "{id}");
             }
         }
     }
@@ -914,7 +1004,7 @@ mod tests {
                 ids.extend(CostRow::rows(&settings).into_iter().map(CostRow::help_id));
             }
         }
-        assert_eq!(ids.len(), 23, "COST-01 through COST-23");
+        assert_eq!(ids.len(), 27, "COST-01 through COST-27");
     }
 
     #[test]

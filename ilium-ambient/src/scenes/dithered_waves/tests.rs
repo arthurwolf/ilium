@@ -218,6 +218,29 @@ fn default_raster_is_non_empty_and_not_uniform() {
 }
 
 #[test]
+fn ordered_global_dither_does_not_erase_default_waves() {
+    use crate::raster::{threshold, DitherMode};
+    for time in [0.0, 5.0, 12.5, 30.0] {
+        let rendered = render_at(&DitheredWavesSettings::default(), 100, 30, time);
+        let width = rendered.raster.width;
+        let scene_dots = lit(&rendered);
+        let visible = rendered
+            .raster
+            .dots
+            .iter()
+            .enumerate()
+            .filter(|(index, dot)| {
+                **dot > threshold(index % width, index / width, DitherMode::Ordered)
+            })
+            .count();
+        assert!(
+            scene_dots > 0 && visible * 5 >= scene_dots,
+            "ordered dither erased the waves at {time}s: {visible}/{scene_dots} dots"
+        );
+    }
+}
+
+#[test]
 fn default_picture_is_quiet() {
     let rendered = render_at(&DitheredWavesSettings::default(), 100, 40, 5.0);
     let peak = rendered.raster.dots.iter().copied().fold(0.0f32, f32::max);

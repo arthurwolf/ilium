@@ -150,10 +150,11 @@ Rules:
 
 ## Clean up worktrees
 
-Ilium never deletes a worktree without a check, and never silently. There are two entry points:
+Ilium never deletes a worktree without a check, and never silently. There are three entry points:
 
 1. **When you close the pane.** If **Close policy** is `offer_removal_when_safe` (set per pane when it was created, or as the global default), closing offers removal when it is safe. The offer reads "Remove the clean, merged worktree at ... too?" with **Keep** as the default. The offer is advisory: the server repeats every safety check before removing anything. A missing policy means the worktree is kept.
-2. **The worktree manager.** Right-click a project or a pane in it and choose **Manage worktrees...**. It lists every worktree registered in the repository with its blockers.
+2. **The command line, from inside the agent's pane.** `ilium close-pane --worktree remove` closes the pane and removes its worktree with the same checks. An agent runs it as its last step, after it commits and merges its branch. See [Wrap up a worktree agent](#wrap-up-a-worktree-agent).
+3. **The worktree manager.** Right-click a project or a pane in it and choose **Manage worktrees...**. It lists every worktree registered in the repository with its blockers.
 
 Manager keys:
 
@@ -177,6 +178,24 @@ Manager keys:
 2. Press `Tab` to choose the branch behaviour, then `Enter` to confirm.
 
 The result screen reports the outcome, whether anything was changed, and whether the path, Git registration and Git metadata are still present.
+
+## Wrap up a worktree agent
+
+A finished worktree agent closes itself with one command, run from its own pane:
+
+```sh
+git -C <worktree> status --short            # must be empty
+git -C <main checkout> merge --ff-only <branch>
+ilium close-pane --worktree remove          # closes this pane, removes the worktree
+```
+
+Order matters. The worktree must be committed and merged into its recorded base branch first, because the removal check refuses unmerged work. `remove` keeps the branch; `--worktree remove-and-branch` also deletes the creation branch when that is safe.
+
+The server stops the pane before it removes the worktree, so the command's last lines may not reach the agent. Check the outcome from outside the pane: `git worktree list` should no longer show the path, and the pane should be gone from the tree.
+
+If the removal is refused, the reasons are printed (for example uncommitted changes or a branch that is not merged). Fix the cause and run the command again. A refusal that comes after the pane's processes have stopped also closes the pane; the worktree stays on disk and can be reopened with **In existing worktree...**. A `blocked` or `uncertain` result never removes files. Full output and exit codes: [CLI reference](cli-reference.md#ilium-close-pane).
+
+Use `--worktree keep` (the default) to close the pane and leave the worktree for later inspection.
 
 ## Removal blockers and states
 

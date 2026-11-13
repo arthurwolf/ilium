@@ -6,7 +6,7 @@ use super::{
     history_store::BoundMap,
     loader,
     native_binding::{self, NativeSourceSession, NativeTile},
-    projected_source, saved_binding, source_footprint, sparse_cells,
+    projected_source, saved_binding, source_footprint, sparse_cells, tile_cache,
     tours::{self, Plan, PreparedMap, ProjectedDisplay},
 };
 use crate::voxel_landscape::{
@@ -39,6 +39,8 @@ pub enum Error {
     Empty,
     #[error("projected tile model or fluid vertex exceeded certified local bounds")]
     Geometry,
+    #[error("projected tile worker panicked; route preparation stopped")]
+    Worker,
     #[error("projected route exceeded tile/bank account")]
     Limit,
     #[error(transparent)]
@@ -70,14 +72,17 @@ pub struct Inputs<'a> {
     pub viewport: [usize; 2],
     pub scale: f64,
     pub account: &'a ByteBudget,
+    /// Persistent cache for the viewport model-requirement scan; `None` disables it.
+    pub cache: Option<&'a crate::prepared_cache::PreparedCache>,
     pub cancel: Cancel<'a>,
-    pub cancelled: &'a dyn Fn() -> bool,
+    // Sync: rendered tiles are built on scoped worker threads that share these.
+    pub cancelled: &'a (dyn Fn() -> bool + Sync),
     /// Reports concrete stages and bounded chunk counts to the preparation UI.
-    pub progress: &'a dyn Fn(&str),
+    pub progress: &'a (dyn Fn(&str) + Sync),
     /// Reports each completed projected source-chunk decode to the preparation UI.
-    pub decode_progress: &'a dyn Fn(usize, usize),
+    pub decode_progress: &'a (dyn Fn(usize, usize) + Sync),
     /// Reports bounded model, texture, and rendered-tile preparation work.
-    pub work_progress: &'a dyn Fn(&str, usize, usize, &str),
+    pub work_progress: &'a (dyn Fn(&str, usize, usize, &str) + Sync),
 }
 
 pub struct PreparedRoute {
@@ -97,6 +102,19 @@ fn certified_points(points: &[[f64; 3]; 4]) -> bool {
         value.is_finite()
             && (source_footprint::LOCAL_MIN..=source_footprint::LOCAL_MAX).contains(value)
     })
+}
+
+/// Upper bound on concurrent tile workers. Each worker keeps its own model
+/// cache, all charged to the one scene account, so the count stays small.
+const MAX_TILE_WORKERS: usize = 8;
+
+/// Worker count for building `chunk_count` tiles: available parallelism,
+/// capped, and never more workers than tiles.
+fn tile_worker_count(chunk_count: usize) -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(MAX_TILE_WORKERS)
+        .min(chunk_count.max(1))
 }
 
 fn certify_tile(tile: &NativeTile) -> Result<(), Error> {
@@ -144,6 +162,70 @@ pub fn prepare_pinned(
         return Err(Error::Source);
     }
     prepare_source(input, Some((source, native_jar)))
+}
+
+const REQUIREMENT_CACHE_KIND: &str = "route-requirements";
+const ROUTE_TILES_CACHE_KIND: &str = "route-tiles";
+
+/// Everything that decides which model/texture IDs the viewport scan finds:
+/// the world's region files, the viewport chunks, the seed, the native jar and
+/// the selected pack.
+fn requirement_key(input: &Inputs<'_>, render_chunks: &[[i32; 2]]) -> crate::prepared_cache::Key {
+    source_key_builder(REQUIREMENT_CACHE_KIND, input, render_chunks).finish()
+}
+
+/// The requirement inputs plus everything the finished tiles additionally
+/// depend on: the support (halo) chunks, the blend radius, the camera framing and
+/// the identity of the imported texture bank.
+fn route_tiles_key(
+    input: &Inputs<'_>,
+    render_chunks: &[[i32; 2]],
+    request: &source_footprint::Request,
+    camera_height: f64,
+    bank_epoch: Digest256,
+) -> crate::prepared_cache::Key {
+    let mut builder = source_key_builder(ROUTE_TILES_CACHE_KIND, input, render_chunks);
+    builder
+        .part(&bank_epoch.bytes())
+        .number(u64::from(input.blend_radius))
+        .number(camera_height.to_bits())
+        .number(input.scale.to_bits())
+        .number(input.viewport[0] as u64)
+        .number(input.viewport[1] as u64)
+        .number(request.support_chunks().len() as u64);
+    for chunk in request.support_chunks() {
+        builder
+            .part(&chunk[0].to_le_bytes())
+            .part(&chunk[1].to_le_bytes());
+    }
+    builder.finish()
+}
+
+fn source_key_builder(
+    kind: &str,
+    input: &Inputs<'_>,
+    render_chunks: &[[i32; 2]],
+) -> crate::prepared_cache::KeyBuilder {
+    let mut builder = crate::prepared_cache::KeyBuilder::new(kind);
+    builder
+        .path_fingerprint(&input.bound.directory.join("region"))
+        .path_fingerprint(&input.bound.directory.join("level.dat"))
+        .path_fingerprint(input.jar)
+        .number(input.world_seed as u64)
+        .number(u64::from(input.fancy_leaves))
+        .number(render_chunks.len() as u64);
+    for chunk in render_chunks {
+        builder
+            .part(&chunk[0].to_le_bytes())
+            .part(&chunk[1].to_le_bytes());
+    }
+    if let Some(selected) = input.selected {
+        builder
+            .text(&format!("{selected:?}"))
+            .path_fingerprint(Path::new(&selected.pack_path))
+            .path_fingerprint(Path::new(&selected.pack_addon_path));
+    }
+    builder
 }
 
 fn prepare_source(
@@ -224,73 +306,114 @@ fn prepare_source(
         )?,
     };
     let definitions = session.definitions()?;
-    let mut compiler = ModelCompiler::new(&definitions, session.limits(), input.account.clone())?;
     let immutable_definitions = session.immutable_definitions();
-    if immutable_definitions {
-        compiler.enable_immutable_source_cache();
+    // Ordered Vec so tile batches can slice it; the BTreeSet order is the chunk order.
+    let render_chunks: Vec<[i32; 2]> = request.render_chunks().iter().copied().collect();
+    let requirement_cache_key = input.cache.map(|_| requirement_key(&input, &render_chunks));
+    let cached_ids: Option<BTreeSet<ResourceId>> = input
+        .cache
+        .zip(requirement_cache_key)
+        .and_then(|(cache, key)| cache.load(REQUIREMENT_CACHE_KIND, &key));
+    if cached_ids.is_some() {
+        (input.progress)("Loaded viewport model requirements from the prepared-data cache");
     }
-    let mut ids = BTreeSet::<ResourceId>::new();
-    let render_chunks = request.render_chunks();
+    let requirement_worker_count = if cached_ids.is_some() {
+        0
+    } else {
+        tile_worker_count(render_chunks.len())
+    };
+    let mut requirement_compilers = Vec::with_capacity(requirement_worker_count);
+    for _ in 0..requirement_worker_count {
+        let mut compiler =
+            ModelCompiler::new(&definitions, session.limits(), input.account.clone())?;
+        if immutable_definitions {
+            compiler.enable_immutable_source_cache();
+        }
+        requirement_compilers.push(compiler);
+    }
+    let scan_needed = cached_ids.is_none();
+    let mut ids = cached_ids.unwrap_or_default();
     (input.work_progress)(
         "Collecting viewport model requirements",
         0,
         render_chunks.len(),
         "starting bounded viewport chunk scan",
     );
-    for (index, &chunk) in render_chunks.iter().enumerate() {
+    // Batches hold one chunk per worker. Each worker has its own model cache and
+    // requirement set; the sets are merged back in chunk order, so the union matches
+    // a sequential scan (the requirement result does not depend on which cache served it).
+    let mut next_index = 0;
+    while scan_needed && next_index < render_chunks.len() {
         input.cancel.check()?;
-        (input.progress)(&format!(
-            "Collecting texture-model requirements from viewport chunk {}/{}, {} unique models so far",
-            index + 1,
-            render_chunks.len(),
-            ids.len()
-        ));
-        if !immutable_definitions {
-            compiler.reset_for_next_tile();
-        }
-        let tile = match sparse_cells::prepare(
-            Arc::clone(&map),
-            &request,
-            chunk,
-            input.account,
-            input.cancel,
-        ) {
-            Ok(tile) => tile,
-            Err(sparse_cells::Error::Empty) => {
-                (input.work_progress)(
-                    "Collecting viewport model requirements",
-                    index + 1,
-                    render_chunks.len(),
-                    "empty viewport chunk skipped",
-                );
-                continue;
+        let batch_end = (next_index + requirement_compilers.len()).min(render_chunks.len());
+        let batch = &render_chunks[next_index..batch_end];
+        let outcomes = std::thread::scope(|scope| {
+            let workers: Vec<_> = batch
+                .iter()
+                .zip(requirement_compilers.iter_mut())
+                .map(|(&chunk, compiler)| {
+                    let map = Arc::clone(&map);
+                    let request = &request;
+                    let session = &session;
+                    let input = &input;
+                    scope.spawn(move || -> Result<Option<BTreeSet<ResourceId>>, Error> {
+                        if !immutable_definitions {
+                            compiler.reset_for_next_tile();
+                        }
+                        let tile = match sparse_cells::prepare(
+                            Arc::clone(&map),
+                            request,
+                            chunk,
+                            input.account,
+                            input.cancel,
+                        ) {
+                            Ok(tile) => tile,
+                            Err(sparse_cells::Error::Empty) => return Ok(None),
+                            Err(error) => return Err(error.into()),
+                        };
+                        let binding = saved_binding::prepare_accounted(
+                            &tile.cells,
+                            saved_binding::Limits::default(),
+                            input.account,
+                            input.cancel,
+                            input.cancelled,
+                        )?;
+                        let mut chunk_ids = BTreeSet::<ResourceId>::new();
+                        session.collect_required(
+                            &binding,
+                            input.world_seed,
+                            &mut chunk_ids,
+                            compiler,
+                            input.cancel,
+                        )?;
+                        Ok(Some(chunk_ids))
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap_or(Err(Error::Worker)))
+                .collect::<Vec<_>>()
+        });
+        for outcome in outcomes {
+            if let Some(chunk_ids) = outcome? {
+                ids.extend(chunk_ids);
             }
-            Err(error) => return Err(error.into()),
-        };
-        let binding = saved_binding::prepare_accounted(
-            &tile.cells,
-            saved_binding::Limits::default(),
-            input.account,
-            input.cancel,
-            input.cancelled,
-        )?;
-        session.collect_required(
-            &binding,
-            input.world_seed,
-            &mut ids,
-            &mut compiler,
-            input.cancel,
-        )?;
+        }
         (input.work_progress)(
             "Collecting viewport model requirements",
-            index + 1,
+            batch_end,
             render_chunks.len(),
             &format!("{} unique texture models", ids.len()),
         );
+        next_index = batch_end;
     }
-    // Release every retained parsed selector/base model before the importer
-    // reserves decoded selected textures in the same finite scene account.
-    drop(compiler);
+    drop(requirement_compilers);
+    if let (true, Some(cache), Some(key)) = (scan_needed, input.cache, requirement_cache_key) {
+        if let Err(error) = cache.store(REQUIREMENT_CACHE_KIND, &key, &ids) {
+            tracing::warn!(%error, "could not save viewport model requirements to the cache");
+        }
+    }
     (input.progress)(&format!(
         "Loading selected texture-pack assets for {} required models",
         ids.len()
@@ -309,15 +432,41 @@ fn prepare_source(
     let shared = session.import_with_progress(ids, input.cancel, &mut report_import_progress)?;
     let bank_epoch = shared.bank_epoch();
     let definitions = shared.definitions()?;
-    let mut compiler = ModelCompiler::new(&definitions, shared.limits(), input.account.clone())?;
     if shared.immutable_definitions() != immutable_definitions {
         return Err(Error::Source);
     }
-    if immutable_definitions {
-        compiler.enable_immutable_source_cache();
+    // Each worker owns its compiler: the model caches are mutable, and a
+    // tile's result does not depend on which worker's cache served it.
+    let route_cache_key = input
+        .cache
+        .map(|_| route_tiles_key(&input, &render_chunks, &request, camera_height, bank_epoch));
+    let restored_tiles = input
+        .cache
+        .zip(route_cache_key)
+        .and_then(|(cache, key)| {
+            cache.load::<tile_cache::CachedRoute>(ROUTE_TILES_CACHE_KIND, &key)
+        })
+        .and_then(|cached| tile_cache::restore(cached, &shared, &map, input.cancel));
+    if restored_tiles.is_some() {
+        (input.progress)("Loaded projected viewport tiles from the prepared-data cache");
+    }
+    let worker_count = if restored_tiles.is_some() {
+        0
+    } else {
+        tile_worker_count(render_chunks.len())
+    };
+    let mut compilers = Vec::with_capacity(worker_count);
+    for _ in 0..worker_count {
+        let mut compiler =
+            ModelCompiler::new(&definitions, shared.limits(), input.account.clone())?;
+        if immutable_definitions {
+            compiler.enable_immutable_source_cache();
+        }
+        compilers.push(compiler);
     }
     let tiles_charge = input.account.reserve(1 << 20, input.cancel)?;
-    let mut tiles = Vec::<NativeTile>::new();
+    let route_from_cache = restored_tiles.is_some();
+    let mut tiles = restored_tiles.unwrap_or_default();
     tiles
         .try_reserve_exact(request.render_chunks().len())
         .map_err(|_| Error::Limit)?;
@@ -334,77 +483,113 @@ fn prepare_source(
         render_chunks.len(),
         "starting bounded tile raster preparation",
     );
-    for (index, &chunk) in render_chunks.iter().enumerate() {
+    // Batches hold one chunk per worker and are merged back in chunk order, so
+    // the route is identical to a sequential build.
+    let mut next_index = if route_from_cache {
+        render_chunks.len()
+    } else {
+        0
+    };
+    while next_index < render_chunks.len() {
         input.cancel.check()?;
+        let batch_end = (next_index + compilers.len()).min(render_chunks.len());
+        let batch = &render_chunks[next_index..batch_end];
         (input.progress)(&format!(
-            "Building rendered viewport tile {}/{}, {} tiles ready",
-            index + 1,
+            "Building rendered viewport tiles {}-{}/{}, {} tiles ready",
+            next_index + 1,
+            batch_end,
             render_chunks.len(),
             tiles.len()
         ));
-        if !immutable_definitions {
-            compiler.reset_for_next_tile();
-        }
-        let tile = match sparse_cells::prepare(
-            Arc::clone(&map),
-            &request,
-            chunk,
-            input.account,
-            input.cancel,
-        ) {
-            Ok(tile) => tile,
-            Err(sparse_cells::Error::Empty) => {
-                (input.work_progress)(
-                    "Building projected viewport tiles",
-                    index + 1,
-                    render_chunks.len(),
-                    "empty viewport chunk skipped",
-                );
+        let outcomes = std::thread::scope(|scope| {
+            let workers: Vec<_> = batch
+                .iter()
+                .zip(compilers.iter_mut())
+                .map(|(&chunk, compiler)| {
+                    let map = Arc::clone(&map);
+                    let request = &request;
+                    let shared = &shared;
+                    let input = &input;
+                    scope.spawn(move || -> Result<Option<NativeTile>, Error> {
+                        if !immutable_definitions {
+                            compiler.reset_for_next_tile();
+                        }
+                        let tile = match sparse_cells::prepare(
+                            Arc::clone(&map),
+                            request,
+                            chunk,
+                            input.account,
+                            input.cancel,
+                        ) {
+                            Ok(tile) => tile,
+                            Err(sparse_cells::Error::Empty) => return Ok(None),
+                            Err(error) => return Err(error.into()),
+                        };
+                        let binding = saved_binding::prepare_accounted(
+                            &tile.cells,
+                            saved_binding::Limits::default(),
+                            input.account,
+                            input.cancel,
+                            input.cancelled,
+                        )?;
+                        let prepared = native_binding::prepare_native_shared(
+                            binding,
+                            shared,
+                            compiler,
+                            input.world_seed,
+                            input.blend_radius,
+                            input.cancel,
+                        )?;
+                        let native_tile = prepared.into_tile();
+                        certify_tile(&native_tile)?;
+                        Ok(Some(native_tile))
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap_or(Err(Error::Worker)))
+                .collect::<Vec<_>>()
+        });
+        for outcome in outcomes {
+            let Some(native_tile) = outcome? else {
                 continue;
+            };
+            if native_tile.bank_epoch != bank_epoch || !Arc::ptr_eq(&native_tile.map, &map) {
+                return Err(Error::Source);
             }
-            Err(error) => return Err(error.into()),
-        };
-        let binding = saved_binding::prepare_accounted(
-            &tile.cells,
-            saved_binding::Limits::default(),
-            input.account,
-            input.cancel,
-            input.cancelled,
-        )?;
-        let prepared = native_binding::prepare_native_shared(
-            binding,
-            &shared,
-            &mut compiler,
-            input.world_seed,
-            input.blend_radius,
-            input.cancel,
-        )?;
-        let native_tile = prepared.into_tile();
-        certify_tile(&native_tile)?;
-        if native_tile.bank_epoch != bank_epoch || !Arc::ptr_eq(&native_tile.map, &map) {
-            return Err(Error::Source);
+            if tiles
+                .first()
+                .is_some_and(|first| !Arc::ptr_eq(&first.imports, &native_tile.imports))
+            {
+                return Err(Error::Source);
+            }
+            tiles.push(native_tile);
         }
-        if tiles
-            .first()
-            .is_some_and(|first| !Arc::ptr_eq(&first.imports, &native_tile.imports))
-        {
-            return Err(Error::Source);
-        }
-        tiles.push(native_tile);
         (input.work_progress)(
             "Building projected viewport tiles",
-            index + 1,
+            batch_end,
             render_chunks.len(),
-            &format!("tile {},{} ready", chunk[0], chunk[1]),
+            &format!("{} tiles ready", tiles.len()),
         );
+        next_index = batch_end;
     }
-    drop(compiler);
+    drop(compilers);
     if tiles.is_empty()
         || tiles.iter().all(|tile| {
             tile.mesh.faces.is_empty() && tile.fluid.as_ref().is_none_or(|m| m.faces.is_empty())
         })
     {
         return Err(Error::Empty);
+    }
+    if let (false, Some(cache), Some(key)) = (route_from_cache, input.cache, route_cache_key) {
+        if let Err(error) = cache.store(
+            ROUTE_TILES_CACHE_KIND,
+            &key,
+            &tile_cache::capture(&tiles, bank_epoch),
+        ) {
+            tracing::warn!(%error, "could not save projected viewport tiles to the cache");
+        }
     }
     Ok(PreparedRoute {
         map,

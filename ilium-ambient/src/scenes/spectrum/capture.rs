@@ -1071,6 +1071,7 @@ mod tests {
         let (_execution, resources) = crate::resources::isolated_test_resources();
         let quota = resources.finite().quota_group();
         let before = quota.snapshot().worker_threads;
+        let before_bytes = quota.snapshot().worker_bytes;
         let reservation = resources
             .reserve_worker(WorkerCost {
                 threads: 1,
@@ -1085,7 +1086,7 @@ mod tests {
             before + 1,
             "unobservable backend workers remain charged until process exit"
         );
-        assert_eq!(quota.snapshot().worker_bytes, 1024);
+        assert_eq!(quota.snapshot().worker_bytes, before_bytes + 1024);
     }
 
     #[test]

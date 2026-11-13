@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>cli | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details open><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/" aria-current="page">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Host API</b></p>
+<h1>cli</h1>
+
+<p>The <code>cli</code> import lets a server-side plugin add a subcommand to the <code>ilium</code> command line. The plugin declares the subcommand in its manifest. When the user runs <code>ilium &lt;name&gt; [arguments]</code>, the kernel routes the call to the plugin as a <code>cli-invoked</code> event. The plugin writes output, optionally reads standard input, and ends the call with an exit code. The invocation stays open until the plugin calls <code>finish</code>, or until the caller disconnects.</p>
+<p>The interface provides a JSON-lines output form, a plain text form, a separate standard error stream, bounded standard input, a terminal test, the caller's pane, a shared pane-selector argument group, and commands that run without a server. This page documents the whole contract. CLI dispatch, server auto-start and session control stay in the kernel.</p>
+<figure>
+<svg viewBox="0 0 440 290" role="img" aria-label="Sequence of a CLI invocation between caller, kernel and plugin" width="660" height="435">
+  <defs>
+    <marker id="api-cli-seq-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <text x="60" y="16" font-size="12" text-anchor="middle" fill="currentColor">Caller</text>
+  <text x="220" y="16" font-size="12" text-anchor="middle" fill="currentColor">Kernel</text>
+  <text x="380" y="16" font-size="12" text-anchor="middle" fill="currentColor">Plugin (server)</text>
+  <line x1="60" y1="24" x2="60" y2="280" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="220" y1="24" x2="220" y2="280" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="380" y1="24" x2="380" y2="280" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="60" y1="46" x2="218" y2="46" stroke="currentColor" marker-end="url(#api-cli-seq-arrow)"/>
+  <text x="140" y="40" font-size="10" text-anchor="middle" fill="currentColor">ilium tally</text>
+  <line x1="220" y1="72" x2="378" y2="72" stroke="currentColor" marker-end="url(#api-cli-seq-arrow)"/>
+  <text x="300" y="66" font-size="10" text-anchor="middle" fill="currentColor">cli-invoked</text>
+  <line x1="378" y1="100" x2="222" y2="100" stroke="currentColor" marker-end="url(#api-cli-seq-arrow)"/>
+  <text x="300" y="94" font-size="10" text-anchor="middle" fill="currentColor">read-stdin (optional)</text>
+  <line x1="220" y1="128" x2="378" y2="128" stroke="currentColor" marker-end="url(#api-cli-seq-arrow)"/>
+  <text x="300" y="122" font-size="10" text-anchor="middle" fill="currentColor">request-completed</text>
+  <line x1="378" y1="156" x2="222" y2="156" stroke="currentColor" marker-end="url(#api-cli-seq-arrow)"/>
+  <text x="300" y="150" font-size="10" text-anchor="middle" fill="currentColor">write-line / write-text</text>
+  <line x1="218" y1="178" x2="62" y2="178" stroke="currentColor" marker-end="url(#api-cli-seq-arrow)"/>
+  <text x="140" y="172" font-size="10" text-anchor="middle" fill="currentColor">stdout</text>
+  <line x1="378" y1="204" x2="222" y2="204" stroke="currentColor" marker-end="url(#api-cli-seq-arrow)"/>
+  <text x="300" y="198" font-size="10" text-anchor="middle" fill="currentColor">write-stderr</text>
+  <line x1="218" y1="226" x2="62" y2="226" stroke="currentColor" marker-end="url(#api-cli-seq-arrow)"/>
+  <text x="140" y="220" font-size="10" text-anchor="middle" fill="currentColor">stderr</text>
+  <line x1="378" y1="252" x2="222" y2="252" stroke="currentColor" marker-end="url(#api-cli-seq-arrow)"/>
+  <text x="300" y="246" font-size="10" text-anchor="middle" fill="currentColor">finish(0)</text>
+  <line x1="218" y1="274" x2="62" y2="274" stroke="currentColor" marker-end="url(#api-cli-seq-arrow)"/>
+  <text x="140" y="268" font-size="10" text-anchor="middle" fill="currentColor">exit status 0</text>
+</svg>
+<figcaption>One invocation. The plugin answers the <code>cli-invoked</code> event, optionally reads standard input through the request model, writes output, and ends the call with <code>finish</code>. If the caller disconnects first, the kernel sends <code>cli-cancelled</code> instead.</figcaption>
+</figure>
+
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>Grant:</strong> <code>cli.contribute</code>, on the server side only. The grant takes no argument (see <a href="/pages/capability-cli-contribute/">capability-cli-contribute</a>). Every function and event on this page needs it.</li>
+<li><strong>Manifest:</strong> a <code>cli</code> entry under <code>contributes</code>, and a <code>server</code> component that exports <code>handler</code>.</li>
+<li><strong>Language:</strong> Rust with the <code>ilium-plugin-sdk</code> crate, or TypeScript with the <code>@ilium/plugin-sdk</code> package. Both are set up by <code>ilium plugin new</code> (see <a href="/pages/getting-started-toolchain/">getting started</a>).</li>
+<li><strong>Imports:</strong> <code>ilium_plugin_sdk::host::cli</code> in Rust, <code>@ilium/plugin-sdk/host/cli</code> in TypeScript.</li>
+</ul>
+<h3 id="manifest">Manifest</h3>
+<p>The <code>cli</code> key under <code>contributes</code> declares the subcommands. It holds one object, or a list of at most 8 objects, and the names MUST be unique inside the plugin. A name in the reserved kernel list (see <a href="/pages/reference-cli-compatibility/">CLI compatibility</a>) is refused with <code>manifest.cli-name-reserved</code>. Each entry has these fields; six are optional.</p>
+<pre><code class="language-json">{
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;cli.contribute&quot;] },
+  &quot;contributes&quot;: {
+    &quot;cli&quot;: [{
+      &quot;name&quot;: &quot;tally&quot;,
+      &quot;summary&quot;: &quot;Count lines of text read from standard input&quot;,
+      &quot;arguments_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: { &quot;label&quot;: { &quot;type&quot;: &quot;string&quot; } } },
+      &quot;output&quot;: &quot;text&quot;,
+      &quot;stdin&quot;: &quot;optional&quot;,
+      &quot;requires_server&quot;: false,
+      &quot;argument_groups&quot;: [&quot;pane-selector&quot;]
+    }]
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>required</td>
+<td>The subcommand. It must match <code>[a-z][a-z0-9-]{0,31}</code> and runs as <code>ilium &lt;name&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>summary</code></td>
+<td>string</td>
+<td>required</td>
+<td>One line shown in <code>ilium --help</code>.</td>
+</tr>
+<tr>
+<td><code>arguments_schema</code></td>
+<td>JSON Schema object</td>
+<td>none</td>
+<td>Documents the arguments for help. The host passes <code>argv</code> unchanged and does not validate it.</td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td><code>"jsonl"</code>, <code>"text"</code> or <code>"mixed"</code></td>
+<td><code>"jsonl"</code></td>
+<td>The output form. It decides which write function is allowed (see "Output forms").</td>
+</tr>
+<tr>
+<td><code>aliases</code></td>
+<td>list of strings</td>
+<td>empty</td>
+<td>Further names for the same command. Each follows the <code>name</code> rule.</td>
+</tr>
+<tr>
+<td><code>stdin</code></td>
+<td><code>"none"</code>, <code>"optional"</code> or <code>"required"</code></td>
+<td><code>"none"</code></td>
+<td>Whether the command may read standard input.</td>
+</tr>
+<tr>
+<td><code>requires_server</code></td>
+<td>bool</td>
+<td><code>true</code></td>
+<td>With <code>false</code>, the command also runs when no server is running (see "Commands without a server").</td>
+</tr>
+<tr>
+<td><code>argument_groups</code></td>
+<td>list of strings</td>
+<td>empty</td>
+<td><code>["pane-selector"]</code> adds <code>--pane &lt;id\|title\|.&gt;</code> and <code>--all-panes</code>, resolved by the host.</td>
+</tr>
+</tbody>
+</table>
+<p>A name that a kernel command uses is refused at install with <code>manifest.cli-name-reserved</code>. A name that another installed plugin owns is refused with <code>manifest.cli-name-taken</code>. An invalid <code>output</code>, <code>stdin</code> or <code>argument_groups</code> value is refused with <code>manifest.cli-field</code>.</p>
+<h3 id="surface">Surface</h3>
+<h4 id="wit">WIT</h4>
+<pre><code class="language-wit">// Excerpt of ilium:host/cli in reference-wit
+// ilium:host/cli  (cli.contribute, server side)
+write-line:   func(invocation: u64, jsonl: string) -&gt; result&lt;_, plugin-error&gt;;       // output &quot;jsonl&quot;
+write-error:  func(invocation: u64, text: string)  -&gt; result&lt;_, plugin-error&gt;;       // plain text to stderr
+finish:       func(invocation: u64, exit-code: u8);
+
+// further output and input functions
+write-text:   func(invocation: u64, text: string) -&gt; result&lt;_, plugin-error&gt;;        // output &quot;text&quot;
+write-stderr: func(invocation: u64, text: string) -&gt; result&lt;_, plugin-error&gt;;        // plain text to the caller's stderr
+read-stdin:   func(invocation: u64, max-bytes: u32) -&gt; result&lt;request-id, plugin-error&gt;;   // at most 4 MiB in total
+take-stdin:   func(request: request-id) -&gt; option&lt;list&lt;u8&gt;&gt;;                         // empty list: end of input
+is-tty:       func(invocation: u64) -&gt; tuple&lt;bool, bool&gt;;                            // stdout, stderr are terminals
+caller-pane:  func(invocation: u64) -&gt; option&lt;node-id&gt;;                              // from ILIUM_PANE_ID
+record pane-selection { panes: list&lt;node-id&gt;, all: bool }
+selected-panes: func(invocation: u64) -&gt; option&lt;pane-selection&gt;;                     // with argument_groups [&quot;pane-selector&quot;]
+</code></pre>
+<h4 id="functions">Functions</h4>
+<table>
+<thead>
+<tr>
+<th>WIT function</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>write-line</code></td>
+<td><code>cli::write_line(invocation: u64, jsonl: &amp;str) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>writeLine(invocation: bigint, jsonl: string): void</code></td>
+<td>One JSON object and a newline to standard output. Only for <code>output: "jsonl"</code>.</td>
+</tr>
+<tr>
+<td><code>write-error</code></td>
+<td><code>cli::write_error(invocation: u64, text: &amp;str) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>writeError(invocation: bigint, text: string): void</code></td>
+<td>Plain text and a newline to standard error.</td>
+</tr>
+<tr>
+<td><code>write-text</code></td>
+<td><code>cli::write_text(invocation: u64, text: &amp;str) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>writeText(invocation: bigint, text: string): void</code></td>
+<td>Plain text to standard output, written as given. Only for <code>output: "text"</code>.</td>
+</tr>
+<tr>
+<td><code>write-stderr</code></td>
+<td><code>cli::write_stderr(invocation: u64, text: &amp;str) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>writeStderr(invocation: bigint, text: string): void</code></td>
+<td>Plain text to standard error, for either output form.</td>
+</tr>
+<tr>
+<td><code>read-stdin</code></td>
+<td><code>cli::read_stdin(invocation: u64, max_bytes: u32) -&gt; Result&lt;RequestId, PluginError&gt;</code></td>
+<td><code>readStdin(invocation: bigint, maxBytes: number): bigint</code></td>
+<td>Asks for up to <code>max_bytes</code> of standard input. The chunk arrives as <code>request-completed</code>.</td>
+</tr>
+<tr>
+<td><code>take-stdin</code></td>
+<td><code>cli::take_stdin(request: RequestId) -&gt; Option&lt;Vec&lt;u8&gt;&gt;</code></td>
+<td><code>takeStdin(request: bigint): Uint8Array \| undefined</code></td>
+<td>Takes the chunk. An empty list means end of input.</td>
+</tr>
+<tr>
+<td><code>is-tty</code></td>
+<td><code>cli::is_tty(invocation: u64) -&gt; (bool, bool)</code></td>
+<td><code>isTty(invocation: bigint): [boolean, boolean]</code></td>
+<td>Whether standard output and standard error are terminals.</td>
+</tr>
+<tr>
+<td><code>caller-pane</code></td>
+<td><code>cli::caller_pane(invocation: u64) -&gt; Option&lt;NodeId&gt;</code></td>
+<td><code>callerPane(invocation: bigint): bigint \| undefined</code></td>
+<td>The pane the command ran in, taken from <code>ILIUM_PANE_ID</code>.</td>
+</tr>
+<tr>
+<td><code>selected-panes</code></td>
+<td><code>cli::selected_panes(invocation: u64) -&gt; Option&lt;PaneSelection&gt;</code></td>
+<td><code>selectedPanes(invocation: bigint): PaneSelection \| undefined</code></td>
+<td>The panes chosen by <code>--pane</code> or <code>--all-panes</code>.</td>
+</tr>
+<tr>
+<td><code>finish</code></td>
+<td><code>cli::finish(invocation: u64, exit_code: u8)</code></td>
+<td><code>finish(invocation: bigint, exitCode: number): void</code></td>
+<td>Ends the invocation. <code>exit_code</code> becomes the process exit status.</td>
+</tr>
+</tbody>
+</table>
+<p>In TypeScript, a failed call throws <code>PluginError</code>. <code>PaneSelection</code> is <code>{ panes: bigint[]; all: boolean }</code> in TypeScript and <code>PaneSelection { panes: Vec&lt;NodeId&gt;, all: bool }</code> in Rust.</p>
+<h4 id="events">Events</h4>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Payload</th>
+<th>Rust</th>
+<th>TypeScript</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cli-invoked</code></td>
+<td><code>invocation</code> (u64), <code>name</code>, <code>argv</code> (list of strings), <code>cwd</code></td>
+<td><code>Event::CliInvoked(CliInvokedEvent { invocation, name, argv, cwd })</code></td>
+<td><code>{ tag: 'cli-invoked', val: { invocation, name, argv, cwd } }</code></td>
+</tr>
+<tr>
+<td><code>cli-cancelled</code></td>
+<td><code>invocation</code> (u64)</td>
+<td><code>Event::CliCancelled(u64)</code></td>
+<td><code>{ tag: 'cli-cancelled', val: bigint }</code></td>
+</tr>
+<tr>
+<td><code>request-completed</code></td>
+<td><code>request</code>, <code>outcome</code> (for <code>read-stdin</code>)</td>
+<td><code>Event::RequestCompleted(..)</code></td>
+<td><code>{ tag: 'request-completed', val: { request, outcome } }</code></td>
+</tr>
+</tbody>
+</table>
+<p>Both CLI events are never dropped. <code>argv</code> holds the words after the name as the shell passed them. <code>cwd</code> is the absolute path of the caller's working directory.</p>
+<h3 id="output-forms">Output forms</h3>
+<p>The manifest <code>output</code> key picks the form. <code>jsonl</code> and <code>text</code> never mix in one command. <code>mixed</code> allows both <code>write-line</code> and <code>write-text</code>, for a command such as <code>new-pane</code> that prints a plain line for one argument shape and JSONL for another.</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Allowed output calls</th>
+<th>Rule</th>
+<th>Typical use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>jsonl</code> (default)</td>
+<td><code>write-line</code>, <code>write-stderr</code>, <code>write-error</code></td>
+<td>Every line is exactly one JSON object with a string <code>type</code> field. Agents read this output.</td>
+<td>Commands that agents and scripts call.</td>
+</tr>
+<tr>
+<td><code>text</code></td>
+<td><code>write-text</code>, <code>write-stderr</code>, <code>write-error</code></td>
+<td>Written as given, no parsing.</td>
+<td>Commands a person reads, or that feed a pipe.</td>
+</tr>
+</tbody>
+</table>
+<p><code>write-text</code> on a JSONL command, and <code>write-line</code> on a text command, both return <code>invalid-argument</code>. The refused write is not sent.</p>
+<h3 id="standard-input">Standard input</h3>
+<p>Set <code>stdin</code> to <code>optional</code> or <code>required</code>. The plugin then reads input with the request model: <code>read-stdin</code> returns a <code>request-id</code>, the host completes it with <code>request-completed</code>, and <code>take-stdin</code> returns the bytes. An empty list means the caller closed standard input. The total over one invocation is at most 4 MiB. A command with <code>stdin: "none"</code> calls <code>read-stdin</code> and gets <code>unsupported</code>. See <a href="/pages/requests-and-outcomes/">Requests and outcomes</a>.</p>
+<h3 id="commands-without-a-server">Commands without a server</h3>
+<p>With <code>requires_server: false</code>, <code>ilium &lt;name&gt;</code> works when no Ilium server is running. The <code>ilium</code> process then runs the plugin's server component in a transient host inside the CLI process, with the same grants. The transient host is smaller than a server:</p>
+<ul>
+<li><code>tree.*</code> returns empty results and no panes exist.</li>
+<li>Storage and settings are read from disk. The host neither reads nor writes the <code>restored</code> bytes.</li>
+<li>No other plugin and no client side runs there.</li>
+<li><code>caller-pane</code> returns <code>none</code>.</li>
+<li>The host ends at <code>finish</code>, and the component is deactivated with the reason <code>shutdown</code>.</li>
+</ul>
+<p>When a server is running, the command runs in the normal instance instead.</p>
+<h3 id="pane-selector">Pane selector</h3>
+<p><code>argument_groups: ["pane-selector"]</code> gives the command two options without any parsing in the plugin: <code>--pane &lt;id|title|.&gt;</code> (a pane id, a title, or <code>.</code> for the caller's pane) and <code>--all-panes</code>. The host resolves them to node ids. The plugin calls <code>selected-panes</code>. It receives the resolved list, or <code>none</code> when the caller gave neither option. <code>caller-pane</code> is separate: it reports the pane the command ran in, from the <code>ILIUM_PANE_ID</code> environment variable, and is <code>none</code> outside Ilium.</p>
+<h3 id="worked-example-a-tally-command">Worked example: a tally command</h3>
+<p><code>ilium tally</code> counts the lines on standard input and prints the result. It declares <code>output: "text"</code> and <code>stdin: "optional"</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::cli;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::CliInvokedEvent;
+
+const CHUNK_BYTES: u32 = 64 * 1024;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct Tally {
+    /// Open invocation, the read request in flight, and the lines counted so far.
+    open: Option&lt;(u64, RequestId, u64)&gt;,
+}
+
+impl Lifecycle for Tally {}
+
+impl Handler for Tally {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            match event {
+                Event::CliInvoked(CliInvokedEvent { invocation, name, .. }) if name == &quot;tally&quot; =&gt; {
+                    self.start(invocation);
+                }
+                Event::RequestCompleted(done) =&gt; self.on_chunk(done.request, done.outcome.is_ok()),
+                Event::CliCancelled(invocation) =&gt; {
+                    if matches!(self.open, Some((open, _, _)) if open == invocation) {
+                        self.open = None;
+                    }
+                }
+                _ =&gt; {}
+            }
+        }
+        Vec::new()
+    }
+}
+
+impl Tally {
+    fn start(&amp;mut self, invocation: u64) {
+        let (stdout_is_tty, _) = cli::is_tty(invocation);
+        if stdout_is_tty {
+            let _ = cli::write_stderr(invocation, &quot;tally: pipe some text into this command&quot;);
+            cli::finish(invocation, 2);
+            return;
+        }
+        match cli::read_stdin(invocation, CHUNK_BYTES) {
+            Ok(request) =&gt; self.open = Some((invocation, request, 0)),
+            Err(error) =&gt; {
+                let _ = cli::write_stderr(invocation, &amp;error.message);
+                cli::finish(invocation, 1);
+            }
+        }
+    }
+
+    fn on_chunk(&amp;mut self, request: RequestId, is_ok: bool) {
+        let Some((invocation, open_request, lines)) = self.open else { return };
+        if open_request != request {
+            return;
+        }
+        self.open = None;
+        let Some(bytes) = cli::take_stdin(request).filter(|_| is_ok) else {
+            let _ = cli::write_stderr(invocation, &quot;tally: input failed&quot;);
+            cli::finish(invocation, 1);
+            return;
+        };
+        if bytes.is_empty() {
+            let _ = cli::write_text(invocation, &amp;format!(&quot;{lines} lines\n&quot;));
+            cli::finish(invocation, 0);
+            return;
+        }
+        let total = lines + bytes.iter().filter(|byte| **byte == b'\n').count() as u64;
+        match cli::read_stdin(invocation, CHUNK_BYTES) {
+            Ok(next) =&gt; self.open = Some((invocation, next, total)),
+            Err(_) =&gt; cli::finish(invocation, 1),
+        }
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import * as cli from '@ilium/plugin-sdk/host/cli';
+
+const CHUNK_BYTES = 64 * 1024;
+
+interface OpenCall { invocation: bigint; request: bigint; lines: number }
+let open: OpenCall | undefined;
+
+function start(invocation: bigint): void {
+  const [stdoutIsTty] = cli.isTty(invocation);
+  if (stdoutIsTty) {
+    cli.writeStderr(invocation, 'tally: pipe some text into this command');
+    cli.finish(invocation, 2);
+    return;
+  }
+  open = { invocation, request: cli.readStdin(invocation, CHUNK_BYTES), lines: 0 };
+}
+
+function onChunk(request: bigint, isOk: boolean): void {
+  if (open === undefined || open.request !== request) return;
+  const call = open;
+  open = undefined;
+  const bytes = isOk ? cli.takeStdin(request) : undefined;
+  if (bytes === undefined) {
+    cli.writeStderr(call.invocation, 'tally: input failed');
+    cli.finish(call.invocation, 1);
+    return;
+  }
+  if (bytes.length === 0) {
+    cli.writeText(call.invocation, `${call.lines} lines\n`);
+    cli.finish(call.invocation, 0);
+    return;
+  }
+  call.lines += bytes.filter((byte) =&gt; byte === 0x0a).length;
+  call.request = cli.readStdin(call.invocation, CHUNK_BYTES);
+  open = call;
+}
+
+export const { handler } = definePlugin({
+  side: 'server',
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'cli-invoked' &amp;&amp; event.val.name === 'tally') start(event.val.invocation);
+      else if (event.tag === 'request-completed') onChunk(event.val.request, event.val.outcome.tag === 'ok');
+      else if (event.tag === 'cli-cancelled' &amp;&amp; open?.invocation === event.val) open = undefined;
+    }
+    return [];
+  },
+});
+</code></pre>
+<p>Both examples keep one open call and one read request in flight, and call <code>finish</code> on every path. A real command keeps a map keyed by invocation, because several invocations can run at once.</p>
+<h3 id="worked-example-json-lines-and-the-pane-selector">Worked example: JSON lines and the pane selector</h3>
+<p>A command declared with <code>output: "jsonl"</code> and <code>argument_groups: ["pane-selector"]</code> reports the selected panes. It writes one object per pane, then a summary.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::cli;
+use ilium_plugin_sdk::prelude::*;
+
+fn report_panes(invocation: u64) -&gt; Result&lt;(), PluginError&gt; {
+    let Some(selection) = cli::selected_panes(invocation) else {
+        cli::write_stderr(invocation, &quot;pass --pane or --all-panes&quot;)?;
+        cli::finish(invocation, 2);
+        return Ok(());
+    };
+    for pane in &amp;selection.panes {
+        cli::write_line(invocation, &amp;format!(r#&quot;{{&quot;type&quot;:&quot;pane&quot;,&quot;id&quot;:{}}}&quot;#, pane.0))?;
+    }
+    cli::write_line(
+        invocation,
+        &amp;format!(r#&quot;{{&quot;type&quot;:&quot;summary&quot;,&quot;panes&quot;:{},&quot;all&quot;:{}}}&quot;#, selection.panes.len(), selection.all),
+    )?;
+    cli::finish(invocation, 0);
+    Ok(())
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as cli from '@ilium/plugin-sdk/host/cli';
+
+export function reportPanes(invocation: bigint): void {
+  const selection = cli.selectedPanes(invocation);
+  if (selection === undefined) {
+    cli.writeStderr(invocation, 'pass --pane or --all-panes');
+    cli.finish(invocation, 2);
+    return;
+  }
+  for (const pane of selection.panes) {
+    cli.writeLine(invocation, JSON.stringify({ type: 'pane', id: Number(pane) }));
+  }
+  cli.writeLine(
+    invocation,
+    JSON.stringify({ type: 'summary', panes: selection.panes.length, all: selection.all }),
+  );
+  cli.finish(invocation, 0);
+}
+</code></pre>
+<p>For a slow command, start the work with <code>task::spawn</code> (Rust) or an async function (TypeScript) and write from it. Keep <code>on-events</code> short, because its deadline is 20 ms.</p>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>Help lists the subcommand with its summary. A text command prints what the plugin wrote. A JSONL command prints one object per line. Standard error is a separate stream, so a pipe sees only standard output.</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> printf 'a\nb\nc\n' | ilium tally
+3 lines
+<span class="t-prompt">$</span> echo $?
+0
+<span class="t-prompt">$</span> ilium tally
+<span class="t-err">tally: pipe some text into this command</span>
+<span class="t-prompt">$</span> echo $?
+2
+</pre>
+<figcaption>A text command. The first run reads a pipe. The second run has a terminal on standard output, so the plugin refuses with a message on standard error and exit status 2. Illustrative, not generated.</figcaption>
+</figure>
+
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium panes-report --all-panes
+<span class="t-dim">{"type":"pane","id":3}</span>
+<span class="t-dim">{"type":"pane","id":7}</span>
+<span class="t-dim">{"type":"summary","panes":2,"all":true}</span>
+<span class="t-prompt">$</span> ilium panes-report
+<span class="t-err">pass --pane or --all-panes</span>
+</pre>
+<figcaption>A JSON lines command with the pane selector. Every stdout line carries a type field. Illustrative, not generated.</figcaption>
+</figure>
+
+<p>When the grant is declined, the subcommand is hidden from help and the command fails:</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium tally
+<span class="t-err">error</span>: unknown command
+</pre>
+<figcaption>The plugin never runs, because the grant was declined. Illustrative, not generated.</figcaption>
+</figure>
+
+<h3 id="error-codes">Error codes</h3>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Code</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>write-line</code></td>
+<td><code>invalid-argument</code></td>
+<td>Not exactly one JSON object with a string <code>type</code>, a raw newline in the line, over 64 KiB, or the command declares <code>output: "text"</code>.</td>
+</tr>
+<tr>
+<td><code>write-text</code></td>
+<td><code>invalid-argument</code></td>
+<td>The command declares <code>output: "jsonl"</code>, or the text is over 64 KiB.</td>
+</tr>
+<tr>
+<td><code>write-error</code>, <code>write-stderr</code></td>
+<td><code>invalid-argument</code></td>
+<td>Text over 64 KiB.</td>
+</tr>
+<tr>
+<td>every write</td>
+<td><code>not-found</code></td>
+<td>The invocation is finished or cancelled.</td>
+</tr>
+<tr>
+<td>every write</td>
+<td><code>not-permitted</code></td>
+<td>The user declined <code>cli.contribute</code>.</td>
+</tr>
+<tr>
+<td><code>read-stdin</code></td>
+<td><code>unsupported</code></td>
+<td>The command declares <code>stdin: "none"</code>.</td>
+</tr>
+<tr>
+<td><code>read-stdin</code></td>
+<td><code>quota-exceeded</code></td>
+<td>The 4 MiB total for this invocation is used up.</td>
+</tr>
+<tr>
+<td><code>read-stdin</code> completion</td>
+<td><code>cancelled</code></td>
+<td>The caller left before the chunk arrived.</td>
+</tr>
+<tr>
+<td><code>finish</code></td>
+<td>none</td>
+<td>An unknown or finished invocation is ignored.</td>
+</tr>
+<tr>
+<td>manifest</td>
+<td><code>manifest.cli-field</code></td>
+<td>A bad <code>output</code>, <code>stdin</code> or <code>argument_groups</code> value.</td>
+</tr>
+<tr>
+<td>manifest</td>
+<td><code>manifest.cli-name-taken</code></td>
+<td>The name belongs to another plugin.</td>
+</tr>
+<tr>
+<td>manifest</td>
+<td><code>manifest.cli-name-reserved</code></td>
+<td>The name is a kernel command.</td>
+</tr>
+<tr>
+<td>kernel</td>
+<td><code>cli.owner-disabled</code></td>
+<td>The owner plugin is disabled. The kernel answers with exit code 1 before any plugin runs.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="limits">Limits</h3>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Value</th>
+<th>Error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Text of one write</td>
+<td>64 KiB</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Standard input per invocation</td>
+<td>4 MiB in total</td>
+<td><code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td>Invocation deadline</td>
+<td>none; open until <code>finish</code> or the caller disconnects</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>on-events</code> deadline</td>
+<td>20 ms (50 ms at tier 1)</td>
+<td>trap</td>
+</tr>
+</tbody>
+</table>
+<h3 id="edge-cases">Edge cases</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No <code>cli.contribute</code> grant</td>
+<td>The subcommand is hidden from help. <code>ilium &lt;name&gt;</code> fails with <code>unknown command</code>. Calls return <code>not-permitted</code>.</td>
+</tr>
+<tr>
+<td>Caller disconnects early</td>
+<td><code>cli-cancelled</code> arrives. Later writes return <code>not-found</code>.</td>
+</tr>
+<tr>
+<td>Plugin restarts, is disabled or is uninstalled while open</td>
+<td>The invocation ends with exit code 1 and <code>plugin stopped</code> on standard error.</td>
+</tr>
+<tr>
+<td>Handler traps</td>
+<td>The plugin restarts under the rule in <a href="/pages/reference-errors-and-limits/">errors and limits</a>, and the open invocation ends as above.</td>
+</tr>
+<tr>
+<td>Output form mismatch</td>
+<td><code>invalid-argument</code>; the write is dropped.</td>
+</tr>
+</tbody>
+</table>
+<div class="warn">
+<p>A plugin that never calls <code>finish</code> leaves the caller waiting with no deadline. Call <code>finish</code> on every path, including the error path and the cancel path.</p>
+</div>
+
+<div class="note">
+<p>Several invocations can run at once. Each has its own id, and each <code>cli-invoked</code> event arrives in a batch with other events.</p>
+</div>
+
+<h3 id="used-by">Used by</h3>
+<ul>
+<li><code>ilium voice say</code> is a <code>cli</code> subcommand that asks the plugin's own client side to act (see <a href="/pages/api-client-requests/">client requests</a>).</li>
+<li><code>ilium progress</code> writes its status through <code>cli.write-line</code> and <code>cli.finish</code>.</li>
+<li>The chatroom commands hold <code>cli.contribute</code>.</li>
+<li><code>ilium broadcast</code> (all agent panes, across sessions) is the cross-session case (see <a href="/pages/api-sessions/">sessions</a>).</li>
+<li>The context-injection hook reads its read position from <code>storage</code> when <code>cli-invoked</code> arrives.</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-http-api/">http-api</a> for the other server entry point.</li>
+<li><a href="/pages/api-events/">Events</a> for <code>cli-invoked</code> and <code>cli-cancelled</code>.</li>
+<li><a href="/pages/api-exports/">Exports</a> for the <code>handler</code> export that receives them.</li>
+<li><a href="/pages/api-sessions/">sessions</a> for running a command of the same plugin in another Ilium session.</li>
+<li><a href="/pages/capability-cli-contribute/">Capability: cli.contribute</a> for the grant and its declined behaviour.</li>
+<li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a> for the build setup.</li>
+</ul>
+<p>Interface version: <code>ilium:host/cli</code>, version 0.1.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-audio/"><small>Previous</small>audio</a><a class="next" href="/pages/api-clipboard/"><small>Next</small>clipboard</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#manifest">Manifest</a></li><li class="l2"><a href="#surface">Surface</a></li><li class="l3"><a href="#wit">WIT</a></li><li class="l3"><a href="#functions">Functions</a></li><li class="l3"><a href="#events">Events</a></li><li class="l2"><a href="#output-forms">Output forms</a></li><li class="l2"><a href="#standard-input">Standard input</a></li><li class="l2"><a href="#commands-without-a-server">Commands without a server</a></li><li class="l2"><a href="#pane-selector">Pane selector</a></li><li class="l2"><a href="#worked-example-a-tally-command">Worked example: a tally command</a></li><li class="l2"><a href="#worked-example-json-lines-and-the-pane-selector">Worked example: JSON lines and the pane selector</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#error-codes">Error codes</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#used-by">Used by</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

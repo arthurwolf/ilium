@@ -159,7 +159,7 @@ async fn attach_inner(
     Err(last_error)
 }
 
-async fn attach_as(
+pub(crate) async fn attach_as(
     socket_path: &Path,
     session_name: &str,
     mut evidence: Option<&mut PaneEvidence>,

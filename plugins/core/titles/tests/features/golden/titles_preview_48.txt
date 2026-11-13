@@ -1,0 +1,12 @@
+╭─ Preview of the change ──────────────────────╮
+│@@ tree, 4 panes @@                           │
+│- shell-1                                     │
+│- shell-2                                     │
+│+ Billing API                                 │
+│+   claude                                    │
+│+   shell-1                                   │
+│+ Web client                                  │
+│+   codex                                     │
+│+   shell-2                                   │
+│Moves: 4, new groups: 2                       │
+╰──────────────────────────────────────────────╯

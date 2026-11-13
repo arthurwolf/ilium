@@ -344,7 +344,7 @@ pub fn config_rows(settings: &VoiceSettings) -> Vec<(VoiceRow, &'static str, Cow
             let (label, value) = match row {
                 VoiceRow::Enabled => (
                     "Enable voice after setup",
-                    if settings.enabled { "On" } else { "Off" }.into(),
+                    crate::value_control::boolean_switch(settings.enabled).into(),
                 ),
                 VoiceRow::ApiKey => (
                     "OpenAI API key",
@@ -385,12 +385,7 @@ pub fn config_rows(settings: &VoiceSettings) -> Vec<(VoiceRow, &'static str, Cow
                 }
                 VoiceRow::PauseMediaWhileActive => (
                     "Pause other media",
-                    if settings.pause_media_while_active {
-                        "On"
-                    } else {
-                        "Off"
-                    }
-                    .into(),
+                    crate::value_control::boolean_switch(settings.pause_media_while_active).into(),
                 ),
                 _ => unreachable!("CONFIG_ROWS contains only demo configuration fields"),
             };
@@ -646,6 +641,39 @@ fn append_transcript<'a>(
 mod tests {
     use super::*;
     use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn voice_configuration_boolean_rows_use_fixed_width_circle_switches() {
+        let disabled = VoiceSettings {
+            enabled: false,
+            pause_media_while_active: false,
+            ..VoiceSettings::default()
+        };
+        let disabled_rows = config_rows(&disabled);
+        for row in [VoiceRow::Enabled, VoiceRow::PauseMediaWhileActive] {
+            let entry = disabled_rows
+                .iter()
+                .find(|entry| entry.0 == row)
+                .expect("boolean configuration row should be present");
+            assert_eq!(entry.2, "[○ OFF]");
+            assert_eq!(unicode_width::UnicodeWidthStr::width(entry.2.as_ref()), 7);
+        }
+
+        let enabled = VoiceSettings {
+            enabled: true,
+            pause_media_while_active: true,
+            ..VoiceSettings::default()
+        };
+        let enabled_rows = config_rows(&enabled);
+        for row in [VoiceRow::Enabled, VoiceRow::PauseMediaWhileActive] {
+            let entry = enabled_rows
+                .iter()
+                .find(|entry| entry.0 == row)
+                .expect("boolean configuration row should be present");
+            assert_eq!(entry.2, "[ON  ●]");
+            assert_eq!(unicode_width::UnicodeWidthStr::width(entry.2.as_ref()), 7);
+        }
+    }
 
     #[test]
     fn every_configuration_and_live_action_is_reachable_on_small_and_wide_screens() {

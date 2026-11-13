@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+directories = "6.0.0"
 ilium-http = { version = "0.1.1", path = "../ilium-http" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 rand = { version = "0.10", default-features = false, features = ["std", "thread_rng"] }

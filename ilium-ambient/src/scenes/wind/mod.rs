@@ -269,6 +269,10 @@ impl WindScene {
 }
 
 impl Scene for WindScene {
+    fn wants_pointer(&self) -> bool {
+        true
+    }
+
     fn pointer(&mut self, position: Option<[f32; 2]>) {
         self.sim.set_pointer(position);
     }

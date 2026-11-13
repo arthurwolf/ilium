@@ -57,7 +57,7 @@ fn text_trigger_modal_waits_for_real_durable_writer_and_server_request() {
     let mut state = state;
     state.regexp.buf = trigger.regexp.clone();
     state.message.buf = trigger.message.clone();
-    let trigger = state.candidate();
+    let trigger = state.candidate().unwrap();
     app.mode = Mode::TextTriggerDialog(Box::new(state));
     let lock = ExclusiveFileLock::acquire(&directory.path().join(".agent-detection-settings.lock"))
         .unwrap();
@@ -80,6 +80,58 @@ fn text_trigger_modal_waits_for_real_durable_writer_and_server_request() {
     let saved = crate::config::load(directory.path()).unwrap();
     assert_eq!(saved.text_triggers.triggers.len(), 1);
     assert_eq!(saved.text_triggers.triggers[0].regexp, "ready$");
+}
+
+#[test]
+fn board_async_detail_typing_admits_a_bounded_burst_before_collecting_writes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("board.md");
+    std::fs::write(&path, "# Board\n\n## Todo\n- Task\n").unwrap();
+    let storage = ilium_core::BoardStorage::MarkdownFile { path: path.clone() };
+    let source = crate::board::read_source(storage, false).unwrap();
+    let mut files = BoardFiles::new(
+        crate::execution::test_client(),
+        Arc::new(tokio::sync::Notify::new()),
+    );
+    let mut board = files.attach(source).unwrap();
+    board.open_card_details(0, 0);
+    board.cycle_detail_editor_focus(false);
+    let lock =
+        ExclusiveFileLock::acquire(&directory.path().join(".board.md.ilium-write.lock")).unwrap();
+    // A terminal input batch can arrive before the UI collects write receipts.
+    // Test that bounded admission preserves that burst, then publish and read
+    // back every accepted character; this is not a lock-contention timing test.
+    for character in "Live note 123456".chars() {
+        let event = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(character),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        board
+            .input_detail_editor(ratatui_textarea::Input::from(crossterm::event::Event::Key(
+                event,
+            )))
+            .unwrap();
+    }
+    let overflow = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('!'),
+        crossterm::event::KeyModifiers::NONE,
+    );
+    assert!(board
+        .input_detail_editor(ratatui_textarea::Input::from(crossterm::event::Event::Key(
+            overflow,
+        )))
+        .is_err());
+    drop(lock);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while files.pending() != 0 {
+        if let Some(ack) = files.poll_write() {
+            board.acknowledge_revision(ack.result.unwrap());
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let saved = std::fs::read_to_string(path).unwrap();
+    assert!(saved.contains("  Live note 123456\n"), "{saved:?}");
 }
 
 #[test]
@@ -489,12 +541,14 @@ fn isolated_editor_save_execution() -> (ilium_execution::Execution, ilium_execut
     use ilium_execution::{
         ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
     };
+    // Match the production general input tenant: frozen serialization retains
+    // up to two128 MiB generations while its ordered write is also admitted.
     let quota = QuotaGroup::new(QuotaLimits {
         clients: 1,
         jobs: 8,
         service_jobs: 0,
-        input_bytes: 192 * 1024 * 1024,
-        result_bytes: 128 * 1024 * 1024,
+        input_bytes: 512 * 1024 * 1024,
+        result_bytes: 768 * 1024 * 1024,
         worker_threads: 2,
         worker_bytes: 32 * 1024 * 1024,
     });
@@ -523,8 +577,8 @@ fn isolated_editor_save_execution() -> (ilium_execution::Execution, ilium_execut
         .client(ClientLimits {
             jobs: 8,
             service_jobs: 0,
-            input_bytes: 192 * 1024 * 1024,
-            result_bytes: 128 * 1024 * 1024,
+            input_bytes: 512 * 1024 * 1024,
+            result_bytes: 768 * 1024 * 1024,
         })
         .unwrap();
     (owner, client)
@@ -1051,6 +1105,226 @@ fn frozen_screen_save_runs_on_workers_and_acknowledges_durable_readback() {
     );
 }
 
+#[tokio::test]
+async fn frozen_screen_restore_preserves_read_bytes_until_result_pressure_clears() {
+    use super::editors::{EditorCompletion, EditorFiles, FrozenScreenTarget};
+    use ilium_execution::{JobCost, Lane, ShutdownMode};
+
+    let (mut owner, client) = isolated_editor_save_execution();
+    let quota = client.quota_group();
+    // The read fits beside this reservation, but its expanded parser result
+    // cannot fit until this independent owner's temporary charge is released.
+    let pressure = client
+        .try_reserve(
+            Lane::Cpu,
+            JobCost {
+                input_bytes: 64,
+                result_bytes: 600 * 1024 * 1024,
+            },
+        )
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("retained-frozen.bin");
+    let mut snapshot = vec![2, 0, 24, 0];
+    snapshot.extend_from_slice(b"restored after pressure");
+    std::fs::write(&path, &snapshot).unwrap();
+    let target = FrozenScreenTarget {
+        pane_id: ilium_core::NodeId(93),
+        identity: Arc::new(()),
+    };
+    let identity = Arc::clone(&target.identity);
+    let mut files = EditorFiles::new(client);
+    let ready = files.notification();
+    files.load_frozen_screen(target, path).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), ready.notified())
+        .await
+        .expect("read must complete while parser result admission is full");
+    assert!(
+        files.poll().is_none(),
+        "temporary refusal must not fail the restore"
+    );
+    assert_eq!(files.pending(), 1, "the read remains queued and accounted");
+    assert!(quota.snapshot().result_bytes > 600 * 1024 * 1024);
+    assert!(
+        quota.snapshot().input_bytes >= crate::terminal_parsing::MAX_STATE_BYTES,
+        "read retention must cover old/new allocation overlap while waiting"
+    );
+
+    // A retry must consume the original successful read, even if its source
+    // file has since been replaced. Re-reading would lose this generation.
+    std::fs::write(directory.path().join("retained-frozen.bin"), b"changed").unwrap();
+    drop(pressure);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let restored = loop {
+        match files.poll() {
+            Some(EditorCompletion::FrozenScreenLoaded { target, screen }) => {
+                assert!(Arc::ptr_eq(&target.identity, &identity));
+                break screen;
+            }
+            Some(EditorCompletion::FrozenScreenLoadFailed { message, .. }) => {
+                panic!("retry discarded the successful frozen-screen read: {message}")
+            }
+            _ => {}
+        }
+        assert!(
+            Instant::now() < deadline,
+            "parser did not retry after release"
+        );
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    };
+    assert_eq!(
+        restored.view().with_screen(|screen| screen.contents()),
+        "restored after pressure"
+    );
+    drop(restored);
+    drop(files);
+    assert_eq!(quota.snapshot().jobs, 0);
+    owner.request_shutdown(ShutdownMode::Drain);
+    assert!(
+        owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap()
+            .shutdown_complete
+    );
+}
+
+#[tokio::test]
+async fn frozen_screen_waiting_parses_remain_bounded_and_cancel_on_close() {
+    use super::editors::{EditorFiles, FrozenScreenTarget};
+    use ilium_execution::{JobCost, Lane, ShutdownMode};
+
+    let (mut owner, client) = isolated_editor_save_execution();
+    let quota = client.quota_group();
+    // Reserve every CPU queue slot without submitting. I/O can finish, but
+    // parsing must remain in the bounded application-owned waiting state.
+    let pressure: Vec<_> = (0..4)
+        .map(|_| {
+            client
+                .try_reserve(
+                    Lane::Cpu,
+                    JobCost {
+                        input_bytes: 64,
+                        result_bytes: 64,
+                    },
+                )
+                .unwrap()
+        })
+        .collect();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("queued-frozen.bin");
+    std::fs::write(&path, [2, 0, 24, 0, b'q']).unwrap();
+    let mut files = EditorFiles::new(client);
+    let ready = files.notification();
+    for pane in 94..96 {
+        files
+            .load_frozen_screen(
+                FrozenScreenTarget {
+                    pane_id: ilium_core::NodeId(pane),
+                    identity: Arc::new(()),
+                },
+                path.clone(),
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), ready.notified())
+            .await
+            .expect("bounded frozen-screen read should finish");
+        assert!(files.poll().is_none());
+    }
+    assert_eq!(files.pending(), 2);
+    let refused = files.load_frozen_screen(
+        FrozenScreenTarget {
+            pane_id: ilium_core::NodeId(96),
+            identity: Arc::new(()),
+        },
+        path.clone(),
+    );
+    assert!(refused.unwrap_err().contains("full"));
+
+    files.close_admission();
+    assert_eq!(
+        files.pending(),
+        0,
+        "closing must release waiting restore custody"
+    );
+    assert!(files
+        .load_frozen_screen(
+            FrozenScreenTarget {
+                pane_id: ilium_core::NodeId(97),
+                identity: Arc::new(()),
+            },
+            path,
+        )
+        .unwrap_err()
+        .contains("closed"));
+    assert_eq!(quota.snapshot().jobs, pressure.len());
+    drop(pressure);
+    drop(files);
+    owner.request_shutdown(ShutdownMode::Drain);
+    assert!(
+        owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap()
+            .shutdown_complete
+    );
+}
+
+#[tokio::test]
+async fn small_frozen_screen_parse_uses_its_actual_input_allocation() {
+    use super::editors::{EditorCompletion, EditorFiles, FrozenScreenTarget};
+    use ilium_execution::{JobCost, Lane, ShutdownMode};
+
+    let (mut owner, client) = isolated_editor_save_execution();
+    // The read's separate realloc-overlap allowance remains retained. After
+    // that and this pressure, less than one maximum-sized snapshot is free,
+    // but the tiny parser input still fits without changing quota ceilings.
+    let pressure = client
+        .try_reserve(
+            Lane::Cpu,
+            JobCost {
+                input_bytes: 300 * 1024 * 1024,
+                result_bytes: 64,
+            },
+        )
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("small-frozen.bin");
+    std::fs::write(&path, [2, 0, 24, 0, b'o', b'k']).unwrap();
+    let mut files = EditorFiles::new(client);
+    files
+        .load_frozen_screen(
+            FrozenScreenTarget {
+                pane_id: ilium_core::NodeId(98),
+                identity: Arc::new(()),
+            },
+            path,
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match files.poll() {
+            Some(EditorCompletion::FrozenScreenLoaded { screen, .. }) => {
+                assert_eq!(screen.view().with_screen(|screen| screen.contents()), "ok");
+                break;
+            }
+            Some(EditorCompletion::FrozenScreenLoadFailed { message, .. }) => {
+                panic!("small frozen-screen parser was overcharged: {message}")
+            }
+            _ => {}
+        }
+        assert!(Instant::now() < deadline, "small parser remained blocked");
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    drop(pressure);
+    drop(files);
+    owner.request_shutdown(ShutdownMode::Drain);
+    assert!(
+        owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap()
+            .shutdown_complete
+    );
+}
+
 #[test]
 fn frozen_screen_save_reports_durable_writer_failure() {
     use super::editors::{EditorCompletion, EditorFiles, FrozenScreenTarget};
@@ -1099,4 +1373,37 @@ fn frozen_screen_save_reports_durable_writer_failure() {
             .unwrap()
             .shutdown_complete
     );
+}
+
+#[test]
+fn older_valid_trigger_receipt_does_not_close_a_later_invalid_draft() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut app = App::new(
+        "trigger-receipt-fixture".into(),
+        directory.path().to_path_buf(),
+    );
+    app.config_dir = Some(directory.path().to_path_buf());
+    let mut state = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
+    state.regexp.buf = "ready$".into();
+    state.message.buf = "continue".into();
+    let accepted = state.candidate().unwrap();
+    app.mode = Mode::TextTriggerDialog(Box::new(state));
+    let lock = ExclusiveFileLock::acquire(&directory.path().join(".agent-detection-settings.lock"))
+        .unwrap();
+    app.commit_text_trigger(None, None, accepted.clone())
+        .unwrap();
+    let Mode::TextTriggerDialog(editor) = &mut app.mode else {
+        panic!("missing editor")
+    };
+    editor.delay.buf = "99999999999999999999".into();
+    drop(lock);
+    app.settle_filesystem_for_test();
+    let Mode::TextTriggerDialog(editor) = &app.mode else {
+        panic!("an older receipt closed the invalid draft")
+    };
+    assert_eq!(editor.delay.buf, "99999999999999999999");
+    let saved = crate::config::load(directory.path()).unwrap().text_triggers;
+    assert_eq!(saved.triggers, vec![accepted]);
+    assert!(matches!(app.take_outbound_requests().as_slice(),
+        [ilium_ipc::ClientRequest::UpdateTextTriggers { settings }] if settings == &saved));
 }

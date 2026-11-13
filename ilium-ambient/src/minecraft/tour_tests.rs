@@ -1307,7 +1307,7 @@ fn proto_incomplete_unaddressable_and_mismatched_coverage_are_rejected() {
     for fault in 0..6 {
         let mut chunk = decoded([0, 0], None, 3218);
         match fault {
-            0 => chunk.status = Some("features".into()),
+            0 => chunk.sections.get_mut(&0).unwrap().block_states = None,
             1 => {
                 chunk.sections.remove(&0);
             }
@@ -1371,7 +1371,8 @@ fn saved_source_accepts_three_window_footprint_and_clones_retain_projected_charg
 
     let template = Arc::clone(expanded.chunks.get(&[0, 0]).unwrap());
     let mut oversized = super::super::loader::LoadedWindow::default();
-    for x in 0..=384 {
+    // One chunk over the merged-map cap (three saved windows), so the limit is exceeded.
+    for x in 0..=super::super::loader::MAX_MERGED_CHUNKS as i32 {
         let position = [x, 0];
         oversized.chunks.insert(position, Arc::clone(&template));
         oversized.coverage.chunks.insert(position);

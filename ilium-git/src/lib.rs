@@ -37,6 +37,11 @@ pub enum GitError {
     Command { exit: Option<i32>, stderr: String },
     #[error("invalid git output: {0}")]
     Parse(String),
+    /// Git found a repository, but the queried directory is not inside its
+    /// work tree (`core.worktree` points elsewhere, or the directory is inside
+    /// a `.git` folder). No checkout exists there for Ilium to manage.
+    #[error("invalid git output: project path is outside Git worktree")]
+    OutsideWorktree,
     #[error("git {0} is too old; worktrees require 2.17 or newer")]
     UnsupportedVersion(GitVersion),
     #[error("invalid git operation: {0}")]
@@ -143,17 +148,98 @@ pub async fn git_version() -> Result<GitVersion, GitError> {
     Ok(*version)
 }
 
+/// Discover a repository, requiring one to exist at the selected directory.
 pub async fn discover(directory: &Path) -> Result<Repository, GitError> {
     let version = git_version().await?;
     let directory = ilium_platform::paths::canonicalize(directory).map_err(GitError::Path)?;
-    let common_dir = single_line(
-        runner::run(
-            &directory,
-            &runner::args(&["rev-parse", "--git-common-dir"]),
-            true,
-        )
-        .await?,
-    )?;
+    let output = runner::run(
+        &directory,
+        &runner::args(&["rev-parse", "--git-common-dir"]),
+        true,
+    )
+    .await?;
+    finish_discovery(directory, version, output).await
+}
+
+/// Use Git's discovery rules, allowing an ordinary directory without a
+/// repository. Only the initial discovery query may establish absence; later
+/// failures still indicate an incomplete or concurrently changed repository.
+pub async fn discover_optional(directory: &Path) -> Result<Option<Repository>, GitError> {
+    let version = match git_version().await {
+        Ok(version) => version,
+        // Without a usable Git there can be no Ilium-managed worktree, so the
+        // folder is simply an ordinary directory.
+        Err(error) if git_unavailable(&error) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let directory = ilium_platform::paths::canonicalize(directory).map_err(GitError::Path)?;
+    let output = match runner::run(
+        &directory,
+        &runner::args(&["rev-parse", "--git-common-dir"]),
+        true,
+    )
+    .await
+    {
+        Ok(output) => output,
+        Err(error) if initial_repository_absent(&error) || unowned_repository(&error) => {
+            return Ok(None)
+        }
+        Err(error) => return Err(error),
+    };
+    match finish_discovery(directory, version, output).await {
+        Ok(repository) => Ok(Some(repository)),
+        // A repository whose work tree lies elsewhere does not make this
+        // directory a checkout; treat it like an ordinary folder.
+        Err(GitError::OutsideWorktree) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Git could not be started at all (not installed, not executable).
+fn git_unavailable(error: &GitError) -> bool {
+    matches!(error, GitError::Spawn(io) if io.kind() == std::io::ErrorKind::NotFound
+        || io.kind() == std::io::ErrorKind::PermissionDenied)
+}
+
+/// Git cannot read the repository around this directory: another user owns it
+/// ("dubious ownership"), or its `.git` file is corrupt or points at a missing
+/// repository. Ilium's ownership markers live inside the repository, so an
+/// unreadable one can neither identify nor prune a managed worktree; the
+/// directory is treated as an ordinary folder instead of failing every start.
+fn unowned_repository(error: &GitError) -> bool {
+    matches!(error, GitError::Command { exit: Some(128), stderr }
+        if stderr.starts_with("fatal: detected dubious ownership in repository at ")
+            || stderr.starts_with("fatal: invalid gitfile format: ")
+            || stderr.starts_with("fatal: not a git repository: "))
+}
+
+fn initial_repository_absent(error: &GitError) -> bool {
+    let GitError::Command {
+        exit: Some(128),
+        stderr,
+    } = error
+    else {
+        return false;
+    };
+    if stderr == "fatal: not a git repository (or any of the parent directories): .git" {
+        return true;
+    }
+    let Some((location, boundary)) = stderr.split_once('\n') else {
+        return false;
+    };
+    boundary == "Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set)."
+        && location
+            .strip_prefix("fatal: not a git repository (or any parent up to mount point ")
+            .and_then(|path| path.strip_suffix(')'))
+            .is_some_and(|path| !path.is_empty() && !path.contains(['\r', '\n']))
+}
+
+async fn finish_discovery(
+    directory: PathBuf,
+    version: GitVersion,
+    output: Vec<u8>,
+) -> Result<Repository, GitError> {
+    let common_dir = single_line(output)?;
     let is_bare = single_line(
         runner::run(
             &directory,
@@ -169,18 +255,26 @@ pub async fn discover(directory: &Path) -> Result<Repository, GitError> {
     let (worktree_root, project_subpath) = if is_bare == "true" {
         (directory.clone(), PathBuf::new())
     } else {
-        let root = single_line(
-            runner::run(
-                &directory,
-                &runner::args(&["rev-parse", "--show-toplevel"]),
-                true,
-            )
-            .await?,
-        )?;
+        let root = match runner::run(
+            &directory,
+            &runner::args(&["rev-parse", "--show-toplevel"]),
+            true,
+        )
+        .await
+        {
+            Ok(output) => single_line(output)?,
+            Err(GitError::Command {
+                exit: Some(128),
+                stderr,
+            }) if stderr.contains("this operation must be run in a work tree") => {
+                return Err(GitError::OutsideWorktree);
+            }
+            Err(error) => return Err(error),
+        };
         let root = resolve_git_path(&directory, Path::new(&root))?;
         let subpath = directory
             .strip_prefix(&root)
-            .map_err(|_| GitError::Parse("project path is outside Git worktree".into()))?
+            .map_err(|_| GitError::OutsideWorktree)?
             .to_path_buf();
         (root, subpath)
     };
@@ -867,4 +961,66 @@ fn parse_count(value: Option<&str>, name: &str) -> Result<u32, GitError> {
 
 fn is_full_object_id(value: &str) -> bool {
     matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+#[cfg(test)]
+mod optional_discovery_tests {
+    use super::*;
+
+    #[test]
+    fn only_exact_initial_absence_diagnostics_allow_ordinary_directories() {
+        let ordinary = "fatal: not a git repository (or any of the parent directories): .git";
+        let mount = "fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).";
+        for stderr in [ordinary, mount] {
+            assert!(initial_repository_absent(&GitError::Command {
+                exit: Some(128),
+                stderr: stderr.into()
+            }));
+            assert!(!initial_repository_absent(&GitError::Command {
+                exit: Some(1),
+                stderr: stderr.into()
+            }));
+            assert!(!initial_repository_absent(&GitError::Command {
+                exit: None,
+                stderr: stderr.into()
+            }));
+        }
+        for stderr in [
+            "fatal: invalid gitfile format: /project/.git".to_string(),
+            "fatal: not a git repository: /project/.git".to_string(),
+            "fatal: detected dubious ownership in repository at '/project'".to_string(),
+            "fatal: cannot open /project/.git: Permission denied".to_string(),
+            format!("warning: inaccessible parent\n{ordinary}"),
+            format!("{mount}\nfatal: another failure"),
+            mount.replace("mount point /)", "mount point )"),
+        ] {
+            assert!(!initial_repository_absent(&GitError::Command {
+                exit: Some(128),
+                stderr
+            }));
+        }
+        assert!(unowned_repository(&GitError::Command {
+            exit: Some(128),
+            stderr: "fatal: detected dubious ownership in repository at '/project'".into()
+        }));
+        assert!(unowned_repository(&GitError::Command {
+            exit: Some(128),
+            stderr: "fatal: invalid gitfile format: /project/.git".into()
+        }));
+        assert!(!unowned_repository(&GitError::Command {
+            exit: Some(128),
+            stderr: "fatal: cannot open /project/.git: Permission denied".into()
+        }));
+        assert!(git_unavailable(&GitError::Spawn(std::io::Error::from(
+            std::io::ErrorKind::NotFound
+        ))));
+        assert!(!git_unavailable(&GitError::Timeout(Duration::from_secs(1))));
+        assert!(!initial_repository_absent(&GitError::OutsideWorktree));
+        assert!(!initial_repository_absent(&GitError::Timeout(
+            Duration::from_secs(1)
+        )));
+        assert!(!initial_repository_absent(&GitError::Path(
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied)
+        )));
+    }
 }

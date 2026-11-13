@@ -1,0 +1,81 @@
+//! An in-process guest that bypasses Wasmtime, for dispatcher and scheduler tests.
+
+use ilium_plugin_api::generated::types::events::Event;
+use ilium_plugin_api::generated::types::intents::Submission;
+use ilium_plugin_api::generated::types::layout::Area;
+use ilium_plugin_api::generated::types::lifecycle::{Activation, DeactivationReason};
+use ilium_plugin_api::generated::types::ui::{UiTree, ViewTarget};
+use ilium_plugin_api::{Code, PluginError};
+use std::borrow::Cow;
+
+use crate::calls::Trap;
+use crate::instance::{ExportCall, ExportReply};
+
+/// A guest written in Rust and called directly by the harness.
+pub trait NativeGuest: Send {
+    /// `activate`; the default accepts.
+    fn activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    /// `deactivate`; the default saves no state.
+    fn deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
+        None
+    }
+
+    /// `on-events`: the submissions to return for one batch.
+    fn on_events(&mut self, batch: Vec<Event>) -> Result<Vec<Submission>, Trap>;
+
+    /// `render`; the default has no view export and traps with `trap.abi`.
+    fn render(&mut self, _view: ViewTarget, _area: Area) -> Result<UiTree, Trap> {
+        Err(missing_export("render"))
+    }
+
+    /// Any other export; the default has none and traps with `trap.abi`.
+    fn call_export(&mut self, _call: ExportCall) -> Result<ExportReply, Trap> {
+        Err(missing_export("call-export"))
+    }
+}
+
+fn missing_export(function: &str) -> Trap {
+    Trap {
+        code: Code(Cow::Borrowed("trap.abi")),
+        interface: "native-guest".to_owned(),
+        function: function.to_owned(),
+    }
+}
+
+/// Bridges native fixtures to the production lifecycle owner. It contains no
+/// state machine, batching, restart or ABI-validation policy of its own.
+pub struct NativeGuestAdapter {
+    guest: Box<dyn NativeGuest>,
+}
+
+impl NativeGuestAdapter {
+    /// Wraps one native guest; does not instantiate a WebAssembly component.
+    pub fn new(guest: Box<dyn NativeGuest>) -> Self {
+        Self { guest }
+    }
+}
+
+impl crate::instance::GuestExports for NativeGuestAdapter {
+    fn activate(&mut self, activation: Activation) -> Result<Result<(), PluginError>, Trap> {
+        Ok(self.guest.activate(activation))
+    }
+
+    fn deactivate(&mut self, reason: DeactivationReason) -> Result<Option<Vec<u8>>, Trap> {
+        Ok(self.guest.deactivate(reason))
+    }
+
+    fn on_events(&mut self, batch: Vec<Event>) -> Result<Vec<Submission>, Trap> {
+        self.guest.on_events(batch)
+    }
+
+    fn render(&mut self, view: ViewTarget, area: Area) -> Result<UiTree, Trap> {
+        self.guest.render(view, area)
+    }
+
+    fn call_export(&mut self, call: ExportCall) -> Result<ExportReply, Trap> {
+        self.guest.call_export(call)
+    }
+}

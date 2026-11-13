@@ -29,6 +29,8 @@
 //! - [`runtime_dir`] -- where sockets and debug logs live, kept short enough
 //!   that a Unix-domain socket path cannot overflow `sockaddr_un`.
 //! - [`detached`] -- spawning a server process that outlives its parent.
+//! - [`disk_space`] -- free space on the filesystem holding a path, so a
+//!   large file write can be refused up front instead of failing halfway.
 //! - `interruptible_reader` (Unix only, and therefore not linked -- the module
 //!   does not exist to link to when documenting any other platform) --
 //!   blocking file-descriptor reads a dropped owner can wake immediately via a
@@ -51,11 +53,19 @@ pub mod animation_files;
 pub mod animation_sandbox;
 pub mod audio_backend;
 pub mod child_limits;
+pub mod claude_session_record;
+#[cfg(target_os = "linux")]
+pub mod codex_goal_sandbox;
+#[cfg(target_os = "linux")]
+pub mod codex_goal_storage;
 pub mod detached;
+pub mod disk_space;
+pub mod file_identity;
 pub mod file_lock;
 pub mod flatpak_host;
 #[cfg(unix)]
 pub mod interruptible_reader;
+pub mod local_time;
 pub mod minecraft;
 #[cfg(windows)]
 mod nofollow_windows;
@@ -66,6 +76,8 @@ pub mod process_control;
 pub mod process_info;
 pub mod provider_admission; // Native-account finite-provider slot ownership.
 pub mod pty_io;
+pub mod resource_fs;
 pub mod runtime_dir;
 pub mod secure_fs;
+pub mod startup_timing;
 pub mod thread_priority;

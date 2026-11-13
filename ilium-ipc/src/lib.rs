@@ -15,7 +15,9 @@ mod allocation;
 mod bounded_decode;
 mod error;
 mod framing;
+pub mod plugin;
 mod protocol;
+pub mod resource;
 mod startup;
 mod terminal_bytes;
 mod text_trigger;
@@ -24,23 +26,26 @@ mod voice_text;
 pub use bounded_decode::{deserialize_allocation_checked, AllocationDecodeError, BoundedMessage};
 pub use error::IpcError;
 pub use framing::{
-    decode_bounded_frame, decode_frame, encode_frame, encoded_capacity_bound, read_frame,
-    write_frame, EncodedFrame, FrameReader, FrameWriter, MAX_FRAME_LEN,
+    decode_bounded_frame, decode_bounded_frame_with_storage, decode_frame, encode_frame,
+    encoded_capacity_bound, read_frame, write_frame, EncodedFrame, FrameReader, FrameWriter,
+    MAX_FRAME_LEN,
 };
 pub use ilium_agent_debug::{
     AgentDebugContext, AgentDebugEntry, AgentDebugEventDraft, AgentDebugEventKind,
     AgentDebugEventMetadata, AgentDebugField, AgentDebugFieldPresentation, AgentDebugSeverity,
     AgentDebugSource, PaneDebugLog, PaneResizeCause,
 };
+pub use plugin::PLUGIN_PROTOCOL_VERSION;
 pub use protocol::{
     AgentDetectionSettings, AgentDetectionSettingsError, AntigravityStatuslineAction,
-    ClientRequest, CustomAgentSignature, DetectionReason, MouseButton, MouseEventKind,
-    MouseModifiers, NewPaneKind, NewPaneWorkingDirectory, PaneDetectionEvidence,
+    BlockingError, ClientRequest, CustomAgentSignature, DetectionReason, MouseButton,
+    MouseEventKind, MouseModifiers, NewPaneKind, NewPaneWorkingDirectory, PaneDetectionEvidence,
     PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
-    ProgressWaitOutcome, PromptSubmissionSource, RepoFacts, ServerEvent, WorkspaceClosePolicy,
-    WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus,
-    WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
+    ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
+    StatusScreenObservation, StatusScreenWatch, StatusScreenWatchRejection, WorkspaceClosePolicy, WorkspaceCreateSpec,
+    WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus, WorkspaceGitVersion,
+    WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
     WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
     WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget, WorkspaceWorktreeFact,
 };
@@ -84,6 +89,7 @@ mod tests {
     use std::path::PathBuf;
 
     use ilium_core::{
+        status_rule_expression::{ScreenPattern, ScreenRegion},
         AgentActivity, AgentClass, BoardStorage, BuiltinAgentProvider, NodeId, PaneStatus,
         PromptQueueDelivery, SplitOrientation, Tree, TreeMoveDirection, ROOT_ID,
     };
@@ -167,28 +173,34 @@ mod tests {
         vec![
             ClientRequest::Attach {
                 session: "main".to_string(),
+                hello: Default::default(),
             },
             ClientRequest::NewPane {
+                request_id: 0,
                 parent_group: NodeId(1),
                 kind: NewPaneKind::PlainShell,
                 working_directory: NewPaneWorkingDirectory::ProjectRoot,
             },
             ClientRequest::NewPane {
+                request_id: 0,
                 parent_group: NodeId(1),
                 kind: NewPaneKind::Command("claude".to_string()),
                 working_directory: NewPaneWorkingDirectory::FocusedTerminal,
             },
             ClientRequest::NewPane {
+                request_id: 0,
                 parent_group: NodeId(1),
                 kind: NewPaneKind::Editor(PathBuf::from("/tmp/notes.md")),
                 working_directory: NewPaneWorkingDirectory::LastUsed,
             },
             ClientRequest::NewPane {
+                request_id: 0,
                 parent_group: NodeId(1),
                 kind: NewPaneKind::PlainShell,
                 working_directory: NewPaneWorkingDirectory::WorkspacePane(NodeId(2)),
             },
             ClientRequest::NewPane {
+                request_id: 0,
                 parent_group: NodeId(1),
                 kind: NewPaneKind::CommandWithInitialInput {
                     command_line: "codex".to_string(),
@@ -197,9 +209,16 @@ mod tests {
                 working_directory: NewPaneWorkingDirectory::ProjectRoot,
             },
             ClientRequest::NewPane {
+                request_id: 0,
                 parent_group: NodeId(1),
                 kind: NewPaneKind::CommandClosingOnExit("sleep 1".to_string()),
                 working_directory: NewPaneWorkingDirectory::ProjectRoot,
+            },
+            ClientRequest::NewPane {
+                request_id: 0,
+                parent_group: NodeId(1),
+                kind: NewPaneKind::PlainShell,
+                working_directory: NewPaneWorkingDirectory::Directory(PathBuf::from("/tmp/work")),
             },
             ClientRequest::ClosePane { pane_id: NodeId(2) },
             ClientRequest::MoveNode {
@@ -458,6 +477,7 @@ mod tests {
             ClientRequest::RecordNodeActivity { node_id: NodeId(2) },
             ClientRequest::AttachInteractive {
                 session: "main".to_string(),
+                hello: Default::default(),
             },
             ClientRequest::SetVisiblePanes {
                 pane_ids: vec![NodeId(2), NodeId(3)],
@@ -505,6 +525,27 @@ mod tests {
                 monitor_id: 7,
             },
             ClientRequest::GetPaneRecapScreen { pane_id: NodeId(2) },
+            ClientRequest::ApplyRecap {
+                pane_id: NodeId(2),
+                session_id: "95fd0645".to_string(),
+                recap_generation: 7,
+                trigger: RecapTrigger::Manual,
+                short: "Fixing the login test.".to_string(),
+                long: Some("Long recap".to_string()),
+            },
+            ClientRequest::ApplyRecap {
+                pane_id: NodeId(2),
+                session_id: String::new(),
+                recap_generation: 8,
+                trigger: RecapTrigger::Batch,
+                short: "Short only".to_string(),
+                long: None,
+            },
+            ClientRequest::TerminalHistory {
+                pane_id: NodeId(2),
+                before_sequence: 42,
+                max_bytes: 1024 * 1024,
+            },
             ClientRequest::PasteTerminalText {
                 pane_id: NodeId(2),
                 text: "first line\nsecond line".to_string(),
@@ -675,6 +716,33 @@ mod tests {
                 request_id: 86,
                 pane_id: NodeId(2),
             },
+            // A populated subscription exercises every pattern option on the
+            // wire; the empty one is how a client cancels its watches.
+            ClientRequest::SetStatusScreenWatches {
+                revision: 1,
+                watches: vec![
+                    StatusScreenWatch {
+                        id: 0,
+                        pattern: ScreenPattern {
+                            pattern: "\\b(error|failed)\\b".to_string(),
+                            ignore_case: true,
+                            region: ScreenRegion::LastLines(5),
+                        },
+                    },
+                    StatusScreenWatch {
+                        id: 1,
+                        pattern: ScreenPattern {
+                            pattern: "^Done".to_string(),
+                            ignore_case: false,
+                            region: ScreenRegion::FirstLines(1),
+                        },
+                    },
+                ],
+            },
+            ClientRequest::SetStatusScreenWatches {
+                revision: 2,
+                watches: Vec::new(),
+            },
         ]
     }
 
@@ -710,11 +778,29 @@ mod tests {
     fn sample_server_events() -> Vec<ServerEvent> {
         vec![
             ServerEvent::TreeSnapshot(sample_tree()),
+            ServerEvent::BlockingErrorsSnapshot {
+                errors: vec![BlockingError {
+                    node_id: Some(NodeId(2)),
+                    operation: "launch".into(),
+                    message: "directory unavailable".into(),
+                }],
+            },
+            ServerEvent::BlockingErrorsSnapshot { errors: vec![] },
+            ServerEvent::PaneCreateFinished {
+                request_id: 7,
+                result: Ok(NodeId(2)),
+            },
+            ServerEvent::PaneCreateFinished {
+                request_id: 8,
+                result: Err("launch refused".into()),
+            },
             ServerEvent::PaneStateSnapshot {
                 tree: sample_tree(),
                 detection_evidence: vec![(
                     NodeId(2),
                     PaneDetectionEvidence {
+                        observed_at_unix_millis: 1_700_000_000_000,
+                        stale_after_millis: 30_000,
                         applied_status: PaneStatus::PlainShell,
                         identity: Some(DetectionReason {
                             rule: "no registered agent process".into(),
@@ -737,6 +823,19 @@ mod tests {
                 through_sequence: 7,
                 bytes: b"hello from the pty".to_vec(),
                 is_complete: true,
+            },
+            ServerEvent::TerminalSnapshot {
+                pane_id: NodeId(2),
+                through_sequence: 7,
+                bytes: b"\x1b[H\x1b[Jhello from the pty".to_vec(),
+                is_complete: false,
+            },
+            ServerEvent::TerminalHistory {
+                pane_id: NodeId(2),
+                before_sequence: 7,
+                first_sequence: 3,
+                bytes: b"older output".to_vec(),
+                reaches_journal_start: true,
             },
             ServerEvent::PaneStatusChanged {
                 pane_id: NodeId(2),
@@ -771,6 +870,7 @@ mod tests {
                 pane_id: NodeId(2),
                 session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),
                 process_id: Some(12345),
+                process_identity_inode: None,
                 title_generation: 0,
                 transcript_path: Some(PathBuf::from("/home/user/.claude/projects/p/95fd.jsonl")),
             },
@@ -781,6 +881,14 @@ mod tests {
             ServerEvent::PaneSessionTitleCleared {
                 pane_id: NodeId(2),
                 title_generation: 2,
+            },
+            ServerEvent::RecapUpdated {
+                pane_id: NodeId(2),
+                session_id: "95fd0645".to_string(),
+                recap_generation: 7,
+                trigger: RecapTrigger::Batch,
+                short: "Fixing the login test.".to_string(),
+                long: None,
             },
             ServerEvent::PaneEditorPathResolved {
                 pane_id: NodeId(2),
@@ -813,6 +921,28 @@ mod tests {
                 node_id: NodeId(2),
                 activity_revision: 7,
             },
+            ServerEvent::PaneRecentActivity {
+                pane_id: NodeId(2),
+                revision: 7,
+                age_millis: 1234,
+            },
+            ServerEvent::StatusScreenObserved(StatusScreenObservation {
+                pane_id: NodeId(2),
+                revision: 8,
+                screen_generation: 42,
+                matched: vec![1, 3],
+                unknown: vec![2],
+            }),
+            ServerEvent::StatusScreenWatchesRejected(StatusScreenWatchRejection {
+                revision: 9,
+                watch_id: Some(4),
+                message: "Invalid screen watch 4: unclosed group".into(),
+            }),
+            ServerEvent::StatusScreenWatchesRejected(StatusScreenWatchRejection {
+                revision: 10,
+                watch_id: None,
+                message: "At most 16 screen watches are allowed".into(),
+            }),
             ServerEvent::NodeFocusCheckpointChanged {
                 node_id: NodeId(2),
                 activity_revision: 7,
@@ -1014,6 +1144,8 @@ mod tests {
             ServerEvent::PaneDetectionEvidenceChanged {
                 pane_id: NodeId(2),
                 evidence: PaneDetectionEvidence {
+                    observed_at_unix_millis: 1_700_000_000_000,
+                    stale_after_millis: 30_000,
                     applied_status: PaneStatus::from_activity(
                         AgentClass::Codex,
                         AgentActivity::Idle,
@@ -1036,6 +1168,8 @@ mod tests {
                 pane_id: NodeId(2),
                 status: PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
                 evidence: PaneDetectionEvidence {
+                    observed_at_unix_millis: 1_700_000_000_000,
+                    stale_after_millis: 30_000,
                     applied_status: PaneStatus::from_activity(
                         AgentClass::Codex,
                         AgentActivity::Working,
@@ -1333,15 +1467,17 @@ mod tests {
         assert_eq!(&cleared_bytes[4..], former_tail.as_slice());
     }
 
+    /// bincode's fixed-width encoding puts the enum variant index in the
+    /// first four bytes. Shared by every test that compares variant order.
+    fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
+        let bytes = bincode::serialize(value).expect("serializable");
+        u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
+    }
+
     /// The voice-text messages form one contiguous block of variants at the
-    /// end of each enum. bincode's fixed-width encoding puts the variant
-    /// index in the first four bytes.
+    /// end of each enum.
     #[test]
     fn voice_text_variants_are_contiguous() {
-        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
-            let bytes = bincode::serialize(value).expect("serializable");
-            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
-        }
         let register = variant_index(&ClientRequest::RegisterVoiceTextReceiver);
         let submit = variant_index(&ClientRequest::SubmitVoiceText {
             request_id: 1,
@@ -1561,5 +1697,78 @@ mod tests {
             result.is_err(),
             "decoding a ServerEvent frame as a ClientRequest should fail, got {result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn attach_snapshot_and_history_frames_round_trip_exactly() {
+        let snapshot = ServerEvent::TerminalSnapshot {
+            pane_id: NodeId(9),
+            through_sequence: 41,
+            bytes: b"\x1b[H\x1b[2Jvisible screen".to_vec(),
+            is_complete: true,
+        };
+        let history = ServerEvent::TerminalHistory {
+            pane_id: NodeId(9),
+            before_sequence: 41,
+            first_sequence: 12,
+            bytes: b"older output".to_vec(),
+            reaches_journal_start: false,
+        };
+        let request = ClientRequest::TerminalHistory {
+            pane_id: NodeId(9),
+            before_sequence: 41,
+            max_bytes: 1024 * 1024,
+        };
+        for event in [snapshot, history] {
+            let mut buffer = Vec::new();
+            write_frame(&mut buffer, &event).await.unwrap();
+            let mut cursor = Cursor::new(buffer);
+            let decoded: ServerEvent = read_frame(&mut cursor).await.unwrap();
+            assert_eq!(decoded, event);
+        }
+        let mut buffer = Vec::new();
+        write_frame(&mut buffer, &request).await.unwrap();
+        let mut cursor = Cursor::new(buffer);
+        let decoded: ClientRequest = read_frame(&mut cursor).await.unwrap();
+        assert_eq!(decoded, request);
+    }
+
+    #[tokio::test]
+    async fn a_frame_from_a_different_protocol_schema_is_refused_loudly() {
+        // The schema tag lives in the top bits of the frame's length word. A
+        // peer built from another protocol generation writes a different tag,
+        // so the frame must be refused before any payload is decoded.
+        let mut buffer = Vec::new();
+        write_frame(
+            &mut buffer,
+            &ServerEvent::TerminalSnapshot {
+                pane_id: NodeId(9),
+                through_sequence: 1,
+                bytes: b"x".to_vec(),
+                is_complete: true,
+            },
+        )
+        .await
+        .unwrap();
+        buffer[..4].copy_from_slice(&0x0000_0001_u32.to_le_bytes());
+
+        let mut cursor = Cursor::new(buffer);
+        let result: Result<ServerEvent, IpcError> = read_frame(&mut cursor).await;
+        assert!(
+            result.is_err(),
+            "a frame with another schema tag must be refused, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_server_event_variant_fails_to_decode() {
+        // Variants are appended in bincode order, so a discriminant past the
+        // last variant must fail loudly instead of decoding as a neighbour.
+        let mut bytes = bincode::serialize(&ServerEvent::Error {
+            message: "probe".to_string(),
+        })
+        .unwrap();
+        bytes[..4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(bincode::deserialize::<ServerEvent>(&bytes).is_err());
     }
 }

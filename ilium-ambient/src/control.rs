@@ -155,7 +155,7 @@ impl Control {
                 .get(*index)
                 .map_or_else(|| "?".to_owned(), |label| (*label).to_owned()),
             (ControlKind::Toggle, ControlValue::Bool(on)) => {
-                if *on { "On" } else { "Off" }.to_owned()
+                if *on { "[ON  ●]" } else { "[○ OFF]" }.to_owned()
             }
             (ControlKind::Text { hint }, ControlValue::Text(text)) => {
                 if text.is_empty() {
@@ -309,5 +309,14 @@ mod tests {
     fn display_value_ignores_disabled_state() {
         let row = backend_row(1).with_disabled_option(1, "no");
         assert_eq!(row.display_value(), "GPU");
+    }
+
+    #[test]
+    fn toggle_values_use_fixed_width_circle_switches() {
+        let off = Control::toggle("test", "Test", false, "Help").display_value();
+        let on = Control::toggle("test", "Test", true, "Help").display_value();
+        assert_eq!(off, "[○ OFF]");
+        assert_eq!(on, "[ON  ●]");
+        assert_eq!(off.chars().count(), on.chars().count());
     }
 }

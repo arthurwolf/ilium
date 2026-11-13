@@ -1,0 +1,20 @@
+package ilium:primitives@0.1.0;
+
+interface basic {
+  use ilium:types/ids@0.1.0.{node-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{styled-text};
+  use ilium:types/tree@0.1.0.{agent-activity};
+
+  /// Own panes only. Errors: not-permitted for a pane of another kind.
+  set-title: func(pane: node-id, title: string) -> result<_, plugin-error>;
+  /// One line in the footer of the pane frame.
+  set-status: func(pane: node-id, status: styled-text) -> result<_, plugin-error>;
+  request-focus: func(pane: node-id) -> result<_, plugin-error>;
+  /// Inner columns and rows.
+  size: func(pane: node-id) -> option<tuple<u16, u16>>;
+  /// Drives the activity icon of the tree.
+  report-activity: func(pane: node-id, activity: agent-activity) -> result<_, plugin-error>;
+  /// A dirty pane asks before it is closed.
+  set-dirty: func(pane: node-id, dirty: bool) -> result<_, plugin-error>;
+}

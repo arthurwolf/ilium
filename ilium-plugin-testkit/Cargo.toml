@@ -1,0 +1,30 @@
+[package]
+name = "ilium-plugin-testkit"
+description = "Test harness for Ilium plugins: FakeHost, FakeSession, FakeScene, fixtures, golden files, replay and fuzz hooks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ilium-plugin-sdk-core = { version = "0.1.1", path = "../ilium-plugin-sdk-core" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.18"
+rand = "0.9.5"
+rand_chacha = "0.9"
+similar = "2"
+
+[dev-dependencies]
+# Test lanes of the plugin platform (test-plan.md sections 2.4 and 2.13).
+proptest = "1"
+
+[features]
+# Component mode: runs the built .wasm under Wasmtime instead of the native library (reference-test-harness.md "Modes").
+# The implementation phase adds the optional wasmtime dependency here, with the code that uses it.
+component = []
+# Gates of the host-call, session and view harness tests that wait for their implementation.
+plugin_host_calls = []
+plugin_session = []
+plugin_views = []

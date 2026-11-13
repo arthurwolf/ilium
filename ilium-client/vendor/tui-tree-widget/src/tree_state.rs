@@ -26,6 +26,9 @@ pub struct TreeState<Identifier> {
     pub(super) opened: HashSet<Vec<Identifier>>,
     pub(super) selected: Vec<Identifier>,
     pub(super) ensure_selected_in_view_on_next_render: bool,
+    /// One-shot: place the selected item in the vertical middle of the
+    /// viewport on the next render (clamped at the list's ends).
+    pub(super) center_selected_on_next_render: bool,
 
     pub(super) last_area: Rect,
     pub(super) last_biggest_index: usize,
@@ -43,6 +46,7 @@ impl<Identifier> Default for TreeState<Identifier> {
             opened: HashSet::new(),
             selected: Vec::new(),
             ensure_selected_in_view_on_next_render: false,
+            center_selected_on_next_render: false,
 
             last_area: Rect::ZERO,
             last_biggest_index: 0,
@@ -179,6 +183,33 @@ where
                 None
             };
         let mut start = self.offset.min(visible.len().saturating_sub(1));
+        if self.center_selected_on_next_render {
+            if let Some(selected_index) = visible
+                .iter()
+                .position(|flattened| flattened.identifier == self.selected)
+            {
+                let total: usize = item_heights.iter().sum();
+                let selected_height = item_heights[selected_index].min(available_height);
+                let wanted_above = available_height.saturating_sub(selected_height) / 2;
+                // Clamp so the list never scrolls past its last row.
+                let mut start_candidate = selected_index;
+                let mut above = 0;
+                while start_candidate > 0 {
+                    let previous = item_heights[start_candidate - 1];
+                    if above + previous > wanted_above {
+                        break;
+                    }
+                    above += previous;
+                    start_candidate -= 1;
+                }
+                let mut tail: usize = item_heights.iter().skip(start_candidate).sum();
+                while start_candidate > 0 && tail < available_height.min(total) {
+                    start_candidate -= 1;
+                    tail += item_heights[start_candidate];
+                }
+                start = start_candidate;
+            }
+        }
         if let Some(ensure_index_in_view) = ensure_index_in_view {
             start = start.min(ensure_index_in_view);
         }
@@ -419,6 +450,13 @@ where
                     .get(*index)
                     .map(|identifier| (identifier.as_slice(), *y, *height))
             })
+    }
+
+    /// Asks the next render to scroll so the selected item sits in the middle
+    /// of the viewport, as far as the list's ends allow.
+    pub const fn center_selected_on_next_render(&mut self) {
+        self.center_selected_on_next_render = true;
+        self.ensure_selected_in_view_on_next_render = true;
     }
 
     /// Restore a previously rendered item offset without treating it as a

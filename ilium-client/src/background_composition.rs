@@ -112,12 +112,30 @@ pub fn animation_frame_delay(app: &App, elapsed: Duration) -> Option<Duration> {
 
 /// Requests worker preparation and leases the latest valid immutable frame.
 /// Scene construction, cache preparation and rendering stay on the worker.
+/// How the field reaches the screen this tick.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FieldPresentation {
+    /// A fresh frame under a presentation lease; painted cells are credited.
+    Fresh,
+    /// The previously shown frame, repainted uncredited because no lease was
+    /// available this tick. One stale frame beats one dark frame.
+    Repeat,
+}
+
+/// A repeated frame credits nothing: it was never leased.
+fn finish_field(app: &mut App, presentation: FieldPresentation, painted_bits: Vec<u8>) {
+    match presentation {
+        FieldPresentation::Fresh => app.animation_frame.composed(painted_bits),
+        FieldPresentation::Repeat => app.animation_frame.discard_composed_receipt(),
+    }
+}
+
 fn render_field(
     app: &mut App,
     settings: &crate::background_animation::AnimationSettings,
     area: Rect,
     elapsed: Duration,
-) -> bool {
+) -> Option<FieldPresentation> {
     let pointer = app.animation_pointer(area);
     if let Err(error) =
         app.animation_frame
@@ -127,7 +145,12 @@ fn render_field(
     }
     app.animation_frame.collect();
     app.note_animation_field_settings();
-    app.animation_frame.begin_composition()
+    if app.animation_frame.begin_composition() {
+        return Some(FieldPresentation::Fresh);
+    }
+    app.animation_frame
+        .can_repeat_display(area.width, area.height)
+        .then_some(FieldPresentation::Repeat)
 }
 
 fn needs_screen_occupancy(settings: &crate::background_animation::AnimationSettings) -> bool {
@@ -186,12 +209,15 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         } else {
             None
         });
-    if !render_field(app, &settings, buffer.area, elapsed) {
+    let Some(presentation) = render_field(app, &settings, buffer.area, elapsed) else {
         return;
-    }
+    };
     let area = buffer.area;
     let receipt_cells = usize::from(area.width) * usize::from(area.height);
-    let mut painted_bits = if !is_preview && receipt_cells <= MAX_RECEIPT_CELLS {
+    let mut painted_bits = if !is_preview
+        && presentation == FieldPresentation::Fresh
+        && receipt_cells <= MAX_RECEIPT_CELLS
+    {
         vec![0_u8; receipt_cells]
     } else {
         Vec::new()
@@ -208,12 +234,14 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         && settings.kind == crate::background_animation::AnimationKind::Aurora;
     if is_preview {
         let area = buffer.area;
-        app.animation_frame.check_visibility(
-            buffer,
-            (red, green, blue),
-            app.ui_settings.color_scheme == crate::theme::ColorScheme::Light,
-            black_backdrop,
-        );
+        if presentation == FieldPresentation::Fresh {
+            app.animation_frame.check_visibility(
+                buffer,
+                (red, green, blue),
+                app.ui_settings.color_scheme == crate::theme::ColorScheme::Light,
+                black_backdrop,
+            );
+        }
         // Article letters in label whitespace become part of the UI wording.
         // Keep the same page coordinates, but leave Settings chrome opaque.
         let preview_area =
@@ -271,9 +299,14 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     }
 
     if !settings.panels.shows_right()
-        || matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. })
+        || matches!(
+            app.right_panel_target,
+            RightPanelTarget::Chatroom { .. }
+                | RightPanelTarget::Resource { .. }
+                | RightPanelTarget::Attention
+        )
     {
-        app.animation_frame.composed(painted_bits);
+        finish_field(app, presentation, painted_bits);
         return;
     }
     let viewports = app.pane_viewports();
@@ -289,7 +322,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             app.animation_frame.is_wikipedia(),
             &mut mark_painted,
         );
-        app.animation_frame.composed(painted_bits);
+        finish_field(app, presentation, painted_bits);
         return;
     }
     for viewport in viewports {
@@ -311,7 +344,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             );
         });
     }
-    app.animation_frame.composed(painted_bits);
+    finish_field(app, presentation, painted_bits);
 }
 
 /// The Settings controls panel of the full-field preview, which stays opaque.
@@ -389,7 +422,12 @@ fn screen_occupancy(
             mark_free(panel_inner(app.layout.tree_area), None);
         }
         if settings.panels.shows_right()
-            && !matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. })
+            && !matches!(
+                app.right_panel_target,
+                RightPanelTarget::Chatroom { .. }
+                    | RightPanelTarget::Resource { .. }
+                    | RightPanelTarget::Attention
+            )
         {
             let viewports = app.pane_viewports();
             if viewports.is_empty() {
@@ -435,6 +473,11 @@ enum FieldCell {
     BlackInk {
         symbol: String,
         color: Option<Color>,
+    },
+    ImageInk {
+        symbol: String,
+        color: Option<Color>,
+        background: Color,
     },
     Text {
         symbol: String,
@@ -484,6 +527,15 @@ fn field_cell(app: &App, column: u16, row: u16, black_backdrop: bool) -> FieldCe
         };
     }
     let symbol = frame.glyph(column, row);
+    if let Some((red, green, blue)) = frame.image_background(column, row) {
+        return FieldCell::ImageInk {
+            symbol: symbol.to_string(),
+            color: frame
+                .cell_color(column, row)
+                .map(|(r, g, b)| Color::Rgb(r, g, b)),
+            background: Color::Rgb(red, green, blue),
+        };
+    }
     if symbol == ' ' {
         return if black_backdrop {
             FieldCell::Black
@@ -710,6 +762,11 @@ fn paint_region_with_field_receipt(
                         color,
                         modifier,
                     } => (symbol, color, None, modifier, 0),
+                    FieldCell::ImageInk {
+                        symbol,
+                        color,
+                        background,
+                    } => (symbol, color, Some(background), Modifier::empty(), 0),
                     FieldCell::BlackInk { symbol, color } => {
                         (symbol, color, Some(Color::Black), Modifier::empty(), 0)
                     }
@@ -728,7 +785,13 @@ fn paint_region_with_field_receipt(
                     } => (symbol, color, background, modifier, 2),
                     FieldCell::Empty | FieldCell::Continuation => continue,
                 };
-            let symbol_width = crate::background_animation::wikipedia_symbol_width(&symbol);
+            // An image can cover a cell whose dithered glyph has no dots.
+            // Permit that exact blank without relaxing validation of text.
+            let symbol_width = if background.is_some() && native_kind == 0 && symbol == " " {
+                Some(1)
+            } else {
+                crate::background_animation::wikipedia_symbol_width(&symbol)
+            };
             let is_braille = symbol_width == Some(1)
                 && symbol.chars().count() == 1
                 && symbol
@@ -744,7 +807,7 @@ fn paint_region_with_field_receipt(
                 if native_kind != 0 {
                     is_native_text
                 } else {
-                    allow_text || is_braille
+                    allow_text || is_braille || (background.is_some() && symbol == " ")
                 }
             }) else {
                 continue;
@@ -876,6 +939,30 @@ mod tests {
     fn paint_all(buffer: &mut Buffer) {
         let area = buffer.area;
         paint_region(buffer, area, None, Color::White, |_, _| '\u{28ff}');
+    }
+
+    #[test]
+    fn image_background_paints_blank_glyph_without_overwriting_terminal_content() {
+        let area = Rect::new(0, 0, 3, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer[(1, 0)].set_char('A').set_fg(Color::Yellow);
+        let original = buffer[(1, 0)].clone();
+        paint_region_with_field(
+            &mut buffer,
+            area,
+            None,
+            Color::White,
+            |_, _| FieldCell::ImageInk {
+                symbol: " ".into(),
+                color: None,
+                background: Color::Rgb(20, 30, 40),
+            },
+            false,
+        );
+        assert_eq!(buffer[(0, 0)].bg, Color::Rgb(20, 30, 40));
+        assert_eq!(buffer[(0, 0)].symbol(), " ");
+        assert_eq!(buffer[(1, 0)], original);
+        assert_eq!(buffer[(2, 0)].bg, Color::Rgb(20, 30, 40));
     }
 
     #[test]
@@ -1060,10 +1147,10 @@ mod tests {
             .set_scene_control("wiki_render_mode", ilium_ambient::ControlValue::Index(1))
             .unwrap();
         app.animation_settings.wikipedia.scroll_tenths = 0;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         // A synthetic long article puts ink behind both chrome and the preview.
         let html = format!("<p>{}</p>", "article words ".repeat(2000));
         let document = std::sync::Arc::new(
@@ -1734,10 +1821,10 @@ mod tests {
         app.mode = Mode::Help;
         assert!(!ambient_is_visible(&app));
         assert_eq!(animation_frame_delay(&app, Duration::ZERO), None);
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..SettingsState::default()
-        });
+        }));
         app.animation_settings.enabled = false;
         app.ui_settings.motion_level = MotionLevel::Off;
         assert!(
@@ -2065,10 +2152,10 @@ mod tests {
         let (mut app, probe, _project) = ambient_app();
         compose_at(&mut app, 0);
         assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..SettingsState::default()
-        });
+        }));
         let preview = compose_at(&mut app, 1);
         assert!(braille_cells(&preview) > 0, "the preview shows the field");
         assert_eq!(
@@ -2082,10 +2169,10 @@ mod tests {
         assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
         // The preview alone (ambient disabled) also hosts exactly one scene.
         app.animation_settings.enabled = false;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..SettingsState::default()
-        });
+        }));
         compose_at(&mut app, 3);
         assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
         assert_eq!(probe.alive(), 1);
@@ -2095,10 +2182,10 @@ mod tests {
     fn preview_field_matches_the_screen_and_covers_it_entirely() {
         let (mut app, _probe, _project) = ambient_app();
         app.animation_settings.enabled = false;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..SettingsState::default()
-        });
+        }));
         let buffer = compose_at(&mut app, 2);
         assert_eq!(
             (app.animation_frame.width(), app.animation_frame.height()),

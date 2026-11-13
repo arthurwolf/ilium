@@ -14,31 +14,55 @@ use std::sync::Arc;
 use crossterm::event::KeyCode;
 use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId};
 use ilium_execution::{
-    Client, Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, Receipt, SkipReason,
+    AdmissionFailure, Client, Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, Receipt,
+    RejectReason, SkipReason,
 };
 use ilium_ipc::ClientRequest;
 use ilium_session_convert::{
     convert_session_with_cancel, ConversionEvent, ConversionOutcome, ConversionRequest,
+    MAX_LINE_BYTES, MAX_SOURCE_TRANSCRIPT_BYTES,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Gauge, Paragraph};
+use ratatui::widgets::{Clear, Gauge, Paragraph, Wrap};
 use ratatui::Frame;
-use tokio::sync::mpsc;
 use tokio::sync::Notify;
+use tokio::sync::{mpsc, oneshot};
 
-use crate::app::{App, Mode};
+use crate::app::{App, Mode, UNFREEZING_AGENT_STATUS};
 use crate::modal;
 use crate::theme;
 
 /// Upper bound on retained log lines; a conversion emits tens of lines, this
 /// only guards against a runaway producer.
 const MAX_LOG_LINES: usize = 500;
-pub(crate) const CONVERSION_WORKING_BYTES: usize = 512 * 1024 * 1024;
+const CONVERSION_FIXED_WORKING_BYTES: usize = 64 * 1024 * 1024;
+/// Fixed reservation: the streaming converter holds one source line (at most
+/// `MAX_LINE_BYTES`) plus bounded bookkeeping, whatever the file size.
+pub(crate) const CONVERSION_WORKING_BYTES: usize =
+    CONVERSION_FIXED_WORKING_BYTES + MAX_LINE_BYTES as usize;
 pub(crate) const CONVERSION_RESULT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PROGRESS_TEXT_BYTES: usize = 4 * 1024;
 const UI_EVENT_CAPACITY: usize = 64;
+
+/// Memory charged for one conversion. Streaming makes it independent of the
+/// transcript size, so the argument only documents that nothing scales.
+fn conversion_working_bytes(_source_transcript_bytes: u64) -> usize {
+    CONVERSION_WORKING_BYTES
+}
+
+/// Refuses sources above the sanity cap; the message names the limit and the
+/// disk-space requirement of the output file.
+fn check_source_size(source_transcript_bytes: u64) -> Result<(), String> {
+    if source_transcript_bytes > MAX_SOURCE_TRANSCRIPT_BYTES {
+        return Err(format!(
+            "The source transcript is larger than the {} GiB conversion limit (the converted copy also needs free disk space). Resume the original session with Enter.",
+            MAX_SOURCE_TRANSCRIPT_BYTES / (1024 * 1024 * 1024)
+        ));
+    }
+    Ok(())
+}
 
 /// Where the conversion currently is. `Failed` keeps the agent-stopped fact so
 /// the dialog knows whether "resume the original session" is offered.
@@ -57,6 +81,7 @@ pub struct ConversionDialogState {
     pub source: BuiltinAgentProvider,
     pub target: BuiltinAgentProvider,
     pub source_session_id: String,
+    pub source_transcript_path: PathBuf,
     pub project_cwd: PathBuf,
     pub phase: ConversionPhase,
     /// True once the server confirmed the source agent process is gone.
@@ -76,6 +101,7 @@ impl ConversionDialogState {
         source: BuiltinAgentProvider,
         target: BuiltinAgentProvider,
         source_session_id: String,
+        source_transcript_path: PathBuf,
         project_cwd: PathBuf,
     ) -> Self {
         let mut state = Self {
@@ -83,6 +109,7 @@ impl ConversionDialogState {
             source,
             target,
             source_session_id,
+            source_transcript_path,
             project_cwd,
             phase: ConversionPhase::StoppingAgent,
             is_agent_stopped: false,
@@ -157,6 +184,7 @@ pub struct ReplacementFocus {
 pub struct ConversionJob {
     pub pane_id: NodeId,
     pub request: ConversionRequest,
+    pub source_transcript_path: PathBuf,
 }
 
 /// Messages a running worker sends back to the event loop.
@@ -178,8 +206,25 @@ struct ActiveWorker {
     receipt: Receipt<ConversionTask>,
 }
 
+struct PendingAdmission {
+    cancel: Arc<AtomicBool>,
+    cancel_wake: Arc<Notify>,
+    pane_id: NodeId,
+    result: oneshot::Receiver<Result<Receipt<ConversionTask>, String>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+struct AdmissionCompletionWake(Arc<Notify>);
+
+impl Drop for AdmissionCompletionWake {
+    fn drop(&mut self) {
+        self.0.notify_one();
+    }
+}
+
 struct ConversionTask {
     job: ConversionJob,
+    source_transcript_bytes_at_admission: u64,
     events: mpsc::Sender<ConversionWorkerEvent>,
     cancel: Arc<AtomicBool>,
     notification: Arc<Notify>,
@@ -216,8 +261,19 @@ impl Job for ConversionTask {
             }
         };
         let is_cancelled = || self.cancel.load(Ordering::Acquire) || stop.is_stopped();
-        let result = convert_session_with_cancel(&request, &is_cancelled, &mut sink)
-            .map_err(|error| bounded_conversion_error(error.to_string()));
+        let result = match std::fs::metadata(&self.job.source_transcript_path) {
+            Ok(metadata) if metadata.len() <= self.source_transcript_bytes_at_admission => {
+                convert_session_with_cancel(&request, &is_cancelled, &mut sink)
+                    .map_err(|error| bounded_conversion_error(error.to_string()))
+            }
+            Ok(_) => Err(
+                "Source transcript grew after conversion admission; retry the conversion"
+                    .to_string(),
+            ),
+            Err(error) => Err(bounded_conversion_error(format!(
+                "Cannot inspect source transcript after admission: {error}"
+            ))),
+        };
         Ok(ConversionWorkerEvent::Finished { pane_id, result })
     }
 }
@@ -230,6 +286,7 @@ pub struct ConversionWorkers {
     received_events: mpsc::Receiver<ConversionWorkerEvent>,
     notification: Arc<Notify>,
     active: Option<ActiveWorker>,
+    pending: Option<PendingAdmission>,
 }
 
 impl ConversionWorkers {
@@ -241,53 +298,75 @@ impl ConversionWorkers {
             received_events,
             notification,
             active: None,
+            pending: None,
         }
     }
 
     pub fn spawn(&mut self, job: ConversionJob) -> Result<(), ConversionWorkerEvent> {
-        if self.active.is_some() {
+        if self.active.is_some() || self.pending.is_some() {
             return Err(conversion_failure(
                 &job,
                 "A previous session conversion is still stopping",
             ));
         }
+        let source_transcript_bytes_at_admission = std::fs::metadata(&job.source_transcript_path)
+            .map_err(|error| {
+                conversion_failure(
+                    &job,
+                    &format!("Cannot inspect source transcript before admission: {error}"),
+                )
+            })?
+            .len();
+        if let Err(message) = check_source_size(source_transcript_bytes_at_admission) {
+            return Err(conversion_failure(&job, &message));
+        }
+        let input_bytes = conversion_working_bytes(source_transcript_bytes_at_admission);
         let pane_id = job.pane_id;
         let cancel = Arc::new(AtomicBool::new(false));
         let task = ConversionTask {
             job,
+            source_transcript_bytes_at_admission,
             events: self.events.clone(),
             cancel: Arc::clone(&cancel),
             notification: Arc::clone(&self.notification),
         };
-        let receipt = self
-            .client
-            .try_submit(
-                Lane::Io,
+        let client = self.client.clone();
+        let notification = Arc::clone(&self.notification);
+        let cancel_wake = Arc::new(Notify::new());
+        let waiter_wake = Arc::clone(&cancel_wake);
+        let waiter_cancel = Arc::clone(&cancel);
+        let (sender, result) = oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            let _completion_wake = AdmissionCompletionWake(notification);
+            let outcome = wait_for_conversion_admission(
+                client,
+                task,
                 JobCost {
-                    input_bytes: CONVERSION_WORKING_BYTES,
+                    input_bytes,
                     result_bytes: CONVERSION_RESULT_BYTES,
                 },
-                task,
+                waiter_cancel,
+                waiter_wake,
             )
-            .map_err(|rejected| {
-                conversion_failure(
-                    &rejected.value.job,
-                    &format!(
-                        "Session conversion admission refused: {:?}",
-                        rejected.reason
-                    ),
-                )
-            })?;
-        self.active = Some(ActiveWorker {
+            .await;
+            let _ = sender.send(outcome);
+        });
+        self.pending = Some(PendingAdmission {
             cancel,
+            cancel_wake,
             pane_id,
-            receipt,
+            result,
+            task: waiter,
         });
         Ok(())
     }
 
     /// Asks the running conversion (if any) to stop at its next checkpoint.
     pub fn cancel(&self) {
+        if let Some(pending) = &self.pending {
+            pending.cancel.store(true, Ordering::Release);
+            pending.cancel_wake.notify_one();
+        }
         if let Some(active) = &self.active {
             active.cancel.store(true, Ordering::Release);
             active.receipt.cancel();
@@ -301,6 +380,39 @@ impl ConversionWorkers {
         while let Ok(event) = self.received_events.try_recv() {
             apply(event);
             did_apply = true;
+        }
+        if let Some(pending) = self.pending.as_mut() {
+            match pending.result.try_recv() {
+                Ok(result) => {
+                    let Some(pending) = self.pending.take() else {
+                        return did_apply;
+                    };
+                    match result {
+                        Ok(receipt) => {
+                            if pending.cancel.load(Ordering::Acquire) {
+                                receipt.cancel();
+                            }
+                            self.active = Some(ActiveWorker {
+                                cancel: pending.cancel,
+                                pane_id: pending.pane_id,
+                                receipt,
+                            });
+                        }
+                        Err(message) => {
+                            apply(conversion_worker_failure(pending.pane_id, &message));
+                            did_apply = true;
+                        }
+                    }
+                }
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    let Some(pending) = self.pending.take() else {
+                        return did_apply;
+                    };
+                    apply(conversion_worker_failure(pending.pane_id, "The conversion admission worker stopped unexpectedly. Press Enter to resume the original session."));
+                    did_apply = true;
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {}
+            }
         }
         let Some(active) = self.active.as_mut() else {
             return did_apply;
@@ -345,7 +457,127 @@ impl ConversionWorkers {
 impl Drop for ConversionWorkers {
     fn drop(&mut self) {
         self.cancel();
+        if let Some(pending) = &self.pending {
+            pending.task.abort();
+        }
     }
+}
+
+/// Wait without holding a worker slot or reservation. The absolute deadline
+/// and cancellation wake remain effective even if no other job releases quota.
+async fn wait_for_conversion_admission(
+    client: Client,
+    task: ConversionTask,
+    cost: JobCost,
+    cancel: Arc<AtomicBool>,
+    cancel_wake: Arc<Notify>,
+) -> Result<Receipt<ConversionTask>, String> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut announced = false;
+    loop {
+        let capacity = crate::execution::admission_notification();
+        let mut changed = Box::pin(capacity.notified());
+        changed.as_mut().enable();
+        if cancel.load(Ordering::Acquire) {
+            return Err("Conversion cancelled before it started. Press Enter to resume the original session.".into());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err("Conversion timed out waiting for available memory or worker capacity. Press Enter to resume the original session, then try again after other work finishes.".into());
+        }
+        match client.try_reserve_detailed(Lane::Io, cost) {
+            Ok(reservation) => {
+                if cancel.load(Ordering::Acquire) {
+                    return Err("Conversion cancelled before it started. Press Enter to resume the original session.".into());
+                }
+                return reservation
+                    .submit(task)
+                    .map_err(|rejected| describe_admission_failure(rejected.reason.into()));
+            }
+            Err(failure) if admission_may_be_temporary(failure) => {
+                if !announced {
+                    tracing::warn!(
+                        ?failure,
+                        "session conversion is waiting for execution capacity"
+                    );
+                    let _ = task.events.try_send(ConversionWorkerEvent::Progress {
+                        pane_id: task.job.pane_id,
+                        event: ConversionEvent::Log(
+                            "Waiting for conversion memory or worker capacity; Esc cancels.".into(),
+                        ),
+                    });
+                    task.notification.notify_one();
+                    announced = true;
+                }
+                tokio::select! {
+                    _ = &mut changed => {},
+                    _ = cancel_wake.notified() => {},
+                    _ = tokio::time::sleep_until(deadline) => {
+                        return Err(format!("Timed out waiting for conversion capacity. {}", describe_admission_failure(failure)));
+                    }
+                }
+            }
+            Err(failure) => {
+                tracing::warn!(?failure, "session conversion admission cannot proceed");
+                return Err(describe_admission_failure(failure));
+            }
+        }
+    }
+}
+
+fn admission_may_be_temporary(failure: AdmissionFailure) -> bool {
+    match failure.quota {
+        Some(quota) => quota.requested <= quota.limit,
+        None => matches!(
+            failure.reason,
+            RejectReason::QueueFull | RejectReason::ServiceBankFull
+        ),
+    }
+}
+
+fn describe_admission_failure(failure: AdmissionFailure) -> String {
+    if let Some(quota) = failure.quota {
+        let resource = match failure.reason {
+            RejectReason::InputBytes => "working memory",
+            RejectReason::ResultBytes => "result memory",
+            RejectReason::JobLimit | RejectReason::ServiceLimit => "worker slots",
+            _ => "resource capacity",
+        };
+        if matches!(
+            failure.reason,
+            RejectReason::InputBytes | RejectReason::ResultBytes
+        ) {
+            let size = |bytes: usize| {
+                const MIB: usize = 1024 * 1024;
+                if bytes.is_multiple_of(MIB) {
+                    format!("{} MiB", bytes / MIB)
+                } else {
+                    format!("{bytes} bytes")
+                }
+            };
+            if quota.requested > quota.limit {
+                return format!("Conversion needs {} of {resource}, exceeding the {} limit. Waiting will not help. Press Enter to resume the original session.", size(quota.requested), size(quota.limit));
+            }
+            return format!("Conversion needs {} of {resource}; {} of the {} limit is in use. Press Enter to resume the original session; try again after other work finishes.", size(quota.requested), size(quota.used), size(quota.limit));
+        }
+        return format!("Conversion needs {resource}, but {} of {} slots are in use ({} requested). Press Enter to resume the original session.", quota.used, quota.limit, quota.requested);
+    }
+    let explanation = match failure.reason {
+        RejectReason::Busy
+        | RejectReason::QueueFull
+        | RejectReason::ServiceBankFull
+        | RejectReason::JobLimit
+        | RejectReason::ServiceLimit => "The conversion worker is busy",
+        RejectReason::InputBytes | RejectReason::ResultBytes => {
+            "The conversion memory budget is unavailable"
+        }
+        RejectReason::Closed => "The conversion service is shutting down",
+        RejectReason::InvalidCost => "The conversion request exceeds a worker limit",
+        RejectReason::AccountingPoisoned => "The conversion resource accounting is unavailable",
+        RejectReason::ClientLimit | RejectReason::WorkerLimit | RejectReason::WorkerBytes => {
+            "The conversion service has reached a resource limit"
+        }
+    };
+    format!("{explanation}. Press Enter to resume the original session; try again after other work finishes.")
 }
 
 fn conversion_failure(job: &ConversionJob, reason: &str) -> ConversionWorkerEvent {
@@ -526,7 +758,14 @@ pub fn render(frame: &mut Frame, area: Rect, state: &ConversionDialogState) {
         .iter()
         .map(|line| Line::from(Span::styled(line.clone(), Style::new().fg(Color::Gray))))
         .collect();
-    frame.render_widget(Paragraph::new(log_lines), log_area);
+    if let ConversionPhase::Failed(message) = &state.phase {
+        frame.render_widget(
+            Paragraph::new(message.as_str()).wrap(Wrap { trim: false }),
+            log_area,
+        );
+    } else {
+        frame.render_widget(Paragraph::new(log_lines), log_area);
+    }
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
@@ -571,24 +810,23 @@ impl App {
             self.status_message = Some("Cannot convert: home directory unavailable".to_string());
             return;
         };
-        if crate::agent_history_path::verified_jsonl_history_path(
+        let Some(source_transcript_path) = crate::agent_history_path::verified_jsonl_history_path(
             &home_dir,
             &project_cwd,
             &class,
             &session_id,
-        )
-        .is_none()
-        {
+        ) else {
             self.status_message =
                 Some("Cannot convert: this session has no verified transcript yet".to_string());
             return;
-        }
+        };
         self.frozen_panes.insert(pane_id);
         self.conversion = Some(Box::new(ConversionDialogState::new(
             pane_id,
             source,
             target,
             session_id,
+            source_transcript_path,
             project_cwd,
         )));
         self.mode = Mode::ConvertSession;
@@ -629,6 +867,7 @@ impl App {
                         codex_home: None,
                         codex_executable: None,
                     },
+                    source_transcript_path: state.source_transcript_path.clone(),
                 });
             }
             Err(message) => state.fail(message),
@@ -705,6 +944,9 @@ impl App {
             return;
         }
         self.pending_replacement_focus = None;
+        if self.status_message.as_deref() == Some(UNFREEZING_AGENT_STATUS) {
+            self.status_message = None;
+        }
         if !pending.was_focused {
             return;
         }
@@ -767,6 +1009,245 @@ impl App {
 mod tests {
     use super::*;
 
+    #[test]
+    fn conversion_memory_refusal_explains_capacity_and_recovery() {
+        let failure = ilium_execution::AdmissionFailure {
+            reason: ilium_execution::RejectReason::InputBytes,
+            quota: Some(ilium_execution::QuotaRefusal {
+                boundary: ilium_execution::AdmissionBoundary::Client {
+                    ancestor_distance: 1,
+                },
+                resource: ilium_execution::QuotaResource::InputBytes,
+                requested: 48 * 1024 * 1024,
+                used: 500 * 1024 * 1024,
+                limit: 512 * 1024 * 1024,
+            }),
+        };
+        let message = describe_admission_failure(failure);
+        assert!(message.contains("memory"));
+        assert!(message.contains("48 MiB"));
+        assert!(message.contains("500 MiB"));
+        assert!(message.contains("512 MiB"));
+        assert!(message.contains("original"));
+        assert!(!message.contains("InputBytes"));
+    }
+
+    #[test]
+    fn maximum_supported_transcript_is_fully_charged() {
+        let mebibyte = 1024 * 1024;
+        assert_eq!(CONVERSION_WORKING_BYTES, 320 * mebibyte as usize);
+        assert_eq!(
+            conversion_working_bytes(MAX_SOURCE_TRANSCRIPT_BYTES),
+            CONVERSION_WORKING_BYTES
+        );
+    }
+
+    #[test]
+    fn admission_over_hard_limit_does_not_wait() {
+        let failure = AdmissionFailure {
+            reason: RejectReason::InputBytes,
+            quota: Some(ilium_execution::QuotaRefusal {
+                boundary: ilium_execution::AdmissionBoundary::Root,
+                resource: ilium_execution::QuotaResource::InputBytes,
+                requested: 2,
+                used: 0,
+                limit: 1,
+            }),
+        };
+        assert!(!admission_may_be_temporary(failure));
+        assert!(describe_admission_failure(failure).contains("Waiting will not help"));
+    }
+
+    #[test]
+    fn conversion_failure_details_wrap_in_the_dialog() {
+        let mut dialog = state();
+        dialog.is_agent_stopped = true;
+        dialog.fail(format!("{} RECOVERYVISIBLE", "details ".repeat(12)));
+        let backend = ratatui::backend::TestBackend::new(78, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, &dialog);
+            })
+            .unwrap();
+        let display: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(display.contains("RECOVERYVISIBLE"));
+        assert!(display.contains("Enter resume"));
+    }
+
+    async fn exercise_saturated_admission(cancel_waiter: bool) {
+        use ilium_execution::{
+            ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+            ShutdownMode,
+        };
+        use std::time::{Duration, Instant};
+        let capacity = crate::execution::admission_notification();
+        let quota = QuotaGroup::new_with_admission_wake(
+            QuotaLimits {
+                clients: 2,
+                jobs: 2,
+                service_jobs: 0,
+                input_bytes: 32 * 1024 * 1024,
+                result_bytes: 4 * 1024 * 1024,
+                worker_threads: 1,
+                worker_bytes: 5 * 1024 * 1024,
+            },
+            move || capacity.notify_waiters(),
+        );
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut execution = Execution::start(
+            quota,
+            ExecutionConfig {
+                cpu: disabled,
+                io: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: 4 * 1024 * 1024,
+                },
+                service: disabled,
+            },
+        )
+        .unwrap();
+        let limits = ClientLimits {
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 32 * 1024 * 1024,
+            result_bytes: CONVERSION_RESULT_BYTES,
+        };
+        let blocker = execution.client(limits).unwrap();
+        let client = execution.client(limits).unwrap();
+        let held = blocker
+            .try_reserve_external(JobCost {
+                input_bytes: 20 * 1024 * 1024,
+                result_bytes: 0,
+            })
+            .unwrap();
+        let (events, mut received) = mpsc::channel(UI_EVENT_CAPACITY);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_wake = Arc::new(Notify::new());
+        let task = ConversionTask {
+            job: ConversionJob {
+                pane_id: NodeId(1),
+                source_transcript_path: PathBuf::from("/nonexistent/transcript"),
+                request: ConversionRequest {
+                    home_dir: PathBuf::from("/nonexistent"),
+                    project_cwd: PathBuf::from("/nonexistent"),
+                    source: BuiltinAgentProvider::Claude,
+                    target: BuiltinAgentProvider::Codex,
+                    source_session_id: "11111111-1111-4111-8111-111111111111".into(),
+                    codex_home: None,
+                    codex_executable: None,
+                },
+            },
+            source_transcript_bytes_at_admission: 0,
+            events,
+            cancel: Arc::clone(&cancel),
+            notification: Arc::new(Notify::new()),
+        };
+        let waiter = tokio::spawn(wait_for_conversion_admission(
+            client,
+            task,
+            JobCost {
+                input_bytes: 16 * 1024 * 1024,
+                result_bytes: CONVERSION_RESULT_BYTES,
+            },
+            Arc::clone(&cancel),
+            Arc::clone(&cancel_wake),
+        ));
+        tokio::time::timeout(Duration::from_secs(5), received.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        if cancel_waiter {
+            cancel.store(true, Ordering::Release);
+            cancel_wake.notify_one();
+        } else {
+            drop(held);
+        }
+        let result = tokio::time::timeout(Duration::from_secs(5), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        if cancel_waiter {
+            assert!(matches!(&result, Err(message) if message.contains("cancelled")));
+        } else {
+            assert!(
+                result.is_ok(),
+                "capacity release should admit the waiting conversion"
+            );
+        }
+        drop(result);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[tokio::test]
+    async fn conversion_waits_until_other_work_releases_capacity() {
+        exercise_saturated_admission(false).await;
+    }
+
+    #[tokio::test]
+    async fn cancellation_wakes_conversion_waiting_for_capacity() {
+        exercise_saturated_admission(true).await;
+    }
+
+    #[test]
+    fn conversion_reservation_is_fixed_and_independent_of_file_size() {
+        let mebibyte = 1024 * 1024;
+        assert_eq!(conversion_working_bytes(0), 320 * mebibyte);
+        assert_eq!(conversion_working_bytes(1024), 320 * mebibyte);
+        assert_eq!(
+            conversion_working_bytes(3 * 1024 * 1024 * 1024),
+            CONVERSION_WORKING_BYTES
+        );
+        assert_eq!(
+            conversion_working_bytes(MAX_SOURCE_TRANSCRIPT_BYTES),
+            CONVERSION_WORKING_BYTES
+        );
+    }
+
+    // The client slice must stay within the 528 MiB general children share;
+    // checked at compile time because both sides are constants.
+    const _: () = assert!(CONVERSION_WORKING_BYTES <= 528 * 1024 * 1024);
+
+    #[test]
+    fn sparse_three_gib_source_passes_admission() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rollout.jsonl");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(3 * 1024 * 1024 * 1024).unwrap();
+        let length = std::fs::metadata(&path).unwrap().len();
+        assert_eq!(length, 3 * 1024 * 1024 * 1024);
+        assert!(check_source_size(length).is_ok());
+    }
+
+    #[test]
+    fn source_over_the_cap_is_refused_with_the_new_message() {
+        assert!(check_source_size(MAX_SOURCE_TRANSCRIPT_BYTES).is_ok());
+        let message = check_source_size(MAX_SOURCE_TRANSCRIPT_BYTES + 1).unwrap_err();
+        assert!(message.contains("64 GiB"));
+        assert!(message.contains("disk space"));
+        assert!(!message.contains("128 MiB"));
+    }
+
     #[tokio::test]
     async fn conversion_worker_completes_through_the_bounded_io_receipt() {
         use ilium_execution::{
@@ -774,14 +1255,17 @@ mod tests {
         };
         use std::time::{Duration, Instant};
 
+        const TEST_INPUT_BUDGET: usize = 32 * 1024 * 1024;
         let quota = QuotaGroup::new(QuotaLimits {
             clients: 1,
             jobs: 1,
             service_jobs: 0,
-            input_bytes: CONVERSION_WORKING_BYTES,
+            input_bytes: TEST_INPUT_BUDGET,
             result_bytes: CONVERSION_RESULT_BYTES,
             worker_threads: 1,
-            worker_bytes: 4 * 1024 * 1024,
+            // Four MiB worker plus retained bank bookkeeping. The smaller
+            // shared input ceiling reproduces admission under background use.
+            worker_bytes: 5 * 1024 * 1024,
         });
         let disabled = LaneConfig {
             threads: 0,
@@ -809,24 +1293,51 @@ mod tests {
             .client(ilium_execution::ClientLimits {
                 jobs: 1,
                 service_jobs: 0,
-                input_bytes: CONVERSION_WORKING_BYTES,
+                input_bytes: TEST_INPUT_BUDGET,
                 result_bytes: CONVERSION_RESULT_BYTES,
             })
             .unwrap()
             .with_completion_wake(move || wake.notify_one());
         let mut workers = ConversionWorkers::new(client, Arc::clone(&notification));
         let temporary = tempfile::tempdir().unwrap();
+        let home_dir = temporary.path().join("home");
+        let project_cwd = temporary.path().join("project");
+        std::fs::create_dir_all(&project_cwd).unwrap();
+        let source_session_id = "11111111-1111-4111-8111-111111111111";
+        let project_slug: String = project_cwd
+            .to_string_lossy()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        let transcript_dir = home_dir.join(".claude/projects").join(project_slug);
+        std::fs::create_dir_all(&transcript_dir).unwrap();
+        std::fs::write(
+            transcript_dir.join(format!("{source_session_id}.jsonl")),
+            format!(
+                "{}\n{}\n",
+                serde_json::json!({"type":"user","sessionId":source_session_id,"cwd":project_cwd,"message":{"content":"hello"}}),
+                serde_json::json!({"type":"assistant","sessionId":source_session_id,"cwd":project_cwd,"message":{"content":"noted"}})
+            ),
+        )
+        .unwrap();
         let job = ConversionJob {
             pane_id: NodeId(7),
             request: ConversionRequest {
-                home_dir: temporary.path().to_path_buf(),
-                project_cwd: temporary.path().to_path_buf(),
+                home_dir,
+                project_cwd,
                 source: BuiltinAgentProvider::Claude,
                 target: BuiltinAgentProvider::Codex,
-                source_session_id: "11111111-1111-4111-8111-111111111111".to_string(),
+                source_session_id: source_session_id.to_string(),
                 codex_home: None,
-                codex_executable: None,
+                codex_executable: Some(PathBuf::from("/nonexistent/codex")),
             },
+            source_transcript_path: transcript_dir.join(format!("{source_session_id}.jsonl")),
         };
         workers.spawn(job).unwrap();
         let mut events = Vec::new();
@@ -845,7 +1356,8 @@ mod tests {
             events.last(),
             Some(ConversionWorkerEvent::Finished {
                 result: Err(message), ..
-            }) if message.contains("no Claude Code transcript")
+            }) if !message.contains("no Claude Code transcript")
+                && !message.contains("admission refused")
         ));
         drop(workers);
         execution.request_shutdown(ShutdownMode::Cancel);
@@ -861,6 +1373,7 @@ mod tests {
             BuiltinAgentProvider::Claude,
             BuiltinAgentProvider::Codex,
             "11111111-1111-4111-8111-111111111111".to_string(),
+            PathBuf::from("/tmp/project/.claude/transcript.jsonl"),
             PathBuf::from("/tmp/project"),
         )
     }
@@ -962,6 +1475,7 @@ mod tests {
                 source,
                 target,
                 SESSION_ID.to_string(),
+                PathBuf::from("/tmp/project/.claude/transcript.jsonl"),
                 std::env::temp_dir(),
             )));
             app.mode = Mode::ConvertSession;
@@ -1155,6 +1669,31 @@ mod tests {
             app.apply_pending_replacement_focus();
             assert!(app.pending_replacement_focus.is_none());
             assert_eq!(app.active_pane_id(), Some(replacement));
+        }
+
+        #[test]
+        fn the_unfreezing_status_clears_once_the_replacement_lands() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            let parent = app.tree.parent_of(pane).unwrap();
+            app.status_message = Some(UNFREEZING_AGENT_STATUS.to_string());
+            app.pending_replacement_focus = Some(ReplacementFocus {
+                old_pane_id: pane,
+                parent,
+                index: 0,
+                was_focused: false,
+            });
+            app.apply_pending_replacement_focus();
+            assert_eq!(
+                app.status_message.as_deref(),
+                Some(UNFREEZING_AGENT_STATUS),
+                "the old pane still exists, so the status must stay"
+            );
+            app.tree
+                .add_pane(parent, "new", PaneContentKind::Terminal)
+                .unwrap();
+            app.tree.remove_node(pane).unwrap();
+            app.apply_pending_replacement_focus();
+            assert!(app.status_message.is_none());
         }
     }
 }

@@ -3,7 +3,7 @@
 //! One scrollable page in three parts: shared selectors choosing what to
 //! measure and how "expensive" is decided (with a live threshold preview),
 //! the parameter of the chosen calibration, and one block per display
-//! option with an enable checkbox and a visibility selector. Geometry is
+//! option with an enable switch and a visibility selector. Geometry is
 //! produced once by [`view`] and shared by rendering, mouse hit testing,
 //! help anchors and keyboard scrolling, so they cannot drift apart.
 
@@ -24,7 +24,9 @@ use crate::cost_settings::{
     QUOTA_FIXED_PRESETS,
 };
 use crate::theme;
-use crate::value_control::{leader_span, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH};
+use crate::value_control::{
+    boolean_switch, leader_span, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH,
+};
 
 /// Left margin shared with the other settings tabs.
 const INSET: u16 = 2;
@@ -318,6 +320,12 @@ fn param_label(row: CostRow) -> &'static str {
         CostRow::BurnPreset => "Burn-rate bands",
         CostRow::SparklineWindow => "Sparkline window",
         CostRow::SparklineCells => "Sparkline width",
+        CostRow::MedalsEnabled => "Spending medals",
+        CostRow::MedalWindow => "Medal period",
+        CostRow::MedalScope => "Medal scope",
+        CostRow::MedalGoldIcon => "Gold medal icon",
+        CostRow::MedalSilverIcon => "Silver medal icon",
+        CostRow::MedalBronzeIcon => "Bronze medal icon",
         CostRow::SortByCost => "Sort tree by cost",
         _ => "",
     }
@@ -369,13 +377,27 @@ fn param_value(row: CostRow, app: &App) -> String {
         }
         CostRow::SparklineWindow => format_window(settings.sparkline_window_minutes),
         CostRow::SparklineCells => format!("{} cells", settings.sparkline_cells),
-        CostRow::SortByCost => {
-            if settings.sort_by_cost {
-                "On".to_owned()
-            } else {
-                "Off".to_owned()
-            }
+        CostRow::MedalsEnabled => {
+            crate::value_control::boolean_switch(settings.medals_enabled).into()
         }
+        CostRow::MedalWindow => format_window(settings.medal_window_minutes),
+        CostRow::MedalScope => settings.medal_scope.label().to_owned(),
+        CostRow::MedalGoldIcon => app
+            .ui_settings
+            .icons
+            .glyph(crate::icon_settings::IconTarget::SpendingMedalGold)
+            .to_owned(),
+        CostRow::MedalSilverIcon => app
+            .ui_settings
+            .icons
+            .glyph(crate::icon_settings::IconTarget::SpendingMedalSilver)
+            .to_owned(),
+        CostRow::MedalBronzeIcon => app
+            .ui_settings
+            .icons
+            .glyph(crate::icon_settings::IconTarget::SpendingMedalBronze)
+            .to_owned(),
+        CostRow::SortByCost => crate::value_control::boolean_switch(settings.sort_by_cost).into(),
         _ => String::new(),
     }
 }
@@ -440,6 +462,22 @@ fn param_description(row: CostRow, app: &App) -> String {
         }
         CostRow::SparklineCells => {
             "Number of time slices in the burn sparkline; each cell covers window ÷ width."
+                .to_owned()
+        }
+        CostRow::MedalsEnabled => {
+            "Show gold, silver and bronze beside the three agents with the most recent token spend."
+                .to_owned()
+        }
+        CostRow::MedalWindow => {
+            "Rolling token-spend period used for medals (twelve hours by default). Enter accepts 90, 90m, 6h or 2d."
+                .to_owned()
+        }
+        CostRow::MedalScope => {
+            "Award one set across all agents, or a separate gold, silver and bronze set for each provider."
+                .to_owned()
+        }
+        CostRow::MedalGoldIcon | CostRow::MedalSilverIcon | CostRow::MedalBronzeIcon => {
+            "Press Enter to choose the glyph from the shared rich icon catalogue; the same assignment is available in Icons."
                 .to_owned()
         }
         CostRow::SortByCost => {
@@ -563,7 +601,6 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
         let toggle_row = CostRow::Display(display);
         let visibility_row = CostRow::Visibility(display);
         let first_line = lines.len() as u16;
-        let checkbox = if option.enabled { "[x]" } else { "[ ]" };
         let label_style = if is_selected(toggle_row) {
             selected_style
         } else if option.enabled {
@@ -572,7 +609,7 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
             dim()
         };
         let (sample, level) = sample_for(display, settings);
-        let label = format!("  {checkbox} {}", display.label());
+        let label = format!("  {} {}", boolean_switch(option.enabled), display.label());
         let padding = usize::from(control_x).saturating_sub(UnicodeWidthStr::width(label.as_str()));
         lines.push(Line::from(vec![
             Span::styled(label, label_style),
@@ -633,12 +670,22 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
         lines.push(Line::from(""));
     }
 
-    // ---- sparkline and ordering parameters
-    lines.push(section_bar("SPARKLINE AND ORDER", "SPARKLINE", width));
+    // ---- sparkline, medal and ordering parameters
+    lines.push(section_bar(
+        "SPARKLINE, MEDALS AND ORDER",
+        "SPARKLINE",
+        width,
+    ));
     lines.push(Line::from(""));
     for row in [
         CostRow::SparklineWindow,
         CostRow::SparklineCells,
+        CostRow::MedalsEnabled,
+        CostRow::MedalWindow,
+        CostRow::MedalScope,
+        CostRow::MedalGoldIcon,
+        CostRow::MedalSilverIcon,
+        CostRow::MedalBronzeIcon,
         CostRow::SortByCost,
     ] {
         push_control(
@@ -692,7 +739,11 @@ fn push_control(
     };
     let is_number = matches!(
         row,
-        CostRow::HistoryDays | CostRow::Budget | CostRow::SparklineWindow | CostRow::SparklineCells
+        CostRow::HistoryDays
+            | CostRow::Budget
+            | CostRow::SparklineWindow
+            | CostRow::SparklineCells
+            | CostRow::MedalWindow
     );
     let shown = if is_number {
         format!(
@@ -909,7 +960,11 @@ pub fn hit_with_button(
     let index = all_rows.iter().position(|row| *row == span.row)?;
     let is_number = matches!(
         span.row,
-        CostRow::HistoryDays | CostRow::Budget | CostRow::SparklineWindow | CostRow::SparklineCells
+        CostRow::HistoryDays
+            | CostRow::Budget
+            | CostRow::SparklineWindow
+            | CostRow::SparklineCells
+            | CostRow::MedalWindow
     );
     let is_choice = matches!(
         span.row,
@@ -994,7 +1049,7 @@ mod tests {
                     "WHAT IS MEASURED?",
                     "HOW IS \"EXPENSIVE\" DECIDED?",
                     "WHAT TO SHOW ON EACH AGENT",
-                    "SPARKLINE AND ORDER",
+                    "SPARKLINE, MEDALS AND ORDER",
                 ] {
                     assert!(bars.iter().any(|line| line.to_string().contains(title)));
                 }
@@ -1120,6 +1175,127 @@ mod tests {
     }
 
     #[test]
+    fn medal_scope_plus_retains_failed_choice_and_retries_to_disk() {
+        use crate::app::{Mode, SettingsState, SettingsTab};
+        use crate::cost_settings::MedalScope;
+        use crate::value_dialog::ValueDialogState;
+        use crossterm::event::{
+            Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        };
+        use ratatui::{backend::TestBackend, Terminal};
+
+        // Plain-label rendering, premature closure, or dropping the retry choice must fail.
+        let directory = tempfile::tempdir().unwrap();
+        let initial = CostSettings {
+            budget_usd: 17.125,
+            ..CostSettings::default()
+        };
+        crate::config::save_cost_settings(directory.path(), &initial).unwrap();
+        let config_path = directory.path().join("config.toml");
+        let original = std::fs::read_to_string(&config_path).unwrap();
+        let mut app = App::new("medal-scope-dialog".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.cost_settings = initial.clone();
+        app.set_screen_area(Rect::new(0, 0, 130, 260));
+        app.mode = Mode::Settings(Box::new(SettingsState {
+            tab: SettingsTab::Cost,
+            ..SettingsState::default()
+        }));
+        let Mode::Settings(state) = &app.mode else {
+            panic!("Cost settings fixture");
+        };
+        let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
+            .content_area;
+        let span = view(&app, 0, area.width)
+            .rows
+            .into_iter()
+            .find(|span| span.row == CostRow::MedalScope)
+            .unwrap();
+        let open = value_control(area, 0, &span, &app)
+            .expect("medal scope must use the shared choice control")
+            .geometry()
+            .open;
+        let mut terminal = Terminal::new(TestBackend::new(130, 260)).unwrap();
+        terminal
+            .draw(|frame| render(frame, area, &app, 0, 0))
+            .unwrap();
+        assert_eq!(terminal.backend().buffer()[(open.x, open.y)].symbol(), "+");
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: open.x,
+                row: open.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("plus must open medal scope catalog");
+        };
+        let ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("medal scope choices");
+        };
+        assert_eq!(
+            choice
+                .options()
+                .iter()
+                .map(|option| (option.id.as_str(), option.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("global", "All agents together"),
+                ("per_provider", "Separate by provider")
+            ]
+        );
+        assert_eq!(choice.selected_id.as_deref(), Some("global"));
+        let key = |app: &mut App, code| {
+            crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        };
+        key(&mut app, KeyCode::Down);
+        let broken_config = "[cost\ninvalid synthetic configuration";
+        std::fs::write(&config_path, broken_config).unwrap();
+        key(&mut app, KeyCode::Enter);
+        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
+        app.settle_filesystem_for_test();
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("failed save must retain medal scope catalog");
+        };
+        assert!(!host.is_saving());
+        let ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("failed save lost choice");
+        };
+        assert_eq!(choice.highlighted_id.as_deref(), Some("per_provider"));
+        assert_eq!(choice.selected_id.as_deref(), Some("global"));
+        assert!(choice
+            .notice
+            .as_ref()
+            .is_some_and(|notice| !notice.is_empty()));
+        assert_eq!(
+            std::fs::read_to_string(&config_path).unwrap(),
+            broken_config
+        );
+
+        // Retry the retained selection after repairing the real configuration input.
+        std::fs::write(&config_path, original).unwrap();
+        key(&mut app, KeyCode::Enter);
+        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
+        assert_eq!(
+            crate::config::load(directory.path()).unwrap().cost,
+            initial,
+            "admission alone must not be reported as a durable save"
+        );
+        app.settle_filesystem_for_test();
+        assert!(matches!(&app.mode, Mode::Settings(state) if state.tab == SettingsTab::Cost));
+        assert!(app.modal_stack.is_empty());
+        assert_eq!(
+            crate::config::load(directory.path()).unwrap().cost,
+            CostSettings {
+                medal_scope: MedalScope::PerProvider,
+                ..initial
+            }
+        );
+    }
+
+    #[test]
     fn cost_choice_right_click_reverses_and_plus_opens_the_complete_dialog() {
         use crate::app::{Mode, SettingsState, SettingsTab};
         use crate::cost_model::CostMetric;
@@ -1135,10 +1311,10 @@ mod tests {
         app.config_dir = Some(directory.path().to_owned());
         app.cost_settings.metric = CostMetric::Dollars;
         app.set_screen_area(Rect::new(0, 0, 130, 260));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Cost,
             ..SettingsState::default()
-        });
+        }));
         let Mode::Settings(state) = &app.mode else {
             panic!("Cost settings fixture");
         };
@@ -1240,11 +1416,12 @@ mod tests {
         );
         app.config_dir = Some(directory.path().to_owned());
         app.cost_settings.calibration = Calibration::Budget;
+        crate::config::save_cost_settings(directory.path(), &app.cost_settings).unwrap();
         app.set_screen_area(Rect::new(0, 0, 130, 260));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Cost,
             ..SettingsState::default()
-        });
+        }));
         let Mode::Settings(state) = &app.mode else {
             panic!("Cost settings fixture");
         };
@@ -1280,6 +1457,7 @@ mod tests {
             ValueTarget::Cost { target, .. } if target.row == row
         ));
         assert!(matches!(&host.dialog, ValueDialogState::Number(_)));
+        app.settle_filesystem_for_test();
 
         let draft_length = match &app.mode {
             Mode::ValueDialog(host) => match &host.dialog {
@@ -1328,8 +1506,8 @@ mod tests {
         for display in CostDisplay::ALL {
             assert!(page.contains(display.label()), "{}", display.label());
         }
-        assert!(page.contains("[x] Five-cell meter"));
-        assert!(page.contains("[ ] Level glyph"));
+        assert!(page.contains("[ON  ●] Five-cell meter"));
+        assert!(page.contains("[○ OFF] Level glyph"));
         assert!(page.contains("← Only when hovering the entry + →"));
         assert!(page.contains("Sparkline window"));
         assert!(

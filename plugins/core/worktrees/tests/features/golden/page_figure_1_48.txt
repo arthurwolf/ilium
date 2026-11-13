@@ -1,0 +1,6 @@
+╭─ Git ──────────────────────────────────────────╮
+│ Worktree folder …………………… ~/dev/ilium.worktrees │
+│ Post-create command …………………………………… bun install │
+│ ! docs-sweep cannot be removed                 │
+│   It has uncommitted changes.                  │
+╰────────────────────────────────────────────────╯

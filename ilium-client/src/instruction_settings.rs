@@ -153,7 +153,7 @@ pub fn scrollbar_selection_at(tab: SettingsTab, area: Rect, position: Position) 
     let maximum_first = field_count.saturating_sub(visible_fields);
     let track_height = usize::from(area.height.saturating_sub(2)).max(1);
     let track_row = usize::from(position.y.saturating_sub(area.y.saturating_add(2)));
-    let first = track_row.saturating_mul(maximum_first) / track_height;
+    let first = track_row.saturating_mul(maximum_first) / track_height.saturating_sub(1).max(1);
     Some(SELECTION_BASE + first + visible_fields.saturating_sub(1))
 }
 
@@ -278,10 +278,10 @@ mod tests {
     fn instruction_header_actions_are_not_field_click_targets() {
         let mut app = App::new("instruction-header-click".into(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 60, 20));
-        app.mode = crate::app::Mode::Settings(crate::app::SettingsState {
+        app.mode = crate::app::Mode::Settings(Box::new(crate::app::SettingsState {
             tab: SettingsTab::LlmInstructions,
             ..Default::default()
-        });
+        }));
         let layout = crate::settings_ui::compute_layout_for_mode(
             app.layout.screen_area,
             &app,
@@ -393,7 +393,10 @@ mod tests {
         .expect("bottom of overflowing track");
 
         assert_eq!(first_visible(tab, area, top), 0);
-        assert_eq!(first_visible(tab, area, bottom), 5);
+        assert_eq!(
+            first_visible(tab, area, bottom),
+            fields(tab).len() - visible_field_count(area)
+        );
         assert_eq!(
             scrollbar_selection_at(tab, area, Position::new(area.right() - 2, area.y + 5),),
             None,
@@ -410,10 +413,10 @@ mod tests {
     fn instruction_scrollbar_click_selects_a_field_without_opening_its_editor() {
         let mut app = App::new("instruction-scrollbar-click".into(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 60, 20));
-        app.mode = crate::app::Mode::Settings(crate::app::SettingsState {
+        app.mode = crate::app::Mode::Settings(Box::new(crate::app::SettingsState {
             tab: SettingsTab::LlmInstructions,
             ..Default::default()
-        });
+        }));
         let layout = crate::settings_ui::compute_layout_for_mode(
             app.layout.screen_area,
             &app,
@@ -530,27 +533,32 @@ mod interaction_tests {
         let mut app = App::new("instructions".into(), directory.path().to_path_buf());
         app.config_dir = Some(directory.path().to_path_buf());
         app.layout.screen_area = Rect::new(0, 0, 80, 24);
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::LlmInstructions,
             selected_row: SELECTION_BASE + 1,
             ..Default::default()
-        });
+        }));
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
         key(&mut app, KeyCode::Char('X'), KeyModifiers::NONE);
         key(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
         assert_eq!(app.inference_settings.instructions.entry_naming, "X");
         assert!(matches!(&app.mode,Mode::Settings(s) if s.tab==SettingsTab::LlmInstructions));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Titles,
             ..Default::default()
-        });
-        let area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
+        }));
+        let Mode::Settings(state) = &app.mode else {
+            unreachable!()
+        };
+        let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
+            .content_area;
         crate::mouse::handle_mouse_event(
             &mut app,
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
                 column: area.x + 1,
-                row: area.y + 1,
+                // Two panel heading rows precede the first instruction field.
+                row: area.y + 2,
                 modifiers: KeyModifiers::NONE,
             },
         );
@@ -602,10 +610,10 @@ mod interaction_tests {
     fn wheel_reaches_the_last_shared_field_in_a_short_terminal() {
         let mut app = App::new("instructions".into(), std::env::temp_dir());
         app.layout.screen_area = Rect::new(0, 0, 60, 20);
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::LlmInstructions,
             ..Default::default()
-        });
+        }));
         let area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
         for _ in 0..6 {
             crate::mouse::handle_mouse_event(

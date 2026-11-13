@@ -1,0 +1,11 @@
+- ilium-plugin-sdk: needs `testing` enabled for its tests (dev-dependency or required-features) plus dev-dependency `proptest`; DEV-563/DEV-522.
+- ilium-plugin-testkit: re-export `Invocation` (fakes::cli) and `Submission` under `testing`; DEV-563.
+- ilium-plugin-testkit/sdk: `pub fn arbitrary_event() -> impl Strategy<Value = Event>` (manual) vs skeleton `arbitrary_event(&mut ChaCha8Rng) -> Event`; DEV-522.
+- ilium-plugin-testkit: `FakeScene::advance_clock(&mut self, ms: u64)`; DEV-561.
+- ilium-plugin-testkit: `FrameInput::default()` is all zeros but manual says width/height come from scene size and times from the fake clock; DEV-561.
+- ilium-plugin-testkit: `ReplayMismatch` has no code channel for `replay.version-unsupported`; DEV-542.
+- CLI tests need env `ILIUM_BIN` and `ILIUM_TEST_COMPONENT_SERVER` (a built component); DEV-517, 544, 550-552.
+- Coverage tests need `cargo-llvm-cov`; DEV-530-532.
+- DEV-552 terminal test uses `script(1)`.
+- Fuzz failing round index base (zero or one) is unspecified; DEV-521.
+- Replay recording point/plugin id for a native Spy is unspecified; DEV-540.

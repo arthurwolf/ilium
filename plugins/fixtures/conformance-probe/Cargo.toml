@@ -1,0 +1,15 @@
+[package]
+name = "ilium-plugin-fixture-conformance-probe"
+description = "Guest fixture component conformance-probe (test-plan.md section 1.4)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk" }

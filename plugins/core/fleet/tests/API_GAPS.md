@@ -1,0 +1,30 @@
+# API gaps for ilium.core.fleet feature tests
+
+- ilium-plugin-testkit: `FakeHost::sessions(&mut self) -> &mut FakeSessions` with `add_live(&mut self, name: &str, project: &str, is_self: bool, panes_json: &str)`, `add_unreachable(&mut self, name: &str, project: &str)`, `requests(&self) -> Vec<(String, String, String)>`; F-109, F-110; panes and broadcast read other sessions.
+- ilium-plugin-testkit: `FakeCli::set_env(&mut self, name: &str, value: &str)`; F-110; marks the calling pane (is_self).
+- ilium-plugin-testkit: `FakeHost::http_replies(&self) -> Vec<(u64, u16, Vec<(String, String)>, Vec<u8>)>`; F-058; observe HTTP replies.
+- ilium-plugin-testkit: `FakeHost::pending_requests(&self) -> Vec<RequestId>`; F-058; complete create-pane requests in tests.
+- ilium-plugin-testkit: `FakeHost::stub_service(&mut self, name: &str, method: &str, reply_json: &str)`; F-109, F-107, F-058; fake cost and worktrees services.
+- ilium-plugin-testkit: `FakeHost::stub_service_failure(&mut self, name: &str, method: &str, message: &str)`; F-109; cost failure path.
+- ilium-plugin-testkit: `FakeHost::service_calls(&self) -> Vec<(String, String, String)>`; F-109, F-107, F-058; observe service use.
+- ilium-plugin-testkit: `FakeHost::call_own_service(&mut self, service: &str, method: &str, payload_json: &str) -> String`; COR-011; call the plugin's offered services.
+- ilium-plugin-testkit: `FakeHost::auto_outcome(&mut self, outcome: Outcome)`; F-110; make deliveries fail.
+- ilium-plugin-testkit: `FakeHost::published_topics(&self) -> Vec<(String, String)>`; F-110; observe broadcast-sent.
+- ilium-plugin-testkit: `FakeHost::hook_reply(&mut self, point: &str, reply: HookReply)`; F-110, COR-011; answer before-broadcast.
+- ilium-plugin-testkit: `FakeHost::collect_entries(&mut self, point: &str, entries: Vec<String>)`; COR-011; feed selectors.
+- ilium-plugin-testkit: `FakeHost::hook_calls(&self, point: &str) -> Vec<String>`; F-110, COR-011; observe hook payloads.
+- ilium-plugin-testkit: `FakeHost::disable_plugin(&mut self, id: &str)`; COR-022; render the disabled notice.
+- ilium-plugin-testkit: `FakeFs` exposed as `FakeHost::fs(&mut self) -> &mut FakeFs`; F-110; `--file` input.
+- ilium-plugin-sdk: `CreatePaneSpec` fields `title`, `cwd`, `command`, `initial_input`, `parent`, `content_kind` as used by tests; F-107, F-058; verify names against the generated type.
+- ilium.core.fleet manifest: no `extensions.provide` grants, `services.offer`, topic grants, settings rows or menus although the page defines them; COR-011, COR-030, COR-050.
+- Manual conflict: `ilium.core.fleet` fragment says new-pane output "jsonl", complete manifest says "mixed"; COR-050.
+- Manual conflict: kernel-and-boot disabled-effect row says new-pane is kernel-owned but the manifest contributes it; COR-022.
+- Manual conflict: page sample for /create_agent uses {title, command}, 201, {"pane_id":N}; user docs use {agent_type, project, prompt, workspace}; F-058.
+- Manual gap: ask-for-update channel name, payload and target selection, and the F-023 editor contract, are unspecified; F-036, F-023.
+- Port twins: FakeHost has no fake home directory; twins assume `/home/me` and `/home/me/dev/<area>/<name>` for bare-project lookup in `POST /create_agent`; fleet port tests, F-058.
+- Port twins: FakeFs has only write and read, no mkdir or directory listing; directories exist only through files written inside them; fleet port tests, F-058.
+- Port twins: manual does not specify the Ask-for-update recipient checklist, the press-Enter option, mouse hit-testing, unavailable recipients, or the custom-instructions setting, so those client tests have no twin; F-036.
+- Port twins: manual does not specify the create-agent-from-line dialog (selector, draft retention on refusal, retry); only the HTTP creation path has twins; F-058.
+- Port twins: initial-prompt paste framing, marker stripping and CRLF normalisation are kernel-owned; the manual does not say what `initial_input` looks like at the plugin boundary; F-058.
+- Port twins (scoped_ask.rs): the manual does not say how an Ask for update scope reaches the server side. The twins use channel `ask-for-update-scoped` with JSON `{"node": <id>, "text": <string, absent for the fixed status request>}`, a `row-action` command-invoked with `{"node": <id>}` (api-tree-chrome.md `row_actions`), and the fleet manifest declaring one `row_actions` entry for `ask-for-update` with `applies_to: ["project"]`; F-036.
+- ilium-plugin-testkit: `FakeTree::move_node(&mut self, id: u64, new_parent: u64)` - moving an agent out of the asked scope; F-036.

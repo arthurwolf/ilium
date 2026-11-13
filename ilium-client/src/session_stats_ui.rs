@@ -548,7 +548,13 @@ impl Canvas {
     ) {
         let value_width = UnicodeWidthStr::width(value);
         let share_text = share.map_or_else(String::new, percent_label);
-        let trailing = value_width + 2 + share_text.len().max(5) + 1;
+        let trailing = 2
+            + value_width
+            + if share_text.is_empty() {
+                0
+            } else {
+                2 + share_text.len().max(5)
+            };
         let bar_width = usize::from(self.width)
             .saturating_sub(label_width + 2 + trailing)
             .max(6);
@@ -663,7 +669,8 @@ impl Canvas {
     }
 
     /// The ribbon under a chart's axis: a one-dot-thick braille line coloured
-    /// by what the agent was doing (bold dots while a progress bar runs), a
+    /// by what the agent was doing (idle is white), a coloured line under it
+    /// while a progress bar runs, a
     /// row of success/failure icons for finished progress bars, and a flexing
     /// legend. Columns line up with the chart's data columns.
     fn work_ribbon_rows(&mut self, work: &WorkContext<'_>, gutter: usize, chart_width: usize) {
@@ -685,19 +692,27 @@ impl Canvas {
         let mut line = vec![prefix(label)];
         for cell in &ribbon.cells {
             line.push(match cell {
-                Some(cell) => {
-                    let color = self.work_color(cell.kind);
-                    if cell.progress_running {
-                        // Two dots thick: the "bold" line of a running progress bar.
-                        Span::styled("⣤", Style::new().fg(color).add_modifier(Modifier::BOLD))
-                    } else {
-                        Span::styled("⠤", Style::new().fg(color))
-                    }
-                }
+                Some(cell) => Span::styled("⠤", Style::new().fg(self.work_color(cell.kind))),
                 None => Span::raw(" "),
             });
         }
         self.line(Line::from(line));
+
+        if ribbon.has_running_progress() {
+            // Colour only, no bold: a second line in the progress colour
+            // marks the columns where a progress bar was running.
+            let progress_color = self.palette.label;
+            let mut line = vec![prefix("")];
+            for cell in &ribbon.cells {
+                line.push(match cell {
+                    Some(cell) if cell.progress_running => {
+                        Span::styled("⠤", Style::new().fg(progress_color))
+                    }
+                    _ => Span::raw(" "),
+                });
+            }
+            self.line(Line::from(line));
+        }
 
         if ribbon.outcomes.iter().any(Option::is_some) {
             let mut line = vec![prefix("")];
@@ -705,7 +720,7 @@ impl Canvas {
                 line.push(match outcome {
                     Some(outcome) => {
                         let (icon, color) = self.outcome_icon(*outcome);
-                        Span::styled(icon, Style::new().fg(color).add_modifier(Modifier::BOLD))
+                        Span::styled(icon, Style::new().fg(color))
                     }
                     None => Span::raw(" "),
                 });
@@ -722,12 +737,7 @@ impl Canvas {
         }
         if ribbon.has_running_progress() {
             entries.push(vec![
-                Span::styled(
-                    "⣤⣤ ",
-                    Style::new()
-                        .fg(self.palette.label)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled("⠤⠤ ", Style::new().fg(self.palette.label)),
                 Span::styled("progress bar running", dim),
             ]);
         }
@@ -739,10 +749,7 @@ impl Canvas {
             if ribbon.has_outcome(outcome) {
                 let (icon, color) = self.outcome_icon(outcome);
                 entries.push(vec![
-                    Span::styled(
-                        format!("{icon} "),
-                        Style::new().fg(color).add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(format!("{icon} "), Style::new().fg(color)),
                     Span::styled(text, dim),
                 ]);
             }
@@ -779,7 +786,7 @@ impl Canvas {
     fn work_color(&self, kind: WorkKind) -> Color {
         let palette = &self.palette;
         match kind {
-            WorkKind::Idle => palette.dim,
+            WorkKind::Idle => Color::White,
             WorkKind::Model => palette.output,
             WorkKind::Shell => palette.warn,
             WorkKind::Edit => palette.good,
@@ -1479,6 +1486,16 @@ fn token_legend(canvas: &mut Canvas, tokens: &TokenTotals) {
     }
 }
 
+fn recorded_cost_label(usd: f64) -> String {
+    if usd > 0.0 && usd < 0.0001 {
+        "<$0.0001".to_owned()
+    } else if usd > 0.0 && usd < 0.01 {
+        format!("${usd:.4}")
+    } else {
+        format!("${usd:.2}")
+    }
+}
+
 fn draw_cost(canvas: &mut Canvas, stats: &SessionStats) {
     let dim = Style::new().fg(canvas.palette.dim);
     let (warn, label) = (canvas.palette.warn, canvas.palette.label);
@@ -1497,7 +1514,7 @@ fn draw_cost(canvas: &mut Canvas, stats: &SessionStats) {
     canvas.heading("Cost", "as recorded by Claude Code");
     canvas.line(Line::from(vec![
         Span::styled(
-            format!("${:.2}", cost.total_usd),
+            recorded_cost_label(cost.total_usd),
             Style::new()
                 .fg(canvas.palette.good)
                 .add_modifier(Modifier::BOLD),
@@ -1521,7 +1538,7 @@ fn draw_cost(canvas: &mut Canvas, stats: &SessionStats) {
                 14,
                 usd / peak,
                 label,
-                &format!("${usd:.2}"),
+                &recorded_cost_label(*usd),
                 (cost.total_usd > 0.0).then(|| usd / cost.total_usd),
             );
         }
@@ -2268,6 +2285,69 @@ mod tests {
     }
 
     #[test]
+    fn statistics_bar_keeps_value_and_percentage_inside_canvas() {
+        for width in [36, 100] {
+            let mut canvas = Canvas::new(
+                width,
+                Style::default(),
+                palette(ColorScheme::Dark),
+                StatsScale::default(),
+                None,
+            );
+            canvas.bar_row("fresh input", 12, 1.0, Color::Green, "15.0k ", Some(0.74));
+            let row: String = (0..width).map(|x| canvas.buffer[(x, 0)].symbol()).collect();
+            assert!(
+                row.contains("15.0k"),
+                "missing value at width {width}: {row}"
+            );
+            assert!(
+                row.contains("74%"),
+                "missing percentage at width {width}: {row}"
+            );
+        }
+    }
+
+    #[test]
+    fn recorded_subcent_costs_remain_visible_in_total_and_model_rows() {
+        for (usd, expected) in [
+            (0.00132067, "$0.0013"),
+            (0.00001, "<$0.0001"),
+            (0.0, "$0.00"),
+            (12.5, "$12.50"),
+        ] {
+            let mut stats = sample_stats();
+            let cost = stats.cost.as_mut().unwrap();
+            cost.total_usd = usd;
+            cost.model_costs = vec![("claude-haiku-4-5".into(), usd)];
+            let mut canvas = Canvas::new(
+                90,
+                Style::default(),
+                palette(ColorScheme::Dark),
+                StatsScale::default(),
+                None,
+            );
+            draw_cost(&mut canvas, &stats);
+            let rows: Vec<String> = (0..canvas.y)
+                .map(|y| {
+                    (0..canvas.width)
+                        .map(|x| canvas.buffer[(x, y)].symbol())
+                        .collect()
+                })
+                .collect();
+            assert!(
+                rows.iter().any(|row| row.contains(expected)),
+                "missing total {expected}: {rows:?}"
+            );
+            if usd > 0.0 {
+                assert!(
+                    rows.iter().filter(|row| row.contains(expected)).count() >= 2,
+                    "missing model cost {expected}: {rows:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_popover_fills_the_right_panel_and_never_leaves_it() {
         // A tree occupies the left 40 columns; the panel is the rest.
         let panel = Rect::new(40, 0, 100, 40);
@@ -2306,14 +2386,15 @@ mod tests {
         }
         let ribbon = rows[heading + 2..]
             .iter()
-            .position(|row| row.contains('⠤') && row.contains('⣤'))
+            .position(|row| row.contains('⠤'))
             .map(|offset| heading + 2 + offset)
-            .expect("ribbon row with thin and bold dots");
-        assert!(rows[ribbon + 1].contains('✓') && rows[ribbon + 1].contains('✗'));
-        assert!(rows[ribbon + 2].contains("progress bar running"));
-        assert!(rows[ribbon + 2].contains("thinking"));
+            .expect("ribbon row");
+        assert!(rows[ribbon + 1].contains('⠤'), "progress colour line");
+        assert!(rows[ribbon + 2].contains('✓') && rows[ribbon + 2].contains('✗'));
+        assert!(rows[ribbon + 3].contains("progress bar running"));
+        assert!(rows[ribbon + 3].contains("thinking"));
         // Time labels come after the ribbon, under the axis.
-        assert!(rows[ribbon + 3].contains(':'));
+        assert!(rows[ribbon + 4].contains(':'));
         assert!(popover.scale_buttons.len() >= StatsScale::ALL.len());
     }
 
@@ -2396,6 +2477,54 @@ mod tests {
             "a pinned popover shows its close control"
         );
         assert!(popover.content_rows > 0);
+    }
+
+    #[test]
+    fn refreshing_keeps_the_previous_statistics_visible() {
+        let stats = sample_stats();
+        let load = LoadState::Loading {
+            done: 50,
+            total: 100,
+        };
+        let view = StatsView {
+            stats: Some(&stats),
+            load: &load,
+            supported: true,
+            has_session: true,
+            now_ms: 1_790_000_000_000,
+            animation_ms: 0,
+            scheme: ColorScheme::Dark,
+        };
+        let mut popover = StatsPopover::new(NodeId(1), true, Instant::now());
+        let mut terminal = Terminal::new(TestBackend::new(120, 44)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    Position::new(5, 0),
+                    &mut popover,
+                    &view,
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let text = (0..44)
+            .map(|y| {
+                (0..120)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("$12.50"),
+            "retained totals remain visible: {text}"
+        );
+        assert!(
+            text.contains("reading 50%"),
+            "refresh progress remains visible: {text}"
+        );
     }
 
     #[test]

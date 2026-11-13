@@ -34,6 +34,31 @@ use ilium_server::config::{DetectionConfig, NotificationsConfig};
 use ilium_server::{run, NoopSoundPlayer, ServerOptions, SoundPlayer};
 use ilium_transport::{Liveness, SessionEndpoint, SessionStream};
 
+/// Points `$SHELL` at `/bin/sh` for the whole test process, once.
+///
+/// Command panes run `$SHELL -c <command line>`, so an ambient `SHELL` decides
+/// what the test's fake agent is launched through. A developer's login shell
+/// is fine; a CI or build host whose `SHELL` is some other program (an agent
+/// wrapper, a launcher) makes the test fail for a reason that has nothing to do
+/// with detection. Pinning it keeps the test about the server. Unix only:
+/// Windows reads `SHELL` for the same purpose and has no `/bin/sh`.
+fn pin_test_pane_shell() {
+    static PINNED: std::sync::Once = std::sync::Once::new();
+    if !cfg!(unix) {
+        return;
+    }
+    PINNED.call_once(|| {
+        // Edition 2021 allows `set_var`; this runs once, before any test server
+        // spawns a pane that could read the variable.
+        std::env::set_var("SHELL", "/bin/sh");
+    });
+}
+
+/// Upper bound on the pane text kept for a timeout report. Enough for a full
+/// screen of an agent's startup and error output; bounded so a noisy pane
+/// cannot grow the test's memory without limit.
+const SCREEN_TEXT_CAPTURE_LIMIT: usize = 16 * 1024;
+
 /// Polls `condition` until it's true or `timeout` elapses, without a fixed
 /// sleep -- the server binding its socket (or, for
 /// `live_agent_detection.rs`, the real detection loop's next tick) is not
@@ -122,9 +147,21 @@ pub async fn expect_event(
     // what the server *did* send usually names the cause immediately.
     let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let observed_in_loop = std::sync::Arc::clone(&observed);
+    // The pane's decoded text, kept whole (up to a cap) rather than as the
+    // clipped `Debug` label above: a pane that printed an error before the
+    // detector could classify it names the cause only in this text.
+    let screen_text = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let screen_text_in_loop = std::sync::Arc::clone(&screen_text);
     tokio::time::timeout(timeout, async move {
         loop {
             let event: ServerEvent = read_frame(stream).await.expect("read a server event");
+            if let ServerEvent::ScreenUpdate { bytes, .. } = &event {
+                if let Ok(mut text) = screen_text_in_loop.lock() {
+                    if text.len() < SCREEN_TEXT_CAPTURE_LIMIT {
+                        text.push_str(&String::from_utf8_lossy(bytes));
+                    }
+                }
+            }
             if let Ok(mut seen) = observed_in_loop.lock() {
                 // Debug entries carry the server's own reasoning -- which agent
                 // it identified and why -- so they are kept at length while
@@ -154,8 +191,12 @@ pub async fn expect_event(
                 }
             })
             .unwrap_or_else(|_| "(unavailable)".to_string());
+        let pane_text = screen_text
+            .lock()
+            .map(|text| text.clone())
+            .unwrap_or_else(|_| "(unavailable)".to_string());
         panic!(
-            "timed out waiting for the expected server event\nevents received:\n  {seen}\nwhat the detector sees:\n{}\nlive process table:\n{}",
+            "timed out waiting for the expected server event\nevents received:\n  {seen}\npane output (decoded, lossy UTF-8):\n{pane_text}\nwhat the detector sees:\n{}\nlive process table:\n{}",
             detector_view(),
             process_table_snapshot()
         )
@@ -407,6 +448,7 @@ impl TestServer {
         agent_debug_menu_enabled: bool,
         notifications_config: NotificationsConfig,
     ) -> Self {
+        pin_test_pane_shell();
         // Taken before anything is started, and released when this server is
         // dropped at the end of the test.
         let live_server_guard = LIVE_SERVER_LOCK.lock().await;
@@ -423,6 +465,7 @@ impl TestServer {
         let socket_path = socket_dir.path().join(format!("{session_name}.sock"));
 
         let options = ServerOptions {
+            resource_catalog_path: None,
             session_name: session_name.to_string(),
             socket_path: socket_path.clone(),
             snapshot_path: snapshot_path.clone(),

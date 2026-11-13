@@ -1,0 +1,874 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Extending core plugins | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details open><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/" aria-current="page">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Concepts</b></p>
+<h1>Extending core plugins</h1>
+
+<p>Many features of Ilium are core plugins: titles, cost, fleet, notifications, search and more. <a href="/pages/core-plugins/">Core plugins</a> lists them. This page answers one question: how does another plugin control, change or build on one of those features? It also answers a second one: how does a plugin let others build on it?</p>
+<p>The short answer is that there are five ways, from light to heavy, and every core plugin supports the first four in the same way. The fifth is available for all core plugins except two. All five use the public contract <code>ilium:plugin@0.1.0</code>. A third-party plugin gets nothing less than a core plugin gets.</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>A grant for each way.</strong> Observing needs a topic grant. Driving needs a service or command grant. Extending needs <a href="/pages/capability-extensions-contribute/">extensions.contribute</a>. Offering needs <a href="/pages/capability-extensions-provide/">extensions.provide</a>. Replacing needs no grant of its own to take the place of a core plugin, and the user confirms it. A replacement still declares the <code>services.provide</code> and <code>extensions.provide</code> grants for the services and extension points it re-offers, as the manifest example below shows.</li>
+<li><strong>The page of the core plugin.</strong> Every core plugin page has an <strong>Extension points</strong> section that lists its points, services and topics. <a href="/pages/reference-core-extension-points/">Reference: core extension points</a> lists all of them in one place.</li>
+<li><strong>An SDK.</strong> Rust: stable 1.90 or later with the <code>wasm32-wasip2</code> target and the <code>ilium-plugin-sdk</code> crate. TypeScript: Bun 1.2 or later and <code>@ilium/plugin-sdk</code>.</li>
+</ul>
+<h3 id="the-dogfooding-rule">The dogfooding rule</h3>
+<p>Core plugins are ordinary plugins. They are bundled, they have an id that starts with <code>ilium.</code>, and they are first-party (tier T1). They use only the public contract. They have no private API and no hidden hooks. Everything a core plugin can do, a third-party plugin can do with the same grants.</p>
+<p>Two things follow from this rule.</p>
+<ul>
+<li><strong>If a core plugin lets you change something, it says so.</strong> The lever is a service, a topic, a command, a pane kind or an extension point. It is documented on its page.</li>
+<li><strong>If you need a lever that does not exist, ask for a new point, not a private path.</strong> A new point is a normal change to the core plugin's manifest. It gets a version, a risk level and a review.</li>
+</ul>
+<p>The kernel keeps only the primitives: the PTY, the tree storage, rendering, the plugin host, the grants and the four pane primitives (terminal, agent, editor, basic). Core plugins own the behaviour on top of them. See <a href="/pages/architecture/">architecture</a> and <a href="/pages/primitives/">primitives</a>.</p>
+<h3 id="five-ways-to-work-with-a-core-feature">Five ways to work with a core feature</h3>
+<table>
+<thead>
+<tr>
+<th>Way</th>
+<th>What you do</th>
+<th>Weight</th>
+<th>Needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Observe</strong></td>
+<td>Read events, topics, catalogues and decoration slots.</td>
+<td>Lightest. Read only.</td>
+<td>A topic grant, for example <code>topics.subscribe:ilium.core.notifications/raised</code>.</td>
+</tr>
+<tr>
+<td><strong>Drive</strong></td>
+<td>Call a service or a command of the core plugin, or send an intent that it also uses.</td>
+<td>You act, the core plugin runs the feature.</td>
+<td><code>services.use:&lt;id&gt;/&lt;name&gt;</code> or <code>commands.invoke:&lt;id&gt;/&lt;command&gt;</code>.</td>
+</tr>
+<tr>
+<td><strong>Extend</strong></td>
+<td>Fill an extension point: a collect entry (data) or a hook (code in the core plugin's flow).</td>
+<td>You change what the core plugin does. It stays in charge.</td>
+<td><code>extensions.contribute:&lt;id&gt;/&lt;point&gt;</code>.</td>
+</tr>
+<tr>
+<td><strong>Offer</strong></td>
+<td>Declare your own extension points so others can extend you.</td>
+<td>You become the owner of a slot.</td>
+<td><code>extensions.provide:&lt;your-id&gt;/&lt;point&gt;</code>.</td>
+</tr>
+<tr>
+<td><strong>Replace</strong></td>
+<td>Install a plugin that takes over the whole surface of a core plugin.</td>
+<td>Heaviest. The built-in plugin is turned off.</td>
+<td><code>replaces</code> in the manifest and the user's confirmation.</td>
+</tr>
+</tbody>
+</table>
+<p>Pick the lightest way that does the job. Each step up costs more review, more risk and more work to keep in step with the core plugin.</p>
+<h4 id="i-want-to-use">I want to ... use ...</h4>
+<table>
+<thead>
+<tr>
+<th>I want to ...</th>
+<th>Use</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Know when a notice was raised</td>
+<td>Observe</td>
+<td>The topic <code>ilium.core.notifications/raised</code> pushes it to you.</td>
+</tr>
+<tr>
+<td>Raise a notice myself</td>
+<td>Drive</td>
+<td>The service <code>ilium.core.notifications/notify</code> takes a title, a body and an urgency.</td>
+</tr>
+<tr>
+<td>Stop some notices at night</td>
+<td>Extend (hook)</td>
+<td><code>before-notify</code> is a <code>veto</code> hook. A handler that refuses stops the notice.</td>
+</tr>
+<tr>
+<td>Add a chat webhook as a delivery channel</td>
+<td>Extend (collect)</td>
+<td><code>channels</code> is a collect point. Your entry names a service of yours.</td>
+</tr>
+<tr>
+<td>Rewrite text before it is copied</td>
+<td>Extend (hook)</td>
+<td><code>ilium.core.smart-copy/after-copy</code> is a <code>transform</code> hook.</td>
+</tr>
+<tr>
+<td>Add a new kind of thing to select in Smart Copy</td>
+<td>Extend (collect)</td>
+<td><code>recognisers</code> is a collect point.</td>
+</tr>
+<tr>
+<td>Let others add card actions to my board plugin</td>
+<td>Offer</td>
+<td>Declare <code>card-actions</code> as a collect point of your own.</td>
+</tr>
+<tr>
+<td>Draw something next to a tree row</td>
+<td>Observe and a kernel slot</td>
+<td>Decoration slots are a kernel slot, not an extension point. See <a href="/pages/capability-tree-decorate/">tree.decorate</a>.</td>
+</tr>
+<tr>
+<td>Change how the whole tree sorts and groups</td>
+<td>Replace</td>
+<td>No point covers the whole feature.</td>
+</tr>
+<tr>
+<td>Show a fixed text in a menu</td>
+<td>A provider</td>
+<td>Use <a href="/pages/api-menu-provider/">menu provider</a>, a kernel slot.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="one-running-scenario-quiet-hours-for-notifications">One running scenario: quiet hours for notifications</h3>
+<p>The goal: the user wants no low-urgency notices between 22:00 and 07:00. The notifications feature is the core plugin <code>ilium.core.notifications</code>. Its surface, from <a href="/pages/core-plugin-notifications/">its page</a>:</p>
+<ul>
+<li>Service: <code>ilium.core.notifications/notify</code> (method <code>send</code>).</li>
+<li>Topic: <code>ilium.core.notifications/raised</code>, with <code>{ event, pane, urgency }</code>.</li>
+<li>Points: <code>before-notify</code> (hook, <code>veto</code>) and <code>channels</code> (collect).</li>
+</ul>
+<p>Each way solves part of the goal, or a neighbouring goal. The sections below show the code.</p>
+<h4 id="way-1-observe">Way 1: observe</h4>
+<p>Observe when you only need to know. This plugin counts how many notices were raised and writes the number to its log. It needs <code>topics.subscribe:ilium.core.notifications/raised</code> in its capabilities and lists the topic under <code>contributes.topics.subscribes</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::prelude::*;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct NoticeCounter {
+    raised: u32,
+}
+
+impl Lifecycle for NoticeCounter {}
+
+impl Handler for NoticeCounter {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        for event in batch {
+            if let Event::TopicPublished(published) = event {
+                if published.topic == &quot;ilium.core.notifications/raised&quot; {
+                    self.raised += 1;
+                    log::log(Level::Info, &amp;format!(&quot;notices raised: {}&quot;, self.raised));
+                }
+            }
+        }
+        Vec::new()
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+let raised = 0;
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  onEvents(batch: Event[]): Submission[] {
+    for (const event of batch) {
+      if (event.tag === 'topic-published' &amp;&amp; event.val.topic === 'ilium.core.notifications/raised') {
+        raised += 1;
+        log('info', `notices raised: ${raised}`);
+      }
+    }
+    return [];
+  },
+});
+</code></pre>
+<p>An observer cannot change anything. It also never slows the core plugin down. See <a href="/pages/api-messages-and-topics/">messages and topics</a>.</p>
+<h4 id="way-2-drive">Way 2: drive</h4>
+<p>Drive when you want the core plugin to do its job for you. This plugin raises a notice when its own job ends. It needs <code>services.use:ilium.core.notifications/notify</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::host::services;
+
+// manifest: &quot;services.use:ilium.core.notifications/notify&quot;
+async fn tell_user(title: &amp;str) {
+    let payload = format!(r#&quot;{{&quot;title&quot;:&quot;{title}&quot;,&quot;body&quot;:&quot;&quot;,&quot;urgency&quot;:&quot;low&quot;}}&quot;#);
+    if let Err(error) = services::call(&quot;ilium.core.notifications/notify&quot;, &quot;send&quot;, &amp;payload).await {
+        log::log(Level::Warn, &amp;format!(&quot;notify failed: {}&quot;, error.message));
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { call } from '@ilium/plugin-sdk/host/services';
+import { log } from '@ilium/plugin-sdk/host/log';
+
+// manifest: &quot;services.use:ilium.core.notifications/notify&quot;
+export async function tellUser(title: string): Promise&lt;void&gt; {
+  try {
+    await call(
+      'ilium.core.notifications/notify',
+      'send',
+      JSON.stringify({ title, body: '', urgency: 'low' }),
+    );
+  } catch (error) {
+    log('warn', `notify failed: ${String(error)}`);
+  }
+}
+</code></pre>
+<p>The call passes through the same <code>before-notify</code> chain as every other notice, so a quiet hours extension affects your notice too. Services follow the rules in <a href="/pages/services/">services</a> and <a href="/pages/api-services/">services API</a>.</p>
+<h4 id="way-3-extend">Way 3: extend</h4>
+<p>Extend when you want to change what the core plugin does. This is the way that solves the quiet hours goal. The extension is a <code>veto</code> handler on <code>before-notify</code>. It refuses a notice of urgency <code>low</code> at night.</p>
+<p>Manifest of the extension package:</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;com.example.quiet-hours&quot;,
+  &quot;exports&quot;: [&quot;hook-handler&quot;],
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [&quot;extensions.contribute:ilium.core.notifications/before-notify&quot;]
+  },
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      { &quot;point&quot;: &quot;ilium.core.notifications/before-notify@0.1.0&quot;, &quot;id&quot;: &quot;quiet-hours&quot;,
+        &quot;priority&quot;: 40, &quot;handler&quot;: &quot;quiet_hours&quot; }
+    ]
+  }
+}
+</code></pre>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::exports::{HookCall, HookHandler, HookReply};
+use ilium_plugin_sdk::prelude::*;
+
+#[ilium_plugin(side = &quot;server&quot;, exports = [&quot;hook-handler&quot;])]
+#[derive(Default)]
+struct QuietHours;
+
+impl Lifecycle for QuietHours {}
+
+impl Handler for QuietHours {
+    fn on_events(&amp;mut self, _batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        Vec::new()
+    }
+}
+
+impl HookHandler for QuietHours {
+    fn handle_hook(&amp;mut self, call: HookCall) -&gt; HookReply {
+        if call.extension != &quot;quiet_hours&quot; {
+            return HookReply::Pass;
+        }
+        // Parse call.payload_json with a JSON library in a real plugin.
+        let is_low = call.payload_json.contains(r#&quot;&quot;urgency&quot;:&quot;low&quot;&quot;#);
+        if is_low &amp;&amp; is_quiet_time() {
+            return HookReply::Refuse(&quot;quiet hours&quot;.to_string());
+        }
+        HookReply::Pass
+    }
+}
+
+fn is_quiet_time() -&gt; bool {
+    false // stand-in for a clock read and the user's setting
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { definePlugin, type HookCall, type HookReply } from '@ilium/plugin-sdk';
+
+function isQuietTime(): boolean {
+  const hour = new Date().getHours();
+  return hour &gt;= 22 || hour &lt; 7;
+}
+
+export const { lifecycle, handler, hookHandler } = definePlugin({
+  side: 'server',
+  onEvents() {
+    return [];
+  },
+  handleHook(call: HookCall): HookReply {
+    if (call.extension !== 'quiet_hours') {
+      return { tag: 'pass' };
+    }
+    const payload = JSON.parse(call.payloadJson) as { urgency?: string };
+    if (payload.urgency === 'low' &amp;&amp; isQuietTime()) {
+      return { tag: 'refuse', val: 'quiet hours' };
+    }
+    return { tag: 'pass' };
+  },
+});
+</code></pre>
+<p>The handler sees the payload of <code>before-notify</code> (event, pane, title, urgency, channels) and nothing else. If it is slow or fails, the notice goes out. This is called fail-open and it is explained below.</p>
+<p>A collect extension is simpler. It holds an entry instead of code. This manifest adds a delivery channel to the <code>channels</code> point. The entry names a service of the same plugin that delivers one notice.</p>
+<pre><code class="language-json">{
+  &quot;point&quot;: &quot;ilium.core.notifications/channels&quot;,
+  &quot;id&quot;: &quot;team-chat&quot;,
+  &quot;entry&quot;: { &quot;id&quot;: &quot;team-chat&quot;, &quot;title&quot;: &quot;Team chat&quot;, &quot;service&quot;: &quot;com.example.chat/deliver&quot; }
+}
+</code></pre>
+<h4 id="way-4-offer">Way 4: offer</h4>
+<p>Offer when your own plugin has a place where others could add something. This plugin shows a dashboard. It declares a collect point <code>tiles</code> so that other plugins can add tiles. It needs <code>extensions.provide:com.example.dash/tiles</code>. The full owner code is in <a href="/pages/api-extension-points/">extension points</a>.</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;com.example.dash&quot;,
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;extensions.provide:com.example.dash/tiles&quot;] },
+  &quot;contributes&quot;: {
+    &quot;extension_points&quot;: [
+      { &quot;id&quot;: &quot;tiles&quot;, &quot;kind&quot;: &quot;collect&quot;, &quot;title&quot;: &quot;Dashboard tiles&quot;,
+        &quot;entry_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;required&quot;: [&quot;id&quot;, &quot;title&quot;],
+          &quot;properties&quot;: { &quot;id&quot;: { &quot;type&quot;: &quot;string&quot; }, &quot;title&quot;: { &quot;type&quot;: &quot;string&quot; } } },
+        &quot;max_entries&quot;: 32, &quot;version&quot;: &quot;0.1.0&quot; }
+    ]
+  }
+}
+</code></pre>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::extensions;
+
+// manifest: &quot;extensions.provide:com.example.dash/tiles&quot;
+fn tile_titles() -&gt; Vec&lt;String&gt; {
+    extensions::list(&quot;com.example.dash/tiles&quot;)
+        .map(|entries| entries.into_iter().map(|entry| entry.entry_json).collect())
+        .unwrap_or_default()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { list } from '@ilium/plugin-sdk/host/extensions';
+
+// manifest: &quot;extensions.provide:com.example.dash/tiles&quot;
+export function tileTitles(): string[] {
+  return list('com.example.dash/tiles').map((entry) =&gt; entry.entryJson);
+}
+</code></pre>
+<p>Offering is how a plugin of yours becomes a platform for other plugins. A core plugin is no different: its points are offered the same way.</p>
+<p><a id="replace"></a></p>
+<h4 id="way-5-replace">Way 5: replace</h4>
+<p>Replace when no lever is enough, for example when you want a different notification system. You install a plugin with <code>replaces</code>. It must provide the whole surface of the core plugin. Here the replacement is a plugin that offers notices in its own way and keeps the same service, topic and points.</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;com.example.notices&quot;,
+  &quot;version&quot;: &quot;1.0.0&quot;,
+  &quot;replaces&quot;: [&quot;ilium.core.notifications&quot;],
+  &quot;capabilities&quot;: {
+    &quot;server&quot;: [
+      &quot;services.provide:ilium.core.notifications/notify&quot;,
+      &quot;extensions.provide:ilium.core.notifications/before-notify&quot;,
+      &quot;extensions.provide:ilium.core.notifications/channels&quot;
+    ]
+  }
+}
+</code></pre>
+<p>The rules of replacement are in the section "Replacing a core plugin" below.</p>
+<h3 id="reading-the-surface-of-any-core-plugin">Reading the surface of any core plugin</h3>
+<p>A core plugin lists what it offers in three places.</p>
+<ol>
+<li><strong>Its own page.</strong> Every <code>core-plugin-*</code> page has an <strong>Extension points</strong> section. It has a table of points (kind, what it does, payload, risk), a list of services, a list of topics and a <strong>Replaceable</strong> line.</li>
+<li><strong>The reference.</strong> <a href="/pages/reference-core-extension-points/">Reference: core extension points</a> lists the points of all core plugins in one table. Use it to search.</li>
+<li><strong>The Plugins screen.</strong> Settings &gt; Plugins &gt; the plugin shows its <strong>Surface</strong>: the services, points, topics, commands and pane kinds it offers. The manifest carries the same list in <code>surface</code>. See <a href="/pages/reference-manifest/">reference: manifest</a>.</li>
+</ol>
+<p>Names follow one pattern:</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Form</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Point</td>
+<td><code>&lt;plugin-id&gt;/&lt;point&gt;</code></td>
+<td><code>ilium.core.fleet/before-broadcast</code></td>
+</tr>
+<tr>
+<td>Service</td>
+<td><code>&lt;plugin-id&gt;/&lt;name&gt;</code></td>
+<td><code>ilium.core.fleet/broadcast</code></td>
+</tr>
+<tr>
+<td>Topic</td>
+<td><code>&lt;plugin-id&gt;/&lt;name&gt;</code></td>
+<td><code>ilium.core.tree/changed</code></td>
+</tr>
+<tr>
+<td>Command</td>
+<td><code>&lt;plugin-id&gt;/&lt;command&gt;</code></td>
+<td><code>ilium.core.kanban/open-board</code></td>
+</tr>
+</tbody>
+</table>
+<p>A third-party plugin that wants a core topic lists it in <code>contributes.topics.subscribes</code> and holds the matching topic grant. A core service uses the normal <code>services.provide</code> and <code>services.use</code> grants. Services named <code>ilium.core.&lt;plugin&gt;/&lt;name&gt;</code> are stable and need no <code>unstable</code> opt-in, to call them or to provide them as a replacement (<a href="/pages/versioning/">Versioning</a>). See <a href="/pages/capability-services/">capability: services</a>.</p>
+<h3 id="timing-of-hooks-on-core-points">Timing of hooks on core points</h3>
+<p>A hook on a core plugin's point runs on the side that owns the point (see the Side column of <a href="/pages/reference-core-extension-points/">Core extension points</a>), one handler after another, under the deadlines in <a href="/pages/api-extension-points/">Extension points</a> (20 ms per handler by default, set per handler by its manifest <code>deadline_ms</code> between 5 and 50 ms, 100 ms for the chain, measured from the first handler). For <code>veto</code>, <code>transform</code> and <code>first</code> points the core plugin holds that one action until the chain completes (at most the 100 ms cap plus one deadline) and keeps serving other events meanwhile. For <code>observe</code> points the action does not wait, and observe handlers may run after it. [EXT-029] See <a href="/pages/reference-host-scheduling/">Host scheduling</a>.</p>
+<h3 id="ordering-priorities-and-the-user">Ordering, priorities and the user</h3>
+<ul>
+<li><strong>Priority.</strong> A contribution has a priority from 0 to 100, 50 by default. Lower runs first, but only within a tier band: a T1 contribution runs before a T2 or T3 contribution of any priority, then priority orders contributions inside the band, then plugin id order, then extension id order [SEC-288]. The declared priority is kept.</li>
+<li><strong>User order.</strong> On the owner's Extensions tab the user can move any contributor up or down and turn it off. The user's order is a stored list per point. It overrides priority and tier, a contributor installed later runs after the stored items, and an update keeps the stored position. The host stores it, not the plugin.</li>
+<li><strong>Chains.</strong> A <code>transform</code> chain passes each handler the output of the previous one. A <code>veto</code> chain stops at the first refusal. A <code>first</code> chain stops at the first answer. An <code>observe</code> chain calls everyone.</li>
+<li><strong>Fail open.</strong> A handler that times out, traps or errors counts as <code>pass</code>. A timeout never vetoes. A breach is a timeout, a trap, an error return, an oversize or schema-failing reply, a CPU overrun or a skip because the instance was busy. Three consecutive breaches stop that extension until the contributor's instance restarts or the user presses Reset. The user sees <code>stopped after 3 failures</code> and a Reset button. The whole chain has a cap of 100 ms, and handlers that have not started by then are skipped.</li>
+<li><strong>Dormant contributions.</strong> A contribution is dormant when its owner is not installed, is disabled, or does not satisfy its <code>@version</code>. It stays in the package and does nothing. It becomes active when the owner appears, and the Plugins screen shows <code>waiting for &lt;owner-id&gt;</code> until then. Install never fails because an owner is missing. See <a href="/pages/lifecycle/">lifecycle</a>.</li>
+<li><strong>Point versions.</strong> Every point has a semver <code>version</code> for its schema. A contributor can write <code>&lt;point&gt;@&lt;minimum-version&gt;</code>. The version is a caret range (PKG-317, PKG-318, PKG-328 in <a href="/pages/reference-dependency-resolution/">Dependency resolution</a>): <code>@1.2.0</code> accepts <code>&gt;=1.2.0 &lt;2.0.0</code> and <code>@0.1.0</code> accepts <code>&gt;=0.1.0 &lt;0.2.0</code>. A contribution without <code>@version</code> matches any owner version. A contribution that does not match stays dormant. See <a href="/pages/versioning/">versioning</a>.</li>
+</ul>
+<p>A short rule for choosing a mode when you offer a point: use <code>observe</code> when you only tell others, <code>transform</code> when others may change data, <code>veto</code> when others may stop an action, and <code>first</code> when exactly one answer is needed.</p>
+<h3 id="security-and-consent">Security and consent</h3>
+<ul>
+<li><strong>Grants are per point.</strong> <code>extensions.contribute:&lt;plugin-id&gt;/&lt;point&gt;</code> names one point. Wildcards are refused. There is no grant that covers every point. See <a href="/pages/capability-extensions-contribute/">capability: extensions.contribute</a>.</li>
+<li><strong>High-risk points.</strong> An owner marks a point <code>risk: "high"</code> when its handlers can see or change sensitive data or stop sensitive actions. Examples are text sent to a terminal, a broadcast to many agents, a text trigger about to fire and a scheduled input about to be sent. Contributing to such a point is a high-risk (H) grant. The review dialog shows a warning, and the row starts unchecked.</li>
+<li><strong>What a hook can see.</strong> Only the payload of the owner's <code>payload_schema</code>. Payload fields are chosen by the owner, and they are listed in the table of the core plugin. A handler cannot read the owner's state or the other handlers.</li>
+<li><strong>What a hook can do.</strong> Only what the mode allows. Replies the mode does not allow count as <code>pass</code>.</li>
+<li><strong>The user stays in charge.</strong> The review dialog groups the package's extensions under <strong>Adds to other plugins</strong>. The user can turn any extension off later.</li>
+<li><strong>Replacement is a consent.</strong> The user must confirm that the built-in plugin is turned off. See below.</li>
+</ul>
+<p>See <a href="/pages/security/">security</a> for the grant risk table and <a href="/pages/packages/">packages</a> for the review dialog.</p>
+<h3 id="replacing-a-core-plugin">Replacing a core plugin</h3>
+<p>A package with <code>"replaces": ["ilium.core.titles"]</code> can take the place of a core plugin. The list has at most 4 ids.</p>
+<ul>
+<li><strong>Which plugins.</strong> A core plugin that can be replaced carries <code>"replaceable": true</code> and a <code>surface</code> list in its manifest (fields in <a href="/pages/reference-manifest/#top-level-keys">Manifest reference</a>). <code>ilium.core.sessions</code> and <code>ilium.core.settings</code> are not replaceable, because they protect saved sessions and they host the Plugins screen itself.</li>
+<li><strong>The whole surface.</strong> The replacement must provide every <code>surface</code> item of the replaced plugin: its services, points, commands, pane kinds, topics and cli commands. Values in <code>surface</code> are <code>kind:name</code> pairs. A <code>points</code> item matches only with the same kind, the same mode and the same major version; a <code>services</code> item needs the same method names and the same major version. Otherwise <code>manifest.replaces-surface-incomplete</code> names the item and the reason. The error lists the missing items. The surface is checked again at each enable and after each Ilium update. An enabled replacement that no longer covers the surface is turned off, the built-in plugin comes back, and a notice names the missing items. [EXT-051]</li>
+<li><strong>One at a time.</strong> Several installed packages may replace one core plugin, and at most one is enabled. Enabling another one asks the user and turns the previous replacement off. Only one of the pair (built-in and replacement) is enabled. When the user enables the replacement, the dialog says <code>Replaces Titles and organisation. The built-in plugin is turned off while this one is on.</code> The user confirms. Turning the replacement off or uninstalling it turns the built-in plugin back on.</li>
+<li><strong>Uninstall of the replacement.</strong> Removing the replacement, or turning it off, turns the built-in plugin back on. See the <a href="/pages/lifecycle/#uninstall-cascade">uninstall cascade</a>. The built-in plugin's data was never read or changed by the replacement.</li>
+<li><strong>Contributions carry over.</strong> Standard contributions of other plugins to the replaced points move to the replacement after a notice. High-risk ones are suspended until the user confirms them for the new owner ([SEC-304]).</li>
+<li><strong>What is lost.</strong> The settings tabs, commands and pane kinds of the replaced plugin disappear while it is off. Its stored data stays on disk and is not read by the replacement. When the built-in plugin comes back, it finds its data as it left it.</li>
+<li><strong>Install errors.</strong> <code>manifest.replaces-unknown</code> (no such plugin), <code>manifest.replaces-not-replaceable</code>, <code>manifest.replaces-surface-incomplete</code>, <code>manifest.replaces-cycle</code> (a package lists its own id, or an id twice). A list of more than 4 ids fails with <code>manifest.schema</code>.</li>
+</ul>
+<p>A replacement carries a real cost. It must keep up with every new point of the core plugin. Prefer extending when you can.</p>
+<h3 id="what-the-user-keeps-when-a-core-plugin-is-off">What the user keeps when a core plugin is off</h3>
+<p>Extending or replacing a core plugin never removes what the user already has. When the plugin is disabled, the kernel fallback applies and the stored data stays. The table for all 30 core plugins is in <a href="/pages/reference-kernel-and-boot/">kernel and boot</a>. A replacement MUST provide the <code>surface</code> of the plugin it replaces, and it MUST keep the CLI commands of the replaced plugin (see <a href="/pages/reference-cli-compatibility/">CLI compatibility</a>). [COR-022] [COR-040]</p>
+<h3 id="testing-and-debugging">Testing and debugging</h3>
+<ul>
+<li><strong>Unit tests.</strong> The fake host in <a href="/pages/testing/">testing</a> runs one plugin instance with the grants you give it, and <code>FakeSession</code> runs several plugins and core extension point stubs together. Deliver a batch of events and check the submissions. A hook handler is a plain function over a payload, so you can also call it directly in a test.</li>
+<li><strong>Requests.</strong> <code>run-hook</code> is a request. A test completes it by hand with <code>host.complete(request_id, outcome)</code> and checks the log. The method is described in <a href="/pages/testing/">testing</a> under requests, jobs and services.</li>
+<li><strong>Fixtures.</strong> <code>ilium plugin test</code> runs every fixture, compares its expectation file, and exits 3 when one differs. See <a href="/pages/reference-test-harness/">Test harness reference</a>.</li>
+<li><strong>Logs.</strong> <code>ilium plugin logs &lt;id&gt; --tail 20</code> shows the log of one plugin. The host writes the extension codes there: <code>extension.handler-timeout</code>, <code>extension.reply-not-allowed</code>, <code>extension.schema-mismatch</code>, <code>extension.disabled</code>. <a href="/pages/debugging/">Debugging</a> explains the log format and traps.</li>
+<li><strong>Development reload.</strong> <code>ilium plugin dev</code> reloads a plugin when you rebuild it. See <a href="/pages/debugging/">debugging</a>.</li>
+</ul>
+<h3 id="frequently-asked-questions">Frequently asked questions</h3>
+<p><strong>Is there one place to see everything a core plugin exposes?</strong>
+Yes. The <strong>Extension points</strong> section of its page, and the <strong>Surface</strong> on the Plugins screen. <a href="/pages/reference-core-extension-points/">Reference: core extension points</a> has all of them in one list.</p>
+<p><strong>Can I add a hook to a core plugin that has no point for it?</strong>
+No. A hook exists only where the owner declared a point. If you need one, ask for a new point on that core plugin. It is a normal manifest change with a version.</p>
+<p><strong>Can a hook break the core plugin?</strong>
+A hook can refuse or change data only where the mode allows it. A hook that is late, traps or errors is ignored, and three consecutive breaches stop it. A hook cannot crash the owner.</p>
+<p><strong>Does a hook slow the feature down?</strong>
+A little. T1 handlers share the process. T2 and T3 handlers cost one helper round trip. A handler gets 20 ms by default (its manifest <code>deadline_ms</code> may set 5 to 50 ms) and a chain gets 100 ms. Owners should not put hooks on a path hotter than about 100 calls per second.</p>
+<p><strong>What if the owner is not installed?</strong>
+Your contribution is dormant. It does nothing, and the Plugins screen shows <code>waiting for &lt;owner-id&gt;</code>. It becomes active when the owner appears.</p>
+<p><strong>What is the difference between a service and an extension point?</strong>
+A service has one provider and many callers, and a caller pulls an answer. An extension point has one owner and many contributors, and the owner decides when to read data or run handlers. See <a href="/pages/services/">services</a>.</p>
+<p><strong>What is the difference between an extension point and a kernel slot?</strong>
+A kernel slot, such as a decoration slot, a menu provider or a status segment, is defined by the kernel. An extension point is defined by any plugin. Extension points do not replace kernel slots.</p>
+<p><strong>Can two plugins fill the same point?</strong>
+Yes. Up to <code>max_handlers</code> handlers (8) or <code>max_entries</code> entries (64 on core points) per point. They run in the order described above, and the user can reorder them. Contributors beyond the cap are dormant with the reason <code>point full (&lt;n&gt;)</code>.</p>
+<p><strong>Can I replace a core plugin and keep its data?</strong>
+No. The replacement does not read the replaced plugin's stored data. The data stays on disk for the built-in plugin to use when it returns.</p>
+<p><strong>Can I replace the sessions or settings plugin?</strong>
+No. <code>ilium.core.sessions</code> and <code>ilium.core.settings</code> have <code>replaceable: false</code>.</p>
+<p><strong>Does a wildcard grant exist?</strong>
+No. <code>manifest.grant-wildcard</code> refuses it. List each point.</p>
+<p>When a replacement plugin is disabled by failure, the built-in core plugin it replaced turns on again and a notice says so. The replacement returns only when you enable it. [LIF-273]</p>
+<ul>
+<li>[LIF-273] A replacement disabled by failure MUST re-enable the replaced core plugin with a visible notice. Test: the replacement is disabled by the restart and disable rule (three crashes).</li>
+</ul>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-extension-points/">Extension points</a> for the full interface, the hook modes and the error codes.</li>
+<li><a href="/pages/reference-core-extension-points/">Reference: core extension points</a> for the points of every core plugin.</li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a> and <a href="/pages/capability-extensions-contribute/">extensions.contribute</a> for the grants.</li>
+<li><a href="/pages/core-plugins/">Core plugins</a> for the list of core plugins.</li>
+<li><a href="/pages/services/">Services</a>, <a href="/pages/api-services/">services API</a>, <a href="/pages/api-messages-and-topics/">messages and topics</a> and <a href="/pages/api-menu-provider/">menu provider</a> for the other mechanisms.</li>
+<li><a href="/pages/capabilities/">Capabilities</a>, <a href="/pages/security/">security</a>, <a href="/pages/packages/">packages</a> and <a href="/pages/settings-extension/">settings extension</a> for grants, consent and settings.</li>
+<li><a href="/pages/testing/">Testing</a> and <a href="/pages/debugging/">debugging</a> for tools.</li>
+</ul>
+<p>Checked against <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p>Risk marks follow [SEC-280]; replacement rules are [SEC-300] to [SEC-306] in <a href="/pages/reference-extension-security/">Extension security</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/services/"><small>Previous</small>Services</a><a class="next" href="/pages/testing/"><small>Next</small>Testing plugins</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#the-dogfooding-rule">The dogfooding rule</a></li><li class="l2"><a href="#five-ways-to-work-with-a-core-feature">Five ways to work with a core feature</a></li><li class="l3"><a href="#i-want-to-use">I want to ... use ...</a></li><li class="l2"><a href="#one-running-scenario-quiet-hours-for-notifications">One running scenario: quiet hours for notifications</a></li><li class="l3"><a href="#way-1-observe">Way 1: observe</a></li><li class="l3"><a href="#way-2-drive">Way 2: drive</a></li><li class="l3"><a href="#way-3-extend">Way 3: extend</a></li><li class="l3"><a href="#way-4-offer">Way 4: offer</a></li><li class="l3"><a href="#way-5-replace">Way 5: replace</a></li><li class="l2"><a href="#reading-the-surface-of-any-core-plugin">Reading the surface of any core plugin</a></li><li class="l2"><a href="#timing-of-hooks-on-core-points">Timing of hooks on core points</a></li><li class="l2"><a href="#ordering-priorities-and-the-user">Ordering, priorities and the user</a></li><li class="l2"><a href="#security-and-consent">Security and consent</a></li><li class="l2"><a href="#replacing-a-core-plugin">Replacing a core plugin</a></li><li class="l2"><a href="#what-the-user-keeps-when-a-core-plugin-is-off">What the user keeps when a core plugin is off</a></li><li class="l2"><a href="#testing-and-debugging">Testing and debugging</a></li><li class="l2"><a href="#frequently-asked-questions">Frequently asked questions</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

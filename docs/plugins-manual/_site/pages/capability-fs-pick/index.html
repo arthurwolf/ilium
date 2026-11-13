@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Capability: fs.pick | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details open><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/" aria-current="page">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Capabilities</b></p>
+<h1>Capability: fs.pick</h1>
+<h2 id="fspick">fs.pick</h2>
+<p>The <code>fs.pick</code> capability lets a client-side plugin open the file picker. The picker is a modal panel that the kernel draws and owns. The plugin never sees the folders the user did not choose. It receives only the path the user confirmed, as a <code>picked/&lt;n&gt;</code> scope.</p>
+<p>A plugin cannot choose a file by itself. It asks for a picker, the user decides, and the plugin gets one path back. Reading or writing that path needs a second grant, <code>fs.read:picked</code> or <code>fs.write:picked</code>.</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>Grants.</strong> <code>fs.pick</code> in <code>capabilities.client</code>, plus <code>fs.read:picked</code> for an <code>open-file</code> or <code>open-directory</code> pick, or <code>fs.write:picked</code> for a <code>save-file</code> pick. <code>fs.pick</code> without either of them fails the install with <code>manifest.grant-dependency</code>.</li>
+<li><strong>Language.</strong> Rust with the <code>ilium_plugin_sdk</code> crate, or TypeScript with <code>@ilium/plugin-sdk</code>. Both wrappers are <code>async</code>.</li>
+<li><strong>Event handling.</strong> A pick completes later as a <code>request-completed</code> event. The SDK wrapper hides this, but the plugin must run inside <code>definePlugin</code> or an async task so the completion can arrive. See <a href="/pages/requests-and-outcomes/">Requests and outcomes</a>.</li>
+</ul>
+<h3 id="grant-syntax">Grant syntax</h3>
+<p>The grant takes no argument.</p>
+<table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>Valid</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fs.pick</code></td>
+<td>yes</td>
+<td>the only form</td>
+</tr>
+<tr>
+<td><code>fs.pick:project</code></td>
+<td>no</td>
+<td>the grant takes no argument</td>
+</tr>
+<tr>
+<td><code>fs.picker</code></td>
+<td>no</td>
+<td>the name is <code>fs.pick</code></td>
+</tr>
+</tbody>
+</table>
+<p>Manifest excerpt for a plugin that opens a picker and then reads the chosen file:</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;com.example.notes&quot;,
+  &quot;capabilities&quot;: { &quot;client&quot;: [&quot;fs.pick&quot;, &quot;fs.read:picked&quot;] }
+}
+</code></pre>
+<h3 id="surface">Surface</h3>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Kind</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pick(spec)</code></td>
+<td>function</td>
+<td><code>pick-spec</code> to <code>result&lt;request-id, plugin-error&gt;</code></td>
+<td>Opens the picker. Needs <code>fs.pick</code>. Take the result with <code>take-picked</code>.</td>
+</tr>
+<tr>
+<td><code>take-picked(request)</code></td>
+<td>function</td>
+<td><code>request-id</code> to <code>option&lt;fs-path&gt;</code></td>
+<td>The chosen path, once the completion arrives.</td>
+</tr>
+<tr>
+<td><code>pick-spec</code></td>
+<td>record</td>
+<td><code>kind</code>, <code>title: string</code>, <code>extensions: list&lt;string&gt;</code></td>
+<td>Picker mode, title line and extension filter.</td>
+</tr>
+<tr>
+<td><code>pick-kind</code></td>
+<td>enum</td>
+<td><code>open-file</code>, <code>open-directory</code>, <code>save-file</code></td>
+<td>The mode of the picker and the button it shows.</td>
+</tr>
+<tr>
+<td><code>fs-path</code></td>
+<td>record</td>
+<td><code>scope: string</code>, <code>path: string</code></td>
+<td>The result. <code>scope</code> is <code>picked/&lt;n&gt;</code>, and <code>path</code> is empty.</td>
+</tr>
+<tr>
+<td><code>picked/&lt;n&gt;</code></td>
+<td>scope</td>
+<td>grant per pick</td>
+<td>Reading and writing needs <code>fs.read:picked</code> or <code>fs.write:picked</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Rust names: <code>fs::pick(spec).await</code>, <code>PickSpec</code>, <code>PickKind::OpenFile</code>, <code>PickKind::OpenDirectory</code>
+and <code>PickKind::SaveFile</code>, all from <code>ilium_plugin_sdk::host::fs</code>. TypeScript names: <code>pick(spec)</code>
+from <code>@ilium/plugin-sdk/host/fs</code>, with <code>kind</code> set to the strings <code>'open-file'</code>, <code>'open-directory'</code>
+or <code>'save-file'</code>.</p>
+<p>The <code>extensions</code> filter takes lower-case names without a leading dot, such as <code>png</code>. It matches
+case-insensitively. An empty list allows every file. The filter applies only to file modes, not to
+<code>open-directory</code>.</p>
+<h3 id="how-the-pick-flows">How the pick flows</h3>
+<figure>
+<svg viewBox="0 0 400 230" role="img" aria-label="Pick flow from the plugin request through the kernel dialog to the picked path" width="600" height="345">
+  <defs>
+    <marker id="fsp-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="10" y="10" width="380" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="200" y="32" text-anchor="middle" font-size="11" fill="currentColor">1. Plugin calls pick(spec), gets a request-id</text>
+  <line x1="200" y1="46" x2="200" y2="66" stroke="currentColor" marker-end="url(#fsp-arrow)"/>
+  <rect x="10" y="66" width="380" height="36" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="200" y="88" text-anchor="middle" font-size="11" fill="currentColor">2. Kernel draws the picker panel (not the plugin)</text>
+  <line x1="200" y1="102" x2="200" y2="122" stroke="currentColor" marker-end="url(#fsp-arrow)"/>
+  <rect x="10" y="122" width="380" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="200" y="144" text-anchor="middle" font-size="11" fill="currentColor">3. User confirms; picked/1 scope is created</text>
+  <line x1="200" y1="158" x2="200" y2="178" stroke="currentColor" marker-end="url(#fsp-arrow)"/>
+  <rect x="10" y="178" width="380" height="36" rx="6" fill="none" stroke="currentColor"/>
+  <text x="200" y="200" text-anchor="middle" font-size="11" fill="currentColor">4. take-picked returns fs-path { picked/1, "" }</text>
+</svg>
+<figcaption>The dialog belongs to the kernel. The dashed box marks the step the plugin does not control.</figcaption>
+</figure>
+
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>The review dialog lists the grant in plain words when the package is installed. Tier T1 bundled plugins
+receive <code>fs.pick</code> without a prompt. Tier T2 and T3 packages show it in the review dialog.</p>
+<figure>
+<pre class="term"><span class="t-dim">Review permissions: com.example.notes 0.1.0</span>
+     Opens the file picker: fs.pick
+     Lets you choose a file or folder. The plugin sees only your choice.
+<span class="t-dim">[allow]  [decline]</span>
+</pre>
+
+<figcaption>Illustrative, not generated. The review line for <code>fs.pick</code>.</figcaption>
+</figure>
+
+<p>The picker itself has a title line, a path input, the entry list, the extension filter and two buttons.
+The button label depends on the mode. Keys: Enter opens a folder or confirms, Backspace goes to the
+parent folder, Tab moves between the input, the list and the buttons, Ctrl+H shows hidden files, and
+Escape cancels.</p>
+<figure>
+<pre class="term"><span class="t-hi">Choose a background image</span>
+<span class="t-dim">╭  ≡ ● · Choose a background image─────────────────────────╮</span>
+<span class="t-dim">│</span> Path …… /home/arthur/Pictures                            <span class="t-dim">│</span>
+<span class="t-dim">│</span> <span class="t-dim">────────────────────────────────────────────────</span>         <span class="t-dim">│</span>
+<span class="t-dim">│</span> <span class="t-ok">› sunrise.png</span>                                            <span class="t-dim">│</span>
+<span class="t-dim">│</span>   dune.jpg                                               <span class="t-dim">│</span>
+<span class="t-dim">│</span>   notes.md                  <span class="t-dim">(hidden by filter)</span>           <span class="t-dim">│</span>
+<span class="t-dim">│</span> <span class="t-dim">────────────────────────────────────────────────</span>         <span class="t-dim">│</span>
+<span class="t-dim">│</span> Filter …… png, jpg                                       <span class="t-dim">│</span>
+<span class="t-dim">│</span>                                                          <span class="t-dim">│</span>
+<span class="t-dim">│</span>  Esc Cancel      Enter Open                              <span class="t-dim">│</span>
+<span class="t-dim">│</span> <span class="t-dim">Esc cancel · Enter open</span>                                  <span class="t-dim">│</span>
+<span class="t-dim">╰──────────────────────────────────────────────────────────╯</span>
+</pre>
+
+<figcaption>Illustrative, not generated. The picker opened by <code>pick</code> with
+<code>kind</code> set to <code>open-file</code> and <code>extensions</code> set to png and jpg.</figcaption>
+</figure>
+
+<p>The button reads <code>Open</code> for <code>open-file</code>, <code>Save</code> for <code>save-file</code> and <code>Choose</code> for <code>open-directory</code>.
+<code>Cancel</code> is always present.</p>
+<h3 id="worked-example-rust">Worked example: Rust</h3>
+<p>This example asks for an image and reads it. It treats a cancelled pick as a normal outcome.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::host::fs::{self, PickKind, PickSpec};
+
+/// Asks the user for a background image. Needs fs.pick, fs.read:picked.
+async fn choose_background() -&gt; Result&lt;FsPath, PluginError&gt; {
+    let spec = PickSpec {
+        kind: PickKind::OpenFile,
+        title: &quot;Choose a background image&quot;.to_string(),
+        extensions: vec![&quot;png&quot;.to_string(), &quot;jpg&quot;.to_string()],
+    };
+    fs::pick(spec).await
+}
+
+/// Returns the image bytes, or None when the user cancelled the picker.
+async fn load_background() -&gt; Result&lt;Option&lt;Vec&lt;u8&gt;&gt;, PluginError&gt; {
+    let picked_path = match choose_background().await {
+        Ok(picked_path) =&gt; picked_path,
+        Err(error) if error.code == ErrorCode::Cancelled =&gt; return Ok(None),
+        Err(error) =&gt; return Err(error),
+    };
+    let bytes = fs::read_all(&amp;picked_path).await?;
+    Ok(Some(bytes))
+}
+</code></pre>
+<p>The picked path has an empty <code>path</code>, so <code>read_all</code> with <code>picked_path</code> reads the chosen file itself.</p>
+<h3 id="worked-example-typescript">Worked example: TypeScript</h3>
+<p>The same flow in TypeScript. A cancelled pick rejects with a <code>PluginError</code>, which the function turns
+into <code>undefined</code>.</p>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { PluginError } from '@ilium/plugin-sdk';
+import { pick, readAll } from '@ilium/plugin-sdk/host/fs';
+
+/** Asks the user for a background image and returns its bytes, or undefined on cancel. */
+export async function loadBackground(): Promise&lt;Uint8Array | undefined&gt; {
+  try {
+    const pickedPath = await pick({
+      kind: 'open-file',
+      title: 'Choose a background image',
+      extensions: ['png', 'jpg'],
+    });
+    return await readAll(pickedPath);
+  } catch (error) {
+    if (error instanceof PluginError &amp;&amp; error.code === 'cancelled') {
+      return undefined;
+    }
+    throw error;
+  }
+}
+</code></pre>
+<h3 id="save-file-example">Save-file example</h3>
+<p>A <code>save-file</code> pick returns a scope whose path is empty and names the file the user typed. The file may
+not exist yet. Write it with <code>write</code> and a <code>create-new</code> mode to avoid overwriting an existing file:</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">let target = fs::pick(PickSpec {
+    kind: PickKind::SaveFile,
+    title: &quot;Save the export&quot;.to_string(),
+    extensions: vec![&quot;json&quot;.to_string()],
+}).await?;
+fs::write(&amp;target, export_bytes, WriteMode::CreateNew).await?;
+</code></pre>
+<p>This needs <code>fs.write:picked</code> in the manifest. Without it, <code>write</code> returns <code>not-permitted</code>.</p>
+<h3 id="limits-and-rules">Limits and rules</h3>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pickers open at once per plugin</td>
+<td>1. A second <code>pick</code> returns <code>busy</code>.</td>
+</tr>
+<tr>
+<td>Picked paths kept per plugin</td>
+<td>64. The oldest is forgotten when a 65th is added.</td>
+</tr>
+<tr>
+<td><code>&lt;n&gt;</code> in <code>picked/&lt;n&gt;</code></td>
+<td>A per-plugin counter that never repeats.</td>
+</tr>
+<tr>
+<td>Lifetime of a picked path</td>
+<td>Survives restarts until its grant is revoked.</td>
+</tr>
+<tr>
+<td>Watching a picked scope</td>
+<td>Allowed for folders only.</td>
+</tr>
+</tbody>
+</table>
+<p>Paths inside a picked folder are relative to it, as for every scope. A path that leaves the folder
+through <code>..</code> or a symbolic link returns <code>not-permitted</code>.</p>
+<h3 id="errors">Errors</h3>
+<p>Every error code of <code>plugin-error</code> can occur. These are the ones that matter for a picker:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>When</th>
+<th>Where it appears</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>not-permitted</code></td>
+<td><code>fs.pick</code> declined or revoked. No dialog opens.</td>
+<td>Returned by <code>pick</code>.</td>
+</tr>
+<tr>
+<td><code>busy</code></td>
+<td>This plugin already shows a picker.</td>
+<td>Returned by <code>pick</code>, before any dialog opens.</td>
+</tr>
+<tr>
+<td><code>cancelled</code></td>
+<td>The user pressed Cancel or Escape.</td>
+<td>Completion; the SDK wrapper fails with it.</td>
+</tr>
+<tr>
+<td><code>not-found</code></td>
+<td>The completion succeeded but has no picked path.</td>
+<td>SDK wrapper.</td>
+</tr>
+<tr>
+<td><code>revoked</code></td>
+<td>The grant changed during the call. The plugin is reactivated with the reduced grant set.</td>
+<td>Returned or completion.</td>
+</tr>
+<tr>
+<td><code>not-permitted</code> on read or write</td>
+<td>The plugin lacks <code>fs.read:picked</code> or <code>fs.write:picked</code>.</td>
+<td><code>read_all</code>, <code>write</code>, and so on.</td>
+</tr>
+</tbody>
+</table>
+<p>When the grant is declined, the plugin should tell the user that the feature needs the picker
+permission. It should not retry in a loop.</p>
+<h3 id="who-requests-it">Who requests it</h3>
+<p>No first-party plugin in the feature mapping lists <code>fs.pick</code> in its capability column. Feature 22
+(File explorer and picker) keeps the picker dialog in the kernel. Feature 101 (Media scenes) reads
+paths that the user picked, under the <code>picked</code> scope. A scene gets its path from a settings field with
+the <code>picker</code> keyword, so it declares <code>fs.read:picked</code> without <code>fs.pick</code>.</p>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/capability-fs-read/">fs.read</a> for the read functions that work on a picked path.</li>
+<li><a href="/pages/capability-fs-write/">fs.write</a> for writing to a path the user saved.</li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a> for watching a picked folder.</li>
+<li><a href="/pages/file-access/">File access</a> for scopes, grants and preopened folders.</li>
+<li><a href="/pages/api-fs/">Filesystem API</a> for every <code>fs</code> function, type and limit.</li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a> for how completions reach the plugin.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full error code list.</li>
+</ul>
+<p>Checked against <code>ilium:plugin@0.1.0</code> (API draft of 2026-10-11).</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/capability-editor-read/"><small>Previous</small>editor.read</a><a class="next" href="/pages/capability-fs-read/"><small>Next</small>fs.read:&lt;scope&gt;</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#fspick">fs.pick</a></li><li class="l3"><a href="#what-you-need">What you need</a></li><li class="l3"><a href="#grant-syntax">Grant syntax</a></li><li class="l3"><a href="#surface">Surface</a></li><li class="l3"><a href="#how-the-pick-flows">How the pick flows</a></li><li class="l3"><a href="#what-the-user-sees">What the user sees</a></li><li class="l3"><a href="#worked-example-rust">Worked example: Rust</a></li><li class="l3"><a href="#worked-example-typescript">Worked example: TypeScript</a></li><li class="l3"><a href="#save-file-example">Save-file example</a></li><li class="l3"><a href="#limits-and-rules">Limits and rules</a></li><li class="l3"><a href="#errors">Errors</a></li><li class="l3"><a href="#who-requests-it">Who requests it</a></li><li class="l3"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

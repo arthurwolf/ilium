@@ -1,0 +1,19 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "example.minimal",
+  "name": "Minimal",
+  "version": "0.1.0",
+  "publisher": "Example Labs",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": []
+  },
+  "files": [
+    {
+      "path": "server.wasm",
+      "length": 34,
+      "sha256": "028fb8ab3e154570597f3cc09ad59782ab44d9a6873f1834490da625ef3c6cd8"
+    }
+  ]
+}

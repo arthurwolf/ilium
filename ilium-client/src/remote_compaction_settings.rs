@@ -343,7 +343,7 @@ impl TechniqueTarget {
 pub enum RemoteCompactionRowKind {
     /// The closable privacy box.
     Banner,
-    /// `[x]` checkbox.
+    /// Fixed-width boolean switch.
     Toggle,
     /// `‹ value ›` stepper over numbers.
     Stepper,

@@ -192,6 +192,22 @@ fn read_new_records(
     path: &Path,
     cursor: FileCursor,
 ) -> Result<(FileCursor, Vec<PendingRecord>), std::io::Error> {
+    // Reject a directory before the platform opener can report a generic
+    // open error. The secure opener below still validates the actual handle,
+    // so a path replacement between these checks cannot admit a symlink.
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "chatroom log is not a regular file",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok((cursor, Vec::new()));
+        }
+        Err(error) => return Err(error),
+        _ => {}
+    }
     let mut file = match open_chatroom_log(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {

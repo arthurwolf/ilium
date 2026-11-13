@@ -18,7 +18,9 @@ use ilium_client::connection::Connection;
 use ilium_core::{NodeId, PaneProgress, ProgressTaskStatus};
 use ilium_ipc::{ClientRequest, ProgressWaitEnd, ServerEvent};
 
-use crate::{json_string, next_progress_request_id, pane_progress_json, CliError};
+use crate::{
+    json_string, next_progress_request_id, pane_progress_json, CliError, SERVER_BUILD_MISMATCH_HINT,
+};
 
 /// Exit statuses of a wait. 1 (CLI or connection failure) and 2 (usage) keep
 /// their usual meaning; the rest name the monitor outcome.
@@ -26,7 +28,6 @@ pub(crate) const EXIT_TASK_DONE: u8 = 0;
 pub(crate) const EXIT_TASK_ERROR: u8 = 3;
 pub(crate) const EXIT_MONITOR_FAILED: u8 = 4;
 pub(crate) const EXIT_MONITOR_ENDED: u8 = 5;
-pub(crate) const EXIT_WAIT_TIMED_OUT: u8 = 6;
 
 /// How often the wait double-checks the monitor through a status request.
 const LIVENESS_CHECK_INTERVAL: Duration = Duration::from_secs(15);
@@ -49,7 +50,6 @@ pub(crate) enum WaitReportEnd {
     Settled,
     Cleared,
     NoMonitor,
-    TimedOut,
 }
 
 /// Why `wait` without a monitor ID could not choose one.
@@ -121,7 +121,6 @@ impl WaitReport {
             },
             WaitReportEnd::Cleared => "cleared",
             WaitReportEnd::NoMonitor => "no-monitor",
-            WaitReportEnd::TimedOut => "still-running",
         }
     }
 
@@ -130,12 +129,25 @@ impl WaitReport {
             "done" => EXIT_TASK_DONE,
             "error" => EXIT_TASK_ERROR,
             "monitor-failed" => EXIT_MONITOR_FAILED,
-            "still-running" => EXIT_WAIT_TIMED_OUT,
             _ => EXIT_MONITOR_ENDED,
         }
     }
 
-    fn next_step(&self) -> &'static str {
+    /// The instruction printed in `next`. A settled outcome names the exact `clear` command so an
+    /// agent sharing the pane with other monitors removes only its own one (live demo agents left
+    /// theirs behind when they had to work out which ID was theirs).
+    fn next_step(&self) -> String {
+        let step = self.outcome_step();
+        match (self.end, self.monitor_id) {
+            (WaitReportEnd::Settled, Some(monitor_id)) => format!(
+                "{step} When you have handled it, remove this monitor with `ilium progress clear \
+                 --monitor-id {monitor_id}`."
+            ),
+            _ => step.to_string(),
+        }
+    }
+
+    fn outcome_step(&self) -> &'static str {
         match self.outcome_name() {
             "done" => "The task finished. Verify its output, then continue.",
             "error" => "The task reported failure. Inspect its log or error, fix, and retry.",
@@ -147,10 +159,7 @@ impl WaitReport {
                 "The monitor was cleared, or is not registered on this pane. Check `ilium \
                  progress status`."
             }
-            "no-monitor" => {
-                "This pane has no progress monitor. Register one with `ilium progress set`."
-            }
-            _ => "The task is still running. Run the same wait command again to keep waiting.",
+            _ => "This pane has no progress monitor. Register one with `ilium progress set`.",
         }
     }
 
@@ -176,7 +185,7 @@ impl WaitReport {
             self.exit_code(),
             self.waited.as_secs(),
             json_string(composer_notice),
-            json_string(self.next_step()),
+            json_string(&self.next_step()),
         );
     }
 }
@@ -215,9 +224,9 @@ pub(crate) async fn current_monitors(
                 }
             }
         }
-        Err(CliError::ServerReportedError(
-            "connection closed before the progress status arrived".to_string(),
-        ))
+        Err(CliError::ServerReportedError(format!(
+            "connection closed before the progress status arrived; {SERVER_BUILD_MISMATCH_HINT}"
+        )))
     })
     .await
     .map_err(|_| {
@@ -237,7 +246,6 @@ pub(crate) async fn wait_for_monitor(
     connection: &mut Connection,
     pane_id: NodeId,
     monitor_id: Option<u64>,
-    timeout: Option<Duration>,
 ) -> Result<Result<WaitReport, AmbiguousMonitor>, CliError> {
     let started = Instant::now();
     let report = |monitor_id, end, progress, composer_notice_suppressed| WaitReport {
@@ -269,20 +277,10 @@ pub(crate) async fn wait_for_monitor(
     )
     .await?;
 
-    let deadline = timeout.map(|timeout| tokio::time::Instant::now() + timeout);
     let mut next_check = tokio::time::Instant::now() + LIVENESS_CHECK_INTERVAL;
     let mut status_request_id = None;
     let mut settled_from_status: Option<PaneProgress> = None;
-    // The latest report seen by a liveness check, returned on a timeout so the
-    // caller sees how far the task got without a separate status request.
-    let mut last_seen: Option<PaneProgress> = None;
     loop {
-        let timeout_sleep = async {
-            match deadline {
-                Some(deadline) => tokio::time::sleep_until(deadline).await,
-                None => std::future::pending().await,
-            }
-        };
         tokio::select! {
             event = connection.events.recv() => {
                 let Some(event) = event else {
@@ -350,7 +348,7 @@ pub(crate) async fn wait_for_monitor(
                                 settled_from_status = Some(progress);
                                 next_check = tokio::time::Instant::now() + SETTLED_REPLY_GRACE;
                             }
-                            Some(progress) => last_seen = Some(progress),
+                            Some(_) => {}
                         }
                     }
                     _ => {}
@@ -365,14 +363,6 @@ pub(crate) async fn wait_for_monitor(
                 .await?;
                 status_request_id = Some(request_id);
                 next_check = tokio::time::Instant::now() + LIVENESS_CHECK_INTERVAL;
-            }
-            () = timeout_sleep => {
-                return Ok(Ok(report(
-                    Some(monitor_id),
-                    WaitReportEnd::TimedOut,
-                    last_seen,
-                    false,
-                )));
             }
         }
     }
@@ -394,9 +384,12 @@ mod tests {
                 message: String::new(),
                 details: String::new(),
                 error: (status == ProgressTaskStatus::Error).then(|| "failed".to_string()),
+                eta_seconds: None,
+                indeterminate: false,
             },
             monitor_health: ProgressMonitorHealth::Healthy,
             last_observed_unix_millis: 1,
+            timing: Default::default(),
             attention: Default::default(),
         }
     }
@@ -433,5 +426,30 @@ mod tests {
             choose_monitor(&[done, monitor(4, ProgressTaskStatus::Error)]),
             MonitorChoice::Ambiguous(_)
         ));
+    }
+
+    fn report(end: WaitReportEnd, progress: Option<PaneProgress>) -> WaitReport {
+        WaitReport {
+            pane_id: NodeId(7),
+            monitor_id: Some(93),
+            end,
+            progress,
+            composer_notice_suppressed: true,
+            waited: Duration::from_secs(1),
+        }
+    }
+
+    #[test]
+    fn a_settled_wait_names_the_exact_clear_command_for_its_own_monitor() {
+        for status in [ProgressTaskStatus::Done, ProgressTaskStatus::Error] {
+            let next = report(WaitReportEnd::Settled, Some(monitor(93, status))).next_step();
+            assert!(
+                next.ends_with("`ilium progress clear --monitor-id 93`."),
+                "{next}"
+            );
+        }
+        for end in [WaitReportEnd::Cleared, WaitReportEnd::NoMonitor] {
+            assert!(!report(end, None).next_step().contains("progress clear"));
+        }
     }
 }

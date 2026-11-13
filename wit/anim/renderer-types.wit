@@ -1,0 +1,9 @@
+package ilium:anim@0.1.0;
+
+interface renderer-types {
+  /// The order is the ABI.
+  enum readiness { ready, preparing, failed }
+  record frame-input {
+    time-millis: u64, wall-millis: u64, now-unix-millis: u64, width: u32, height: u32, palette-rgb: list<u32>,
+  }
+}

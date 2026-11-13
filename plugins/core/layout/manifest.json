@@ -1,0 +1,34 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.layout",
+  "name": "Layout",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Layout plugin (ilium.core.layout, side both) owns split views and the arrangement of panes on screen: splitting four ways, mixed splits of terminal, editor and board panes, focus and navigation, and resizing with the mouse.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "panes.read",
+      "panes.lifecycle",
+      "panes.create",
+      "tree.restructure"
+    ],
+    "client": [
+      "panes.read",
+      "ui.panels"
+    ]
+  },
+  "activation": [
+    "command:layout.preset",
+    "view:layout.presets"
+  ],
+  "limits_tier": "first-party"
+}

@@ -1,0 +1,11 @@
+╭ Session statistics ─────────────────────────╮
+│ Spend, last 24 h   ▁▂▂▃▅▇▆▄▃▂▂▃  $6.12      │
+│                                             │
+│ opus   ████████████  $4.10                  │
+│ sonnet █████         $1.60                  │
+│ haiku  █             $0.42                  │
+│                                             │
+│ Session        Model   Tokens    Cost       │
+│ refactor       opus    412k      $2.31      │
+│ tests          sonnet  188k      $0.77      │
+╰─────────────────────────────────────────────╯

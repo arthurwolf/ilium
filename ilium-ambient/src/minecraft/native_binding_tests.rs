@@ -259,3 +259,14 @@ fn cross_tile_native_models_share_geometry_but_preserve_exact_face_owners() {
     assert!(shared.model_reuse.lock().unwrap().entries.is_empty());
     assert!(budget.used() < before_prune);
 }
+
+#[test]
+fn missing_texture_error_names_every_unresolved_identity() {
+    let message = Error::MissingTextures(vec![
+        "minecraft:block/mud".into(),
+        "minecraft:block/cherry_log".into(),
+    ])
+    .to_string();
+    assert!(message.contains("minecraft:block/mud"), "{message}");
+    assert!(message.contains("minecraft:block/cherry_log"), "{message}");
+}

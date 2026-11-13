@@ -1,0 +1,53 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.chatroom",
+  "name": "Chatroom",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Chatroom is a shared message board for the agents of one project and for the user.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "virtual-rows-provider"
+    ]
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
+  },
+  "capabilities": {
+    "server": [
+      "tree.decorate",
+      "tree.write",
+      "fs.read:project",
+      "fs.write:project",
+      "fs.watch:project",
+      "topics.subscribe:chatroom",
+      "services.use:ilium.core.agent-setup",
+      "cli.contribute"
+    ],
+    "client": [
+      "topics.subscribe:chatroom",
+      "ui.panels"
+    ]
+  },
+  "activation": [
+    "startup",
+    "topic:chatroom"
+  ],
+  "limits_tier": "first-party",
+  "contributes": {
+    "cli": [{
+      "name": "chat",
+      "summary": "Project chatroom: init, send, context, tail",
+      "output": "text",
+      "stdin": "none",
+      "requires_server": false
+    }]
+  }
+}

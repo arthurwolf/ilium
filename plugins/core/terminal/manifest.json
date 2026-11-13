@@ -1,0 +1,49 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.terminal",
+  "name": "Terminal",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Terminal plugin (ilium.core.terminal, side both) owns terminal panes as plugins see them: pane processes and signals, screen reads, scrollback history, input, clickable links, pane titles and screen transfer.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "terminal.read-screen",
+      "terminal.read-cells",
+      "terminal.history",
+      "terminal.write",
+      "panes.read",
+      "panes.signal",
+      "tree.write"
+    ],
+    "client": [
+      "terminal.read-screen",
+      "editor.edit",
+      "commands.invoke:ilium.core.editor/*",
+      "ui.panels",
+      "settings.write-kernel:terminal"
+    ]
+  },
+  "activation": [
+    "event:screen-changed",
+    "startup"
+  ],
+  "contributes": {
+    "link_detectors": [
+      {
+        "id": "path-line",
+        "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+",
+        "command": "link-open"
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

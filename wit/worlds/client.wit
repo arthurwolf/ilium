@@ -1,0 +1,58 @@
+package ilium:client@0.1.0;
+
+world base {
+  import ilium:host/log@0.1.0;
+  import ilium:host/clock@0.1.0;
+  import ilium:host/timers@0.1.0;
+  import ilium:host/journal@0.1.0;
+  import ilium:host/tree@0.1.0;
+  import ilium:host/panes@0.1.0;
+  import ilium:host/intents-host@0.1.0;
+  import ilium:host/storage@0.1.0;
+  import ilium:host/settings@0.1.0;
+  import ilium:host/codec@0.1.0;
+  import ilium:host/fs@0.1.0;
+  import ilium:host/http@0.1.0;
+  import ilium:host/jobs@0.1.0;
+  import ilium:host/process@0.1.0;
+  import ilium:host/inference@0.1.0;
+  import ilium:host/vector@0.1.0;
+  import ilium:host/sounds@0.1.0;
+  import ilium:host/topics@0.1.0;
+  import ilium:host/commands@0.1.0;
+  import ilium:host/services@0.1.0;
+  import ilium:host/ui-host@0.1.0;
+  import ilium:host/keys@0.1.0;
+  import ilium:host/clipboard@0.1.0;
+  import ilium:host/audio@0.1.0;
+  import ilium:host/media@0.1.0;
+  import ilium:host/location@0.1.0;
+  import ilium:host/help@0.1.0;
+  import ilium:host/plugins@0.1.0;
+  import ilium:host/catalogs@0.1.0;
+  import ilium:host/geocode@0.1.0;
+  import ilium:host/kernel-settings@0.1.0;
+  import ilium:host/keymap@0.1.0;
+  import ilium:host/gpu@0.1.0;
+  import ilium:host/client-requests@0.1.0;
+  import ilium:host/extensions@0.1.0;
+  import ilium:primitives/terminal@0.1.0;
+  import ilium:primitives/agent@0.1.0;
+  import ilium:primitives/editor@0.1.0;
+  import ilium:primitives/basic@0.1.0;
+  export ilium:exports/lifecycle@0.1.0;
+  export ilium:exports/handler@0.1.0;
+}
+
+world with-views { export ilium:exports/views@0.1.0; }
+world with-annotator { export ilium:exports/annotator@0.1.0; }
+world with-jobs { export ilium:exports/job-runner@0.1.0; }
+world with-service { export ilium:exports/service-provider@0.1.0; }
+world with-inference-provider { export ilium:exports/inference-provider@0.1.0; }
+world with-settings-validate { export ilium:exports/settings-validate@0.1.0; }
+world with-catalog { export ilium:exports/catalog-provider@0.1.0; }
+world with-menus { export ilium:exports/menu-provider@0.1.0; }
+world with-virtual-rows { export ilium:exports/virtual-rows-provider@0.1.0; }
+world with-tokens { export ilium:exports/token-provider@0.1.0; }
+world with-hook-handler { export ilium:exports/hook-handler@0.1.0; }
+world with-migrator { export ilium:exports/migrator@0.1.0; }

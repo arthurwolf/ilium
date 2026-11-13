@@ -1,0 +1,67 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.compaction",
+  "name": "Compaction",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Compaction plugin (id ilium.core.compaction, sides: server and client) is the plugin form of Ilium's context compaction.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "job-runner"
+    ]
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
+  },
+  "capabilities": {
+    "server": [
+      "agent.transcript",
+      "inference",
+      "jobs.run",
+      "panes.lifecycle",
+      "fs.read:agent-homes",
+      "fs.write:agent-homes"
+    ],
+    "client": [
+      "open-external",
+      "ui.panels",
+      "settings.write-kernel:optimization",
+      "settings.write-kernel:remote-compaction"
+    ]
+  },
+  "activation": [
+    "event:agent-activity-changed",
+    "service:compact",
+    "view:compaction.optimizer"
+  ],
+  "contributes": {
+    "jobs": [
+      {
+        "kind": "compact",
+        "deadline_ms": 300000,
+        "memory_mib": 256
+      }
+    ],
+    "commands": [
+      {
+        "id": "compact",
+        "title": "Compact this agent"
+      }
+    ],
+    "panels": [
+      {
+        "id": "optimizer",
+        "title": "Compaction",
+        "modal": false
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

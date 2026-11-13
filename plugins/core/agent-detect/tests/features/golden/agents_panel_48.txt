@@ -1,0 +1,6 @@
+╭ Agents ─────────────────────────────────────╮
+│ Agent    State      Goal                    │
+│ claude   ⠹ working  ship the parser port    │
+│ codex    idle       …………………………………………        │
+│ gemini   approval   …………………………………………        │
+╰─────────────────────────────────────────────╯

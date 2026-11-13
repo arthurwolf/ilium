@@ -6,6 +6,7 @@
 //! and for other attached clients to know what's open).
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ilium_core::{
@@ -211,6 +212,18 @@ pub struct ProgressMonitorRuntimeState {
     pub result_delivery: ProgressDeliveryState,
 }
 
+/// Process-bound inputs for an off-lock cache-wait observation. Possession
+/// of this snapshot alone does not authorize a provider request: its caller
+/// must recheck the process and the pane binding immediately before use.
+pub(crate) struct CacheWaitSource {
+    pub generation: u64,
+    pub process: AgentProcessKey,
+    pub process_identity: Arc<ilium_platform::process_control::PtyProcessIdentity>,
+    pub session_id: String,
+    pub transcript_path: PathBuf,
+    pub monitor_running: bool,
+}
+
 impl ProgressMonitorRuntimeState {
     /// The task reported done/error, or the monitor itself failed.
     pub fn is_settled(&self) -> bool {
@@ -263,6 +276,13 @@ pub enum TerminalOrigin {
     /// A stopped agent whose resume command is retained for an explicit
     /// unfreeze. Restarting Ilium restores the pane without launching it.
     Frozen { resume_command: String },
+    /// A profile identity and its non-secret provider command survive restarts.
+    /// Environment values are resolved from configuration at each launch.
+    CustomAgent {
+        identity: ilium_core::custom_agent::CustomAgentIdentity,
+        command_line: String,
+        frozen: bool,
+    },
 }
 
 impl TerminalOrigin {
@@ -275,6 +295,7 @@ impl TerminalOrigin {
             TerminalOrigin::PlainShell => "shell",
             TerminalOrigin::Command(command_line) => command_line,
             TerminalOrigin::Frozen { .. } => "frozen agent",
+            TerminalOrigin::CustomAgent { identity, .. } => &identity.profile_id,
         }
     }
 
@@ -291,8 +312,16 @@ impl TerminalOrigin {
                 .unwrap_or_else(|| self.default_pane_name()),
             TerminalOrigin::PlainShell => self.default_pane_name(),
             TerminalOrigin::Frozen { .. } => self.default_pane_name(),
+            TerminalOrigin::CustomAgent { .. } => self.default_pane_name(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResourceInstructionNotice {
+    Available,
+    Changed,
+    Removed,
 }
 
 /// One live pty-backed terminal pane: the pty session itself, what it was
@@ -385,6 +414,13 @@ pub struct TerminalPaneRuntime {
     /// owner. Keep across child replacements; detection prunes exact old births.
     pub agent_launcher_ancestors: Vec<AgentProcessKey>,
     pub agent_generation: u64,
+    /// Coalesced resource-instruction change for this invocation. The serial
+    /// fences clearing a delivery against a newer concurrently observed change.
+    pub(crate) pending_resource_notice: Option<(u64, ResourceInstructionNotice)>,
+    pub(crate) resource_notice_serial: u64,
+    /// At most one actor and one coalescing mailbox for detection follow-ups.
+    detection_effects: Option<crate::detection_effects::DetectionEffects>,
+    pub(crate) detection_completion: crate::detection_effects::CompletionEpoch,
     pub agent_input_available: bool,
     /// Invalidates admitted automated delivery when this invocation exits or
     /// is replaced. Manual input still awaits its receipt for recovery.
@@ -398,6 +434,12 @@ pub struct TerminalPaneRuntime {
     /// Latest manual Enter eligible for a provider transcript correction.
     pub prompt_transcript_epoch: Option<PromptTranscriptEpoch>,
     pub session_process_started_at_unix_seconds: Option<u64>,
+    pub session_process_identity_inode: Option<u64>,
+    /// Revisit Claude session evidence periodically without tying I/O to every screen refresh.
+    pub next_claude_session_recheck: Instant,
+    /// Held while the session binding is cached, so PID reuse cannot recreate
+    /// ownership even if the replacement has the same kernel start tick.
+    pub session_process_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
     /// Exact detected process that owned `session_id`. A replacement process
     /// may safely use its own startup arguments even when the previous agent
     /// invalidated launch-time identity with an in-process session command.
@@ -476,6 +518,8 @@ impl TerminalPaneRuntime {
                 client_focused: false,
                 last_forced: None,
                 request_generation: 0,
+                wake_on_output: false,
+                last_output_wake: None,
                 identity_system_generation: None,
                 cached_identity: None,
                 cached_screen_classification: None,
@@ -488,6 +532,10 @@ impl TerminalPaneRuntime {
             agent_process_key: None,
             agent_launcher_ancestors: Vec::new(),
             agent_generation: 0,
+            pending_resource_notice: None,
+            resource_notice_serial: 0,
+            detection_effects: None,
+            detection_completion: crate::detection_effects::CompletionEpoch::default(),
             agent_input_available: false,
             agent_input_cancel: watch::channel(0).0,
             verified_agent_exit: None,
@@ -497,6 +545,9 @@ impl TerminalPaneRuntime {
             legacy_prompt_fallback_blocked: false,
             prompt_transcript_epoch: None,
             session_process_started_at_unix_seconds: None,
+            session_process_identity_inode: None,
+            next_claude_session_recheck: Instant::now(),
+            session_process_identity: None,
             session_process_id: None,
             session_transcript_path: None,
             auto_answer_attempt: None,
@@ -526,6 +577,7 @@ impl TerminalPaneRuntime {
             .ok_or("agent invocation generation exhausted")?;
         let replaced = self.agent_process_key.is_some();
         self.agent_generation = next;
+        self.pending_resource_notice = None;
         self.agent_process_key = Some(key);
         self.agent_input_available = false;
         self.agent_input_cancel
@@ -585,7 +637,51 @@ impl TerminalPaneRuntime {
         true
     }
 
+    /// Queue bounded follow-up work without awaiting shared execution or
+    /// persistence capacity inside the all-pane detection sweep.
+    pub(crate) fn request_detection_effects(
+        &mut self,
+        state: &std::sync::Arc<crate::state::ServerState>,
+        pane_id: NodeId,
+        check_title: bool,
+        deliver_prompt: bool,
+    ) {
+        if !check_title && !deliver_prompt {
+            return;
+        }
+        let input = self.session.input_handle();
+        if !self
+            .detection_effects
+            .as_ref()
+            .is_some_and(|effects| effects.matches(self.agent_generation, &input))
+        {
+            self.detection_effects = Some(crate::detection_effects::DetectionEffects::start(
+                state,
+                pane_id,
+                self.agent_generation,
+                input,
+            ));
+        }
+        if let Some(effects) = &self.detection_effects {
+            effects.request(
+                check_title,
+                deliver_prompt,
+                self.detection_completion.current(),
+            );
+        }
+    }
+
+    pub(crate) fn invalidate_detection_completion(&mut self) {
+        self.detection_completion.invalidate();
+    }
+
+    pub(crate) fn retire_detection_completion(&mut self) {
+        self.detection_completion.retire_submission();
+    }
+
     pub(crate) fn cancel_agent_owned_delivery(&mut self) {
+        self.invalidate_detection_completion();
+        self.detection_effects = None;
         self.cancel_initial_prompt_delivery();
         self.cancel_progress_delivery_tasks();
         self.cancel_auto_answer_task();
@@ -715,6 +811,42 @@ impl TerminalPaneRuntime {
     /// Every monitor registered on this pane, in registration order.
     pub fn progress_monitors(&self) -> impl Iterator<Item = &ProgressMonitorRuntimeState> {
         self.progress_monitors.iter().map(|slot| &slot.state)
+    }
+
+    /// Read only facts already established by agent detection. A monitor may
+    /// run independently of an agent wait, so its state stays a separate fact.
+    pub(crate) fn cache_wait_source(&self) -> Option<CacheWaitSource> {
+        let process = self.agent_process_key.as_ref()?;
+        if self.is_session_identity_invalidated
+            || self.verified_agent_exit.is_some()
+            || self.session_agent_class.as_ref() != Some(&process.class)
+            || self.session_process_id != Some(process.process_id)
+            || self.session_process_started_at_unix_seconds != Some(process.started_at_unix_seconds)
+            || !matches!(process.class, AgentClass::Claude | AgentClass::Codex)
+        {
+            return None;
+        }
+        Some(CacheWaitSource {
+            generation: self.agent_generation,
+            process: process.clone(),
+            process_identity: self.session_process_identity.clone()?,
+            session_id: self.session_id.clone()?,
+            transcript_path: self.session_transcript_path.clone()?,
+            monitor_running: self.progress_monitors().any(|monitor| !monitor.is_settled()),
+        })
+    }
+
+    /// Recheck after I/O; a resumed session or replaced process cannot reuse
+    /// evidence collected for its predecessor. Monitor liveness is returned
+    /// afresh by `cache_wait_source`, never trusted from an earlier snapshot.
+    pub(crate) fn cache_wait_source_is_current(&self, source: &CacheWaitSource) -> bool {
+        self.cache_wait_source().is_some_and(|current| {
+            current.generation == source.generation
+                && current.process == source.process
+                && Arc::ptr_eq(&current.process_identity, &source.process_identity)
+                && current.session_id == source.session_id
+                && current.transcript_path == source.transcript_path
+        })
     }
 
     pub fn progress_monitor(&self, monitor_id: u64) -> Option<&ProgressMonitorRuntimeState> {
@@ -1146,6 +1278,7 @@ impl TerminalPaneRuntime {
     /// `session.kill()`, since a pane can also be torn down after its
     /// child already exited on its own).
     pub fn abort_background_tasks(&mut self) {
+        self.detection_effects = None;
         if let Some(forward_task) = self.forward_task.take() {
             forward_task.abort();
         }
@@ -1285,6 +1418,13 @@ pub struct DetectionSchedule {
     /// coalesced by the debounce window. A detection pass captures this value
     /// and cannot overwrite a newer request with its stale deadline/status.
     pub request_generation: u64,
+    /// Set by the detection loop while this pane holds an agent that is not
+    /// mid-turn and is not focused, i.e. while it sits in the slow idle tier.
+    /// Only then does PTY output wake the pane early (see
+    /// `crate::detection::wake_for_output`).
+    pub wake_on_output: bool,
+    /// Start of the current output-wake spacing window.
+    pub last_output_wake: Option<Instant>,
     /// Process identity result associated with one refreshed `System` table.
     pub identity_system_generation: Option<u64>,
     pub cached_identity: Option<ilium_detect::AgentIdentity>,
@@ -1406,6 +1546,24 @@ fn terminal_launch_plan(
     origin: &TerminalOrigin,
     claude_transcript_exists: impl FnOnce(&str) -> bool,
 ) -> TerminalLaunchPlan {
+    if let TerminalOrigin::CustomAgent {
+        command_line,
+        frozen,
+        ..
+    } = origin
+    {
+        return if *frozen {
+            TerminalLaunchPlan {
+                command_line: None,
+                session_id: None,
+            }
+        } else {
+            terminal_launch_plan(
+                &TerminalOrigin::Command(command_line.clone()),
+                claude_transcript_exists,
+            )
+        };
+    }
     if let TerminalOrigin::Command(command_line) = origin {
         if let Some(session_id) = generated_claude_session_id(command_line) {
             return if claude_transcript_exists(session_id) {
@@ -1447,6 +1605,7 @@ fn terminal_launch_plan(
             command_line: Some(command_line.clone()),
             session_id: None,
         },
+        TerminalOrigin::CustomAgent { .. } => unreachable!("custom origins are handled above"),
     }
 }
 
@@ -1496,11 +1655,14 @@ pub struct PaneIdentityEnv<'a> {
     pub worktree_root: Option<&'a Path>,
 }
 
-pub fn spawn_terminal_session(
+/// Spawn with validated profile variables as structured process environment.
+/// Values never enter the shell command or the durable terminal origin.
+pub(crate) fn spawn_terminal_session_with_environment(
     origin: &TerminalOrigin,
     cwd: &Path,
     identity: &PaneIdentityEnv<'_>,
     quota: &ilium_execution::QuotaGroup,
+    custom_launch: Option<&ilium_core::custom_agent::ResolvedCustomAgentLaunch>,
 ) -> Result<SpawnedTerminalSession, PtyError> {
     let (shell, command_flag) = shell_command();
     let launch_plan = terminal_launch_plan(origin, |session_id| {
@@ -1508,12 +1670,22 @@ pub fn spawn_terminal_session(
             ilium_agent_session::claude_transcript_path(base.home_dir(), cwd, session_id).is_file()
         })
     });
-    let command = match launch_plan.command_line {
+    // A profile may swap the program word and add arguments; the plan's session
+    // identity is unaffected because only the leading word is rewritten.
+    let command_line = match (launch_plan.command_line, custom_launch) {
+        (Some(line), Some(launch)) => Some(launch.customize_command_line(&line)),
+        (line, _) => line,
+    };
+    let environment = custom_launch.map_or(&[][..], |launch| launch.environment.as_slice());
+    let command = match command_line {
         None => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS),
         Some(command_line) => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS)
             .arg(command_flag)
             .arg(command_line),
     };
+    let command = environment.iter().fold(command, |command, entry| {
+        command.env(&entry.key, &entry.value)
+    });
     let mut command = command
         .env(ilium_ipc::pane_env::PANE_ID, identity.pane_id.0.to_string())
         .env(ilium_ipc::pane_env::SESSION_NAME, identity.session_name)
@@ -1553,6 +1725,7 @@ mod tests {
             None,
             Duration::from_secs(1),
         );
+        assert!(runtime.cache_wait_source().is_none());
         let identity = ilium_detect::AgentIdentity {
             class: AgentClass::Codex,
             pid: 123,
@@ -1562,6 +1735,9 @@ mod tests {
             process_tree_depth: 1,
         };
         runtime.agent_process_key = Some(agent_process_key(&identity));
+        // Process classification without a verified session and transcript is
+        // insufficient to authorize cache-wait evidence.
+        assert!(runtime.cache_wait_source().is_none());
         runtime.detection_schedule.cached_identity = Some(identity);
         runtime.agent_input_available = true;
         let status =
@@ -1574,6 +1750,25 @@ mod tests {
             .automated_agent_input_rejection(&status, None)
             .is_some());
         runtime.session.kill().expect("close fixture");
+    }
+
+    #[test]
+    fn custom_claude_uses_the_same_session_id_launch_as_the_base_provider() {
+        let origin = TerminalOrigin::CustomAgent {
+            identity: ilium_core::custom_agent::CustomAgentIdentity {
+                profile_id: "work".into(),
+                base_provider: BuiltinAgentProvider::Claude,
+            },
+            command_line: "claude".into(),
+            frozen: false,
+        };
+        let plan = terminal_launch_plan(&origin, |_| false);
+        let session_id = plan.session_id.unwrap();
+        assert!(uuid::Uuid::parse_str(&session_id).is_ok());
+        assert_eq!(
+            plan.command_line,
+            Some(format!("claude --session-id {session_id}"))
+        );
     }
 
     #[test]

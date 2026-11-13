@@ -3,8 +3,8 @@ use super::{LeafContext, ProtectedSplitViewContext, RestructureCompletionClient}
 use crate::background_animation::AnimationSettings;
 use crate::semantic_animation::{validate_recommendations, ProposedRecommendations};
 use ilium_core::animation_recommendation::{
-    AnimationRecommendation, PlanAnimationEntry, RecommendedRestructurePlan,
-    MAXIMUM_RECOMMENDATION_DEPTH, MAXIMUM_RECOMMENDATION_NODES,
+    AnimationRecommendation, PlanAnimationEntry, MAXIMUM_RECOMMENDATION_DEPTH,
+    MAXIMUM_RECOMMENDATION_NODES,
 };
 use ilium_core::{NodeId, Tree};
 use serde_json::Value;
@@ -65,25 +65,29 @@ pub struct RecommendationContext {
     pub snapshot: RecommendationSnapshot,
     pub authored: AnimationSettings,
 }
-pub fn infer_project_restructure<G: RestructureCompletionClient>(
+/// Infers one project's plan. With `include_attention` the reply may also
+/// carry the attention list, returned raw and unparsed.
+pub fn infer_project_restructure_with_attention<G: RestructureCompletionClient>(
     generator: &G,
     contexts: &[LeafContext],
     structure: &str,
     splits: &[ProtectedSplitViewContext],
     snapshot: &RecommendationSnapshot,
     animation_home: &Path,
-) -> anyhow::Result<RecommendedRestructurePlan> {
+    include_attention: bool,
+) -> anyhow::Result<super::RestructureInference> {
     let authored = crate::project_config::load(animation_home)?.animation;
     let recommendation_context = RecommendationContext {
         snapshot: snapshot.clone(),
         authored,
     };
-    super::infer_restructure_plan_with_protected_splits(
+    super::infer_restructure_with_recaps(
         generator,
         contexts,
         structure,
         splits,
         &recommendation_context,
+        include_attention,
     )
 }
 fn collect_pointers(
@@ -113,6 +117,7 @@ fn collect_pointers(
                 "short_title",
                 "icon",
                 "command_hint",
+                "recap",
                 "animation",
             ],
             "folder" => &["kind", "id", "title", "short_title", "icon", "animation"],

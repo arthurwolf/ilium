@@ -224,6 +224,18 @@ pub struct LocationPickerState {
 }
 
 impl LocationPickerState {
+    pub(crate) fn diagnostic_text(&self) -> Option<&str> {
+        self.coordinate_dialog
+            .as_ref()
+            .and_then(|(_, dialog)| dialog.error.as_deref())
+            .or_else(|| {
+                self.entry_dialog
+                    .as_ref()
+                    .and_then(|dialog| dialog.notice.as_deref())
+            })
+            .or(self.status.as_deref())
+    }
+
     pub fn new(current: GeoLocation, search_client: Option<Client>) -> Self {
         Self::with_searcher_and_client(
             current,
@@ -342,31 +354,39 @@ impl LocationPickerState {
     }
 
     fn step_entry_mode(&mut self, direction: i32) {
-        let mode = match (self.entry_mode, direction.signum()) {
-            (PickerEntryMode::Address, 1) | (PickerEntryMode::Coordinates, -1) => {
-                PickerEntryMode::Coordinates
-            }
-            (PickerEntryMode::Address, -1) | (PickerEntryMode::Coordinates, 1) => {
-                PickerEntryMode::Address
-            }
-            (_, 0) => return,
-            _ => unreachable!("signum is -1, 0, or 1"),
+        if direction == 0 {
+            return;
+        }
+        // Both directions wrap through the two-option catalog. Keep focus on
+        // the selector so the next key continues changing the entry mode.
+        let mode = match self.entry_mode {
+            PickerEntryMode::Address => PickerEntryMode::Coordinates,
+            PickerEntryMode::Coordinates => PickerEntryMode::Address,
         };
         self.set_entry_mode(mode);
+        self.focus = PickerFocus::EntryMode;
+    }
+
+    fn coordinate_limit(&self, axis: CoordinateAxis) -> f64 {
+        match axis {
+            CoordinateAxis::Latitude
+                if matches!(&self.target, PickerTarget::OpenStreetMap { .. }) =>
+            {
+                85.0
+            }
+            CoordinateAxis::Latitude => 90.0,
+            CoordinateAxis::Longitude => 180.0,
+        }
     }
 
     pub fn set_coordinate(&mut self, axis: CoordinateAxis, value: f64) -> Result<(), String> {
-        let latitude_limit = if matches!(&self.target, PickerTarget::OpenStreetMap { .. }) {
-            85.0
-        } else {
-            90.0
-        };
+        let bound = self.coordinate_limit(axis);
         if !value.is_finite() {
             return Err("Enter a finite coordinate".into());
         }
-        let (bound, field) = match axis {
-            CoordinateAxis::Latitude => (latitude_limit, "latitude"),
-            CoordinateAxis::Longitude => (180.0, "longitude"),
+        let field = match axis {
+            CoordinateAxis::Latitude => "latitude",
+            CoordinateAxis::Longitude => "longitude",
         };
         if !(-bound..=bound).contains(&value) {
             return Err(format!("Enter {field} between -{bound} and {bound}"));
@@ -386,16 +406,14 @@ impl LocationPickerState {
             CoordinateAxis::Latitude => self.candidate.latitude,
             CoordinateAxis::Longitude => self.candidate.longitude,
         };
-        let limit = match axis {
-            CoordinateAxis::Latitude
-                if matches!(&self.target, PickerTarget::OpenStreetMap { .. }) =>
-            {
-                85.0
-            }
-            CoordinateAxis::Latitude => 90.0,
-            CoordinateAxis::Longitude => 180.0,
-        };
-        let next = (value + f64::from(direction.signum())).clamp(-limit, limit);
+        let limit = self.coordinate_limit(axis);
+        let direction = direction.signum();
+        // Disabled outward steps must retain the named candidate and its storage owner.
+        if direction == 0 || (direction > 0 && value >= limit) || (direction < 0 && value <= -limit)
+        {
+            return Ok(());
+        }
+        let next = (value + f64::from(direction)).clamp(-limit, limit);
         self.set_coordinate(axis, next)
     }
 
@@ -817,7 +835,7 @@ impl LocationPickerState {
             PickerFocus::EntryMode => match code {
                 KeyCode::Left => self.step_entry_mode(-1),
                 KeyCode::Right => self.step_entry_mode(1),
-                KeyCode::Enter => self.open_entry_dialog(),
+                KeyCode::Enter | KeyCode::Char('+') => self.open_entry_dialog(),
                 _ => {}
             },
             PickerFocus::Input => match code {
@@ -847,23 +865,27 @@ impl LocationPickerState {
                 _ => {}
             },
             PickerFocus::Latitude => match code {
-                KeyCode::Left => {
+                KeyCode::Left | KeyCode::Char('-') => {
                     let _ = self.step_coordinate(CoordinateAxis::Latitude, -1);
                 }
-                KeyCode::Right => {
+                KeyCode::Right | KeyCode::Char('+') => {
                     let _ = self.step_coordinate(CoordinateAxis::Latitude, 1);
                 }
-                KeyCode::Enter => self.open_coordinate_dialog(CoordinateAxis::Latitude),
+                KeyCode::Enter | KeyCode::Char('*') => {
+                    self.open_coordinate_dialog(CoordinateAxis::Latitude)
+                }
                 _ => {}
             },
             PickerFocus::Longitude => match code {
-                KeyCode::Left => {
+                KeyCode::Left | KeyCode::Char('-') => {
                     let _ = self.step_coordinate(CoordinateAxis::Longitude, -1);
                 }
-                KeyCode::Right => {
+                KeyCode::Right | KeyCode::Char('+') => {
                     let _ = self.step_coordinate(CoordinateAxis::Longitude, 1);
                 }
-                KeyCode::Enter => self.open_coordinate_dialog(CoordinateAxis::Longitude),
+                KeyCode::Enter | KeyCode::Char('*') => {
+                    self.open_coordinate_dialog(CoordinateAxis::Longitude)
+                }
                 _ => {}
             },
             PickerFocus::Map => {
@@ -994,7 +1016,7 @@ impl LocationPickerState {
                     PickerFocus::Longitude,
                 ),
             ] {
-                let control = coordinate_control(row, axis, &self.candidate);
+                let control = coordinate_control(row, axis, self);
                 if let Some(action) = control.hit(position, button) {
                     self.focus = focus;
                     match action {
@@ -1052,12 +1074,17 @@ fn entry_mode_control(row: Rect, mode: PickerEntryMode) -> ValueControl {
     )
 }
 
-fn coordinate_control(row: Rect, axis: CoordinateAxis, candidate: &GeoLocation) -> ValueControl {
-    let (label, value) = match axis {
-        CoordinateAxis::Latitude => ("Latitude", candidate.latitude),
-        CoordinateAxis::Longitude => ("Longitude", candidate.longitude),
+fn coordinate_control(
+    row: Rect,
+    axis: CoordinateAxis,
+    picker: &LocationPickerState,
+) -> ValueControl {
+    let (label, coordinate) = match axis {
+        CoordinateAxis::Latitude => ("Latitude", picker.candidate.latitude),
+        CoordinateAxis::Longitude => ("Longitude", picker.candidate.longitude),
     };
-    let value = format!("{value:.4}");
+    let limit = picker.coordinate_limit(axis);
+    let value = format!("{coordinate:.4}");
     ValueControl::new(
         row,
         ControlSpec {
@@ -1065,8 +1092,8 @@ fn coordinate_control(row: Rect, axis: CoordinateAxis, candidate: &GeoLocation) 
             label,
             value: &value,
             label_width: 10,
-            previous_enabled: true,
-            next_enabled: true,
+            previous_enabled: coordinate > -limit,
+            next_enabled: coordinate < limit,
             open_enabled: true,
         },
     )
@@ -1315,7 +1342,7 @@ pub fn render_cursor(
             (CoordinateAxis::Latitude, picker_layout.latitude),
             (CoordinateAxis::Longitude, picker_layout.longitude),
         ] {
-            coordinate_control(area, axis, &picker.candidate).render(
+            coordinate_control(area, axis, picker).render(
                 frame,
                 picker_control_styles(
                     picker.focus
@@ -1330,9 +1357,10 @@ pub fn render_cursor(
 
     // Results list.
     let results = picker_layout.result_content_area(picker.results.len());
-    if picker.entry_mode == PickerEntryMode::Coordinates {
-        frame.render_widget(Clear, picker_layout.results);
-    } else if picker.results.is_empty() {
+    // Coordinate controls occupy the results region and were painted above.
+    // Clearing that region here would erase their visible controls while
+    // leaving their pointer targets active.
+    if picker.entry_mode == PickerEntryMode::Address && picker.results.is_empty() {
         frame.render_widget(
             Paragraph::new(if picker.is_searching() {
                 "Searching\u{2026}"
@@ -1342,7 +1370,7 @@ pub fn render_cursor(
             .style(Style::new().add_modifier(Modifier::DIM)),
             results,
         );
-    } else {
+    } else if picker.entry_mode == PickerEntryMode::Address {
         let first = picker_layout.visible_result_start(picker.selected_result);
         for (offset, result) in picker
             .results
@@ -1373,7 +1401,10 @@ pub fn render_cursor(
         }
     }
 
-    if results.width < picker_layout.results.width && results.height > 0 {
+    if picker.entry_mode == PickerEntryMode::Address
+        && results.width < picker_layout.results.width
+        && results.height > 0
+    {
         let track = Rect::new(results.right(), results.y, 1, results.height);
         let mut scrollbar = ratatui::widgets::ScrollbarState::new(picker.results.len())
             .position(picker_layout.visible_result_start(picker.selected_result))
@@ -1451,7 +1482,7 @@ pub fn render_cursor(
             },
         ),
     );
-    let hint = picker.status.clone().unwrap_or_else(|| {
+    let hint = picker.status.as_ref().map(|status| format!("F9 details · {status}")).unwrap_or_else(|| {
         "Tab switches field \u{b7} arrows move the crosshair (Shift: big steps) \u{b7} click the map"
             .to_owned()
     });
@@ -1957,6 +1988,68 @@ mod tests {
     }
 
     #[test]
+    fn coordinate_arrows_at_axis_limits_are_inert() {
+        let mut picker = picker_with(offline());
+        let row = Rect::new(0, 0, 40, 1);
+        for (axis, limit) in [
+            (CoordinateAxis::Latitude, 90.0),
+            (CoordinateAxis::Longitude, 180.0),
+        ] {
+            for sign in [-1.0, 1.0] {
+                picker.set_coordinate(axis, sign * limit).unwrap();
+                let control = coordinate_control(row, axis, &picker);
+                let geometry = control.geometry();
+                let disabled = if sign < 0.0 {
+                    geometry.previous
+                } else {
+                    geometry.next
+                };
+                let enabled = if sign < 0.0 {
+                    geometry.next
+                } else {
+                    geometry.previous
+                };
+                assert_eq!(
+                    control.hit(Position::new(disabled.x, disabled.y), PointerButton::Left),
+                    None
+                );
+                assert!(control
+                    .hit(Position::new(enabled.x, enabled.y), PointerButton::Left)
+                    .is_some());
+                assert_eq!(
+                    control.hit(
+                        Position::new(geometry.open.x, geometry.open.y),
+                        PointerButton::Left
+                    ),
+                    Some(ControlAction::EditNumber)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn outward_coordinate_keys_preserve_named_candidate_at_the_bound() {
+        let mut picker = picker_with(offline());
+        for (axis, limit) in [
+            (CoordinateAxis::Latitude, 90.0),
+            (CoordinateAxis::Longitude, 180.0),
+        ] {
+            for sign in [-1.0, 1.0] {
+                picker.set_coordinate(axis, sign * limit).unwrap();
+                picker.candidate.label = "Selected named place".into();
+                let original = picker.candidate.clone();
+                picker
+                    .step_coordinate(axis, if sign < 0.0 { -1 } else { 1 })
+                    .unwrap();
+                assert_eq!(
+                    picker.candidate, original,
+                    "disabled outward step must be inert"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn coordinate_fields_enforce_shared_and_openstreetmap_latitude_bounds() {
         let mut shared = picker_with(offline());
         shared
@@ -2032,8 +2125,7 @@ mod tests {
                 .draw(|frame| render(frame, screen, &picker))
                 .unwrap();
             let buffer = terminal.backend().buffer();
-            let latitude =
-                coordinate_control(areas.latitude, CoordinateAxis::Latitude, &picker.candidate);
+            let latitude = coordinate_control(areas.latitude, CoordinateAxis::Latitude, &picker);
             let geometry = latitude.geometry();
             assert_eq!(
                 buffer[(geometry.previous.x, geometry.previous.y)].symbol(),
@@ -2092,7 +2184,7 @@ mod tests {
         let number = coordinate_control(
             coordinate_layout.latitude,
             CoordinateAxis::Latitude,
-            &picker.candidate,
+            &picker,
         );
         let open = number.geometry().open;
         picker.click_with_button(Position::new(open.x, open.y), SCREEN, PointerButton::Left);
@@ -2423,6 +2515,8 @@ mod tests {
         let mut picker = picker_with(offline());
         assert_eq!(picker.focus, PickerFocus::Input);
         press(&mut picker, KeyCode::Tab);
+        assert_eq!(picker.focus, PickerFocus::EntryMode);
+        press(&mut picker, KeyCode::Tab);
         assert_eq!(
             picker.focus,
             PickerFocus::Map,
@@ -2432,6 +2526,7 @@ mod tests {
         press(&mut picker, KeyCode::BackTab);
         assert_eq!(picker.focus, PickerFocus::Results);
         press(&mut picker, KeyCode::Tab);
+        assert_eq!(picker.focus, PickerFocus::Map);
         press(&mut picker, KeyCode::Tab);
         assert_eq!(picker.focus, PickerFocus::Input);
         type_text(&mut picker, "Rome");
@@ -2527,10 +2622,10 @@ mod tests {
         let mut app = App::new("test".into(), project.path().to_path_buf());
         app.set_screen_area(SCREEN);
         app.animation_settings.kind = AnimationKind::Stars;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         (app, project)
     }
 
@@ -2539,10 +2634,10 @@ mod tests {
         let mut app = App::new("osm-picker-test".into(), project.path().to_path_buf());
         app.set_screen_area(SCREEN);
         app.animation_settings.kind = AnimationKind::OpenStreetMap;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         (app, project)
     }
 
@@ -2991,10 +3086,10 @@ mod tests {
                 home.path().to_path_buf(),
                 Ok(home_before.clone()),
             );
-            app.mode = Mode::Settings(SettingsState {
+            app.mode = Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Animations,
                 ..Default::default()
-            });
+            }));
             app.open_location_picker();
             let Mode::LocationPicker(picker) = &mut app.mode else {
                 panic!("location picker must open")
@@ -3191,6 +3286,98 @@ mod tests {
             let picker_layout = layout(screen);
             assert!(screen.intersection(picker_layout.popup) == picker_layout.popup);
             assert!(picker_layout.map.height >= 1);
+        }
+    }
+    #[test]
+    fn axis_limit_controls_are_inert_for_shared_and_openstreetmap_targets() {
+        let row = Rect::new(0, 0, 40, 1);
+        for osm in [false, true] {
+            let mut picker = if osm {
+                LocationPickerState::for_openstreetmap(
+                    place("Synthetic map point", 0.0, 0.0),
+                    PathBuf::from("/synthetic/osm-project"),
+                    &AddressSearchSettings::default(),
+                    None,
+                )
+            } else {
+                picker_with(offline())
+            };
+            picker.set_entry_mode(PickerEntryMode::Coordinates);
+            for axis in [CoordinateAxis::Latitude, CoordinateAxis::Longitude] {
+                let limit = match axis {
+                    CoordinateAxis::Latitude if osm => 85.0,
+                    CoordinateAxis::Latitude => 90.0,
+                    CoordinateAxis::Longitude => 180.0,
+                };
+                for sign in [-1.0, 1.0] {
+                    picker.set_coordinate(axis, sign * limit).unwrap();
+                    let before = picker.candidate.clone();
+                    let control = coordinate_control(row, axis, &picker);
+                    let geometry = control.geometry();
+                    let disabled = if sign < 0.0 {
+                        geometry.previous
+                    } else {
+                        geometry.next
+                    };
+                    let enabled = if sign < 0.0 {
+                        geometry.next
+                    } else {
+                        geometry.previous
+                    };
+                    assert_eq!(
+                        control.hit(disabled.as_position(), PointerButton::Left),
+                        None
+                    );
+                    assert!(control
+                        .hit(enabled.as_position(), PointerButton::Left)
+                        .is_some());
+                    assert_eq!(
+                        control.hit(geometry.open.as_position(), PointerButton::Left),
+                        Some(ControlAction::EditNumber)
+                    );
+                    picker.step_coordinate(axis, sign as i32).unwrap();
+                    assert_eq!(picker.candidate, before);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn location_catalog_and_numeric_keyboard_aliases_reach_existing_editors() {
+        let mut picker = picker_with(offline());
+        picker.focus = PickerFocus::EntryMode;
+        press(&mut picker, KeyCode::Char('+'));
+        assert!(picker.entry_dialog.is_some());
+        press(&mut picker, KeyCode::Esc);
+        assert!(picker.entry_dialog.is_none());
+        picker.set_entry_mode(PickerEntryMode::Coordinates);
+        for (axis, focus) in [
+            (CoordinateAxis::Latitude, PickerFocus::Latitude),
+            (CoordinateAxis::Longitude, PickerFocus::Longitude),
+        ] {
+            picker.set_coordinate(axis, 0.25).unwrap();
+            picker.focus = focus;
+            press(&mut picker, KeyCode::Char('+'));
+            let value = match axis {
+                CoordinateAxis::Latitude => picker.candidate.latitude,
+                CoordinateAxis::Longitude => picker.candidate.longitude,
+            };
+            assert_eq!(value, 1.25);
+            press(&mut picker, KeyCode::Char('-'));
+            let value = match axis {
+                CoordinateAxis::Latitude => picker.candidate.latitude,
+                CoordinateAxis::Longitude => picker.candidate.longitude,
+            };
+            assert_eq!(value, 0.25);
+            press(&mut picker, KeyCode::Char('*'));
+            assert_eq!(picker.coordinate_dialog.as_ref().unwrap().0, axis);
+            press(&mut picker, KeyCode::Esc);
+            assert!(picker.coordinate_dialog.is_none());
+            let value = match axis {
+                CoordinateAxis::Latitude => picker.candidate.latitude,
+                CoordinateAxis::Longitude => picker.candidate.longitude,
+            };
+            assert_eq!(value, 0.25);
         }
     }
 }

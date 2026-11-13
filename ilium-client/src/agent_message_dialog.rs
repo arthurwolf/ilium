@@ -9,7 +9,7 @@ use ilium_core::{NodeKind, PaneContentKind, PaneStatus, Tree};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Modifier, Style},
-    widgets::{Clear, Paragraph},
+    widgets::{Clear, Paragraph, Wrap},
     Frame,
 };
 use ratatui_textarea::TextArea;
@@ -262,7 +262,7 @@ impl AgentMessageDialog {
     }
 
     pub fn handle_mouse(&mut self, screen: Rect, mouse: MouseEvent) -> Outcome {
-        let geometry = Geometry::new(screen);
+        let geometry = Geometry::with_error(screen, self.error.as_deref());
         let recipients_block = crate::theme::block(self.focus == Focus::Recipients);
         let inner = recipients_block.inner(geometry.recipients);
         let rows = inner.height as usize;
@@ -339,12 +339,27 @@ struct Geometry {
 }
 
 impl Geometry {
+    #[cfg(test)]
     fn new(screen: Rect) -> Self {
-        let outer = crate::modal::centered_fixed_rect(100, 24, screen);
+        Self::with_error(screen, None)
+    }
+
+    fn with_error(screen: Rect, error: Option<&str>) -> Self {
+        let width = screen.width.min(100).saturating_sub(2);
+        let error_lines = error.map_or(2, |text| {
+            crate::value_dialog::wrap_cells(text, width)
+                .len()
+                .saturating_add(1)
+        });
+        let footer_height = error_lines
+            .min(usize::from(screen.height.saturating_sub(8)))
+            .max(2) as u16;
+        let outer =
+            crate::modal::centered_fixed_rect(100, 22u16.saturating_add(footer_height), screen);
         let inner = crate::theme::block(true).inner(outer);
         let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(2)])
+            .constraints([Constraint::Min(3), Constraint::Length(footer_height)])
             .split(inner);
         let columns = Layout::default()
             .direction(Direction::Horizontal)
@@ -379,7 +394,7 @@ impl Geometry {
 }
 
 pub fn draw(frame: &mut Frame<'_>, screen: Rect, state: &AgentMessageDialog) {
-    let geometry = Geometry::new(screen);
+    let geometry = Geometry::with_error(screen, state.error.as_deref());
     frame.render_widget(Clear, geometry.outer);
     frame.render_widget(
         crate::theme::block(true).title(crate::theme::chrome_title(&format!(
@@ -494,11 +509,14 @@ pub fn draw(frame: &mut Frame<'_>, screen: Rect, state: &AgentMessageDialog) {
         frame.render_widget(Paragraph::new(text).style(style), area);
     }
     frame.render_widget(
-        Paragraph::new(
-            state.error.as_deref().unwrap_or(
-                "Tab: change field · Space: toggle agent · Ctrl+Enter: send · Esc: cancel",
-            ),
-        ),
+        Paragraph::new(state.error.as_ref().map_or_else(
+            || {
+                "Tab: change field · Space: toggle agent · Ctrl+Enter: send · Esc: cancel"
+                    .to_owned()
+            },
+            |error| format!("F9: full diagnostic\n{error}"),
+        ))
+        .wrap(Wrap { trim: false }),
         geometry.footer,
     );
 }
@@ -507,6 +525,16 @@ pub fn draw(frame: &mut Frame<'_>, screen: Rect, state: &AgentMessageDialog) {
 mod tests {
     use super::*;
     use crossterm::event::KeyEvent;
+
+    #[test]
+    fn long_error_footer_grows_to_fit_available_space() {
+        let screen = Rect::new(0, 0, 45, 30);
+        let error = format!("{}\nFINAL_SUFFIX", "界 diagnostic ".repeat(100));
+        let geometry = Geometry::with_error(screen, Some(&error));
+        assert!(geometry.footer.height > 2);
+        assert!(geometry.outer.bottom() <= screen.bottom());
+        assert!(geometry.message.height >= 1);
+    }
 
     #[test]
     fn scope_is_recursive_and_filesystem_membership_is_component_safe_and_project_local() {

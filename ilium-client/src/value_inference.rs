@@ -481,11 +481,11 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut app = synthetic_app(directory.path());
         app.onboarding = None;
-        app.mode = Mode::Settings(crate::app::SettingsState {
+        app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
             tab: crate::app::SettingsTab::Inference,
             selected_row: 0,
             ..crate::app::SettingsState::default()
-        });
+        }));
         app.begin_settings_choice_dialog(SettingsChoice::InferenceProvider);
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("catalog");

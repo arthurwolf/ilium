@@ -45,6 +45,7 @@ fn isolated_bank() -> (ClientExecution, QuotaGroup) {
             execution,
             general,
             location_search,
+            codec_groups: CodecAdmissionGroups::new(quota.clone()),
             terminal_storage: terminal_storage_quota(),
         },
         quota,

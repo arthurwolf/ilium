@@ -179,11 +179,11 @@ impl ByteBudget {
         limit: u64,
         storage: Option<Arc<ilium_execution::StorageAdmission>>,
     ) -> Result<Self> {
-        if limit == 0 || limit > 1024 * MIB {
+        if limit == 0 || limit > 2048 * MIB {
             return Err(AssetError::Limit {
                 resource: "working bytes",
                 requested: limit,
-                limit: 1024 * MIB,
+                limit: 2048 * MIB,
             });
         }
         Ok(Self(Arc::new(Counter {

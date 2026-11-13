@@ -18,6 +18,7 @@ qualification-test-support = ["ilium-animation-js/qualification-test-support"]
 ui-capture = []
 
 [dependencies]
+ilium-instructions = { version = "0.1.1", path = "../ilium-instructions" }
 ilium-http = { version = "0.1.1", path = "../ilium-http" }
 ilium-wikipedia = { version = "0.1.1", path = "../ilium-wikipedia" }
 ilium-prompts = { version = "0.1.1", path = "../ilium-prompts" }
@@ -38,6 +39,9 @@ ilium-gpu = { version = "0.1.1", path = "../ilium-gpu" }
 ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
 ilium-core = { version = "0.1.1", path = "../ilium-core" }
 ilium-ipc = { version = "0.1.1", path = "../ilium-ipc" }
+ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host" }
+# `plugin_host::widget_rig::solve_row` takes the generated `Constraint` (WID-005..007).
+ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
 ilium-inference = { version = "0.1.1", path = "../ilium-inference" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 ilium-remote-compaction = { version = "0.1.1", path = "../ilium-remote-compaction" }
@@ -53,13 +57,13 @@ regex = "1.12.3"
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 ratatui-image = { version = "11.0", default-features = false }
 ratatui-textarea = "0.9.2"
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_norway = "0.9.42"
 serde_json = "1.0.149"
 sha2 = "0.10.9"
 strip-ansi-escapes = "0.2.1"
 thiserror = "2.0.18"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "process"] }
 tokenizers = { version = "0.22.2", default-features = false, features = ["onig"] }
 toml = "0.8.23"
 toml_edit = "0.25.12"
@@ -76,6 +80,10 @@ zbus = { version = "5.18.0", default-features = false, features = ["tokio"] }
 uuid = { version = "1.23.5", features = ["v4"] }
 
 [dev-dependencies]
+# Plugin platform test lanes (test-plan.md section 1.5).
+ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host", features = ["testing"] }
+ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
+proptest = "1"
 ilium-server = { version = "0.1.1", path = "../ilium-server" }
 tempfile = "3.27.0"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }

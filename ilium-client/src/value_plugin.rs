@@ -903,11 +903,11 @@ mod tests {
         use std::sync::Arc;
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new("synthetic-plugin-receipts".into(), directory.path().into());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             animation_source_tab: crate::animation_plugins::AnimationSourceTab::Plugin,
             ..SettingsState::default()
-        });
+        }));
         let host = || {
             let (target, _, _) = plugin_fixture(PluginField::Control("speed".into()));
             let ValueDialogState::Number(mut number) = target.dialog().unwrap() else {

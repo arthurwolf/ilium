@@ -120,6 +120,50 @@ pub fn infer_pane_title<G: PromptCompletionClient>(
     infer_session_title(generator, input, &transcript.path, transcript_entries)
 }
 
+/// Icon shown for a title taken from Codex's own thread name, when the pane
+/// has no inferred icon yet.
+const OFFICIAL_THREAD_NAME_ICON: &str = "🧵";
+
+/// Builds a pane title from the thread name Codex stored on disk, with no
+/// model call. The long form keeps up to seven words and the short form the
+/// first three, matching the bounds of model-written titles.
+pub fn official_codex_thread_title(
+    home: &Path,
+    input: &SessionTitleInput,
+) -> SessionTitleInferenceTrace {
+    let result = official_codex_thread_dual_title(home, input);
+    SessionTitleInferenceTrace {
+        rendered_prompt: None,
+        raw_response: result
+            .as_ref()
+            .ok()
+            .map(|title| format!("official Codex thread name: {}", title.long)),
+        result,
+    }
+}
+
+fn official_codex_thread_dual_title(
+    home: &Path,
+    input: &SessionTitleInput,
+) -> anyhow::Result<DualTitle> {
+    let name =
+        ilium_agent_session::official_thread_name(home, &input.session_id).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Codex has not saved a thread name for session {} yet",
+                input.session_id
+            )
+        })?;
+    let words: Vec<&str> = name.split_whitespace().collect();
+    Ok(DualTitle {
+        icon: input
+            .current_icon
+            .clone()
+            .unwrap_or_else(|| OFFICIAL_THREAD_NAME_ICON.to_string()),
+        short: words.iter().take(3).copied().collect::<Vec<_>>().join(" "),
+        long: words.iter().take(7).copied().collect::<Vec<_>>().join(" "),
+    })
+}
+
 /// Runs the same inference while returning its exact rendered request and raw
 /// response when the provider boundary was reached. Preflight failures (for
 /// example a missing verified transcript) correctly return neither.
@@ -896,5 +940,53 @@ mod tests {
         assert!(!prompt.contains("Only organization"));
         assert!(prompt.contains("Entry {{> absent}} <x>&"));
         assert!(!prompt.contains("Project convention"));
+    }
+
+    fn home_with_codex_index(lines: &str) -> tempfile::TempDir {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+        std::fs::write(home.path().join(".codex/session_index.jsonl"), lines).unwrap();
+        home
+    }
+
+    #[test]
+    fn official_codex_thread_title_uses_latest_saved_name_without_a_model() {
+        let home = home_with_codex_index(concat!(
+            r#"{"id":"77777777-7777-4777-8777-777777777777","thread_name":"Old name"}"#,
+            "\n",
+            r#"{"id":"77777777-7777-4777-8777-777777777777","thread_name":"Fix the login flow for expired tokens today please"}"#,
+            "\n",
+        ));
+        let trace = official_codex_thread_title(home.path(), &input(PathBuf::from("/tmp/x")));
+        let title = trace.result.unwrap();
+        assert_eq!(title.long, "Fix the login flow for expired tokens");
+        assert_eq!(title.short, "Fix the login");
+        assert_eq!(title.icon, "🔐");
+        assert!(trace.rendered_prompt.is_none());
+        assert!(trace
+            .raw_response
+            .unwrap()
+            .contains("official Codex thread name"));
+    }
+
+    #[test]
+    fn official_codex_thread_title_errors_when_codex_has_not_named_the_session() {
+        let home = home_with_codex_index("{\"id\":\"other\",\"thread_name\":\"Elsewhere\"}\n");
+        let trace = official_codex_thread_title(home.path(), &input(PathBuf::from("/tmp/x")));
+        assert!(trace.result.is_err());
+        assert!(trace.raw_response.is_none());
+    }
+
+    #[test]
+    fn official_codex_thread_title_defaults_the_icon_when_none_is_set() {
+        let home = home_with_codex_index(
+            "{\"id\":\"77777777-7777-4777-8777-777777777777\",\"thread_name\":\"Refactor parser\"}\n",
+        );
+        let mut request = input(PathBuf::from("/tmp/x"));
+        request.current_icon = None;
+        let title = official_codex_thread_title(home.path(), &request)
+            .result
+            .unwrap();
+        assert_eq!(title.icon, OFFICIAL_THREAD_NAME_ICON);
     }
 }

@@ -1,0 +1,16 @@
+[package]
+name = "ilium-plugin-sdk-core"
+description = "Rust SDK core for Ilium plugins: generated WIT mirror types, plugin traits, event and intent builders, UI tree builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.18"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wit-bindgen = "0.57.1"

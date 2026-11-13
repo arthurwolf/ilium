@@ -34,12 +34,13 @@ fn open_number(app: &mut App) {
         .iter()
         .position(|row| *row == TerminalRow::EngineMemoryBudget)
         .unwrap();
-    app.mode = Mode::Settings(SettingsState {
+    app.mode = Mode::Settings(Box::new(SettingsState {
         tab: SettingsTab::Terminal,
         selected_row,
         ..SettingsState::default()
-    });
+    }));
     app.begin_settings_number_dialog(SettingsNumber::TerminalEngineMemory);
+    app.settle_filesystem_for_test();
 }
 //
 fn submit_number(app: &mut App, text: &str) {
@@ -142,8 +143,9 @@ fn terminal_pool_number_dialog_queue_refusal_is_unsaved_and_does_not_apply_local
         app.configuration_admission.attempts,
         app.configuration_admission.accepted,
     );
-    app.configuration_files.as_mut().unwrap().close_admission();
+    // Finish the read first so this still exercises refused write admission.
     open_number(&mut app);
+    app.configuration_files.as_mut().unwrap().close_admission();
     submit_number(&mut app, "257");
     assert_eq!(app.configuration_admission.attempts, before.0 + 1);
     assert_eq!(app.configuration_admission.accepted, before.1);

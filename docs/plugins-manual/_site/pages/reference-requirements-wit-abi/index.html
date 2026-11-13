@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Requirements for WIT and ABI | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/" aria-current="page">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Requirements for WIT and ABI</h1>
+
+<p>This page lists every normative rule of the WIT contract and the binary interface of <code>ilium:plugin@0.1.0</code>. Each row has an id, the rule, the page that explains it, and the test that proves it. The ids appear inline as [ABI-NNN] on the pages that state the rule. The contract is in the <a href="/pages/reference-wit/">WIT reference</a>.</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>The WIT reference.</strong> <a href="/pages/reference-wit/">WIT reference</a> is the owner of all type definitions.</li>
+<li><strong>The conformance matrices.</strong> <a href="/pages/reference-host-conformance/">Host conformance matrix</a> lists the members that rule ABI-030 covers.</li>
+</ul>
+<h2 id="rules">Rules</h2>
+<table>
+<thead>
+<tr>
+<th>Id</th>
+<th>Rule</th>
+<th>Owner page</th>
+<th>Test</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ABI-001</td>
+<td>The WIT reference is the only canonical definition of the contract. Other pages MUST hold excerpts only.</td>
+<td><a href="/pages/reference-wit/">reference-wit</a></td>
+<td>check.py excerpt check</td>
+</tr>
+<tr>
+<td>ABI-002</td>
+<td>Case order and case counts of event (56), intent (42), outcome (7), widget (51), action-kind (17), action-value (12), error-code (15) and deactivation-reason (6, of which five are delivered) MUST match the WIT reference.</td>
+<td><a href="/pages/reference-wit/">reference-wit</a></td>
+<td>case-count diff against wit/since_v0_1</td>
+</tr>
+<tr>
+<td>ABI-003</td>
+<td>All seven WIT packages MUST carry the one version 0.1.0 and change together.</td>
+<td><a href="/pages/reference-abi-evolution/">reference-abi-evolution</a></td>
+<td>package version scan</td>
+</tr>
+<tr>
+<td>ABI-004</td>
+<td>Each component MUST carry the custom section ilium:api-version with bytes 00 00 00 01 00 00.</td>
+<td><a href="/pages/reference-abi-evolution/">reference-abi-evolution</a></td>
+<td>inspect a built component</td>
+</tr>
+<tr>
+<td>ABI-005</td>
+<td>A WIT excerpt on another page MUST match the declared names and cases in the WIT reference.</td>
+<td><a href="/pages/reference-wit/">reference-wit</a></td>
+<td>check.py excerpt check</td>
+</tr>
+<tr>
+<td>ABI-006</td>
+<td>The optional exports a component has MUST equal the optional exports its manifest lists.</td>
+<td><a href="/pages/reference-manifest/">reference-manifest</a></td>
+<td>install a component with an extra export</td>
+</tr>
+<tr>
+<td>ABI-007</td>
+<td>The manifest exports list MUST NOT differ from the component. A difference MUST refuse install with manifest.exports-mismatch.</td>
+<td><a href="/pages/reference-host-conformance/">reference-host-conformance</a></td>
+<td>install with a missing optional export</td>
+</tr>
+<tr>
+<td>ABI-008</td>
+<td>A plugin that returns more than 256 submissions MUST trap the call; the host MUST apply none and none completes.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>return 257 submissions</td>
+</tr>
+<tr>
+<td>ABI-009</td>
+<td>The lowest-index offender of a batch-level check MUST complete as refused(invalid-argument) (shape) or refused(not-permitted) (grant), and every other submission MUST complete as refused(cancelled) with the message 'batch refused: submission <index>', where index is 0-based.</td>
+<td><a href="/pages/requests-and-outcomes/">requests-and-outcomes</a></td>
+<td>batch of 3 with 1 bad</td>
+</tr>
+<tr>
+<td>ABI-010</td>
+<td>A dedup key MUST be 1 to 128 characters from [A-Za-z0-9._:/-] and is mandatory for send-input and agent-action.</td>
+<td><a href="/pages/events-and-intents/">events-and-intents</a></td>
+<td>repeat a key twice</td>
+</tr>
+<tr>
+<td>ABI-011</td>
+<td>Correlation numbers below 2^63 MUST belong to plugins. Numbers from 2^63 up belong to the SDK.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>submit with a high number</td>
+</tr>
+<tr>
+<td>ABI-012</td>
+<td>The host MUST hold a finished slow-call result for 30 seconds.</td>
+<td><a href="/pages/requests-and-outcomes/">requests-and-outcomes</a></td>
+<td>take after 31 s</td>
+</tr>
+<tr>
+<td>ABI-013</td>
+<td>The host MUST allow 64 pending requests by default per plugin (ceiling 256 for T1) and 4,096 per session. Over the limit MUST return busy.</td>
+<td><a href="/pages/reference-errors-and-limits/">reference-errors-and-limits</a></td>
+<td>start 65 requests</td>
+</tr>
+<tr>
+<td>ABI-014</td>
+<td>A take before completion, a second take, or a take of an unknown id MUST return none. The SDK wrapper returns not-found.</td>
+<td><a href="/pages/requests-and-outcomes/">requests-and-outcomes</a></td>
+<td>take twice</td>
+</tr>
+<tr>
+<td>ABI-015</td>
+<td>Each event case MUST follow its delivery policy: coalesced, drop-oldest-counted or never-dropped. Loss of a drop-oldest event MUST be reported in events-dropped.</td>
+<td><a href="/pages/reference-host-conformance/">reference-host-conformance</a></td>
+<td>fill a queue of 1,024</td>
+</tr>
+<tr>
+<td>ABI-016</td>
+<td>Names MUST use kebab-case in WIT. JSON inside strings MUST be UTF-8.</td>
+<td><a href="/pages/reference-wit/">reference-wit</a></td>
+<td>scan</td>
+</tr>
+<tr>
+<td>ABI-017</td>
+<td>A string that is not valid UTF-8 MUST trap the call.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>pass bad bytes</td>
+</tr>
+<tr>
+<td>ABI-018</td>
+<td>Required exports (lifecycle, handler, renderer) MUST NOT be listed in the manifest exports.</td>
+<td><a href="/pages/reference-manifest/">reference-manifest</a></td>
+<td>list handler in a manifest</td>
+</tr>
+<tr>
+<td>ABI-019</td>
+<td>Cases of a variant, enum or flags MUST only be appended after the freeze. Records MUST NOT gain fields.</td>
+<td><a href="/pages/reference-abi-evolution/">reference-abi-evolution</a></td>
+<td>case-order diff</td>
+</tr>
+<tr>
+<td>ABI-020</td>
+<td>The Rust and TypeScript SDKs MUST map WIT names by the rules in the WIT reference section 10.</td>
+<td><a href="/pages/reference-wit/">reference-wit</a></td>
+<td>SDK binding test</td>
+</tr>
+<tr>
+<td>ABI-021</td>
+<td>The host MUST compare api versions by minor window and MUST report one refusal code per package, the first failing check.</td>
+<td><a href="/pages/reference-abi-evolution/">reference-abi-evolution</a></td>
+<td>install a 0.3.0 package</td>
+</tr>
+<tr>
+<td>ABI-022</td>
+<td>Version 0.1.0 MUST have exactly four unstable features: ui-calendar, plugin-services, gpu-kernels and websocket.</td>
+<td><a href="/pages/reference-abi-evolution/">reference-abi-evolution</a></td>
+<td>list features</td>
+</tr>
+<tr>
+<td>ABI-023</td>
+<td>A requested grant not in the API MUST refuse with manifest.grant-unknown. An unrequested import MUST refuse with manifest.import-not-requested. A call of an unrequested capability MUST trap host.capability-not-requested.</td>
+<td><a href="/pages/reference-host-conformance/">reference-host-conformance</a></td>
+<td>three installs</td>
+</tr>
+<tr>
+<td>ABI-024</td>
+<td>The host MUST NOT link wasi:sockets or wasi:http.</td>
+<td><a href="/pages/security/">security</a></td>
+<td>import wasi:sockets</td>
+</tr>
+<tr>
+<td>ABI-025</td>
+<td>Each plugin side MUST run one single-threaded instance, and a host call MUST NOT re-enter a plugin export.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>call an export from an import</td>
+</tr>
+<tr>
+<td>ABI-026</td>
+<td>The host MUST interrupt a running export by an epoch ticker of 10 ms against the export deadline.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>spin in on-events</td>
+</tr>
+<tr>
+<td>ABI-027</td>
+<td>A memory growth over the instance limit MUST trap.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>grow memory</td>
+</tr>
+<tr>
+<td>ABI-028</td>
+<td>The deactivation reason crash-restart is reserved. The host MUST NOT deliver it.</td>
+<td><a href="/pages/reference-abi-evolution/">reference-abi-evolution</a></td>
+<td>crash a plugin</td>
+</tr>
+<tr>
+<td>ABI-029</td>
+<td>The host MUST NOT deliver an event, outcome or reason case to a plugin whose API predates the case.</td>
+<td><a href="/pages/reference-abi-evolution/">reference-abi-evolution</a></td>
+<td>run a plugin built against 0.1.0 on a host that adds a case after it</td>
+</tr>
+<tr>
+<td>ABI-030</td>
+<td>A host test suite MUST have a test for every row of the import, export, event, intent and widget matrices.</td>
+<td><a href="/pages/reference-host-conformance/">reference-host-conformance</a></td>
+<td>row count check</td>
+</tr>
+<tr>
+<td>ABI-031</td>
+<td>The kernel MUST run two batch-level checks over the whole submission list in index order before any effect: shape first, then grant. Inside one submission shape wins over grant.</td>
+<td><a href="/pages/events-and-intents/">events-and-intents</a></td>
+<td>batch with a missing grant at index 1 and a bad shape at index 2 -&gt; index 2 is invalid-argument only if checked first; the shape check runs for the whole list before the grant check, so index 2 is the offender and the others are cancelled</td>
+</tr>
+<tr>
+<td>ABI-032</td>
+<td>Every check other than shape and grant (target, readiness, value validity, rate, quota, conflict, if-current) MUST be per submission and MUST affect only that submission.</td>
+<td><a href="/pages/events-and-intents/">events-and-intents</a></td>
+<td>batch of 3 with a stale revision at index 1 -&gt; only index 1 is refused</td>
+</tr>
+<tr>
+<td>ABI-033</td>
+<td>A full queue MUST admit a drop-oldest event by evicting the oldest queued drop-oldest event of any kind and counting it.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>fill a queue of 1,024 with output-matched, send 1,500 -&gt; 477 dropped counted</td>
+</tr>
+<tr>
+<td>ABI-034</td>
+<td>A dedup key MUST be reserved while now_wall_ms - accepted_wall_ms &lt; 600,000, measured on the wall clock. The table is in memory and a server restart clears it, except that from Phase 5 the keys of <code>send-input</code> and <code>agent-action</code> are persisted in the journal and survive.</td>
+<td><a href="/pages/requests-and-outcomes/">requests-and-outcomes</a></td>
+<td>repeat a key at 599,999 ms (duplicate) and at 600,000 ms (accepted); restart the server between (only <code>send-input</code> and <code>agent-action</code> keys, from Phase 5, stay reserved)</td>
+</tr>
+<tr>
+<td>ABI-035</td>
+<td>A repeated dedup key MUST complete as duplicate naming the ref of the first submission. The host MUST NOT check correlation uniqueness.</td>
+<td><a href="/pages/requests-and-outcomes/">requests-and-outcomes</a></td>
+<td>submit a key twice with the same correlation -&gt; two completions</td>
+</tr>
+<tr>
+<td>ABI-036</td>
+<td>events-dropped MUST be coalesced by (event, source) and MUST never be dropped.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>drop two kinds twice -&gt; one events-dropped event with two records</td>
+</tr>
+<tr>
+<td>ABI-037</td>
+<td>The hold of a slow-call result MUST start when on-events returns for the batch that delivered the request-completed event.</td>
+<td><a href="/pages/requests-and-outcomes/">requests-and-outcomes</a></td>
+<td>delay the batch by 40 s -&gt; take still succeeds</td>
+</tr>
+<tr>
+<td>ABI-038</td>
+<td>After a trap, surviving events MUST be redelivered once at the head of the new queue, completions of submissions MUST be delivered to the new instance, and completions of call(id) requests MUST be discarded.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>trap with a pending submission and a pending http call</td>
+</tr>
+<tr>
+<td>ABI-039</td>
+<td>A coalesced event MUST NOT be reported in events-dropped when its queued event is merged.</td>
+<td><a href="/pages/reference-events-and-intents/">reference-events-and-intents</a></td>
+<td>send 2,000 screen-changed -&gt; no events-dropped</td>
+</tr>
+<tr>
+<td>ABI-040</td>
+<td>A request-id MUST be unique per plugin side for the whole server run, start at 1 at each server start, and never be reused across plugin-instance restarts within a server run. A server restart begins a new run.</td>
+<td><a href="/pages/requests-and-outcomes/">requests-and-outcomes</a></td>
+<td>restart a plugin instance -&gt; new ids exceed the old ones</td>
+</tr>
+<tr>
+<td>ABI-041</td>
+<td>A request MUST count toward pending_requests from the return of its id to the enqueue of its completion; refused submissions and synchronous calls MUST NOT count.</td>
+<td><a href="/pages/reference-errors-and-limits/">reference-errors-and-limits</a></td>
+<td>64 slow calls then a refused submission -&gt; count stays 64</td>
+</tr>
+<tr>
+<td>ABI-042</td>
+<td>The instance deadline of a call with deadline d ms MUST be ceil(d / 10) + 1 ticks, so a spinning guest traps in [d, d + 20] ms and a call that returns at d - 1 ms never traps.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>spin with d = 20 -&gt; trap in [20, 40] ms</td>
+</tr>
+<tr>
+<td>ABI-043</td>
+<td>On revocation, synchronous calls needing the grant MUST return err(revoked) (reads with no error channel, such as the <code>tree.read</code> functions, instead return <code>none</code> or an empty list), pending requests needing it MUST complete failed(revoked) before deactivate(revoked), and other pending call(id) requests MUST be cancelled with the instance.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>revoke http with one http and one fs request pending</td>
+</tr>
+<tr>
+<td>ABI-044</td>
+<td>A deactivate breach or trap MUST drop the instance and its bytes and MUST NOT count as a failure. Returned bytes over 1 MiB MUST be dropped with one warn line and MUST NOT count as a failure.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>breach deactivate three times -&gt; plugin still restarts</td>
+</tr>
+<tr>
+<td>ABI-045</td>
+<td>A batch MUST hold at most 256 events, and event_queue MUST default to 1,024 with a ceiling of 4,096 for T1 and 1,024 for T2 and T3.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>deliver 600 queued events -&gt; 3 batches</td>
+</tr>
+<tr>
+<td>ABI-046</td>
+<td>Events produced while a plugin activates MUST be queued and delivered in the first batch after activate returns ok, and MUST be discarded without events-dropped if activate fails.</td>
+<td><a href="/pages/reference-events-and-intents/">reference-events-and-intents</a></td>
+<td>emit pane-created during activate</td>
+</tr>
+<tr>
+<td>ABI-047</td>
+<td>After every activation of a plugin that holds tree.read, the first batch MUST start with one tree-changed event listing every node in pre-order.</td>
+<td><a href="/pages/reference-events-and-intents/">reference-events-and-intents</a></td>
+<td>activate with 3 nodes -&gt; one event, 3 ids</td>
+</tr>
+<tr>
+<td>ABI-048</td>
+<td>An effectful import called inside views.render, annotate or settings-validate MUST return err(not-permitted) with the message 'effectful import in a pure call', and the call MUST continue.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>call intents.submit inside views.render</td>
+</tr>
+<tr>
+<td>ABI-049</td>
+<td>The host MUST NOT call an export of an instance while another export of that instance is on the stack.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>call an export from an import</td>
+</tr>
+<tr>
+<td>ABI-050</td>
+<td>A services.call to the caller's own service and an invoke-command for the caller's own command MUST be queued and run as later calls.</td>
+<td><a href="/pages/reference-runtime-model/">reference-runtime-model</a></td>
+<td>invoke own command inside on-events</td>
+</tr>
+<tr>
+<td>ABI-051</td>
+<td>Every WIT function that returns <code>request-id</code> MUST have an awaiting wrapper with the WIT name and a starting wrapper with the suffix <code>_request</code> in Rust and <code>Request</code> in TypeScript. A WIT name that ends in <code>-json</code> MUST keep the suffix as <code>_json</code> in Rust and <code>Json</code> in TypeScript.</td>
+<td><a href="/pages/reference-wit/#wrapper-names-in-the-sdks">reference-wit</a></td>
+<td>SDK binding test: list the wrappers of <code>http</code>, <code>jobs</code>, <code>services</code>, <code>inference</code> and <code>settings</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="how-the-rows-are-tested">How the rows are tested</h2>
+<p>Three kinds of test cover the rows.</p>
+<ol>
+<li><strong>Static checks.</strong> <code>_tools/check.py</code> compares each labelled WIT excerpt with the WIT reference (ABI-001, ABI-005). A diff of case order against the frozen snapshot covers ABI-002, ABI-003 and ABI-019.</li>
+<li><strong>Install tests.</strong> A test installs a crafted package and expects the refusal code (ABI-004, ABI-006, ABI-007, ABI-018, ABI-021, ABI-023, ABI-024).</li>
+<li><strong>Runtime tests.</strong> A fake host runs a plugin that breaks the rule and the test expects the trap, the refusal or the outcome (ABI-008 to ABI-017, ABI-025 to ABI-050).</li>
+</ol>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::testing::FakeHost;
+
+#[test]
+fn more_than_256_submissions_trap() {
+    let mut host = FakeHost::new();
+    host.grant(&quot;tree.write&quot;);
+    let result = host.run_on_events_returning(257);
+    assert!(result.is_trap());
+    assert_eq!(host.applied_count(), 0);
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { createFakeHost } from '@ilium/plugin-sdk/testing';
+
+test('more than 256 submissions trap', () =&gt; {
+  const host = createFakeHost();
+  host.grant('tree.write');
+  const result = host.runOnEventsReturning(257);
+  expect(result.trapped).toBe(true);
+  expect(host.appliedCount()).toBe(0);
+});
+</code></pre>
+<h2 id="edge-cases">Edge cases</h2>
+<ul>
+<li>A batch of exactly 256 submissions is valid.</li>
+<li>A dedup key of 129 characters is a malformed submission, so the whole batch is refused (ABI-009, ABI-010).</li>
+<li>A take at 30 s plus one tick returns none (ABI-012, ABI-014).</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+</ul>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-host-conformance/"><small>Previous</small>Host conformance matrix</a><a class="next" href="/pages/reference-widget-input-map/"><small>Next</small>Widget input map</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#rules">Rules</a></li><li class="l2"><a href="#how-the-rows-are-tested">How the rows are tested</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

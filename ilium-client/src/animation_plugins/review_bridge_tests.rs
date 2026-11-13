@@ -495,27 +495,45 @@ fn permission_frame_regions_stay_bounded_at_compact_sizes() {
 }
 #[test]
 fn unicode_status_snapshot_admission_refuses_before_copy_and_retains_its_owner() {
-    let original = quota(MAILBOX_BYTES + STATUS_BYTES - 1);
+    let diagnostic = "😀".repeat(1000);
+    let bytes = diagnostic.len();
+    let original = quota(MAILBOX_BYTES + bytes - 1);
     let bridge = bridge(original.clone());
     bridge.select(1, true).unwrap();
-    bridge
-        .set_phase(1, ReviewPhase::Failed, Some(&"😀".repeat(1000)))
-        .unwrap();
-    assert!(bridge.status().is_err());
+    assert!(bridge
+        .set_phase(1, ReviewPhase::Failed, Some(&diagnostic))
+        .is_err());
     assert_eq!(original.snapshot().worker_bytes, MAILBOX_BYTES);
     drop(bridge);
     assert_eq!(original.snapshot().worker_bytes, 0);
-    let original = quota(MAILBOX_BYTES + STATUS_BYTES);
+
+    let original = quota(MAILBOX_BYTES + 2 * bytes + STATUS_BYTES - 1);
     let bridge = self::bridge(original.clone());
     bridge.select(1, true).unwrap();
     bridge
-        .set_phase(1, ReviewPhase::Failed, Some(&"😀".repeat(1000)))
+        .set_phase(1, ReviewPhase::Failed, Some(&diagnostic))
+        .unwrap();
+    assert!(bridge.status().is_err());
+    assert_eq!(original.snapshot().worker_bytes, MAILBOX_BYTES + bytes);
+    drop(bridge);
+    assert_eq!(original.snapshot().worker_bytes, 0);
+
+    let original = quota(MAILBOX_BYTES + 2 * bytes + STATUS_BYTES);
+    let bridge = self::bridge(original.clone());
+    bridge.select(1, true).unwrap();
+    bridge
+        .set_phase(1, ReviewPhase::Failed, Some(&diagnostic))
         .unwrap();
     let snapshot = bridge.status().unwrap();
-    assert_eq!(snapshot.message().chars().count(), 240);
-    assert_eq!(snapshot.message().len(), 960);
+    assert_eq!(snapshot.message(), diagnostic);
+    assert_eq!(snapshot.message().chars().count(), 1000);
+    bridge.select(2, false).unwrap();
+    assert_eq!(
+        original.snapshot().worker_bytes,
+        MAILBOX_BYTES + STATUS_BYTES + bytes
+    );
     drop(bridge);
-    assert_eq!(original.snapshot().worker_bytes, STATUS_BYTES);
+    assert_eq!(original.snapshot().worker_bytes, STATUS_BYTES + bytes);
     drop(snapshot);
     assert_eq!(original.snapshot().worker_bytes, 0);
 }
@@ -539,7 +557,9 @@ fn export_permission_review_visual_matrix() {
                 session.view.detail_scroll = u16::MAX;
             }
             if variant == "save-error" {
-                session.set_error("Synthetic permission save failed; no decision was persisted");
+                session
+                    .set_error("Synthetic permission save failed; no decision was persisted")
+                    .unwrap();
             }
             let area = Rect::new(0, 0, width, height);
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -558,4 +578,75 @@ fn export_permission_review_visual_matrix() {
             crate::ui_capture::save(&format!("permission-{variant}-{width}x{height}"), &terminal);
         }
     }
+}
+
+#[test]
+fn permission_error_retains_full_unicode_multiline_diagnostic() {
+    let (package, principal, mut broker) = fixture();
+    let bridge = bridge(quota(4 * 1024 * 1024));
+    bridge.select(1, true).unwrap();
+    bridge
+        .publish(1, &package, &principal, review(&mut broker, 1))
+        .unwrap();
+    let mut session = bridge.session().unwrap().unwrap();
+    let diagnostic = format!("{}\nFINAL_SUFFIX", "界 diagnostic ".repeat(100));
+    session.set_error(&diagnostic).unwrap();
+    assert_eq!(session.diagnostic_text(), Some(diagnostic.as_str()));
+    session.view.detail_scroll = u16::MAX;
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(45, 24)).unwrap();
+    terminal
+        .draw(|frame| session.draw(frame, Rect::new(0, 0, 45, 24), Style::default()))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let rendered = buffer
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(rendered.contains("FINAL_SUFFIX"));
+}
+
+#[test]
+fn full_session_diagnostic_admission_refuses_before_clone_and_releases_with_owner() {
+    let (package, principal, mut broker) = fixture();
+    let budget = 4 * REVIEW_BYTES;
+    let original = quota(budget);
+    let bridge = bridge(original.clone());
+    bridge.select(1, true).unwrap();
+    bridge
+        .publish(1, &package, &principal, review(&mut broker, 1))
+        .unwrap();
+    let diagnostic = "😀".repeat(1000);
+    bridge.picker_error(1, &diagnostic).unwrap();
+    let mailbox_bytes = original.snapshot().worker_bytes;
+    let blocker = original
+        .reserve_external_storage(budget - mailbox_bytes)
+        .unwrap();
+    assert!(bridge.session().is_err());
+    drop(blocker);
+    let mut session = bridge.session().unwrap().unwrap();
+    assert_eq!(session.diagnostic_text(), Some(diagnostic.as_str()));
+    assert_eq!(
+        original.snapshot().worker_bytes,
+        mailbox_bytes + diagnostic.len()
+    );
+    let blocker = original
+        .reserve_external_storage(budget - original.snapshot().worker_bytes)
+        .unwrap();
+    assert!(session.set_error(&"replacement".repeat(1000)).is_err());
+    assert_eq!(session.diagnostic_text(), Some(diagnostic.as_str()));
+    drop(blocker);
+    session.set_error("replacement").unwrap();
+    assert_eq!(
+        original.snapshot().worker_bytes,
+        mailbox_bytes + "replacement".len()
+    );
+    bridge.select(2, false).unwrap();
+    drop(bridge);
+    assert_eq!(
+        original.snapshot().worker_bytes,
+        REVIEW_BYTES + "replacement".len()
+    );
+    drop(session);
+    assert_eq!(original.snapshot().worker_bytes, 0);
 }

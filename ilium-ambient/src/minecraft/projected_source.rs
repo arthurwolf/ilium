@@ -211,12 +211,11 @@ fn qualify_source(
     };
     cancel.check()?;
     source.verify(bound)?;
-    if &loaded.coverage.chunks != request.support_chunks() {
-        let missing_positions = request
-            .support_chunks()
-            .difference(&loaded.coverage.chunks)
-            .copied()
-            .collect::<Vec<_>>();
+    // Missing and unfinished support chunks are holes, not errors: the loader
+    // keeps only fully decoded chunks and the sparse renderer skips cells without
+    // decoded state. Only a route with no decoded support at all is unusable.
+    if loaded.coverage.chunks.is_empty() {
+        let missing_positions = request.support_chunks().iter().copied().collect::<Vec<_>>();
         return Err(Error::Unqualified {
             missing: missing_positions.len(),
             first: missing_positions.first().copied(),
@@ -242,7 +241,6 @@ fn summarize_rejections(issues: &[loader::Issue]) -> String {
         .map(|issue| {
             let reason = match &issue.reason {
                 loader::Rejection::Absent => "absent",
-                loader::Rejection::ProtoChunk => "proto chunk",
                 loader::Rejection::IncompleteSections => "incomplete sections",
                 loader::Rejection::CoordinateMismatch => "coordinate mismatch",
                 loader::Rejection::Read(_) => "read error",
@@ -270,7 +268,7 @@ mod rejection_summary_tests {
                 loader::Rejection::Read("/private/world/r.0.0.mca".into()),
             ),
             ([5, 6], loader::Rejection::IncompleteSections),
-            ([7, 8], loader::Rejection::ProtoChunk),
+            ([7, 8], loader::Rejection::CoordinateMismatch),
         ]
         .map(|(position, reason)| loader::Issue { position, reason });
 

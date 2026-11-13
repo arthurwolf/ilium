@@ -7,7 +7,9 @@ use std::time::Duration;
 
 const RUNTIME_WORKER_THREADS: usize = 2;
 const RUNTIME_MAX_BLOCKING_THREADS: usize = 4;
-const RUNTIME_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
+// Debug builds keep large async state machines on the stack; 2 MiB overflowed while
+// the server booted its plugin-host and restart paths (see the restart-survival test).
+const RUNTIME_THREAD_STACK_BYTES: usize = 8 * 1024 * 1024;
 const RUNTIME_BLOCKING_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(5);
 /// Bound on how long process exit may be blocked by still-running
 /// `spawn_blocking` work (e.g. a sound-player subprocess or a slow config
@@ -165,6 +167,8 @@ async fn async_main(
         }
     };
     let options = ilium_server::ServerOptions {
+        resource_catalog_path: directories::ProjectDirs::from("", "", "ilium")
+            .map(|directories| directories.data_local_dir().join("resources/catalog.json")),
         session_name: launch.session_name,
         socket_path: launch.socket_path,
         snapshot_path: launch.snapshot_path,

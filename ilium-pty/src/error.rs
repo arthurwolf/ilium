@@ -4,6 +4,21 @@
 //! spawn/write/resize lifecycle it happened, instead of leaking an opaque
 //! `anyhow::Error` straight out of this crate's public API.
 
+/// Nonblocking screen/journal capture failed before producing any snapshot.
+/// Busy means retry outside coordination locks; poison means the affected
+/// source is unavailable and must not be presented as a current screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PtyCaptureError {
+    #[error("PTY screen parser capture is busy; retry without holding server state locks")]
+    ParserBusy,
+    #[error("PTY output journal capture is busy; retry without holding server state locks")]
+    JournalBusy,
+    #[error("PTY screen parser is unavailable because its lock is poisoned")]
+    ParserPoisoned,
+    #[error("PTY output journal is unavailable because its lock is poisoned")]
+    JournalPoisoned,
+}
+
 /// Everything that can go wrong talking to a spawned pty and its child
 /// process, from opening the pty through to writing input into it.
 #[derive(Debug, thiserror::Error)]

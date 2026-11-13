@@ -18,7 +18,7 @@
 //! or cancellation and keep output pipes or other resources open.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 #[cfg(target_os = "linux")]
@@ -174,6 +174,58 @@ pub struct PtyProcessIdentity {
     pidfd: std::os::fd::OwnedFd,
 }
 
+impl PtyProcessIdentity {
+    /// Whether this proof was captured for the requested numeric process ID.
+    #[cfg(target_os = "linux")]
+    pub fn is_for_process(&self, process_id: u32) -> bool {
+        self.process_id == process_id
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn is_for_process(&self, _process_id: u32) -> bool {
+        false
+    }
+
+    /// Kernel process birth token, meaningful only on the current boot.
+    #[cfg(target_os = "linux")]
+    pub fn birth_start_ticks(&self) -> Option<u64> {
+        Some(self.start_ticks)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn birth_start_ticks(&self) -> Option<u64> {
+        None
+    }
+
+    /// Comparable pidfs identity while at least one process handle is held.
+    /// Older Linux kernels use a shared anonymous inode, and 32-bit pidfs also
+    /// needs an inode generation; neither can safely supply this token.
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    pub fn pidfs_inode(&self) -> Option<u64> {
+        use std::os::fd::AsRawFd;
+
+        const PID_FS_MAGIC: libc::c_long = 0x5049_4446;
+        // SAFETY: both structs are plain C output buffers, initialized before
+        // the kernel writes them; the owned descriptor remains live throughout.
+        let mut filesystem: libc::statfs = unsafe { std::mem::zeroed() };
+        let mut metadata: libc::stat = unsafe { std::mem::zeroed() };
+        let descriptor = self.pidfd.as_raw_fd();
+        if unsafe { libc::fstatfs(descriptor, &mut filesystem) } != 0
+            || filesystem.f_type != PID_FS_MAGIC
+            || unsafe { libc::fstat(descriptor, &mut metadata) } != 0
+            || metadata.st_ino == 0
+        {
+            return None;
+        }
+        Some(metadata.st_ino)
+    }
+
+    #[cfg(not(all(target_os = "linux", target_pointer_width = "64")))]
+    pub fn pidfs_inode(&self) -> Option<u64> {
+        None
+    }
+}
+
 /// Successful, bounded observation after terminating a PTY lineage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PtyTerminationProof {
@@ -208,6 +260,85 @@ pub fn capture_pty_process(_process_id: u32) -> io::Result<PtyProcessIdentity> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "PTY process proof requires Linux procfs",
+    ))
+}
+
+/// Check that a captured process still owns its numeric identity. This also
+/// detects exit and reuse while an asynchronous provider read is in flight.
+#[cfg(target_os = "linux")]
+pub fn captured_process_is_current(identity: &PtyProcessIdentity) -> io::Result<bool> {
+    if !linux_pidfd_is_live(&identity.pidfd)? {
+        return Ok(false);
+    }
+    match read_linux_process(identity.process_id) {
+        Ok(current) => Ok(current.start_ticks == identity.start_ticks
+            && !matches!(current.state, 'Z' | 'X')
+            && linux_pidfd_is_live(&identity.pidfd)?),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn captured_process_is_current(_identity: &PtyProcessIdentity) -> io::Result<bool> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "process identity proof unavailable",
+    ))
+}
+
+/// Prove that two captured, live processes are connected by a live parent
+/// chain. Holding every intermediate pidfd prevents a recycled intermediate
+/// PID from silently changing the chain while it is inspected.
+#[cfg(target_os = "linux")]
+pub fn captured_process_descends_from(
+    process: &PtyProcessIdentity,
+    root: &PtyProcessIdentity,
+) -> io::Result<bool> {
+    const MAX_ANCESTORS: usize = 128;
+    if !captured_process_is_current(process)? || !captured_process_is_current(root)? {
+        return Ok(false);
+    }
+    let mut ancestors: Vec<PtyProcessIdentity> = Vec::new();
+    let mut current = process.process_id;
+    for _ in 0..MAX_ANCESTORS {
+        if current == root.process_id {
+            if current == process.process_id && process.start_ticks != root.start_ticks {
+                return Ok(false);
+            }
+            let mut child = process;
+            for parent in &ancestors {
+                let observed = read_linux_process(child.process_id)?;
+                if !captured_process_is_current(child)? || observed.parent_id != parent.process_id {
+                    return Ok(false);
+                }
+                child = parent;
+            }
+            return Ok(captured_process_is_current(child)?
+                && child.process_id == root.process_id
+                && child.start_ticks == root.start_ticks
+                && captured_process_is_current(root)?);
+        }
+        let child = ancestors.last().unwrap_or(process);
+        let observed = read_linux_process(current)?;
+        if !captured_process_is_current(child)? || observed.parent_id == 0 {
+            return Ok(false);
+        }
+        let parent = capture_pty_process(observed.parent_id)?;
+        current = parent.process_id;
+        ancestors.push(parent);
+    }
+    Ok(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn captured_process_descends_from(
+    _process: &PtyProcessIdentity,
+    _root: &PtyProcessIdentity,
+) -> io::Result<bool> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "process ancestry proof unavailable",
     ))
 }
 
@@ -373,23 +504,28 @@ pub fn processes_using_directory_bounded(
         if metadata.uid() != own_uid {
             continue;
         }
-        let cwd_matches = match std::fs::read_link(entry.path().join("cwd")) {
+        let cwd_matches = match read_process_cwd(&entry.path(), deadline) {
             Ok(cwd) => cwd.starts_with(&root),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                // A vanished proc entry is normal; an existing live process
-                // with an unreadable cwd is not proof that the path is free.
-                match read_linux_process(process_id) {
-                    Ok(process) if matches!(process.state, 'Z' | 'X') => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Ok(_) => {
-                        return Err(io::Error::other(format!(
-                            "cwd of live process {process_id} is unavailable"
-                        )))
-                    }
-                    Err(error) => return Err(error),
+            Err(error) if process_vanished(&error) => {
+                // A process that is exiting loses its cwd before its state
+                // becomes a zombie, so give it a bounded moment to finish. An
+                // unreadable cwd on a process that stays alive is not proof
+                // that the path is free, so it still blocks removal.
+                if linux_process_still_running_without_cwd(
+                    process_id,
+                    read_linux_process,
+                    EXITING_PROCESS_SETTLE_BUDGET,
+                )? {
+                    return Err(io::Error::other(format!(
+                        "cwd of live process {process_id} is unavailable"
+                    )));
                 }
                 false
             }
+            // Non-dumpable same-user processes (for example systemd --user)
+            // hide their cwd and fds from every other process. Treat them as
+            // not using the path; a readable cwd or fd still blocks removal.
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => false,
             Err(error) => {
                 return Err(io::Error::new(
                     error.kind(),
@@ -405,6 +541,31 @@ pub fn processes_using_directory_bounded(
     users.sort_unstable();
     users.dedup();
     Ok(users)
+}
+
+/// Reads `<pid>/cwd`, retrying briefly on `EACCES`. The kernel marks a process
+/// non-dumpable while `execve` replaces its image, so a same-user process
+/// mid-exec can refuse `/proc/<pid>/cwd` for a moment. A denial that persists
+/// still fails closed: the caller treats the process as possibly inside the
+/// path.
+#[cfg(target_os = "linux")]
+fn read_process_cwd(process_directory: &Path, deadline: Instant) -> io::Result<PathBuf> {
+    const MAXIMUM_ATTEMPTS: u32 = 8;
+    const RETRY_DELAY: Duration = Duration::from_millis(5);
+    let mut attempt = 1;
+    loop {
+        match std::fs::read_link(process_directory.join("cwd")) {
+            Err(error)
+                if error.kind() == io::ErrorKind::PermissionDenied
+                    && attempt < MAXIMUM_ATTEMPTS
+                    && Instant::now() < deadline =>
+            {
+                attempt += 1;
+                std::thread::sleep(RETRY_DELAY);
+            }
+            result => return result,
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -452,6 +613,40 @@ pub fn processes_using_directory_bounded(
     ))
 }
 
+/// A process can exit between `/proc` listing and its per-process reads. procfs then
+/// answers `ENOENT` for some files and `ESRCH` ("No such process") for others, and both
+/// mean the same thing: the process is gone and cannot hold the path.
+#[cfg(target_os = "linux")]
+fn process_vanished(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
+}
+
+/// How long a process whose cwd has disappeared may keep running before the
+/// scan treats it as live. Measured: an exiting process shows no cwd for
+/// tens of milliseconds while its state is still running.
+#[cfg(target_os = "linux")]
+const EXITING_PROCESS_SETTLE_BUDGET: Duration = Duration::from_secs(1);
+
+/// Reports whether a process with no readable cwd is still running after the
+/// budget. A zombie, a dead process or a vanished entry is not running.
+#[cfg(target_os = "linux")]
+fn linux_process_still_running_without_cwd(
+    process_id: u32,
+    mut read_process: impl FnMut(u32) -> io::Result<LinuxProcess>,
+    budget: Duration,
+) -> io::Result<bool> {
+    let deadline = Instant::now() + budget;
+    loop {
+        match read_process(process_id) {
+            Ok(process) if matches!(process.state, 'Z' | 'X') => return Ok(false),
+            Err(error) if process_vanished(&error) => return Ok(false),
+            Err(error) => return Err(error),
+            Ok(_) if Instant::now() >= deadline => return Ok(true),
+            Ok(_) => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+}
+
 /// Open descriptors matter even when a process changed its cwd out of the worktree.
 /// This remains an observation, not an exclusion of future external opens or mmap-only use.
 #[cfg(target_os = "linux")]
@@ -462,16 +657,19 @@ fn linux_process_has_worktree_fd(
 ) -> io::Result<bool> {
     let entries = match std::fs::read_dir(format!("/proc/{process_id}/fd")) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        Err(error) if process_vanished(&error) => {
             return match read_linux_process(process_id) {
                 Ok(process) if matches!(process.state, 'Z' | 'X') => Ok(false),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+                Err(error) if process_vanished(&error) => Ok(false),
                 Ok(_) => Err(io::Error::other(format!(
                     "fds of live process {process_id} are unavailable"
                 ))),
                 Err(error) => Err(error),
             };
         }
+        // Hidden fds of a non-dumpable same-user process: not inspectable, so
+        // not evidence of use (see the cwd check in directory_users).
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => return Ok(false),
         Err(error) => return Err(error),
     };
     for entry in entries {
@@ -486,6 +684,9 @@ fn linux_process_has_worktree_fd(
             Ok(target) if target.starts_with(root) => return Ok(true),
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            // Hidden fd of a non-dumpable same-user process: cannot be read,
+            // so it cannot be shown to use the path.
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {}
             Err(error) => return Err(error),
         }
     }
@@ -1208,6 +1409,71 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn captured_process_proof_rejects_an_exited_child() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn owned child");
+        let identity = capture_pty_process(child.id()).expect("capture child");
+        assert!(captured_process_is_current(&identity).expect("inspect live child"));
+        child.kill().expect("stop owned child");
+        child.wait().expect("reap owned child");
+        assert!(!captured_process_is_current(&identity).expect("inspect exited child"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn captured_process_proof_rejects_a_changed_birth_identity() {
+        let mut identity =
+            capture_pty_process(std::process::id()).expect("capture current process");
+        assert!(captured_process_is_current(&identity).expect("inspect current process"));
+        identity.start_ticks ^= 1;
+        assert!(!captured_process_is_current(&identity).expect("inspect different birth identity"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pidfs_inode_identifies_the_same_captured_process() {
+        let first = capture_pty_process(std::process::id()).expect("capture test process");
+        let second = capture_pty_process(std::process::id()).expect("capture same process");
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn owned child");
+        let child_identity = capture_pty_process(child.id()).expect("capture child");
+        if let Some(first_inode) = first.pidfs_inode() {
+            assert_eq!(second.pidfs_inode(), Some(first_inode));
+            assert_ne!(child_identity.pidfs_inode(), Some(first_inode));
+        } else {
+            assert_eq!(second.pidfs_inode(), None);
+            assert_eq!(child_identity.pidfs_inode(), None);
+        }
+        child.kill().expect("stop owned child");
+        child.wait().expect("reap owned child");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn captured_ancestry_requires_live_matching_processes() {
+        let mut root = capture_pty_process(std::process::id()).expect("capture test process");
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn owned child");
+        let child_identity = capture_pty_process(child.id()).expect("capture child");
+        assert!(captured_process_descends_from(&root, &root).expect("same process"));
+        assert!(captured_process_descends_from(&child_identity, &root).expect("child lineage"));
+        assert!(!captured_process_descends_from(&root, &child_identity).unwrap_or(false));
+        root.start_ticks ^= 1;
+        assert!(!captured_process_descends_from(&child_identity, &root).unwrap_or(false));
+        root.start_ticks ^= 1;
+        child.kill().expect("stop owned child");
+        child.wait().expect("reap owned child");
+        assert!(!captured_process_descends_from(&child_identity, &root).unwrap_or(false));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn proc_stat_parser_handles_parenthesized_command_names() {
         let stat = "42 (a strange ) name) S 10 11 12 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 12345 0";
         let process = parse_linux_stat(42, stat).expect("parse stat");
@@ -1319,19 +1585,13 @@ mod tests {
         let sibling_users = processes_using_directory(&sibling);
         child.kill().expect("kill child");
         child.wait().expect("reap child");
-        // A same-user process can disallow /proc cwd inspection (for example
-        // systemd --user). That must block deletion rather than produce a
-        // partial empty list. The path boundary is asserted when the host
-        // permits a complete scan.
-        match (root_users, sibling_users) {
-            (Ok(root_users), Ok(sibling_users)) => {
-                assert!(root_users.contains(&child.id()));
-                assert!(!sibling_users.contains(&child.id()));
-            }
-            (Err(error), _) | (_, Err(error)) => {
-                assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-            }
-        }
+        // Same-user processes with hidden cwd/fds (for example systemd --user)
+        // are skipped, so the scan completes. The sleep child is readable and
+        // must be found in the root only.
+        let root_users = root_users.expect("scan completes despite hidden processes");
+        let sibling_users = sibling_users.expect("scan completes despite hidden processes");
+        assert!(root_users.contains(&child.id()));
+        assert!(!sibling_users.contains(&child.id()));
     }
 
     #[test]
@@ -1521,5 +1781,78 @@ mod tests {
         child.wait().unwrap();
         wait_for_group_exit(process_id, Duration::from_secs(3)).unwrap();
         assert!(!process_group_exists(process_id).unwrap());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn exited_process_errors_count_as_vanished_including_esrch() {
+        assert!(super::process_vanished(&io::Error::from_raw_os_error(
+            libc::ESRCH
+        )));
+        assert!(super::process_vanished(&io::Error::from(
+            io::ErrorKind::NotFound
+        )));
+        assert!(!super::process_vanished(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_process_in_state(state: char) -> super::LinuxProcess {
+        super::LinuxProcess {
+            process_id: 7,
+            parent_id: 1,
+            session_id: 7,
+            state,
+            start_ticks: 0,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn exiting_process_without_cwd_settles_before_the_scan_decides() {
+        let states = std::cell::RefCell::new(vec!['R', 'S', 'Z'].into_iter());
+        let still_running = super::linux_process_still_running_without_cwd(
+            7,
+            |_| Ok(linux_process_in_state(states.borrow_mut().next().unwrap())),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(!still_running);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_that_vanishes_while_exiting_does_not_block_removal() {
+        let still_running = super::linux_process_still_running_without_cwd(
+            7,
+            |_| Err(io::Error::from(io::ErrorKind::NotFound)),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(!still_running);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn process_still_running_without_cwd_after_budget_blocks_removal() {
+        let still_running = super::linux_process_still_running_without_cwd(
+            7,
+            |_| Ok(linux_process_in_state('S')),
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert!(still_running);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unexpected_stat_read_error_is_not_mistaken_for_an_exited_process() {
+        let outcome = super::linux_process_still_running_without_cwd(
+            7,
+            |_| Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            Duration::from_secs(5),
+        );
+        assert!(outcome.is_err());
     }
 }

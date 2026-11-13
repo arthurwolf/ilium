@@ -13,7 +13,7 @@ use super::{
     surface_mesh::{AlphaMode, BoundQuad, FaceOwner, PreparedMesh},
 };
 use std::time::Duration;
-const MAX_TRANSLUCENT_LAYERS: u8 = 12;
+pub(super) const MAX_TRANSLUCENT_LAYERS: u8 = 12;
 #[derive(Clone, Copy, Debug)]
 pub struct RasterLimits {
     pub pixels: usize,
@@ -950,8 +950,8 @@ pub(super) fn draw_mesh_inner(
         if dot3(quad.normal, quad.normal) <= 1e-8 {
             continue;
         }
-        let shader = resolve_shader(bank, quad, time, light, face.position, false)?;
-        let vertices = project_quad(face.position, quad, camera, scale, output.size());
+        let shader = resolve_shader(bank, quad, time, light, face.position(), false)?;
+        let vertices = project_quad(face.position(), quad, camera, scale, output.size());
         output.quad(vertices, face.owner, quad.material.alpha, &shader, cancel)?;
     }
     Ok(())

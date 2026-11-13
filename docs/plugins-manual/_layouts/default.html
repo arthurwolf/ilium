@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+{% include head.html %}
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+{{ sidebar }}
+</nav>
+<div class="main">
+{{ content }}
+{{ rail }}
+</div>
+</div>
+<script src="{{ '/assets/js/manual.js' | relative_url }}" defer></script>
+</body>
+</html>

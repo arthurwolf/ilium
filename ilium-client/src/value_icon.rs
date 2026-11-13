@@ -221,10 +221,10 @@ mod tests {
         let mut picker = IconPickerState::new(IconTarget::Terminal);
         picker.search_query = "rocket".into();
         let request = picker.begin_semantic_search().unwrap();
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             icon_picker: Some(picker),
             ..SettingsState::default()
-        });
+        }));
         app.begin_icon_column_dialog();
         assert!(matches!(app.mode, Mode::ValueDialog(_)));
         app.apply_icon_semantic_search_event(IconSemanticSearchEvent::Results {

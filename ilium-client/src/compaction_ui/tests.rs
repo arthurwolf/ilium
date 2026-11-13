@@ -1294,10 +1294,10 @@ fn the_tab_renders_in_the_settings_screen_at_80_and_160_columns() {
             tab: SettingsTab::Optimization,
             ..SettingsState::default()
         };
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Optimization,
             ..SettingsState::default()
-        });
+        }));
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal
             .draw(|frame| crate::settings_ui::render(frame, frame.area(), &app, &state))

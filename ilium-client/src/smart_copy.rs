@@ -62,6 +62,47 @@ pub struct SmartCopySnapshot {
 }
 
 impl SmartCopySnapshot {
+    /// Move every large leaf to retirement. Keeping a clone in the drop shell
+    /// lets a faster CPU consumer make the interactive thread the last owner.
+    fn take_for_retirement(&mut self) -> Self {
+        let parser = vt100::Parser::new(1, 1, 0);
+        std::mem::replace(
+            self,
+            Self {
+                screen: std::sync::Arc::new(parser.screen().clone()),
+                lines: std::sync::Arc::new(Vec::new()),
+                words: std::sync::Arc::new(Vec::new()),
+                detected: std::sync::Arc::new(Vec::new()),
+                _allocation_hold: None,
+            },
+        )
+    }
+
+    pub(crate) fn prepared_session_bytes(&self) -> Result<usize, String> {
+        self.detected.iter().try_fold(4096usize, |total, region| {
+            let label = region.probe.as_ref().map_or(region.label.len(), |probe| {
+                region.label.len().max(probe.path.len().saturating_add(32))
+            });
+            let bytes = std::mem::size_of::<SmartCopyCandidate>()
+                .checked_add(region.text.len())
+                .and_then(|bytes| bytes.checked_add(label))
+                .and_then(|bytes| bytes.checked_add(region.kind.len().max(32)))
+                .and_then(|bytes| {
+                    bytes.checked_add(
+                        region
+                            .spans
+                            .len()
+                            .checked_mul(std::mem::size_of::<CellSpan>() * 3)?,
+                    )
+                })
+                .and_then(|bytes| bytes.checked_mul(4))
+                .ok_or_else(|| "Smart Copy candidate charge overflow".to_string())?;
+            total
+                .checked_add(bytes)
+                .ok_or_else(|| "Smart Copy candidate charge overflow".to_string())
+        })
+    }
+
     pub(crate) fn retain_allocation(
         &mut self,
         charge: std::sync::Arc<crate::terminal_parsing::SnapshotCharge>,
@@ -1516,6 +1557,8 @@ pub struct SmartCopySession {
     /// are only ever appended, so an index stays valid for the whole session.
     selected: Vec<usize>,
     pub(crate) output_retention: Option<ilium_execution::Retention>,
+    /// Immutable prepared-capture allocations outlive replaceable model results.
+    pub(crate) capture_retention: Option<ilium_execution::Retention>,
     /// Preadmitted before selected-copy transfer; permits exact UI restoration
     /// without making final candidate/String destruction an interactive task.
     pub(crate) return_retirement: Option<ilium_execution::RetirementReservation<SmartCopySession>>,
@@ -1527,13 +1570,13 @@ impl Drop for SmartCopySession {
         let Some(permit) = self.return_retirement.take() else {
             return;
         };
-        // Move all potentially large owned fields, never clone their contents.
-        // The snapshot clone contains shared leaves only. The original Session
-        // now holds empty containers; the returned source dies on CPU.
+        // Move all potentially large owned fields, including the snapshot's
+        // original Arc leaves. The interactive drop shell retains only bounded
+        // empty containers even if CPU retirement wins the scheduling race.
         let original = Self {
             generation: self.generation,
             pane_id: self.pane_id,
-            snapshot: self.snapshot.clone(),
+            snapshot: self.snapshot.take_for_retirement(),
             phase: std::mem::replace(&mut self.phase, SmartCopyPhase::Connecting),
             candidates: std::mem::take(&mut self.candidates),
             received_characters: self.received_characters,
@@ -1546,6 +1589,7 @@ impl Drop for SmartCopySession {
             geometries: std::mem::take(&mut self.geometries),
             selected: std::mem::take(&mut self.selected),
             output_retention: self.output_retention.take(),
+            capture_retention: self.capture_retention.take(),
             return_retirement: None,
             recovery_result_hold: self.recovery_result_hold.take(),
         };
@@ -1553,6 +1597,7 @@ impl Drop for SmartCopySession {
     }
 }
 impl SmartCopySession {
+    #[cfg(test)]
     pub fn new(generation: u64, pane_id: NodeId, snapshot: SmartCopySnapshot) -> Self {
         Self::with_path_context(generation, pane_id, snapshot, &PathContext::default())
     }
@@ -1560,19 +1605,51 @@ impl SmartCopySession {
     /// Builds a session whose path-shaped regions are checked against the
     /// filesystem: existing files and directories are labelled as such, and
     /// path-like text that is neither plausible nor present is dropped.
+    #[cfg(test)]
     pub fn with_path_context(
         generation: u64,
         pane_id: NodeId,
         snapshot: SmartCopySnapshot,
         paths: &PathContext,
     ) -> Self {
+        Self::with_path_context_while(generation, pane_id, snapshot, paths, &|| true)
+    }
+
+    pub(crate) fn prepare_with_path_context(
+        generation: u64,
+        pane_id: NodeId,
+        snapshot: SmartCopySnapshot,
+        paths: &PathContext,
+        continue_work: impl Fn() -> bool,
+    ) -> Result<Self, String> {
+        if !continue_work() {
+            return Err("Smart Copy preparation cancelled".into());
+        }
+        let session =
+            Self::with_path_context_while(generation, pane_id, snapshot, paths, &continue_work);
+        if !continue_work() {
+            return Err("Smart Copy preparation cancelled".into());
+        }
+        Ok(session)
+    }
+
+    fn with_path_context_while(
+        generation: u64,
+        pane_id: NodeId,
+        snapshot: SmartCopySnapshot,
+        paths: &PathContext,
+        continue_work: &impl Fn() -> bool,
+    ) -> Self {
         let candidates = snapshot
             .detected
             .iter()
             .filter_map(|region| {
+                if !continue_work() {
+                    return None;
+                }
                 let mut candidate = region.candidate();
                 if let Some(probe) = &region.probe {
-                    match paths.resolve(&probe.path) {
+                    match paths.resolve_while(&probe.path, continue_work) {
                         Some(PathKind::File) => {
                             candidate.kind = if region.kind == "file-location" {
                                 "file-location".to_string()
@@ -1612,6 +1689,7 @@ impl SmartCopySession {
             geometries,
             selected: Vec::new(),
             output_retention: None,
+            capture_retention: None,
             return_retirement: None,
             recovery_result_hold: None,
         }
@@ -1877,6 +1955,48 @@ mod tests {
         let mut parser = vt100::Parser::new(lines.len() as u16, 120, 0);
         parser.process(lines.join("\r\n").as_bytes());
         SmartCopySnapshot::capture(parser.screen())
+    }
+
+    #[test]
+    fn retirement_moves_every_large_leaf_while_the_drop_shell_stays_alive() {
+        let mut shell = snapshot(&["original large snapshot leaf"]);
+        let screen = std::sync::Arc::downgrade(&shell.screen);
+        let lines = std::sync::Arc::downgrade(&shell.lines);
+        let words = std::sync::Arc::downgrade(&shell.words);
+        let detected = std::sync::Arc::downgrade(&shell.detected);
+        let retired = shell.take_for_retirement();
+        assert!(std::sync::Arc::ptr_eq(
+            &retired.screen,
+            &screen.upgrade().unwrap()
+        ));
+        assert!(std::sync::Arc::ptr_eq(
+            &retired.lines,
+            &lines.upgrade().unwrap()
+        ));
+        assert!(std::sync::Arc::ptr_eq(
+            &retired.words,
+            &words.upgrade().unwrap()
+        ));
+        assert!(std::sync::Arc::ptr_eq(
+            &retired.detected,
+            &detected.upgrade().unwrap()
+        ));
+        assert!(retired
+            .screen
+            .contents()
+            .contains("original large snapshot leaf"));
+        assert_eq!(shell.screen.size(), (1, 1));
+        assert!(shell.lines.is_empty());
+        assert!(shell.words.is_empty());
+        assert!(shell.detected.is_empty());
+        // Model the CPU destroying its original before the interactive shell:
+        // no old allocation may wait for this still-live shell's destructor.
+        drop(retired);
+        assert!(screen.upgrade().is_none());
+        assert!(lines.upgrade().is_none());
+        assert!(words.upgrade().is_none());
+        assert!(detected.upgrade().is_none());
+        assert_eq!(shell.screen.size(), (1, 1));
     }
 
     #[test]

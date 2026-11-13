@@ -1,0 +1,19 @@
+package ilium:host@0.1.0;
+
+interface storage {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// shared is visible to every plugin that holds the grant `storage.shared:<name>`.
+  enum bucket { global, project, session, shared }
+  /// key is 1 to 256 bytes. A value is at most 1 MiB. A bucket holds 16 MiB by default (limits.storage_bucket_mib).
+  get: func(bucket: bucket, key: string) -> option<list<u8>>;
+  put: func(bucket: bucket, key: string, value: list<u8>) -> result<_, plugin-error>;
+  remove: func(bucket: bucket, key: string);
+  keys: func(bucket: bucket, prefix: string) -> list<string>;
+  /// none removes the key.
+  record entry { key: string, value: option<list<u8>> }
+  /// All entries or none. At most 256 entries and 4 MiB of key and value bytes together.
+  /// Errors: invalid-argument above the limits, quota-exceeded, conflict for a stale data version.
+  write-batch: func(bucket: bucket, entries: list<entry>) -> result<_, plugin-error>;
+  /// true for the one caller that may refresh the shared key. ttl-millis 1 to 3,600,000.
+  lease: func(key: string, ttl-millis: u32) -> bool;
+}

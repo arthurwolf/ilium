@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Tree and window chrome | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details open><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/" aria-current="page">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Host API</b></p>
+<h1>Tree and window chrome</h1>
+
+<p>Ilium draws a tree of nodes on the left, a status bar at the bottom and a frame around every pane. The contract lets a plugin add to each of these places without drawing them itself. A plugin declares a place in its manifest, then fills it with intents. The host draws the result with the same rounded borders, icon slots and colours as its own rows, so a plugin row cannot be told apart from a built-in one except by its content.</p>
+<p>This page covers eight places: decorations on tree rows (including trailing and hover-only ones), tree toolbar buttons, hover actions on rows, tree orderings, display modes, virtual rows (including lazy children and drops), status bar segments and pane frame slots. Reading the tree is on <a href="/pages/api-tree/">tree</a>. Pane lifecycle intents are on <a href="/pages/api-pane-lifecycle/">pane lifecycle</a>.</p>
+<p><strong>You will need:</strong></p>
+<ul>
+<li><code>tree.decorate</code> for decorations, virtual rows, <code>tree_orderings</code> and <code>display_modes</code>.</li>
+<li><code>ui.chrome</code> for <code>tree_toolbar</code>, <code>row_actions</code>, <code>status_segments</code> and <code>pane_frame_slots</code>, and for the intents <code>set-status-segment</code>, <code>clear-status-segment</code>, <code>set-frame-slot</code> and <code>clear-frame-slot</code>.</li>
+<li><code>tree.write</code> for <code>set-expanded</code> on real nodes.</li>
+<li>Both worlds: the server side owns decorations and virtual rows, the client side draws them. Intents can be submitted from either side. See <a href="/pages/worlds-and-sides/">worlds and sides</a>.</li>
+<li>Grants are explained in <a href="/pages/capability-tree-decorate/">tree.decorate</a>, <a href="/pages/capability-tree-write/">tree.write</a> and <a href="/pages/capability-ui-panels/">ui.panels</a>. The grant <code>ui.chrome</code> is listed in the <a href="/pages/reference-capabilities/">capability reference</a>.</li>
+</ul>
+<h3 id="where-each-place-is">Where each place is</h3>
+<figure>
+<svg viewBox="0 0 420 230" role="img" aria-label="Layout of the tree sidebar, a pane frame and the status bar with the places a plugin can fill" width="630" height="345">
+  <title>Places in the window that a plugin can fill</title>
+  <desc>A sidebar with a toolbar on top, rows with decorations, hover actions and trailing text; a pane frame with header icon, header text, banner and footer row; a status bar with two segments.</desc>
+  <rect x="6" y="6" width="150" height="200" rx="8" fill="none" stroke="currentColor"/>
+  <text x="14" y="24" font-size="11" fill="currentColor">tree_toolbar</text>
+  <line x1="6" y1="32" x2="156" y2="32" stroke="currentColor" stroke-dasharray="3 3"/>
+  <text x="14" y="52" font-size="11" fill="currentColor">row: icon, title, badge</text>
+  <text x="14" y="72" font-size="11" fill="currentColor">row: hover strip (row_actions)</text>
+  <text x="14" y="92" font-size="11" fill="currentColor">row: trailing slot</text>
+  <text x="14" y="112" font-size="11" fill="currentColor">virtual row, expandable</text>
+  <text x="26" y="132" font-size="11" fill="currentColor">lazy child rows</text>
+  <text x="14" y="160" font-size="11" fill="currentColor">Order By: tree_orderings</text>
+  <text x="14" y="180" font-size="11" fill="currentColor">Mode: display_modes</text>
+  <rect x="170" y="6" width="244" height="200" rx="8" fill="none" stroke="currentColor"/>
+  <text x="178" y="24" font-size="11" fill="currentColor">header-icon  header-text</text>
+  <line x1="170" y1="32" x2="414" y2="32" stroke="currentColor" stroke-dasharray="3 3"/>
+  <text x="178" y="50" font-size="11" fill="currentColor">banner</text>
+  <text x="178" y="110" font-size="11" fill="currentColor">pane content (not a plugin slot)</text>
+  <line x1="170" y1="182" x2="414" y2="182" stroke="currentColor" stroke-dasharray="3 3"/>
+  <text x="178" y="198" font-size="11" fill="currentColor">footer-row</text>
+  <rect x="6" y="212" width="408" height="16" rx="4" fill="none" stroke="currentColor"/>
+  <text x="14" y="224" font-size="10" fill="currentColor">status_segments: quota  |  cost</text>
+</svg>
+<figcaption>The places that the contract opens. Dashed lines separate the host's fixed parts from the plugin's slots.</figcaption>
+</figure>
+
+<h3 id="decorations-on-tree-rows">Decorations on tree rows</h3>
+<p>A decoration is text and an icon that a plugin attaches to one node, in one of its own <code>decoration_slots</code>. The intent <code>set-decoration</code> takes these optional fields. A missing field keeps the plain behaviour.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>node</code></td>
+<td>node id</td>
+<td>The row.</td>
+</tr>
+<tr>
+<td><code>slot</code></td>
+<td>string</td>
+<td>An own <code>decoration_slots</code> id.</td>
+</tr>
+<tr>
+<td><code>content</code></td>
+<td>styled text</td>
+<td>The text, with a tone per run.</td>
+</tr>
+<tr>
+<td><code>icon</code></td>
+<td>optional string</td>
+<td>A glyph or an icon catalogue id.</td>
+</tr>
+<tr>
+<td><code>sort-key</code></td>
+<td>optional <code>s64</code></td>
+<td>Used by <code>tree_orderings</code>.</td>
+</tr>
+<tr>
+<td><code>persist</code></td>
+<td>bool</td>
+<td>Keep the decoration across restarts.</td>
+</tr>
+<tr>
+<td><code>spans</code></td>
+<td>optional rich text</td>
+<td>Styled spans with their own tooltip and click target, replacing <code>content</code>.</td>
+</tr>
+<tr>
+<td><code>tooltip</code></td>
+<td>optional tooltip</td>
+<td>Up to 200 characters, shown after the hover delay.</td>
+</tr>
+<tr>
+<td><code>frames</code></td>
+<td>list of styled text, 2 to 16</td>
+<td>Animation frames.</td>
+</tr>
+<tr>
+<td><code>frame-ms</code></td>
+<td><code>u16</code>, at least 90</td>
+<td>Time per frame.</td>
+</tr>
+<tr>
+<td><code>trailing</code></td>
+<td>bool</td>
+<td>Right-aligned after the title, for cost columns.</td>
+</tr>
+<tr>
+<td><code>visibility</code></td>
+<td><code>always</code> or <code>on-hover</code></td>
+<td>A hover-only decoration appears only on the row under the pointer.</td>
+</tr>
+<tr>
+<td><code>tone</code></td>
+<td>optional tone</td>
+<td>Default colour for the whole decoration.</td>
+</tr>
+</tbody>
+</table>
+<p>The host steps the frames itself. The plugin makes one call, not one per frame. When the user turns on reduced motion, the host shows the first frame only.</p>
+<p>The samples on this page and in the core plugin pages call <code>baseDecoration(node, slot, text)</code>. It is a helper each sample plugin defines for itself, not host API: it returns a <code>set-decoration</code> value with the given <code>node</code> and <code>slot</code>, a <code>content</code> of one run of <code>text</code> in the default tone, and every other field at its plain default (no icon, <code>persist</code> false, no frames, <code>always</code> visibility). The caller then spreads it and overrides the fields it needs, such as <code>sortKey</code> or <code>trailing</code>.</p>
+<p>Manifest, declared once per plugin:</p>
+<pre><code class="language-json">&quot;decoration_slots&quot;: [
+  { &quot;id&quot;: &quot;cost&quot;,  &quot;placement&quot;: &quot;badge&quot;,    &quot;priority&quot;: 40, &quot;trailing&quot;: true },
+  { &quot;id&quot;: &quot;queue&quot;, &quot;placement&quot;: &quot;icon&quot;,     &quot;priority&quot;: 60 },
+  { &quot;id&quot;: &quot;hint&quot;,  &quot;placement&quot;: &quot;subtitle&quot;, &quot;priority&quot;: 10, &quot;visibility&quot;: &quot;on-hover&quot; }
+]
+</code></pre>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::intents::{Intent, SetDecorationSpec, DecorationVisibility};
+
+/// A spinner that the host animates on a pane while the plugin indexes it.
+fn indexing_decoration(node: NodeId) -&gt; Submission {
+    Submission::keyed(
+        Intent::SetDecoration(SetDecorationSpec {
+            node,
+            slot: &quot;queue&quot;.into(),
+            content: StyledText::plain(&quot;indexing&quot;),
+            icon: None,
+            sort_key: None,
+            persist: false,
+            spans: None,
+            tooltip: Some(Tooltip::new(&quot;Building the search index&quot;)),
+            frames: [&quot;⠋&quot;, &quot;⠙&quot;, &quot;⠹&quot;, &quot;⠸&quot;, &quot;⠼&quot;, &quot;⠴&quot;, &quot;⠦&quot;, &quot;⠧&quot;, &quot;⠇&quot;, &quot;⠏&quot;]
+                .iter().map(|glyph| StyledText::plain(glyph)).collect(),
+            frame_ms: 100,
+            trailing: false,
+            visibility: DecorationVisibility::Always,
+            tone: Some(Tone::Info),
+        }),
+        format!(&quot;index-{node}&quot;),
+    )
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { Submission } from '@ilium/plugin-sdk';
+
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/** A spinner that the host animates on a pane while the plugin indexes it. */
+export function indexingDecoration(node: bigint): Submission {
+  return {
+    intent: {
+      tag: 'set-decoration',
+      val: {
+        node,
+        slot: 'queue',
+        content: { text: 'indexing', tone: undefined },
+        icon: undefined,
+        sortKey: undefined,
+        persist: false,
+        spans: undefined,
+        tooltip: { text: 'Building the search index' },
+        frames: SPINNER.map((glyph) =&gt; ({ text: glyph, tone: undefined })),
+        frameMs: 100,
+        trailing: false,
+        visibility: 'always',
+        tone: 'info',
+      },
+    },
+    correlation: 1n,
+    dedupKey: `index-${node}`,
+  };
+}
+</code></pre>
+<p>Outcome: <code>ok</code>. Errors: <code>invalid-argument</code> when <code>frames</code> has fewer than 2 or more than 16 entries, or <code>frame-ms</code> is below 90; <code>not-found</code> for an unknown node; <code>not-permitted</code> without <code>tree.decorate</code>; <code>invalid-argument</code> for a slot that is not one of the plugin's own. Clear a decoration with <code>clear-decoration { node, slot }</code>.</p>
+<figure>
+<pre class="term">▼ <span class="w2">📂</span> Ilium
+›   <span class="w2">🦀</span> <span class="t-hi">⠋</span> Fix auth                <span class="t-dim">$0.42</span>
+›   <span class="w2">🐢</span> ● Docs pass               <span class="t-dim">$0.08</span>
+›   <span class="w2">🖥️</span>    Shell
+</pre>
+<figcaption>A tree with two decorations. The spinner in the now column comes from a <code>frames</code> decoration in an <code>icon</code> slot. The cost at the right edge is a <code>trailing</code> decoration in the <code>cost</code> slot. Drawn after the tree rows of the real client: an indent marker, then the identity glyph, then the status column.</figcaption>
+</figure>
+
+<h3 id="tree-toolbar-buttons">Tree toolbar buttons</h3>
+<p><code>tree_toolbar</code> adds buttons to the strip above the tree. The built-in strip holds the search <code>🔎</code>, restructure <code>♻️</code> and settings <code>🎚️</code> buttons. At most 4 entries per plugin.</p>
+<pre><code class="language-json">&quot;tree_toolbar&quot;: [
+  { &quot;id&quot;: &quot;board&quot;, &quot;icon&quot;: &quot;📉&quot;, &quot;label&quot;: &quot;Open board&quot;, &quot;command&quot;: &quot;open-board&quot;,
+    &quot;caption&quot;: &quot;Board&quot; },
+  { &quot;id&quot;: &quot;quota&quot;, &quot;icon&quot;: &quot;⌛&quot;, &quot;label&quot;: &quot;Quota&quot;, &quot;popup_view&quot;: &quot;quota-popover&quot; }
+]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>icon</code></td>
+<td>A glyph or an icon catalogue id.</td>
+</tr>
+<tr>
+<td><code>label</code></td>
+<td>At most 24 characters. The tooltip and the accessible name.</td>
+</tr>
+<tr>
+<td><code>caption</code></td>
+<td>At most 12 cells, shown beside the icon when the sidebar is wide.</td>
+</tr>
+<tr>
+<td><code>command</code></td>
+<td>Runs when clicked. Arrives as <code>command-invoked</code> with origin <code>tree-toolbar</code>.</td>
+</tr>
+<tr>
+<td><code>popup_view</code></td>
+<td>An own <code>panels</code> id. The button opens it as a popover anchored at the button instead of running <code>command</code>.</td>
+</tr>
+<tr>
+<td><code>when</code></td>
+<td>A context expression, for example <code>display_mode == "attention"</code>. An unknown key is refused with <code>manifest.when-key</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::{CommandInvokedEvent, CommandOrigin};
+
+fn on_command(invoked: &amp;CommandInvokedEvent) -&gt; Vec&lt;Submission&gt; {
+    if invoked.origin == CommandOrigin::TreeToolbar &amp;&amp; invoked.command == &quot;open-board&quot; {
+        return vec![Submission::new(Intent::CreatePane(CreatePaneSpec::kind(&quot;ilium.board&quot;)))];
+    }
+    Vec::new()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { CommandInvokedEvent, Submission } from '@ilium/plugin-sdk';
+
+export function onCommand(invoked: CommandInvokedEvent): Submission[] {
+  if (invoked.origin === 'tree-toolbar' &amp;&amp; invoked.command === 'open-board') {
+    return [{ intent: { tag: 'create-pane', val: { kind: 'ilium.board' } }, correlation: 1n, dedupKey: undefined }];
+  }
+  return [];
+}
+</code></pre>
+<h3 id="hover-actions-on-rows">Hover actions on rows</h3>
+<p><code>row_actions</code> places icons in the strip that appears on the row under the pointer. At most 4 entries per plugin. The built-in strip shows rename <code>✏️</code>, move up <code>🔼</code>, move down <code>🔽</code> and close <code>🚫</code>; plugin icons come after them, ordered by <code>order</code> (0 to 1000, default 500).</p>
+<pre><code class="language-json">&quot;row_actions&quot;: [
+  { &quot;id&quot;: &quot;bookmark&quot;, &quot;icon&quot;: &quot;★&quot;, &quot;label&quot;: &quot;Bookmark&quot;, &quot;command&quot;: &quot;toggle-bookmark&quot;,
+    &quot;applies_to&quot;: [&quot;pane&quot;, &quot;agent&quot;], &quot;order&quot;: 300 }
+]
+</code></pre>
+<p><code>applies_to</code> lists any of <code>pane</code>, <code>group</code>, <code>folder</code>, <code>project</code>, <code>agent</code> and <code>virtual:&lt;row-kind&gt;</code>. A click arrives as <code>command-invoked</code> with origin <code>row-action</code>; <code>arguments-json</code> is <code>{"node": &lt;id&gt;}</code> or, for a virtual row, <code>{"row": "&lt;virtual row id&gt;"}</code>. A target name that is none of these is refused at install with <code>manifest.contribution-target</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">fn on_row_action(invoked: &amp;CommandInvokedEvent) -&gt; Vec&lt;Submission&gt; {
+    if invoked.origin != CommandOrigin::RowAction || invoked.command != &quot;toggle-bookmark&quot; {
+        return Vec::new();
+    }
+    let Some(node) = invoked.context.node else { return Vec::new() };
+    let on = !is_bookmarked(node);
+    vec![Submission::new(Intent::SetBookmarked(SetBookmarkedSpec { node, bookmarked: on }))]
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export function onRowAction(invoked: CommandInvokedEvent): Submission[] {
+  if (invoked.origin !== 'row-action' || invoked.command !== 'toggle-bookmark') return [];
+  const node = invoked.context.node;
+  if (node === undefined) return [];
+  return [{
+    intent: { tag: 'set-bookmarked', val: { node, bookmarked: !isBookmarked(node) } },
+    correlation: 1n,
+    dedupKey: undefined,
+  }];
+}
+</code></pre>
+<figure>
+<pre class="term">▼ <span class="w2">📂</span> Ilium
+›   <span class="w2">🦀</span> ⠋ Fix auth                       <span class="t-hi"><span class="w2">✏️</span> <span class="w2">🔼</span> <span class="w2">🔽</span> <span class="w2">🚫</span> <span class="w2">★</span></span>
+›   <span class="w2">🐢</span> ● Docs pass
+›   <span class="w2">🖥️</span>    Shell
+</pre>
+<figcaption>The hover strip on the first row. The first four glyphs are the built-in actions; the star is a plugin <code>row_actions</code> entry. The strip is visible only on the row under the pointer.</figcaption>
+</figure>
+
+<h3 id="tree-orderings-and-display-modes">Tree orderings and display modes</h3>
+<p><code>tree_orderings</code> adds a choice to the tree's Order By list. Siblings sort by the <code>sort-key</code> of the plugin's decoration in the named slot, ascending. Nodes without a key keep their manual order, after the keyed ones. At most 4.</p>
+<p><code>display_modes</code> adds a mode next to Normal and Attention. In the mode, the tree shows the decorations of the slot first, and with <code>hide_unmarked: true</code> it hides panes that have none. At most 2. The host sends <code>display-mode-changed</code> (payload: the mode's global id, or none for Normal) to the plugin that owns the mode.</p>
+<pre><code class="language-json">&quot;decoration_slots&quot;: [ { &quot;id&quot;: &quot;cost&quot;, &quot;placement&quot;: &quot;badge&quot;, &quot;priority&quot;: 40 } ],
+&quot;tree_orderings&quot;: [ { &quot;id&quot;: &quot;by-cost&quot;, &quot;title&quot;: &quot;Cost, highest first&quot;, &quot;slot&quot;: &quot;cost&quot; } ],
+&quot;display_modes&quot;: [ { &quot;id&quot;: &quot;costly&quot;, &quot;title&quot;: &quot;Costly&quot;, &quot;icon&quot;: &quot;¤&quot;, &quot;slot&quot;: &quot;cost&quot;, &quot;hide_unmarked&quot;: true } ]
+</code></pre>
+<p>To sort highest first, send a negative <code>sort-key</code>. A <code>slot</code> that is not the plugin's own is refused with <code>manifest.contribution-target</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">fn publish_cost(node: NodeId, cents: i64) -&gt; Submission {
+    Submission::new(Intent::SetDecoration(SetDecorationSpec {
+        sort_key: Some(-cents), // ascending order puts the highest cost first
+        ..SetDecorationSpec::text(node, &quot;cost&quot;, format!(&quot;${:.2}&quot;, cents as f64 / 100.0))
+    }))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export function publishCost(node: bigint, cents: number): Submission {
+  return {
+    intent: {
+      tag: 'set-decoration',
+      val: { ...baseDecoration(node, 'cost', `$${(cents / 100).toFixed(2)}`), sortKey: BigInt(-cents) },
+    },
+    correlation: 1n,
+    dedupKey: undefined,
+  };
+}
+</code></pre>
+<h3 id="virtual-rows">Virtual rows</h3>
+<p>A virtual row is a row in the tree that does not belong to a pane or group: a plugin's own list, such as saved searches or quota buckets. The plugin sends them with <code>set-virtual-rows { row-kind, rows }</code>. A row also has <code>parent</code>, <code>expandable</code>, <code>accepts-drop</code>, <code>tooltip</code>, a rich-text <code>label</code> and <code>trailing</code>. The manifest entry <code>virtual_rows</code> also has <code>expandable</code>, <code>children</code>, <code>accepts_drop</code> and <code>drop_command</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Values</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>children</code></td>
+<td><code>"static"</code></td>
+<td>The plugin sends child rows itself with <code>parent</code> set.</td>
+</tr>
+<tr>
+<td><code>children</code></td>
+<td><code>"provider"</code></td>
+<td>The host calls the <code>virtual-rows-provider</code> export when the user expands a row.</td>
+</tr>
+<tr>
+<td><code>accepts_drop</code></td>
+<td>list of <code>pane</code>, <code>file</code>, <code>text</code></td>
+<td>What the row accepts. A drop runs <code>drop_command</code> with origin <code>virtual-row-drop</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The provider export:</p>
+<pre><code class="language-wit">// Excerpt of ilium:exports/virtual-rows-provider in reference-wit
+record virtual-row-child { id: string, label: rich-text, icon: option&lt;string&gt;, expandable: bool, command: option&lt;string&gt;,
+                           tooltip: option&lt;tooltip&gt;, accepts-drop: bool }
+list-virtual-children: func(row-kind: string, parent: string, cursor: option&lt;string&gt;)
+    -&gt; result&lt;tuple&lt;list&lt;virtual-row-child&gt;, option&lt;string&gt;&gt;, plugin-error&gt;;
+</code></pre>
+<p>The deadline is 20 ms and a page holds at most 256 children. While a page is pending the host shows <code>…</code> with a spinner; with a returned cursor it shows a <code>Load more</code> row. Expansion state belongs to the host. A plugin changes it with <code>set-expanded { virtual-row, expanded }</code>, which needs no grant beyond the plugin's own <code>virtual_rows</code> entry (real nodes need <code>tree.write</code>).</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::exports::VirtualRowsProvider;
+
+struct Searches;
+
+impl VirtualRowsProvider for Searches {
+    fn list_virtual_children(
+        &amp;mut self, row_kind: &amp;str, parent: &amp;str, cursor: Option&lt;String&gt;,
+    ) -&gt; Result&lt;(Vec&lt;VirtualRowChild&gt;, Option&lt;String&gt;), PluginError&gt; {
+        if row_kind != &quot;saved-searches&quot; {
+            return Ok((Vec::new(), None));
+        }
+        let page = load_page(parent, cursor.as_deref())?; // must answer within 20 ms: read from a cache
+        let rows = page.items.iter().map(|item| VirtualRowChild {
+            id: item.id.clone(),
+            label: RichText::plain(&amp;item.title),
+            icon: Some(&quot;🔎&quot;.into()),
+            expandable: false,
+            command: Some(&quot;run-search&quot;.into()),
+            tooltip: None,
+            accepts_drop: false,
+        }).collect();
+        Ok((rows, page.next_cursor))
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import type { VirtualRowsProvider, VirtualRowChild } from '@ilium/plugin-sdk';
+
+export const virtualRows: VirtualRowsProvider = {
+  listVirtualChildren(rowKind, parent, cursor) {
+    if (rowKind !== 'saved-searches') return [[], undefined];
+    const page = loadPage(parent, cursor); // must answer within 20 ms: read from a cache
+    const rows: VirtualRowChild[] = page.items.map((item) =&gt; ({
+      id: item.id,
+      label: [{ text: item.title }],
+      icon: '🔎',
+      expandable: false,
+      command: 'run-search',
+      tooltip: undefined,
+      acceptsDrop: false,
+    }));
+    return [rows, page.nextCursor];
+  },
+};
+</code></pre>
+<figure>
+<pre class="term">▼ <span class="w2">📂</span> Ilium
+›   <span class="w2">🦀</span> ⠋ Fix auth
+› ▼ <span class="w2">🔎</span> Saved searches
+› ›   <span class="w2">🔎</span> TODO in src
+› ›   <span class="w2">🔎</span> failing tests
+› ›   <span class="t-dim">…</span>
+</pre>
+<figcaption>A virtual row <code>Saved searches</code>, expanded. Its children come from the provider; the last row stands for a page that is still loading. Indent markers are one <code>›</code> per level, in dark grey in the real client.</figcaption>
+</figure>
+
+<h3 id="status-bar-segments">Status bar segments</h3>
+<p>The status bar shows the mode, then segments separated by a long dash with spaces around it. A plugin declares up to 2 segments and fills them with intents.</p>
+<pre><code class="language-json">&quot;status_segments&quot;: [ { &quot;id&quot;: &quot;quota&quot;, &quot;priority&quot;: 70, &quot;max_width&quot;: 20 } ]
+</code></pre>
+<p><code>priority</code> is 0 to 100; when the bar is too narrow, higher priority survives. <code>max_width</code> is 4 to 40 cells, default 24. Text longer than that is cut with <code>…</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>Fields</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>set-status-segment</code></td>
+<td><code>segment</code>, <code>content</code> (rich text), <code>tooltip</code>, <code>tone</code></td>
+<td>At most 10 per second per slot (the segment id is the slot); faster calls are refused with <code>rate-limited</code>.</td>
+</tr>
+<tr>
+<td><code>clear-status-segment</code></td>
+<td><code>segment</code></td>
+<td>Removes the segment.</td>
+</tr>
+</tbody>
+</table>
+<p>A click on the segment arrives as <code>command-invoked</code> with origin <code>status-segment</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">fn show_quota(percent_used: u32) -&gt; Submission {
+    let tone = if percent_used &gt;= 90 { Tone::Warning } else { Tone::Info };
+    Submission::new(Intent::SetStatusSegment(SetStatusSegmentSpec {
+        segment: &quot;quota&quot;.into(),
+        content: RichText::plain(format!(&quot;quota {percent_used}%&quot;)),
+        tooltip: Some(Tooltip::new(&quot;Tokens used in this 5 hour window&quot;)),
+        tone: Some(tone),
+    }))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export function showQuota(percentUsed: number): Submission {
+  return {
+    intent: {
+      tag: 'set-status-segment',
+      val: {
+        segment: 'quota',
+        content: [{ text: `quota ${percentUsed}%` }],
+        tooltip: { text: 'Tokens used in this 5 hour window' },
+        tone: percentUsed &gt;= 90 ? 'warning' : 'info',
+      },
+    },
+    correlation: 1n,
+    dedupKey: undefined,
+  };
+}
+</code></pre>
+<figure>
+<pre class="term"><span class="t-hi">ℹ Tree</span>  -  Ctrl+B menu  -  <span class="t-warn">quota 92%</span>  -  <span class="t-dim">3 panes</span>
+</pre>
+<figcaption>The status bar with one plugin segment. The mode prefix is <code>ℹ</code>. The real bar is drawn in the accent colours with a rounded cap at each end; a segment takes the tone colour of its intent.</figcaption>
+</figure>
+
+<h3 id="pane-frame-slots">Pane frame slots</h3>
+<p><code>pane_frame_slots</code> reserve a place in the frame of matching panes. At most 4 per plugin. <code>placement</code> is <code>header-icon</code>, <code>header-text</code>, <code>footer-row</code> or <code>banner</code>. <code>applies_to</code> is <code>all</code>, <code>agents</code>, <code>terminals</code>, <code>pane:&lt;kind&gt;</code>, or a list of agent signature ids. The intents are <code>set-frame-slot { pane, slot, content, icon, tooltip }</code> and <code>clear-frame-slot { pane, slot }</code>, at most 10 per second per slot. Filling a slot on a pane that does not match <code>applies_to</code> is refused with <code>invalid-argument</code>.</p>
+<pre><code class="language-json">&quot;pane_frame_slots&quot;: [ { &quot;id&quot;: &quot;model&quot;, &quot;placement&quot;: &quot;header-text&quot;, &quot;applies_to&quot;: [&quot;claude&quot;, &quot;codex&quot;] } ]
+</code></pre>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">fn show_model(pane: NodeId, model: &amp;str) -&gt; Submission {
+    Submission::new(Intent::SetFrameSlot(SetFrameSlotSpec {
+        pane,
+        slot: &quot;model&quot;.into(),
+        content: RichText::plain(model),
+        icon: Some(&quot;🧩&quot;.into()),
+        tooltip: None,
+    }))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">export function showModel(pane: bigint, model: string): Submission {
+  return {
+    intent: {
+      tag: 'set-frame-slot',
+      val: { pane, slot: 'model', content: [{ text: model }], icon: '🧩', tooltip: undefined },
+    },
+    correlation: 1n,
+    dedupKey: undefined,
+  };
+}
+</code></pre>
+<figure>
+<pre class="term">╭──≡ ● · Fix auth  <span class="w2">🧩</span> sonnet──────────────╮
+│ Reading ilium-client/src/ui.rs          │
+│                                         │
+╰─────────────────────────────────────────╯
+</pre>
+<figcaption>A pane frame with a <code>header-text</code> slot. The title notch and the three icons <code>≡ ● ·</code> belong to the host; only the text after the title is the plugin's.</figcaption>
+</figure>
+
+<h3 id="errors-and-limits">Errors and limits</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A contribution key over its cap (<code>status_segments</code> 2, <code>pane_frame_slots</code> 4, <code>tree_toolbar</code> 4, <code>row_actions</code> 4, <code>tree_orderings</code> 4, <code>display_modes</code> 2)</td>
+<td>Install refused with <code>manifest.contribution-limit</code></td>
+</tr>
+<tr>
+<td><code>applies_to</code> or <code>slot</code> names an unknown target or another plugin's slot</td>
+<td><code>manifest.contribution-target</code></td>
+</tr>
+<tr>
+<td>Unknown <code>when</code> key</td>
+<td><code>manifest.when-key</code></td>
+</tr>
+<tr>
+<td>Intent without <code>ui.chrome</code> or <code>tree.decorate</code></td>
+<td><code>not-permitted</code></td>
+</tr>
+<tr>
+<td>More than 10 updates per second to one segment or slot</td>
+<td><code>rate-limited</code></td>
+</tr>
+<tr>
+<td>Decoration frames below 2 or above 16, or <code>frame-ms</code> below 90</td>
+<td><code>invalid-argument</code></td>
+</tr>
+<tr>
+<td>Tooltip over 200 characters</td>
+<td>Truncated with <code>…</code></td>
+</tr>
+<tr>
+<td>Provider answers after 20 ms</td>
+<td>Deadline breach counted; the host shows <code>…</code> until the next page</td>
+</tr>
+<tr>
+<td>Virtual-row page above 256 children</td>
+<td>Clamped</td>
+</tr>
+</tbody>
+</table>
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-tree/">tree</a> for reading nodes.</li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle</a> for freeze, replace and restructure intents.</li>
+<li><a href="/pages/api-ui/">UI</a> for popovers opened from a toolbar button and for the menu model.</li>
+<li><a href="/pages/api-intents/">Intents</a> and <a href="/pages/api-events/">events</a> for the shared shapes.</li>
+<li><a href="/pages/ui-model/">UI model</a> for how the host draws rows and widgets.</li>
+</ul>
+<h3 id="security">Security</h3>
+<p>Tree chrome text is sanitised ([SEC-380]).</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-durable-timers/"><small>Previous</small>Durable timers and journal</a><a class="next" href="/pages/api-pane-lifecycle/"><small>Next</small>Pane lifecycle and tree restructuring</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#where-each-place-is">Where each place is</a></li><li class="l2"><a href="#decorations-on-tree-rows">Decorations on tree rows</a></li><li class="l2"><a href="#tree-toolbar-buttons">Tree toolbar buttons</a></li><li class="l2"><a href="#hover-actions-on-rows">Hover actions on rows</a></li><li class="l2"><a href="#tree-orderings-and-display-modes">Tree orderings and display modes</a></li><li class="l2"><a href="#virtual-rows">Virtual rows</a></li><li class="l2"><a href="#status-bar-segments">Status bar segments</a></li><li class="l2"><a href="#pane-frame-slots">Pane frame slots</a></li><li class="l2"><a href="#errors-and-limits">Errors and limits</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l2"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -48,6 +48,16 @@ use ilium_sound::NotificationEvent;
 /// classification to run every single base tick regardless of its
 /// configured poll tier.
 const FORCE_CHECK_DEBOUNCE: Duration = Duration::from_secs(5);
+/// How long after PTY output a slow-tier agent pane is rechecked. Gives a
+/// freshly started turn time to paint its spinner and status line.
+/// Ceiling on the idle check interval of a pane that holds an agent. A turn can
+/// start without any screen output the wake path sees (for example a silent
+/// redraw), so agent panes are never left on the full plain-shell interval.
+const AGENT_IDLE_POLL_CEILING: Duration = Duration::from_secs(15);
+pub(crate) const OUTPUT_WAKE_DELAY: Duration = Duration::from_secs(1);
+/// Minimum spacing between output-driven wakes of one pane, so a chatty idle
+/// screen costs at most one classification per window instead of one per chunk.
+const OUTPUT_WAKE_MIN_SPACING: Duration = Duration::from_secs(5);
 /// Focused panes retain the previous one-second classification cadence, while
 /// the scheduler itself now sleeps to exact deadlines instead of polling.
 const FOCUSED_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -103,6 +113,9 @@ async fn supervise_loop(state: std::sync::Arc<ServerState>) {
             Err(error) if error.is_cancelled() => return,
             Err(error) => {
                 tracing::error!("agent detection loop panicked and is restarting: {error}");
+                // A deterministic native failure must not respawn tasks in a
+                // tight loop and starve IPC/input on the same runtime.
+                tokio::time::sleep(TICK_FAILURE_BACKOFF_INITIAL).await;
             }
         }
     }
@@ -232,7 +245,7 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
         tracing::error!("detection requires bootstrap-owned server execution");
         return;
     };
-    let execution = owner.client.clone();
+    let execution = owner.detection.clone();
     let retention = match execution.foundation.try_reserve(
         Lane::Io,
         JobCost {
@@ -258,16 +271,21 @@ async fn run_loop(state: std::sync::Arc<ServerState>) {
         // Sleep to the exact nearest pane deadline. New panes and debounced
         // force-checks notify this loop, so an earlier deadline interrupts
         // the sleep immediately without a fixed polling granularity.
+        // Register before inspecting the schedule: a pane/focus update may
+        // notify while next_detection_delay is awaiting registry locks.
+        let schedule_changed = state.detection_schedule_changed.notified();
+        tokio::pin!(schedule_changed);
+        schedule_changed.as_mut().enable();
         match next_detection_delay(&state, Instant::now()).await {
             Some(delay) if !delay.is_zero() => {
                 tokio::select! {
                     () = tokio::time::sleep(delay) => {}
-                    () = state.detection_schedule_changed.notified() => continue,
+                    () = &mut schedule_changed => continue,
                 }
             }
             Some(_) => {}
             None => {
-                state.detection_schedule_changed.notified().await;
+                schedule_changed.await;
                 continue;
             }
         }
@@ -472,7 +490,7 @@ async fn system_refresh_required(
         return true;
     };
     match owner
-        .client
+        .detection
         .run(
             Lane::Io,
             JobCost {
@@ -799,9 +817,14 @@ async fn run_due_panes_with_hook(
         .execution
         .get()
         .ok_or_else(|| execution_error("server bank not started"))?
+        .detection
+        .clone();
+    let notification_execution = state
+        .execution
+        .get()
+        .ok_or_else(|| execution_error("server bank not started"))?
         .client
         .clone();
-    let notification_execution = execution.clone();
     // Reserve before cloning classification inputs or formatting screens.
     let reservation = execution
         .foundation
@@ -841,6 +864,7 @@ async fn run_due_panes_with_hook(
         agent_generation: u64,
         title_generation: u64,
         shell_pid: Option<u32>,
+        shell_birth_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
         shell_was_plain: bool,
         shell_observer: Option<ilium_pty::PtyShellObserver>,
         screen_generation: u64,
@@ -852,6 +876,9 @@ async fn run_due_panes_with_hook(
         invalidated_session_id: Option<String>,
         session_process_id: Option<u32>,
         session_process_started_at_unix_seconds: Option<u64>,
+        session_process_identity_inode: Option<u64>,
+        claude_session_recheck_due: bool,
+        session_process_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
         pending_generated_session_id: Option<String>,
         identity_system_generation: Option<u64>,
         agent_launcher_ancestors: Vec<AgentProcessKey>,
@@ -926,6 +953,7 @@ async fn run_due_panes_with_hook(
                 agent_generation: runtime.agent_generation,
                 title_generation: runtime.title_generation,
                 shell_pid: runtime.session.process_id(),
+                shell_birth_identity: runtime.session.process_birth_identity(),
                 shell_was_plain: shell_observer.is_some(),
                 shell_observer,
                 screen_generation: runtime.session.screen_generation(),
@@ -938,6 +966,9 @@ async fn run_due_panes_with_hook(
                 session_process_id: runtime.session_process_id,
                 session_process_started_at_unix_seconds: runtime
                     .session_process_started_at_unix_seconds,
+                session_process_identity_inode: runtime.session_process_identity_inode,
+                claude_session_recheck_due: now >= runtime.next_claude_session_recheck,
+                session_process_identity: runtime.session_process_identity.clone(),
                 pending_generated_session_id: runtime.pending_generated_session_id.clone(),
                 identity_system_generation: runtime.detection_schedule.identity_system_generation,
                 agent_launcher_ancestors: runtime.agent_launcher_ancestors.clone(),
@@ -958,6 +989,10 @@ async fn run_due_panes_with_hook(
     }
 
     let evidence_deadline = tokio::time::Instant::now() + EVIDENCE_DEADLINE;
+    let attempted_panes: Vec<_> = due_panes
+        .iter()
+        .map(|pane| (pane.pane_id, pane.request_generation, pane.agent_generation))
+        .collect();
     let shell_observers: Vec<_> = due_panes
         .iter_mut()
         .filter_map(|pane| {
@@ -1008,6 +1043,7 @@ async fn run_due_panes_with_hook(
         status: PaneStatus,
         identity: Option<ilium_detect::AgentIdentity>,
         screen_generation: u64,
+        observed_at_unix_millis: u64,
         request_generation: u64,
         confirmed_goal_owner: Option<ConfirmedGoalOwner>,
         is_fresh_agent_screen: bool,
@@ -1015,10 +1051,15 @@ async fn run_due_panes_with_hook(
         invalidated_session_id: Option<String>,
         session_process_id: Option<u32>,
         session_process_started_at_unix_seconds: Option<u64>,
+        session_process_identity_inode: Option<u64>,
+        session_process_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
+        session_identity_changed: bool,
+        claude_session_recheck: bool,
         session_agent_class: Option<ilium_core::AgentClass>,
         pending_generated_session_id: Option<String>,
         needs_session_discovery: bool,
         shell_pid: Option<u32>,
+        shell_birth_identity: Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
         shell_was_plain: bool,
         shell_ownership: Option<bool>,
         activity_evidence: Option<ilium_detect::ActivityEvidence>,
@@ -1152,6 +1193,8 @@ async fn run_due_panes_with_hook(
                         })
                         .collect();
 
+                    let observed_at_unix_millis = observation_unix_millis();
+                    let mut current_cached_screens = std::collections::HashSet::new();
                     let screen_snapshots: std::collections::HashMap<
                         NodeId,
                         ilium_pty::ScreenSnapshot,
@@ -1160,9 +1203,7 @@ async fn run_due_panes_with_hook(
                         let mut snapshots =
                             std::collections::HashMap::with_capacity(identified_panes.len());
                         for pane in &identified_panes {
-                            if pane.identity.is_none()
-                                || pane.cached_screen_classification.is_some()
-                            {
+                            if pane.identity.is_none() {
                                 continue;
                             }
                             let Some(PaneResource::Terminal(runtime)) =
@@ -1170,12 +1211,23 @@ async fn run_due_panes_with_hook(
                             else {
                                 continue;
                             };
-                            let Ok(snapshot) =
-                                runtime.session.screen_snapshot_with_limit(2 * 1024 * 1024)
+                            if let Some(cache) = &pane.cached_screen_classification {
+                                // The atomic generation can remain old while the parser
+                                // processes output. Only the parser lock proves this
+                                // unchanged frame was actually available to observe.
+                                if runtime.session.current_screen_generation()
+                                    == Some(cache.screen_generation)
+                                {
+                                    current_cached_screens.insert(pane.due.pane_id);
+                                }
+                                continue;
+                            }
+                            let Ok(Some(snapshot)) = runtime
+                                .session
+                                .current_screen_snapshot_with_limit(2 * 1024 * 1024)
                             else {
-                                return Err(std::io::Error::other(
-                                    "detection screen evidence admission limit reached",
-                                ));
+                                // A busy or oversized pane must not prevent checks of its peers.
+                                continue;
                             };
                             snapshots.insert(pane.due.pane_id, snapshot);
                         }
@@ -1184,9 +1236,15 @@ async fn run_due_panes_with_hook(
 
                     let classifications: Vec<ClassifiedPane> = identified_panes
                         .into_iter()
-                        .map(|identified| {
+                        .filter_map(|identified| {
                             let due_pane = identified.due;
                             let identity = identified.identity;
+                            if identity.is_some()
+                                && !current_cached_screens.contains(&due_pane.pane_id)
+                                && !screen_snapshots.contains_key(&due_pane.pane_id)
+                            {
+                                return None;
+                            }
                             let (
                                 screen_generation,
                                 classified_identity,
@@ -1257,9 +1315,24 @@ async fn run_due_panes_with_hook(
                                         &ambiguous_session_ids,
                                     )
                                 });
-                            let needs_session_discovery =
-                                identity.is_some() && !has_stable_session_owner;
-                            ClassifiedPane {
+                            // An otherwise stable session can have been discovered
+                            // while native process custody was unavailable. Retry
+                            // qualification when the terminal itself has a proof.
+                            let claude_session_recheck = has_stable_session_owner
+                                && due_pane.claude_session_recheck_due
+                                && identity.as_ref().is_some_and(|identity| {
+                                    identity.class == ilium_core::AgentClass::Claude
+                                });
+                            let needs_session_discovery = identity.is_some()
+                                && (!has_stable_session_owner
+                                    || claude_session_recheck
+                                    || (due_pane.session_process_identity_inode.is_none()
+                                        && due_pane
+                                            .shell_birth_identity
+                                            .as_ref()
+                                            .and_then(|identity| identity.pidfs_inode())
+                                            .is_some()));
+                            Some(ClassifiedPane {
                                 pane_id: due_pane.pane_id,
                                 input: due_pane.input,
                                 agent_generation: due_pane.agent_generation,
@@ -1269,6 +1342,7 @@ async fn run_due_panes_with_hook(
                                 status: classified_identity.status,
                                 identity,
                                 screen_generation,
+                                observed_at_unix_millis,
                                 request_generation: due_pane.request_generation,
                                 confirmed_goal_owner: classified_identity.confirmed_goal_owner,
                                 is_fresh_agent_screen,
@@ -1278,10 +1352,16 @@ async fn run_due_panes_with_hook(
                                 session_process_id: due_pane.session_process_id,
                                 session_process_started_at_unix_seconds: due_pane
                                     .session_process_started_at_unix_seconds,
+                                session_process_identity_inode: due_pane
+                                    .session_process_identity_inode,
+                                session_process_identity: due_pane.session_process_identity,
+                                session_identity_changed: false,
+                                claude_session_recheck,
                                 session_agent_class: due_pane.session_agent_class,
                                 pending_generated_session_id: due_pane.pending_generated_session_id,
                                 needs_session_discovery,
                                 shell_pid: due_pane.shell_pid,
+                                shell_birth_identity: due_pane.shell_birth_identity,
                                 shell_was_plain: due_pane.shell_was_plain,
                                 shell_ownership: shell_ownership
                                     .get(&due_pane.pane_id)
@@ -1296,14 +1376,16 @@ async fn run_due_panes_with_hook(
                                 goal_was_retained: classified_identity.goal_was_retained,
                                 interstitial_prompt_response,
                                 screen_classification_cache,
-                            }
+                            })
                         })
                         .collect();
 
                     pane_cwds.retain(|pane_id, _| {
-                        classifications
-                            .iter()
-                            .any(|pane| pane.pane_id == *pane_id && pane.needs_session_discovery)
+                        classifications.iter().any(|pane| {
+                            pane.pane_id == *pane_id
+                                && (pane.needs_session_discovery
+                                    || pane.session_process_identity_inode.is_some())
+                        })
                     });
 
                     // CPU work only reads the immutable process-tree snapshot. Native
@@ -1430,6 +1512,9 @@ async fn run_due_panes_with_hook(
         ilium_detect::AgentIdentity,
         Option<std::path::PathBuf>,
         bool,
+        Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
+        Option<u64>,
+        Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
     )>());
     for pane in &classifications {
         let Some(identity) = pane.identity.as_ref() else {
@@ -1441,7 +1526,7 @@ async fn run_due_panes_with_hook(
         if let ilium_core::AgentClass::Other(name) = &identity.class {
             discovery_input_bytes = discovery_input_bytes.saturating_add(name.capacity());
         }
-        if pane.needs_session_discovery {
+        if pane.needs_session_discovery || pane.session_process_identity_inode.is_some() {
             discovery_input_bytes = discovery_input_bytes.saturating_add(
                 pane_cwds
                     .get(&pane.pane_id)
@@ -1453,10 +1538,10 @@ async fn run_due_panes_with_hook(
     }
     discovery_input_bytes = discovery_input_bytes
         .saturating_add(MAX_DUE_PANES.saturating_mul(std::mem::size_of::<Pid>()));
-    if classifications
-        .iter()
-        .any(|pane| pane.needs_session_discovery && pane.identity.is_some())
-    {
+    if classifications.iter().any(|pane| {
+        pane.identity.is_some()
+            && (pane.needs_session_discovery || pane.session_process_identity_inode.is_some())
+    }) {
         discovery_input_bytes =
             discovery_input_bytes.saturating_add(state.session_cwd.capacity().saturating_mul(2));
     }
@@ -1471,10 +1556,11 @@ async fn run_due_panes_with_hook(
             Lane::Io,
             JobCost {
                 input_bytes: discovery_input_bytes,
-                result_bytes: if classifications
-                    .iter()
-                    .any(|pane| pane.needs_session_discovery && pane.identity.is_some())
-                {
+                result_bytes: if classifications.iter().any(|pane| {
+                    pane.identity.is_some()
+                        && (pane.needs_session_discovery
+                            || pane.session_process_identity_inode.is_some())
+                }) {
                     DISCOVERY_RESULT_BYTES
                 } else {
                     1024 * 1024
@@ -1486,7 +1572,9 @@ async fn run_due_panes_with_hook(
         .iter()
         .filter_map(|pane| {
             pane.identity.clone().map(|identity| {
-                let project_cwd = pane.needs_session_discovery.then(|| {
+                let project_cwd = (pane.needs_session_discovery
+                    || pane.session_process_identity_inode.is_some())
+                .then(|| {
                     pane_cwds
                         .get(&pane.pane_id)
                         .unwrap_or(&state.session_cwd)
@@ -1497,6 +1585,9 @@ async fn run_due_panes_with_hook(
                     identity,
                     project_cwd,
                     pane.needs_session_discovery,
+                    pane.shell_birth_identity.clone(),
+                    pane.session_process_identity_inode,
+                    pane.session_process_identity.clone(),
                 )
             })
         })
@@ -1510,22 +1601,59 @@ async fn run_due_panes_with_hook(
             move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
                 let mut discovery_pids: Vec<Pid> = discovery_requests
                     .iter()
-                    .filter(|(_, _, _, needs_discovery)| *needs_discovery)
-                    .map(|(_, identity, _, _)| Pid::from_u32(identity.pid))
+                    .filter(|(_, _, _, needs_discovery, _, birth, _)| {
+                        *needs_discovery || birth.is_some()
+                    })
+                    .map(|(_, identity, _, _, _, _, _)| Pid::from_u32(identity.pid))
                     .collect();
                 discovery_pids.sort_unstable();
                 discovery_pids.dedup();
+                // Hold the kernel identity before refreshing any process facts;
+                // a reused PID cannot inherit the subsequent discovery result.
+                let process_identities: std::collections::HashMap<_, _> = discovery_pids
+                    .iter()
+                    .filter_map(|pid| {
+                        ilium_platform::process_control::capture_pty_process(pid.as_u32())
+                            .ok()
+                            .map(|identity| (*pid, Arc::new(identity)))
+                    })
+                    .collect();
+                let changed_identities: std::collections::HashSet<_> = discovery_requests
+                    .iter()
+                    .filter_map(|(pane_id, identity, _, _, _, birth, retained)| {
+                        cached_session_owner_changed(
+                            *birth,
+                            process_identities
+                                .get(&Pid::from_u32(identity.pid))
+                                .and_then(|proof| proof.pidfs_inode()),
+                            retained.as_ref().map(|proof| {
+                                ilium_platform::process_control::captured_process_is_current(proof)
+                                    .unwrap_or(false)
+                            }),
+                        )
+                        .then_some(*pane_id)
+                    })
+                    .collect();
+                // Stable owners need only the bounded identity check above; do not
+                // refresh their command lines and cwd on every detection tick.
+                discovery_pids.retain(|pid| {
+                    discovery_requests.iter().any(|(pane_id, identity, _, needs, _, _, _)| {
+                        identity.pid == pid.as_u32() && (*needs || changed_identities.contains(pane_id))
+                    })
+                });
                 let mut process_table = discovery_process_table
                     .system
                     .lock()
                     .map_err(|_| std::io::Error::other("process table lock poisoned"))?;
                 crate::session_id::refresh_for_discovery(&mut process_table, &discovery_pids);
                 let mut snapshots = std::collections::HashMap::with_capacity(discovery_pids.len());
-                for (pane_id, identity, project_cwd, needs_discovery) in &discovery_requests {
+                for (pane_id, identity, project_cwd, needs_discovery, shell_identity, _, _) in
+                    &discovery_requests
+                {
                     if context.stop_requested() {
                         return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
                     }
-                    if *needs_discovery {
+                    if *needs_discovery || changed_identities.contains(pane_id) {
                         let cwd = project_cwd.as_deref().unwrap_or(&discovery_session_cwd);
                         snapshots.insert(
                             *pane_id,
@@ -1533,13 +1661,24 @@ async fn run_due_panes_with_hook(
                                 &process_table,
                                 Pid::from_u32(identity.pid),
                                 cwd,
+                                process_identities
+                                    .get(&Pid::from_u32(identity.pid))
+                                    .filter(|agent| {
+                                        shell_identity.as_ref().is_some_and(|shell| {
+                                            ilium_platform::process_control::captured_process_descends_from(
+                                                agent, shell,
+                                            )
+                                            .unwrap_or(false)
+                                        })
+                                    })
+                                    .cloned(),
                             ),
                         );
                     }
                 }
                 drop(process_table);
                 let mut stale_panes = std::collections::HashSet::new();
-                for (pane_id, identity, _, _) in &discovery_requests {
+                for (pane_id, identity, _, _, _, _, _) in &discovery_requests {
                     if context.stop_requested() {
                         return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
                     }
@@ -1555,6 +1694,9 @@ async fn run_due_panes_with_hook(
                     stale_panes
                         .capacity()
                         .saturating_mul(std::mem::size_of::<NodeId>()),
+                );
+                result_bytes = result_bytes.saturating_add(
+                    changed_identities.capacity().saturating_mul(std::mem::size_of::<NodeId>()),
                 );
                 for snapshot in snapshots.values().flatten() {
                     result_bytes = result_bytes
@@ -1579,7 +1721,7 @@ async fn run_due_panes_with_hook(
                         "detection process discovery result exceeds retained admission",
                     ));
                 }
-                Ok((snapshots, stale_panes, result_bytes))
+                Ok((snapshots, stale_panes, changed_identities, result_bytes))
             },
         ),
     )
@@ -1587,8 +1729,12 @@ async fn run_due_panes_with_hook(
     .map_err(|_| execution_error("detection process discovery deadline expired"))?
     .map_err(execution_error)?;
     let (discovery_result, _discovery_retention) = discovery_evidence.into_parts();
-    let (discovery_snapshots, stale_classifications, _) = discovery_result;
+    let (discovery_snapshots, stale_classifications, changed_identities, _) = discovery_result;
     for pane in &mut classifications {
+        if changed_identities.contains(&pane.pane_id) {
+            pane.needs_session_discovery = true;
+            pane.session_identity_changed = true;
+        }
         if !stale_classifications.contains(&pane.pane_id) {
             continue;
         }
@@ -1722,6 +1868,32 @@ async fn run_due_panes_with_hook(
             let Some(identity) = pane.identity.as_ref() else {
                 continue;
             };
+            if pane.claude_session_recheck {
+                let process = discovery_snapshots
+                    .get(&pane.pane_id)
+                    .and_then(Option::as_ref)
+                    .and_then(|snapshot| snapshot.process_identity.clone());
+                let Some(process) = process else {
+                    continue;
+                };
+                let project = pane_cwds
+                    .get(&pane.pane_id)
+                    .unwrap_or(&state.session_cwd)
+                    .clone();
+                let current = crate::session_id::claude_session_record_staged(
+                    &execution,
+                    identity.pid,
+                    process,
+                    project,
+                )
+                .await;
+                if !claude_session_record_requires_rediscovery(
+                    pane.captured_session_id.as_deref(),
+                    current.as_deref(),
+                ) {
+                    continue;
+                }
+            }
             let mut exclusion_details: Vec<String> = claimed_session_ids
                 .iter()
                 .filter(|(_, owner)| **owner != pane.pane_id)
@@ -1741,11 +1913,39 @@ async fn run_due_panes_with_hook(
                 .collect();
             excluded_session_ids.extend(captured_ambiguous_session_ids.iter().cloned());
             let project_cwd = pane_cwds.get(&pane.pane_id).unwrap_or(&state.session_cwd);
-            let transcript_locator = TranscriptLocator::new_bounded(
-                &state.home_dir,
+            let process_id = identity.pid;
+            let provider_homes = execution
+                .run(
+                    Lane::Io,
+                    JobCost {
+                        input_bytes: 2 * 1024 * 1024,
+                        result_bytes: 32 * 1024,
+                    },
+                    move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
+                        if context.stop_requested() {
+                            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                        }
+                        Ok(ilium_platform::process_info::agent_provider_homes(
+                            process_id,
+                        ))
+                    },
+                )
+                .await
+                .ok()
+                .and_then(|result| result.view().clone());
+            let home = provider_homes
+                .as_ref()
+                .map_or(&state.home_dir, |homes| &homes.home);
+            let mut transcript_locator = TranscriptLocator::new_bounded(
+                home,
                 project_cwd,
                 crate::session_id::TRANSCRIPT_READ_LIMITS,
             );
+            if let Some(homes) = provider_homes {
+                transcript_locator = transcript_locator
+                    .with_claude_config_dir(&homes.claude_config)
+                    .with_codex_home(&homes.codex_home);
+            }
             // A resumed process can keep the old descriptor open until its
             // transition finishes. That identity stays excluded on every rank.
             if pane.is_session_identity_invalidated
@@ -1841,7 +2041,10 @@ async fn run_due_panes_with_hook(
             let discovered_session = if transcript_locator.read_limit_reached() {
                 None
             } else {
-                discovered_session
+                discovered_session.filter(|session| {
+                    !pane.claude_session_recheck
+                        || session.source == crate::session_id::DiscoverySource::ClaudeSessionRecord
+                })
             };
             discovery_phases.push(crate::session_id::SessionDiscoveryPhase {
                 phase: "overall result",
@@ -1889,11 +2092,14 @@ async fn run_due_panes_with_hook(
             },
         )
         .map_err(|error| execution_error(format!("{error:?}")))?;
-    let identity_checks: Vec<(
+    type IdentityCheck = (
         NodeId,
         ilium_detect::AgentIdentity,
         Option<std::path::PathBuf>,
-    )> = classifications
+        bool,
+        Option<Arc<ilium_platform::process_control::PtyProcessIdentity>>,
+    );
+    let identity_checks: Vec<IdentityCheck> = classifications
         .iter()
         .filter_map(|pane| {
             pane.identity.clone().map(|identity| {
@@ -1908,7 +2114,18 @@ async fn run_due_panes_with_hook(
                             .unwrap_or(&state.session_cwd)
                             .clone()
                     });
-                (pane.pane_id, identity, project_cwd)
+                let has_discovered_session = discovered_session_ids.contains_key(&pane.pane_id);
+                let process_identity = discovery_snapshots
+                    .get(&pane.pane_id)
+                    .and_then(Option::as_ref)
+                    .and_then(|snapshot| snapshot.process_identity.clone());
+                (
+                    pane.pane_id,
+                    identity,
+                    project_cwd,
+                    has_discovered_session,
+                    process_identity,
+                )
             })
         })
         .collect();
@@ -1918,12 +2135,19 @@ async fn run_due_panes_with_hook(
             identity_check_reservation,
             move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
                 let mut stale = std::collections::HashSet::new();
-                for (pane_id, identity, project_cwd) in identity_checks {
+                for (pane_id, identity, project_cwd, has_discovered_session, process_identity) in
+                    identity_checks
+                {
                     if context.stop_requested() {
                         return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
                     }
                     if !crate::agent_identity_guard::matches_current_agent_identity(&identity)
                         || !ilium_platform::process_control::is_running(identity.pid)
+                        || (has_discovered_session
+                            && process_identity.as_ref().is_some_and(|proof| {
+                                !ilium_platform::process_control::captured_process_is_current(proof)
+                                    .unwrap_or(false)
+                            }))
                         || project_cwd.as_deref().is_some_and(|project_cwd| {
                             !crate::session_id::current_process_project_matches(
                                 identity.pid,
@@ -2066,6 +2290,22 @@ async fn run_due_panes_with_hook(
                     .is_none_or(|owner| owner == pane_id)
         });
 
+        // An unavailable oldest batch must not monopolize the next batch.
+        // Retrying an observation changes scheduling only, never freshness.
+        for (pane_id, request_generation, agent_generation) in &attempted_panes {
+            if classifications.iter().any(|pane| pane.pane_id == *pane_id) {
+                continue;
+            }
+            if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(pane_id) {
+                if runtime.detection_schedule.request_generation == *request_generation
+                    && runtime.agent_generation == *agent_generation
+                {
+                    runtime.detection_schedule.next_due =
+                        unavailable_observation_retry(Instant::now());
+                }
+            }
+        }
+
         for classified_pane in classifications.iter().cloned() {
             let pane_id = classified_pane.pane_id;
             let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
@@ -2089,6 +2329,16 @@ async fn run_due_panes_with_hook(
                 || runtime.session_process_started_at_unix_seconds
                     != classified_pane.session_process_started_at_unix_seconds
                 || runtime.session_agent_class != classified_pane.session_agent_class
+                || runtime.session_process_identity_inode
+                    != classified_pane.session_process_identity_inode
+                || match (
+                    &runtime.session_process_identity,
+                    &classified_pane.session_process_identity,
+                ) {
+                    (Some(current), Some(captured)) => !Arc::ptr_eq(current, captured),
+                    (None, None) => false,
+                    _ => true,
+                }
                 || runtime.pending_generated_session_id
                     != classified_pane.pending_generated_session_id
                 || (classified_pane.needs_session_discovery
@@ -2115,6 +2365,10 @@ async fn run_due_panes_with_hook(
                 runtime.cancel_agent_owned_delivery();
                 runtime.detection_schedule.next_due = runtime.detection_schedule.next_due.min(now);
                 continue;
+            }
+
+            if classified_pane.claude_session_recheck {
+                runtime.next_claude_session_recheck = now + Duration::from_secs(3);
             }
 
             runtime.agent_launcher_ancestors = classified_pane.agent_launcher_ancestors.clone();
@@ -2335,6 +2589,8 @@ async fn run_due_panes_with_hook(
             } else {
                 polled_interval
             };
+            runtime.detection_schedule.wake_on_output =
+                wakes_on_output(&new_status, runtime.detection_schedule.client_focused);
             runtime.detection_schedule.next_due =
                 if screen_changed_after_snapshot || runtime.pending_idle_confirmation {
                     // Bounded catch-up, not a flat 1s reschedule: a pane whose
@@ -2428,7 +2684,8 @@ async fn run_due_panes_with_hook(
                 && runtime.session_agent_class != detected_agent_class;
             let owning_process_changed_without_reverification = runtime.session_id.is_some()
                 && classified_pane.identity.as_ref().is_some_and(|identity| {
-                    Some(identity.pid) != runtime.session_process_id
+                    classified_pane.session_identity_changed
+                        || Some(identity.pid) != runtime.session_process_id
                         || Some(identity.started_at_unix_seconds)
                             != runtime.session_process_started_at_unix_seconds
                 })
@@ -2459,6 +2716,8 @@ async fn run_due_panes_with_hook(
                 }
                 runtime.session_id = None;
                 runtime.session_transcript_path = None;
+                runtime.session_process_identity_inode = None;
+                runtime.session_process_identity = None;
                 session_was_cleared = true;
                 runtime.title_generation = runtime.title_generation.saturating_add(1);
                 runtime.session_agent_class = None;
@@ -2476,12 +2735,21 @@ async fn run_due_panes_with_hook(
 
             let mut newly_resolved_session = None;
             if let Some(discovered) = discovered_session_ids.get(&pane_id) {
+                let process_identity = discovery_snapshots
+                    .get(&pane_id)
+                    .and_then(Option::as_ref)
+                    .and_then(|snapshot| snapshot.process_identity.clone());
+                let process_identity_inode = process_identity
+                    .as_ref()
+                    .and_then(|identity| identity.pidfs_inode());
                 let session_id = &discovered.session_id;
                 if runtime.session_id.as_ref() != Some(session_id) {
                     let invalidated_session_id = runtime.invalidated_session_id.clone();
                     let correlation_id = runtime.pending_session_transition_correlation_id.take();
                     runtime.session_id = Some(session_id.clone());
                     runtime.session_transcript_path = discovered.transcript_path.clone();
+                    runtime.session_process_identity_inode = process_identity_inode;
+                    runtime.session_process_identity = process_identity.clone();
                     runtime.session_agent_class = detected_agent_class.clone();
                     runtime.session_process_id = classified_pane
                         .identity
@@ -2501,14 +2769,18 @@ async fn run_due_panes_with_hook(
                         pane_id,
                         session_id: session_id.clone(),
                         process_id: runtime.session_process_id,
+                        process_identity_inode: runtime.session_process_identity_inode,
                         title_generation: runtime.title_generation,
                         transcript_path: runtime.session_transcript_path.clone(),
                     });
                 } else {
                     let previous_process_id = runtime.session_process_id;
                     let previous_process_start = runtime.session_process_started_at_unix_seconds;
+                    let previous_process_identity_inode = runtime.session_process_identity_inode;
                     let previous_transcript_path = runtime.session_transcript_path.clone();
                     runtime.session_transcript_path = discovered.transcript_path.clone();
+                    runtime.session_process_identity_inode = process_identity_inode;
+                    runtime.session_process_identity = process_identity;
                     runtime.session_agent_class = detected_agent_class;
                     runtime.session_process_id = classified_pane
                         .identity
@@ -2518,9 +2790,14 @@ async fn run_due_panes_with_hook(
                         .identity
                         .as_ref()
                         .map(|identity| identity.started_at_unix_seconds);
+                    if classified_pane.session_identity_changed {
+                        runtime.title_generation = runtime.title_generation.saturating_add(1);
+                    }
                     if runtime.session_process_id != previous_process_id
                         || runtime.session_process_started_at_unix_seconds != previous_process_start
+                        || runtime.session_process_identity_inode != previous_process_identity_inode
                         || runtime.session_transcript_path != previous_transcript_path
+                        || classified_pane.session_identity_changed
                         || process_was_replaced
                     {
                         state.request_snapshot_save();
@@ -2528,6 +2805,7 @@ async fn run_due_panes_with_hook(
                             pane_id,
                             session_id: session_id.clone(),
                             process_id: runtime.session_process_id,
+                            process_identity_inode: runtime.session_process_identity_inode,
                             title_generation: runtime.title_generation,
                             transcript_path: runtime.session_transcript_path.clone(),
                         });
@@ -2789,6 +3067,10 @@ async fn run_due_panes_with_hook(
             }
 
             let detection_evidence = pane_detection_evidence(DetectionEvidenceInputs {
+                observed_at_unix_millis: classified_pane.observed_at_unix_millis,
+                stale_after_millis: detection_stale_after_millis(
+                    runtime.detection_schedule.current_interval,
+                ),
                 identity: classified_pane.identity.as_ref(),
                 shell_pid: classified_pane.shell_pid,
                 raw_status: &raw_status,
@@ -2836,6 +3118,14 @@ async fn run_due_panes_with_hook(
                 // other pane's status update this tick.
                 tracing::error!("detection loop: pane {pane_id:?} status update rejected: {error}");
                 continue;
+            }
+            if previous_status
+                .as_ref()
+                .and_then(PaneStatus::agent_state)
+                .map(|agent| agent.turn)
+                != new_status.agent_state().map(|agent| agent.turn)
+            {
+                runtime.invalidate_detection_completion();
             }
             runtime.detection_evidence = Some(detection_evidence.clone());
             match tree.record_node_activity(pane_id) {
@@ -2950,10 +3240,26 @@ async fn run_due_panes_with_hook(
         });
     }
 
-    crate::ipc::handlers::reconcile_empty_agent_titles(state, &pending_empty_title_checks).await;
-
-    for pane_id in completed_pane_ids {
-        crate::prompt_queue::deliver_next_after_completion(state, pane_id).await;
+    // Slow general-bank title reads and durable prompt writes must never
+    // serialize the next background observation. Each pane owns one bounded,
+    // coalescing actor, cancelled with its agent/runtime ownership.
+    {
+        let mut panes = state.panes.write().await;
+        let effect_panes: std::collections::HashSet<_> = pending_empty_title_checks
+            .iter()
+            .chain(completed_pane_ids.iter())
+            .copied()
+            .collect();
+        for pane_id in effect_panes {
+            if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+                runtime.request_detection_effects(
+                    state,
+                    pane_id,
+                    pending_empty_title_checks.contains(&pane_id),
+                    completed_pane_ids.contains(&pane_id),
+                );
+            }
+        }
     }
 
     for pending in pending_notifications {
@@ -3027,6 +3333,8 @@ fn explain_identity_decision(
 }
 
 struct DetectionEvidenceInputs<'a> {
+    observed_at_unix_millis: u64,
+    stale_after_millis: u64,
     identity: Option<&'a ilium_detect::AgentIdentity>,
     shell_pid: Option<u32>,
     raw_status: &'a PaneStatus,
@@ -3114,6 +3422,8 @@ fn pane_detection_evidence(input: DetectionEvidenceInputs<'_>) -> PaneDetectionE
         _ => None,
     };
     PaneDetectionEvidence {
+        observed_at_unix_millis: input.observed_at_unix_millis,
+        stale_after_millis: input.stale_after_millis,
         applied_status: input.applied_status.clone(),
         identity,
         activity,
@@ -3326,6 +3636,18 @@ fn sentence_case(value: &str) -> String {
     first.to_uppercase().chain(characters).collect()
 }
 
+fn claude_session_record_requires_rediscovery(bound: Option<&str>, current: Option<&str>) -> bool {
+    current.is_some_and(|session_id| Some(session_id) != bound)
+}
+
+fn cached_session_owner_changed(
+    previous: Option<u64>,
+    current: Option<u64>,
+    retained_is_current: Option<bool>,
+) -> bool {
+    previous.is_some_and(|previous| current != Some(previous) || retained_is_current != Some(true))
+}
+
 /// Returns whether existing transcript ownership remains conclusive enough
 /// to avoid repeated command/cwd refreshes and `/proc/<pid>/fd` scans.
 fn session_owner_is_stable(
@@ -3441,6 +3763,54 @@ pub fn force_check(schedule: &mut crate::pane::DetectionSchedule, now: Instant) 
     let previous_deadline = schedule.next_due;
     schedule.next_due = schedule.next_due.min(requested_deadline);
     schedule.next_due < previous_deadline
+}
+
+/// Pulls a slow-tier agent pane's next check forward after PTY output.
+///
+/// An agent can start a turn by itself (goal continuation, queued or scheduled
+/// prompt, background-task notification, loop), so no keystroke reaches the
+/// server to call [`force_check`]. Without this, such a pane is only seen at
+/// its next idle tick (45 s by default) and a short turn can be missed whole.
+/// Unlike `force_check` this does not advance `request_generation`: output is
+/// not a user request, and an in-flight pass is as fresh as the output it saw.
+/// Returns true when the deadline moved earlier, so the caller must notify the
+/// detection loop.
+pub fn wake_for_output(schedule: &mut crate::pane::DetectionSchedule, now: Instant) -> bool {
+    if !schedule.wake_on_output {
+        return false;
+    }
+    let requested_deadline = match schedule.last_output_wake {
+        Some(last_wake) if now.saturating_duration_since(last_wake) < OUTPUT_WAKE_MIN_SPACING => {
+            last_wake + OUTPUT_WAKE_MIN_SPACING
+        }
+        Some(_) | None => {
+            schedule.last_output_wake = Some(now);
+            now + OUTPUT_WAKE_DELAY
+        }
+    };
+    let previous_deadline = schedule.next_due;
+    schedule.next_due = schedule.next_due.min(requested_deadline);
+    schedule.next_due < previous_deadline
+}
+
+/// True when the status is an agent in an active turn (or waiting on one),
+/// which polls at the working tier instead of the idle tier.
+fn is_active_agent_turn(status: &PaneStatus) -> bool {
+    status.agent_state().is_some_and(|agent| {
+        matches!(
+            agent.turn,
+            AgentTurn::Working
+                | AgentTurn::WaitingSubagents
+                | AgentTurn::Settling
+                | AgentTurn::WaitingApproval
+        )
+    })
+}
+
+/// Whether output should wake this pane early: an agent that is between turns
+/// and not focused (a focused pane already polls every second).
+fn wakes_on_output(status: &PaneStatus, client_focused: bool) -> bool {
+    !client_focused && status.agent_state().is_some() && !is_active_agent_turn(status)
 }
 
 /// One pure identity/screen reduction result. Goal ownership stays separate
@@ -3714,9 +4084,33 @@ fn is_awaiting_launched_agent(
     launched_at: Instant,
     now: Instant,
 ) -> bool {
-    matches!(origin, crate::pane::TerminalOrigin::Command(_))
-        && matches!(status, PaneStatus::PlainShell)
+    matches!(
+        origin,
+        crate::pane::TerminalOrigin::Command(_)
+            | crate::pane::TerminalOrigin::CustomAgent { frozen: false, .. }
+    ) && matches!(status, PaneStatus::PlainShell)
         && now.saturating_duration_since(launched_at) < LAUNCH_FAST_POLL_WINDOW
+}
+
+fn unavailable_observation_retry(now: Instant) -> Instant {
+    now + FOCUSED_POLL_INTERVAL
+}
+
+fn observation_unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+/// Allow three scheduled checks, with a floor for a briefly busy server.
+fn detection_stale_after_millis(interval: Duration) -> u64 {
+    interval
+        .saturating_mul(3)
+        .max(Duration::from_secs(30))
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
 }
 
 /// Takes `&DetectionConfig` rather than `&ServerState` -- this is a pure
@@ -3732,13 +4126,12 @@ fn interval_for(
     if client_focused {
         return FOCUSED_POLL_INTERVAL;
     }
-    if status.agent_state().is_some_and(|agent| {
-        matches!(
-            agent.turn,
-            AgentTurn::Working | AgentTurn::WaitingSubagents | AgentTurn::Settling
-        ) || agent.turn == AgentTurn::WaitingApproval
-    }) {
+    if is_active_agent_turn(status) {
         detection_config.working_poll_interval
+    } else if status.agent_state().is_some() {
+        detection_config
+            .idle_poll_interval
+            .min(AGENT_IDLE_POLL_CEILING)
     } else {
         detection_config.idle_poll_interval
     }
@@ -3750,11 +4143,30 @@ mod tests {
     use crate::config::DetectionConfig;
     use ilium_core::{AgentActivity, AgentClass};
 
+    #[test]
+    fn cached_session_birth_change_requires_rediscovery() {
+        assert!(!cached_session_owner_changed(None, None, None));
+        assert!(!cached_session_owner_changed(None, Some(10), None));
+        assert!(!cached_session_owner_changed(
+            Some(10),
+            Some(10),
+            Some(true)
+        ));
+        assert!(cached_session_owner_changed(Some(10), Some(11), Some(true)));
+        assert!(cached_session_owner_changed(Some(10), None, Some(true)));
+        assert!(cached_session_owner_changed(
+            Some(10),
+            Some(10),
+            Some(false)
+        ));
+        assert!(cached_session_owner_changed(Some(10), Some(10), None));
+    }
+
     #[tokio::test]
     async fn shell_ownership_observation_uses_the_admitted_io_worker() {
         let execution = crate::execution::ServerExecution::start().expect("execution bank");
         let result = execution
-            .client
+            .detection
             .run(
                 Lane::Io,
                 JobCost {
@@ -3849,7 +4261,7 @@ mod tests {
 
         let owner = state.execution.get().expect("owner");
         let retention = owner
-            .client
+            .detection
             .foundation
             .try_reserve(
                 Lane::Io,
@@ -3969,7 +4381,7 @@ mod tests {
             .insert(pane_id, PaneResource::Terminal(Box::new(spawn())));
         let owner = state.execution.get().expect("owner");
         let retention = owner
-            .client
+            .detection
             .foundation
             .try_reserve(
                 Lane::Io,
@@ -4101,7 +4513,7 @@ mod tests {
             .insert(pane_id, PaneResource::Terminal(Box::new(runtime)));
         let owner = state.execution.get().expect("owner");
         let retention = owner
-            .client
+            .detection
             .foundation
             .try_reserve(
                 Lane::Io,
@@ -4161,6 +4573,22 @@ mod tests {
             Some(Duration::ZERO)
         );
         assert_eq!(minimum_detection_delay(std::iter::empty(), now), None);
+    }
+
+    #[test]
+    fn claude_session_record_rechecks_only_a_verified_different_session() {
+        assert!(!claude_session_record_requires_rediscovery(
+            Some("old"),
+            None
+        ));
+        assert!(!claude_session_record_requires_rediscovery(
+            Some("old"),
+            Some("old")
+        ));
+        assert!(claude_session_record_requires_rediscovery(
+            Some("old"),
+            Some("new")
+        ));
     }
 
     #[test]
@@ -4461,18 +4889,14 @@ mod tests {
     }
 
     #[test]
-    fn idle_done_and_plain_shell_poll_on_the_slow_tier() {
+    fn idle_agents_poll_faster_than_plain_shells() {
         let config = config();
         let idle = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None);
         let done = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Done, None);
-        assert_eq!(
-            interval_for(&idle, false, &config),
-            config.idle_poll_interval
-        );
-        assert_eq!(
-            interval_for(&done, false, &config),
-            config.idle_poll_interval
-        );
+        let agent_interval = config.idle_poll_interval.min(AGENT_IDLE_POLL_CEILING);
+        assert!(agent_interval < config.idle_poll_interval);
+        assert_eq!(interval_for(&idle, false, &config), agent_interval);
+        assert_eq!(interval_for(&done, false, &config), agent_interval);
         assert_eq!(
             interval_for(&PaneStatus::PlainShell, false, &config),
             config.idle_poll_interval
@@ -4493,6 +4917,72 @@ mod tests {
         );
     }
 
+    fn output_wake_schedule(wake_on_output: bool) -> crate::pane::DetectionSchedule {
+        crate::pane::DetectionSchedule {
+            next_due: Instant::now() + Duration::from_secs(45),
+            launched_at: Instant::now(),
+            current_interval: Duration::from_secs(45),
+            client_focused: false,
+            last_forced: None,
+            request_generation: 7,
+            wake_on_output,
+            last_output_wake: None,
+            identity_system_generation: None,
+            cached_identity: None,
+            cached_screen_classification: None,
+        }
+    }
+
+    /// Output on an idle-tier agent pane pulls its check to one second out,
+    /// repeated output inside the spacing window coalesces at that window's
+    /// end, and no wake ever invalidates an in-flight pass.
+    #[test]
+    fn output_wake_is_delayed_spaced_and_keeps_generation() {
+        let mut schedule = output_wake_schedule(true);
+        let t0 = Instant::now();
+        assert!(wake_for_output(&mut schedule, t0));
+        assert_eq!(schedule.next_due, t0 + OUTPUT_WAKE_DELAY);
+
+        // The check ran and rescheduled far out; chatter inside the window
+        // may only move it to the window boundary.
+        schedule.next_due = t0 + Duration::from_secs(45);
+        assert!(wake_for_output(&mut schedule, t0 + Duration::from_secs(2)));
+        assert_eq!(schedule.next_due, t0 + OUTPUT_WAKE_MIN_SPACING);
+
+        // After the window a new wake takes effect again.
+        schedule.next_due = t0 + Duration::from_secs(45);
+        let t1 = t0 + OUTPUT_WAKE_MIN_SPACING;
+        assert!(wake_for_output(&mut schedule, t1));
+        assert_eq!(schedule.next_due, t1 + OUTPUT_WAKE_DELAY);
+
+        // An earlier deadline is never pushed back.
+        assert!(!wake_for_output(&mut schedule, t1 + Duration::from_secs(1)));
+        assert_eq!(schedule.request_generation, 7);
+    }
+
+    #[test]
+    fn output_wake_ignores_panes_outside_the_slow_agent_tier() {
+        let mut schedule = output_wake_schedule(false);
+        let deadline = schedule.next_due;
+        assert!(!wake_for_output(&mut schedule, Instant::now()));
+        assert_eq!(schedule.next_due, deadline);
+        assert!(schedule.last_output_wake.is_none());
+    }
+
+    /// Only an agent between turns that nobody is looking at wakes on output.
+    #[test]
+    fn only_idle_unfocused_agents_wake_on_output() {
+        let idle = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None);
+        let working = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None);
+        assert!(wakes_on_output(&idle, false));
+        assert!(!wakes_on_output(&idle, true), "focused panes poll at 1s");
+        assert!(
+            !wakes_on_output(&working, false),
+            "working tier already polls"
+        );
+        assert!(!wakes_on_output(&PaneStatus::PlainShell, false));
+    }
+
     /// `force_check` pulls `next_due` to `now` on first call. A second call
     /// within `FORCE_CHECK_DEBOUNCE` coalesces at the existing window boundary
     /// while still advancing the generation that invalidates an in-flight pass.
@@ -4505,6 +4995,8 @@ mod tests {
             client_focused: false,
             last_forced: None,
             request_generation: 0,
+            wake_on_output: false,
+            last_output_wake: None,
             identity_system_generation: None,
             cached_identity: None,
             cached_screen_classification: None,
@@ -4795,6 +5287,44 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_oldest_batch_yields_to_healthy_panes_without_freshness() {
+        let now = Instant::now();
+        let mut deadlines: Vec<_> = (0..MAX_DUE_PANES + 1)
+            .map(|index| {
+                (
+                    now - Duration::from_secs((MAX_DUE_PANES + 1 - index) as u64),
+                    NodeId(index as u64),
+                )
+            })
+            .collect();
+        let unavailable = select_due_pane_ids(deadlines.iter().copied(), now, MAX_DUE_PANES);
+        assert_eq!(unavailable.len(), MAX_DUE_PANES);
+        for (deadline, pane_id) in &mut deadlines {
+            if unavailable.contains(pane_id) {
+                *deadline = unavailable_observation_retry(now);
+            }
+        }
+        assert_eq!(
+            select_due_pane_ids(deadlines.into_iter(), now, MAX_DUE_PANES),
+            vec![NodeId(MAX_DUE_PANES as u64)]
+        );
+    }
+
+    #[test]
+    fn freshness_threshold_tracks_poll_interval_with_busy_server_floor() {
+        assert_eq!(detection_stale_after_millis(Duration::from_secs(1)), 30_000);
+        assert_eq!(
+            detection_stale_after_millis(Duration::from_secs(10)),
+            30_000
+        );
+        assert_eq!(
+            detection_stale_after_millis(Duration::from_secs(45)),
+            135_000
+        );
+        assert_eq!(detection_stale_after_millis(Duration::MAX), u64::MAX);
+    }
+
+    #[test]
     fn failed_ticks_back_off_exponentially_up_to_a_ceiling() {
         assert_eq!(tick_failure_backoff(1), TICK_FAILURE_BACKOFF_INITIAL);
         assert_eq!(tick_failure_backoff(2), TICK_FAILURE_BACKOFF_INITIAL * 2);
@@ -4804,13 +5334,13 @@ mod tests {
     }
 
     #[test]
-    fn discovery_and_evidence_reservations_fit_the_shared_result_budget() {
-        // Both are held at once during a tick; the rest of the server shares
-        // the same foundation budget, so they must leave real headroom.
+    fn discovery_and_evidence_reservations_fit_the_detection_result_budget() {
+        // Evidence, discovery and staged transcript reads overlap; leave
+        // sixteen MiB for staged results within the reserved detector bank.
         const {
             assert!(
                 EVIDENCE_RESULT_BYTES + DISCOVERY_RESULT_BYTES
-                    <= crate::execution::GENERAL_RESULT_BYTES * 3 / 4
+                    <= crate::execution::DETECTION_RESULT_BYTES - 16 * 1024 * 1024
             );
         }
     }

@@ -277,7 +277,7 @@ version_owned() {
         [ "$(hash_file "$owned_directory/bin/$member")" = "$expected" ] || return 1
         case "$member" in
             ilium|ilium-server|ilium-animation-helper) [ -x "$owned_directory/bin/$member" ] || return 1 ;;
-            beach-1.0.0.iliumanim) [ "$expected" = 15c81ff5a9aa329aa4451c5e19405be4f6957a8f617ce4bff94b02be5b39612f ] || return 1 ;;
+            beach-1.0.0.iliumanim) [ "$expected" = a744b574dae0f55505c86ec2c2d77555b0c11e1800b0b306273112d8ae1b06a2 ] || return 1 ;;
             carpet-1.0.0.iliumanim) [ "$expected" = 5ef31ca8cee61fd7f0c077128419f81dbea59ef516813453532a98e976d8daf9 ] || return 1 ;;
         esac
     done < "$receipt"
@@ -414,7 +414,7 @@ mkdir "$work/extract" || fail "Cannot create private extraction directory"
 (cd "$work/extract" && tar -xf ../archive.tar) 2> "$work/archive-error" || fail "Archive extraction failed"
 candidate=$work/extract/$prefix
 for member in ilium ilium-server ilium-animation-helper; do [ -f "$candidate/$member" ] && [ ! -L "$candidate/$member" ] && [ -x "$candidate/$member" ] || fail "Extracted executable payload is incomplete"; done
-[ "$(hash_file "$candidate/beach-1.0.0.iliumanim")" = 15c81ff5a9aa329aa4451c5e19405be4f6957a8f617ce4bff94b02be5b39612f ] || fail "Official beach animation differs from compiled release identity"
+[ "$(hash_file "$candidate/beach-1.0.0.iliumanim")" = a744b574dae0f55505c86ec2c2d77555b0c11e1800b0b306273112d8ae1b06a2 ] || fail "Official beach animation differs from compiled release identity"
 [ "$(hash_file "$candidate/carpet-1.0.0.iliumanim")" = 5ef31ca8cee61fd7f0c077128419f81dbea59ef516813453532a98e976d8daf9 ] || fail "Official carpet animation differs from compiled release identity"
 printf '%s\n' "$version" > "$work/expected-version"
 cmp -s "$candidate/VERSION" "$work/expected-version" || fail "Archive VERSION differs from requested release"

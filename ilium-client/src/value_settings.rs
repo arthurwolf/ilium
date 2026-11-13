@@ -1,7 +1,7 @@
 //! Numeric settings binding. Rendering never owns persistence or runtime effects.
 use crate::app::{
-    AgentMonitoringRow, App, AppearanceRow, EditorRow, KanbanBoardRow, Mode, SettingsTab,
-    TerminalRow,
+    AgentMonitoringRow, App, AppearanceRow, AttentionRow, EditorRow, KanbanBoardRow, Mode,
+    SettingsTab, TerminalRow,
 };
 use crate::value_config::{self, BoardNumber, PanelNumber, ScalarNumber};
 use crate::value_number::{NumberSpec, NumberValue};
@@ -21,6 +21,9 @@ pub enum SettingsNumber {
     InferenceTokenBudget,
     WorkingPollSeconds,
     IdlePollSeconds,
+    AttentionTurboConcurrency,
+    AttentionExpirySeconds,
+    PaddingThreshold,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +42,23 @@ impl UiNumber {
             Self::CompletedProgressHideAfter => ScalarNumber::CompletedProgressHideAfter,
         }
     }
+}
+
+// Numeric bindings project either live runtime values or a read-only persisted
+// snapshot. Reading a dialog value never applies a whole configuration to App.
+struct NumberSettingsValues<'a> {
+    remote_compaction: &'a crate::remote_compaction_settings::RemoteCompactionSettings,
+    padding: &'a crate::padding::PaddingSettings,
+    inference: &'a ilium_inference::InferenceSettings,
+    voice: &'a crate::config::VoiceSettings,
+    notification: &'a ilium_sound::NotificationSettings,
+    ui: &'a crate::config::UiSettings,
+    terminal: &'a crate::config::TerminalSettings,
+    editor: &'a crate::config::EditorSettings,
+    kanban_board: &'a crate::config::KanbanBoardSettings,
+    api: &'a crate::config::ApiSettings,
+    attention: &'a crate::attention::AttentionSettings,
+    detection: Option<&'a ilium_ipc::AgentDetectionSettings>,
 }
 
 impl SettingsNumber {
@@ -138,7 +158,15 @@ impl SettingsNumber {
                 }
                 None => None,
             },
+            SettingsTab::Attention => match AttentionRow::ALL.get(row) {
+                Some(AttentionRow::TurboConcurrency) => Some(Self::AttentionTurboConcurrency),
+                Some(AttentionRow::ExpirySeconds) => Some(Self::AttentionExpirySeconds),
+                _ => None,
+            },
             SettingsTab::Api if row == 0 => Some(Self::ApiPort),
+            SettingsTab::Padding if row == crate::padding_ui::ROW_THRESHOLD => {
+                Some(Self::PaddingThreshold)
+            }
             _ => None,
         }
     }
@@ -167,14 +195,52 @@ impl SettingsNumber {
             Self::Board(BoardNumber::CardPreviewLines) => "Card preview lines",
             Self::Board(BoardNumber::MinimumColumnWidth) => "Minimum column width",
             Self::ApiPort => "HTTP API port",
+            Self::AttentionTurboConcurrency => "Turbo parallel calls",
+            Self::AttentionExpirySeconds => "Forget stale items after",
+            Self::PaddingThreshold => "Terminal columns",
         }
     }
 
     pub fn snapshot(self, app: &App) -> (NumberSpec, String) {
+        self.snapshot_values(NumberSettingsValues {
+            remote_compaction: &app.remote_compaction_settings,
+            padding: &app.padding_settings,
+            inference: &app.inference_settings,
+            voice: &app.voice_settings,
+            notification: &app.notification_settings,
+            ui: &app.ui_settings,
+            terminal: &app.terminal_settings,
+            editor: &app.editor_settings,
+            kanban_board: &app.kanban_board_settings,
+            api: &app.api_settings,
+            attention: &app.attention_settings,
+            detection: app.agent_detection_settings.as_ref(),
+        })
+    }
+
+    pub(crate) fn persisted_snapshot(self, config: &crate::config::ClientConfig) -> String {
+        self.snapshot_values(NumberSettingsValues {
+            remote_compaction: &config.remote_compaction,
+            padding: &config.padding,
+            inference: &config.inference,
+            voice: &config.voice,
+            notification: &config.notifications,
+            ui: &config.ui,
+            terminal: &config.terminal,
+            editor: &config.editor,
+            kanban_board: &config.kanban_board,
+            api: &config.api,
+            attention: &config.attention,
+            detection: None,
+        })
+        .1
+    }
+
+    fn snapshot_values(self, values: NumberSettingsValues<'_>) -> (NumberSpec, String) {
         match self {
             Self::Remote(row) => {
                 use crate::remote_compaction_settings::*;
-                let settings = &app.remote_compaction_settings;
+                let settings = values.remote_compaction;
                 let (minimum, maximum, value) = match row {
                     RemoteCompactionRow::Threshold => (
                         THRESHOLD_PERCENT_RANGE.0 as i128,
@@ -221,71 +287,76 @@ impl SettingsNumber {
                 (NumberSpec::Integer { minimum, maximum }, value.to_string())
             }
 
+            Self::PaddingThreshold => (
+                NumberSpec::Integer {
+                    minimum: i128::from(crate::padding::MIN_WIDTH_THRESHOLD),
+                    maximum: i128::from(crate::padding::MAX_WIDTH_THRESHOLD),
+                },
+                values.padding.width_threshold.to_string(),
+            ),
+
             Self::WorkingPollSeconds => (
                 ScalarNumber::WorkingPollSeconds.spec(),
-                app.agent_detection_settings
-                    .as_ref()
+                values
+                    .detection
                     .map_or(0, |settings| settings.working_poll_seconds)
                     .to_string(),
             ),
             Self::IdlePollSeconds => (
                 ScalarNumber::IdlePollSeconds.spec(),
-                app.agent_detection_settings
-                    .as_ref()
+                values
+                    .detection
                     .map_or(0, |settings| settings.idle_poll_seconds)
                     .to_string(),
             ),
             Self::InferenceTokenBudget => (
                 ScalarNumber::InferenceTokenBudget.spec(),
-                app.inference_settings
-                    .restructure_prompt_token_limit
-                    .to_string(),
+                values.inference.restructure_prompt_token_limit.to_string(),
             ),
             Self::VoiceVolume => (
                 ScalarNumber::VoiceVolume.spec(),
-                app.voice_settings.output_volume_percent.to_string(),
+                values.voice.output_volume_percent.to_string(),
             ),
             Self::NotificationCoalesce => (
                 ScalarNumber::NotificationCoalesce.spec(),
-                app.notification_settings.task_coalesce_seconds.to_string(),
+                values.notification.task_coalesce_seconds.to_string(),
             ),
             Self::Panel(field) => (
-                field.spec(&app.ui_settings.left_panel_sizing),
-                field.value(&app.ui_settings.left_panel_sizing).to_string(),
+                field.spec(&values.ui.left_panel_sizing),
+                field.value(&values.ui.left_panel_sizing).to_string(),
             ),
             Self::Ui(field) => (
                 field.scalar().spec(),
                 match field {
-                    UiNumber::AutoFreezeAfter => {
-                        app.ui_settings.auto_freeze_after_seconds.to_string()
+                    UiNumber::AutoFreezeAfter => values.ui.auto_freeze_after_seconds.to_string(),
+                    UiNumber::LastPromptLines => values.ui.last_prompt_max_lines.to_string(),
+                    UiNumber::ProgressLines => values.ui.progress_max_lines.to_string(),
+                    UiNumber::CompletedProgressHideAfter => {
+                        values.ui.completed_progress_hide_after_seconds.to_string()
                     }
-                    UiNumber::LastPromptLines => app.ui_settings.last_prompt_max_lines.to_string(),
-                    UiNumber::ProgressLines => app.ui_settings.progress_max_lines.to_string(),
-                    UiNumber::CompletedProgressHideAfter => app
-                        .ui_settings
-                        .completed_progress_hide_after_seconds
-                        .to_string(),
                 },
             ),
             Self::TerminalScrollback => (
                 value_config::terminal_scrollback_spec(),
-                app.terminal_settings.scrollback_budget_mib.to_string(),
+                values.terminal.scrollback_budget_mib.to_string(),
             ),
             Self::TerminalEngineMemory => (
                 value_config::terminal_engine_memory_spec(),
-                app.terminal_settings.engine_memory_budget_mib.to_string(),
+                values.terminal.engine_memory_budget_mib.to_string(),
             ),
             Self::EditorAutosaveDelay => (
                 value_config::editor_autosave_spec(),
-                app.editor_settings.autosave_delay_ms.to_string(),
+                values.editor.autosave_delay_ms.to_string(),
             ),
-            Self::Board(field) => (
-                field.spec(),
-                field.value(&app.kanban_board_settings).to_string(),
+            Self::Board(field) => (field.spec(), field.value(values.kanban_board).to_string()),
+            Self::ApiPort => (ScalarNumber::ApiPort.spec(), values.api.port.to_string()),
+            Self::AttentionTurboConcurrency => (
+                ScalarNumber::AttentionTurboConcurrency.spec(),
+                values.attention.turbo_concurrency.to_string(),
             ),
-            Self::ApiPort => (
-                ScalarNumber::ApiPort.spec(),
-                app.api_settings.port.to_string(),
+            Self::AttentionExpirySeconds => (
+                ScalarNumber::AttentionExpirySeconds.spec(),
+                values.attention.expiry_seconds.to_string(),
             ),
         }
     }
@@ -336,6 +407,7 @@ impl SettingsNumber {
                 .to_string());
         }
         let step = match self {
+            Self::PaddingThreshold => 1,
             Self::VoiceVolume => 5,
             Self::NotificationCoalesce => {
                 i128::from(ilium_sound::NotificationSettings::TASK_COALESCE_STEP_SECONDS)
@@ -343,6 +415,7 @@ impl SettingsNumber {
             Self::TerminalScrollback => 4,
             Self::Ui(UiNumber::CompletedProgressHideAfter) => 30,
             Self::Ui(UiNumber::AutoFreezeAfter) => 15 * 60,
+            Self::AttentionExpirySeconds => 60,
             _ => 1,
         };
         match spec.stepped(spec.parse(&text)?, NumberValue::Integer(step), direction)? {
@@ -366,9 +439,151 @@ impl App {
                 crate::value_dialog_host::ValueDialogHost::settings_number(field, self, directory)
             });
         match result {
-            Ok(host) => self.push_modal(Mode::ValueDialog(Box::new(host))),
+            Ok(host) => self.begin_authoritative_number_dialog(host),
             Err(error) => self.status_message = Some(error),
         }
+    }
+
+    pub(crate) fn begin_authoritative_number_dialog(
+        &mut self,
+        mut host: crate::value_dialog_host::ValueDialogHost,
+    ) {
+        use crate::filesystem::{
+            configuration::NumberReadTarget, configurations::ConfigurationIntent,
+        };
+        use crate::value_dialog_host::ValueTarget;
+        let (directory, target) = match &host.target {
+            ValueTarget::SettingsNumber {
+                field, directory, ..
+            } => (directory.clone(), NumberReadTarget::Settings(*field)),
+            ValueTarget::Cost {
+                target, directory, ..
+            } => (directory.clone(), NumberReadTarget::Cost(target.clone())),
+            _ => return,
+        };
+        let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog else {
+            return;
+        };
+        let token = std::sync::Arc::new(());
+        let read = crate::value_dialog_host::NumericReadState {
+            token: token.clone(),
+            runtime_value: number.draft.buf.clone(),
+            accepted_writes: self.configuration_admission.accepted,
+            settled: Err("Loading saved value; wait for authoritative readback".into()),
+        };
+        number.draft = crate::text_prompt::TextPromptState::new("");
+        host.set_number_read(read);
+        let result = self
+            .configuration_files
+            .as_mut()
+            .ok_or_else(|| "Configuration reader unavailable".to_owned())
+            .and_then(|files| {
+                files.enqueue(
+                    directory,
+                    crate::filesystem::configuration::ConfigurationChange::NumberRead(target),
+                    ConfigurationIntent::NumberRead { token },
+                )
+            });
+        if let Err(error) = result {
+            if let Some(read) = host.number_read_mut() {
+                read.settled = Err(error);
+            }
+        }
+        if let Err(error) = host.number_read_ready() {
+            if let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog {
+                number.notice = Some(error);
+            }
+        }
+        self.push_modal(Mode::ValueDialog(Box::new(host)));
+    }
+
+    pub(crate) fn collect_settings_number_read(
+        &mut self,
+        token: &std::sync::Arc<()>,
+        completion: crate::filesystem::ordered::WriteCompletion<
+            crate::filesystem::configuration::ConfigurationWrite,
+        >,
+    ) {
+        use crate::filesystem::{configuration::ConfigurationSaved, ordered::WriteCompletion};
+        use ilium_execution::JobOutcome;
+        let mut result = Err("Saved value read did not complete; reopen this dialog".to_owned());
+        match completion {
+            WriteCompletion::Outcome { outcome, .. } => {
+                let _held = outcome.map(|outcome| {
+                    result = match outcome {
+                        JobOutcome::Finished(Ok(ConfigurationSaved::NumberRead(value))) => {
+                            Ok(value)
+                        }
+                        JobOutcome::Finished(Err(failure)) => Err(failure.message),
+                        _ => Err("Saved value read did not complete; reopen this dialog".into()),
+                    };
+                });
+            }
+            WriteCompletion::Rejected { rejection, .. } => {
+                result = Err(format!(
+                    "Saved value read refused: {:?}; reopen this dialog",
+                    rejection.reason
+                ));
+            }
+            WriteCompletion::Lost { .. } => {}
+        }
+        let Mode::ValueDialog(host) = &self.mode else {
+            return;
+        };
+        let Some(read) = host.number_read() else {
+            return;
+        };
+        if !std::sync::Arc::ptr_eq(&read.token, token) {
+            return;
+        }
+        // A later destination, selected field, inference revision or accepted
+        // runtime change cannot be overwritten by this older read.
+        let matches = match (&host.target, self.modal_stack.last()) {
+            (crate::value_dialog_host::ValueTarget::SettingsNumber { field, directory, inference_revision, .. }, Some(Mode::Settings(parent))) => {
+                self.config_dir.as_ref() == Some(directory)
+                    && field.snapshot(self).1 == read.runtime_value
+                    && inference_revision.is_none_or(|revision| revision == self.onboarding_revision)
+                    && SettingsNumber::at(self, parent.tab, parent.selected_row) == Some(*field)
+            }
+            (crate::value_dialog_host::ValueTarget::Cost { target, directory, .. }, Some(Mode::Settings(parent))) => {
+                self.config_dir.as_ref() == Some(directory)
+                    && parent.tab == SettingsTab::Cost
+                    && crate::cost_settings::CostRow::rows(&self.cost_settings).get(parent.selected_row) == Some(&target.row)
+                    && target.dialog(&self.cost_settings).is_ok_and(|dialog| matches!(dialog,
+                        crate::value_dialog::ValueDialogState::Number(number) if number.draft.buf == read.runtime_value))
+            }
+            _ => false,
+        };
+        if !matches || read.accepted_writes != self.configuration_admission.accepted {
+            result = Err("Setting changed during saved-value read; reopen this dialog".into());
+        }
+        let Mode::ValueDialog(mut host) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+            return;
+        };
+        if let Some(read) = host.number_read_mut() {
+            read.settled = result.as_ref().map(|_| ()).map_err(Clone::clone);
+        }
+        let mut edited = false;
+        if let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog {
+            match result {
+                Ok(value) => {
+                    // Keystrokes accepted while loading belong to the user.
+                    // Initial readback may initialize only an untouched draft.
+                    if !number.draft_edited && number.draft.buf.is_empty() {
+                        number.draft = crate::text_prompt::TextPromptState::new(value);
+                    }
+                    edited = number.draft_edited;
+                    number.notice = None;
+                }
+                Err(error) => number.notice = Some(error),
+            }
+        }
+        // Typing during the read is retained and starts the same debounce only
+        // after the authoritative gate opens. It cannot save before readback.
+        if edited {
+            self.queue_inference_number_autosave(&mut host, None, std::time::Instant::now());
+        }
+        self.mode = Mode::ValueDialog(host);
     }
 
     pub(crate) fn commit_settings_number_dialog(
@@ -385,10 +600,12 @@ impl App {
             directory,
             inference_revision,
             autosave,
+            ..
         } = &host.target
         else {
             return Err("This is not a numeric settings dialog".into());
         };
+        host.number_read_ready()?;
         if inference_revision.is_some_and(|revision| revision != self.onboarding_revision) {
             return Err("Inference settings changed; reopen this dialog".into());
         }
@@ -513,6 +730,7 @@ impl App {
                 directory,
                 inference_revision,
                 autosave: Some(autosave),
+                ..
             } = &mut host.target
             else {
                 return Err("Number dialog changed".to_owned());
@@ -558,12 +776,40 @@ impl App {
         }
         let result = (|| {
             let text = field.stepped(self, direction)?;
+            if field == SettingsNumber::PaddingThreshold && text == field.snapshot(self).1 {
+                return Ok(());
+            }
             let directory = self
                 .config_dir
                 .clone()
                 .ok_or_else(|| "The configuration directory is unavailable".to_owned())?;
             self.save_settings_number(field, &text, directory, None)
         })();
+        if let Err(error) = result {
+            self.status_message = Some(error);
+        }
+    }
+
+    pub(crate) fn step_padding_threshold_by(&mut self, delta: i32) {
+        let next = (i32::from(self.padding_settings.width_threshold) + delta).clamp(
+            i32::from(crate::padding::MIN_WIDTH_THRESHOLD),
+            i32::from(crate::padding::MAX_WIDTH_THRESHOLD),
+        );
+        if next as u16 == self.padding_settings.width_threshold {
+            return;
+        }
+        let result = self
+            .config_dir
+            .clone()
+            .ok_or_else(|| "The configuration directory is unavailable".to_owned())
+            .and_then(|directory| {
+                self.save_settings_number(
+                    SettingsNumber::PaddingThreshold,
+                    &next.to_string(),
+                    directory,
+                    None,
+                )
+            });
         if let Err(error) = result {
             self.status_message = Some(error);
         }
@@ -705,6 +951,30 @@ impl App {
                     .map_err(|_| "API port exceeds its storage range".to_owned())?;
                 ConfigurationChange::Api(settings)
             }
+            SettingsNumber::AttentionTurboConcurrency => {
+                let mut settings = self.attention_settings.clone();
+                settings.turbo_concurrency =
+                    u8::try_from(ScalarNumber::AttentionTurboConcurrency.parse(text)?)
+                        .map_err(|_| "Parallel call count exceeds storage range")?;
+                ConfigurationChange::Attention(settings)
+            }
+            SettingsNumber::AttentionExpirySeconds => {
+                let mut settings = self.attention_settings.clone();
+                settings.expiry_seconds =
+                    u32::try_from(ScalarNumber::AttentionExpirySeconds.parse(text)?)
+                        .map_err(|_| "Duration exceeds storage range")?;
+                ConfigurationChange::Attention(settings)
+            }
+            SettingsNumber::PaddingThreshold => {
+                let NumberValue::Integer(value) = field.snapshot(self).0.parse(text)? else {
+                    return Err("Enter a whole number of columns".into());
+                };
+                let mut settings = self.padding_settings;
+                settings.mode = crate::padding::PaddingMode::WidthDependent;
+                settings.width_threshold =
+                    u16::try_from(value).map_err(|_| "Terminal width exceeds storage range")?;
+                ConfigurationChange::Padding(settings)
+            }
         };
         let intent = match token {
             Some(token) => ConfigurationIntent::ValueDialog { token },
@@ -785,11 +1055,31 @@ impl App {
                 self.enqueue_configuration(directory, ConfigurationChange::Api(settings), intent)?;
                 self.api_settings = settings;
             }
+            ConfigurationChange::Attention(settings) => {
+                self.enqueue_configuration(
+                    directory,
+                    ConfigurationChange::Attention(settings.clone()),
+                    intent,
+                )?;
+                self.apply_attention_settings(settings);
+            }
+            ConfigurationChange::Padding(settings) => {
+                self.enqueue_configuration(
+                    directory,
+                    ConfigurationChange::Padding(settings),
+                    intent,
+                )?;
+                self.apply_padding_settings(settings);
+            }
             _ => return Err("Unsupported numeric settings destination".into()),
         }
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "value_settings_read_tests.rs"]
+mod read_tests;
 
 #[cfg(test)]
 mod tests {
@@ -890,12 +1180,13 @@ mod tests {
                     }
                 }
 
-                app.mode = Mode::Settings(SettingsState {
+                app.mode = Mode::Settings(Box::new(SettingsState {
                     tab,
                     selected_row: row,
                     ..SettingsState::default()
-                });
+                }));
                 app.begin_settings_number_dialog(field);
+                app.settle_filesystem_for_test();
                 let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                     panic!("{tab:?}/{row} must open its numeric dialog");
                 };
@@ -916,7 +1207,7 @@ mod tests {
             }
         }
 
-        assert_eq!(binding_count, 26, "all numeric settings rows must be bound");
+        assert_eq!(binding_count, 28, "all numeric settings rows must be bound");
     }
 
     #[test]
@@ -1092,18 +1383,74 @@ mod tests {
     }
 
     #[test]
+    fn universal_review_failed_numeric_save_cancel_reopens_last_accepted_value() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "[padding]\nwidth_threshold = 200\n").unwrap();
+        let mut app = App::new("numeric-cancel-reopen".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.mode = Mode::Settings(Box::new(SettingsState {
+            tab: SettingsTab::Padding,
+            selected_row: crate::padding_ui::ROW_THRESHOLD,
+            ..SettingsState::default()
+        }));
+        app.begin_settings_number_dialog(SettingsNumber::PaddingThreshold);
+        app.settle_filesystem_for_test();
+        std::fs::write(&path, "[padding\n").unwrap();
+        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("number editor")
+        };
+        app.finish_value_dialog(host, DialogOutcome::CommitNumber("153".into()));
+        app.settle_filesystem_for_test();
+        assert_eq!(
+            app.padding_settings.width_threshold, 153,
+            "admitted runtime preview remains optimistic"
+        );
+        std::fs::write(&path, "[padding]\nwidth_threshold = 207\n").unwrap();
+        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("failed write must keep draft")
+        };
+        app.finish_value_dialog(host, DialogOutcome::Cancel);
+        app.begin_settings_number_dialog(SettingsNumber::PaddingThreshold);
+        app.settle_filesystem_for_test();
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("reopened number editor")
+        };
+        let ValueDialogState::Number(number) = &host.dialog else {
+            panic!("number dialog")
+        };
+        assert_eq!(
+            number.draft.buf, "207",
+            "reopen must observe the actual saved field, including external changes"
+        );
+        assert_eq!(
+            app.padding_settings.width_threshold, 153,
+            "readback must not roll back runtime or unrelated pending fields"
+        );
+        assert_eq!(
+            crate::config::load(directory.path())
+                .unwrap()
+                .padding
+                .width_threshold,
+            207
+        );
+    }
+
+    #[test]
     fn direct_settings_number_preserves_exact_draft_after_failure_and_retries() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
-        std::fs::write(&path, "[editor\n").unwrap();
+        std::fs::write(&path, "[editor]\n").unwrap();
         let mut app = App::new("numeric-settings-test".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Editor,
             selected_row: 4,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_number_dialog(SettingsNumber::EditorAutosaveDelay);
+        app.settle_filesystem_for_test();
+        std::fs::write(&path, "[editor\n").unwrap();
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("numeric editor");
         };
@@ -1137,14 +1484,76 @@ mod tests {
     }
 
     #[test]
+    fn padding_threshold_dialog_preserves_draft_after_failure_and_retries_atomically() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "[padding]\n").unwrap();
+        let mut app = App::new("padding-number-test".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.mode = Mode::Settings(Box::new(SettingsState {
+            tab: SettingsTab::Padding,
+            selected_row: crate::padding_ui::ROW_THRESHOLD,
+            ..SettingsState::default()
+        }));
+        app.begin_settings_number_dialog(SettingsNumber::PaddingThreshold);
+        app.settle_filesystem_for_test();
+        std::fs::write(&path, "[padding\n").unwrap();
+        let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("padding number editor");
+        };
+        let ValueDialogState::Number(number) = &mut host.dialog else {
+            panic!("number dialog");
+        };
+        number.draft = crate::text_prompt::TextPromptState::new("0153");
+        app.finish_value_dialog(host, DialogOutcome::CommitNumber("0153".into()));
+        app.settle_filesystem_for_test();
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("failed write must keep the dialog open");
+        };
+        assert!(!host.is_saving());
+        let ValueDialogState::Number(number) = &host.dialog else {
+            panic!("number dialog");
+        };
+        assert_eq!(number.draft.buf, "0153");
+        assert!(number.error.is_some());
+        assert_eq!(
+            app.padding_settings.width_threshold, 153,
+            "the accepted write is applied locally even when durable storage later fails"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[padding\n");
+
+        std::fs::write(
+            &path,
+            "[api]\nport = 8873\n[padding]\nright_panels_shared = true\n",
+        )
+        .unwrap();
+        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("retry");
+        };
+        app.finish_value_dialog(host, DialogOutcome::CommitNumber("0153".into()));
+        app.settle_filesystem_for_test();
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        let config = crate::config::load(directory.path()).unwrap();
+        assert_eq!(config.padding.width_threshold, 153);
+        assert_eq!(
+            config.padding.mode,
+            crate::padding::PaddingMode::WidthDependent
+        );
+        assert!(config.padding.right_panels_shared);
+        assert_eq!(config.api.port, 8873);
+    }
+
+    #[test]
     fn numeric_settings_validation_and_changed_parent_cannot_mutate_or_enqueue() {
-        let mut app = App::new("numeric-settings-test".into(), std::env::temp_dir());
-        app.config_dir = Some(std::env::temp_dir());
-        app.mode = Mode::Settings(SettingsState {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("numeric-settings-test".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Terminal,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_number_dialog(SettingsNumber::TerminalScrollback);
+        app.settle_filesystem_for_test();
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("dialog");
         };

@@ -43,7 +43,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-const SCENE_ACCOUNT: u64 = 1024 * 1024 * 1024;
+// A merged saved map's native biome-colour working set reaches about 1.1 GB, so the
+// account holds 2 GiB (the shared budget ceiling is raised to match).
+const SCENE_ACCOUNT: u64 = 2 * 1024 * 1024 * 1024;
 const PREPARATION_PROGRESS_PHASES: usize = 6;
 const PREPARATION_SCAN_STAGES: usize = 6;
 const MAX_PREPARATION_EVENTS: usize = 32;
@@ -53,91 +55,6 @@ const MAX_SELECTION_WORK: u64 = PLANNER_WORK * MAX_ROUTE_QUALIFICATIONS as u64;
 const PREPARATION_BUSY_ACTIVITY_INTERVAL: Duration = Duration::from_secs(3);
 const MIN_OVERALL_ETA_SAMPLE: Duration = Duration::from_secs(60);
 const MIN_OVERALL_ETA_PROGRESS_PERCENT: usize = 10;
-
-fn route_support_is_eligible(
-    support: &BTreeSet<[i32; 2]>,
-    allocated: &BTreeSet<[i32; 2]>,
-    mut has_full_status: impl FnMut([i32; 2]) -> Result<bool, String>,
-) -> Result<(), String> {
-    for position in support {
-        if !allocated.contains(position) {
-            return Err(format!("source chunk {position:?} is not allocated"));
-        }
-        if !has_full_status(*position)? {
-            return Err(format!(
-                "source chunk {position:?} is unfinished or has no readable generation status"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn saved_chunk_has_full_generation_status(
-    bundle: &Bundle,
-    bound: &BoundMap,
-    position: [i32; 2],
-    cancelled: &dyn Fn() -> bool,
-    progress: &PreparationProgress,
-) -> Result<bool, String> {
-    if cancelled() {
-        return Err("Saved route preparation cancelled".into());
-    }
-    let chunk = if let Some(selected) = &bundle.selected {
-        let child = selected
-            .children
-            .get(&bound.directory)
-            .ok_or("Selected route child descriptor missing")?;
-        let region = selected
-            .regions
-            .get(&bound.directory)
-            .ok_or("Selected route region descriptor missing")?;
-        bound
-            .verify_pinned(&bundle.root, &selected.root, child)
-            .map_err(|error| format!("Selected route binding changed: {error}"))?;
-        if child
-            .child("region", false)
-            .map_err(|error| error.to_string())?
-            .identity()
-            != region.identity()
-        {
-            return Err("Selected route region descriptor changed".into());
-        }
-        super::region::read_chunk_pinned(
-            region,
-            position,
-            super::region::Limits::default(),
-            cancelled,
-        )
-    } else {
-        bound
-            .verify(&bundle.root)
-            .map_err(|error| format!("Saved route binding changed: {error}"))?;
-        let result = super::region::read_chunk(
-            &bound.directory.join("region"),
-            position,
-            super::region::Limits::default(),
-            cancelled,
-        );
-        bound
-            .verify(&bundle.root)
-            .map_err(|error| format!("Saved route binding changed during status read: {error}"))?;
-        result
-    };
-    match chunk {
-        Ok(Some(chunk)) => super::chunk::has_full_generation_status(&chunk.document, position)
-            .map_err(|error| {
-                format!("chunk {position:?} generation status could not be decoded: {error}")
-            }),
-        Ok(None) => Ok(false),
-        Err(super::region::Error::Cancelled) => Err("Saved route preparation cancelled".into()),
-        Err(error) => {
-            progress.record(&format!(
-                "Chunk {position:?} status could not be verified before full route decode: {error}"
-            ));
-            Ok(false)
-        }
-    }
-}
 
 #[derive(Clone)]
 struct PreparationProgress {
@@ -1037,6 +954,7 @@ struct Bundle {
     selected: Option<Arc<session_catalog::PinnedCatalog>>,
     native_jar: Option<Arc<ilium_platform::animation_files::PinnedFile>>,
     warnings: Vec<String>,
+    prepared_cache: Option<crate::prepared_cache::PreparedCache>,
     budget: ByteBudget,
     _catalog_reservation: Arc<Reservation>,
 }
@@ -1660,17 +1578,25 @@ impl Scene for SavedScene {
         self.receive_plan();
         self.retry_retired_plans();
         self.retry_persist();
-        frame.raster.dots.fill(0.0);
-        frame.raster.owner_ids.fill(0);
-        frame.cell_colors.fill([0; 3]);
+        let scale = f64::from(VoxelLandscapeScene::scale(&self.settings));
         self.receipt = None;
+        // Show the last painted raster while the next route is prepared. A blank
+        // clear here made every not-yet-ready frame flash to black.
+        let replayed_last_frame = self
+            .display
+            .as_ref()
+            .is_some_and(|display| display.replay(frame, scale));
+        if !replayed_last_frame {
+            frame.raster.dots.fill(0.0);
+            frame.raster.owner_ids.fill(0);
+            frame.cell_colors.fill([0; 3]);
+        }
         let Some(bundle) = self.bundle.as_ref() else {
             return;
         };
         if self.controller.is_none() {
             return;
         }
-        let scale = f64::from(VoxelLandscapeScene::scale(&self.settings));
         let size = [frame.raster.width, frame.raster.height];
         if self
             .display
@@ -2135,6 +2061,7 @@ fn prepare_bundle(
         root,
         jar,
         warnings,
+        prepared_cache: crate::prepared_cache::PreparedCache::for_user(),
         budget,
         _catalog_reservation: Arc::new(catalog_reservation),
     };
@@ -2439,6 +2366,12 @@ fn prepare_selection(
         }
         allocation_reservations.push(reservation);
     }
+    // Lines are proposed inside the saved area shrunk by the footprint reach, so a
+    // candidate's support chunks are normally saved; the qualification step still checks them.
+    let search_maps = maps
+        .iter()
+        .map(|map| Arc::new(map.with_search_margin(tours::SAVED_SEARCH_CHUNK_MARGIN)))
+        .collect::<Vec<_>>();
     let mut attempts_by_map = BTreeMap::<MapId, usize>::new();
     for map in &maps {
         attempts_by_map.insert(map.source().map, 0);
@@ -2459,14 +2392,20 @@ fn prepare_selection(
         "Starting the finite route survey across qualified saved-map windows",
     );
     progress.route_candidates(0, MAX_ROUTE_QUALIFICATIONS);
+    // Why candidate lines fail coverage, counted per tier and reported in the tier's audit line.
+    let estimate_rejections = std::cell::Cell::new(0_usize);
+    let footprint_rejections = std::cell::Cell::new(0_usize);
+    let unallocated_rejections = std::cell::Cell::new(0_usize);
     let mut candidate_eligibility = |source: super::evidence::Source,
                                      line: super::coverage::Line,
                                      focus_y: f64,
                                      work: &mut tours::Budget<'_>|
      -> Result<bool, tours::Error> {
-        let allocated = allocations.get(&source.map).ok_or_else(|| {
-            tours::Error::CandidateCoverage("map allocation index missing".into())
-        })?;
+        if !allocations.contains_key(&source.map) {
+            return Err(tours::Error::CandidateCoverage(
+                "map allocation index missing".into(),
+            ));
+        }
         let estimate = match super::source_footprint::work_estimate(
             line,
             focus_y,
@@ -2477,6 +2416,7 @@ fn prepare_selection(
             Err(
                 super::source_footprint::Error::Invalid | super::source_footprint::Error::Limit,
             ) => {
+                estimate_rejections.set(estimate_rejections.get() + 1);
                 work.charge(128)?;
                 let pass = selection_pass_number.get().max(1);
                 progress.work(
@@ -2511,7 +2451,7 @@ fn prepare_selection(
                 "Pass {pass} of {MAX_ROUTE_QUALIFICATIONS}: comparing candidate camera views with allocated saved chunks"
             ),
         );
-        let footprint = match super::source_footprint::request(
+        match super::source_footprint::request(
             line,
             focus_y,
             request.size,
@@ -2519,20 +2459,18 @@ fn prepare_selection(
             &bundle.budget,
             cancel,
         ) {
-            Ok(footprint) => footprint,
+            Ok(_) => {}
             Err(
                 super::source_footprint::Error::Invalid | super::source_footprint::Error::Limit,
             ) => {
+                footprint_rejections.set(footprint_rejections.get() + 1);
                 return Ok(false);
             }
             Err(error @ super::source_footprint::Error::Asset(_)) => {
                 return Err(tours::Error::CandidateCoverage(error.to_string()));
             }
         };
-        Ok(footprint
-            .support_chunks()
-            .iter()
-            .all(|position| allocated.contains(position)))
+        Ok(true)
     };
     let qualified: Option<(Plan, Arc<projected_route::PreparedRoute>, f64)> =
         qualify_in_tier_order(
@@ -2560,7 +2498,7 @@ fn prepare_selection(
                 // maps only within the required appearance phase.
                 let selection = tours::select_diverse_excluding_with_eligibility(
                     request.ticket,
-                    &maps,
+                    &search_maps,
                     &request.history,
                     policy,
                     tours::CandidateSurvey {
@@ -2606,6 +2544,25 @@ fn prepare_selection(
                     );
                 }
                 let Some(plan) = selection.plan else {
+                    progress.record(&format!(
+                        "No route in tier {choice:?} {maximum_length}: reason {:?}, chunks {}, desired {}",
+                        selection.unavailable,
+                        selection.audit.chunks,
+                        selection.audit.desired,
+                    ));
+                    progress.record(&format!(
+                        "Line search tier {choice:?} {maximum_length}: queries {}, usable {}, coverage rejected {}, repeats {}",
+                        selection.audit.line_queries,
+                        selection.audit.usable_lines,
+                        selection.audit.source_coverage_rejections,
+                        selection.audit.immediate_repeats,
+                    ));
+                    let estimate_count = estimate_rejections.replace(0);
+                    let footprint_count = footprint_rejections.replace(0);
+                    let unallocated_count = unallocated_rejections.replace(0);
+                    progress.record(&format!(
+                        "Coverage rejections in tier {choice:?} {maximum_length}: estimate invalid or over limit {estimate_count}, footprint invalid or over limit {footprint_count}, support chunks not allocated {unallocated_count}",
+                    ));
                     return Ok(SurveyStep::EmptyTier);
                 };
                 // The exclusion and map-attempt count belong to the selected
@@ -2645,7 +2602,7 @@ fn prepare_selection(
                 else {
                     return Err("Selected saved route lost its canonical seed".into());
                 };
-                let footprint = super::source_footprint::request(
+                super::source_footprint::request(
                     plan.line(),
                     plan.focus_y(),
                     request.size,
@@ -2654,53 +2611,6 @@ fn prepare_selection(
                     cancel,
                 )
                 .map_err(|error| error.to_string())?;
-                let allocated = allocations
-                    .get(&plan.source().map)
-                    .ok_or("Selected route allocation index missing")?;
-                let support = footprint.support_chunks();
-                progress.phase(
-                    3,
-                    "Checking saved chunk generation status",
-                    &format!(
-                        "Checking {} source chunks for candidate {attempted} before full viewport decode",
-                        support.len()
-                    ),
-                );
-                let mut status_reads = 0;
-                let support_status = route_support_is_eligible(support, allocated, |position| {
-                    status_reads += 1;
-                    progress.work(
-                            &bound.directory,
-                            "Checking saved chunk generation status",
-                            status_reads,
-                            support.len().max(1),
-                            &format!(
-                                "Candidate {attempted} of {MAX_ROUTE_QUALIFICATIONS}: checking chunk {position:?}"
-                            ),
-                        );
-                    saved_chunk_has_full_generation_status(
-                        bundle, bound, position, &cancelled, progress,
-                    )
-                });
-                if let Err(reason) = support_status {
-                    if cancelled() {
-                        return Err("Saved route preparation cancelled".into());
-                    }
-                    let failure = format!(
-                        "map {:?}, choice {:?}, cap {maximum_length}, length {:.1}, {:?}: {reason}",
-                        plan.source().map,
-                        plan.choice(),
-                        plan.line().length(),
-                        plan.route()
-                    );
-                    if failures.len() < 8 {
-                        failures.push(failure);
-                    }
-                    progress.record(&format!(
-                        "Candidate {attempted} rejected before full viewport decode: {reason}"
-                    ));
-                    return Ok(None);
-                }
                 let selected = (!settings.pack_path.is_empty()).then_some(settings);
                 let inputs = projected_route::Inputs {
                     plan: &plan,
@@ -2715,6 +2625,7 @@ fn prepare_selection(
                     viewport: request.size,
                     scale: request.scale,
                     account: &bundle.budget,
+                    cache: bundle.prepared_cache.as_ref(),
                     cancel,
                     cancelled: &cancelled,
                     progress: &|event| progress.record(event),
@@ -2950,6 +2861,7 @@ fn paint(
         required_materials: coverage.required_count,
         required_materials_satisfied: coverage.required_satisfied,
         visible_pixels: covered.iter().filter(|visible| **visible).count(),
+        route_endpoints_quarter_blocks: Some(route.request.route_endpoints_quarter_blocks()),
     };
     composite_selected(&colors, &covered, frame, settings, palette);
     let mut owners = FrameOwners::new(Arc::clone(&route.map));

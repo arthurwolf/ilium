@@ -312,10 +312,10 @@ fn semantic_disabled_background_preview_and_concrete_cadence_are_consistent() {
         crate::background_composition::animation_frame_delay(&fixture.app, Duration::ZERO),
         None
     );
-    fixture.app.mode = Mode::Settings(SettingsState {
+    fixture.app.mode = Mode::Settings(Box::new(SettingsState {
         tab: SettingsTab::Animations,
         ..Default::default()
-    });
+    }));
     compose(&mut fixture.app, 2);
     assert_eq!(fixture.app.animation_frames_per_second(), 7);
     assert!(fixture.app.animation_row_context().scene_uses_cell_colors);
@@ -460,10 +460,10 @@ fn semantic_undo_restores_effective_choice_and_stale_apply_preserves_it() {
 #[test]
 fn semantic_status_help_preserves_full_report_after_host_release() {
     let mut fixture = fixture();
-    fixture.app.mode = Mode::Settings(SettingsState {
+    fixture.app.mode = Mode::Settings(Box::new(SettingsState {
         tab: SettingsTab::Animations,
         ..Default::default()
-    });
+    }));
     let probe = install_probe(&mut fixture.app);
     let report = format!(
         "{}\nUNIQUE_REPORT_TAIL",

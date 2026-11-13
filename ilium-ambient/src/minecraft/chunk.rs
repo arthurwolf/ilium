@@ -187,7 +187,12 @@ impl DecodedChunk {
         matches!(self.status.as_deref(), Some("full" | "minecraft:full"))
     }
     pub fn has_full_coverage(&self, min_y: i8, max_y: i8) -> bool {
-        if min_y > max_y || !self.is_full() || !self.sections_present {
+        self.is_full() && self.has_block_coverage(min_y, max_y)
+    }
+    /// Block states present for every section in range, whatever the generation
+    /// status. Partly generated terrain renders by user decision (2026-10-18).
+    pub fn has_block_coverage(&self, min_y: i8, max_y: i8) -> bool {
+        if min_y > max_y || !self.sections_present {
             return false;
         }
         (i16::from(min_y)..=i16::from(max_y)).all(|y| {
@@ -475,16 +480,4 @@ pub fn decode(
     }
     check(cancel)?;
     Ok(decoded)
-}
-
-/// Check the persisted world-generation gate without decoding sections.
-/// Projected rendering still runs the full decoder after this inexpensive
-/// candidate filter has established that Minecraft marked the chunk complete.
-pub fn has_full_generation_status(document: &Document, expected: [i32; 2]) -> DecodeResult<bool> {
-    region::verify_identity(document, expected)?;
-    let (_, _, body) = region::chunk_body(document)?;
-    let Some(Tag::String(status)) = nbt::get(body, "Status") else {
-        return Ok(false);
-    };
-    Ok(status.0 == Text::from("full").0 || status.0 == Text::from("minecraft:full").0)
 }

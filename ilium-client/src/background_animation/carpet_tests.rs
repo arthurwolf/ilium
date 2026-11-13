@@ -169,6 +169,7 @@ fn pointer_change_does_not_rerender_pointer_insensitive_scene() {
 #[test]
 fn production_wind_scene_declares_pointer_sensitive_rendering() {
     let settings = AnimationSettings {
+        enabled: true,
         kind: AnimationKind::Wind,
         ..Default::default()
     };

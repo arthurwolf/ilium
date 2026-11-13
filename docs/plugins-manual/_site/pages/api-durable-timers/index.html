@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>durable timers and input journal | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details open><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/" aria-current="page">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Host API</b></p>
+<h1>durable timers and input journal</h1>
+
+<p>Ordinary timers (see <a href="/pages/api-clock-and-timers/">clock and timers</a>) live in memory and vanish when Ilium restarts. Two features survive a restart. A durable timer fires at a wall-clock time, even if Ilium was not running at that time. The pane journal records events per pane, and a <code>send-input</code> marked <code>journal: true</code> is recorded before it is written, so a crash between the write and its outcome is reported instead of lost.</p>
+<p>Both features live in the snapshot that the server keeps. They are always granted: a plugin needs no capability for its own durable timers or its own journal entries. Reading the journal entries of the host or of other plugins needs the <code>journal.read</code> grant.</p>
+<p>This page covers the durable timer, the journal and the input journal. The settings row state and meter calls (<code>set-row-state</code>, <code>set-item-states</code>, <code>set-choice-items</code>, <code>set-info-rich</code>, <code>set-meter</code>) belong to the settings pages (see <a href="/pages/api-settings/">settings</a>).</p>
+<figure>
+<svg viewBox="0 0 440 250" role="img" aria-label="Durable timer across a restart" width="660" height="375">
+  <defs>
+    <marker id="api-durable-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <line x1="20" y1="60" x2="420" y2="60" stroke="currentColor"/>
+  <text x="20" y="22" font-size="12" fill="currentColor">Time</text>
+  <circle cx="50" cy="60" r="5" fill="currentColor"/>
+  <text x="50" y="44" font-size="10" text-anchor="middle" fill="currentColor">timers.at</text>
+  <rect x="100" y="52" width="150" height="16" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+  <text x="175" y="90" font-size="10" text-anchor="middle" fill="currentColor">Ilium not running</text>
+  <circle cx="190" cy="60" r="5" fill="none" stroke="currentColor"/>
+  <text x="190" y="44" font-size="10" text-anchor="middle" fill="currentColor">due time</text>
+  <circle cx="270" cy="60" r="5" fill="currentColor"/>
+  <text x="270" y="44" font-size="10" text-anchor="middle" fill="currentColor">activate</text>
+  <line x1="290" y1="66" x2="290" y2="112" stroke="currentColor" marker-end="url(#api-durable-arrow)"/>
+  <text x="340" y="86" font-size="10" fill="currentColor">durable-timer-fired</text>
+  <rect x="150" y="114" width="280" height="40" rx="6" fill="none" stroke="currentColor"/>
+  <text x="160" y="131" font-size="11" fill="currentColor">timer, name</text>
+  <text x="160" y="146" font-size="11" fill="currentColor">late-by-millis: how long after the due time</text>
+  <text x="20" y="184" font-size="11" fill="currentColor">A timer that came due while Ilium was stopped fires once, after the</text>
+  <text x="20" y="200" font-size="11" fill="currentColor">next activation, and reports how late it is. It never fires twice.</text>
+  <text x="20" y="224" font-size="11" fill="currentColor">The same name replaces an earlier timer of that name.</text>
+</svg>
+<figcaption>A durable timer is stored in the snapshot with its due time. After a restart, an overdue timer fires once and reports its lateness.</figcaption>
+</figure>
+
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>Grants:</strong> none for <code>timers.at</code>, <code>timers.cancel-durable</code>, <code>journal.log-event</code> and the reading of your own entries. <code>journal.read</code> for the entries of the host and of other plugins.</li>
+<li><strong>Sides:</strong> server and client. Each side keeps its own timers and entries.</li>
+<li><strong>Language:</strong> Rust with <code>ilium-plugin-sdk</code> (<code>host::timers</code>, <code>host::journal</code>), or TypeScript with <code>@ilium/plugin-sdk</code> (<code>@ilium/plugin-sdk/host/timers</code>, <code>@ilium/plugin-sdk/host/journal</code>).</li>
+<li><strong>For the input journal:</strong> the grant of the <code>send-input</code> intent (<code>terminal.write</code>), and the <code>journal: true</code> field on the intent (see <a href="/pages/api-intents/">intents</a>).</li>
+</ul>
+<h3 id="surface">Surface</h3>
+<pre><code class="language-wit">// ilium:host/timers  (S C, always)
+at:             func(epoch: epoch-ms, name: string) -&gt; result&lt;timer-id, plugin-error&gt;;   // durable
+cancel-durable: func(name: string);
+
+// ilium:host/journal  (S C)
+record journal-entry { at: epoch-ms, pane: option&lt;node-id&gt;, source: string, kind: string, payload-json: string }
+log-event: func(pane: option&lt;node-id&gt;, kind: string, payload-json: string) -&gt; result&lt;_, plugin-error&gt;;   // &lt;= 4 KiB payload
+read:      func(pane: option&lt;node-id&gt;, since: epoch-ms, limit: u32) -&gt; list&lt;journal-entry&gt;;   // own entries; journal.read for others
+</code></pre>
+<p><code>epoch-ms</code> is a <code>u64</code> count of milliseconds since the Unix epoch, the same unit as <code>clock.now-unix-millis</code>.</p>
+<table>
+<thead>
+<tr>
+<th>WIT function</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>at</code></td>
+<td><code>timers::at(epoch: u64, name: &amp;str) -&gt; Result&lt;TimerId, PluginError&gt;</code></td>
+<td><code>timers.at(epoch: bigint, name: string): bigint</code></td>
+<td>Arms a durable timer that fires at <code>epoch</code>. The same <code>name</code> replaces an earlier timer of that name.</td>
+</tr>
+<tr>
+<td><code>cancel-durable</code></td>
+<td><code>timers::cancel_durable(name: &amp;str)</code></td>
+<td><code>timers.cancelDurable(name: string): void</code></td>
+<td>Removes the durable timer with that name.</td>
+</tr>
+<tr>
+<td><code>log-event</code></td>
+<td><code>journal::log_event(pane: Option&lt;NodeId&gt;, kind: &amp;str, payload_json: &amp;str) -&gt; Result&lt;(), PluginError&gt;</code></td>
+<td><code>journal.logEvent(pane: bigint \| undefined, kind: string, payloadJson: string): void</code></td>
+<td>Adds an entry to the journal, for a pane or with <code>pane</code> set to <code>none</code>.</td>
+</tr>
+<tr>
+<td><code>read</code></td>
+<td><code>journal::read(pane: Option&lt;NodeId&gt;, since: u64, limit: u32) -&gt; Vec&lt;JournalEntry&gt;</code></td>
+<td><code>journal.read(pane: bigint \| undefined, since: bigint, limit: number): JournalEntry[]</code></td>
+<td>Returns entries from <code>since</code> on, at most <code>limit</code>. A <code>limit</code> above 1,000 is clamped to 1,000 (the per-call read cap); page with <code>since</code>. Without <code>journal.read</code> these are the plugin's own entries.</td>
+</tr>
+</tbody>
+</table>
+<p><code>JournalEntry</code> is <code>JournalEntry { at: u64, pane: Option&lt;NodeId&gt;, source: String, kind: String, payload_json: String }</code> in Rust and <code>{ at: bigint; pane: bigint | undefined; source: string; kind: string; payloadJson: string }</code> in TypeScript.</p>
+<h4 id="events">Events</h4>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Payload</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Delivery</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>durable-timer-fired</code></td>
+<td><code>timer</code>, <code>name</code>, <code>late-by-millis</code> (u64)</td>
+<td><code>Event::DurableTimerFired(DurableTimerFiredEvent { timer, name, late_by_millis })</code></td>
+<td><code>{ tag: 'durable-timer-fired', val: { timer, name, lateByMillis } }</code></td>
+<td>never dropped</td>
+</tr>
+<tr>
+<td><code>input-uncertain</code></td>
+<td><code>pane</code>, <code>dedup-key</code></td>
+<td><code>Event::InputUncertain(InputUncertainEvent { pane, dedup_key })</code></td>
+<td><code>{ tag: 'input-uncertain', val: { pane, dedupKey } }</code></td>
+<td>never dropped</td>
+</tr>
+</tbody>
+</table>
+<p>A plugin that is not running is activated for a due durable timer: the activation trigger is <code>durable-timer</code> (see <a href="/pages/lifecycle/">lifecycle</a>).</p>
+<h3 id="the-journal">The journal</h3>
+<p>The journal holds plugin entries and host entries per pane. A plugin writes its own entries with <code>log-event</code>. The host writes entries for what it does:</p>
+<table>
+<thead>
+<tr>
+<th>Host entry kind</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pane-created</code></td>
+<td>A pane is created.</td>
+</tr>
+<tr>
+<td><code>pane-exited</code></td>
+<td>A pane's process ends.</td>
+</tr>
+<tr>
+<td><code>input-sent</code></td>
+<td>A <code>send-input</code> completes. The payload holds the dedup key and the delivery result.</td>
+</tr>
+</tbody>
+</table>
+<p>The journal survives restarts in the snapshot. It is trimmed oldest first when it passes <code>journal_entries</code> (5,000 per pane by default).</p>
+<h3 id="the-input-journal">The input journal</h3>
+<p>A <code>send-input</code> with <code>journal: true</code> writes its journal entry before the PTY write. If the server stops between the write and the outcome, the restarted plugin receives <code>input-uncertain { pane, dedup-key }</code>. This is deliberate: the kernel never replays the input silently (decision D21), because the prompt could then reach the agent twice. The plugin decides whether to send again.</p>
+<figure>
+<svg viewBox="0 0 440 230" role="img" aria-label="Sequence of a journaled send-input across a crash" width="660" height="345">
+  <defs>
+    <marker id="api-durable-seq-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <text x="70" y="16" font-size="12" text-anchor="middle" fill="currentColor">Plugin</text>
+  <text x="230" y="16" font-size="12" text-anchor="middle" fill="currentColor">Kernel</text>
+  <text x="390" y="16" font-size="12" text-anchor="middle" fill="currentColor">Pane (PTY)</text>
+  <line x1="70" y1="24" x2="70" y2="220" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="230" y1="24" x2="230" y2="220" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="390" y1="24" x2="390" y2="220" stroke="currentColor" stroke-dasharray="3 3"/>
+  <line x1="70" y1="44" x2="228" y2="44" stroke="currentColor" marker-end="url(#api-durable-seq-arrow)"/>
+  <text x="150" y="38" font-size="10" text-anchor="middle" fill="currentColor">send-input, journal: true</text>
+  <rect x="150" y="56" width="160" height="22" rx="4" fill="none" stroke="currentColor"/>
+  <text x="230" y="71" font-size="10" text-anchor="middle" fill="currentColor">journal entry written first</text>
+  <line x1="232" y1="96" x2="388" y2="96" stroke="currentColor" marker-end="url(#api-durable-seq-arrow)"/>
+  <text x="310" y="90" font-size="10" text-anchor="middle" fill="currentColor">PTY write</text>
+  <text x="230" y="130" font-size="11" text-anchor="middle" fill="currentColor">server stops before the outcome</text>
+  <line x1="150" y1="138" x2="310" y2="138" stroke="currentColor" stroke-dasharray="2 3"/>
+  <line x1="228" y1="168" x2="72" y2="168" stroke="currentColor" marker-end="url(#api-durable-seq-arrow)"/>
+  <text x="150" y="162" font-size="10" text-anchor="middle" fill="currentColor">activate, then input-uncertain</text>
+  <text x="70" y="194" font-size="10" fill="currentColor">The plugin checks the pane and decides whether to resend.</text>
+  <text x="70" y="212" font-size="10" fill="currentColor">The kernel never replays the input itself.</text>
+</svg>
+<figcaption>With <code>journal: true</code> the entry exists before the byte is written. After a restart the plugin learns which dedup key is in doubt.</figcaption>
+</figure>
+
+<h3 id="worked-example-scheduled-input">Worked example: scheduled input</h3>
+<p>The plugin sends a prompt to a pane after a delay, and survives a restart. It keeps the pane and text in <code>storage</code> (see <a href="/pages/api-storage/">storage</a>), arms a durable timer named after the job, and on firing sends the text with a journaled <code>send-input</code>. If Ilium was down, the timer fires late and the plugin decides whether the delay is still acceptable.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::{clock, timers};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::intents::{Delivery, SendInputSpec};
+
+const STALE_AFTER_MILLIS: u64 = 10 * 60 * 1000;
+
+/// Arms the timer. `delay_millis` counts from now.
+fn schedule(job: &amp;str, delay_millis: u64) -&gt; Result&lt;TimerId, PluginError&gt; {
+    timers::at(clock::now_unix_millis() + delay_millis, job)
+}
+
+fn send_scheduled(pane: NodeId, text: String, job: &amp;str) -&gt; Submission {
+    let intent = Intent::SendInput(SendInputSpec {
+        pane,
+        text,
+        delivery: Delivery::Submitted,
+        journal: true,
+        ..SendInputSpec::default()
+    });
+    Submission::keyed(intent, format!(&quot;scheduled:{job}&quot;))
+}
+
+fn on_event(event: Event, pane: NodeId, text: &amp;str) -&gt; Option&lt;Submission&gt; {
+    match event {
+        Event::DurableTimerFired(fired) if fired.late_by_millis &lt;= STALE_AFTER_MILLIS =&gt; {
+            Some(send_scheduled(pane, text.to_string(), &amp;fired.name))
+        }
+        Event::DurableTimerFired(fired) =&gt; {
+            log_late(&amp;fired.name, fired.late_by_millis);
+            None
+        }
+        Event::InputUncertain(uncertain) =&gt; {
+            // The dedup key names the job. Look at the pane before sending again.
+            log_uncertain(&amp;uncertain.dedup_key);
+            None
+        }
+        _ =&gt; None,
+    }
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as clock from '@ilium/plugin-sdk/host/clock';
+import * as timers from '@ilium/plugin-sdk/host/timers';
+import type { Event, Submission } from '@ilium/plugin-sdk/types';
+
+const STALE_AFTER_MILLIS = 10n * 60n * 1000n;
+
+/** Arms the timer. `delayMillis` counts from now. */
+export function schedule(job: string, delayMillis: bigint): bigint {
+  return timers.at(clock.nowUnixMillis() + delayMillis, job);
+}
+
+function sendScheduled(pane: bigint, text: string, job: string): Submission {
+  return {
+    intent: {
+      tag: 'send-input',
+      val: { pane, text, delivery: 'submitted', journal: true },
+    },
+    correlation: 0n,
+    dedupKey: `scheduled:${job}`,
+  };
+}
+
+export function onEvent(event: Event, pane: bigint, text: string): Submission | undefined {
+  if (event.tag === 'durable-timer-fired') {
+    if (event.val.lateByMillis &gt; STALE_AFTER_MILLIS) {
+      logLate(event.val.name, event.val.lateByMillis);
+      return undefined;
+    }
+    return sendScheduled(pane, text, event.val.name);
+  }
+  if (event.tag === 'input-uncertain') {
+    // The dedup key names the job. Look at the pane before sending again.
+    logUncertain(event.val.dedupKey);
+  }
+  return undefined;
+}
+</code></pre>
+<p><code>log_late</code>, <code>log_uncertain</code> and their TypeScript equivalents are the plugin's own helpers. <code>send-input</code> requires a dedup key (see <a href="/pages/api-intents/">intents</a>). The unset optional fields of <code>send-input</code> (<code>stages</code>, <code>raw</code>, <code>mouse</code>, <code>if-current</code>, <code>lock-user-input</code>) keep their defaults.</p>
+<h3 id="worked-example-a-pane-journal-entry">Worked example: a pane journal entry</h3>
+<p>A plugin records when it pauses a pane, and reads the last entries back for a panel.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::{clock, journal};
+use ilium_plugin_sdk::prelude::*;
+
+fn record_pause(pane: NodeId, reason: &amp;str) -&gt; Result&lt;(), PluginError&gt; {
+    journal::log_event(Some(pane), &quot;paused&quot;, &amp;format!(r#&quot;{{&quot;reason&quot;:&quot;{reason}&quot;}}&quot;#))
+}
+
+fn recent(pane: NodeId) -&gt; Vec&lt;String&gt; {
+    let since = clock::now_unix_millis().saturating_sub(60 * 60 * 1000);
+    journal::read(Some(pane), since, 20)
+        .into_iter()
+        .map(|entry| format!(&quot;{} {} {}&quot;, entry.at, entry.kind, entry.payload_json))
+        .collect()
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import * as clock from '@ilium/plugin-sdk/host/clock';
+import * as journal from '@ilium/plugin-sdk/host/journal';
+
+export function recordPause(pane: bigint, reason: string): void {
+  journal.logEvent(pane, 'paused', JSON.stringify({ reason }));
+}
+
+export function recent(pane: bigint): string[] {
+  const since = clock.nowUnixMillis() - 60n * 60n * 1000n;
+  return journal
+    .read(pane, since, 20)
+    .map((entry) =&gt; `${entry.at} ${entry.kind} ${entry.payloadJson}`);
+}
+</code></pre>
+<h3 id="what-the-user-sees">What the user sees</h3>
+<p>A pane with a scheduled input shows the scheduled-input glyph in the objective column of its tree row, next to the identity glyph and the activity spinner. The client default for that glyph is <code>⏰</code> (the <code>ScheduledInput</code> icon slot).</p>
+<figure>
+<pre class="term">▼ <span class="w2">📂</span> Ilium
+›   <span class="w2">🦀</span> ⏰ ⠋ Fix auth
+›   <span class="w2">🖥️</span>    Shell
+</pre>
+<figcaption>A Claude pane with a scheduled input shows the objective glyph before the working spinner. Glyphs are the client defaults from the icon settings; column spacing is approximate. Illustrative.</figcaption>
+</figure>
+
+<p>The plugin log records what happened around a restart:</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs example.scheduler --tail 4
+<span class="t-dim">2026-10-12 08:59:50</span> <span class="t-ok">info </span> timers.at job-17 due 09:00:00
+<span class="t-dim">2026-10-12 09:04:12</span> <span class="t-ok">info </span> durable-timer-fired job-17 late 252000 ms
+<span class="t-dim">2026-10-12 09:04:12</span> <span class="t-ok">info </span> send-input pane 5 journal=true
+<span class="t-dim">2026-10-12 09:04:12</span> <span class="t-ok">info </span> input-sent ok
+<span class="t-prompt">$</span> <span class="t-dim">4 lines shown</span>
+</pre>
+<figcaption>The server was down at 09:00:00. The timer fires once after the next activation and reports 252,000 ms of lateness. Illustrative, not generated.</figcaption>
+</figure>
+
+<h3 id="error-codes">Error codes</h3>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Code</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>at</code></td>
+<td><code>invalid-argument</code></td>
+<td><code>epoch</code> is in the past by more than 1 s.</td>
+</tr>
+<tr>
+<td><code>at</code></td>
+<td><code>quota-exceeded</code></td>
+<td>The plugin already holds <code>durable_timers</code> timers.</td>
+</tr>
+<tr>
+<td><code>log-event</code></td>
+<td><code>invalid-argument</code></td>
+<td>The payload is over 4 KiB.</td>
+</tr>
+<tr>
+<td><code>log-event</code></td>
+<td><code>rate-limited</code></td>
+<td>More than 20 <code>log-event</code> calls per second per plugin (see the rate table in the <a href="/pages/reference-errors-and-limits/">errors and limits reference</a>). When <code>journal_entries</code> is full the oldest entries are trimmed, with no error.</td>
+</tr>
+<tr>
+<td><code>cancel-durable</code>, <code>read</code></td>
+<td>none</td>
+<td>These functions return no error.</td>
+</tr>
+<tr>
+<td>journaled <code>send-input</code></td>
+<td>as for <code>send-input</code></td>
+<td>The <code>journal</code> field adds no error code of its own.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="limits">Limits</h3>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Default</th>
+<th>Ceiling tier 1</th>
+<th>Ceiling tier 2 and 3</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>durable_timers</code></td>
+<td>64</td>
+<td>256</td>
+<td>64</td>
+</tr>
+<tr>
+<td><code>journal_entries</code> (per pane, own entries)</td>
+<td>5,000</td>
+<td>20,000</td>
+<td>5,000</td>
+</tr>
+<tr>
+<td>Journal payload</td>
+<td>4 KiB</td>
+<td>4 KiB</td>
+<td>4 KiB</td>
+</tr>
+</tbody>
+</table>
+<p><code>journal.read</code> returns at most 1,000 entries per call (a larger <code>limit</code> is clamped). <code>durable_timers</code> and <code>journal_entries</code> are requestable in the manifest <code>limits</code> up to the ceiling for the tier. Beyond <code>journal_entries</code>, the oldest entries are trimmed.</p>
+<h3 id="edge-cases">Edge cases</h3>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The server was off at the due time</td>
+<td>The timer fires once after the next activation. <code>late-by-millis</code> is the lateness.</td>
+</tr>
+<tr>
+<td><code>at</code> with a name that is in use</td>
+<td>The earlier timer is replaced.</td>
+</tr>
+<tr>
+<td><code>at</code> with a time up to 1 s in the past</td>
+<td>Accepted. A longer past time is <code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td>Crash after the PTY write, before the outcome</td>
+<td><code>input-uncertain</code> after restart. The input is not replayed.</td>
+</tr>
+</tbody>
+</table>
+<div class="warn">
+<p>Do not treat <code>input-uncertain</code> as a failure to retry blindly. The text may already be in the prompt. Read the screen first (see <a href="/pages/primitives-terminal/">terminal</a>), then decide.</p>
+</div>
+
+<h3 id="see-also">See also</h3>
+<ul>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a> for ordinary, in-memory timers and the clock.</li>
+<li><a href="/pages/api-intents/">intents</a> for <code>send-input</code> and its dedup key.</li>
+<li><a href="/pages/api-events/">Events</a> for the delivery policy of <code>durable-timer-fired</code> and <code>input-uncertain</code>.</li>
+<li><a href="/pages/lifecycle/">Lifecycle</a> for the <code>durable-timer</code> activation trigger.</li>
+<li><a href="/pages/api-storage/">storage</a> for keeping the job's pane and text across restarts.</li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a> for the full code list.</li>
+</ul>
+<p>Interface version: <code>ilium:host/timers</code> and <code>ilium:host/journal</code>, version 0.1.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/api-command-palette/"><small>Previous</small>Command palette</a><a class="next" href="/pages/api-tree-chrome/"><small>Next</small>Tree and window chrome</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#surface">Surface</a></li><li class="l3"><a href="#events">Events</a></li><li class="l2"><a href="#the-journal">The journal</a></li><li class="l2"><a href="#the-input-journal">The input journal</a></li><li class="l2"><a href="#worked-example-scheduled-input">Worked example: scheduled input</a></li><li class="l2"><a href="#worked-example-a-pane-journal-entry">Worked example: a pane journal entry</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#error-codes">Error codes</a></li><li class="l2"><a href="#limits">Limits</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

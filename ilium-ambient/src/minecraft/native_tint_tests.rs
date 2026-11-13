@@ -506,3 +506,34 @@ fn official_biome_render_conversion_is_version_qualified_and_leaves_unknown_name
         );
     }
 }
+
+#[test]
+fn memoized_window_rgb_matches_full_sample_for_overlapping_blocks() {
+    let stop = AtomicBool::new(false);
+    let cancel = Cancel::new(&stop);
+    let budget = ByteBudget::new(8 << 20).unwrap();
+    let provider = tint(&budget, cancel);
+    let map = map(3218, Some("minecraft:plains"), false);
+    let mut memo = NativeTintMemo::default();
+    for kind in [ColorKind::Water, ColorKind::Grass, ColorKind::Foliage] {
+        // Adjacent centres share most of their windows, so later calls hit the memo.
+        for x in -10..-6 {
+            for z in -24..-20 {
+                let request = NativeRequest {
+                    source: map.source(),
+                    java_position: [x, 64, z],
+                    kind,
+                    climate_policy: ClimatePolicy::RenderEarlierWith1193,
+                    world_seed: Some(0),
+                    blend_radius: 2,
+                };
+                let memoized = provider
+                    .sample_native_rgb(&map, request, &mut memo, cancel)
+                    .unwrap();
+                let full = provider.sample_native(&map, request, cancel).unwrap();
+                assert_eq!(memoized, full.rgb, "kind {kind:?} at {x} {z}");
+            }
+        }
+    }
+    assert!(!memo.colors.is_empty());
+}

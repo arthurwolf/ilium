@@ -15,6 +15,7 @@ fn context() -> LeafContext {
         filename: None,
         content_extract: "Working on Paris public transport maps".into(),
         automatic_content_fingerprint: 0,
+        recap_evidence: String::new(),
         agent_lookup: None,
     }
 }
@@ -128,6 +129,7 @@ fn parse_value(value: &serde_json::Value) -> anyhow::Result<RecommendedRestructu
         TitleStyle::Summarization,
         &RecommendationContext::default(),
     )
+    .map(|inference| inference.plan)
 }
 #[test]
 fn semantic_contract_resolves_project_group_and_leaf() {
@@ -228,7 +230,8 @@ fn semantic_contract_preserves_fixed_groups_and_split_paths() {
         TitleStyle::Summarization,
         &context,
     )
-    .unwrap();
+    .unwrap()
+    .plan;
     assert_eq!(plan.expected_animation_generation, 7);
     assert_eq!(
         plan.entries
@@ -310,6 +313,7 @@ fn semantic_contract_budget_retains_fixed_group_and_all_leaf_ids() {
         RestructurePromptPolicy {
             instructions: &ilium_inference::PromptInstructions::default(),
             prompt_token_limit: ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
+            include_attention: false,
         },
         &contexts,
         &"y".repeat(30_000),
@@ -327,4 +331,65 @@ fn semantic_contract_budget_retains_fixed_group_and_all_leaf_ids() {
         assert!(prompt.contains(&format!("<item id=\"{}\"", item.id.0)));
     }
     assert!(prompt.contains(crate::semantic_animation::catalog().unwrap()));
+}
+
+fn prompt_with_attention(include_attention: bool) -> String {
+    render_restructure_prompt_with_instructions(
+        TitleStyle::Summarization,
+        RestructurePromptPolicy {
+            instructions: &ilium_inference::PromptInstructions::default(),
+            prompt_token_limit: ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
+            include_attention,
+        },
+        &[context()],
+        "",
+        &[],
+        None,
+        &RecommendationContext::default(),
+    )
+    .expect("the small real project context renders")
+}
+
+#[test]
+fn attention_prompt_section_appears_only_when_requested() {
+    assert!(prompt_with_attention(true).contains("<attention-queue>"));
+    assert!(!prompt_with_attention(false).contains("attention-queue"));
+}
+
+#[test]
+fn attention_list_never_fails_or_alters_the_sort_parse() {
+    for attention in [
+        serde_json::json!([{"id": 1, "kind": "question", "reason": "asks"}]),
+        serde_json::json!("garbage"),
+        serde_json::json!([{"id": "x"}, 7, null]),
+        serde_json::json!({"unexpected": true}),
+    ] {
+        let mut value = valid_response();
+        value["attention"] = attention;
+        let (plan, raw) = parse_restructure_response(
+            &value.to_string(),
+            &[context()],
+            &[],
+            TitleStyle::Summarization,
+            &RecommendationContext::default(),
+        )
+        .map(|inference| (inference.plan, inference.attention))
+        .expect("the attention key must not affect the strict sort parse");
+        assert!(raw.is_some());
+        let plain = parse_value(&valid_response()).unwrap();
+        assert_eq!(
+            plan.structure.children.len(),
+            plain.structure.children.len()
+        );
+    }
+    let (_, raw) = parse_restructure_response(
+        &valid_response().to_string(),
+        &[context()],
+        &[],
+        TitleStyle::Summarization,
+        &RecommendationContext::default(),
+    )
+    .map(|inference| (inference.plan, inference.attention))
+    .unwrap();
+    assert!(raw.is_none(), "a reply without the key is normal");
 }

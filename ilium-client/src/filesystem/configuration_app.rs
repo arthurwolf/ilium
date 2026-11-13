@@ -269,6 +269,10 @@ impl App {
                 break;
             };
             changed = true;
+            if let Some(ConfigurationIntent::NumberRead { token }) = &intent {
+                self.collect_settings_number_read(token, completion);
+                continue;
+            }
             if let Some(ConfigurationIntent::SessionValueDialog { desired, token }) = &intent {
                 self.collect_session_choice_configuration(*desired, token, completion);
                 continue;
@@ -352,6 +356,7 @@ impl App {
                         }
                     }
                     match saved {
+                        ConfigurationSaved::NumberRead(_) => {}
                         ConfigurationSaved::Session(saved) => {
                             if matches!(&intent,Some(ConfigurationIntent::Session{desired}) if self.session_settings==*desired)
                             {
@@ -400,9 +405,23 @@ impl App {
                                 dialog: Some(expected),
                             }) = &intent
                             {
-                                if matches!(&self.mode,Mode::TextTriggerDialog(state) if state.candidate()==*expected)
+                                if matches!(&self.mode,Mode::TextTriggerDialog(state) if state.candidate().as_ref()==Ok(expected))
                                 {
                                     self.pop_modal();
+                                }
+                            }
+                        }
+                        ConfigurationSaved::CustomAgents(settings) => {
+                            self.custom_agents = settings;
+                            self.reconcile_toolbar_custom_agents();
+                            if let Mode::Settings(state) = &mut self.mode {
+                                if state.tab == crate::app::SettingsTab::CustomAgents
+                                    && state.custom_agent_save_pending
+                                {
+                                    state.custom_agent_save_pending = false;
+                                    state.custom_agent_editor = None;
+                                    state.selected_row =
+                                        state.selected_row.min(self.custom_agents.profiles.len());
                                 }
                             }
                         }
@@ -446,6 +465,11 @@ impl App {
                         }
                         ConfigurationSaved::Plain => {}
                     }
+                    if matches!(&intent, Some(ConfigurationIntent::Plain { label, .. })
+                        if *label == crate::status_rules_save::STATUS_RULES_SAVE_LABEL)
+                    {
+                        self.custom_status_rules_write_succeeded();
+                    }
                     if let Some(ConfigurationIntent::Onboarding { revision, dismiss }) = &intent {
                         if *revision == self.onboarding_revision && *dismiss {
                             self.onboarding = None;
@@ -466,6 +490,9 @@ impl App {
                             .unwrap_or_else(|| format!("{label} saved to disk")),
                         Some(ConfigurationIntent::TextTriggers { .. }) => {
                             "Text Triggers saved to disk".into()
+                        }
+                        Some(ConfigurationIntent::CustomAgents) => {
+                            "Custom agents saved to disk".into()
                         }
                         Some(ConfigurationIntent::ProjectName) => {
                             "Project name saved to disk".into()
@@ -520,6 +547,9 @@ impl App {
                         if *label == "Git settings" {
                             self.git_settings_error = Some(failure.message.clone());
                         }
+                        if *label == crate::status_rules_save::STATUS_RULES_SAVE_LABEL {
+                            self.custom_status_rules_write_failed(&failure.message);
+                        }
                     }
                     // Readback may reflect publication before a directory flush
                     // error. Never overwrite a subsequent edit or blindly roll
@@ -545,6 +575,11 @@ impl App {
                         Some(ConfigurationIntent::TextTriggers { .. }) => {
                             if let Mode::TextTriggerDialog(state) = &mut self.mode {
                                 state.save_error = Some(failure.message.clone());
+                            }
+                        }
+                        Some(ConfigurationIntent::CustomAgents) => {
+                            if let Mode::Settings(state) = &mut self.mode {
+                                state.custom_agent_save_pending = false;
                             }
                         }
                         Some(ConfigurationIntent::Onboarding { .. }) => {
@@ -591,12 +626,13 @@ mod inference_value_receipt_tests {
                 )
             })
             .unwrap();
-        app.mode = Mode::Settings(crate::app::SettingsState {
+        app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
             tab: crate::app::SettingsTab::Inference,
             selected_row: row,
             ..crate::app::SettingsState::default()
-        });
+        }));
         app.begin_settings_number_dialog(SettingsNumber::InferenceTokenBudget);
+        app.settle_filesystem_for_test();
         app
     }
 
@@ -759,12 +795,12 @@ mod inference_value_receipt_tests {
     #[test]
     fn typed_budget_waits_for_one_own_write_retains_failure_and_retries() {
         let directory = tempfile::tempdir().unwrap();
+        let mut app = budget_app(directory.path());
         std::fs::write(
             directory.path().join("config.toml"),
             "invalid synthetic configuration = [",
         )
         .unwrap();
-        let mut app = budget_app(directory.path());
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("exact budget");
         };

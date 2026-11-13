@@ -10,7 +10,7 @@ use super::{
     native_fluid::{self},
     native_fluid_assembly,
     native_render_layer::{self, Layer, RenderLayers},
-    native_tint::{self, ClimatePolicy, NativeRequest, NativeTint},
+    native_tint::{self, ClimatePolicy, NativeRequest, NativeTint, NativeTintMemo},
     saved_binding::SavedBinding,
     tours::PreparedMap,
 };
@@ -70,6 +70,8 @@ pub enum Error {
         state: String,
         java_position: [i32; 3],
     },
+    #[error("selected native model textures are missing from the pinned packs: {}", .0.join(", "))]
+    MissingTextures(Vec<String>),
     #[error("native binding source/model limit: {0}")]
     Limit(&'static str),
 }
@@ -274,6 +276,19 @@ impl SharedNative {
         self.imports.bank.identity()
     }
 
+    /// Shared texture import; restored cache tiles must reference this exact Arc.
+    pub fn imports(&self) -> &Arc<ImportResult> {
+        &self.imports
+    }
+
+    pub fn budget(&self) -> &ByteBudget {
+        &self.budget
+    }
+
+    pub fn provenance(&self) -> &native_assets::Provenance {
+        self.sources.provenance()
+    }
+
     pub fn definitions(&self) -> Result<DefinitionSources<'_>, Error> {
         Ok(self.sources.definitions()?)
     }
@@ -439,8 +454,15 @@ impl NativeSourceSession {
             self.budget.clone(),
         )?
         .import_with_progress(requests.as_slice(), cancel, progress)?;
+        let missing = ids
+            .iter()
+            .filter(|id| imports.bank.resolve(id).is_none())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(Error::MissingTextures(missing));
+        }
         if imports.bank.coverage().required_satisfied != ids.len()
-            || ids.iter().any(|id| imports.bank.resolve(id).is_none())
             || imports.records.iter().any(|record| record.source.is_none())
         {
             return Err(Error::Limit("required native model textures missing"));
@@ -603,10 +625,17 @@ pub fn prepare_native_shared(
         }
     }
     let ids = textures.into_iter().collect::<Vec<_>>();
-    if ids.iter().any(|id| imports.bank.resolve(id).is_none()) {
-        return Err(Error::Limit("required native model textures missing"));
+    let missing = ids
+        .iter()
+        .filter(|id| imports.bank.resolve(id).is_none())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(Error::MissingTextures(missing));
     }
     let mut tint = None::<NativeTint>;
+    // One memo per tile: blend windows of neighbouring blocks overlap heavily.
+    let mut tint_memo = NativeTintMemo::default();
     let mut instances = BTreeMap::<[i32; 3], Arc<BoundModel>>::new();
     let mut bound_cache = BTreeMap::<(ModelStateKey, Vec<(u16, [u8; 3])>), Arc<BoundModel>>::new();
     for (&position, state) in &normalized {
@@ -673,21 +702,19 @@ pub fn prepare_native_shared(
                     if tint.is_none() {
                         tint = Some(NativeTint::load(sources, cancel)?);
                     }
-                    tint.as_ref()
-                        .ok_or(Error::Source)?
-                        .sample_native(
-                            &binding.map,
-                            NativeRequest {
-                                source: binding.map.source(),
-                                java_position,
-                                kind,
-                                climate_policy: ClimatePolicy::RenderEarlierWith1193,
-                                world_seed: Some(world_seed),
-                                blend_radius,
-                            },
-                            cancel,
-                        )?
-                        .rgb
+                    tint.as_ref().ok_or(Error::Source)?.sample_native_rgb(
+                        &binding.map,
+                        NativeRequest {
+                            source: binding.map.source(),
+                            java_position,
+                            kind,
+                            climate_policy: ClimatePolicy::RenderEarlierWith1193,
+                            world_seed: Some(world_seed),
+                            blend_radius,
+                        },
+                        &mut tint_memo,
+                        cancel,
+                    )?
                 }
             };
             tints.insert(index, color.map(|channel| f32::from(channel) / 255.0));

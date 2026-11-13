@@ -1,0 +1,20 @@
+package ilium:host@0.1.0;
+
+interface inference {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  record chat-message { role: string, content: string }
+  record completion-request {
+    messages: list<chat-message>, max-output-tokens: option<u32>, json-schema: option<string>, purpose: string,
+  }
+  record completion { text: string, model: string, input-tokens: u32, output-tokens: u32 }
+  /// Async, take-completion.
+  complete: func(request: completion-request) -> result<request-id, plugin-error>;
+  take-completion: func(request: request-id) -> option<completion>;
+  /// Async, take-models.
+  models: func() -> result<request-id, plugin-error>;
+  take-models: func(request: request-id) -> option<list<string>>;
+  /// Grant inference.provide. Answers inference-provider.complete.
+  /// Errors: not-found for an unknown or already answered call id.
+  provider-reply: func(call: u64, outcome: result<completion, plugin-error>) -> result<_, plugin-error>;
+}

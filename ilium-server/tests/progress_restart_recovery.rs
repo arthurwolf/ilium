@@ -32,6 +32,7 @@ fn server_options(
     launch_directory: &Path,
 ) -> ServerOptions {
     ServerOptions {
+        resource_catalog_path: None,
         session_name: session_name.to_string(),
         socket_path,
         snapshot_path,
@@ -94,6 +95,7 @@ async fn attach_and_read_initial_state(
         client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -115,6 +117,7 @@ async fn create_pane(client: &mut SessionStream) -> ilium_core::NodeId {
     ilium_ipc::write_frame(
         client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ilium_core::ROOT_ID,
             kind: ilium_ipc::NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

@@ -1,0 +1,7 @@
+package ilium:exports@0.1.0;
+
+interface settings-validate {
+  use ilium:host/settings@0.1.0.{field-error};
+  /// 100 ms deadline. A message is at most 120 characters of plain text.
+  settings-validate: func(patch: string, merged: string) -> result<_, list<field-error>>;
+}

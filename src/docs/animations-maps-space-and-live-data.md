@@ -225,7 +225,7 @@ Controls:
 | Contour spacing | 0-10000 m, step 50 | 0 | Fixed elevation step. 0 derives the step from Contour lines. |
 | Index line every | 0-10 | 5 | Every Nth contour is drawn heavier, like a survey map. 0 draws none. |
 | Line thickness | 1-3 dots | 1 | |
-| Lines below zero | Solid, Dotted, Hidden | Dotted | How contours below the zero level (sea floor, basins) are drawn. |
+| Lines below zero | Solid, Dotted, Hidden | Dotted | How contours below the zero level (sea floor, basins) are drawn. Ignored while Tide range is above 0 or Zero level shift is not 0: the sea floor does not move with the water, so its lines are hidden and only the shore and the land above the water keep contours. |
 | Emphasise zero level | On/off | On | Draws the zero-elevation contour (the shore on Earth) heavier. |
 | Map outline | On/off | On | The edge of the map, or the limb of the globe. |
 | Relief shading | 0-100 %, step 5 | 0 | Sparse dots that light north-west-facing slopes in addition to the contours. |
@@ -235,7 +235,8 @@ Controls:
 | Start latitude | -80 to 80, step 5 | 15 | Also the fixed latitude for a still view. |
 | Start longitude | -180 to 180, step 5 | 0 | |
 | Zero level shift | -3000 to 3000 m, step 50 | 0 | Raises or lowers the zero level that the shore line and "Lines below zero" refer to, flooding or draining the world. |
-| Tide range | 0-2000 m, step 50 | 0 | Lets the zero level rise and fall by this much (peak to peak), so shores creep across the map. 0 keeps it fixed. |
+| Tide range | 0-20000 m, step 50 | 0 | Lets the sea level rise and fall by this much (peak to peak), flooding and draining the map. Water is tinted by its depth below the surface, so large values look like a real rising or falling sea. 0 keeps it fixed. |
+| Tide pattern | Same everywhere / Travelling bulges | Same everywhere | Same everywhere: one sea level for the world. Travelling bulges: two tidal bulges on opposite sides of the world circle it, so it is high tide in some places while it is low tide elsewhere. |
 | Tide period | 10-600 s, step 10 | 120 | Only when Tide range is above 0. Seconds per full rise and fall. |
 
 Recipes:
@@ -299,6 +300,8 @@ Default saves folder (blank **Saved maps folder**):
 | Windows | `%APPDATA%\.minecraft\saves` |
 
 For another launcher, enter the absolute folder that contains your world folders. A relative path, a path with a NUL character, or one longer than 4096 bytes is rejected. A world folder counts as a candidate only if it contains `level.dat` and a `region` folder. Discovery looks at direct children only and is bounded (it refuses a folder with more than 4096 entries or more than 512 maps; choose a smaller folder in that case).
+
+Preparing a world (reading block requirements and building the viewport tiles for each route) is slow the first time, so the results are cached in `~/.ilium/cache/minecraft`. Later starts load them from disk. The cache is keyed by the world files, resource pack, game jar and settings, so changing any of them rebuilds the affected entries; a damaged cache file is discarded and rebuilt. You can delete the folder at any time.
 
 Version limits and behaviour:
 

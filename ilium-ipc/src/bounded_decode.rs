@@ -152,6 +152,23 @@ where
 pub fn decode_bounded<T: BoundedMessage>(payload: &[u8]) -> Result<T, IpcError> {
     decode_with_budget(payload, &Budget::default())
 }
+/// Same audited allocation policy, also returning a conservative retained
+/// declaration. Cumulative visited allocation/inline costs intentionally
+/// overstate retained storage. The existing threefold decoder headroom policy
+/// covers collection growth/overlap; this is not an allocator or RSS measure.
+pub(crate) fn decode_bounded_with_storage<T: BoundedMessage>(
+    payload: &[u8],
+) -> Result<(T, usize), IpcError> {
+    let budget = Budget::default();
+    let value = decode_with_budget(payload, &budget)?;
+    let bytes = budget
+        .allocations
+        .get()
+        .saturating_mul(3)
+        .max(size_of::<T>().max(1));
+    Ok((value, bytes))
+}
+
 fn decode_with_budget<T: DeserializeOwned>(payload: &[u8], budget: &Budget) -> Result<T, IpcError> {
     let result = bincode::DefaultOptions::new()
         .with_fixint_encoding()

@@ -277,7 +277,7 @@ function Expand-IliumValidatedZip([string]$Archive, [string]$Destination, [strin
     $expected = [Text.Encoding]::ASCII.GetBytes("$Version`n")
     $actual = [IO.File]::ReadAllBytes($versionPath)
     if ([Convert]::ToBase64String($actual) -cne [Convert]::ToBase64String($expected)) { throw 'Archive VERSION differs from the requested release.' }
-    if ((Get-IliumHash (Join-Path $Destination 'beach-1.0.0.iliumanim')) -cne '15c81ff5a9aa329aa4451c5e19405be4f6957a8f617ce4bff94b02be5b39612f' -or
+    if ((Get-IliumHash (Join-Path $Destination 'beach-1.0.0.iliumanim')) -cne 'a744b574dae0f55505c86ec2c2d77555b0c11e1800b0b306273112d8ae1b06a2' -or
         (Get-IliumHash (Join-Path $Destination 'carpet-1.0.0.iliumanim')) -cne '5ef31ca8cee61fd7f0c077128419f81dbea59ef516813453532a98e976d8daf9') { throw 'Official animation archive differs from compiled release identity.' }
 }
 
@@ -346,7 +346,7 @@ function Test-IliumOwnedVersion([string]$Root, [string]$Version, [switch]$AllowM
     foreach ($file in Get-ChildItem -LiteralPath $directory -Force) { if ($file.PSIsContainer -or $file.Name -cnotin $names) { return $false } }
     foreach ($property in $receipt.PSObject.Properties) {
         if ($property.Name -cnotmatch '\A(?:ilium\.exe|ilium-server\.exe|ilium-animation-helper\.exe|beach-1\.0\.0\.iliumanim|carpet-1\.0\.0\.iliumanim|VERSION|THIRD-PARTY\.txt|[A-Za-z0-9_-]+\.dll)\z' -or $property.Value -cnotmatch '\A[0-9a-f]{64}\z') { return $false }
-        if ($property.Name -ceq 'beach-1.0.0.iliumanim' -and $property.Value -cne '15c81ff5a9aa329aa4451c5e19405be4f6957a8f617ce4bff94b02be5b39612f') { return $false }
+        if ($property.Name -ceq 'beach-1.0.0.iliumanim' -and $property.Value -cne 'a744b574dae0f55505c86ec2c2d77555b0c11e1800b0b306273112d8ae1b06a2') { return $false }
         if ($property.Name -ceq 'carpet-1.0.0.iliumanim' -and $property.Value -cne '5ef31ca8cee61fd7f0c077128419f81dbea59ef516813453532a98e976d8daf9') { return $false }
         $path = Join-Path $directory $property.Name
         Assert-IliumPlainPath $path

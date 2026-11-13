@@ -24,6 +24,9 @@ const TTY_BUFFER_SIZE: usize = 1_024;
 pub(crate) struct UnixInternalEventSource {
     poll: Poll,
     events: Events,
+    // Readiness is edge-triggered: yielding one input must retain the rest of
+    // the batch, including a simultaneous resize or event-stream wakeup.
+    pending_event_index: usize,
     parser: Parser,
     native_parser: Option<crate::event::native::NativeParser>,
     pending_start: usize,
@@ -70,6 +73,7 @@ impl UnixInternalEventSource {
         Ok(UnixInternalEventSource {
             poll,
             events: Events::with_capacity(3),
+            pending_event_index: 0,
             parser: if storage.is_some() {
                 Parser::empty()
             } else {
@@ -155,16 +159,18 @@ impl EventSource for UnixInternalEventSource {
         let timeout = PollTimeout::new(timeout);
 
         loop {
-            if let Err(e) = self.poll.poll(&mut self.events, timeout.leftover()) {
-                // Mio will throw an interrupted error in case of cursor position retrieval. We need to retry until it succeeds.
-                // Previous versions of Mio (< 0.7) would automatically retry the poll call if it was interrupted (if EINTR was returned).
-                // https://docs.rs/mio/0.7.0/mio/struct.Poll.html#notes
-                if e.kind() == io::ErrorKind::Interrupted {
-                    continue;
-                } else {
-                    return Err(e);
+            if self.pending_event_index >= self.events.iter().count() {
+                self.pending_event_index = 0;
+                if let Err(e) = self.poll.poll(&mut self.events, timeout.leftover()) {
+                    // Mio can be interrupted by cursor position retrieval.
+                    // Retry without losing an unprocessed readiness batch.
+                    if e.kind() == io::ErrorKind::Interrupted {
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
                 }
-            };
+            }
 
             if self.events.is_empty() {
                 // No readiness events = timeout
@@ -172,15 +178,16 @@ impl EventSource for UnixInternalEventSource {
             }
 
             // Copy one scalar token before mutating the owned parser/source.
-            for event_index in 0..self.events.iter().count() {
+            while self.pending_event_index < self.events.iter().count() {
                 let Some(token) = self
                     .events
                     .iter()
-                    .nth(event_index)
+                    .nth(self.pending_event_index)
                     .map(|event| event.token())
                 else {
-                    continue;
+                    break;
                 };
+                self.pending_event_index += 1;
                 match token {
                     TTY_TOKEN => {
                         loop {
@@ -193,6 +200,17 @@ impl EventSource for UnixInternalEventSource {
                                         ));
                                     }
                                     if read_count > 0 {
+                                        // The parsed event may return before the kernel
+                                        // input is drained. Rearm now so unread bytes do
+                                        // not depend on another edge; a blocking native
+                                        // descriptor must still repoll before reading.
+                                        let raw_fd = self.tty_fd.raw_fd();
+                                        let mut tty = SourceFd(&raw_fd);
+                                        self.poll.registry().reregister(
+                                            &mut tty,
+                                            TTY_TOKEN,
+                                            Interest::READABLE,
+                                        )?;
                                         if self.native_parser.is_some() {
                                             self.pending_start = 0;
                                             self.pending_end = read_count;
@@ -202,17 +220,6 @@ impl EventSource for UnixInternalEventSource {
                                             if timeout.elapsed() {
                                                 return Ok(None);
                                             }
-                                            // An incomplete Paste must poll again before
-                                            // another possibly blocking native read. Rearm
-                                            // readiness so already-readable chunk tails
-                                            // are not stranded by edge-triggered polling.
-                                            let raw_fd = self.tty_fd.raw_fd();
-                                            let mut tty = SourceFd(&raw_fd);
-                                            self.poll.registry().reregister(
-                                                &mut tty,
-                                                TTY_TOKEN,
-                                                Interest::READABLE,
-                                            )?;
                                             break;
                                         } else {
                                             self.parser.advance(
@@ -685,6 +692,39 @@ mod native_storage_source_tests {
             UnixInternalEventSource::from_descriptor_with_storage(descriptor, Some(budget.clone()))
                 .unwrap();
         (source, writer, budget)
+    }
+
+    #[cfg(feature = "event-stream")]
+    #[test]
+    fn ready_batch_survives_returning_one_native_input_event() {
+        let (mut source, mut writer, _budget) = blocking_source(256);
+        writer.write_all(b"x").unwrap();
+        source.waker().wake().unwrap();
+        // Capture both real edge notifications in one batch. Returning the
+        // input must not overwrite the wakeup with a new poll on the next read.
+        source
+            .poll
+            .poll(&mut source.events, Some(Duration::from_millis(100)))
+            .unwrap();
+        assert!(source.events.iter().any(|event| event.token() == TTY_TOKEN));
+        assert!(source
+            .events
+            .iter()
+            .any(|event| event.token() == WAKE_TOKEN));
+        let mut saw_input = false;
+        let mut saw_wakeup = false;
+        for _ in 0..2 {
+            match source.try_read(Some(Duration::from_millis(100))) {
+                Ok(Some(InternalEvent::Event(Event::Key(key))))
+                    if key.code == crate::event::KeyCode::Char('x') =>
+                {
+                    saw_input = true
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => saw_wakeup = true,
+                other => panic!("lost a captured readiness notification: {other:?}"),
+            }
+        }
+        assert!(saw_input && saw_wakeup);
     }
 
     #[test]

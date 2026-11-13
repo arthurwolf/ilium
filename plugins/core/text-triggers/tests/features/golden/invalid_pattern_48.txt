@@ -1,0 +1,6 @@
+╭─ Text Triggers ────────────────────────────────╮
+│ Pattern "(y/n" is not valid                    │
+│   unclosed group. The rule is switched off.    │
+│ Confirm prompts …………………………………… off             │
+│   Pattern ……………………………… (y/n                    │
+╰────────────────────────────────────────────────╯

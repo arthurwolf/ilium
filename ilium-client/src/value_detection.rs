@@ -217,11 +217,11 @@ mod tests {
         let row = (0..crate::settings_ui::agent_monitoring_rows(&app).len())
             .find(|row| SettingsNumber::at(&app, SettingsTab::AgentMonitoring, *row) == Some(field))
             .unwrap();
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::AgentMonitoring,
             selected_row: row,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_number_dialog(field);
         app
     }

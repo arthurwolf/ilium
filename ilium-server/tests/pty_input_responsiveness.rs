@@ -16,6 +16,7 @@ async fn create_pane(client: &mut SessionStream, command: String, count: usize) 
     write_frame(
         client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(command),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -136,6 +137,7 @@ async fn stalled_input_current_thread_helper() {
         &mut stalled_client,
         &ClientRequest::Attach {
             session: session_name.to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -176,6 +178,7 @@ async fn stalled_input_current_thread_helper() {
         &mut healthy_client,
         &ClientRequest::Attach {
             session: session_name.to_owned(),
+            hello: Default::default(),
         },
     )
     .await

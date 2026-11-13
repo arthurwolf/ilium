@@ -32,7 +32,7 @@ fn help_app(screen: Rect, selected_row: usize, scroll: u16) -> (tempfile::TempDi
     let mut app = App::new("terminal-pool-help".into(), directory.path().into());
     app.config_dir = Some(directory.path().into());
     app.set_screen_area(screen);
-    app.mode = Mode::Settings(SettingsState {
+    app.mode = Mode::Settings(Box::new(SettingsState {
         tab: SettingsTab::Terminal,
         selected_row,
         scroll,
@@ -41,7 +41,7 @@ fn help_app(screen: Rect, selected_row: usize, scroll: u16) -> (tempfile::TempDi
         icons_preview_real: true,
         trigger_action_cursor: 2,
         ..SettingsState::default()
-    });
+    }));
     (directory, app)
 }
 fn pool_help_position(app: &App) -> Position {

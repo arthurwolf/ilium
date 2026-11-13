@@ -19,7 +19,9 @@ use crate::remote_compaction_settings::{
     RemoteCompactionSettings, TechniqueTarget, THRESHOLD_PERCENT_RANGE,
 };
 use crate::theme;
-use crate::value_control::{leader_span, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH};
+use crate::value_control::{
+    boolean_switch, leader_span, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH,
+};
 
 /// Left margin shared with the other settings tabs.
 const INSET: u16 = 2;
@@ -458,7 +460,14 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
     let accent = Style::new()
         .fg(theme::accent_bg())
         .add_modifier(Modifier::BOLD);
-    let control_x = INSET + LABEL_WIDTH;
+    // A compact row keeps its full label above the control rather than
+    // placing all buttons beyond the viewport's fixed label column.
+    let compact_controls = width < INSET + LABEL_WIDTH + 16;
+    let control_x = if compact_controls {
+        INSET
+    } else {
+        INSET + LABEL_WIDTH
+    };
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut spans_out: Vec<RowSpan> = Vec::new();
@@ -525,7 +534,7 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
                     Style::new()
                 };
                 lines.push(Line::from(Span::styled(
-                    format!("  {} {}", if is_on { "[x]" } else { "[ ]" }, row.label()),
+                    format!("  {} {}", boolean_switch(is_on), row.label()),
                     label_style,
                 )));
                 push_description(&mut lines, row, app, body_width);
@@ -572,17 +581,31 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
                 } else {
                     Style::new()
                 };
-                lines.push(Line::from(vec![
-                    Span::styled(label, label_style),
-                    leader_span(padding),
-                    Span::styled(shown, control_style),
-                ]));
+                let control_line = if compact_controls && is_stepped {
+                    lines.extend(
+                        wrap(row.label(), usize::from(width.saturating_sub(INSET)).max(1))
+                            .into_iter()
+                            .map(|label| {
+                                Line::from(Span::styled(format!("  {label}"), label_style))
+                            }),
+                    );
+                    let line = lines.len() as u16;
+                    lines.push(Line::from(""));
+                    line
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::styled(label, label_style),
+                        leader_span(padding),
+                        Span::styled(shown, control_style),
+                    ]));
+                    first_line
+                };
                 push_description(&mut lines, row, app, body_width);
                 spans_out.push(RowSpan {
                     row,
                     first_line,
                     last_line: lines.len() as u16 - 1,
-                    control_line: first_line,
+                    control_line,
                     control_x,
                 });
                 lines.push(Line::from(""));
@@ -918,8 +941,8 @@ mod tests {
             }
             assert!(page.contains(row.label()), "{}", row.label());
         }
-        assert!(page.contains("[ ] Remote compaction"));
-        assert!(page.contains("[x] Redact secrets"));
+        assert!(page.contains("[○ OFF] Remote compaction"));
+        assert!(page.contains("[ON  ●] Redact secrets"));
         assert!(page.contains("- 65% + *"));
         assert!(page.contains("← Claude Code + →"));
         assert!(page.contains("← Codex + →"));
@@ -950,6 +973,80 @@ mod tests {
         assert!(page.contains("Keep the migration plan."), "{page}");
         assert!(page.contains("(31 characters)"), "{page}");
         assert!(!page.contains("Second"));
+    }
+
+    #[test]
+    fn compact_controls_preserve_labels_buttons_and_scrolled_hit_targets() {
+        let app = app();
+        for width in [16, 23, 40, 120] {
+            let page = view(&app, 0, width);
+            let area = Rect::new(0, 0, width, 8);
+            let mut terminal = Terminal::new(TestBackend::new(width, 8)).unwrap();
+            for span in &page.rows {
+                if !matches!(
+                    span.row.kind(),
+                    RemoteCompactionRowKind::Stepper | RemoteCompactionRowKind::Select
+                ) {
+                    continue;
+                }
+                let scroll = span.control_line;
+                let control = value_control(area, scroll, span, &app).unwrap();
+                let geometry = control.geometry();
+                assert_eq!(geometry.row.y, area.y);
+                assert!(geometry.row.right() <= area.right());
+                if width < INSET + LABEL_WIDTH + 16 {
+                    assert!(span.control_line > span.first_line);
+                    let label: String = page.lines
+                        [usize::from(span.first_line)..usize::from(span.control_line)]
+                        .iter()
+                        .flat_map(|line| line.to_string().chars().collect::<Vec<_>>())
+                        .filter(|character| !character.is_whitespace())
+                        .collect();
+                    assert_eq!(
+                        label,
+                        span.row
+                            .label()
+                            .chars()
+                            .filter(|character| !character.is_whitespace())
+                            .collect::<String>()
+                    );
+                }
+                terminal
+                    .draw(|frame| render(frame, area, &app, 0, scroll))
+                    .unwrap();
+                let (previous, next, open, expected) = match span.row {
+                    RemoteCompactionRow::Technique(target) => {
+                        ("←", "→", "+", HitAction::OpenChoice(target))
+                    }
+                    row => (
+                        NUMBER_DECREMENT_GLYPH,
+                        NUMBER_INCREMENT_GLYPH,
+                        "*",
+                        HitAction::EditNumber(row),
+                    ),
+                };
+                for (rectangle, glyph) in [
+                    (geometry.previous, previous),
+                    (geometry.next, next),
+                    (geometry.open, open),
+                ] {
+                    assert_eq!(rectangle.width, 1);
+                    assert_eq!(
+                        terminal.backend().buffer()[(rectangle.x, rectangle.y)].symbol(),
+                        glyph
+                    );
+                }
+                let hit = hit(
+                    area,
+                    scroll,
+                    Position::new(geometry.open.x, geometry.open.y),
+                    &app,
+                )
+                .unwrap();
+                assert_eq!(hit.row, span.row);
+                assert_eq!(hit.action, expected);
+            }
+        }
     }
 
     #[test]

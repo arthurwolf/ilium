@@ -15,6 +15,7 @@ pub mod live_data;
 pub mod location;
 pub mod minecraft;
 pub mod pi_digits;
+pub mod prepared_cache;
 pub mod raster;
 pub mod registry;
 pub mod resources;

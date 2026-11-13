@@ -52,6 +52,7 @@ async fn matched_output_round_trip(session: &str, delay_seconds: u32) -> Duratio
         &mut client,
         &ClientRequest::Attach {
             session: session.to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -86,6 +87,7 @@ async fn matched_output_round_trip(session: &str, delay_seconds: u32) -> Duratio
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fixture.path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -170,6 +172,7 @@ async fn client_semantic_submission_reaches_the_pty_after_a_separate_enter() {
         &mut client,
         &ClientRequest::Attach {
             session: "semantic-submission-terminal".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -178,6 +181,7 @@ async fn client_semantic_submission_reaches_the_pty_after_a_separate_enter() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fixture.path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -255,6 +259,7 @@ async fn repainting_one_matching_screen_line_submits_only_once() {
         &mut client,
         &ClientRequest::Attach {
             session: "text-trigger-redraw-test".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -287,6 +292,7 @@ async fn repainting_one_matching_screen_line_submits_only_once() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fixture.path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -352,6 +358,7 @@ async fn a_match_reappearing_after_the_row_clears_submits_again() {
         &mut client,
         &ClientRequest::Attach {
             session: "text-trigger-reappearance-test".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -384,6 +391,7 @@ async fn a_match_reappearing_after_the_row_clears_submits_again() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fixture.path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -454,6 +462,7 @@ async fn a_second_attach_receives_accepted_text_triggers_without_replacing_them(
         &mut second,
         &ClientRequest::AttachInteractive {
             session: "text-trigger-attach-state".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -508,6 +517,7 @@ async fn a_fresh_server_attaches_with_durable_rules_without_a_client_replacement
     let durable_bytes = toml::to_string(&document).unwrap();
     std::fs::write(&config_path, &durable_bytes).unwrap();
     let mut server = OwnedServer(Some(tokio::spawn(run(ServerOptions {
+        resource_catalog_path: None,
         session_name: "durable-trigger".to_owned(),
         socket_path: socket_path.clone(),
         snapshot_path: directory.path().join("snapshot.json"),
@@ -541,6 +551,7 @@ async fn a_fresh_server_attaches_with_durable_rules_without_a_client_replacement
         &mut client,
         &ClientRequest::AttachInteractive {
             session: "durable-trigger".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -597,6 +608,7 @@ async fn a_running_server_reconciles_durable_trigger_edits_without_client_replac
     let durable_bytes = toml::to_string(&document).unwrap();
     std::fs::write(&config_path, &durable_bytes).unwrap();
     let mut server = OwnedServer(Some(tokio::spawn(run(ServerOptions {
+        resource_catalog_path: None,
         session_name: "durable-trigger".to_owned(),
         socket_path: socket_path.clone(),
         snapshot_path: directory.path().join("snapshot.json"),
@@ -630,6 +642,7 @@ async fn a_running_server_reconciles_durable_trigger_edits_without_client_replac
         &mut client,
         &ClientRequest::AttachInteractive {
             session: "durable-trigger".to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -706,6 +719,7 @@ async fn a_stale_client_default_payload_cannot_replace_durable_rules() {
     let durable_bytes = toml::to_string(&document).unwrap();
     std::fs::write(&config_path, &durable_bytes).unwrap();
     let mut server = OwnedServer(Some(tokio::spawn(run(ServerOptions {
+        resource_catalog_path: None,
         session_name: "durable-trigger".to_owned(),
         socket_path: socket_path.clone(),
         snapshot_path: directory.path().join("snapshot.json"),
@@ -739,6 +753,7 @@ async fn a_stale_client_default_payload_cannot_replace_durable_rules() {
         &mut client,
         &ClientRequest::AttachInteractive {
             session: "durable-trigger".to_owned(),
+            hello: Default::default(),
         },
     )
     .await

@@ -1,0 +1,10 @@
+╭─ Plugins ──────────────────────────────────────────────╮
+│ ilium.core.tree        T1  On                          │
+│ ilium.core.cost        T1  Off                         │
+│ com.example.notes      T2  On                          │
+│ com.example.cursor     T2  Failed                      │
+│ com.example.tidy       T2  Waiting for ilium.core.cost │
+│ vendor.ext             T3  Refused: no sandbox         │
+│                                                        │
+│ Enter open  Space on or off  i install file            │
+╰────────────────────────────────────────────────────────╯

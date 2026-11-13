@@ -36,6 +36,8 @@ fn cell_width(text: &str) -> u16 {
 pub enum AgentToolbarAction {
     /// Hides the toolbar (mirrors `AppearanceRow::AgentToolbar`'s toggle).
     Close,
+    /// Displays the current session goal without sending input to the agent.
+    Goal,
     /// Sends a raw Escape byte -- works for every provider, not routed
     /// through `command_for`.
     Stop,
@@ -46,6 +48,9 @@ pub enum AgentToolbarAction {
     /// configured inference provider. Entirely client-side.
     SmartCopy,
     CopyLastMessage,
+    /// Re-opens the last-prompt banner closed for this agent. Client-side;
+    /// only drawn while the banner is enabled but closed for the pane.
+    ShowLastPrompt,
     Compact,
     Clear,
     Config,
@@ -331,9 +336,11 @@ pub fn command_for(
             .get(usize::from(index))
             .map(|button| button.command),
         AgentToolbarAction::Close
+        | AgentToolbarAction::Goal
         | AgentToolbarAction::Stop
         | AgentToolbarAction::CopyScreen
         | AgentToolbarAction::SmartCopy
+        | AgentToolbarAction::ShowLastPrompt
         | AgentToolbarAction::CycleEffort
         | AgentToolbarAction::ToggleTextSelection
         | AgentToolbarAction::CodexModelTier(_)
@@ -376,10 +383,12 @@ pub fn keystroke_stages_for(
 pub const fn action_label(action: AgentToolbarAction) -> &'static str {
     match action {
         AgentToolbarAction::Close => "Close",
+        AgentToolbarAction::Goal => "Goal",
         AgentToolbarAction::Stop => "Stop",
         AgentToolbarAction::CopyScreen => "Screen",
         AgentToolbarAction::SmartCopy => "Smart copy",
         AgentToolbarAction::CopyLastMessage => "Copy",
+        AgentToolbarAction::ShowLastPrompt => "Prompt",
         AgentToolbarAction::Compact => "Compact",
         AgentToolbarAction::Clear => "Clear",
         AgentToolbarAction::Config => "Config",
@@ -415,6 +424,7 @@ pub fn tooltip_for(
         AgentToolbarAction::Close => {
             "Close toolbar (re-open from the \u{2261} icon or right-click menu)".to_string()
         }
+        AgentToolbarAction::Goal => "Show the current goal".to_string(),
         AgentToolbarAction::Stop => "Send Escape (interrupt the agent)".to_string(),
         AgentToolbarAction::CopyScreen => "Copy the visible screen to the clipboard".to_string(),
         AgentToolbarAction::SmartCopy => {
@@ -422,6 +432,9 @@ pub fn tooltip_for(
         }
         AgentToolbarAction::CopyLastMessage => {
             "Copy the agent's last message (sends /copy)".to_string()
+        }
+        AgentToolbarAction::ShowLastPrompt => {
+            "Show the last-prompt banner again for this agent".to_string()
         }
         AgentToolbarAction::Compact => {
             "Compact the conversation (remote model when enabled in settings, else /compact)"
@@ -476,6 +489,10 @@ pub struct ToolbarContext<'a> {
     /// Mirrors `UiSettings::terminal_text_selection_enabled` -- drives both
     /// the `ToggleTextSelection` button's on/off state text and its tooltip.
     pub selection_enabled: bool,
+    /// The last-prompt banner is enabled but closed for this pane: offer a
+    /// button that re-opens it.
+    pub show_prompt_reopen: bool,
+    pub show_goal: bool,
 }
 
 /// The centered button group: universal actions available for every pane
@@ -491,6 +508,8 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
         effort,
         show_labels,
         selection_enabled,
+        show_prompt_reopen,
+        show_goal: _,
     } = ctx;
     let mut buttons = vec![
         Button {
@@ -526,6 +545,16 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
             ),
         },
     ];
+    if show_prompt_reopen {
+        buttons.push(Button {
+            action: AgentToolbarAction::ShowLastPrompt,
+            text: button_text(
+                crate::last_prompt_toolbar::REOPEN_GLYPH,
+                AgentToolbarAction::ShowLastPrompt,
+                show_labels,
+            ),
+        });
+    }
     let Some(provider) = provider else {
         return buttons;
     };
@@ -770,6 +799,16 @@ fn button_rects(area: Rect, ctx: ToolbarContext) -> Vec<(AgentToolbarAction, Rec
     );
     let close_width = cell_width(&close_text);
     let close_right_edge = area.width.saturating_sub(close_width);
+    let goal_width = if ctx.show_goal && close_right_edge >= 3 {
+        1
+    } else {
+        0
+    };
+    let reserved_left = close_right_edge.saturating_sub(if goal_width > 0 {
+        goal_width + BUTTON_GAP
+    } else {
+        0
+    });
 
     let mut center = center_buttons(ctx);
     // Drop from the end until the group fits beside Close, rather than
@@ -785,7 +824,7 @@ fn button_rects(area: Rect, ctx: ToolbarContext) -> Vec<(AgentToolbarAction, Rec
         let total_width = group_width(&center);
         let centered_start = area.width.saturating_sub(total_width) / 2;
         let centered_right_edge = centered_start.saturating_add(total_width);
-        if centered_right_edge.saturating_add(BUTTON_GAP) <= close_right_edge {
+        if centered_right_edge.saturating_add(BUTTON_GAP) <= reserved_left {
             break;
         }
         center.pop();
@@ -799,6 +838,13 @@ fn button_rects(area: Rect, ctx: ToolbarContext) -> Vec<(AgentToolbarAction, Rec
         let width = cell_width(&button.text);
         rects.push((button.action, Rect::new(x, area.y, width, 1), button.text));
         x += width + BUTTON_GAP;
+    }
+    if goal_width > 0 {
+        rects.push((
+            AgentToolbarAction::Goal,
+            Rect::new(area.x + reserved_left, area.y, goal_width, 1),
+            "⚑".to_string(),
+        ));
     }
     rects.push((
         AgentToolbarAction::Close,
@@ -989,6 +1035,8 @@ fn rendered_texts(
             effort,
             show_labels,
             selection_enabled: true,
+            show_prompt_reopen: false,
+            show_goal: false,
         },
     )
     .into_iter()
@@ -1013,6 +1061,8 @@ mod tests {
             effort,
             show_labels,
             selection_enabled: true,
+            show_prompt_reopen: false,
+            show_goal: false,
         }
     }
 
@@ -1037,6 +1087,35 @@ mod tests {
             ),
             Some(AgentToolbarAction::Close)
         );
+    }
+
+    #[test]
+    fn goal_flag_reserves_a_non_overlapping_click_target() {
+        let icons = IconSettings::default();
+        for width in 3..100 {
+            let area = Rect::new(7, 4, width, 1);
+            let mut context = ctx(None, &icons, EffortLevel::Auto, false);
+            assert!(button_rect_for(area, context, AgentToolbarAction::Goal).is_none());
+            context.show_goal = true;
+            let rects = button_rects(area, context);
+            if let Some((_, flag, _)) = rects
+                .iter()
+                .find(|(action, _, _)| *action == AgentToolbarAction::Goal)
+            {
+                assert_eq!(
+                    action_at(area, context, Position::new(flag.x, flag.y)),
+                    Some(AgentToolbarAction::Goal)
+                );
+                for (action, other, _) in &rects {
+                    if *action != AgentToolbarAction::Goal {
+                        assert!(
+                            flag.intersection(*other).is_empty(),
+                            "overlap at width {width}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

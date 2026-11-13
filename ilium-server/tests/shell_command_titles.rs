@@ -41,6 +41,7 @@ async fn create_plain_shell(
         client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -50,6 +51,7 @@ async fn create_plain_shell(
     write_frame(
         client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -99,6 +101,7 @@ async fn completed_shell_commands_update_the_title_for_other_clients_until_user_
         &mut observer,
         &ClientRequest::Attach {
             session: "shell-title-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -184,6 +187,7 @@ async fn completed_shell_commands_update_the_title_for_other_clients_until_user_
         &mut creator,
         &ClientRequest::Attach {
             session: "shell-title-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -207,6 +211,7 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(NON_SHELL_PROBE_COMMAND.to_string()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -260,6 +265,7 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
         &mut client,
         &ClientRequest::Attach {
             session: "non-shell-title-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await

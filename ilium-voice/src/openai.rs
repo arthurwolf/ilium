@@ -164,6 +164,10 @@ pub(crate) async fn run_session(
             VoiceEvent::StateChanged(VoiceConnectionState::Connecting),
         )
         .await?;
+        if matches!(config.input_mode, VoiceInputMode::SemanticVad) {
+            // Reconnects also pause native capture until the new session is accepted.
+            audio.set_capture_enabled(false);
+        }
         let mut socket = tokio::select! {
             result = connect_with_timeout(&config) => result?,
             _ = shutdown_receiver.changed() => {
@@ -189,6 +193,9 @@ pub(crate) async fn run_session(
             }
         }
         tracing::info!("OpenAI Realtime session configuration accepted");
+        if matches!(config.input_mode, VoiceInputMode::SemanticVad) {
+            audio.set_capture_enabled(true);
+        }
         send_event(
             &event_sender,
             VoiceEvent::StateChanged(VoiceConnectionState::Listening),

@@ -676,10 +676,13 @@ fn intact_large_output_publishes_visible_progress_before_its_final_snapshot() {
     drop(results_guard);
 
     fixture.wait_sequence(pane, 2);
+    // The later 234 KiB legitimately scroll the early preview out of the
+    // visible viewport. Its bytes must still survive in the final history.
     assert!(fixture.snapshots[&pane]
-        .visible
-        .contents()
-        .contains("PREVIEW-AT-QUANTUM"));
+        .history
+        .to_vec()
+        .windows(marker.len())
+        .any(|window| window == marker));
     assert_eq!(
         fixture
             .completed

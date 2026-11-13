@@ -1,0 +1,25 @@
+  ⎿  Wrote 1 line to questions/q12.txt
+      1 Q12: If the registrar's ceiling tastes of violet and th
+        e lockers migrate south in pairs, how many lanterns mus
+        t a nervous accountant ferry before the diploma forgets
+         its name?
+
+  Read 1 file
+
+● Write(questions/q13.txt)
+  ⎿  Wrote 1 line to questions/q13.txt
+      1 Q13: If the lecture podium yodels at dusk and the pigeo
+        ns refund their feathers, how many compasses must a sen
+        sible otter balance before the midterm climbs the belfr
+        y?
+
+❯ Write answers/a01.txt to a06.txt, one answer per question.
+  ctrl+x ctrl+s to send now
+
+✶ Considering… (54s · ↓ 3.8k tokens)
+
+──────────────────────────────────────────────────────────────────────
+❯ Press up to edit queued messages
+──────────────────────────────────────────────────────────────────────
+  Haiku 5.5 · exam-university
+  ⏵⏵ accept edits on (shift+tab to cycle) · ← 3 agents

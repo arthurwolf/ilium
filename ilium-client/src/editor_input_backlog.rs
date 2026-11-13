@@ -89,22 +89,23 @@ impl EditorInputBacklog {
             .is_some_and(|total| total <= self.max_bytes)
     }
 
+    #[allow(clippy::result_large_err)] // The refusal hands the original input back unchanged; boxing would allocate on that path.
     pub(crate) fn push(
         &mut self,
         event: Result<InputEvent, InputFailure>,
         target_pane: Option<NodeId>,
         layout_revision: Option<u64>,
         loan_identity: Option<Arc<()>>,
-    ) -> Result<(), Result<InputEvent, InputFailure>> {
+    ) -> Result<(), Box<Result<InputEvent, InputFailure>>> {
         let payload_bytes = match &event {
             Ok(event) => event.retained_payload_bytes(),
-            Err(_) => return Err(event),
+            Err(_) => return Err(Box::new(event)),
         };
         let Some(total_payload_bytes) = self.payload_bytes.checked_add(payload_bytes) else {
-            return Err(event);
+            return Err(Box::new(event));
         };
         if self.events.len() >= self.max_events || total_payload_bytes > self.max_bytes {
-            return Err(event);
+            return Err(Box::new(event));
         }
         self.payload_bytes = total_payload_bytes;
         self.events.push_back(QueuedEditorInput {
@@ -185,7 +186,7 @@ mod tests {
         let mut queue = EditorInputBacklog::begin_with_limits(quota, 1, 0).unwrap();
         queue.push(Ok(first), None, None, None).unwrap();
 
-        let returned = queue.push(Ok(event), None, None, None).unwrap_err();
+        let returned = *queue.push(Ok(event), None, None, None).unwrap_err();
         assert_eq!(
             queue
                 .pop()
@@ -211,7 +212,7 @@ mod tests {
         let mut queue = EditorInputBacklog::begin_with_limits(quota, 4, 4).unwrap();
         queue.push(Ok(first), None, None, None).unwrap();
 
-        let returned = queue.push(Ok(paste), None, None, None).unwrap_err();
+        let returned = *queue.push(Ok(paste), None, None, None).unwrap_err();
         assert_eq!(
             queue
                 .pop()

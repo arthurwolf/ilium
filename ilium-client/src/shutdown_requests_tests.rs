@@ -37,6 +37,7 @@ fn batch(client: &ilium_execution::Client) -> Vec<crate::ipc_preparation::Admitt
                 client,
                 ClientRequest::AttachInteractive {
                     session: session.to_owned(),
+                    hello: Default::default(),
                 },
             )
             .expect("actual input admission")
@@ -47,7 +48,7 @@ fn identities(batch: &[crate::ipc_preparation::AdmittedRequest]) -> Vec<(usize, 
     batch
         .iter()
         .map(|request| {
-            let ClientRequest::AttachInteractive { session } = request.view() else {
+            let ClientRequest::AttachInteractive { session, .. } = request.view() else {
                 panic!("fixture original");
             };
             // Same outbound enum slot (including opaque hold) and authored backing.
@@ -190,6 +191,9 @@ async fn closed_writer_preserves_original_head_tail_and_guards() {
         "cleanup wrapping released an unpublished original's admission"
     );
     assert!(typed.to_string().contains("4 original requests retained"));
+    assert!(typed
+        .to_string()
+        .contains("original terminal cleanup failure"));
     assert!(std::error::Error::source(typed)
         .expect("previous cleanup error remains observable")
         .to_string()
@@ -346,7 +350,9 @@ async fn cancelled_flush_keeps_same_receipt_and_wire_order_without_replay() {
     let mut reader = FrameReader::new(bytes.as_slice());
     for expected in ["actual-original-head", "actual-original-tail"] {
         let actual: ClientRequest = reader.read().await.expect("actual ordered wire frame");
-        assert!(matches!(actual,ClientRequest::AttachInteractive{session} if session==expected));
+        assert!(
+            matches!(actual, ClientRequest::AttachInteractive { session, .. } if session == expected)
+        );
     }
     assert!(
         matches!(reader.read::<ClientRequest>().await,

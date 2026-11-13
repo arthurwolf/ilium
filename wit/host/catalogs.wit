@@ -1,0 +1,16 @@
+package ilium:host@0.1.0;
+
+interface catalogs {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/ui@0.1.0.{catalog-item};
+  record catalog-page { items: list<catalog-item>, next: option<string>, total: option<u32> }
+  /// limit 1 to 256.
+  record catalog-query { catalog: string, filter: string, cursor: option<string>, limit: u16 }
+  /// Sync, for host catalogues.
+  query: func(q: catalog-query) -> result<catalog-page, plugin-error>;
+  /// Async, take-page. For plugin catalogues.
+  query-async: func(q: catalog-query) -> result<request-id, plugin-error>;
+  take-page: func(request: request-id) -> option<catalog-page>;
+  lookup: func(catalog: string, id: string) -> option<catalog-item>;
+}

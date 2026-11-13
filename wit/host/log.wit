@@ -1,0 +1,8 @@
+package ilium:host@0.1.0;
+
+interface log {
+  enum level { trace, debug, info, warn, error }
+  /// One entry per line. The budget is 200 lines per second per side instance (limits.log_lines_per_second,
+  /// 1,000 for bundled plugins). Lines over the budget are dropped and counted.
+  log: func(level: level, message: string);
+}

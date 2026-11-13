@@ -4,6 +4,8 @@
 //! discovery contracts. It never needs to know about Kilo's HTTP endpoints,
 //! retryable status codes, or OpenAI-compatible response envelopes.
 
+mod scanner;
+
 use std::io::{BufRead, BufReader};
 use std::thread;
 use std::time::Duration;
@@ -245,6 +247,11 @@ impl KiloGatewayClient {
     }
 
     fn build_agent(&self) -> Result<ureq::Agent, GatewayError> {
+        if self.base_url.starts_with("https://api.kilo.ai/") && self.proxy_url.is_none() {
+            return Err(GatewayError::InvalidProxy(
+                "canonical Kilo requests require a paid proxy".into(),
+            ));
+        }
         let mut config = ureq::Agent::config_builder()
             .timeout_global(Some(self.request_timeout))
             .http_status_as_error(false);
@@ -280,16 +287,30 @@ impl KiloGatewayClient {
         let payload = ChatCompletionPayload {
             model: &request.model,
             messages: &request.messages,
-            max_tokens: request.max_tokens,
+            max_tokens: Some(request.max_tokens),
             temperature: request.temperature,
             stream: true,
             stream_options: Some(StreamOptions {
                 include_usage: true,
             }),
         };
+        let agent = self.build_agent()?;
+        let recommendation = if self.base_url.starts_with("https://api.kilo.ai/") {
+            Some(scanner::read_base()?)
+        } else {
+            None
+        };
+        let payload = ChatCompletionPayload {
+            model: recommendation
+                .as_ref()
+                .map_or(payload.model, |model| model.id.as_str()),
+            max_tokens: recommendation
+                .as_ref()
+                .map_or(payload.max_tokens, |model| model.max_output_tokens),
+            ..payload
+        };
         let url = format!("{}/chat/completions", self.base_url);
         let diagnostic_url = ilium_logging::redacted_url(&url);
-        let agent = self.build_agent()?;
         let mut response = agent
             .post(&url)
             .header("Content-Type", "application/json")
@@ -369,10 +390,21 @@ impl KiloGatewayClient {
     where
         F: FnMut(&ChatCompletionPayload) -> Result<ChatCompletionResponse, GatewayError>,
     {
+        self.complete_text_for_model(request, &mut send)
+    }
+
+    fn complete_text_for_model<F>(
+        &self,
+        request: &CompletionRequest,
+        send: &mut F,
+    ) -> Result<String, GatewayError>
+    where
+        F: FnMut(&ChatCompletionPayload) -> Result<ChatCompletionResponse, GatewayError>,
+    {
         let payload = ChatCompletionPayload {
             model: &request.model,
             messages: &request.messages,
-            max_tokens: request.max_tokens,
+            max_tokens: Some(request.max_tokens),
             temperature: request.temperature,
             stream: false,
             stream_options: None,
@@ -392,7 +424,7 @@ impl KiloGatewayClient {
                 attempt,
                 attempts,
                 model = payload.model,
-                max_tokens = payload.max_tokens,
+                max_tokens = ?payload.max_tokens,
                 message_count = payload.messages.len(),
                 prompt_characters = payload
                     .messages
@@ -487,28 +519,45 @@ impl KiloGatewayClient {
         &self,
         payload: &ChatCompletionPayload<'_>,
     ) -> Result<ChatCompletionResponse, GatewayError> {
+        let agent = self.build_agent()?;
+        let recommendation = if self.base_url.starts_with("https://api.kilo.ai/") {
+            Some(scanner::read_base()?)
+        } else {
+            None
+        };
+        let payload = ChatCompletionPayload {
+            model: recommendation
+                .as_ref()
+                .map_or(payload.model, |model| model.id.as_str()),
+            max_tokens: recommendation
+                .as_ref()
+                .map_or(payload.max_tokens, |model| model.max_output_tokens),
+            messages: payload.messages,
+            temperature: payload.temperature,
+            stream: payload.stream,
+            stream_options: None,
+        };
         let url = format!("{}/chat/completions", self.base_url);
         let diagnostic_url = ilium_logging::redacted_url(&url);
         tracing::info!(
             method = "POST",
             url = %diagnostic_url,
             headers = ?[("Content-Type", "application/json")],
-            request_characters = serde_json::to_string(payload).map(|body| body.chars().count()).unwrap_or_default(),
+            request_characters = serde_json::to_string(&payload).map(|body| body.chars().count()).unwrap_or_default(),
             "HTTP request started"
         );
         tracing::debug!(
             method = "POST",
             url = %diagnostic_url,
-            request_body = %serde_json::to_string(payload).unwrap_or_else(|error| format!("<serialization failed: {error}>")),
+            request_body = %serde_json::to_string(&payload).unwrap_or_else(|error| format!("<serialization failed: {error}>")),
             "HTTP request payload"
         );
         // A one-shot UI enrichment must never leave its tracked worker
         // waiting indefinitely on a broken network path.
-        let agent = self.build_agent()?;
         let mut response = match agent
             .post(&url)
             .header("Content-Type", "application/json")
-            .send_json(payload)
+            .send_json(&payload)
         {
             Ok(response) => response,
             Err(error) => {
@@ -606,7 +655,8 @@ fn redacted_response_headers(headers: &ureq::http::HeaderMap) -> Vec<(String, St
 struct ChatCompletionPayload<'a> {
     model: &'a str,
     messages: &'a [ChatMessage],
-    max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
     temperature: f32,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -875,18 +925,18 @@ mod tests {
     #[test]
     fn explicit_request_preserves_selected_model_and_token_budget() {
         let request = CompletionRequest::new(
-            "stepfun/step-5-preview-free",
+            "dots-studio/dots-3-note-preview:free",
             vec![ChatMessage::user("restructure this project")],
             4096,
         );
 
-        assert_eq!(request.model, "stepfun/step-5-preview-free");
+        assert_eq!(request.model, "dots-studio/dots-3-note-preview:free");
         assert_eq!(request.max_tokens, 4096);
     }
 
     #[test]
     fn selected_model_and_restructure_budget_reach_the_http_payload() {
-        let response_body = r#"{"model":"stepfun/step-5-preview-free","choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]}"#;
+        let response_body = r#"{"model":"dots-studio/dots-3-note-preview:free","choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]}"#;
         let (base_url, request_receiver) = spawn_http_response("200 OK", response_body);
         let client = KiloGatewayClient::new(
             base_url,
@@ -897,7 +947,7 @@ mod tests {
             },
         );
         let request = CompletionRequest::new(
-            "stepfun/step-5-preview-free",
+            "dots-studio/dots-3-note-preview:free",
             vec![ChatMessage::user("restructure")],
             4096,
         );
@@ -913,7 +963,10 @@ mod tests {
             .expect("captured HTTP body");
         let request_json: serde_json::Value =
             serde_json::from_str(request_body).expect("valid request JSON");
-        assert_eq!(request_json["model"], "stepfun/step-5-preview-free");
+        assert_eq!(
+            request_json["model"],
+            "dots-studio/dots-3-note-preview:free"
+        );
         assert_eq!(request_json["max_tokens"], 4096);
     }
 
@@ -950,6 +1003,24 @@ mod tests {
 
         assert_eq!(result.unwrap(), "Ilium");
         assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn does_not_substitute_a_fixed_model_after_authentication_failure() {
+        let client = KiloGatewayClient::new("https://example.invalid", RetryPolicy::default());
+        let seen = std::cell::RefCell::new(Vec::new());
+        let result = client.complete_text_with_sender(&request(), |payload| {
+            seen.borrow_mut().push(payload.model.to_string());
+            Err(GatewayError::Http {
+                status: 401,
+                message: "login required".into(),
+            })
+        });
+        assert!(matches!(
+            result,
+            Err(GatewayError::Http { status: 401, .. })
+        ));
+        assert_eq!(seen.borrow().len(), 1);
     }
 
     #[test]

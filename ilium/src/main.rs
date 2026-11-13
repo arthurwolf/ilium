@@ -23,11 +23,14 @@
 use ilium::session;
 
 mod broadcast;
+mod close_pane;
+mod ctl;
 mod pane_filter;
 mod pane_scan;
 mod panes;
 mod progress_wait;
 mod recap;
+mod resource;
 mod voice;
 
 use std::ffi::OsString;
@@ -37,7 +40,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 use ilium::error::CliError;
 use ilium_core::BuiltinAgentProvider;
@@ -90,6 +93,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Coordinate exclusive shared GPU and USB-board reservations.
+    #[command(alias = "ressource")]
+    Resource(resource::ResourceArgs),
     /// Internal native clipboard owner; never opens a session or runtime.
     #[command(hide = true)]
     ClipboardHelper,
@@ -161,9 +167,9 @@ enum Command {
     /// Same as `ilium progress wait`: blocks until MONITOR_ID (or this pane's
     /// only running monitor) settles, then prints one JSONL line.
     Wait {
+        /// Monitor to wait for; defaults to the pane's only running monitor
+        /// (or its only monitor).
         monitor_id: Option<u64>,
-        #[arg(long)]
-        timeout_seconds: Option<u64>,
     },
     /// Voice control from the command line: `voice say` types sentences into
     /// the running voice session as if they had been spoken. Output is JSONL.
@@ -185,6 +191,14 @@ enum Command {
     /// "Send message to all" does. The pane running this command is skipped
     /// unless --include-self is given. Output is JSONL.
     Broadcast(broadcast::BroadcastArgs),
+    /// Close a pane of this session, by default the pane this command runs
+    /// in. `--worktree remove` also removes the pane's Ilium-created Git
+    /// worktree when it is clean, merged and unused. Output is JSONL.
+    ClosePane(close_pane::ClosePaneArgs),
+    /// Full remote control of a running session for agents and scripts: read
+    /// the tree, project or pane as JSON/YAML/Markdown; create, rename, move,
+    /// close and drive panes; manage worktrees. Start with `ilium ctl guide`.
+    Ctl(ctl::CtlArgs),
 }
 
 /// Local chatroom operations intentionally avoid the detached server: agents
@@ -281,10 +295,6 @@ enum ProgressCommand {
         /// the wait's status). The usual way to run a long task.
         #[arg(long)]
         wait: bool,
-        /// With --wait: give up after this many seconds (exit 6, task still
-        /// running). Omit to wait as long as the task takes.
-        #[arg(long, requires = "wait")]
-        timeout_seconds: Option<u64>,
         /// Clear every monitor of this pane (running ones included) before
         /// adding this one. Without it, `set` adds beside the others.
         #[arg(long)]
@@ -292,7 +302,7 @@ enum ProgressCommand {
     },
     /// Blocks until MONITOR_ID reports done or error, or the monitor fails or
     /// is cleared. Prints one JSONL line and exits 0 done, 3 task error, 4
-    /// monitor failed (outcome unknown), 5 cleared/no monitor, 6 timeout, 2
+    /// monitor failed (outcome unknown), 5 cleared/no monitor, 2
     /// when no ID was given and the pane has several candidate monitors.
     /// While this command is waiting, the result is returned here instead of
     /// being typed into the agent's prompt.
@@ -300,16 +310,14 @@ enum ProgressCommand {
         /// Monitor to wait for; defaults to the pane's only running monitor
         /// (or its only monitor).
         monitor_id: Option<u64>,
-        /// Give up after this many seconds (exit 6). Omit to wait as long as
-        /// the task takes.
-        #[arg(long)]
-        timeout_seconds: Option<u64>,
     },
     /// Claude Code `PreToolUse` hook (installed by Ilium into project
     /// `.claude/settings.local.json`). Reads the hook payload on stdin and,
     /// inside an Ilium pane, refuses a foreground Bash call with a tool
     /// timeout above three minutes that is not an `ilium progress` command:
-    /// exit 0 with a deny decision on stdout. Otherwise exits 0. Listed in
+    /// exit 0 with a deny decision on stdout. A background Bash call in a
+    /// pane passes with a reminder (`additionalContext`) to register a monitor
+    /// for long tasks. Otherwise exits 0. Listed in
     /// help on purpose: the project hook runs it only when `ilium progress
     /// --help` names `guard`.
     Guard,
@@ -317,13 +325,18 @@ enum ProgressCommand {
     Status,
     /// Stops a monitor and clears its retained progress. Without
     /// `--monitor-id`, clears the pane's only monitor; with several, pass
-    /// `--monitor-id` or `--all`.
+    /// `--monitor-id` or `--all`. A monitor that is still running is refused
+    /// unless `--running` is given: on a pane shared by several agents, an
+    /// agent that guesses an ID would otherwise stop another agent's task.
     Clear {
         #[arg(long, conflicts_with = "all")]
         monitor_id: Option<u64>,
         /// Clear every monitor of this pane.
         #[arg(long)]
         all: bool,
+        /// Also clear the monitor when its task is still running.
+        #[arg(long, requires = "monitor_id")]
+        running: bool,
     },
 }
 
@@ -357,7 +370,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let explicit_cwd = matches.value_source("cwd") == Some(clap::parser::ValueSource::CommandLine);
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     if matches!(&cli.command, Some(Command::ClipboardHelper)) {
         return match ilium_client::terminal_clipboard::run_helper() {
             Ok(()) => ExitCode::SUCCESS,
@@ -422,11 +437,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    runtime.block_on(run_main(cli))
+    runtime.block_on(run_main(cli, explicit_cwd))
 }
 
-async fn run_main(cli: Cli) -> ExitCode {
-    let outcome = dispatch(cli).await;
+async fn run_main(cli: Cli, explicit_cwd: bool) -> ExitCode {
+    let outcome = dispatch(cli, explicit_cwd).await;
     if let Some(error) = outcome
         .as_ref()
         .err()
@@ -475,7 +490,7 @@ async fn process_logging_barrier(shutdown: bool) -> Result<(), ilium_logging::Lo
     .map_err(|_| ilium_logging::LoggingError::Deadline)?
 }
 
-async fn dispatch(cli: Cli) -> Result<(), CliError> {
+async fn dispatch(cli: Cli, explicit_cwd: bool) -> Result<(), CliError> {
     match cli.command {
         Some(Command::ClipboardHelper) => Err(CliError::ServerReportedError(
             "Clipboard helper must run before runtime startup".into(),
@@ -536,22 +551,16 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
             }
             _ => new_pane(&session_name, &cmd, &cli.cwd, keep_open).await,
         },
+        Some(Command::Resource(args)) => resource::run(args, &cli.cwd, explicit_cwd).await,
         Some(Command::Chat { command }) => chat(command, &cli.cwd),
         Some(Command::Progress { command }) => progress(command).await,
-        Some(Command::Wait {
-            monitor_id,
-            timeout_seconds,
-        }) => {
-            progress(ProgressCommand::Wait {
-                monitor_id,
-                timeout_seconds,
-            })
-            .await
-        }
+        Some(Command::Wait { monitor_id }) => progress(ProgressCommand::Wait { monitor_id }).await,
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
         Some(Command::Panes(args)) => panes::panes(args, &cli.cwd).await,
         Some(Command::Recap(args)) => recap::recap(args, &cli.cwd).await,
         Some(Command::Broadcast(args)) => broadcast::broadcast(args, &cli.cwd).await,
+        Some(Command::ClosePane(args)) => close_pane::close_pane(args).await,
+        Some(Command::Ctl(args)) => ctl::ctl(args, &cli.cwd).await,
     }
 }
 
@@ -605,6 +614,19 @@ fn read_hook_input() -> HookInput {
 }
 
 fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
+    let pane_worktree = std::env::var_os(ilium_ipc::pane_env::WORKTREE)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
+    chat_with_pane_worktree(command, cwd, pane_worktree.as_deref())
+}
+
+/// `chat` with the pane's worktree passed in, so tests need not mutate the
+/// process environment.
+fn chat_with_pane_worktree(
+    command: ChatCommand,
+    cwd: &Path,
+    pane_worktree: Option<&Path>,
+) -> Result<(), CliError> {
     // `paths::canonicalize` strips Windows' extended-length `\\?\` prefix:
     // this value is printed straight to the user below ("chatroom ready at
     // ...") and written into `CHATROOM.md`, neither of which should show it.
@@ -619,7 +641,7 @@ fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
             Ok(())
         }
         ChatCommand::Send { message, author } => {
-            let project_root = chatroom_project_root(&cwd);
+            let project_root = chatroom_project_root(&cwd, pane_worktree);
             let author = author.unwrap_or_else(default_chatroom_author);
             ilium_client::chatroom::append_message(&project_root, &author, &message)?;
             println!("chatroom message sent");
@@ -631,7 +653,7 @@ fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
             max_bytes,
             reader,
         } => {
-            let project_root = chatroom_project_root(&cwd);
+            let project_root = chatroom_project_root(&cwd, pane_worktree);
             let hook_input = if since_last_read {
                 read_hook_input()
             } else {
@@ -663,7 +685,10 @@ fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
             Ok(())
         }
         ChatCommand::Tail { limit } => {
-            let project_root = chatroom_project_root(&cwd);
+            let project_root = chatroom_project_root(&cwd, pane_worktree);
+            // Unlike the hook-driven `context`, `tail` is run on purpose, so a
+            // directory with no room is an error rather than empty output.
+            ilium_client::chatroom::require_room(&project_root)?;
             for message in ilium_client::chatroom::read_messages(&project_root, limit)? {
                 println!(
                     "{} | {} | {}",
@@ -675,19 +700,24 @@ fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
     }
 }
 
-/// Finds the nearest owning room so a provider hook also works when an agent
-/// starts in a project subdirectory rather than exactly at the project root.
-fn chatroom_project_root(cwd: &Path) -> PathBuf {
-    cwd.ancestors()
-        .find(|ancestor| ilium_client::chatroom::exists(ancestor))
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| cwd.to_path_buf())
+/// Finds the owning room so a provider hook also works when an agent starts in
+/// a project subdirectory, in a linked worktree (the room is git-ignored and
+/// lives only in the main checkout), or in a shell that left its pane's
+/// worktree. See `ilium_client::chatroom_root` for the lookup order.
+fn chatroom_project_root(cwd: &Path, pane_worktree: Option<&Path>) -> PathBuf {
+    ilium_client::chatroom_root::resolve_project_root(cwd, pane_worktree)
 }
 
 fn default_chatroom_author() -> String {
     std::env::var("ILIUM_CHATROOM_AUTHOR")
-        .or_else(|_| std::env::var("AGENT_NAME"))
-        .unwrap_or_else(|_| "agent".to_string())
+        .ok()
+        .filter(|author| !author.trim().is_empty())
+        .or_else(|| {
+            std::env::var("AGENT_NAME")
+                .ok()
+                .filter(|author| !author.trim().is_empty())
+        })
+        .unwrap_or_else(|| "agent".to_string())
 }
 
 /// This pane's identity, as injected by `ilium-server` at spawn time (see
@@ -805,20 +835,13 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
         }
     };
 
-    // Pending `--wait` after a successful `set`, as its timeout.
-    let mut wait_after_set: Option<Option<u64>> = None;
+    // Registration and waiting are separate: nonblocking `set` remains unchanged.
+    let mut wait_after_set = false;
     let (request, expected_response) = match command {
-        ProgressCommand::Wait {
-            monitor_id,
-            timeout_seconds,
-        } => {
-            let result = progress_wait::wait_for_monitor(
-                &mut connection,
-                identity.pane_id,
-                monitor_id,
-                timeout_seconds.map(Duration::from_secs),
-            )
-            .await;
+        ProgressCommand::Wait { monitor_id } => {
+            let result =
+                progress_wait::wait_for_monitor(&mut connection, identity.pane_id, monitor_id)
+                    .await;
             return finish_progress_wait(connection, identity.pane_id, request_id, result).await;
         }
         ProgressCommand::Check { command } => (
@@ -833,15 +856,12 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
             command,
             interval_seconds,
             wait,
-            timeout_seconds,
             replace,
         } => {
             if replace {
                 clear_all_before_replace(&mut connection, identity.pane_id, request_id).await?;
             }
-            if wait {
-                wait_after_set = Some(timeout_seconds);
-            }
+            wait_after_set = wait;
             (
                 ilium_ipc::ClientRequest::SetPaneProgressMonitor {
                     request_id,
@@ -860,9 +880,17 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
             },
             ExpectedProgressResponse::Status,
         ),
-        ProgressCommand::Clear { monitor_id, all } => {
+        ProgressCommand::Clear {
+            monitor_id,
+            all,
+            running,
+        } => {
             if monitor_id.is_none() && !all {
                 refuse_ambiguous_clear(&mut connection, identity.pane_id, request_id).await?;
+            }
+            if let (Some(monitor_id), false) = (monitor_id, running) {
+                refuse_running_clear(&mut connection, identity.pane_id, monitor_id, request_id)
+                    .await?;
             }
             (
                 ilium_ipc::ClientRequest::ClearPaneProgressMonitor {
@@ -898,13 +926,12 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
         _ => None,
     };
     let response = match (wait_after_set, accepted_monitor_id, response) {
-        (Some(timeout_seconds), Some(monitor_id), Ok(response)) => {
+        (true, Some(monitor_id), Ok(response)) => {
             print_progress_response(request_id, response)?;
             let result = progress_wait::wait_for_monitor(
                 &mut connection,
                 identity.pane_id,
                 Some(monitor_id),
-                timeout_seconds.map(Duration::from_secs),
             )
             .await;
             return finish_progress_wait(connection, identity.pane_id, request_id, result).await;
@@ -1012,6 +1039,48 @@ fn print_monitor_ambiguous(
 
 /// `clear` without an ID must not silently stop several monitors, some of
 /// which may belong to another agent sharing this pane.
+/// Whether `monitor_id` is on the pane and its task is still being observed
+/// as not finished. A failed monitor is not running: its task outcome is
+/// unknown and clearing it is the documented recovery.
+fn is_running_monitor(monitors: &[ilium_core::PaneProgress], monitor_id: u64) -> bool {
+    monitors.iter().any(|progress| {
+        progress.monitor_id == monitor_id
+            && !progress.report.status.is_terminal()
+            && !matches!(
+                progress.monitor_health,
+                ilium_core::ProgressMonitorHealth::Failed { .. }
+            )
+    })
+}
+
+/// `clear --monitor-id <id>` on a running monitor: refuses unless `--running`
+/// was given. Live demo agents sharing a pane picked the first ID from
+/// `ilium progress status` to clear their own finished monitor; on a shared
+/// pane that ID can be another agent's running task.
+async fn refuse_running_clear(
+    connection: &mut ilium_client::connection::Connection,
+    pane_id: ilium_core::NodeId,
+    monitor_id: u64,
+    request_id: u64,
+) -> Result<(), CliError> {
+    let monitors = read_pane_monitors(connection, pane_id, "clear", request_id).await?;
+    if !is_running_monitor(&monitors, monitor_id) {
+        return Ok(());
+    }
+    println!(
+        "{{\"type\":\"progress_rejected\",\"operation\":\"clear\",\"request_id\":{request_id},\"pane_id\":{},\"code\":\"monitor-running\",\"monitor_id\":{monitor_id},\"message\":{}}}",
+        pane_id.0,
+        json_string(&format!(
+            "progress monitor {monitor_id} is still running and may belong to another agent; clear only the ID your own `ilium progress set` printed, or pass --running to stop a running monitor on purpose"
+        ))
+    );
+    let _ = connection
+        .requests
+        .send(ilium_ipc::ClientRequest::Detach)
+        .await;
+    Err(CliError::ExitStatus(2))
+}
+
 async fn refuse_ambiguous_clear(
     connection: &mut ilium_client::connection::Connection,
     pane_id: ilium_core::NodeId,
@@ -1186,9 +1255,9 @@ async fn wait_for_progress_response(
                 ));
             }
         }
-        Err(CliError::ServerReportedError(
-            "connection closed before the correlated progress response arrived".to_string(),
-        ))
+        Err(CliError::ServerReportedError(format!(
+            "connection closed before the correlated progress response arrived; {SERVER_BUILD_MISMATCH_HINT}"
+        )))
     })
     .await
     .map_err(|_| {
@@ -1377,6 +1446,15 @@ const fn progress_rejection_code_name(
     }
 }
 
+/// Appended when the server closes a progress connection without answering. The server drops a
+/// connection whose request it cannot decode, which is what happens when this binary and the
+/// running server come from different builds (new binaries installed, Ilium not restarted yet).
+/// Without this, agents only see an opaque transport failure and retry blindly.
+pub(crate) const SERVER_BUILD_MISMATCH_HINT: &str =
+    "the running ilium server is probably a different build than this ilium command (for \
+     example new binaries installed without restarting Ilium), so restart Ilium or use the \
+     matching ilium binary";
+
 fn json_string(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len() + 2);
     encoded.push('"');
@@ -1429,20 +1507,85 @@ async fn attach_or_create(
         should_reset_session,
         "interactive session attach started"
     );
-    let exit_reason = ilium_client::run(ilium_client::RunOptions {
+    let run_result = ilium_client::run(ilium_client::RunOptions {
         session_name: project_session.name.clone(),
         session_cwd: project_session.project_root.clone(),
         socket_path: project_session.socket_path.clone(),
         log_path,
         onboarding,
     })
-    .await?;
+    .await;
+    let exit_reason = match run_result {
+        Ok(exit_reason) => exit_reason,
+        Err(ilium_client::error::ClientError::ServerConnectionLost(error)) => {
+            return recover_lost_server_connection(&client_executable, &project_session, error)
+                .await;
+        }
+        Err(error) => return Err(error.into()),
+    };
     match exit_reason {
         ilium_client::ClientExitReason::Quit => Ok(()),
         ilium_client::ClientExitReason::RestartRequested => {
-            restart_client_process(&client_executable, &project_session).await
+            restart_client_process(&client_executable, &project_session, None).await
         }
     }
+}
+
+/// Environment variable carrying `<attempts>:<first unix second>` across the
+/// client relaunches this module performs after a lost server connection.
+const CONNECTION_RECOVERY_ENV: &str = "ILIUM_CONNECTION_RECOVERY";
+/// A server that keeps dropping the window must not trap it in a relaunch
+/// loop: after this many relaunches inside the window the error is reported.
+const MAX_CONNECTION_RECOVERIES: u64 = 5;
+const CONNECTION_RECOVERY_WINDOW_SECONDS: u64 = 600;
+const CONNECTION_RECOVERY_DELAY: Duration = Duration::from_millis(500);
+
+/// Computes the recovery state for the next relaunch, or `None` when the
+/// relaunch budget of the current window is spent. Pure so the budget is
+/// testable without a process or a clock.
+fn next_connection_recovery_state(previous: Option<&str>, now_seconds: u64) -> Option<String> {
+    let (attempts, window_start) = previous
+        .and_then(|state| state.split_once(':'))
+        .and_then(|(attempts, start)| {
+            Some((attempts.parse::<u64>().ok()?, start.parse::<u64>().ok()?))
+        })
+        .filter(|(_, start)| {
+            now_seconds.saturating_sub(*start) < CONNECTION_RECOVERY_WINDOW_SECONDS
+        })
+        .unwrap_or((0, now_seconds));
+    let attempts = attempts.checked_add(1)?;
+    (attempts <= MAX_CONNECTION_RECOVERIES).then(|| format!("{attempts}:{window_start}"))
+}
+
+/// The server dropped this window while it was running (for example after a
+/// failed lag resynchronization) but is still serving its session: relaunch
+/// the window so it reattaches instead of leaving the user with a dead
+/// terminal. A server that is gone (killed session, crash) or a spent
+/// relaunch budget reports the original error unchanged, so a deliberate
+/// shutdown never resurrects the server.
+async fn recover_lost_server_connection(
+    executable_path: &Path,
+    project_session: &session::ProjectSession,
+    error: ilium_ipc::IpcError,
+) -> Result<(), CliError> {
+    tracing::warn!(%error, "lost the server connection while the window was running");
+    let lost = ilium_client::error::ClientError::ServerConnectionLost(error);
+    if !session::is_session_live(&project_session.socket_path) {
+        tracing::warn!("the session server is no longer live; not relaunching the window");
+        return Err(lost.into());
+    }
+    let now_seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let Some(recovery_state) = next_connection_recovery_state(
+        std::env::var(CONNECTION_RECOVERY_ENV).ok().as_deref(),
+        now_seconds,
+    ) else {
+        tracing::error!("the window lost its server connection too often; not relaunching");
+        return Err(lost.into());
+    };
+    tokio::time::sleep(CONNECTION_RECOVERY_DELAY).await;
+    restart_client_process(executable_path, project_session, Some(recovery_state)).await
 }
 
 /// Replaces this client process with the executable captured before the TUI
@@ -1451,14 +1594,20 @@ async fn attach_or_create(
 async fn restart_client_process(
     executable_path: &Path,
     project_session: &session::ProjectSession,
+    connection_recovery_state: Option<String>,
 ) -> Result<(), CliError> {
     tracing::info!("client process replacement requested");
     process_logging_barrier(false).await?;
-    let source = ilium_platform::process_control::replace_current_process(
-        ProcessCommand::new(executable_path)
-            .args(client_restart_args(project_session))
-            .current_dir(&project_session.project_root),
-    );
+    let mut command = ProcessCommand::new(executable_path);
+    command
+        .args(client_restart_args(project_session))
+        .current_dir(&project_session.project_root);
+    match connection_recovery_state {
+        Some(state) => command.env(CONNECTION_RECOVERY_ENV, state),
+        // A deliberate restart starts a fresh relaunch budget.
+        None => command.env_remove(CONNECTION_RECOVERY_ENV),
+    };
+    let source = ilium_platform::process_control::replace_current_process(&mut command);
     Err(CliError::RestartClient {
         path: executable_path.to_path_buf(),
         source,
@@ -1906,7 +2055,7 @@ async fn new_pane(
         Ok(None)
     })
     .await;
-    let baseline_pane_count = match baseline_wait {
+    let _baseline_pane_count = match baseline_wait {
         Ok(Ok(count)) => count,
         Ok(Err(message)) => return Err(message),
         Err(_elapsed) => None,
@@ -1921,6 +2070,7 @@ async fn new_pane(
     connection
         .requests
         .send(ilium_ipc::ClientRequest::NewPane {
+            request_id: 1,
             parent_group: ilium_core::ROOT_ID,
             kind,
             // The non-interactive CLI has no focused client-side terminal
@@ -1943,15 +2093,11 @@ async fn new_pane(
                         _event_retention,
                     )));
                 }
-                ilium_ipc::ServerEvent::TreeSnapshot(tree) => {
-                    let grew =
-                        baseline_pane_count.is_none_or(|baseline| tree.panes().count() > baseline);
-                    if grew {
-                        return Some(Ok(()));
-                    }
-                    // A `TreeSnapshot` that didn't grow the pane count is
-                    // some other client's unrelated mutation racing on the
-                    // same session -- keep waiting for our own.
+                ilium_ipc::ServerEvent::PaneCreateFinished {
+                    request_id: 1,
+                    result,
+                } => {
+                    return Some(result.map(|_| ()).map_err(CliError::ServerReportedError));
                 }
                 _ => {}
             }
@@ -2075,11 +2221,29 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        chatroom_project_root, client_restart_args, default_workspace_path, join_for_shell,
-        json_string, pane_identity_from_values, pane_progress_json, progress_report_json, session,
-        shell_join, workspace_provider, Cli, Command, ProgressCommand,
+        chat_with_pane_worktree, chatroom_project_root, client_restart_args,
+        default_workspace_path, join_for_shell, json_string, pane_identity_from_values,
+        pane_progress_json, progress_report_json, session, shell_join, workspace_provider,
+        ChatCommand, Cli, Command, ProgressCommand,
     };
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn resource_project_selection_distinguishes_explicit_cwd_from_default() {
+        use clap::parser::ValueSource;
+
+        for arguments in [
+            vec!["ilium", "--cwd", ".", "resource", "list"],
+            vec!["ilium", "resource", "list", "--cwd=."],
+        ] {
+            let matches = Cli::command().try_get_matches_from(arguments).unwrap();
+            assert_eq!(matches.value_source("cwd"), Some(ValueSource::CommandLine));
+        }
+        let matches = Cli::command()
+            .try_get_matches_from(["ilium", "resource", "list"])
+            .unwrap();
+        assert_eq!(matches.value_source("cwd"), Some(ValueSource::DefaultValue));
+    }
 
     #[test]
     fn onboarding_flag_is_available_for_bare_and_named_interactive_attach() {
@@ -2092,6 +2256,31 @@ mod tests {
         assert!(named.onboarding);
         assert!(matches!(named.command, Some(Command::NewSession { .. })));
         assert!(!Cli::try_parse_from(["ilium"]).unwrap().onboarding);
+    }
+
+    #[test]
+    fn connection_recovery_budget_counts_relaunches_inside_one_window() {
+        use super::{next_connection_recovery_state as next, MAX_CONNECTION_RECOVERIES};
+        assert_eq!(next(None, 1_000).as_deref(), Some("1:1000"));
+        assert_eq!(next(Some("1:1000"), 1_030).as_deref(), Some("2:1000"));
+        let spent = format!("{MAX_CONNECTION_RECOVERIES}:1000");
+        assert_eq!(next(Some(&spent), 1_100), None);
+    }
+
+    #[test]
+    fn connection_recovery_budget_restarts_after_the_window_or_bad_state() {
+        use super::{
+            next_connection_recovery_state as next, CONNECTION_RECOVERY_WINDOW_SECONDS,
+            MAX_CONNECTION_RECOVERIES,
+        };
+        let spent = format!("{MAX_CONNECTION_RECOVERIES}:1000");
+        let later = 1_000 + CONNECTION_RECOVERY_WINDOW_SECONDS;
+        assert_eq!(
+            next(Some(&spent), later).as_deref(),
+            Some(&*format!("1:{later}"))
+        );
+        assert_eq!(next(Some("garbage"), 50).as_deref(), Some("1:50"));
+        assert_eq!(next(Some("x:y"), 50).as_deref(), Some("1:50"));
     }
 
     #[test]
@@ -2298,7 +2487,41 @@ mod tests {
         std::fs::create_dir_all(&nested).unwrap();
         ilium_client::chatroom::initialize(project.path()).unwrap();
 
-        assert_eq!(chatroom_project_root(&nested), project.path());
+        assert_eq!(chatroom_project_root(&nested, None), project.path());
+    }
+
+    #[test]
+    fn tail_and_send_report_a_missing_room_but_context_stays_silent() {
+        let project = tempfile::tempdir().unwrap();
+
+        let tail = chat_with_pane_worktree(ChatCommand::Tail { limit: 5 }, project.path(), None)
+            .unwrap_err();
+        assert!(tail
+            .to_string()
+            .ends_with(ilium_client::chatroom_root::NO_CHATROOM_MESSAGE));
+        let send = chat_with_pane_worktree(
+            ChatCommand::Send {
+                message: "hello".to_string(),
+                author: Some("test".to_string()),
+            },
+            project.path(),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(send.to_string(), tail.to_string());
+        // Lifecycle hooks run in every project, including ones without a room.
+        chat_with_pane_worktree(
+            ChatCommand::Context {
+                limit: 5,
+                since_last_read: false,
+                max_bytes: None,
+                reader: None,
+            },
+            project.path(),
+            None,
+        )
+        .unwrap();
+        assert!(!project.path().join("CHATROOM.md").exists());
     }
 
     /// `ilium progress` only works run from inside a pane ilium itself
@@ -2332,6 +2555,28 @@ mod tests {
     }
 
     #[test]
+    fn logical_wait_deadlines_are_unsupported() {
+        for args in [
+            vec!["ilium", "wait", "7", "--timeout-seconds", "60"],
+            vec!["ilium", "progress", "wait", "7", "--timeout-seconds", "60"],
+            vec![
+                "ilium",
+                "progress",
+                "set",
+                "--command",
+                "/work/status --json",
+                "--wait",
+                "--timeout-seconds",
+                "60",
+            ],
+        ] {
+            let error = Cli::try_parse_from(args).expect_err("logical waits have no deadline");
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+            assert!(error.to_string().contains("--timeout-seconds"));
+        }
+    }
+
+    #[test]
     fn progress_set_defaults_to_one_second_interval() {
         let cli = Cli::try_parse_from([
             "ilium",
@@ -2349,7 +2594,6 @@ mod tests {
                     command,
                     interval_seconds: 1,
                     wait: false,
-                    timeout_seconds: None,
                     replace: false,
                 }
             }) if command == "/work/status --json"
@@ -2357,7 +2601,7 @@ mod tests {
     }
 
     #[test]
-    fn progress_set_can_wait_with_a_timeout_and_replace_on_purpose() {
+    fn progress_set_can_wait_and_replace_on_purpose() {
         let cli = Cli::try_parse_from([
             "ilium",
             "progress",
@@ -2365,8 +2609,6 @@ mod tests {
             "--command",
             "/work/status --json",
             "--wait",
-            "--timeout-seconds",
-            "540",
             "--replace",
         ])
         .unwrap();
@@ -2375,23 +2617,11 @@ mod tests {
             Some(Command::Progress {
                 command: ProgressCommand::Set {
                     wait: true,
-                    timeout_seconds: Some(540),
                     replace: true,
                     ..
                 }
             })
         ));
-        // A timeout only makes sense for a waiting set.
-        assert!(Cli::try_parse_from([
-            "ilium",
-            "progress",
-            "set",
-            "--command",
-            "/work/status --json",
-            "--timeout-seconds",
-            "540",
-        ])
-        .is_err());
     }
 
     #[test]
@@ -2400,21 +2630,15 @@ mod tests {
         assert!(matches!(
             current.command,
             Some(Command::Progress {
-                command: ProgressCommand::Wait {
-                    monitor_id: None,
-                    timeout_seconds: None
-                }
+                command: ProgressCommand::Wait { monitor_id: None }
             })
         ));
-        let exact =
-            Cli::try_parse_from(["ilium", "progress", "wait", "7", "--timeout-seconds", "60"])
-                .unwrap();
+        let exact = Cli::try_parse_from(["ilium", "progress", "wait", "7"]).unwrap();
         assert!(matches!(
             exact.command,
             Some(Command::Progress {
                 command: ProgressCommand::Wait {
-                    monitor_id: Some(7),
-                    timeout_seconds: Some(60)
+                    monitor_id: Some(7)
                 }
             })
         ));
@@ -2422,8 +2646,7 @@ mod tests {
         assert!(matches!(
             top_level.command,
             Some(Command::Wait {
-                monitor_id: Some(7),
-                timeout_seconds: None
+                monitor_id: Some(7)
             })
         ));
         assert!(Cli::try_parse_from(["ilium", "wait", "not-a-number"]).is_err());
@@ -2457,7 +2680,8 @@ mod tests {
             Some(Command::Progress {
                 command: ProgressCommand::Clear {
                     monitor_id: None,
-                    all: false
+                    all: false,
+                    running: false
                 }
             })
         ));
@@ -2469,7 +2693,8 @@ mod tests {
             Some(Command::Progress {
                 command: ProgressCommand::Clear {
                     monitor_id: Some(99),
-                    all: false
+                    all: false,
+                    running: false
                 }
             })
         ));
@@ -2480,7 +2705,8 @@ mod tests {
             Some(Command::Progress {
                 command: ProgressCommand::Clear {
                     monitor_id: None,
-                    all: true
+                    all: true,
+                    running: false
                 }
             })
         ));
@@ -2488,6 +2714,80 @@ mod tests {
             Cli::try_parse_from(["ilium", "progress", "clear", "--all", "--monitor-id", "99"])
                 .is_err()
         );
+        let running = Cli::try_parse_from([
+            "ilium",
+            "progress",
+            "clear",
+            "--monitor-id",
+            "99",
+            "--running",
+        ])
+        .unwrap();
+        assert!(matches!(
+            running.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Clear {
+                    monitor_id: Some(99),
+                    all: false,
+                    running: true
+                }
+            })
+        ));
+        assert!(Cli::try_parse_from(["ilium", "progress", "clear", "--running"]).is_err());
+    }
+
+    #[test]
+    fn only_an_unfinished_healthy_monitor_counts_as_running_for_clear() {
+        let progress = |monitor_id, status, monitor_health| ilium_core::PaneProgress {
+            monitor_id,
+            report: ilium_core::ProgressTaskReport {
+                job_id: format!("job-{monitor_id}"),
+                status,
+                percent: 50.0,
+                message: String::new(),
+                details: String::new(),
+                error: None,
+                eta_seconds: None,
+                indeterminate: false,
+            },
+            monitor_health,
+            last_observed_unix_millis: 0,
+            timing: Default::default(),
+            attention: Default::default(),
+        };
+        let failed = ilium_core::ProgressMonitorHealth::Failed {
+            consecutive_failures: 3,
+            last_error: "probe exited 1".to_string(),
+        };
+        let monitors = vec![
+            progress(
+                1,
+                ilium_core::ProgressTaskStatus::Running,
+                ilium_core::ProgressMonitorHealth::Healthy,
+            ),
+            progress(
+                2,
+                ilium_core::ProgressTaskStatus::NotStartedYet,
+                ilium_core::ProgressMonitorHealth::Healthy,
+            ),
+            progress(
+                3,
+                ilium_core::ProgressTaskStatus::Done,
+                ilium_core::ProgressMonitorHealth::Healthy,
+            ),
+            progress(
+                4,
+                ilium_core::ProgressTaskStatus::Error,
+                ilium_core::ProgressMonitorHealth::Healthy,
+            ),
+            progress(5, ilium_core::ProgressTaskStatus::Running, failed),
+        ];
+        assert!(super::is_running_monitor(&monitors, 1));
+        assert!(super::is_running_monitor(&monitors, 2));
+        assert!(!super::is_running_monitor(&monitors, 3));
+        assert!(!super::is_running_monitor(&monitors, 4));
+        assert!(!super::is_running_monitor(&monitors, 5));
+        assert!(!super::is_running_monitor(&monitors, 6));
     }
 
     #[test]

@@ -147,6 +147,7 @@ async fn live_worktree_status_refreshes_and_replays_after_head_changes() {
         &mut observer,
         &ClientRequest::Attach {
             session: "workspace".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -238,7 +239,7 @@ async fn workspace_request_can_derive_a_safe_default_path_on_the_server() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn existing_worktree_cannot_start_a_second_agent_pane() {
+async fn existing_worktree_starts_multiple_agent_panes() {
     let server = IsolatedWorkspaceServer::start().await;
     let mut client = server.connect().await;
     let linked = server.root.join("single-agent-worktree");
@@ -259,7 +260,12 @@ async fn existing_worktree_cannot_start_a_second_agent_pane() {
     .await
     .unwrap();
     let (first, _) = create_result(&mut client, 93).await;
-    assert!(matches!(first, ServerEvent::WorkspaceCreated { .. }));
+    let ServerEvent::WorkspaceCreated {
+        pane_id: first_id, ..
+    } = first
+    else {
+        panic!("first agent failed: {first:?}");
+    };
 
     write_frame(
         &mut client,
@@ -267,7 +273,9 @@ async fn existing_worktree_cannot_start_a_second_agent_pane() {
             request_id: 94,
             parent_group: ROOT_ID,
             provider: BuiltinAgentProvider::Codex,
-            spec: WorkspaceCreateSpec::Existing { path: linked },
+            spec: WorkspaceCreateSpec::Existing {
+                path: linked.clone(),
+            },
             initial_input: None,
         },
     )
@@ -275,15 +283,68 @@ async fn existing_worktree_cannot_start_a_second_agent_pane() {
     .unwrap();
     let (second, _) = create_result(&mut client, 94).await;
     assert!(
-        matches!(second, ServerEvent::WorkspaceCreateFailed { .. }),
-        "a second pane was allowed into an occupied worktree: {second:?}"
+        matches!(second, ServerEvent::WorkspaceCreated { .. }),
+        "second agent failed to reuse the worktree: {second:?}"
     );
-    assert_eq!(server.snapshot().await.panes().count(), 1);
+    let mut snapshot = server.snapshot().await;
+    let owner = snapshot.parent_of(first_id).unwrap();
+    assert!(snapshot.get(owner).unwrap().is_worktree());
+    assert!(snapshot
+        .get(snapshot.parent_of(owner).unwrap())
+        .unwrap()
+        .is_project());
+    for request_id in 100..106 {
+        write_frame(
+            &mut client,
+            &ClientRequest::CreateAgentInWorkspace {
+                request_id,
+                parent_group: owner,
+                provider: BuiltinAgentProvider::Codex,
+                spec: WorkspaceCreateSpec::Existing {
+                    path: linked.clone(),
+                },
+                initial_input: None,
+            },
+        )
+        .await
+        .unwrap();
+        let (created, _) = create_result(&mut client, request_id).await;
+        assert!(
+            matches!(created, ServerEvent::WorkspaceCreated { .. }),
+            "{created:?}"
+        );
+    }
+    snapshot = server.snapshot().await;
+    assert_eq!(snapshot.children_of(owner).unwrap().len(), 8);
+    for pane in snapshot.panes() {
+        assert_eq!(pane.parent, Some(owner));
+        assert_eq!(
+            snapshot.pane_workspace(pane.id).unwrap().worktree_root,
+            linked
+        );
+    }
+    write_frame(&mut client, &ClientRequest::ClosePane { pane_id: first_id })
+        .await
+        .unwrap();
+    let event = expect_event(
+        &mut client,
+        Duration::from_secs(10),
+        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.get(first_id).is_none()),
+    )
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!()
+    };
+    assert_eq!(tree.children_of(owner).unwrap().len(), 7);
+    assert!(
+        linked.is_dir(),
+        "closing one agent removed the shared checkout"
+    );
 }
 
 #[cfg(unix)]
 #[tokio::test]
-async fn concurrent_existing_worktree_requests_admit_one_agent() {
+async fn concurrent_existing_worktree_requests_admit_both_agents() {
     let server = IsolatedWorkspaceServer::start().await;
     let linked = server.root.join("concurrent-existing");
     git(
@@ -332,10 +393,10 @@ async fn concurrent_existing_worktree_requests_admit_one_agent() {
             .iter()
             .filter(|result| matches!(result, ServerEvent::WorkspaceCreated { .. }))
             .count(),
-        1,
+        2,
         "concurrent existing worktree results: {results:?}"
     );
-    assert_eq!(server.snapshot().await.panes().count(), 1);
+    assert_eq!(server.snapshot().await.panes().count(), 2);
 }
 
 #[cfg(unix)]
@@ -706,6 +767,20 @@ struct IsolatedWorkspaceServer {
 #[cfg(unix)]
 impl Drop for IsolatedWorkspaceServer {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            use std::io::{Read, Seek, SeekFrom};
+            let status = self.child.try_wait();
+            let log_path = self.root.join("workspace.log");
+            let log_tail = (|| -> std::io::Result<String> {
+                let mut log = std::fs::File::open(&log_path)?;
+                let start = log.metadata()?.len().saturating_sub(32 * 1024);
+                log.seek(SeekFrom::Start(start))?;
+                let mut bytes = Vec::new();
+                log.take(32 * 1024).read_to_end(&mut bytes)?;
+                Ok(String::from_utf8_lossy(&bytes).into_owned())
+            })();
+            eprintln!("isolated worktree server status: {status:?}; log tail: {log_tail:?}");
+        }
         if self.child.try_wait().ok().flatten().is_none() {
             let _ = self.child.kill();
             let _ = self.child.wait();
@@ -819,6 +894,7 @@ impl IsolatedWorkspaceServer {
             &mut stream,
             &ClientRequest::Attach {
                 session: "workspace".into(),
+                hello: Default::default(),
             },
         )
         .await
@@ -836,6 +912,7 @@ impl IsolatedWorkspaceServer {
             &mut stream,
             &ClientRequest::Attach {
                 session: "workspace".into(),
+                hello: Default::default(),
             },
         )
         .await
@@ -865,6 +942,7 @@ async fn repo_facts_and_invalid_branch_rejection_leave_no_pane_or_worktree() {
         &mut client,
         &ClientRequest::Attach {
             session: "workspace-ipc".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -938,6 +1016,7 @@ async fn repo_facts_and_invalid_branch_rejection_leave_no_pane_or_worktree() {
         &mut observer,
         &ClientRequest::Attach {
             session: "workspace-ipc".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -978,6 +1057,7 @@ async fn invalid_include_rolls_back_new_checkout_branch_and_pane() {
         &mut client,
         &ClientRequest::Attach {
             session: "workspace-include-rollback".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1056,6 +1136,7 @@ async fn invalid_include_rolls_back_new_checkout_branch_and_pane() {
         &mut observer,
         &ClientRequest::Attach {
             session: "workspace-include-rollback".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1087,6 +1168,7 @@ async fn partial_include_copy_retains_prior_files_and_worktree() {
         &mut client,
         &ClientRequest::Attach {
             session: "workspace-partial-include".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1123,6 +1205,7 @@ async fn partial_include_copy_retains_prior_files_and_worktree() {
         &mut observer,
         &ClientRequest::Attach {
             session: "workspace-partial-include".into(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1505,11 +1588,14 @@ async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
     .await;
     if let ServerEvent::WorkspaceRemovalBlocked { reasons, .. } = &removed {
         // Some hosts restrict procfs cwd reads even for a same-user service
-        // manager. Force must fail closed when process custody is unknown.
+        // manager. Force must fail closed when process custody is unknown; the
+        // server reports that as a failed worktree process scan job.
         assert!(
-            reasons
-                .iter()
-                .any(|reason| reason.contains("process directory probe is unavailable")),
+            reasons.iter().any(|reason| {
+                reason.contains("process directory probe is unavailable")
+                    || (reason.contains("cannot inspect cwd of process")
+                        && reason.contains("Permission denied"))
+            }),
             "{removed:?}"
         );
         assert!(linked.exists());
@@ -1806,6 +1892,7 @@ async fn retained_worktree_with_an_open_editor_cannot_be_pruned() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: ilium_ipc::NewPaneKind::Editor(path.join(".local.env")),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

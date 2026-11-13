@@ -445,110 +445,150 @@ pub(crate) fn app_completes_each_ordinal_once_and_ack_preserves_picture_and_erro
 pub(crate) fn pooled_app_protects_displayed_and_busy_panes_and_waits_for_retiring_claims(
     select: fn(&mut App, NodeId),
 ) {
-    let (_bank, mut app, ids) = initialized_app(5, 256, select);
-    let displayed = ids[0];
-    let shared = app.terminal_parsing.as_ref().unwrap().shared.clone();
-    let queue = shared.queue.lock().unwrap();
-    let displayed_target = view(&app, displayed)
-        .frontend
-        .as_ref()
-        .unwrap()
-        .target
-        .clone();
-    for (budget, pressure) in [
-        (0, ParserPressure::StatePool),
+    for (budget, reclaim_pressure) in [
+        (256, ParserPressure::StatePool),
         (0, ParserPressure::ProcessStorage),
-        (256, ParserPressure::PaneLimit),
-        (256, ParserPressure::StorageBusy),
     ] {
-        app.terminal_parsing
+        let (_bank, mut app, ids) = initialized_app(5, budget, select);
+        let displayed = ids[0];
+        let shared = app.terminal_parsing.as_ref().unwrap().shared.clone();
+        let queue = shared.queue.lock().unwrap();
+        let displayed_target = view(&app, displayed)
+            .frontend
             .as_ref()
             .unwrap()
-            .set_budget_mib(budget);
-        displayed_target
-            .pressure
-            .store(pressure as usize, Ordering::Release);
+            .target
+            .clone();
+        // Pool Off removes the configured cache cap; it does not remove the
+        // process-wide storage ceiling or permit reclaiming a displayed engine.
+        displayed_target.pressure.store(0, Ordering::Release);
         app.collect_terminal_parsing();
         assert!(ids.iter().all(|id| view(&app, *id).frontend.is_some()));
-        if budget == 0 {
-            let requests = app.take_admitted_outbound_requests();
-            let queued_discard = requests.iter().any(|request| {
-                matches!(
-                    request.view(),
-                    ilium_ipc::ClientRequest::DiscardTerminalDelivery { .. }
-                )
-            });
-            for request in requests {
-                app.enqueue_admitted_request(request);
-            }
-            assert!(
-                !queued_discard,
-                "pool Off must not queue a discard that can delay visible-pane replay"
+        let requests = app.take_admitted_outbound_requests();
+        assert!(
+            !requests.iter().any(|request| matches!(
+                request.view(),
+                ilium_ipc::ClientRequest::DiscardTerminalDelivery { .. }
+            )),
+            "an unpressured pool must not discard hidden delivery"
+        );
+        for request in requests {
+            app.enqueue_admitted_request(request);
+        }
+        for pressure in [ParserPressure::PaneLimit, ParserPressure::StorageBusy] {
+            displayed_target
+                .pressure
+                .store(pressure as usize, Ordering::Release);
+            app.collect_terminal_parsing();
+            assert!(ids.iter().all(|id| view(&app, *id).frontend.is_some()));
+        }
+        let mut hidden = ids[1..].to_vec();
+        hidden.sort_by_key(|id| (app.tree.get(*id).unwrap().last_focus_activity_revision, *id));
+        let busy = hidden[0];
+        let victim = hidden[1];
+        let frontend = view_mut(&mut app, busy).frontend.as_mut().unwrap();
+        frontend.pending.push_back(PaneCommand::Bottom);
+        frontend.output_backpressure = true;
+        let pin = view(&app, victim).painted_source().pinned().unwrap();
+        let old_text = pin.with_screen(|screen| screen.contents());
+        let identity = view(&app, victim).identity.clone();
+        let retiring = view(&app, victim).frontend.as_ref().unwrap().target.clone();
+        let old_alive = retiring.alive.clone();
+        displayed_target
+            .pressure
+            .store(reclaim_pressure as usize, Ordering::Release);
+        app.collect_terminal_parsing();
+        assert!(view(&app, victim).frontend.is_none());
+        assert!(view(&app, displayed).frontend.is_some());
+        assert!(view(&app, busy).frontend.is_some());
+        assert_eq!(shared.engine_claims.load(Ordering::Acquire), ids.len());
+        for _ in 0..3 {
+            app.collect_terminal_parsing();
+            assert_eq!(
+                ids.iter()
+                    .filter(|id| view(&app, **id).frontend.is_none())
+                    .count(),
+                1
             );
         }
-    }
-    let mut hidden = ids[1..].to_vec();
-    hidden.sort_by_key(|id| (app.tree.get(*id).unwrap().last_focus_activity_revision, *id));
-    let busy = hidden[0];
-    let victim = hidden[1];
-    let frontend = view_mut(&mut app, busy).frontend.as_mut().unwrap();
-    frontend.pending.push_back(PaneCommand::Bottom);
-    frontend.output_backpressure = true;
-    let pin = view(&app, victim).painted_source().pinned().unwrap();
-    let old_text = pin.with_screen(|screen| screen.contents());
-    let identity = view(&app, victim).identity.clone();
-    let retiring = view(&app, victim).frontend.as_ref().unwrap().target.clone();
-    let old_alive = retiring.alive.clone();
-    displayed_target
-        .pressure
-        .store(ParserPressure::StatePool as usize, Ordering::Release);
-    app.collect_terminal_parsing();
-    assert!(view(&app, victim).frontend.is_none());
-    assert!(view(&app, displayed).frontend.is_some());
-    assert!(view(&app, busy).frontend.is_some());
-    assert_eq!(shared.engine_claims.load(Ordering::Acquire), ids.len());
-    for _ in 0..3 {
+        assert_eq!(pin.with_screen(|screen| screen.contents()), old_text);
+        displayed_target.pressure.store(0, Ordering::Release);
+        let frontend = view_mut(&mut app, busy).frontend.as_mut().unwrap();
+        frontend.pending.clear();
+        frontend.output_backpressure = false;
+        drop(queue);
+        drop(retiring);
+        pump(&mut app, |_| {
+            shared.engine_claims.load(Ordering::Acquire) == ids.len() - 1
+        });
+        assert_eq!(pin.with_screen(|screen| screen.contents()), old_text);
+        select(&mut app, victim);
         app.collect_terminal_parsing();
+        assert!(Arc::ptr_eq(&identity, &view(&app, victim).identity));
+        assert!(!Arc::ptr_eq(
+            &old_alive,
+            &view(&app, victim).frontend.as_ref().unwrap().target.alive
+        ));
+        let event = ilium_ipc::ServerEvent::TerminalReplay {
+            pane_id: victim,
+            through_sequence: 7,
+            bytes: b"replayed victim".to_vec(),
+            is_complete: true,
+        };
+        let mut original = event;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match app.submit_terminal_event(original) {
+                Ok(()) => break,
+                Err(returned) => {
+                    original = *returned;
+                    assert!(
+                        Instant::now() < deadline,
+                        "reattached parser never admitted retained replay"
+                    );
+                    app.collect_terminal_parsing();
+                    std::thread::yield_now();
+                }
+            }
+        }
+        pump(&mut app, |app| {
+            view(app, victim).can_evict_parser() && view(app, victim).last_output_sequence() == 7
+        });
         assert_eq!(
-            ids.iter()
-                .filter(|id| view(&app, **id).frontend.is_none())
-                .count(),
-            1
+            view(&app, victim).with_screen(|screen| screen.contents()),
+            "replayed victim"
         );
+        assert_eq!(pin.with_screen(|screen| screen.contents()), old_text);
     }
-    assert_eq!(pin.with_screen(|screen| screen.contents()), old_text);
-    displayed_target.pressure.store(0, Ordering::Release);
-    let frontend = view_mut(&mut app, busy).frontend.as_mut().unwrap();
-    frontend.pending.clear();
-    frontend.output_backpressure = false;
-    drop(queue);
-    drop(retiring);
-    pump(&mut app, |_| {
-        shared.engine_claims.load(Ordering::Acquire) == ids.len() - 1
-    });
-    assert_eq!(pin.with_screen(|screen| screen.contents()), old_text);
-    select(&mut app, victim);
-    app.collect_terminal_parsing();
-    assert!(Arc::ptr_eq(&identity, &view(&app, victim).identity));
-    assert!(!Arc::ptr_eq(
-        &old_alive,
-        &view(&app, victim).frontend.as_ref().unwrap().target.alive
-    ));
-    let event = ilium_ipc::ServerEvent::TerminalReplay {
-        pane_id: victim,
-        through_sequence: 7,
-        bytes: b"replayed victim".to_vec(),
-        is_complete: true,
+}
+
+#[test]
+fn accepted_submission_attaches_never_displayed_terminal_without_stealing_focus() {
+    let select = |app: &mut App, pane_id| {
+        app.right_panel_target = crate::app::RightPanelTarget::Pane { pane_id };
     };
-    assert!(app.submit_terminal_event(event).is_ok());
-    pump(&mut app, |app| {
-        view(app, victim).can_evict_parser() && view(app, victim).last_output_sequence() == 7
-    });
-    assert_eq!(
-        view(&app, victim).with_screen(|screen| screen.contents()),
-        "replayed victim"
-    );
-    assert_eq!(pin.with_screen(|screen| screen.contents()), old_text);
+    let (_bank, mut app, ids) = initialized_app(2, 0, select);
+    let hidden = ids[1];
+    view_mut(&mut app, hidden).frontend = None;
+    let focus = app.right_panel_target.clone();
+    app.send_terminal_submission(
+        hidden,
+        "voice original".into(),
+        ilium_ipc::PromptSubmissionSource::VoiceControl,
+    )
+    .unwrap();
+    assert_eq!(app.terminal_input_pending_count(), 1);
+    assert!(view(&app, hidden).frontend.is_none());
+    pump(&mut app, |app| app.terminal_input_pending_count() == 0);
+    assert_eq!(app.right_panel_target, focus);
+    assert!(view(&app, hidden).frontend.is_some());
+    assert!(app
+        .take_outbound_requests()
+        .iter()
+        .any(|request| matches!(request,
+        ilium_ipc::ClientRequest::SubmitTerminalText { pane_id, text, source }
+            if *pane_id == hidden && text == "voice original"
+                && *source == ilium_ipc::PromptSubmissionSource::VoiceControl)));
 }
 
 pub(crate) fn invalid_exact_pool_setter_rejects_before_mutating_any_live_setting(

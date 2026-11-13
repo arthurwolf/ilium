@@ -41,6 +41,8 @@ pub(crate) fn spawn(state: Arc<ServerState>, config: HttpApiConfig) -> tokio::ta
         tracing::info!(%address, "loopback HTTP API listening");
         let router = Router::new()
             .route("/create_agent", post(create_agent))
+            .route("/v1/agents", post(create_agent))
+            .merge(crate::http_control::routes())
             .with_state(state);
         if let Err(error) = axum::serve(listener, router).await {
             tracing::error!(%address, %error, "loopback HTTP API stopped");
@@ -145,6 +147,7 @@ async fn create_agent(
             parent_group: ROOT_ID,
             project_override: Some(project_path.clone()),
             provider: request.agent_type.provider(),
+            custom_agent: None,
             spec,
             initial_input: Some(request.prompt),
             wait_for_prompt: true,

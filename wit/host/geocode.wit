@@ -1,0 +1,14 @@
+package ilium:host@0.1.0;
+
+interface geocode {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/geo@0.1.0.{geo-point, geo-place};
+  /// text 2 to 200 characters. limit 1 to 8.
+  record geocode-query { text: string, near: option<geo-point>, limit: u8, language: option<string> }
+  /// Async, take-places.
+  search: func(q: geocode-query) -> result<request-id, plugin-error>;
+  /// Async, take-places. At most one place.
+  reverse: func(point: geo-point) -> result<request-id, plugin-error>;
+  take-places: func(request: request-id) -> option<list<geo-place>>;
+}

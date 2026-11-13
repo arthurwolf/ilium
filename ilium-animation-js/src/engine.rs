@@ -111,7 +111,9 @@ impl Default for EngineLimits {
             pending_bytes: 4 * 1024 * 1024,
             evaluation_ms: 500,
             preparation_ms: 10_000,
-            render_ms: 100,
+            // Host ceiling: a package manifest can only lower it. 250 ms covers the
+            // cold first Beach Rich frame (119.6 ms measured, 2026-10-11); steady frames ~33 ms.
+            render_ms: 250,
             dispose_ms: 100,
         }
     }

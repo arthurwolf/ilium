@@ -1,0 +1,890 @@
+package ilium:types@0.1.0;
+
+interface ids {
+  /// A node of the session tree: a container, a pane or a folder. Never reused in one server run.
+  type node-id = u64;
+  /// The id of a slow host call. Unique per plugin side for the whole server run, starting at 1 at
+  /// server start, and never reused, also across instance restarts.
+  type request-id = u64;
+  /// Reverse-DNS style plugin id, 3 to 64 characters from [a-z0-9.-].
+  type plugin-id = string;
+  /// One attached client of the session.
+  type client-id = u64;
+  /// One editor buffer.
+  type buffer-id = u64;
+  /// One timer, volatile or durable.
+  type timer-id = u64;
+  /// A file watch taken through fs.watch.
+  type watch-id = u64;
+  /// An advisory file lock taken through fs.lock.
+  type lock-id = u64;
+  /// An open HTTP or websocket stream.
+  type stream-id = u64;
+  /// A vector index created through vector.create-index.
+  type index-id = u32;
+  /// A child process spawned through process.spawn.
+  type child-id = u64;
+  /// A key grab taken through keys.grab.
+  type grab-id = u64;
+  /// Milliseconds since the Unix epoch, UTC.
+  type epoch-ms = u64;
+}
+
+interface errors {
+  /// The order is part of the ABI. Meaning of each code: see Errors and limits.
+  enum error-code {
+    not-permitted, not-found, invalid-argument, conflict, quota-exceeded, rate-limited,
+    busy, timed-out, cancelled, unsupported, pane-not-ready, revoked, io, network, internal,
+  }
+  record plugin-error {
+    code: error-code,
+    /// Plain text for logs. At most 256 characters. Never parsed by the SDK.
+    message: string,
+    /// Present with rate-limited and busy: wait at least this long before a retry.
+    retry-after-ms: option<u32>,
+  }
+}
+
+interface text {
+  enum color-role { foreground, muted, accent, success, warning, danger, info, selection, border }
+  variant color { role(color-role), rgb(u32), indexed(u8) }
+  flags modifiers { bold, dim, italic, underlined, slow-blink, rapid-blink, reversed, hidden, crossed-out }
+  /// An empty style (no colours, no modifiers) inherits the theme.
+  record style { fg: option<color>, bg: option<color>, add: modifiers, remove: modifiers }
+  record span { text: string, style: style }
+  /// One line of styled text.
+  type styled-text = list<span>;
+  type styled-lines = list<styled-text>;
+
+  /// Where a clickable span goes.
+  variant span-target {
+    none,
+    /// An own command or one covered by commands.invoke. Arrives as command-invoked with origin text.
+    command(string),
+    /// Arrives as a ui-action of kind activated with value text(<string>) on the widget key.
+    action(string),
+    /// A URL, opened only through the open-external rules.
+    link(string),
+  }
+  record rich-span { text: string, style: style, target: span-target, tooltip: option<string> }
+  type rich-text = list<rich-span>;
+  type rich-lines = list<rich-text>;
+
+  /// Hover help. At most 200 characters in all. Default delay 500 ms, allowed 0 to 2000.
+  record tooltip { lines: styled-lines, delay-ms: option<u16> }
+
+  /// A preview in a choice dialog.
+  variant preview {
+    /// One grapheme, drawn with icon widths.
+    glyph(string),
+    /// 1 to 16 colours, drawn as a strip of half blocks.
+    swatch(list<u32>),
+    /// 1 to 4 lines of at most 8 cells, drawn in the muted colour.
+    pattern(list<string>),
+  }
+
+  enum tri-state { off, on, mixed }
+  /// The one tone enum. Toast, notice, badge, status segment and meter use it.
+  enum tone { info, success, warning, danger, muted }
+}
+
+interface paths {
+  /// `scope` is a granted scope name such as project, data or agent-sessions:codex.
+  /// `path` is relative to the scope root and uses '/' separators.
+  record fs-path { scope: string, path: string }
+}
+
+interface editing {
+  use ilium:types/ids@0.1.0.{buffer-id, node-id};
+  use ilium:types/paths@0.1.0.{fs-path};
+  /// Both fields are 0-based. `column` counts Unicode scalar values.
+  record text-position { line: u32, column: u32 }
+  record text-range { start: text-position, end: text-position }
+  record text-edit { range: text-range, replacement: string }
+  record buffer-ref {
+    buffer: buffer-id, pane: option<node-id>, path: option<fs-path>, language: option<string>,
+    revision: u64, line-count: u32, dirty: bool,
+  }
+  record editor-viewport { buffer: buffer-id, pane: node-id, first-line: u32, last-line: u32, columns: u16, rows: u16 }
+}
+
+interface layout {
+  enum direction { horizontal, vertical }
+  variant constraint { length(u16), min(u16), max(u16), percentage(u16), ratio(tuple<u32, u32>), fill(u16) }
+  enum flex { legacy, start, end, center, space-between, space-around, space-evenly }
+  variant spacing { space(u16), overlap(u16) }
+  record margin { horizontal: u16, vertical: u16 }
+  enum alignment { left, center, right }
+  /// A size in cells.
+  record area { columns: u16, rows: u16 }
+}
+
+interface geo {
+  /// WGS 84 degrees. Latitude -90 to 90 and longitude -180 to 180, else invalid-argument.
+  record geo-point { lat: f64, lon: f64 }
+  record geo-place { point: geo-point, label: string, country-code: option<string>, kind: option<string> }
+}
+
+interface net {
+  record header { name: string, value: string }
+}
+
+interface tree {
+  use ilium:types/ids@0.1.0.{node-id, plugin-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  enum node-class { container, pane, folder }
+  enum agent-activity { none, working, idle, awaiting-approval, done, menu }
+  record agent-view { signature: string, activity: agent-activity, objective: option<string>, goal: option<string> }
+  record node-view {
+    id: node-id, parent: option<node-id>, class: node-class,
+    /// "ilium.terminal", "ilium.editor", "ilium.board" or "<plugin-id>.<kind>".
+    content-kind: option<string>,
+    title: string, cwd: option<string>, agent: option<agent-view>, locked: bool, revision: u64,
+  }
+  record node-query { content-kind: option<string>, signature: option<string>, under: option<node-id> }
+  enum primitive-kind { terminal, editor, basic }
+  record pane-info {
+    node: node-id, content-kind: string, primitive: primitive-kind,
+    columns: u16, rows: u16, focused: bool, title: string, is-restored: bool,
+  }
+  /// Where a node goes relative to a target. One definition for the whole contract.
+  enum placement { before, after, inside-first, inside-last }
+  enum split-direction { horizontal, vertical }
+  enum pane-lifecycle-state { running, frozen, restarting, exited }
+  enum signal { interrupt, terminate, kill, hangup }
+  /// The model an agent runs. source is statusline, transcript or signature.
+  record agent-model { model: string, provider: option<string>, context-window: option<u32>, source: string }
+  /// Where a title came from.
+  enum title-source { plugin, inferred }
+  enum title-origin { osc, manual, inferred }
+}
+
+interface ui {
+  use ilium:types/ids@0.1.0.{node-id, plugin-id, buffer-id};
+  use ilium:types/text@0.1.0.{color, style, styled-text, styled-lines, rich-text, rich-lines, tooltip, tri-state, tone, preview};
+  use ilium:types/layout@0.1.0.{direction, constraint, flex, spacing, margin, alignment, area};
+  use ilium:types/paths@0.1.0.{fs-path};
+  use ilium:types/geo@0.1.0.{geo-point};
+
+  // ---- layout and containers
+  record layout-spec { direction: direction, constraints: list<constraint>, flex: flex, spacing: spacing, margin: margin }
+  flags borders { top, right, bottom, left }
+  enum border-type { plain, rounded, double, thick, quadrant-inside, quadrant-outside }
+  enum title-position { top, bottom }
+  record block-title { text: styled-text, position: title-position, alignment: alignment }
+  record padding { left: u16, right: u16, top: u16, bottom: u16 }
+  record block-spec {
+    borders: borders, border-type: border-type, titles: list<block-title>, padding: padding,
+    style: style, border-style: style,
+  }
+  record tabs-spec {
+    titles: list<styled-text>, divider: string, padding-left: u16, padding-right: u16,
+    highlight-style: style,
+  }
+  /// id is the key of the popup node. Size: see the popup rules on the layout and containers page.
+  record popup-spec { id: string, title: option<styled-text>, modal: bool, width: constraint, height: constraint }
+  enum scrollbar-orientation { vertical-right, vertical-left, horizontal-bottom, horizontal-top }
+  record scrollbar-spec { orientation: scrollbar-orientation, target-key: string }
+  /// position is per mille, 50 to 950.
+  record split-spec { direction: direction, position: u16, min-first: u16, min-second: u16, resizable: bool }
+  record separator-spec { direction: direction, label: option<styled-text>, style: style }
+  enum dialog-kind { plain, confirm, danger-confirm }
+  enum button-role { primary, secondary, danger }
+  record dialog-button { id: string, label: string, role: button-role, is-cancel: bool }
+  record dialog-spec {
+    title: styled-text, kind: dialog-kind, buttons: list<dialog-button>,
+    width: constraint, height: constraint, message: option<styled-lines>,
+  }
+  record scroll-view-spec { content-rows: u32, show-scrollbar: bool, follow-tail: bool }
+
+  // ---- text
+  record paragraph-spec {
+    lines: styled-lines, rich: option<rich-lines>, wrap: option<bool>, alignment: alignment,
+    style: style, scrollable: bool,
+  }
+  record markdown-spec { source: string, link-command: option<string>, task-click: bool, images: bool, base: option<fs-path> }
+  record leader-spec { label: styled-text, value: styled-text }
+  record key-hint { keys: string, label: string, command: option<string> }
+  enum diff-line-kind { added, removed, context }
+  record diff-line { kind: diff-line-kind, old-line: option<u32>, new-line: option<u32>, text: string }
+  record diff-hunk { header: string, lines: list<diff-line> }
+  enum diff-layout { unified, split }
+  record diff-view-spec { hunks: list<diff-hunk>, layout: diff-layout, language: option<string>, word-diff: bool }
+
+  // ---- collections
+  enum list-direction { top-to-bottom, bottom-to-top }
+  enum highlight-spacing { always, when-selected, never }
+  record list-item {
+    id: option<string>, lines: styled-lines, style: style, icon: option<string>, trailing: option<styled-text>,
+    tooltip: option<tooltip>, disabled-reason: option<string>,
+  }
+  record list-spec {
+    items: list<list-item>, highlight-symbol: string, highlight-style: style, highlight-spacing: highlight-spacing,
+    repeat-highlight-symbol: bool, direction: list-direction, filter: bool, filter-placeholder: option<string>,
+    multi-select: bool, follow-tail: bool, empty: option<styled-lines>, item-tooltip: bool,
+  }
+  record table-column {
+    id: string, title: styled-text, width: constraint, min-width: u16, priority: u8,
+    align: alignment, sortable: bool,
+  }
+  record table-row { id: option<string>, cells: list<styled-lines>, height: u16, style: style }
+  record table-spec {
+    columns: list<table-column>, rows: list<table-row>, sort: option<tuple<string, bool>>,
+    multi-select: bool, follow-tail: bool, column-spacing: u16, highlight-symbol: string,
+    highlight-spacing: highlight-spacing,
+  }
+  record tree-item {
+    id: string, label: styled-text, depth: u16, expandable: bool, expanded: bool, icon: option<string>,
+    trailing: option<styled-text>, badge: option<string>, tooltip: option<tooltip>, draggable: bool, drop-target: bool,
+  }
+  record tree-list-spec { items: list<tree-item>, multi-select: bool }
+  record menu-item { id: string, label: string, icon: option<string>, enabled: bool, shortcut: option<string>, separator-before: bool }
+  record menu-spec { entries: list<menu-entry>, items: list<menu-item> }
+  record menu-entry {
+    id: string, label: string, icon: option<string>, shortcut: option<string>,
+    /// Id of a submenu entry. Depth is at most 2.
+    parent: option<string>,
+    is-submenu: bool, separator-before: bool,
+    checked: option<tri-state>,
+    /// At most 40 characters.
+    disabled-reason: option<string>,
+    tooltip: option<tooltip>, danger: bool,
+  }
+  record check-item { id: string, label: styled-text, state: tri-state, disabled-reason: option<string>, children: list<check-item> }
+  record check-list-spec { items: list<check-item>, all-toggle: bool, max-height: option<u16> }
+  enum item-format { glob, url, host, path, regex, chord }
+  record list-field { id: string, title: string, kind: string, width: u16 }
+  record list-editor-spec {
+    items: list<string>, item-format: option<item-format>, object-fields: list<list-field>,
+    reorderable: bool, max-items: u32, item-states: list<row-state>, placeholder: option<string>,
+  }
+  enum row-state-kind { idle, loading, pending, error }
+  /// message is at most 80 characters.
+  record row-state { kind: row-state-kind, message: option<string> }
+
+  // ---- data display
+  record gauge-spec { ratio: f64, label: option<styled-text>, use-unicode: bool, gauge-style: style }
+  enum line-set { normal, thick, double }
+  record line-gauge-spec { ratio: f64, label: option<styled-text>, filled-style: style, unfilled-style: style, line-set: line-set }
+  enum render-direction { left-to-right, right-to-left }
+  record sparkline-spec { data: list<option<u64>>, max: option<u64>, direction: render-direction, style: style }
+  record bar-item { value: u64, label: option<string>, text-value: option<string>, style: style }
+  record bar-group { label: option<string>, bars: list<bar-item> }
+  enum bar-direction { vertical, horizontal }
+  record bar-chart-spec { groups: list<bar-group>, bar-width: u16, bar-gap: u16, group-gap: u16, direction: bar-direction, max: option<u64> }
+  enum marker { dot, block, bar, braille, half-block, quadrant, sextant, octant }
+  enum graph-type { scatter, line, bar }
+  record dataset { name: string, marker: marker, graph-type: graph-type, points: list<tuple<f64, f64>>, style: style }
+  record axis { title: option<styled-text>, bounds: tuple<f64, f64>, labels: list<styled-text> }
+  enum legend-position { top, top-right, top-left, left, right, bottom, bottom-right, bottom-left }
+  record chart-spec { datasets: list<dataset>, x-axis: axis, y-axis: axis, legend-position: option<legend-position> }
+  record canvas-line { x1: f64, y1: f64, x2: f64, y2: f64, color: color }
+  record canvas-rectangle { x: f64, y: f64, width: f64, height: f64, color: color }
+  record canvas-circle { x: f64, y: f64, radius: f64, color: color }
+  record canvas-points { coords: list<tuple<f64, f64>>, color: color }
+  record canvas-label { x: f64, y: f64, text: styled-text }
+  enum map-resolution { low, high }
+  record canvas-map { resolution: map-resolution, color: color }
+  variant shape {
+    line(canvas-line), rectangle(canvas-rectangle), circle(canvas-circle),
+    points(canvas-points), label(canvas-label), world-map(canvas-map),
+  }
+  record canvas-spec { x-bounds: tuple<f64, f64>, y-bounds: tuple<f64, f64>, marker: marker, shapes: list<shape> }
+  record marked-day { day: u8, style: style }
+  /// Gate ui-calendar.
+  record calendar-spec { year: u32, month: u8, marked: list<marked-day>, show-month-header: bool, show-weekdays: bool }
+  enum progress-state { waiting, running, done, error }
+  record progress-row-spec {
+    state: progress-state, title: styled-text, percent: option<f32>, message: option<string>, details: option<styled-lines>,
+  }
+  record meter-segment { label: string, value: f64, tone: tone }
+  enum orientation { horizontal, vertical }
+  /// At most 8 segments.
+  record meter-spec { segments: list<meter-segment>, max: f64, label: option<styled-text>, show-values: bool, orientation: orientation }
+  record minimap-mark { line: u32, color: color, lane: u8 }
+  record minimap-spec { density: list<u8>, marks: list<minimap-mark>, viewport: tuple<u32, u32>, total-lines: u32 }
+
+  // ---- input
+  record button-spec { label: string, icon: option<string>, enabled: bool, role: button-role }
+  enum toggle-style { switch, checkbox, icon }
+  record toggle-spec { label: string, value: bool, style: toggle-style, tri-state: bool, icon-on: option<string>, icon-off: option<string> }
+  enum choice-style { stepper, list, dialog }
+  enum view-mode { list, grid }
+  enum disabled-marker { reason, cross }
+  record catalog-item {
+    id: string, title: string,
+    /// At most 120 characters.
+    description: option<string>,
+    preview: option<preview>,
+    /// Heading in the choice dialog, at most 32 characters.
+    group: option<string>,
+    /// At most 8, matched by the filter.
+    keywords: list<string>,
+    /// At most 40 characters.
+    disabled-reason: option<string>,
+  }
+  record choice-spec {
+    label: string, options: list<string>, selected: u32, style: choice-style, items: list<catalog-item>,
+    source: option<string>, selected-id: option<string>, filter: bool, view-modes: list<view-mode>,
+    disabled-marker: disabled-marker, allow-custom: bool,
+  }
+  enum number-style { stepper, slider }
+  record number-spec {
+    label: string, value: f64, minimum: f64, maximum: f64, step: f64, unit: option<string>, style: number-style,
+    steps: list<f64>, special-values: list<tuple<f64, string>>, scale: u32, debounce-ms: u32,
+  }
+  record text-input-spec {
+    label: string, initial: string, placeholder: option<string>, secret: bool, reveal-last: u8, reveal: bool,
+    max-length: u32, submit-on-enter: bool, debounce-ms: u32, validation: option<string>, suggestions: option<string>,
+  }
+  /// max-bytes 0 means no limit.
+  record text-area-spec {
+    initial: string, placeholder: option<string>, wrap: bool, line-numbers: bool, max-bytes: u32,
+    debounce-ms: u32, tab-moves-focus: bool,
+  }
+  record schema-form-spec { plugin: plugin-id, section: string }
+  record key-capture-spec { chord: option<string>, allow-modifier-only: bool, reserved-check: bool }
+  record color-picker-spec { value: string, palette: option<string>, allow-theme-roles: bool }
+  enum path-kind { open-file, open-directory, save-file }
+  record path-field-spec { kind: path-kind, value: option<fs-path>, display: string, extensions: list<string>, editable: bool }
+  record location-picker-spec {
+    value: option<geo-point>, label: option<string>, search: bool, allow-current: bool, zoom: bool, bind: option<string>,
+  }
+
+  // ---- status and feedback
+  record badge-spec { label: option<string>, count: option<u32>, dot: bool, tone: tone }
+  variant spinner-frames { braille, blocks, moons, quarters, custom(list<string>) }
+  record spinner-spec { frames: spinner-frames, interval-ms: u16, label: option<styled-text> }
+  record notice-action { label: string, command: string }
+  record notice-spec {
+    tone: tone, title: option<string>, text: rich-lines, actions: list<notice-action>, dismissible: bool,
+  }
+  record icon-spec { name: string, tone: option<tone> }
+
+  // ---- media and embedded views
+  enum pixel-format { mask8, mono1, gray8, rgb8, rgba8 }
+  record rgba-image { width: u32, height: u32, rgba: list<u8> }
+  record encoded-image { bytes: list<u8>, mime: string }
+  variant image-source { asset(string), file(fs-path), decoded(rgba-image), encoded(encoded-image) }
+  enum media-fit { contain, cover, fill }
+  record image-spec { source: image-source, fit: media-fit }
+  record surface-spec { format: pixel-format, min-columns: u16, min-rows: u16, glyph-plane: bool, owner-ids: bool }
+  record code-view-spec { buffer: buffer-id, read-only: bool, line-numbers: bool, wrap: bool, minimap: bool }
+  record terminal-view-spec { pane: node-id, rows: option<u16>, interactive: bool, scrollback: bool, highlights: option<string> }
+  record video-range { path: fs-path, start-millis: u64, end-millis: option<u64> }
+  variant video-source { asset(string), file(fs-path), range(video-range) }
+  record video-spec { source: video-source, autoplay: bool, looped: bool, muted: bool, controls: bool, fit: media-fit }
+
+  /// The 51 widgets. The order is the ABI.
+  variant widget {
+    // layout (10)
+    layout(layout-spec), block(block-spec), tabs(tabs-spec), popup(popup-spec), clear,
+    scrollbar(scrollbar-spec), split(split-spec), separator(separator-spec), dialog(dialog-spec),
+    scroll-view(scroll-view-spec),
+    // text (5)
+    paragraph(paragraph-spec), markdown(markdown-spec), leader-row(leader-spec), key-hints(list<key-hint>),
+    diff-view(diff-view-spec),
+    // collections (6)
+    %list(list-spec), table(table-spec), tree-list(tree-list-spec), menu(menu-spec),
+    check-list(check-list-spec), list-editor(list-editor-spec),
+    // data (10)
+    gauge(gauge-spec), line-gauge(line-gauge-spec), sparkline(sparkline-spec), bar-chart(bar-chart-spec),
+    chart(chart-spec), canvas(canvas-spec),
+    // @unstable(feature = ui-calendar)
+    calendar(calendar-spec),
+    progress-row(progress-row-spec), meter(meter-spec), minimap(minimap-spec),
+    // input (11)
+    button(button-spec), toggle(toggle-spec), choice(choice-spec), number(number-spec),
+    text-input(text-input-spec), text-area(text-area-spec), schema-form(schema-form-spec),
+    key-capture(key-capture-spec), color-picker(color-picker-spec), path-field(path-field-spec),
+    location-picker(location-picker-spec),
+    // status (4)
+    badge(badge-spec), spinner(spinner-spec), notice(notice-spec), icon(icon-spec),
+    // media (5)
+    image(image-spec), surface(surface-spec), code-view(code-view-spec), terminal-view(terminal-view-spec),
+    video(video-spec),
+  }
+
+  /// The order is the ABI. The last two flags switch on hover and pointer actions.
+  flags node-flags { focusable, draggable, drop-target, hidden, hover-events, pointer-events }
+  record ui-node {
+    /// Widget key, 1 to 64 characters, unique across the whole view, not only among siblings.
+    /// A duplicate traps with ui.duplicate-key. Required for every widget that sends actions.
+    key: option<string>,
+    widget: widget,
+    /// Indexes into ui-tree.nodes. Every index is greater than the index of its parent and less
+    /// than nodes.len(). Every node except the root appears exactly once in exactly one list.
+    children: list<u32>,
+    %flags: node-flags,
+    /// Shown after the delay on hover, or on focus with F1.
+    tooltip: option<tooltip>,
+    /// Focus order: 1 and above first, ascending; then none and 0 in pre-order. Negative: click and
+    /// set-focus only, skipped by Tab.
+    tab-index: option<s16>,
+    /// The node is drawn muted, ignores input, stays in the focus order and the reason shows as its tooltip.
+    disabled-reason: option<string>,
+  }
+  /// root MUST be 0. At most 4,096 nodes and 1 MiB. A tree deeper than 32 levels (root = 1) traps
+  /// ui.too-deep. Any invalid tree traps with a ui.* code; views.render has no result type.
+  record ui-tree { version: u32, nodes: list<ui-node>, root: u32 }
+
+  // ---- views, state and actions
+  variant view-target { panel(string), pane(node-id), popup(string), settings-page(string), onboarding-step(string) }
+
+  variant widget-state {
+    none, selected(option<u32>), offset(u32), tab(u32), text(string), expanded(list<string>), checked(bool),
+    /// Check-list items, or a tri-state toggle under key "".
+    tri(list<tuple<string, tri-state>>),
+    /// location-picker.
+    geo(option<geo-point>),
+    /// number, slider.
+    number(f64),
+    /// Split divider position in per mille.
+    split(u16),
+    /// Multi-selection in the list, table and tree-list.
+    ids(list<string>),
+  }
+
+  variant popup-anchor {
+    centered(tuple<constraint, constraint>), at-cell(tuple<u16, u16>), below-key(string),
+    at-key(key-anchor),
+    /// Next to a tree row (tree toolbar popovers, row actions).
+    at-tree-node(node-id),
+    /// At the last pointer position (context menus in own views).
+    at-pointer,
+  }
+  enum anchor-side { below, above, right, left }
+  record key-anchor { key: string, side: anchor-side }
+  /// Overrides the modal and close-on-escape fields of the spec.
+  record popup-options { modal: bool, pinnable: bool, dismiss-on-leave: bool, close-on-escape: bool }
+
+  record theme-tokens {
+    foreground: u32, background: u32, accent: u32, muted: u32, success: u32, warning: u32, danger: u32,
+    is-dark: bool,
+    /// Derived convenience field: always equal to (icon-mode == stable) in every delivery.
+    stable-glyphs: bool,
+  }
+  enum density { compact, normal, comfortable }
+  /// Widgets and the host follow icon-mode.
+  enum icon-mode { normal, stable }
+  record theme-extras { reduced-motion: bool, density: density, info: u32, selection: u32, border: u32, icon-mode: icon-mode }
+
+  /// 17 cases. The first 11 are the base set, the last 6 were appended.
+  enum action-kind {
+    activated, changed, submitted, selected, toggled, scrolled, dropped,
+    context-requested, closed, focus-gained, focus-lost,
+    hover-enter, hover-leave, pointer, drag-over, resized, filter-changed,
+  }
+
+  enum pointer-kind { down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right }
+  enum pointer-button { none, left, middle, right }
+  flags pointer-modifiers { shift, control, alt }
+  record view-pointer {
+    kind: pointer-kind, button: pointer-button, modifiers: pointer-modifiers,
+    /// Cell inside the widget area, 0-based.
+    column: u16, row: u16,
+    /// Position inside the cell, 0 to 255 from left or top. 128 when the terminal reports cells only.
+    sub-x: u8, sub-y: u8,
+    /// 1, 2 or 3 for down events, 0 otherwise.
+    clicks: u8,
+  }
+  enum drop-accept { none, before, after, inside }
+  record drop-value { source-key: string, target-key: string, index: u32 }
+  record drag-over-value { source-key: string, target-key: string, index: u32, accept: drop-accept }
+  record cell-position { column: u16, row: u16 }
+
+  /// 12 cases. The first 6 are the base set, the last 6 were appended or added later.
+  variant action-value {
+    none, text(string), index(u32), number(f64), flag(bool),
+    drop(drop-value),
+    cell(cell-position),
+    pointer(view-pointer),
+    drag-over(drag-over-value),
+    /// Check-list item id, or "" for a tri-state toggle.
+    item-state(tuple<string, tri-state>),
+    /// location-picker.
+    geo(geo-point),
+    /// Multi-selection in the list, table and tree-list.
+    ids(list<string>),
+  }
+  /// In 0.1.0 `action-id` is always a copy of `key`. value is none for button activated, menu closed,
+  /// key-capture closed and the hover and focus kinds.
+  record ui-action { view: view-target, key: string, action-id: string, kind: action-kind, value: option<action-value> }
+
+}
+
+interface requests {
+  use ilium:types/ids@0.1.0.{node-id, request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Which request a result belongs to. submission(n) is a submission with correlation n.
+  /// call(id) is a slow host call with that request-id.
+  variant request-ref { submission(u64), call(request-id) }
+  /// The order is the ABI.
+  variant outcome {
+    ok,
+    ok-node(node-id),
+    duplicate(request-ref),
+    refused(plugin-error),
+    failed(plugin-error),
+    cancelled,
+    /// send-input on an agent pane was applied. The value is the new prompt epoch.
+    ok-epoch(u64),
+  }
+  record request-result { request: request-ref, outcome: outcome }
+}
+
+interface intents {
+  use ilium:types/ids@0.1.0.{node-id, plugin-id, buffer-id, client-id};
+  use ilium:types/text@0.1.0.{rich-text, tooltip, styled-text, tone};
+  use ilium:types/paths@0.1.0.{fs-path};
+  use ilium:types/editing@0.1.0.{text-edit};
+  use ilium:types/tree@0.1.0.{placement, split-direction, signal, title-source, agent-activity};
+  use ilium:types/ui@0.1.0.{view-target, pointer-kind, pointer-button, pointer-modifiers};
+
+  record submission { intent: intent, correlation: u64, dedup-key: option<string> }
+
+  // ---- tree
+  record rename-node-spec { node: node-id, title: string, source: title-source, expected-revision: option<u64> }
+  record move-node-spec { node: node-id, target: node-id, placement: placement }
+  record set-node-locked-spec { node: node-id, locked: bool }
+
+  // ---- panes
+  /// parent none means the root of the tree.
+  record create-pane-spec {
+    parent: option<node-id>, title: string, content-kind: string, cwd: option<string>,
+    command: option<list<string>>, initial-input: option<string>,
+  }
+  record signal-pane-spec { pane: node-id, signal: signal }
+  enum delivery { typed, submitted, pasted }
+  record input-stage { text: string, delay-ms: u16, delivery: delivery }
+  record terminal-mouse {
+    kind: pointer-kind, button: pointer-button, column: u16, row: u16, modifiers: pointer-modifiers,
+  }
+  record input-precondition { activity: option<agent-activity>, screen-revision: option<u64>, foreground: option<string> }
+  record send-input-spec {
+    pane: node-id,
+    /// Ignored when stages is not empty.
+    text: string,
+    delivery: delivery,
+    /// refused(conflict) when stale.
+    prompt-epoch: option<u64>,
+    /// At most 16 stages, total delay at most 10 s.
+    stages: list<input-stage>,
+    /// At most 64 KiB. Needs terminal.raw-input.
+    raw: option<list<u8>>,
+    /// Needs terminal.raw-input.
+    mouse: option<list<terminal-mouse>>,
+    if-current: option<input-precondition>,
+    /// At most 2 s. Needs terminal.input-lock.
+    lock-user-input: bool,
+    /// Write a journal entry before the PTY write.
+    journal: bool,
+  }
+  record agent-action-spec { pane: node-id, action-id: string }
+
+  // ---- decorations and virtual rows
+  record decoration-key { node: node-id, slot: string }
+  enum decoration-visibility { always, on-hover }
+  record set-decoration-spec {
+    node: node-id, slot: string, content: styled-text, icon: option<string>, sort-key: option<s64>, persist: bool,
+    spans: option<rich-text>, tooltip: option<tooltip>,
+    /// 2 to 16 frames.
+    frames: list<styled-text>,
+    /// At least 90.
+    frame-ms: u16,
+    trailing: bool, visibility: decoration-visibility, tone: option<tone>,
+  }
+  record virtual-row {
+    id: string, label: rich-text, icon: option<string>, command: option<string>,
+    parent: option<string>, expandable: bool, accepts-drop: bool, tooltip: option<tooltip>, trailing: option<styled-text>,
+  }
+  record set-virtual-rows-spec { row-kind: string, rows: list<virtual-row> }
+
+  // ---- sound, notification, views, commands, messages
+  enum urgency { low, normal, high }
+  record notify-spec {
+    title: string, body: option<string>, urgency: urgency, sound: option<string>,
+    /// At most 60,000. 0 or no key: no coalescing.
+    coalesce-key: option<string>, coalesce-window-ms: u32,
+  }
+  record open-view-spec { view: view-target, focus: bool }
+  record invoke-command-spec { command: string, arguments-json: string }
+  enum plugin-side { server, client }
+  record message-target { plugin: plugin-id, side: plugin-side, client: option<client-id> }
+  record message-spec { to: message-target, channel: string, payload: list<u8> }
+
+  // ---- editor
+  record editor-apply-edits-spec { buffer: buffer-id, base-revision: u64, edits: list<text-edit> }
+  enum editor-placement { new-pane, split, replace }
+  record editor-open-spec { path: fs-path, line: option<u32>, placement: editor-placement }
+
+  // ---- appended: pane lifecycle
+  record freeze-pane-spec { pane: node-id }
+  record unfreeze-pane-spec { pane: node-id }
+  record replace-pane-command-spec { pane: node-id, command: list<string>, cwd: option<fs-path>, keep-scrollback: bool }
+  /// grace-ms is at most 10,000.
+  record terminate-pane-process-spec { pane: node-id, grace-ms: u32 }
+  record resize-pane-spec { pane: node-id, columns: option<u16>, rows: option<u16> }
+
+  // ---- appended: tree structure
+  record create-group-spec { parent: option<node-id>, title: string, placement: placement, children: list<node-id> }
+  record create-folder-spec { parent: option<node-id>, title: string, path: option<fs-path> }
+  record create-project-spec { title: string, root: fs-path }
+  /// 2 to 4 panes.
+  record create-split-spec { panes: list<node-id>, direction: split-direction }
+  record set-bookmarked-spec { node: node-id, bookmarked: bool }
+  variant expand-target { node(node-id), virtual-row(string) }
+  record set-expanded-spec { target: expand-target, expanded: bool }
+  variant restructure-op {
+    move(move-node-spec),
+    create-group(create-group-spec),
+    ungroup(node-id),
+    rename(rename-node-spec),
+  }
+  /// At most 256 operations.
+  record restructure-spec { operations: list<restructure-op>, label: string }
+
+  // ---- appended: chrome
+  record set-inferred-icon-spec { node: node-id, icon: option<string>, source: string }
+  /// reason is at most 80 characters.
+  record mark-attention-spec { node: node-id, reason: string }
+  variant external-target { url(string), file(fs-path), settings(string) }
+  record open-external-spec { target: external-target }
+  record set-status-segment-spec { segment: string, content: rich-text, tooltip: option<tooltip>, tone: option<tone> }
+  record set-frame-slot-spec { pane: node-id, slot: string, content: rich-text, icon: option<string>, tooltip: option<tooltip> }
+  record clear-frame-slot-spec { pane: node-id, slot: string }
+  /// label is at most 24 characters.
+  record toast-action { label: string, command: string }
+  record toast-spec {
+    /// A toast with the same id is replaced in place.
+    id: option<string>,
+    tone: tone,
+    /// At most 60 characters.
+    title: string,
+    /// At most 200 characters of text.
+    body: option<rich-text>,
+    /// At most 2.
+    actions: list<toast-action>,
+    /// 1,000 to 30,000.
+    duration-ms: option<u32>,
+  }
+
+  /// 42 cases. The order is the ABI.
+  variant intent {
+    rename-node(rename-node-spec),
+    move-node(move-node-spec),
+    close-node(node-id),
+    set-node-locked(set-node-locked-spec),
+    create-pane(create-pane-spec),
+    signal-pane(signal-pane-spec),
+    send-input(send-input-spec),
+    agent-action(agent-action-spec),
+    set-decoration(set-decoration-spec),
+    clear-decoration(decoration-key),
+    set-virtual-rows(set-virtual-rows-spec),
+    play-sound(string),
+    notify(notify-spec),
+    open-view(open-view-spec),
+    close-view(view-target),
+    invoke-command(invoke-command-spec),
+    message(message-spec),
+    editor-apply-edits(editor-apply-edits-spec),
+    editor-open(editor-open-spec),
+    // appended in this order
+    freeze-pane(freeze-pane-spec),
+    unfreeze-pane(unfreeze-pane-spec),
+    replace-pane-command(replace-pane-command-spec),
+    terminate-pane-process(terminate-pane-process-spec),
+    resize-pane(resize-pane-spec),
+    create-group(create-group-spec),
+    create-folder(create-folder-spec),
+    create-project(create-project-spec),
+    create-split(create-split-spec),
+    set-bookmarked(set-bookmarked-spec),
+    set-expanded(set-expanded-spec),
+    restructure(restructure-spec),
+    revert-restructure(u64),
+    set-inferred-icon(set-inferred-icon-spec),
+    mark-attention(mark-attention-spec),
+    ack-attention(node-id),
+    open-external(open-external-spec),
+    set-status-segment(set-status-segment-spec),
+    clear-status-segment(string),
+    set-frame-slot(set-frame-slot-spec),
+    clear-frame-slot(clear-frame-slot-spec),
+    toast(toast-spec),
+    dismiss-toast(string),
+  }
+}
+
+interface events {
+  use ilium:types/ids@0.1.0.{node-id, plugin-id, client-id, buffer-id, request-id, timer-id, watch-id, stream-id, child-id, grab-id, epoch-ms};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+  use ilium:types/net@0.1.0.{header};
+  use ilium:types/editing@0.1.0.{buffer-ref, editor-viewport, text-position};
+  use ilium:types/tree@0.1.0.{pane-info, agent-activity, agent-model, pane-lifecycle-state, title-origin};
+  use ilium:types/ui@0.1.0.{view-target, ui-action, view-pointer, pointer-kind, pointer-button, pointer-modifiers};
+  use ilium:types/requests@0.1.0.{request-result};
+  use ilium:types/intents@0.1.0.{plugin-side};
+
+  // ---- payload records
+  record pane-exited-event { node: node-id, status: option<s32>, signal: option<string> }
+  record pane-resized-event { node: node-id, columns: u16, rows: u16 }
+  record pane-title-changed-event { node: node-id, title: string, source: title-origin }
+  record agent-identified-event { node: node-id, signature: string }
+  record agent-activity-event { node: node-id, previous: agent-activity, current: agent-activity, revision: u64 }
+  record agent-goal-event { node: node-id, goal: option<string> }
+  enum input-source { user, plugin, scheduled, voice }
+  record input-submitted-event { node: node-id, text: string, source: input-source, epoch: u64 }
+  record output-matched-event { node: node-id, filter-id: string, line: string, row: u32 }
+  record link-activated-event { node: node-id, detector-id: string, text: string }
+  /// Reported only while the plugin has claimed the pointer of the pane.
+  /// kind move is reported only while the pointer is over the pane.
+  record pointer-event {
+    node: node-id, row: u32, column: u16, kind: pointer-kind, button: pointer-button,
+    modifiers: pointer-modifiers, sub-x: u8, sub-y: u8,
+  }
+  record editor-changed-event { buffer: buffer-id, revision: u64, first-line: u32, last-line: u32 }
+  record editor-saved-event { buffer: buffer-id, path: fs-path }
+
+  enum settings-origin { user, plugin, reset, other-plugin, file }
+  /// keys are the changed keys. origin is the last origin when several changes merged.
+  /// side tells which side owns the keys.
+  record settings-change { keys: list<string>, origin: settings-origin, side: plugin-side }
+
+  record job-progress-event { job: request-id, percent: f32 }
+  record message-event {
+    %from: plugin-id, from-side: plugin-side, from-client: option<client-id>,
+    channel: string, payload: list<u8>,
+  }
+  record topic-published-event { topic: string, %from: plugin-id, payload-json: string }
+
+  /// 13 origins.
+  enum command-origin {
+    keybinding, palette, toolbar, menu, voice, cli, toast, row-action, status-segment,
+    tree-toolbar, frame-slot, virtual-row-drop, text,
+  }
+  record command-context {
+    pane: option<node-id>, view: option<view-target>, buffer: option<buffer-id>, line: option<u32>,
+    virtual-row: option<string>, menu-item: option<string>,
+  }
+  record command-invoked-event {
+    command: string, arguments-json: string, origin: command-origin, context: command-context,
+  }
+  record key-event { grab: grab-id, pane: option<node-id>, chord: string, repeat: bool }
+  record view-visibility-event { view: view-target, visible: bool }
+  record fs-changed-event { watch: watch-id, paths: list<string> }
+  record audio-frames-event { capture: u64, samples: list<s16> }
+  record cli-invoked-event { invocation: u64, name: string, argv: list<string>, cwd: string }
+  record http-called-event {
+    call: u64, method: string, path: string, headers: list<header>, body: list<u8>,
+  }
+  record dropped-count { event: string, source: option<string>, count: u32 }
+
+  // ---- appended events
+  record screen-changed-event { pane: node-id, first-row: u32, last-row: u32, revision: u64 }
+  record user-line-event { pane: node-id, text: string, at: epoch-ms }
+  record signal-changed-event { pane: node-id, signal: string, value: string }
+  record agent-model-event { pane: node-id, model: agent-model }
+  record editor-pointer-event { buffer: buffer-id, pane: node-id, position: text-position, pointer: view-pointer }
+  record http-stream-data-event {
+    %stream: stream-id, status: option<u16>, headers: option<list<header>>, chunk: list<u8>,
+  }
+  variant stream-outcome { ended, cancelled, failed(plugin-error) }
+  record http-stream-closed-event { %stream: stream-id, outcome: stream-outcome }
+  enum output-stream { stdout, stderr }
+  record child-output-event { child: child-id, %stream: output-stream, bytes: list<u8> }
+  record child-exited-event { child: child-id, status: option<s32>, signal: option<string> }
+  record pane-lifecycle-event { pane: node-id, state: pane-lifecycle-state, by: option<plugin-id> }
+  record attention-event { node: node-id, marked: bool, reason: option<string>, by: option<plugin-id> }
+  record client-request-event { call: u64, kind: string, payload-json: string }
+  record kernel-settings-event { tab: string, keys: list<string> }
+  /// late-by-millis is how long after its due time the timer fired, in milliseconds.
+  record durable-timer-event { timer: timer-id, name: string, late-by-millis: u64 }
+  record input-uncertain-event { pane: node-id, dedup-key: string }
+
+  /// 56 cases. The order is the ABI.
+  variant event {
+    tree-changed(list<node-id>),
+    node-removed(node-id),
+    pane-created(pane-info),
+    pane-exited(pane-exited-event),
+    pane-focused(option<node-id>),
+    pane-resized(pane-resized-event),
+    pane-title-changed(pane-title-changed-event),
+    agent-identified(agent-identified-event),
+    agent-activity-changed(agent-activity-event),
+    agent-goal-changed(agent-goal-event),
+    input-submitted(input-submitted-event),
+    output-matched(output-matched-event),
+    link-activated(link-activated-event),
+    pointer(pointer-event),
+    editor-opened(buffer-ref),
+    editor-closed(buffer-ref),
+    editor-changed(editor-changed-event),
+    editor-saved(editor-saved-event),
+    settings-changed(settings-change),
+    timer-fired(timer-id),
+    request-completed(request-result),
+    job-progress(job-progress-event),
+    message(message-event),
+    topic-published(topic-published-event),
+    command-invoked(command-invoked-event),
+    ui-action(ui-action),
+    key-pressed(key-event),
+    key-released(key-event),
+    view-visibility(view-visibility-event),
+    fs-changed(fs-changed-event),
+    audio-frames(audio-frames-event),
+    cli-invoked(cli-invoked-event),
+    cli-cancelled(u64),
+    http-called(http-called-event),
+    client-attached(client-id),
+    client-detached(client-id),
+    theme-changed,
+    events-dropped(list<dropped-count>),
+    // appended in this order
+    screen-changed(screen-changed-event),
+    user-line-submitted(user-line-event),
+    signal-changed(signal-changed-event),
+    agent-model-changed(agent-model-event),
+    editor-pointer(editor-pointer-event),
+    editor-viewport-changed(editor-viewport),
+    http-stream-data(http-stream-data-event),
+    http-stream-closed(http-stream-closed-event),
+    child-output(child-output-event),
+    child-exited(child-exited-event),
+    pane-lifecycle-changed(pane-lifecycle-event),
+    attention-changed(attention-event),
+    client-request(client-request-event),
+    kernel-settings-changed(kernel-settings-event),
+    keymap-changed,
+    durable-timer-fired(durable-timer-event),
+    input-uncertain(input-uncertain-event),
+    display-mode-changed(option<string>),
+  }
+}
+
+interface lifecycle {
+  use ilium:types/ids@0.1.0.{plugin-id};
+  /// The order is the ABI. crash-restart is reserved: the host never delivers it, because a
+  /// crashed instance has already stopped and cannot be called. Five reasons are delivered.
+  /// revoked and granted precede a re-activation with the changed granted list.
+  enum deactivation-reason { shutdown, disabled, upgrade, crash-restart, revoked, granted }
+  record activation {
+    plugin: plugin-id,
+    /// Always "ilium:plugin@0.1.0".
+    api: string,
+    /// Unique per activation of this plugin on this side. Starts at 1.
+    instance: u64,
+    /// "server", "client" or "scene".
+    side: string,
+    /// The plugin's own settings as one JSON object.
+    settings-json: string,
+    /// The capabilities actually granted, as strings.
+    granted: list<string>,
+    /// The bytes that the previous deactivate returned. None after a first start or a dropped restore.
+    restored: option<list<u8>>,
+  }
+}

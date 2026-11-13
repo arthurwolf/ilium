@@ -4,7 +4,7 @@ Organize terminals, agents, editors and boards by current work; title each item/
 Return one JSON object: "children" replaces the COMPLETE ordinary hierarchy; "animations" contains definitions and a required "project" pointer. Include every listed exact numeric id once, directly or nested; invent/duplicate/omit none.
 
 Every output node/container needs an "animation" definition-key string, even when disabled. Shapes (add that pointer):
-- pane: kind, id, title, short_title, icon, command_hint
+- pane: kind, id, title, short_title, icon, command_hint, optional recap
 - folder: kind, id, title, short_title, icon
 - group: kind, title, short_title, icon, children; new ordinary group, no id
 - existing_group: kind, id, children; existing name-fixed group, omit title/icon
@@ -14,9 +14,13 @@ Every output node/container needs an "animation" definition-key string, even whe
 
 Protected splits: each listed id appears once with exact ordered pane children. Never invent, omit, duplicate, dissolve, or nest a split view. Preserve membership/order; omit unchanged orientation/container title/icon/expansion/layout. Move whole splits into ordinary groups; retitle only allowed panes.
 
-name-fixed="true": preserve title/short_title/icon exactly. Every fixed group appears once as existing_group with its listed id, even if moved or its children regrouped.
+name-fixed="true": preserve title/short_title/icon exactly. Every ordinary fixed group appears once as existing_group with its listed id, even if moved or its children regrouped.
+
+Worktree rows marked kind="worktree", membership="immutable" and output="omit-wrapper" are immutable checkout ownership shown only as current-structure context, never output nodes or existing_group entries. Member rows identify their fixed checkout with worktree_owner. Include each listed member pane once using its pane id; pane titles may change when allowed. Ilium preserves each member under its worktree directly beneath the project, regardless of proposed grouping. Never suggest transferring members between checkouts or moving a worktree into an ordinary group.
 
 Shell command_hint: identifiable running/last/output program plus one subcommand (git commit, cargo build, npm run) or essential flags (ps faux, ls -la), under20 characters; otherwise "". Exclude paths/arguments/quotes/commits/URLs/env/pipelines/redirections. No brackets or repetition in titles: Ilium prefixes it. Ignore prior [...] title prefixes. Other kinds: command_hint="".
+
+Recap: only for an item with <recap-evidence>, add "recap" to its pane: plain text, at most 40 words, saying what the agent is doing now, its goal, and any blocker or next step. Use only that evidence; never invent. Omit "recap" when the evidence is thin.
 {{#if entry_naming}}
 <custom-instructions purpose="entry_naming">
 {{entry_naming}}
@@ -72,9 +76,22 @@ Project and every-node pointers mandatory at either scope. Omit generation: clie
     <content>
 {{{content_extract}}}
     </content>
+    {{#if recap_evidence}}<recap-evidence>
+{{{recap_evidence}}}
+    </recap-evidence>{{/if}}
 </item>
 {{/each}}
 </items>
+{{#if attention_enabled}}
+<attention-queue>
+Also add the optional top-level key "attention" (never inside "children"; it must not change them): an array naming listed agents the user must look at now. Use only listed ids. Include an agent only when its content shows:
+- "question": it asks the user something or waits for approval or a choice;
+- "stuck": it repeats the same failing step or error without progress;
+- "waiting_on": it waits for another listed item's result (set "waiting_on" to that id);
+- "changed": it finished or changed meaningfully since the user last looked.
+Entry shape: {"id":12,"kind":"question","reason":"under 120 characters, plain words","question":"the exact question or empty string","status_summary":"one or two plain sentences on what the agent is doing or has done, under 300 characters","why_here":"why the user needs to look, under 300 characters","suggested_action":"the short next step for the user, under 300 characters","waiting_on":null,"priority":0-100}. Write the three briefing fields (status_summary, why_here, suggested_action) only from what the content shows; use an empty string for any you cannot support. Omit agents that are working normally or idle; an empty array is a valid answer.
+</attention-queue>
+{{/if}}
 {{#if retry_feedback}}
 <retry-feedback>
 Your prior answer was rejected; correct it and include every listed id once: {{{retry_feedback}}}

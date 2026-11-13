@@ -368,6 +368,9 @@ pub struct SavedWorldFrameEvidence {
     pub required_materials: usize,
     pub required_materials_satisfied: usize,
     pub visible_pixels: usize,
+    /// Saved-tour corridor the frame was painted from, in quarter blocks
+    /// (`RouteKey` units). `None` when the frame is not from a route.
+    pub route_endpoints_quarter_blocks: Option<[[i64; 2]; 2]>,
 }
 
 impl SavedWorldFrameEvidence {
@@ -621,6 +624,7 @@ mod palette_scene_tests {
                     required_materials: 2,
                     required_materials_satisfied: 2,
                     visible_pixels: 7,
+                    route_endpoints_quarter_blocks: None,
                 })
             }
         }

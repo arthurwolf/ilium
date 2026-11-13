@@ -1,0 +1,53 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.worktrees",
+  "name": "Worktrees",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "A worktree agent works in its own Git worktree, a second checkout of the repository on its own branch, so several agents can change the same project without stepping on each other.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "workspace.manage",
+      "process.run:git",
+      "process.run:sh",
+      "panes.create",
+      "panes.read",
+      "fs.read:project",
+      "fs.write:worktrees"
+    ],
+    "client": [
+      "ui.panels",
+      "settings.write-kernel:git"
+    ]
+  },
+  "activation": [
+    "command:new-agent",
+    "service:create"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "new-agent",
+        "title": "New agent in worktree",
+        "category": "Git"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "new-agent",
+        "chord": "w",
+        "mode": "prefix"
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

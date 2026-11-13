@@ -28,6 +28,10 @@ pub const RESTRUCTURE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/naming/restructure.hbs"
 ));
+pub const ATTENTION_AGENT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/templates/naming/attention-agent.hbs"
+));
 pub const INFERENCE_TEST: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/naming/inference-test.hbs"
@@ -665,6 +669,7 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     ("naming/terminal-summary", TERMINAL_SUMMARY),
     ("naming/terminal-title", TERMINAL_TITLE),
     ("naming/restructure", RESTRUCTURE),
+    ("naming/attention-agent", ATTENTION_AGENT),
     ("naming/inference-test", INFERENCE_TEST),
     ("naming/session-label-example", SESSION_LABEL_EXAMPLE),
     ("naming/session-summary-example", SESSION_SUMMARY_EXAMPLE),

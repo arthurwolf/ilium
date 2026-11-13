@@ -1,0 +1,15 @@
+package ilium:host@0.1.0;
+
+interface media {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+  record video-info { width: u32, height: u32, frames-per-second: f32, duration-millis: option<u64> }
+  open-video: func(path: fs-path) -> result<tuple<u64, video-info>, plugin-error>;
+  /// At most 16 MiB.
+  open-video-bytes: func(bytes: list<u8>, mime: string) -> result<tuple<u64, video-info>, plugin-error>;
+  open-video-range: func(path: fs-path, start-millis: u64, end-millis: option<u64>) -> result<tuple<u64, video-info>, plugin-error>;
+  /// RGB8 frame decoded ahead natively. none at the end of the clip.
+  next-frame: func(video: u64, width: u32, height: u32) -> result<option<list<u8>>, plugin-error>;
+  seek: func(video: u64, millis: u64) -> result<_, plugin-error>;
+  close-video: func(video: u64);
+}

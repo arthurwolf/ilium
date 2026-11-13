@@ -1,0 +1,12 @@
+╭─ Titles ─────────────────────────────────────╮
+│ Title style ……………………………………… ‹ Short phrase › │
+│ Name panes from prompts ………………………………… ‹ On › │
+│ Name new sessions ………………………………………………… ‹ On › │
+│ Rename on session change …………………………… ‹ Off › │
+│ Instructions for titles                      │
+│ ╭──────────────────────────────────────────╮ │
+│ │ Keep titles under four words.            │ │
+│ │ Use the repository name first.           │ │
+│ ╰──────────────────────────────────────────╯ │
+│  Each change is saved at once.               │
+╰──────────────────────────────────────────────╯

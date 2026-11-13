@@ -1,0 +1,11 @@
+package ilium:anim@0.1.0;
+
+interface fonts {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  resource font {
+    /// asset is the path of a font file inside the plugin package.
+    constructor(asset: string);
+    /// Returns width, height and a gray8 bitmap.
+    rasterize: func(text: string, size-px: u16) -> result<tuple<u32, u32, list<u8>>, plugin-error>;
+  }
+}

@@ -1,0 +1,9 @@
+package ilium:exports@0.1.0;
+
+interface service-provider {
+  use ilium:types/ids@0.1.0.{plugin-id};
+  variant service-reply { done(string), deferred }
+  record service-call { call: u64, service: string, method: string, payload-json: string, caller: plugin-id }
+  /// deferred means the plugin answers later with services.reply.
+  handle: func(call: service-call) -> service-reply;
+}

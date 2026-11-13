@@ -84,7 +84,9 @@ impl Preparation {
         };
         let storage = match resources.reserve_storage(LAYOUT_RESULT_BYTES) {
             Ok(storage) => storage,
-            Err(RejectReason::Busy | RejectReason::ResultBytes) => return Ok(None),
+            Err(RejectReason::Busy | RejectReason::ResultBytes | RejectReason::WorkerBytes) => {
+                return Ok(None);
+            }
             Err(reason) => return Err(format!("Wikipedia layout storage admission: {reason:?}")),
         };
         if PREPARATION_ACTIVE
@@ -475,6 +477,7 @@ mod status_tests {
     #[test]
     fn layout_admission_refusal_keeps_the_last_good_article_frame_visible() {
         let (mut execution, quota, resources) = execution_fixture(2, 256 * MIB, 1024);
+        let baseline = quota.snapshot();
         let settings = WikipediaSettings {
             render_mode: RenderMode::Text,
             ..Default::default()
@@ -510,7 +513,8 @@ mod status_tests {
             host.pending.is_none(),
             "refused layout must not claim the active slot"
         );
-        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_threads, baseline.worker_threads);
+        assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes);
         assert_eq!(host.layout_count_for_test(), Some(1));
         assert_eq!(retained_row, prior_row);
         host.release();
@@ -523,7 +527,14 @@ mod status_tests {
 
     #[test]
     fn layout_result_keeps_its_storage_charge_after_worker_publication() {
-        let (mut execution, quota, resources) = execution_fixture(2, 256 * MIB, 128 * MIB);
+        // Retained output and the transient worker share the physical byte
+        // budget; both must fit concurrently with the execution lane.
+        let (mut execution, quota, resources) = execution_fixture(
+            2,
+            16 * MIB + LAYOUT_WORKER_BYTES + LAYOUT_RESULT_BYTES,
+            128 * MIB,
+        );
+        let baseline = quota.snapshot();
         let article_storage = resources.reserve_storage(1).unwrap();
         let document = Arc::new(
             ilium_wikipedia::parse_article(
@@ -540,7 +551,7 @@ mod status_tests {
             ..Default::default()
         };
         let key = PreparationKey::new(1, 40, &settings);
-        let preparation = Preparation::start(key, article.clone(), settings, &resources)
+        let mut preparation = Preparation::start(key, article.clone(), settings, &resources)
             .unwrap()
             .expect("layout worker admitted");
         let prepared = preparation
@@ -548,11 +559,23 @@ mod status_tests {
             .recv_timeout(Duration::from_secs(20))
             .expect("layout worker result")
             .expect("layout preparation");
-        assert_eq!(quota.snapshot().result_bytes, 1 + LAYOUT_RESULT_BYTES);
+        preparation
+            .worker
+            .take()
+            .unwrap()
+            .request_stop()
+            .unwrap()
+            .join_until(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            baseline.worker_bytes + 1 + LAYOUT_RESULT_BYTES
+        );
+        assert_eq!(quota.snapshot().result_bytes, baseline.result_bytes);
         drop(prepared);
-        assert_eq!(quota.snapshot().result_bytes, 1);
+        assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes + 1);
         drop(article);
-        assert_eq!(quota.snapshot().result_bytes, 0);
+        assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes);
         drop(preparation);
         execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
         let joined = execution

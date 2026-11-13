@@ -1,0 +1,8 @@
+package ilium:host@0.1.0;
+
+interface clock {
+  /// UTC wall clock in milliseconds. May jump when the user changes the clock.
+  now-unix-millis: func() -> u64;
+  /// Milliseconds since an unspecified start. Never goes backwards. Not comparable between instances.
+  monotonic-millis: func() -> u64;
+}

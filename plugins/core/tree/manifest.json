@@ -1,0 +1,33 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.tree",
+  "name": "Tree",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Tree plugin (ilium.core.tree, side both) owns the project tree as the user sees it: groups, folders and top-level destinations, moving, renaming and closing entries, the tree order, bookmarks, locks and the automatic removal of empty gr",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "tree.read",
+      "tree.write",
+      "tree.metadata",
+      "tree.decorate",
+      "tree.restructure"
+    ],
+    "client": [
+      "tree.read"
+    ]
+  },
+  "activation": [
+    "startup"
+  ],
+  "limits_tier": "first-party"
+}

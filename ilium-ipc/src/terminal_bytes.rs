@@ -70,13 +70,21 @@ mod tests {
                 bincode::serialize(&(1_u32, pane_id, 3_u64, 9_u64, &bytes)).unwrap(),
             ),
             (
+                ServerEvent::ScreenPreview {
+                    pane_id,
+                    through_sequence: 9,
+                    bytes: bytes.clone(),
+                },
+                bincode::serialize(&(2_u32, pane_id, 9_u64, &bytes)).unwrap(),
+            ),
+            (
                 ServerEvent::TerminalReplay {
                     pane_id,
                     through_sequence: 9,
                     bytes: bytes.clone(),
                     is_complete: false,
                 },
-                bincode::serialize(&(7_u32, pane_id, 9_u64, &bytes, false)).unwrap(),
+                bincode::serialize(&(8_u32, pane_id, 9_u64, &bytes, false)).unwrap(),
             ),
         ];
         for (event, legacy) in cases {

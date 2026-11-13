@@ -923,7 +923,8 @@ mod tests {
                 input_bytes: 32 * 1024 * 1024,
                 result_bytes: 128 * 1024,
                 worker_threads: 1,
-                worker_bytes: 1024 * 1024,
+                // One MiB worker plus independent retained bank bookkeeping.
+                worker_bytes: 2 * 1024 * 1024,
             }),
             ExecutionConfig {
                 cpu: disabled,

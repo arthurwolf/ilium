@@ -1,0 +1,1099 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>File access | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details open><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/" aria-current="page">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Concepts</b></p>
+<h1>File access</h1>
+
+<p>A plugin reaches files only through named scopes. A scope is a directory the user has granted, such as the project folder, or a directory the plugin owns, such as its private data folder. The kernel resolves each grant to one canonical directory once. The plugin then reads and writes through paths relative to that scope, and it never learns the real path on the user's disk.</p>
+<p>Use this page to choose a scope, read and write files in Rust or TypeScript, watch a folder for changes, take a lock on a shared file, and ask the user to choose a file with the picker. Every call listed here is in the <code>fs</code> interface of <code>ilium:host/fs</code>, version <code>0.1.0</code>.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>A manifest with a <code>capabilities</code> object for the side that makes the call. Each file operation needs the grant for its scope. See <a href="/pages/capabilities/">Capabilities and grants</a>.</li>
+<li>The SDK for your language: <code>ilium_plugin_sdk</code> for Rust, or <code>@ilium/plugin-sdk</code> for TypeScript. See <a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a>.</li>
+<li>Familiarity with request ids and completions. Slow calls return a request id, and the result arrives later. See <a href="/pages/requests-and-outcomes/">Requests and outcomes</a>.</li>
+</ul>
+<p>The manifest lists grants per side:</p>
+<pre><code class="language-json">&quot;capabilities&quot;: {
+  &quot;server&quot;: [&quot;fs.read:project&quot;, &quot;fs.write:data&quot;, &quot;fs.pick&quot;, &quot;fs.read:picked&quot;]
+}
+</code></pre>
+<h2 id="scopes">Scopes</h2>
+<p>A grant names a scope, and the scope names a directory. The plugin sees each scope as a preopened directory at the path shown below. The kernel holds the real location.</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Preopen</th>
+<th>Root</th>
+<th>Default</th>
+<th>Write</th>
+<th>Watch</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>package</code></td>
+<td><code>/package</code></td>
+<td>Unpacked package <code>assets/</code></td>
+<td>Always, read only</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>data</code></td>
+<td><code>/data</code></td>
+<td>The plugin's private data directory</td>
+<td>Always</td>
+<td>Always</td>
+<td>Always</td>
+</tr>
+<tr>
+<td><code>cache</code></td>
+<td><code>/cache</code></td>
+<td>The plugin's private cache, evictable</td>
+<td>Always</td>
+<td>Always</td>
+<td>Always</td>
+</tr>
+<tr>
+<td><code>project</code></td>
+<td><code>/project</code></td>
+<td>The canonical project directory</td>
+<td>Grant</td>
+<td>Grant</td>
+<td>Grant</td>
+</tr>
+<tr>
+<td><code>picked</code></td>
+<td><code>/picked/&lt;n&gt;</code></td>
+<td>Each path the user chose in the picker</td>
+<td>Grant per pick</td>
+<td>Grant</td>
+<td>Folders only</td>
+</tr>
+<tr>
+<td><code>agent-sessions:claude</code>, <code>:codex</code>, <code>:antigravity</code></td>
+<td><code>/agent-sessions/&lt;agent&gt;</code></td>
+<td>The agent's transcript directory</td>
+<td>Grant, high risk</td>
+<td>Refused</td>
+<td>Grant</td>
+</tr>
+<tr>
+<td><code>agent-config:claude</code>, <code>:codex</code></td>
+<td><code>/agent-config/&lt;agent&gt;</code></td>
+<td>The agent's configuration directory</td>
+<td>Grant, high risk</td>
+<td>Grant, high risk</td>
+<td>Grant</td>
+</tr>
+<tr>
+<td><code>minecraft-saves</code></td>
+<td><code>/minecraft-saves</code></td>
+<td>The platform's saves directory</td>
+<td>Grant</td>
+<td>Grant</td>
+<td>Grant</td>
+</tr>
+<tr>
+<td><code>worktrees</code></td>
+<td><code>/worktrees</code></td>
+<td>The root set by <code>workspace.worktree_root</code></td>
+<td>Grant</td>
+<td>High risk</td>
+<td>Grant</td>
+</tr>
+<tr>
+<td><code>path:&lt;template&gt;</code></td>
+<td><code>/paths/&lt;n&gt;</code></td>
+<td>A template, see below</td>
+<td>Grant</td>
+<td>Grant</td>
+<td>Grant</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>project</code> scope excludes the project's <code>.ilium</code> folder. Listing hides it, and every access returns <code>not-permitted</code>. Session snapshots are never exposed.</p>
+<p>The <code>package</code> scope is never watchable, because the package does not change at run time.</p>
+<p><code>fs.read:&lt;scope&gt;</code> allows reads, <code>fs.write:&lt;scope&gt;</code> allows changes, and <code>fs.watch:&lt;scope&gt;</code> allows watching folders. Writes outside <code>data</code> and <code>cache</code> need an explicit user grant, even for bundled plugins.</p>
+<h3 id="path-templates">Path templates</h3>
+<p>A <code>path:&lt;template&gt;</code> grant starts with a placeholder (<code>{home}</code>, <code>{config}</code>, <code>{data}</code>, <code>{cache}</code>, <code>{project}</code> or <code>{worktrees}</code>) or with a literal absolute path. It ends with a file or folder name, which matches that item and its direct children, or with <code>/**</code>, which matches the whole subtree. A <code>*</code> anywhere else is refused at install.</p>
+<ul>
+<li><code>fs.read:path:{home}/Pictures/**</code> reads the Pictures tree under the user's home directory, and nothing outside it.</li>
+<li>A literal absolute path such as <code>fs.read:path:/srv/logs/**</code> is always high risk.</li>
+<li><code>fs.write:path:</code> with a literal absolute path is available to bundled plugins only.</li>
+</ul>
+<p>The kernel names each <code>path:</code> grant <code>paths/&lt;n&gt;</code>, counting from 0 in manifest order, so the first grant appears as <code>/paths/0</code>.</p>
+<h2 id="calls">Calls</h2>
+<p>Synchronous calls return at once. Calls that need the disk, another process or the user return a request id, and the result is taken with the matching <code>take-*</code> function. The Rust and TypeScript SDKs wrap each slow call in one <code>async</code> function, so most code never touches a request id. Rust uses snake_case names, such as <code>read_all</code>, and TypeScript uses camelCase, such as <code>readAll</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Kind</th>
+<th>Result</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>roots()</code></td>
+<td>Sync</td>
+<td><code>list&lt;tuple&lt;string, bool&gt;&gt;</code></td>
+<td>Granted scopes and whether each is writable</td>
+</tr>
+<tr>
+<td><code>metadata(path)</code></td>
+<td>Sync</td>
+<td><code>fs-metadata</code></td>
+<td>Kind, length, modified time and read-only flag</td>
+</tr>
+<tr>
+<td><code>list-dir(path, max-entries)</code></td>
+<td>Sync</td>
+<td><code>list&lt;dir-entry&gt;</code></td>
+<td>Direct children, at most 4,096</td>
+</tr>
+<tr>
+<td><code>read(path, offset, max-bytes)</code></td>
+<td>Sync</td>
+<td><code>list&lt;u8&gt;</code></td>
+<td>Up to 1 MiB from an offset</td>
+</tr>
+<tr>
+<td><code>read-all(path)</code></td>
+<td>Async</td>
+<td><code>take-bytes</code></td>
+<td>Whole file, up to 64 MiB by default</td>
+</tr>
+<tr>
+<td><code>scan(path, glob, max-entries)</code></td>
+<td>Async</td>
+<td><code>take-entries</code></td>
+<td>Matching entries, at most 65,536</td>
+</tr>
+<tr>
+<td><code>write(path, data, mode)</code></td>
+<td>Async</td>
+<td><code>()</code></td>
+<td>Write one call of up to 16 MiB</td>
+</tr>
+<tr>
+<td><code>create-dir(path)</code></td>
+<td>Sync</td>
+<td><code>()</code></td>
+<td>Create a folder; an existing folder is success</td>
+</tr>
+<tr>
+<td><code>remove(path)</code></td>
+<td>Async</td>
+<td><code>()</code></td>
+<td>Remove a file, or a folder recursively</td>
+</tr>
+<tr>
+<td><code>rename(source, target)</code></td>
+<td>Async</td>
+<td><code>()</code></td>
+<td>Rename within one scope; a target file is replaced</td>
+</tr>
+<tr>
+<td><code>watch(path, recursive)</code></td>
+<td>Sync</td>
+<td><code>watch-id</code></td>
+<td>Start a watch on an existing folder</td>
+</tr>
+<tr>
+<td><code>unwatch(watch)</code></td>
+<td>Sync</td>
+<td>none</td>
+<td>Stop a watch; an unknown id is ignored</td>
+</tr>
+<tr>
+<td><code>lock(path, exclusive, timeout-millis)</code></td>
+<td>Async</td>
+<td><code>take-lock</code></td>
+<td>Take an advisory lock</td>
+</tr>
+<tr>
+<td><code>unlock(lock)</code></td>
+<td>Sync</td>
+<td>none</td>
+<td>Release a lock</td>
+</tr>
+<tr>
+<td><code>pick(spec)</code></td>
+<td>Async</td>
+<td><code>take-picked</code></td>
+<td>Ask the user to choose a file or folder</td>
+</tr>
+<tr>
+<td><code>read-with-revision(path)</code></td>
+<td>Async</td>
+<td><code>take-revisioned</code></td>
+<td>Whole file plus a revision token</td>
+</tr>
+<tr>
+<td><code>write-atomic(path, data, expected)</code></td>
+<td>Async</td>
+<td><code>take-written</code></td>
+<td>Write to a temporary file, then rename over the target; <code>expected</code> makes it a compare-and-swap</td>
+</tr>
+<tr>
+<td><code>tail(path, cursor, max-bytes)</code></td>
+<td>Sync</td>
+<td><code>tail-chunk</code></td>
+<td>New bytes after a cursor, at most 1 MiB</td>
+</tr>
+</tbody>
+</table>
+<p>The key record and enum types are:</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Fields or cases</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fs-path</code></td>
+<td><code>scope: string</code>, <code>path: string</code>, with <code>/</code> as separator and relative to the scope root</td>
+</tr>
+<tr>
+<td><code>fs-metadata</code></td>
+<td><code>kind</code> (<code>file</code>, <code>directory</code>, <code>symlink</code>, <code>other</code>), <code>length: u64</code>, <code>modified-unix-millis</code>, <code>read-only</code></td>
+</tr>
+<tr>
+<td><code>dir-entry</code></td>
+<td><code>name: string</code>, <code>metadata: fs-metadata</code></td>
+</tr>
+<tr>
+<td><code>write-mode</code></td>
+<td><code>create-new</code>, <code>replace</code>, <code>append</code></td>
+</tr>
+<tr>
+<td><code>pick-kind</code></td>
+<td><code>open-file</code>, <code>open-directory</code>, <code>save-file</code></td>
+</tr>
+</tbody>
+</table>
+<p>In Rust these types are <code>FsPath</code>, <code>FsMetadata</code>, <code>DirEntry</code>, <code>WriteMode</code> and <code>PickKind</code>, with cases
+such as <code>WriteMode::Replace</code> and <code>PickKind::OpenFile</code>. In TypeScript the cases are kebab-case
+strings, such as <code>'replace'</code> and <code>'open-file'</code>.</p>
+<p>Every call that returns a request id also returns <code>busy</code> when the plugin has too many pending requests, and <code>quota-exceeded</code> when its CPU budget is spent.</p>
+<h2 id="synchronous-reads-and-stdfs">Synchronous reads and std::fs</h2>
+<p>Synchronous code works against the preopens, so a Rust or JavaScript plugin can use the standard library directly for small reads. No Ilium call is needed. The path is the preopen, not the path on disk.</p>
+<pre><code class="language-rust">// Needs the grant fs.read:project in the manifest.
+// The path is the preopen, not the path on the user's disk.
+let readme_bytes = std::fs::read(&quot;/project/README.md&quot;)?;
+</code></pre>
+<p>Paths that leave the scope through <code>..</code> or through a symbolic link are refused with <code>not-permitted</code>. A symbolic link is reported as kind <code>symlink</code> by <code>metadata</code> and <code>list-dir</code>, and it is not followed. Other operations follow a link only when its target stays inside the same scope root.</p>
+<h2 id="examples">Examples</h2>
+<h3 id="read-a-project-file-and-write-a-summary">Read a project file and write a summary</h3>
+<p>This example reads a file from the project and writes a summary to the plugin's data folder. It needs <code>fs.read:project</code> and <code>fs.write:data</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::fs::{self, WriteMode};
+use ilium_plugin_sdk::prelude::*;
+
+// Manifest grants: fs.read:project and fs.write:data on the server side.
+pub async fn save_readme_size() -&gt; Result&lt;(), PluginError&gt; {
+    let readme = FsPath { scope: &quot;project&quot;.into(), path: &quot;README.md&quot;.into() };
+    let bytes = fs::read_all(readme).await?;
+
+    // create_dir is synchronous and succeeds when the folder already exists.
+    fs::create_dir(FsPath { scope: &quot;data&quot;.into(), path: &quot;reports&quot;.into() })?;
+
+    let summary = format!(&quot;README.md is {} bytes\n&quot;, bytes.len());
+    let target = FsPath { scope: &quot;data&quot;.into(), path: &quot;reports/readme-size.txt&quot;.into() };
+    fs::write(target, summary.into_bytes(), WriteMode::Replace).await?;
+    Ok(())
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { createDir, readAll, write } from '@ilium/plugin-sdk/host/fs';
+
+// Manifest grants: fs.read:project and fs.write:data on the server side.
+export async function saveReadmeSize(): Promise&lt;void&gt; {
+  const bytes = await readAll({ scope: 'project', path: 'README.md' });
+  createDir({ scope: 'data', path: 'reports' });
+  const summary = new TextEncoder().encode(`README.md is ${bytes.length} bytes\n`);
+  await write({ scope: 'data', path: 'reports/readme-size.txt' }, summary, 'replace');
+}
+</code></pre>
+<h3 id="append-to-a-shared-file-under-a-lock">Append to a shared file under a lock</h3>
+<p>This example appends one line to a file that another process also writes. It takes an exclusive
+lock and waits at most 2 seconds. It releases the lock on both the success and the error path.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::fs::{self, WriteMode};
+use ilium_plugin_sdk::prelude::*;
+
+pub async fn append_journal_line(line: &amp;str) -&gt; Result&lt;(), PluginError&gt; {
+    let journal = FsPath { scope: &quot;data&quot;.into(), path: &quot;journal.log&quot;.into() };
+    let lock = fs::lock(journal.clone(), true, 2_000).await?;
+    let result = fs::write(journal, format!(&quot;{line}\n&quot;).into_bytes(), WriteMode::Append).await;
+    fs::unlock(lock);
+    result
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { lock, unlock, write } from '@ilium/plugin-sdk/host/fs';
+
+export async function appendJournalLine(line: string): Promise&lt;void&gt; {
+  const journal = { scope: 'data', path: 'journal.log' };
+  const held = await lock(journal, true, 2_000);
+  try {
+    await write(journal, new TextEncoder().encode(`${line}\n`), 'append');
+  } finally {
+    unlock(held);
+  }
+}
+</code></pre>
+<h3 id="pick-a-note-and-count-its-headings">Pick a note and count its headings</h3>
+<p>This example asks the user to choose a Markdown file, reads it, and writes the count to the data
+folder. It needs <code>fs.pick</code>, <code>fs.read:picked</code> and <code>fs.write:data</code>.</p>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { pick, readAll, write } from '@ilium/plugin-sdk/host/fs';
+
+// Manifest grants: fs.pick, fs.read:picked and fs.write:data on the server side.
+export async function countHeadings(): Promise&lt;number&gt; {
+  const chosen = await pick({
+    kind: 'open-file',
+    title: 'Choose a Markdown note',
+    extensions: ['md'],
+  });
+  const text = new TextDecoder().decode(await readAll(chosen));
+  const headings = text.split('\n').filter((line) =&gt; line.startsWith('#')).length;
+  const report = new TextEncoder().encode(`headings: ${headings}\n`);
+  await write({ scope: 'data', path: 'heading-count.txt' }, report, 'replace');
+  return headings;
+}
+</code></pre>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::fs::{self, PickKind, PickSpec, WriteMode};
+use ilium_plugin_sdk::prelude::*;
+
+// Manifest grants: fs.pick, fs.read:picked and fs.write:data on the server side.
+pub async fn count_headings() -&gt; Result&lt;usize, PluginError&gt; {
+    let chosen = fs::pick(PickSpec {
+        kind: PickKind::OpenFile,
+        title: &quot;Choose a Markdown note&quot;.into(),
+        extensions: vec![&quot;md&quot;.into()],
+    })
+    .await?;
+    let text = String::from_utf8_lossy(&amp;fs::read_all(chosen).await?).into_owned();
+    let headings = text.lines().filter(|line| line.starts_with('#')).count();
+    let report = FsPath { scope: &quot;data&quot;.into(), path: &quot;heading-count.txt&quot;.into() };
+    fs::write(report, format!(&quot;headings: {headings}\n&quot;).into_bytes(), WriteMode::Replace).await?;
+    Ok(headings)
+}
+</code></pre>
+<h2 id="writes">Writes</h2>
+<p>A write takes one of three modes.</p>
+<ul>
+<li><code>create-new</code> creates the file. If the file exists, the call completes as <code>failed(conflict)</code>.</li>
+<li><code>replace</code> writes the whole file atomically. The kernel writes a temporary sibling file and then renames it over the target.</li>
+<li><code>append</code> adds the data to the end of the file. It creates the file if it is missing.</li>
+</ul>
+<figure>
+<svg viewBox="0 0 400 110" role="img" aria-label="Atomic replace through a temporary sibling" width="600" height="165">
+  <defs>
+    <marker id="fa-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="6" y="36" width="100" height="40" rx="6" fill="none" stroke="currentColor"/>
+  <text x="56" y="52" font-size="11" text-anchor="middle" fill="currentColor">Plugin write</text>
+  <text x="56" y="66" font-size="10" text-anchor="middle" fill="currentColor">mode: replace</text>
+  <line x1="106" y1="56" x2="130" y2="56" stroke="currentColor" marker-end="url(#fa-arrow)"/>
+  <rect x="130" y="36" width="122" height="40" rx="6" fill="none" stroke="currentColor"/>
+  <text x="191" y="52" font-size="11" text-anchor="middle" fill="currentColor">Temp sibling</text>
+  <text x="191" y="66" font-size="10" text-anchor="middle" fill="currentColor">notes.md.tmp</text>
+  <line x1="252" y1="56" x2="294" y2="56" stroke="currentColor" marker-end="url(#fa-arrow)"/>
+  <text x="273" y="49" font-size="10" text-anchor="middle" fill="currentColor">rename</text>
+  <rect x="294" y="36" width="100" height="40" rx="6" fill="none" stroke="currentColor"/>
+  <text x="344" y="52" font-size="11" text-anchor="middle" fill="currentColor">Target</text>
+  <text x="344" y="66" font-size="10" text-anchor="middle" fill="currentColor">notes.md</text>
+  <text x="6" y="100" font-size="10" fill="currentColor">A reader sees the old file or the new file, never half of one.</text>
+</svg>
+<figcaption>A replace write creates a temporary sibling, then renames it over the target in one step.</figcaption>
+</figure>
+
+<p>A <code>write</code> with <code>replace</code> on a path that names an existing folder completes as <code>failed(conflict)</code>. A <code>write</code> whose parent folder is missing completes as <code>not-found</code>. Create the folder with <code>create-dir</code> first.</p>
+<p>A write outside <code>data</code> and <code>cache</code> is logged at level info, with the scope, path, operation and byte count. To write more than 16 MiB, split the data into <code>append</code> calls, or let a <a href="/pages/background-jobs/">background job</a> produce the file.</p>
+<h2 id="reading-large-files-and-scans">Reading large files and scans</h2>
+<p><code>read-all</code> returns the whole file when it is 64 MiB or smaller. A larger file completes as <code>failed(quota-exceeded)</code>. Read a large file in pieces with the synchronous <code>read</code> call, which returns at most 1 MiB per call. A <code>read</code> at or past the end of the file returns an empty list, not an error.</p>
+<p><code>scan</code> matches a glob against paths relative to the scope root. <code>*</code> matches within one segment, a whole <code>**</code> segment matches any depth, and <code>?</code> matches one character. Braces and character classes are not supported. Matches are sorted by path bytes, and dotfiles are included. More matches than <code>max-entries</code> complete as <code>failed(quota-exceeded)</code>, never as a silent truncation.</p>
+<h2 id="revisions-atomic-writes-and-tailing">Revisions, atomic writes and tailing</h2>
+<p>Two plugins, or a plugin and an agent CLI, often share one file. Use <code>read-with-revision</code> to read the bytes and a revision token together. The token is a hash of the content, the size and the modification time. Pass it as <code>expected</code> to <code>write-atomic</code>: the host writes a temporary file in the same directory and renames it over the target, so a reader never sees a half-written file. If the file changed since the read, the call fails with <code>conflict</code> and the plugin reads again. With <code>expected</code> set to none, the call creates the file and fails with <code>conflict</code> when it exists.</p>
+<p><code>tail</code> reads what a growing file gained. The plugin keeps the <code>cursor</code> from the last chunk. When the chunk has <code>truncated: true</code>, the file shrank or was replaced, and the next read restarts at 0. One call returns at most 1 MiB.</p>
+<p>Further scopes are <code>agent-sessions:gemini</code>, <code>agent-config:gemini</code> and <code>agent-config:antigravity</code>, with the same risk as the Claude and Codex ones.</p>
+<figure>
+<pre class="term">╭ Write ─────────────────────────────────────────────────────╮
+│ <span class="t-hi">read-with-revision</span>   counter.txt  <span class="t-dim">rev 9f2c</span>                 │
+│ <span class="t-dim">another writer saves the file: rev 71ab</span>                    │
+│ <span class="t-hi">write-atomic</span>         expected 9f2c                         │
+│ <span class="t-err"><span class="w2">✗</span> failed: conflict</span>  <span class="t-dim">read again and retry</span>                   │
+╰────────────────────────────────────────────────────────────╯</pre>
+<figcaption>Illustrative, not generated. A compare-and-swap write that loses to another writer and retries.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::fs;
+use ilium_plugin_sdk::prelude::*;
+
+pub async fn bump_counter() -&gt; Result&lt;(), PluginError&gt; {
+    let path = FsPath { scope: &quot;data&quot;.into(), path: &quot;counter.txt&quot;.into() };
+    for _attempt in 0..3 {
+        let current = fs::read_with_revision(path.clone()).await?;
+        let value: u64 = String::from_utf8_lossy(&amp;current.bytes).trim().parse().unwrap_or(0);
+        let next = format!(&quot;{}\n&quot;, value + 1).into_bytes();
+        match fs::write_atomic(path.clone(), next, Some(current.revision)).await {
+            Ok(_) =&gt; return Ok(()),
+            Err(error) if error.code == ErrorCode::Conflict =&gt; continue,
+            Err(error) =&gt; return Err(error),
+        }
+    }
+    Err(PluginError::new(ErrorCode::Conflict, &quot;the counter kept changing&quot;))
+}
+
+pub fn read_new_log_bytes(path: FsPath, cursor: u64) -&gt; Result&lt;(Vec&lt;u8&gt;, u64), PluginError&gt; {
+    let chunk = fs::tail(path, cursor, 65_536)?;
+    let next = if chunk.truncated { 0 } else { chunk.cursor };
+    Ok((chunk.bytes, next))
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-ts">import { readWithRevision, tail, writeAtomic } from '@ilium/plugin-sdk/host/fs';
+
+export async function bumpCounter(): Promise&lt;void&gt; {
+  const path = { scope: 'data', path: 'counter.txt' };
+  for (let attempt = 0; attempt &lt; 3; attempt += 1) {
+    const current = await readWithRevision(path);
+    const value = Number.parseInt(new TextDecoder().decode(current.bytes).trim(), 10) || 0;
+    try {
+      await writeAtomic(path, new TextEncoder().encode(`${value + 1}\n`), current.revision);
+      return;
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'conflict') throw error;
+    }
+  }
+  throw new Error('the counter kept changing');
+}
+
+export function readNewLogBytes(path: { scope: string; path: string }, cursor: bigint) {
+  const chunk = tail(path, cursor, 65_536);
+  return { bytes: chunk.bytes, next: chunk.truncated ? 0n : chunk.cursor };
+}
+</code></pre>
+<h2 id="watching-folders">Watching folders</h2>
+<p><code>watch(path, recursive)</code> takes an existing folder. A file gives <code>invalid-argument</code>, a missing path gives <code>not-found</code>, and a symbolic link gives <code>not-permitted</code>. Changes arrive as <code>fs-changed</code> events, and each event is a record with the <code>watch</code> id and a list of <code>paths</code>.</p>
+<ul>
+<li>The host waits 200 ms after the first change and sends one event for all changes in that time. A watch sends at most five events per second.</li>
+<li>An event lists at most 1,024 paths. A larger batch becomes one event that lists only the watched path, and the plugin must read that folder again.</li>
+<li>A non-recursive watch reports only the direct children. A recursive watch reports every changed path below the folder. A rename lists the old and the new path.</li>
+<li>A plugin may hold 64 watches. A recursive watch counts once.</li>
+<li>Watch ids do not survive a restart. Watch again in <code>activate</code>.</li>
+</ul>
+<p>The event goes only to the instance that made the watch call. A watch ends when its instance deactivates or restarts, when the plugin is disabled, or when it loses the grant. When the watched folder is removed or renamed, one event lists the watched path, and the watch then ends.</p>
+<h2 id="locks">Locks</h2>
+<p>A lock coordinates plugins with each other, and with any program that takes the same lock. The lock is advisory. A program that does not take the lock is not blocked. The file does not need to exist.</p>
+<ul>
+<li><code>exclusive: true</code> waits behind any other holder. <code>exclusive: false</code> shares the lock with other shared holders.</li>
+<li>A held lock that is still held when <code>timeout-millis</code> ends completes as <code>timed-out</code>.</li>
+<li>A request with timeout <code>0</code> on a held lock returns <code>conflict</code> at once.</li>
+<li>Locks are keyed by the resolved path. They are released when the plugin is deactivated, disabled, or loses the grant.</li>
+</ul>
+<h2 id="the-file-picker">The file picker</h2>
+<p>A plugin cannot choose a file itself. It calls <code>pick</code> with the <code>fs.pick</code> grant, and the host draws a modal picker. The user chooses the path, and the plugin receives an <code>fs-path</code> in the <code>picked/&lt;n&gt;</code> scope. Reading the result needs <code>fs.read:picked</code>, and saving to it needs <code>fs.write:picked</code>. Without the read or write grant, <code>fs.pick</code> fails the install with <code>manifest.grant-dependency</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Result</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>open-file</code></td>
+<td><code>picked/&lt;n&gt;</code> with the file path</td>
+<td>Read it with <code>fs.read:picked</code></td>
+</tr>
+<tr>
+<td><code>open-directory</code></td>
+<td><code>picked/&lt;n&gt;</code> with path <code>""</code></td>
+<td>The folder itself; paths inside it are relative to it</td>
+</tr>
+<tr>
+<td><code>save-file</code></td>
+<td><code>picked/&lt;n&gt;</code> with path <code>""</code></td>
+<td>The file may not exist yet; <code>write</code> needs <code>fs.write:picked</code></td>
+</tr>
+</tbody>
+</table>
+<p>The <code>extensions</code> list is written in lower case without a dot. It matches case-insensitively, and an empty list allows every file.</p>
+<p>The picker accepts Enter to open a folder or confirm, Backspace to go to the parent folder, Tab to move between the input, the list and the buttons, Ctrl+H to show hidden files, and Escape to cancel. A cancelled pick fails with <code>cancelled</code>. A second pick while a picker is open fails at once with <code>busy</code>, and no second dialog opens.</p>
+<p>Picked paths are recorded with the plugin's grants and survive restarts. The plugin keeps up to 64 picked paths. When it picks a 65th, the oldest is forgotten. The <code>&lt;n&gt;</code> counter never repeats, so a picked scope keeps its name until its grant is revoked.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Open file ────────────────────────────────────────╮
+│ <span class="t-dim">Notes wants a file</span>                                       │
+│ Folder ……………………………………………………… /home/arthur/dev/app/docs   │
+│   ..                                                     │
+│   <span class="t-hi">meeting-2026-10-09.md</span>                                  │
+│   release-checklist.md                                   │
+│   plan.md                                                │
+│ Filter ………………………………………………………………………………………………………………… .md   │
+│ <span class="t-dim">Enter open · Backspace parent · Tab move · Esc cancel</span>    │
+╰──────────────────────────────────────────────────────────╯</pre>
+<figcaption>Illustrative, not generated. The host file picker. The folder is an example. The chosen file is shared with the plugin until the user revokes it.</figcaption>
+</figure>
+
+<h2 id="scope-resolution">Scope resolution</h2>
+<p>A grant becomes a preopen once. The kernel does this work through the platform layer, and the plugin never sees a path it was not granted.</p>
+<figure>
+<svg viewBox="0 0 400 150" role="img" aria-label="Scope resolution from grant to preopen" width="600" height="225">
+  <title>Scope resolution</title>
+  <desc>A grant such as fs.read:project is resolved by the kernel to a canonical directory. The directory is opened as a preopen for synchronous calls, and slow calls go through the file host with request ids.</desc>
+  <defs>
+    <marker id="fa-arrow2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="6" y="50" width="110" height="44" rx="6" fill="none" stroke="currentColor"/>
+  <text x="61" y="68" font-size="11" text-anchor="middle" fill="currentColor">Grant</text>
+  <text x="61" y="84" font-size="10" text-anchor="middle" fill="currentColor">fs.read:project</text>
+  <line x1="116" y1="72" x2="138" y2="72" stroke="currentColor" marker-end="url(#fa-arrow2)"/>
+  <rect x="138" y="50" width="136" height="44" rx="6" fill="none" stroke="currentColor" stroke-width="2"/>
+  <text x="206" y="68" font-size="11" text-anchor="middle" fill="currentColor">Kernel resolves</text>
+  <text x="206" y="84" font-size="10" text-anchor="middle" fill="currentColor">canonical directory</text>
+  <line x1="274" y1="64" x2="300" y2="36" stroke="currentColor" marker-end="url(#fa-arrow2)"/>
+  <line x1="274" y1="80" x2="300" y2="108" stroke="currentColor" marker-end="url(#fa-arrow2)"/>
+  <rect x="300" y="14" width="94" height="44" rx="6" fill="none" stroke="currentColor"/>
+  <text x="347" y="32" font-size="11" text-anchor="middle" fill="currentColor">Preopen</text>
+  <text x="347" y="48" font-size="10" text-anchor="middle" fill="currentColor">sync calls</text>
+  <rect x="300" y="88" width="94" height="44" rx="6" fill="none" stroke="currentColor"/>
+  <text x="347" y="106" font-size="11" text-anchor="middle" fill="currentColor">File host</text>
+  <text x="347" y="122" font-size="10" text-anchor="middle" fill="currentColor">request ids</text>
+</svg>
+<figcaption>One grant gives one canonical directory. Synchronous calls use the preopen, and slow calls go through the file host.</figcaption>
+</figure>
+
+<h2 id="errors">Errors</h2>
+<p>Every call returns a plugin error with one of these codes. The table lists the codes beyond the universal <code>not-permitted</code>, <code>revoked</code> and <code>internal</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Synchronous errors</th>
+<th>Completion errors</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>metadata</code>, <code>list-dir</code>, <code>read</code></td>
+<td><code>not-found</code>, <code>invalid-argument</code> (bad path, limits exceeded, wrong kind), <code>io</code></td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>read-all</code></td>
+<td><code>invalid-argument</code> (bad path)</td>
+<td><code>not-found</code>, <code>io</code>, <code>quota-exceeded</code> (over 64 MiB)</td>
+</tr>
+<tr>
+<td><code>scan</code></td>
+<td><code>invalid-argument</code> (bad path or glob, <code>max-entries</code> over 65,536)</td>
+<td><code>not-found</code>, <code>io</code>, <code>quota-exceeded</code></td>
+</tr>
+<tr>
+<td><code>write</code></td>
+<td><code>invalid-argument</code> (bad path, over 16 MiB)</td>
+<td><code>conflict</code> (<code>create-new</code> found a file, or a lock holds it), <code>not-found</code>, <code>quota-exceeded</code>, <code>io</code></td>
+</tr>
+<tr>
+<td><code>create-dir</code></td>
+<td><code>conflict</code> (a file has that name), <code>not-found</code>, <code>io</code></td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>remove</code></td>
+<td><code>invalid-argument</code> (scope root)</td>
+<td><code>not-found</code>, <code>conflict</code> (lock), <code>io</code></td>
+</tr>
+<tr>
+<td><code>rename</code></td>
+<td><code>invalid-argument</code> (two different scopes)</td>
+<td><code>not-found</code>, <code>conflict</code> (target is a non-empty folder or locked), <code>io</code></td>
+</tr>
+<tr>
+<td><code>watch</code></td>
+<td><code>not-found</code>, <code>invalid-argument</code> (not watchable), <code>quota-exceeded</code> (64 watches)</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>unwatch</code></td>
+<td>None (an unknown id is ignored)</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>read-with-revision</code></td>
+<td><code>invalid-argument</code> (bad path)</td>
+<td><code>not-found</code>, <code>io</code>, <code>quota-exceeded</code> (over 64 MiB)</td>
+</tr>
+<tr>
+<td><code>write-atomic</code></td>
+<td><code>invalid-argument</code> (bad path, over 16 MiB)</td>
+<td><code>conflict</code> (the file changed since the read: stale <code>expected</code> revision, or <code>expected</code> is none and the file exists, or a lock holds it), <code>not-found</code>, <code>quota-exceeded</code>, <code>io</code></td>
+</tr>
+<tr>
+<td><code>tail</code></td>
+<td><code>not-found</code>, <code>invalid-argument</code> (bad path, <code>max-bytes</code> over 1 MiB), <code>io</code></td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>lock</code></td>
+<td><code>invalid-argument</code> (bad path)</td>
+<td><code>conflict</code> (held and timeout 0), <code>timed-out</code>, <code>not-found</code></td>
+</tr>
+<tr>
+<td><code>pick</code></td>
+<td><code>busy</code> (a picker is already open)</td>
+<td><code>cancelled</code> when the user cancels</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<ul>
+<li>High-risk scopes appear in the review dialog unchecked, and the user must check each one. See <a href="/pages/capabilities/">Capabilities and grants</a>.</li>
+<li>A call refused for a missing or declined grant writes one refusal line to the plugin log, with the capability, the call and the reason:</li>
+</ul>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin logs notes
+<span class="t-err">refusal</span> capability=fs.read:project function=fs.read reason=declined
+<span class="t-ok">info</span>    write scope=project path=docs/notes.md op=replace bytes=2048
+</pre>
+<figcaption>Illustrative, not generated. The fields are the ones the plugin log records, in an example layout.</figcaption>
+</figure>
+
+<h2 id="edge-cases">Edge cases</h2>
+<ul>
+<li>An empty <code>path</code> names the scope root. <code>write</code> and <code>remove</code> refuse it at once, with <code>invalid-argument</code>. On a <code>picked/&lt;n&gt;</code> scope, an empty path names the picked item itself.</li>
+<li>A declined grant makes every call on that scope return <code>not-permitted</code>. A revoked grant ends the plugin's locks and watches.</li>
+</ul>
+<h2 id="rules">Rules</h2>
+<ul>
+<li>Ask for the narrowest scope. Prefer a path template to the whole project when only one folder is needed.</li>
+<li>Write your own state to <code>data</code>, and use the picker when the user has to choose a file.</li>
+<li>Use <code>replace</code> for any file that another reader must never see half-written.</li>
+<li>Take a lock on any file another process writes, and release it on every path.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/security/">Security</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK</a> and <a href="/pages/typescript-sdk/">TypeScript SDK</a></li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p>Scopes and the deny set are defined in <a href="/pages/reference-sandbox/">Sandbox reference</a> ([SEC-058] to [SEC-062]).</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/events-and-intents/"><small>Previous</small>Events and intents</a><a class="next" href="/pages/layout/"><small>Next</small>Layout constraints</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#scopes">Scopes</a></li><li class="l3"><a href="#path-templates">Path templates</a></li><li class="l2"><a href="#calls">Calls</a></li><li class="l2"><a href="#synchronous-reads-and-stdfs">Synchronous reads and std::fs</a></li><li class="l2"><a href="#examples">Examples</a></li><li class="l3"><a href="#read-a-project-file-and-write-a-summary">Read a project file and write a summary</a></li><li class="l3"><a href="#append-to-a-shared-file-under-a-lock">Append to a shared file under a lock</a></li><li class="l3"><a href="#pick-a-note-and-count-its-headings">Pick a note and count its headings</a></li><li class="l2"><a href="#writes">Writes</a></li><li class="l2"><a href="#reading-large-files-and-scans">Reading large files and scans</a></li><li class="l2"><a href="#revisions-atomic-writes-and-tailing">Revisions, atomic writes and tailing</a></li><li class="l2"><a href="#watching-folders">Watching folders</a></li><li class="l2"><a href="#locks">Locks</a></li><li class="l2"><a href="#the-file-picker">The file picker</a></li><li class="l2"><a href="#scope-resolution">Scope resolution</a></li><li class="l2"><a href="#errors">Errors</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#rules">Rules</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l3"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

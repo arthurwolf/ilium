@@ -172,6 +172,7 @@ impl Harness {
         }));
         let (changed, _) = watch::channel(());
         let terminal = TerminalState {
+            child_process_id: 0,
             screen_reader: crate::screen_reader::ScreenReader::new(
                 Arc::clone(&parser),
                 Arc::clone(&generation),
@@ -692,6 +693,27 @@ fn parser_reader_cannot_make_owner_cancellation_wait_forever() {
     ));
     drop(read_guard);
     assert!(harness.resizes().is_empty());
+    // Unparsed raw output is still journalled as final evidence, and the parser
+    // generation must not advance for bytes it never processed.
+    assert_eq!(
+        harness.published.lock().unwrap().as_slice(),
+        &[b"pending-output".to_vec()]
+    );
+    assert_eq!(harness.generation.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn published_output_is_parsed_under_the_same_lock_as_its_generation() {
+    let harness = Harness::new(OwnerLimits::default(), None, None);
+    harness.output(b"journal-and-parser");
+    harness.fence();
+    assert_eq!(
+        harness.published.lock().unwrap().as_slice(),
+        &[b"journal-and-parser".to_vec()]
+    );
+    assert_eq!(harness.generation.load(Ordering::Acquire), 1);
+    let parser = harness.parser.read().unwrap();
+    assert!(parser.screen().contents().contains("journal-and-parser"));
 }
 
 #[test]
@@ -929,6 +951,31 @@ fn query_reply_never_splits_an_active_input_payload() {
     assert_eq!(
         writes,
         vec![b"one-complete-input".to_vec(), b"\x1b[61;1R".to_vec()]
+    );
+}
+
+#[test]
+fn query_flood_while_writer_is_busy_drops_replies_and_keeps_the_pane_input_alive() {
+    let (writer_gate, controller) = gate();
+    let harness = Harness::new(OwnerLimits::default(), Some(writer_gate), None);
+    let input = harness.input.write(b"busy-input").unwrap();
+    assert!(controller
+        .started
+        .recv_timeout(Duration::from_secs(2))
+        .is_ok());
+    // Far more reply bytes than the pending-reply budget while the writer is busy.
+    let flood = b"\x1b[6n".repeat(64);
+    for _ in 0..32 {
+        harness.output(&flood);
+    }
+    eventually(|| harness.generation.load(Ordering::Acquire) >= 32);
+    assert!(controller.release.send(()).is_ok());
+    assert!(input.wait_blocking().is_ok());
+    // The owner must still accept input after the flood.
+    let after_flood = harness.input.write(b"after-flood").unwrap().wait_blocking();
+    assert!(
+        after_flood.is_ok(),
+        "input after query flood: {after_flood:?}"
     );
 }
 

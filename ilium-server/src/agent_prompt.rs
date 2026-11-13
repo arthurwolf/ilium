@@ -374,6 +374,18 @@ mod tests {
     }
 
     #[test]
+    fn typo_corrected_with_backspace_across_separate_writes_keeps_exact_text() {
+        // Mirrors pty_tui_smoke's typed-prompt case: each keystroke group is a
+        // separate write, so the backspace arrives in its own observe call.
+        let mut tracker = AgentPromptTracker::default();
+        assert!(tracker.observe_written(b"fix the testz").is_none());
+        assert!(tracker.observe_written(b"\x7f").is_none());
+        assert!(tracker.observe_written(b"s").is_none());
+        let submission = tracker.observe_written(b"\r").unwrap();
+        assert_eq!(submission.exact_text.as_deref(), Some("fix the tests"));
+    }
+
+    #[test]
     fn deleting_non_ascii_grapheme_is_not_called_exact() {
         let mut tracker = AgentPromptTracker::default();
         tracker.observe_written("café".as_bytes());

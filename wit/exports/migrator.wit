@@ -1,0 +1,8 @@
+package ilium:exports@0.1.0;
+
+interface migrator {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// The host calls it once per side before activate when the manifest data_version rose.
+  /// It MUST be idempotent: an interrupted run starts again from the same arguments.
+  migrate: func(from: u32, to: u32) -> result<_, plugin-error>;
+}

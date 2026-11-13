@@ -590,7 +590,7 @@ mod admission_tests {
         ticket
             .join_until(Instant::now() + Duration::from_secs(5))
             .unwrap();
-        assert!(quota.snapshot().worker_bytes >= baseline + 8 * 1024 * 1024);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
         drop(ticket);
         assert_eq!(quota.snapshot().worker_bytes, baseline);
         drop(resources);

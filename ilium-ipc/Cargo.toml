@@ -16,5 +16,9 @@ thiserror = "2.0.18"
 tokio = { version = "1", features = ["io-util", "macros"] }
 
 [dev-dependencies]
+# Plugin platform test lanes (test-plan.md section 1.5).
+ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host", features = ["testing"] }
+ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
+proptest = "1"
 tokio = { version = "1", features = ["io-util", "macros", "rt", "rt-multi-thread"] }
 toml = "0.8.23"

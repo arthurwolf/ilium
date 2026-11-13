@@ -14,6 +14,7 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/inference_test.rs:9 TEST_PROMPT` | [naming/inference-test](templates/naming/inference-test.hbs) | `INFERENCE_TEST` |
 | `ilium-client/src/agent_feature_setup.rs:22 CHATROOM_INSTRUCTION` | [agent/chatroom-instructions](templates/agent/chatroom-instructions.hbs) | `CHATROOM_INSTRUCTIONS` |
 | `ilium-client/src/agent_feature_setup.rs:24 PROGRESS_INSTRUCTION` | [agent/progress-instructions](templates/agent/progress-instructions.hbs) | `PROGRESS_INSTRUCTIONS` |
+| `ilium-server/src/workspace.rs worktree agent initial prompt` | [agent/worktree-wrap-up](templates/agent/worktree-wrap-up.hbs) | `WORKTREE_WRAP_UP_INSTRUCTIONS` |
 | `ilium-client/src/chatroom.rs:19 COORDINATION_POSTING_GUIDANCE` | [agent/coordination-guidance](templates/agent/coordination-guidance.hbs) | `COORDINATION_GUIDANCE` |
 | `ilium-client/src/app.rs:9785 ASK_FOR_UPDATE_PROMPT` | [agent/ask-for-update](templates/agent/ask-for-update.hbs) | `ASK_FOR_UPDATE` |
 | `ilium-session-convert/src/claude_writer.rs:26 MISSING_RESULT_TEXT` | [conversion/missing-result](templates/conversion/missing-result.hbs) | `MISSING_RESULT` |

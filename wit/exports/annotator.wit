@@ -1,0 +1,8 @@
+package ilium:exports@0.1.0;
+
+interface annotator {
+  use ilium:types/ids@0.1.0.{buffer-id};
+  use ilium:types/text@0.1.0.{style};
+  record line-annotation { line: u32, first-column: u32, last-column: u32, style: style }
+  annotate: func(buffer: buffer-id, revision: u64, first-line: u32, lines: list<string>) -> list<line-annotation>;
+}

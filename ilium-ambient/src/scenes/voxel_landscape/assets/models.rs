@@ -90,7 +90,7 @@ impl Direction {
         })
     }
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DefinitionOrigin {
     pub resource: ResourceKey,
     pub origin: BlobOrigin,

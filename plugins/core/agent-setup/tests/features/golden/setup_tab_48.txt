@@ -1,0 +1,12 @@
+╭─ Settings · Setup ───────────────────────────╮
+│ Global file ……………………………… ~/.claude/CLAUDE.md │
+│                                              │
+│ Chatroom                                     │
+│ Global ……………………………………………………… Set up by Ilium │
+│ Project ilium ………………………………………………… Not set up │
+│                                              │
+│ Progress                                     │
+│ Global ……………………………………… Ilium update required │
+│ Project ilium ……………………… Instruction detected │
+│ Enter refreshes a row. R restores path.      │
+╰──────────────────────────────────────────────╯

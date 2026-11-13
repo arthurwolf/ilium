@@ -35,6 +35,7 @@ pub enum DiscoverySource {
     GeneratedAtLaunch,
     Arguments,
     OpenFile,
+    ClaudeSessionRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +101,8 @@ pub(crate) const TRANSCRIPT_READ_LIMITS: ilium_agent_session::TranscriptReadLimi
 #[derive(Debug)]
 pub struct ProcessDiscoverySnapshot {
     pub pid: u32,
+    pub process_identity:
+        Option<std::sync::Arc<ilium_platform::process_control::PtyProcessIdentity>>,
     pub process_cwd: Option<PathBuf>,
     pub project_matches: bool,
     pub arguments: Vec<String>,
@@ -109,7 +112,16 @@ pub fn capture_process_discovery(
     system: &System,
     pid: Pid,
     project_cwd: &Path,
+    process_identity: Option<std::sync::Arc<ilium_platform::process_control::PtyProcessIdentity>>,
 ) -> Option<ProcessDiscoverySnapshot> {
+    #[cfg(target_os = "linux")]
+    if process_identity.as_ref().is_some_and(|identity| {
+        !identity.is_for_process(pid.as_u32())
+            || !ilium_platform::process_control::captured_process_is_current(identity)
+                .unwrap_or(false)
+    }) {
+        return None;
+    }
     let process = system.process(pid)?;
     let process_cwd = process
         .cwd()
@@ -120,6 +132,7 @@ pub fn capture_process_discovery(
         .is_some_and(|cwd| same_canonical_path(cwd, project_cwd));
     Some(ProcessDiscoverySnapshot {
         pid: pid.as_u32(),
+        process_identity,
         process_cwd,
         project_matches,
         arguments: ilium_detect::effective_arguments(process),
@@ -377,6 +390,39 @@ async fn open_files_staged(
     }))
 }
 
+pub(crate) async fn claude_session_record_staged(
+    execution: &crate::execution::ExecutionClient,
+    pid: u32,
+    process: std::sync::Arc<ilium_platform::process_control::PtyProcessIdentity>,
+    project: PathBuf,
+) -> Option<String> {
+    execution
+        .run(
+            Lane::Io,
+            JobCost {
+                input_bytes: 17 * 1024 * 1024,
+                result_bytes: 4096,
+            },
+            move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
+                if context.stop_requested() {
+                    return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                }
+                let homes = ilium_platform::process_info::agent_provider_homes(pid);
+                Ok(homes.and_then(|homes| {
+                    ilium_platform::claude_session_record::session_for_process(
+                        pid,
+                        &process,
+                        &homes.claude_config,
+                        &project,
+                    )
+                }))
+            },
+        )
+        .await
+        .ok()
+        .and_then(|result| result.view().clone())
+}
+
 #[allow(clippy::too_many_arguments)] // Preserve explicit process, transcript and exclusion evidence inputs.
 pub async fn discover_with_trace_staged(
     execution: &crate::execution::ExecutionClient,
@@ -453,10 +499,47 @@ pub async fn discover_with_trace_staged(
         detail: format!("canonical cwd matches {}", project_cwd.display()),
     });
 
+    // The provider's process-owned socket binds its current session record to
+    // this captured process; verify both sides of the staged transcript read.
+    let mut record_discovery = None;
+    let mut record_observed = false;
+    if *class == AgentClass::Claude {
+        if let Some(process) = snapshot.process_identity.clone() {
+            let project = project_cwd.to_path_buf();
+            if let Some(session_id) =
+                claude_session_record_staged(execution, pid, process.clone(), project.clone()).await
+            {
+                record_observed = true;
+                if !excluded_session_ids.contains(&session_id) {
+                    if let Some(transcript) =
+                        verify_session_staged(execution, locator, class, &session_id).await?
+                    {
+                        if claude_session_record_staged(execution, pid, process, project)
+                            .await
+                            .as_ref()
+                            == Some(&session_id)
+                        {
+                            record_discovery = Some(DiscoveredSession {
+                                session_id,
+                                source: DiscoverySource::ClaudeSessionRecord,
+                                transcript_path: Some(transcript.path),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
     let excluded_list = sorted_session_ids(excluded_session_ids.iter().cloned());
     let open_file_discovery =
         open_files_staged(execution, pid, class, locator, excluded_session_ids).await?;
-    let discovered = if let Some(open_file) = open_file_discovery
+    let discovered = if let Some(discovered) = record_discovery {
+        phases.push(SessionDiscoveryPhase { phase: "Claude process session record", outcome: "resolved", detail: "The live process owns the session-record socket and the transcript matches the project".into() });
+        Some(discovered)
+    } else if record_observed {
+        phases.push(SessionDiscoveryPhase { phase: "Claude process session record", outcome: "unresolved", detail: "The current session record could not be verified; older transcript descriptors are not authoritative".into() });
+        None
+    } else if let Some(open_file) = open_file_discovery
         .as_ref()
         .filter(|open_file| open_file.discovered_session_id.is_some())
     {
@@ -538,235 +621,6 @@ pub async fn discover_with_trace_staged(
     Ok(attempt)
 }
 
-/// Bounded evidence variant. A partial filesystem scan never proves exclusive
-/// ownership, even if an earlier rank appeared to find one admissible ID.
-#[cfg(test)]
-#[expect(
-    dead_code,
-    reason = "retained as an internal test entry point for structured session discovery evidence"
-)]
-pub fn discover_with_trace_bounded(
-    system: &System,
-    pid: Pid,
-    class: &AgentClass,
-    locator: &TranscriptLocator,
-    project_cwd: &Path,
-    ignore_startup_arguments: bool,
-    excluded_session_ids: &HashSet<String>,
-) -> SessionDiscoveryAttempt {
-    let locator = if locator.read_limits().is_some() {
-        locator.clone()
-    } else {
-        locator.with_read_limits(TRANSCRIPT_READ_LIMITS)
-    };
-    let mut attempt = discover_with_trace(
-        system,
-        pid,
-        class,
-        &locator,
-        project_cwd,
-        ignore_startup_arguments,
-        excluded_session_ids,
-    );
-    if locator.read_limit_reached() {
-        attempt.discovered = None;
-        attempt.phases.push(SessionDiscoveryPhase { phase: "evidence admission", outcome: "unresolved", detail: "transcript read/scan resource limit reached; partial evidence cannot claim a session".into() });
-    }
-    attempt
-}
-
-/// Resolves one project-verified session ID while retaining enough structured
-/// evidence to explain every accepted, skipped, and rejected phase in the
-/// agent debug view. Startup arguments are ignored after an in-process session
-/// transition because they still describe the identity used at launch.
-#[cfg(test)]
-#[expect(
-    dead_code,
-    reason = "retained as an internal test entry point for structured session discovery evidence"
-)]
-pub fn discover_with_trace(
-    system: &System,
-    pid: Pid,
-    class: &AgentClass,
-    locator: &TranscriptLocator,
-    project_cwd: &Path,
-    ignore_startup_arguments: bool,
-    excluded_session_ids: &HashSet<String>,
-) -> SessionDiscoveryAttempt {
-    let mut phases = Vec::new();
-    if class.provider().is_none() {
-        phases.push(SessionDiscoveryPhase {
-            phase: "provider contract",
-            outcome: "unsupported",
-            detail: format!("{class:?} has no verified transcript ownership adapter"),
-        });
-        return SessionDiscoveryAttempt {
-            discovered: None,
-            phases,
-        };
-    }
-    phases.push(SessionDiscoveryPhase {
-        phase: "provider contract",
-        outcome: "accepted",
-        detail: format!("using the built-in {class:?} provider contract"),
-    });
-
-    let Some(process) = system.process(pid) else {
-        phases.push(SessionDiscoveryPhase {
-            phase: "process lookup",
-            outcome: "missing",
-            detail: format!("PID {} was absent after targeted refresh", pid.as_u32()),
-        });
-        return SessionDiscoveryAttempt {
-            discovered: None,
-            phases,
-        };
-    };
-    phases.push(SessionDiscoveryPhase {
-        phase: "process lookup",
-        outcome: "accepted",
-        detail: format!("found exact agent PID {}", pid.as_u32()),
-    });
-
-    // `sysinfo` does not report a working directory on every platform, and
-    // where it does not, session discovery would stop here even though the
-    // agent has already been identified -- which is exactly what happened on
-    // macOS: the pane showed `Agent(Claude, Idle)` while its session id never
-    // resolved. `ilium_platform` asks the OS directly as a fallback.
-    let process_cwd = process
-        .cwd()
-        .map(std::path::Path::to_path_buf)
-        .or_else(|| ilium_platform::process_info::working_directory(pid.as_u32()));
-    let Some(process_cwd) = process_cwd else {
-        phases.push(SessionDiscoveryPhase {
-            phase: "project ownership",
-            outcome: "missing",
-            detail: "process cwd was unavailable".to_string(),
-        });
-        return SessionDiscoveryAttempt {
-            discovered: None,
-            phases,
-        };
-    };
-    let process_cwd = process_cwd.as_path();
-    if !same_canonical_path(process_cwd, project_cwd) {
-        phases.push(SessionDiscoveryPhase {
-            phase: "project ownership",
-            outcome: "rejected",
-            detail: format!(
-                "process cwd {} does not match project {}",
-                process_cwd.display(),
-                project_cwd.display()
-            ),
-        });
-        return SessionDiscoveryAttempt {
-            discovered: None,
-            phases,
-        };
-    }
-    phases.push(SessionDiscoveryPhase {
-        phase: "project ownership",
-        outcome: "accepted",
-        detail: format!("canonical cwd matches {}", project_cwd.display()),
-    });
-    // Through `ilium_detect`, which expands a shell wrapper's single
-    // command-line argument into the tokens the program itself sees. macOS
-    // keeps `sh -c "<command line>"` intact, so scanning raw arguments for
-    // `--resume` or `--session-id` finds nothing there.
-    let arguments = ilium_detect::effective_arguments(process);
-
-    // A current descriptor owned by the exact detected PID is stronger than
-    // immutable launch arguments: an in-process resume can legitimately make
-    // those arguments stale even if input tracking missed the transition.
-    let excluded_session_id_list = sorted_session_ids(excluded_session_ids.iter().cloned());
-    let open_file_discovery = from_open_files(pid.as_u32(), class, locator, excluded_session_ids);
-    if let Some(session_id) = open_file_discovery
-        .as_ref()
-        .and_then(|discovery| discovery.discovered_session_id.as_ref())
-    {
-        phases.push(SessionDiscoveryPhase {
-            phase: "open transcript descriptors",
-            outcome: "resolved",
-            detail: format!(
-                "exact PID owns verified transcript {session_id}; verified descriptor identities: {}; excluded identities: {}",
-                display_session_ids(
-                    &open_file_discovery
-                        .as_ref()
-                        .map_or_else(Vec::new, |discovery| discovery.verified_session_ids.clone())
-                ),
-                display_session_ids(&excluded_session_id_list),
-            ),
-        });
-        return SessionDiscoveryAttempt {
-            discovered: Some(DiscoveredSession {
-                session_id: session_id.clone(),
-                source: DiscoverySource::OpenFile,
-                transcript_path: open_file_discovery
-                    .as_ref()
-                    .and_then(|discovery| discovery.discovered_transcript_path.clone()),
-            }),
-            phases,
-        };
-    }
-    phases.push(SessionDiscoveryPhase {
-        phase: "open transcript descriptors",
-        outcome: "unresolved",
-        detail: open_file_discovery.map_or_else(
-            || format!(
-                "the exact PID descriptor directory was unavailable; excluded identities: {}",
-                display_session_ids(&excluded_session_id_list),
-            ),
-            |discovery| format!(
-                "no single admissible verified transcript; verified descriptor identities: {}; excluded identities: {}",
-                display_session_ids(&discovery.verified_session_ids),
-                display_session_ids(&excluded_session_id_list),
-            ),
-        ),
-    });
-
-    if ignore_startup_arguments {
-        phases.push(SessionDiscoveryPhase {
-            phase: "startup arguments",
-            outcome: "skipped",
-            detail: "an in-process session transition made launch arguments stale".to_string(),
-        });
-    } else if let Some(session_id) = from_arguments(class, &arguments) {
-        if verified_and_unclaimed(locator, class, &session_id, excluded_session_ids) {
-            phases.push(SessionDiscoveryPhase {
-                phase: "startup arguments",
-                outcome: "resolved",
-                detail: format!("verified explicit session argument {session_id}"),
-            });
-            return SessionDiscoveryAttempt {
-                discovered: Some(DiscoveredSession {
-                    session_id,
-                    source: DiscoverySource::Arguments,
-                    transcript_path: None,
-                }),
-                phases,
-            };
-        }
-        phases.push(SessionDiscoveryPhase {
-            phase: "startup arguments",
-            outcome: "rejected",
-            detail: format!(
-                "candidate {session_id} was excluded or had no project-verified transcript"
-            ),
-        });
-    } else {
-        phases.push(SessionDiscoveryPhase {
-            phase: "startup arguments",
-            outcome: "unresolved",
-            detail: "provider arguments contained no explicit session identity".to_string(),
-        });
-    }
-
-    SessionDiscoveryAttempt {
-        discovered: None,
-        phases,
-    }
-}
-
 #[cfg(test)]
 fn verified_and_unclaimed(
     locator: &TranscriptLocator,
@@ -783,71 +637,6 @@ fn verified_and_unclaimed(
 /// than growing a parallel parser in the server.
 fn from_arguments(class: &AgentClass, arguments: &[String]) -> Option<String> {
     class.provider()?.session_id_from_arguments(arguments)
-}
-
-/// Identifies the session by which transcript file the agent process currently
-/// holds open.
-///
-/// Returns `None` where the platform cannot enumerate another process's open
-/// files at all, which is a different answer from "it has none open": the
-/// caller must fall back to other evidence rather than concluding the agent
-/// has no session. `ilium_platform::process_info` documents which platforms
-/// can answer.
-#[cfg(test)]
-#[expect(
-    dead_code,
-    reason = "retained for test-only open-transcript evidence inspection"
-)]
-fn from_open_files(
-    pid: u32,
-    class: &AgentClass,
-    locator: &TranscriptLocator,
-    excluded_session_ids: &HashSet<String>,
-) -> Option<OpenFileDiscovery> {
-    if !ilium_platform::process_info::open_files_are_observable() {
-        return None;
-    }
-    let paths = match locator.read_limits() {
-        Some(limits) => match ilium_platform::process_info::open_file_paths_bounded(
-            pid,
-            ilium_platform::process_info::OpenFilePathLimits {
-                descriptors: limits.scanned_entries,
-                retained_bytes: limits.retained_path_bytes,
-            },
-        ) {
-            Ok(paths) => paths,
-            Err(error) => {
-                if error.kind() == std::io::ErrorKind::OutOfMemory {
-                    locator.mark_read_limit_reached();
-                }
-                return None;
-            }
-        },
-        None => ilium_platform::process_info::open_file_paths(pid),
-    };
-    let verified_transcripts: Vec<(String, PathBuf)> = paths
-        .into_iter()
-        .filter_map(|target| {
-            locator
-                .transcript_from_path(class, &target)
-                .map(|transcript| (transcript.session_id, transcript.path))
-        })
-        .collect();
-    let verified_session_ids = sorted_session_ids(
-        verified_transcripts
-            .iter()
-            .map(|(session_id, _)| session_id.clone()),
-    );
-    let discovered_session_id =
-        uniquely_discovered_session_id(verified_session_ids.iter().cloned(), excluded_session_ids);
-    let discovered_transcript_path = discovered_session_id
-        .as_ref()
-        .and_then(|session_id| unique_transcript_path(&verified_transcripts, session_id));
-    Some(OpenFileDiscovery {
-        discovered_session_id,
-        discovered_transcript_path,
-        verified_session_ids,
-    })
 }
 
 /// Returns the path only when every verified descriptor for `session_id` names
@@ -914,6 +703,34 @@ fn same_canonical_path(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn discovery_retains_a_live_process_identity_when_available() {
+        let process_id = Pid::from_u32(std::process::id());
+        let mut system = System::new();
+        refresh_for_discovery(&mut system, &[process_id]);
+        let project = std::env::current_dir().unwrap();
+        let unpinned = capture_process_discovery(&system, process_id, &project, None).unwrap();
+        assert!(unpinned.process_identity.is_none());
+        let identity = std::sync::Arc::new(
+            ilium_platform::process_control::capture_pty_process(process_id.as_u32()).unwrap(),
+        );
+        assert!(
+            capture_process_discovery(&system, process_id, &project, Some(identity.clone()))
+                .is_some()
+        );
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let child_id = Pid::from_u32(child.id());
+        refresh_for_discovery(&mut system, &[child_id]);
+        assert!(capture_process_discovery(&system, child_id, &project, None).is_some());
+        assert!(capture_process_discovery(&system, child_id, &project, Some(identity)).is_none());
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
 
     #[tokio::test]
     async fn staged_verification_uses_io_and_cpu_lanes() {

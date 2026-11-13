@@ -20,6 +20,13 @@ use ilium_core::{AgentClass, NodeId};
 
 use crate::session_stats::{SessionStats, StatsAccumulator};
 
+#[path = "session_stats_persistence.rs"]
+mod persistent_cache;
+
+#[cfg(test)]
+#[path = "session_stats_cache_tests.rs"]
+mod persistent_cache_tests;
+
 /// Minimum spacing between background refreshes of one open popover. The
 /// transcript is append-only and refreshes are incremental, so this only
 /// bounds how quickly new activity shows up.
@@ -106,7 +113,14 @@ pub struct SessionStatsStore {
     events_rx: Receiver<StatsEvent>,
     next_generation: u64,
     diagnostic: Option<String>,
+    cache_pressure: Option<CachePressure>,
     storage_quota: ilium_execution::QuotaGroup,
+}
+
+/// A capacity observation remains relevant only while its pane lacks a slot.
+struct CachePressure {
+    pane_id: NodeId,
+    message: String,
 }
 
 impl std::fmt::Debug for SessionStatsStore {
@@ -141,6 +155,7 @@ impl Default for SessionStatsStore {
             events_rx,
             next_generation: 0,
             diagnostic: None,
+            cache_pressure: None,
             storage_quota: crate::execution::process_quota(),
         }
     }
@@ -172,8 +187,26 @@ impl Job for StatsPass {
 }
 impl SessionStatsStore {
     pub(crate) fn diagnostic(&self) -> Option<&str> {
-        self.diagnostic.as_deref()
+        self.diagnostic.as_deref().or_else(|| {
+            self.cache_pressure
+                .as_ref()
+                .filter(|pressure| {
+                    self.entries.len() >= MAX_STATS_ENTRIES
+                        && !self.entries.contains_key(&pressure.pane_id)
+                })
+                .map(|pressure| pressure.message.as_str())
+        })
     }
+    /// Retire a resolved observation rather than allowing it to resurface after
+    /// a later, unrelated cache refill.
+    fn clear_resolved_cache_pressure(&mut self) {
+        if self.cache_pressure.as_ref().is_some_and(|pressure| {
+            self.entries.len() < MAX_STATS_ENTRIES || self.entries.contains_key(&pressure.pane_id)
+        }) {
+            self.cache_pressure = None;
+        }
+    }
+
     pub(crate) fn configure_execution(&mut self, client: Client) {
         self.client = Some(client);
     }
@@ -204,6 +237,7 @@ impl SessionStatsStore {
         let previous = self.entries.len();
         self.entries
             .retain(|pane_id, entry| contexts.get(pane_id) == Some(&entry.request));
+        self.clear_resolved_cache_pressure();
         for pass in &self.passes {
             if contexts.get(&pass.pane_id) != Some(&pass.request) {
                 pass.receipt.cancel();
@@ -255,6 +289,7 @@ impl SessionStatsStore {
     /// session changed so the old totals no longer apply.
     pub fn forget(&mut self, pane_id: NodeId) {
         self.entries.remove(&pane_id);
+        self.clear_resolved_cache_pressure();
         for pass in &self.passes {
             if pass.pane_id == pane_id {
                 pass.receipt.cancel();
@@ -266,6 +301,7 @@ impl SessionStatsStore {
     /// panes do not accumulate.
     pub fn retain_panes(&mut self, is_live: impl Fn(NodeId) -> bool) {
         self.entries.retain(|pane_id, _| is_live(*pane_id));
+        self.clear_resolved_cache_pressure();
         for pass in &self.passes {
             if !is_live(pass.pane_id) {
                 pass.receipt.cancel();
@@ -305,6 +341,7 @@ impl SessionStatsStore {
         now: Instant,
         is_interactive: bool,
     ) -> bool {
+        self.clear_resolved_cache_pressure();
         if self.passes.len() >= MAX_STATS_PASSES {
             return false;
         }
@@ -321,12 +358,19 @@ impl SessionStatsStore {
             match victim {
                 Some(victim) => {
                     self.entries.remove(&victim);
+                    self.clear_resolved_cache_pressure();
                 }
                 None => {
-                    self.diagnostic = Some(
-                        "Statistics cache capacity reached; requested pane has no complete statistics"
-                            .into(),
-                    );
+                    self.diagnostic = None;
+                    self.cache_pressure = Some(CachePressure {
+                        pane_id,
+                        message: format!(
+                            "Statistics {} refresh deferred for pane {}: cache entries {}/{}, active read passes {}/{}. Cached statistics remain available; opening a statistics popover prioritizes its pane. This is a cache admission observation, not a server responsiveness measurement.",
+                            if is_interactive { "interactive" } else { "background" },
+                            pane_id.0, self.entries.len(), MAX_STATS_ENTRIES,
+                            self.passes.len(), MAX_STATS_PASSES,
+                        ),
+                    });
                     return false;
                 }
             }
@@ -705,7 +749,27 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
             retained_path_bytes: 1024 * 1024,
         },
     );
-    let path = known_path.or_else(|| {
+    // A validated saved path avoids repeating potentially expensive discovery.
+    // The additional admission covers the bounded decoder and temporary data.
+    let restore_hold = if accumulator.is_none() {
+        storage_quota
+            .reserve_external_storage(128 * 1024 * 1024)
+            .ok()
+    } else {
+        None
+    };
+    let restored = restore_hold
+        .as_ref()
+        .and_then(|_| persistent_cache::load(&request))
+        .filter(|(path, saved)| {
+            saved.retained_bytes() <= 16 * 1024 * 1024
+                && known_path.as_ref().is_none_or(|known| known == path)
+        });
+    let (restored_path, restored_accumulator) = match restored {
+        Some((path, saved)) => (Some(path), Some(saved)),
+        None => (None, None),
+    };
+    let path = known_path.or(restored_path).or_else(|| {
         locator
             .transcript_for_session(&request.class, &request.session_id)
             .map(|transcript| transcript.path)
@@ -732,9 +796,32 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
             observed.saturating_sub(limit)
         ));
     }
-    let mut accumulator =
-        accumulator.unwrap_or_else(|| Box::new(StatsAccumulator::new(request.class.clone())));
+    let was_restored = restored_accumulator.is_some();
+    let source_identity = persistent_cache::source_identity(&path).ok();
+    let mut accumulator = accumulator
+        .or(restored_accumulator)
+        .unwrap_or_else(|| Box::new(StatsAccumulator::new(request.class.clone())));
     accumulator.attach_retention(storage);
+    drop(restore_hold);
+    if was_restored && !context.stop_requested() {
+        if let Ok(hold) = storage_quota.reserve_external_storage(16 * 1024 * 1024) {
+            if let Ok(mut slot) = progress.try_lock() {
+                let mut stats = accumulator.snapshot();
+                if stats.retained_bytes() <= 15 * 1024 * 1024 {
+                    stats.retention = crate::session_stats::StatsRetention::new(Arc::new(hold));
+                    *slot = Some(StatsEvent::Progress {
+                        pane_id,
+                        request: request.clone(),
+                        generation,
+                        stats,
+                        done: accumulator.offset(),
+                        total: std::fs::metadata(&path)
+                            .map_or(accumulator.offset(), |metadata| metadata.len()),
+                    });
+                }
+            }
+        }
+    }
     accumulator
         .ingest_file_cancellable(
             &path,
@@ -789,6 +876,13 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
     }
     if context.stop_requested() {
         return Err("Statistics cancelled; totals incomplete".into());
+    }
+    if source_identity.is_some() && source_identity == persistent_cache::source_identity(&path).ok()
+    {
+        if let Ok(_hold) = storage_quota.reserve_external_storage(128 * 1024 * 1024) {
+            let _ =
+                persistent_cache::save(&request, &path, &accumulator, || context.stop_requested());
+        }
     }
     let mut stats = accumulator.snapshot();
     // The admitted peak remains alive across snapshot allocation and every
@@ -1173,6 +1267,13 @@ mod tests {
             "a refresh inside the interval is skipped"
         );
         assert!(store.request_refresh(pane_id, request, started + REFRESH_INTERVAL));
+        let refreshing = store.entry(pane_id).unwrap();
+        assert!(refreshing.in_flight);
+        assert_eq!(
+            refreshing.stats.as_ref().unwrap().prompt_count,
+            1,
+            "the last snapshot remains available while the refresh is pending"
+        );
         wait_for(&mut store, pane_id);
         assert_eq!(store.entry(pane_id).unwrap().state, LoadState::Ready);
         drop(store);
@@ -1514,5 +1615,98 @@ mod independent_identity_tests {
             &stats,
             store.entry(pane_id).unwrap().stats.as_ref().unwrap()
         ));
+    }
+}
+
+#[cfg(test)]
+mod cache_pressure_tests {
+    use super::*;
+
+    fn full_store() -> SessionStatsStore {
+        let mut store = SessionStatsStore::default();
+        for pane in 1..=16 {
+            store.insert_ready_for_test(NodeId(pane), Arc::new(SessionStats::default()));
+        }
+        store
+    }
+
+    fn defer_background(store: &mut SessionStatsStore) {
+        let request = StatsRequest {
+            class: AgentClass::Codex,
+            session_id: "synthetic-cache-pressure".into(),
+            project_path: PathBuf::from("/fixture/project"),
+            home: PathBuf::from("/fixture/home"),
+        };
+        assert!(!store.request_refresh(NodeId(8181), request, Instant::now()));
+        assert_eq!(store.entries.len(), 16);
+        assert!(store.entries.values().all(|entry| entry.stats.is_some()));
+    }
+
+    #[test]
+    fn cache_pressure_identifies_background_pane_without_discarding_cached_totals() {
+        let mut store = full_store();
+        defer_background(&mut store);
+        let diagnostic = store.diagnostic().unwrap();
+        assert!(diagnostic.contains("background"));
+        assert!(diagnostic.contains("8181"));
+        assert!(diagnostic.contains("16/16"));
+        assert!(diagnostic.contains("0/3"));
+    }
+
+    #[test]
+    fn cache_pressure_disappears_after_any_supported_slot_release() {
+        for release in 0..3 {
+            let mut store = full_store();
+            defer_background(&mut store);
+            assert!(store.diagnostic().is_some());
+            match release {
+                0 => store.forget(NodeId(1)),
+                1 => store.retain_panes(|pane| pane != NodeId(1)),
+                _ => {
+                    store.reconcile_contexts(&HashMap::new());
+                }
+            }
+            assert!(
+                store.diagnostic().is_none(),
+                "resolved pressure must not stay in F9"
+            );
+        }
+    }
+
+    #[test]
+    fn cache_pressure_does_not_resurface_after_release_and_unrelated_refill() {
+        for release in 0..3 {
+            let mut store = full_store();
+            defer_background(&mut store);
+            match release {
+                0 => store.forget(NodeId(1)),
+                1 => store.retain_panes(|pane| pane != NodeId(1)),
+                _ => {
+                    let contexts = store
+                        .entries
+                        .iter()
+                        .filter(|(pane, _)| **pane != NodeId(1))
+                        .map(|(pane, entry)| (*pane, entry.request.clone()))
+                        .collect();
+                    store.reconcile_contexts(&contexts);
+                }
+            }
+            store.insert_ready_for_test(NodeId(9000), Arc::new(SessionStats::default()));
+            assert_eq!(store.entries.len(), 16);
+            assert!(
+                store.diagnostic().is_none(),
+                "old refusal must not revive on refill"
+            );
+        }
+    }
+
+    #[test]
+    fn cache_pressure_disappears_when_requested_pane_has_a_slot() {
+        let mut store = full_store();
+        defer_background(&mut store);
+        store.forget(NodeId(1));
+        store.insert_ready_for_test(NodeId(8181), Arc::new(SessionStats::default()));
+        assert_eq!(store.entries.len(), 16);
+        assert!(store.diagnostic().is_none());
     }
 }

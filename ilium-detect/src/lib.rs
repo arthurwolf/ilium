@@ -306,9 +306,9 @@ fn live_status_evidence(class: Option<&AgentClass>, screen_text: &str) -> Option
         None => {
             looks_like_live_status_line(screen_text).then_some(ActivityEvidence::GenericLiveStatus)
         }
-        Some(AgentClass::Claude) => {
-            looks_like_live_status_line(screen_text).then_some(ActivityEvidence::ClaudeLiveStatus)
-        }
+        Some(AgentClass::Claude) => (looks_like_live_status_line(screen_text)
+            || claude_ascii_live_status_line(screen_text).is_some())
+        .then_some(ActivityEvidence::ClaudeLiveStatus),
         Some(AgentClass::Codex) => looks_like_codex_live_status_line(screen_text)
             .then_some(ActivityEvidence::CodexLiveStatus),
         Some(AgentClass::Antigravity | AgentClass::Other(_)) => None,
@@ -325,6 +325,11 @@ fn live_status_evidence(class: Option<&AgentClass>, screen_text: &str) -> Option
 /// actually fired -- re-stating a predicate inline here is how the two copies
 /// drift apart.
 fn activity_evidence_line(evidence: ActivityEvidence, screen_text: &str) -> Option<String> {
+    if evidence == ActivityEvidence::ClaudeLiveStatus {
+        if let Some(line) = claude_ascii_live_status_line(screen_text) {
+            return Some(bounded_terminal_evidence(line));
+        }
+    }
     let line_matches_evidence: fn(&str) -> bool = match evidence {
         ActivityEvidence::InterruptMarker => is_interrupt_marker_line,
         ActivityEvidence::GenericLiveStatus | ActivityEvidence::ClaudeLiveStatus => {
@@ -736,7 +741,7 @@ impl GoalEvidenceRule {
         match self {
             Self::CodexFooterGoalSegment => "rightmost Codex goal segment in the status footer below its composer",
             Self::CodexMetadataFooterWithoutGoal => "Codex metadata footer below its composer contains no goal segment",
-            Self::ClaudeGoalIndicator => "Claude /goal active indicator directly above its composer",
+            Self::ClaudeGoalIndicator => "Claude /goal active indicator anchored to its composer",
             Self::ClaudePausedNotice => "newest current-turn Claude goal notice starts with Goal paused",
             Self::ClaudeAchievedNotice => "newest current-turn Claude goal notice starts with Goal achieved",
             Self::ClaudeFailedNotice => "newest current-turn Claude goal notice starts with Goal could not be achieved",
@@ -955,18 +960,18 @@ fn is_codex_metadata_footer(normalized_footer: &str) -> bool {
 const CLAUDE_TURN_END_SEARCH_ROWS: usize = 30;
 
 /// Claude Code renders `◎ /goal active (2m)` right-aligned on the indicator
-/// row directly above the composer's top rule for as long as a goal is set.
+/// row above the composer, or below its permission-mode footer, while set.
 /// That row cannot express any other phase, so the closing notices of the
 /// current turn — the rows between the indicator and the last user prompt —
 /// refine it: `Goal paused · <reason>` while the indicator persists, and
 /// `Goal achieved` / `Goal could not be achieved` / `Goal cleared` once it is
 /// gone.
 fn claude_goal_classification(lines: &[&str]) -> GoalClassification {
-    let Some(indicator_index) = claude_indicator_row_index(lines) else {
+    let Some((indicator_index, notice_anchor)) = claude_indicator_row_index(lines) else {
         return goal_classification(GoalEvidence::Unknown, None, None, None);
     };
     let indicator = lines[indicator_index];
-    let turn_end = claude_turn_end_goal_notice(lines, indicator_index);
+    let turn_end = claude_turn_end_goal_notice(lines, notice_anchor);
     if claude_indicator_shows_goal(indicator) {
         return match turn_end {
             Some((ClaudeGoalNotice::Paused(goal_state), line)) => goal_classification(
@@ -1016,12 +1021,25 @@ fn claude_goal_classification(lines: &[&str]) -> GoalClassification {
     }
 }
 
-/// The row immediately above the rule that tops the last `❯` composer.
-fn claude_indicator_row_index(lines: &[&str]) -> Option<usize> {
+/// Locate the status row without allowing conversation text to act as chrome.
+fn claude_indicator_row_index(lines: &[&str]) -> Option<(usize, usize)> {
     let composer_index = (2..lines.len()).rev().find(|&index| {
         lines[index].trim_start().starts_with('❯') && is_horizontal_rule(lines[index - 1])
     })?;
-    Some(composer_index - 2)
+    let notice_anchor = composer_index - 2;
+    if lines
+        .get(composer_index + 1)
+        .is_some_and(|line| is_horizontal_rule(line))
+        && lines
+            .get(composer_index + 2)
+            .is_some_and(|line| line.contains("shift+tab to cycle"))
+        && lines.get(composer_index + 3).is_some_and(|line| {
+            line.trim_start().starts_with('◎') && claude_indicator_shows_goal(line)
+        })
+    {
+        return Some((composer_index + 3, notice_anchor));
+    }
+    Some((notice_anchor, notice_anchor))
 }
 
 fn is_horizontal_rule(line: &str) -> bool {
@@ -1135,6 +1153,23 @@ fn current_status_text<'screen>(
     if !matches!(class, None | Some(AgentClass::Claude)) {
         return screen_text;
     }
+    // The composer is separated from conversation/status rows by a horizontal
+    // rule. Rows below it are configurable footer content, not live activity.
+    // Requiring that separator avoids treating an approval menu's cursor as
+    // the composer. Approval recognition still receives the complete screen.
+    let mut previous_was_separator = false;
+    let mut offset = 0;
+    let mut footer_start = None;
+    for line in screen_text.split_inclusive('\n') {
+        if previous_was_separator && line.trim_start().starts_with('❯') {
+            footer_start = Some(offset);
+        }
+        let trimmed = line.trim();
+        previous_was_separator =
+            trimmed.chars().count() >= 3 && trimmed.chars().all(|character| character == '─');
+        offset += line.len();
+    }
+    let screen_text = &screen_text[..footer_start.unwrap_or(screen_text.len())];
     let mut start = screen_text.len();
     for line in screen_text.split_inclusive('\n').rev() {
         start -= line.len();
@@ -1232,9 +1267,19 @@ fn looks_like_background_wait_line(screen_text: &str) -> bool {
 fn is_background_wait_line(line: &str) -> bool {
     // Use to_ascii_lowercase() for ASCII terminal output (faster than to_lowercase() for typical case)
     let lower = line.to_ascii_lowercase();
-    normalize_goal_status_line(line).starts_with("waiting for ")
-        && lower.contains("background")
-        && (lower.contains("agent") || lower.contains("task"))
+    if !normalize_goal_status_line(line).starts_with("waiting for ") {
+        return false;
+    }
+    // Claude Code words the same blocked-on-dispatched-work state two ways:
+    // "Waiting for 2 background agents to finish" and, for a dynamic workflow
+    // script, "Waiting for 1 dynamic workflow to finish" (no "background"
+    // or "agent"). Both are an actively blocked turn, so both qualify; the
+    // workflow form additionally requires the "to finish" tail so prose that
+    // merely mentions a workflow does not match.
+    let names_background_work =
+        lower.contains("background") && (lower.contains("agent") || lower.contains("task"));
+    let names_workflow = lower.contains("workflow") && lower.contains("to finish");
+    names_background_work || names_workflow
 }
 
 /// The `WORKING_MARKER` rule as a per-line predicate, so evidence recovery
@@ -1281,9 +1326,9 @@ fn is_background_task_wait_line(line: &str) -> bool {
             .any(|token| !token.is_empty() && token.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
-/// True if any line looks like an in-progress status line: contains an
-/// ellipsis ('…') *and* an elapsed-time token (digits immediately
-/// followed by 's' or 'm', e.g. "6s", "12m"). This is the structural
+/// True if any line looks like an in-progress Claude status line: a spinner
+/// glyph, an activity label ending in an ellipsis, and parenthesized metadata
+/// containing an elapsed-time token (e.g. "6s", "12m"). This is the structural
 /// convention observed in real Claude Code output -- a present-tense
 /// whimsical verb ending in '…' plus a live elapsed-time counter, e.g.
 /// `"✢ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)"` -- and
@@ -1298,8 +1343,55 @@ fn looks_like_live_status_line(screen_text: &str) -> bool {
 
 /// The single-line rule behind [`looks_like_live_status_line`].
 fn is_live_status_line(line: &str) -> bool {
-    line.contains('…')
-        && line
+    // Claude's spinner is terminal chrome, not an arbitrary prose ellipsis.
+    // In particular, custom status footers can contain both truncated text
+    // and ages such as `first seen 4m …` while the composer is idle.
+    let mut characters = line.trim().chars();
+    if !characters
+        .next()
+        .is_some_and(|character| matches!(character, '·' | '✢' | '✳' | '✶' | '∗' | '✻' | '✽'))
+    {
+        return false;
+    }
+    is_live_status_body(characters.as_str())
+}
+
+/// ASCII `*` is also a Markdown bullet, so accept it only at Claude's
+/// composer boundary instead of anywhere in the transcript.
+fn claude_ascii_live_status_line(screen_text: &str) -> Option<&str> {
+    let lines: Vec<&str> = screen_text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    // The composer's top rule is the last rule followed by the `❯` prompt row
+    // (or, when the caller already cut the screen at the composer, the final
+    // line). Rules below the prompt row and footer chrome are skipped.
+    let top_rule = (1..lines.len()).rev().find(|&index| {
+        is_horizontal_rule(lines[index])
+            && match lines.get(index + 1) {
+                Some(next) => next.trim_start().starts_with('❯'),
+                None => !lines[index - 1].trim_start().starts_with('❯'),
+            }
+    })?;
+    let line = lines[top_rule - 1];
+    let body = line.trim().strip_prefix('*')?;
+    is_live_status_body(body).then_some(line)
+}
+
+fn is_live_status_body(body: &str) -> bool {
+    if !body.starts_with(char::is_whitespace) {
+        return false;
+    }
+    let Some((label, metadata)) = body.trim_start().split_once('…') else {
+        return false;
+    };
+    let metadata = metadata.trim();
+    !label.is_empty()
+        && label
+            .chars()
+            .all(|character| character.is_alphabetic() || character == ' ')
+        && metadata.starts_with('(')
+        && metadata
             .split(|character: char| character.is_whitespace() || character == '·')
             .any(is_elapsed_time_token)
 }
@@ -2469,6 +2561,98 @@ mod tests {
     }
 
     #[test]
+    fn claude_idle_truncated_custom_footer_is_not_live_activity() {
+        // Captured read-only from a completed live Claude pane, 2026-10-17;
+        // account information is redacted in the fixture.
+        let screen = fixture("claude_idle_truncated_custom_footer.txt");
+        let classification = classify_activity_for_agent_detailed(&AgentClass::Claude, &screen);
+        assert_eq!(classification.turn, AgentTurn::Idle);
+        assert_eq!(classification.evidence, ActivityEvidence::NoActiveMarker);
+        assert_eq!(classification.matched_line, None);
+        assert_eq!(classify_activity(&screen), AgentTurn::Idle);
+    }
+
+    #[test]
+    fn claude_live_status_requires_terminal_chrome() {
+        for line in [
+            "Session: shared observation (first seen 4m …",
+            "The operation took 6s … and is complete.",
+            "● The operation… (6s) finished successfully.",
+            "✻ The operation took 6s … and is complete.",
+            "✻ Thinking… yesterday took 6s",
+        ] {
+            assert_eq!(
+                classify_activity_for_agent(&AgentClass::Claude, line),
+                AgentTurn::Idle,
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_custom_footer_cannot_supply_live_activity_chrome() {
+        let screen =
+            "✻ Cogitated for 29s · done 8:27 AM\n────────\n❯\n────────\n✻ Observing… (4m)\n";
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, screen),
+            AgentTurn::Idle
+        );
+    }
+
+    #[test]
+    fn claude_spinner_frames_preserve_live_status_after_summary() {
+        for spinner in ['·', '✢', '✳', '∗', '✻', '✽'] {
+            let live_line =
+                format!("{spinner} Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)");
+            let screen = format!("✻ Cogitated for 29s · done 8:27 AM\n{live_line}\n❯");
+            let classification = classify_activity_for_agent_detailed(&AgentClass::Claude, &screen);
+            assert_eq!(classification.turn, AgentTurn::Working);
+            assert_eq!(classification.evidence, ActivityEvidence::ClaudeLiveStatus);
+            assert_eq!(
+                classification.matched_line.as_deref(),
+                Some(live_line.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn claude_ascii_and_six_point_spinner_frames_keep_active_turn_working() {
+        for spinner in ['✶', '*'] {
+            let screen = format!(
+                "● Reading 1 file…\n  ⎿ questions/q12.txt\n\n{spinner} Considering… (51s · ↓ 3.5k tokens)\n\n────────────\n❯\n────────────\n  ⏵⏵ accept edits on (shift+tab to cycle)"
+            );
+            assert_eq!(
+                classify_activity_for_agent(&AgentClass::Claude, &screen),
+                AgentTurn::Working,
+                "live Claude spinner frame {spinner:?} must not report idle"
+            );
+        }
+    }
+
+    /// Pane rows of a real Claude Haiku turn captured mid-run with a queued
+    /// message: the live status line carries the six-point `✶` frame, and the
+    /// composer below shows the queue hint instead of an empty prompt.
+    #[test]
+    fn real_claude_capture_with_six_point_spinner_and_queued_input_is_working() {
+        assert_eq!(
+            classify_activity_for_agent(
+                &AgentClass::Claude,
+                &fixture("claude_working_six_point_spinner_with_queued_input.txt")
+            ),
+            AgentTurn::Working
+        );
+    }
+
+    #[test]
+    fn claude_ascii_bullet_in_transcript_is_not_live_spinner() {
+        let screen = "* Considering… (51s · example)\n\nFinal answer.\n\n────────────\n❯\n────────────\n  ⏵⏵ accept edits on (shift+tab to cycle)";
+        assert_eq!(
+            classify_activity_for_agent(&AgentClass::Claude, screen),
+            AgentTurn::Idle
+        );
+    }
+
+    #[test]
     fn claude_code_awaiting_approval_is_waiting_approval() {
         assert_eq!(
             classify_activity(&fixture("claude_code_awaiting_approval.txt")),
@@ -2592,6 +2776,32 @@ mod tests {
             classify_activity(&fixture("claude_code_waiting_background.txt")),
             AgentTurn::WaitingSubagents
         );
+    }
+
+    #[test]
+    fn claude_code_waiting_on_dynamic_workflow_is_waiting_subagents() {
+        let fixture_text = fixture("claude_code_waiting_dynamic_workflow.txt");
+        assert_eq!(
+            classify_activity(&fixture_text),
+            AgentTurn::WaitingSubagents
+        );
+        let classified = classify_activity_for_agent_detailed(&AgentClass::Claude, &fixture_text);
+        assert_eq!(classified.turn, AgentTurn::WaitingSubagents);
+        assert_eq!(classified.evidence, ActivityEvidence::BackgroundWait);
+    }
+
+    #[test]
+    fn workflow_mentioned_in_prose_is_not_a_wait() {
+        for screen in [
+            "I will start a dynamic workflow soon.\n❯",
+            "Waiting for the workflow design review.\n❯",
+        ] {
+            assert_eq!(
+                classify_activity_for_agent(&AgentClass::Claude, screen),
+                AgentTurn::Idle,
+                "{screen}"
+            );
+        }
     }
 
     #[test]
@@ -3232,6 +3442,34 @@ Goal achieved (3m)
   ⏵⏵ auto mode on (shift+tab to cycle)";
 
     #[test]
+    fn claude_goal_indicator_below_composer_is_detected() {
+        let screen = "✻ Connection refused · Retrying in 3s\n\
+────────────────────────────────────────\n\
+❯\n\
+────────────────────────────────────────\n\
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt\n\
+                        ◎ /goal active (33s)";
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Claude, screen),
+            GoalEvidence::State(GoalState::Active)
+        );
+    }
+
+    #[test]
+    fn claude_goal_below_composer_requires_permission_footer() {
+        let screen = "ordinary output\n\
+────────────────────────────────────────\n\
+❯\n\
+────────────────────────────────────────\n\
+  unrelated content\n\
+                        ◎ /goal active (33s)";
+        assert_eq!(
+            goal_evidence_for_agent(&AgentClass::Claude, screen),
+            GoalEvidence::Inactive
+        );
+    }
+
+    #[test]
     fn claude_code_goal_notices_only_count_inside_the_current_turn() {
         let resumed_after_pause = format!(
             "● Goal paused · usage limit reached · send a message after it resets to continue\n\
@@ -3509,7 +3747,7 @@ Goal achieved (3m)
             .arg(&readiness_path)
             .stdin(Stdio::piped());
         prepare_process_tree(&mut command);
-        let child = command.spawn().expect("spawn wrapper");
+        let child = ilium_test_fixtures::spawn_fixture(&mut command).expect("spawn wrapper");
         let mut wrapper = OwnedWrapper {
             child,
             process_tree: None,

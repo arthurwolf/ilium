@@ -84,6 +84,10 @@ pub enum ExplorerOutcome {
 }
 
 impl ExplorerOverlay {
+    pub(crate) fn diagnostic_text(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
     /// Opens the picker rooted at `dir` (the originating pane's cwd).
     pub fn open_at(dir: &Path) -> anyhow::Result<Self> {
         Self::open(dir, ExplorerSelection::File)
@@ -680,7 +684,7 @@ pub fn render(frame: &mut Frame, screen_area: Rect, overlay: &ExplorerOverlay, n
         ExplorerSelection::Folder => "Open Folder",
     };
     let preparation = if let Some(error) = &overlay.error {
-        format!(" — {error}")
+        format!(" — F9 details: {error}")
     } else if overlay.active.is_some() || overlay.desired.is_some() {
         " — Loading…".to_owned()
     } else {

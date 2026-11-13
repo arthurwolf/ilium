@@ -25,7 +25,7 @@ TARGET_FIELDS = frozenset(
      "executables", "packages", "ort_strategy", "minimum_tested_os")
 )
 APPROVED_PACKAGES = {
-    "beach-1.0.0.iliumanim": "15c81ff5a9aa329aa4451c5e19405be4f6957a8f617ce4bff94b02be5b39612f",
+    "beach-1.0.0.iliumanim": "a744b574dae0f55505c86ec2c2d77555b0c11e1800b0b306273112d8ae1b06a2",
     "carpet-1.0.0.iliumanim": "5ef31ca8cee61fd7f0c077128419f81dbea59ef516813453532a98e976d8daf9",
 }
 # This is an acceptance constraint, not a second generated release matrix.

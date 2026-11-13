@@ -1,0 +1,7 @@
+package ilium:exports@0.1.0;
+
+interface catalog-provider {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:host/catalogs@0.1.0.{catalog-query, catalog-page};
+  query-catalog: func(q: catalog-query) -> result<catalog-page, plugin-error>;
+}

@@ -119,6 +119,9 @@ pub struct ServerConfig {
     pub debug: DebugConfig,
     pub http_api: HttpApiConfig,
     pub agent_debug_menu_enabled: bool,
+    /// The same saved policy shown by the client; provider integration must
+    /// separately establish that a request belongs to the waiting agent.
+    pub cache_keepalive: ilium_core::cache_keepalive::CacheKeepaliveSettings,
     /// Whether the server accepts `SetPaneProgressMonitor` at all -- see
     /// `ilium-server`'s progress-monitor loop. Defaults on: the command it
     /// runs is agent-authored, but the agent already has equivalent shell
@@ -147,6 +150,7 @@ impl Default for ServerConfig {
             debug: DebugConfig::default(),
             http_api: HttpApiConfig::default(),
             agent_debug_menu_enabled: false,
+            cache_keepalive: Default::default(),
             progress_monitor_enabled: true,
         }
     }
@@ -198,6 +202,7 @@ struct RawHttpApiConfig {
 struct RawUiConfig {
     agent_debug_menu_enabled: Option<bool>,
     progress_monitor_enabled: Option<bool>,
+    cache_keepalive: Option<ilium_core::cache_keepalive::CacheKeepaliveSettings>,
 }
 #[derive(Debug, Default, Deserialize)]
 struct RawSessionConfig {
@@ -370,9 +375,10 @@ pub fn save_agent_detection_settings(
         }
     })?;
     let mut document = match read_contents(&path) {
-        Ok(contents) => toml::from_str::<toml::Value>(&contents).map_err(|error| {
+        Ok(contents) => toml::from_str::<toml::Value>(&contents).map_err(|_error| {
             ilium_ipc::AgentDetectionSettingsError {
-                message: format!("could not parse config.toml: {error}"),
+                message: "could not parse config.toml; values are omitted from this error"
+                    .to_owned(),
             }
         })?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -572,9 +578,9 @@ pub(crate) fn read_contents(path: &Path) -> std::io::Result<String> {
 
 pub(crate) fn parse_contents(path: &Path, contents: &str) -> Result<ServerConfig, ServerError> {
     let path = path.to_path_buf();
-    let raw: RawConfig = toml::from_str(contents).map_err(|source| ServerError::ConfigLoad {
+    let raw: RawConfig = toml::from_str(contents).map_err(|_source| ServerError::ConfigLoad {
         path: path.clone(),
-        source: Box::new(ConfigLoadError::Parse(source)),
+        source: Box::new(ConfigLoadError::PrivateConfigParse),
     })?;
 
     let detection = DetectionConfig::from_raw(&raw.detection);
@@ -623,6 +629,7 @@ pub(crate) fn parse_contents(path: &Path, contents: &str) -> Result<ServerConfig
             port: http_api_port,
         },
         agent_debug_menu_enabled: raw.ui.agent_debug_menu_enabled.unwrap_or(false),
+        cache_keepalive: raw.ui.cache_keepalive.unwrap_or_default(),
         progress_monitor_enabled: raw.ui.progress_monitor_enabled.unwrap_or(true),
     })
 }
@@ -630,6 +637,16 @@ pub(crate) fn parse_contents(path: &Path, contents: &str) -> Result<ServerConfig
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_custom_agent_config_does_not_echo_private_values() {
+        let error = parse_contents(
+            std::path::Path::new("config.toml"),
+            "[[custom_agents.profiles]]\nvalue = 'sensitive-sentinel\n",
+        )
+        .unwrap_err();
+        assert!(!format!("{error:?} {error}").contains("sensitive-sentinel"));
+    }
 
     fn scratch_dir() -> std::path::PathBuf {
         let dir = std::env::temp_dir()
@@ -654,11 +671,25 @@ mod tests {
         assert!(!config.debug.file_logging_enabled);
         assert_eq!(config.http_api, HttpApiConfig::default());
         assert!(!config.agent_debug_menu_enabled);
+        assert!(!config.cache_keepalive.enabled);
         assert!(config.progress_monitor_enabled);
         assert_eq!(
             config.detection.working_poll_interval,
             Duration::from_secs(10)
         );
+    }
+
+    #[test]
+    fn cache_keepalive_reads_shared_ui_policy() {
+        let config = parse_contents(
+            Path::new("config.toml"),
+            "[ui.cache_keepalive]\nenabled = true\nclaude_interval_minutes = 4\non_monitor = false\n",
+        ).expect("parse cache keep-alive policy");
+        assert!(config.cache_keepalive.enabled);
+        assert_eq!(config.cache_keepalive.claude_interval_minutes, 4);
+        assert_eq!(config.cache_keepalive.codex_interval_minutes, 25);
+        assert!(!config.cache_keepalive.on_monitor);
+        assert!(config.cache_keepalive.on_command);
     }
 
     #[test]

@@ -30,6 +30,28 @@ type Result<T> = std::result::Result<T, String>;
 const REVIEW_BYTES: usize = 1024 * 1024;
 const MAILBOX_BYTES: usize = 32 * 1024;
 const STATUS_BYTES: usize = 2048;
+
+/// Admit the input byte upper bound before allocating its sanitized projection.
+/// The token follows the string until replacement or its owner's destruction.
+fn admitted_diagnostic(
+    quota: &QuotaGroup,
+    error: &str,
+) -> Result<(String, Option<StorageAdmission>)> {
+    if error.is_empty() {
+        return Ok((String::new(), None));
+    }
+    let storage = quota
+        .reserve_external_storage(error.len())
+        .map_err(|error| format!("Permission diagnostic admission: {error:?}"))?;
+    let mut text = String::with_capacity(error.len());
+    text.extend(
+        error
+            .chars()
+            .filter(|character| !character.is_control() || matches!(*character, '\n' | '\t')),
+    );
+    Ok((text, Some(storage)))
+}
+
 const MAX_PROJECTION_BYTES: usize = 256 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,6 +212,7 @@ struct Mailbox {
     intent: Option<Intent>,
     phase: ReviewPhase,
     error: String,
+    error_storage: Option<StorageAdmission>,
 }
 enum Intent {
     Submit {
@@ -214,6 +237,13 @@ pub(crate) enum ReviewAction {
         answers: BTreeMap<String, UserChoice>,
     },
     Cancel {
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "Only tests read it; Cancel is honoured for any revision, kept for symmetry with Resolve and Pick"
+            )
+        )]
         selection_revision: u64,
     },
     Pick {
@@ -260,6 +290,7 @@ impl ReviewBridge {
                 intent: None,
                 phase: ReviewPhase::Inactive,
                 error: String::new(),
+                error_storage: None,
             }),
             ui_ready,
             wake_worker,
@@ -283,7 +314,8 @@ impl ReviewBridge {
         state.selection = selection;
         state.pending = None;
         state.intent = None;
-        state.error.clear();
+        state.error = String::new();
+        state.error_storage = None;
         state.phase = if plugin {
             ReviewPhase::Loading
         } else {
@@ -327,7 +359,8 @@ impl ReviewBridge {
         } else {
             ReviewPhase::Review
         };
-        state.error.clear();
+        state.error = String::new();
+        state.error_storage = None;
         drop(state);
         self.ui_ready.notify_one();
         if empty {
@@ -337,6 +370,7 @@ impl ReviewBridge {
     }
     /// Call for every original broker epoch/plan transition BEFORE publishing
     /// new acquisition/frames. Root resolve checks its own broker again.
+    #[expect(dead_code, reason = "No broker epoch/plan transition calls this yet")]
     pub(crate) fn authority_changed(
         &self,
         selection: u64,
@@ -375,14 +409,12 @@ impl ReviewBridge {
         if state.selection != selection {
             return Err("Native failure belongs to an old selection".into());
         }
+        let (text, storage) = admitted_diagnostic(&self.quota, error)?;
         state.pending = None;
         state.intent = None;
         state.phase = ReviewPhase::Failed;
-        state.error = error
-            .chars()
-            .filter(|character| !character.is_control())
-            .take(240)
-            .collect();
+        state.error = text;
+        state.error_storage = storage;
         drop(state);
         self.ui_ready.notify_one();
         Ok(())
@@ -409,26 +441,26 @@ impl ReviewBridge {
         if state.pending.is_some() || state.intent.is_some() {
             return Err("Native review is still owned".into());
         }
+        let (text, storage) = admitted_diagnostic(&self.quota, error.unwrap_or_default())?;
         state.phase = phase;
-        state.error = error
-            .unwrap_or_default()
-            .chars()
-            .filter(|character| !character.is_control())
-            .take(240)
-            .collect();
+        state.error = text;
+        state.error_storage = storage;
         drop(state);
         self.ui_ready.notify_one();
         Ok(())
     }
     pub(crate) fn status(&self) -> Result<ReviewStatus> {
-        let storage = self
-            .quota
-            .reserve_external_storage(STATUS_BYTES)
-            .map_err(|error| format!("Permission status admission: {error:?}"))?;
         let state = self
             .state
             .lock()
             .map_err(|_| "Permission mailbox poisoned")?;
+        let bytes = STATUS_BYTES
+            .checked_add(state.error.len())
+            .ok_or("Permission status size overflow")?;
+        let storage = self
+            .quota
+            .reserve_external_storage(bytes)
+            .map_err(|error| format!("Permission status admission: {error:?}"))?;
         Ok(ReviewStatus {
             phase: state.phase,
             error: state.error.clone(),
@@ -443,6 +475,10 @@ impl ReviewBridge {
         let Some(pending) = state.pending.as_ref().filter(|_| state.intent.is_none()) else {
             return Ok(None);
         };
+        if pending.envelope.session_alive.load(Ordering::Acquire) {
+            return Ok(None);
+        }
+        let (error, error_storage) = admitted_diagnostic(&self.quota, &state.error)?;
         if pending
             .envelope
             .session_alive
@@ -455,7 +491,9 @@ impl ReviewBridge {
             envelope: pending.envelope.clone(),
             view: pending.envelope.projection.clone(),
             choice_cursor: 2,
-            error: state.error.clone(),
+            error,
+            error_storage,
+            quota: self.quota.clone(),
             selection_input: None,
         }))
     }
@@ -471,11 +509,9 @@ impl ReviewBridge {
         {
             return Err("Native picker error belongs to a stale review".into());
         }
-        state.error = error
-            .chars()
-            .filter(|character| !character.is_control())
-            .take(240)
-            .collect();
+        let (text, storage) = admitted_diagnostic(&self.quota, error)?;
+        state.error = text;
+        state.error_storage = storage;
         drop(state);
         self.ui_ready.notify_one();
         Ok(())
@@ -715,6 +751,8 @@ pub(crate) struct ReviewSession {
     view: PermissionReview,
     choice_cursor: usize,
     error: String,
+    error_storage: Option<StorageAdmission>,
+    quota: QuotaGroup,
     selection_input: Option<String>,
 }
 impl ReviewSession {
@@ -866,12 +904,14 @@ impl ReviewSession {
             area,
         );
         let area = review_content_area(area);
-        self.view.detail_scroll =
-            self.view
-                .detail_scroll
-                .min(permissions::permission_detail_scroll_limit(
-                    area, &self.view,
-                ));
+        if self.error.is_empty() {
+            self.view.detail_scroll =
+                self.view
+                    .detail_scroll
+                    .min(permissions::permission_detail_scroll_limit(
+                        area, &self.view,
+                    ));
+        }
         permissions::draw_permission_review(frame, area, &self.view, style);
         if area.height >= 8 {
             let availability = match self.envelope.verdicts.get(self.view.cursor) {
@@ -915,17 +955,34 @@ impl ReviewSession {
                 }
                 "1–4/Space chooses · Tab changes right · P selects path/source · Enter submits · Esc cancels"
             } else {
-                self.error.as_str()
+                "F9: full diagnostic · Permission review error"
             };
             frame.render_widget(Paragraph::new(footer).style(style), rect);
+            if !self.error.is_empty() {
+                let details = permissions::permission_detail_area(area);
+                let rows = crate::value_dialog::wrap_cells(&self.error, details.width);
+                let maximum = rows.len().saturating_sub(usize::from(details.height));
+                let offset = usize::from(self.view.detail_scroll).min(maximum);
+                self.view.detail_scroll = offset.min(usize::from(u16::MAX)) as u16;
+                frame.render_widget(Clear, details);
+                frame.render_widget(
+                    Paragraph::new(rows.into_iter().skip(offset).collect::<Vec<_>>().join("\n"))
+                        .style(style),
+                    details,
+                );
+            }
         }
     }
-    pub(crate) fn set_error(&mut self, error: &str) {
-        self.error = error
-            .chars()
-            .filter(|character| !character.is_control())
-            .take(240)
-            .collect();
+    pub(crate) fn diagnostic_text(&self) -> Option<&str> {
+        (!self.error.is_empty()).then_some(self.error.as_str())
+    }
+
+    pub(crate) fn set_error(&mut self, error: &str) -> Result<()> {
+        let (text, storage) = admitted_diagnostic(&self.quota, error)?;
+        self.error = text;
+        self.error_storage = storage;
+        self.view.detail_scroll = 0;
+        Ok(())
     }
 }
 fn review_content_area(area: Rect) -> Rect {

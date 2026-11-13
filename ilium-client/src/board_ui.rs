@@ -480,7 +480,8 @@ pub fn render(
 fn board_hint_lines(is_detail_open: bool, width: u16) -> Vec<&'static str> {
     if is_detail_open {
         return match width {
-            0..=19 => vec!["Esc"],
+            0..=2 => vec![],
+            3..=19 => vec!["Esc"],
             20..=21 => vec!["Tab edits", "Autosave", "Esc closes"],
             22..=25 => vec!["Tab edits", "Autosaves · Esc closes"],
             26..=37 => vec!["Tab field", "Autosaves", "Esc closes"],
@@ -839,7 +840,7 @@ mod tests {
         }
         let wide = board_hint_lines(false, 120).join(" ");
         for expected in [
-            "column", "card", "details", "new", "rename", "delete", "move", "drag",
+            "column", "card", "details", "n card", "c column", "rename", "delete", "move", "drag",
         ] {
             assert!(
                 wide.contains(expected),
@@ -953,7 +954,13 @@ mod tests {
             })
             .collect();
         board.selected_card = Some(7);
-        let area = Rect::new(0, 0, 60, 14);
+        // Two complete cards, their gap, borders and the responsive footer
+        // must fit; otherwise the correct scroll result is a single card.
+        let height = 2 * (3 + CARD_BORDER_ROWS)
+            + CARD_GAP_ROWS
+            + 2
+            + board_hint_lines(false, 60).len() as u16;
+        let area = Rect::new(0, 0, 60, height);
         let layout = compute_layout(area, false, 1, 20);
         let column_inner = Block::bordered().inner(layout.columns_area);
         let inner = card_content_area(column_inner, 8, 3);

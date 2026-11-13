@@ -92,6 +92,9 @@ fn text_trigger_all_client_savers_share_the_document_owner() {
         ("reset_planning", |dir| {
             save_reset_planning_settings(dir, &ResetPlanningSettings::default())
         }),
+        ("attention", |dir| {
+            save_attention_settings(dir, &crate::attention::AttentionSettings::default())
+        }),
         ("cost", |dir| {
             save_cost_settings(dir, &CostSettings::default())
         }),

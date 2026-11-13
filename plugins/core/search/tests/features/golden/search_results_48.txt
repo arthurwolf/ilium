@@ -1,0 +1,12 @@
+╭─ Workspace search ───────────────────────────╮
+│ Search deploy▏                               │
+│                                              │
+│ Agents                                       │
+│   ▸ claude: deploy script fix                │
+│ Terminals                                    │
+│     build shell                              │
+│ Files                                        │
+│     docs/deploy.md                           │
+│     ops/deploy.sh                            │
+│                                              │
+╰──────────────────────────────────────────────╯

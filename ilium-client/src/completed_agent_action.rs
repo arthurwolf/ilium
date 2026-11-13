@@ -59,7 +59,12 @@ mod tests {
             slot_index: 0,
             toolbar_area: None,
             last_prompt_area: None,
+            briefing_area: None,
             progress_area: None,
+            toolbar_rule: None,
+            last_prompt_bottom_rule: None,
+            briefing_bottom_rule: None,
+            progress_rule: None,
         };
 
         let action = layout(viewport).expect("non-empty pane content has an action row");
@@ -77,7 +82,12 @@ mod tests {
             slot_index: 0,
             toolbar_area: None,
             last_prompt_area: None,
+            briefing_area: None,
             progress_area: None,
+            toolbar_rule: None,
+            last_prompt_bottom_rule: None,
+            briefing_bottom_rule: None,
+            progress_rule: None,
         };
 
         assert_eq!(layout(viewport), None);

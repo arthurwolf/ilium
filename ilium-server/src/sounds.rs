@@ -563,6 +563,14 @@ fn spawn_config_watcher_with_interval(
                         *state.sound_settings.write().await = settings;
                         *state.notifications_config.write().await = refresh.notifications;
                         state.set_session_backups_enabled(refresh.backups_enabled);
+                        state.cache_keepalive.send_if_modified(|current| {
+                            if *current == refresh.cache_keepalive {
+                                false
+                            } else {
+                                *current = refresh.cache_keepalive;
+                                true
+                            }
+                        });
                         // Refusals never consume the observed revision.
                         observed_fingerprint = Some(refresh.fingerprint);
                     }
@@ -612,6 +620,31 @@ mod tests {
     use std::sync::Mutex;
 
     type PlaybackCall = (SoundSettings, Option<SoundEvent>);
+
+    async fn submit_preview_after_transient_busy(
+        sender: &PlaybackSender,
+        mut request: PlaybackRequest,
+        reply: crate::ipc::DirectEventSender,
+    ) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match sender.try_send_with_preview_reply(request, Some(reply.clone())) {
+                Ok(()) => return,
+                Err(PlaybackSendError::Admission {
+                    reason: ilium_execution::RejectReason::Busy,
+                    _request: returned,
+                }) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "preview fixture storage admission stayed busy"
+                    );
+                    request = returned;
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                Err(error) => panic!("preview fixture admission failed: {error}"),
+            }
+        }
+    }
 
     struct RecordingPlayer {
         calls: Arc<Mutex<Vec<PlaybackCall>>>,
@@ -678,16 +711,16 @@ mod tests {
         });
         let (sender, task) = spawn(player, crate::execution::test_general_client());
         let (reply, mut events) = crate::ipc::DirectEventSender::channel(2);
-        sender
-            .try_send_with_preview_reply(
-                PlaybackRequest {
-                    settings: test_settings(SoundSettings::default()),
-                    event: None,
-                    pane_name: None,
-                },
-                Some(reply),
-            )
-            .unwrap();
+        submit_preview_after_transient_busy(
+            &sender,
+            PlaybackRequest {
+                settings: test_settings(SoundSettings::default()),
+                event: None,
+                pane_name: None,
+            },
+            reply,
+        )
+        .await;
 
         assert_eq!(
             events.recv().await,
@@ -719,16 +752,16 @@ mod tests {
             crate::execution::test_general_client(),
         );
         let (reply, mut events) = crate::ipc::DirectEventSender::channel(2);
-        sender
-            .try_send_with_preview_reply(
-                PlaybackRequest {
-                    settings: test_settings(SoundSettings::default()),
-                    event: None,
-                    pane_name: None,
-                },
-                Some(reply),
-            )
-            .unwrap();
+        submit_preview_after_transient_busy(
+            &sender,
+            PlaybackRequest {
+                settings: test_settings(SoundSettings::default()),
+                event: None,
+                pane_name: None,
+            },
+            reply,
+        )
+        .await;
 
         assert_eq!(
             events.recv().await,
@@ -852,13 +885,15 @@ mod tests {
 
         std::fs::write(
             &config_path,
-            "[sound.events]\napproval_required = true\n[session]\nbackups_enabled = false\n",
+            "[sound.events]\napproval_required = true\n[session]\nbackups_enabled = false\n[ui.cache_keepalive]\nenabled = true\ncodex_interval_minutes = 7\n",
         )
         .unwrap();
         let updated = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 if state.sound_settings.read().await.events.approval_required
                     && !state.session_backups_enabled()
+                    && state.cache_keepalive.borrow().enabled
+                    && state.cache_keepalive.borrow().codex_interval_minutes == 7
                 {
                     break;
                 }

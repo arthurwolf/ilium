@@ -1,0 +1,13 @@
+package ilium:host@0.1.0;
+
+interface intents-host {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/intents@0.1.0.{submission};
+  /// For use outside a batch. Carries one submission. Completes as request-completed with request-ref
+  /// submission(correlation), taken from the submission passed in. The returned request-id is
+  /// informational: it never appears in a completion.
+  /// Errors: invalid-argument (malformed submission), not-permitted (grant missing: reported at once),
+  /// rate-limited.
+  submit: func(submission: submission) -> result<request-id, plugin-error>;
+}

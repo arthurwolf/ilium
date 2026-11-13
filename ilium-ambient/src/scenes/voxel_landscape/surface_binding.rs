@@ -44,6 +44,15 @@ use std::{
 
 const SCENE_BUDGET_BYTES: u64 = 1024 * 1024 * 1024;
 
+pub(super) fn configure_tile_compiler<P: super::assets::models::DefinitionProvider + ?Sized>(
+    compiler: &mut ModelCompiler<'_, P>,
+    immutable: bool,
+) {
+    if immutable {
+        compiler.enable_immutable_source_cache();
+    }
+}
+
 #[cfg(test)]
 #[path = "ground_boundary_regressions.rs"]
 mod ground_boundary_regressions;
@@ -365,6 +374,35 @@ fn request(
     )
 }
 
+/// Block textures that the 1.19.3 Java jar and the pinned packs lack but the
+/// surface vocabulary places (1.20+ blocks and the 1.20.3+ grass names). Each
+/// target is a visibly similar 1.19.3-era block texture. The candidate is
+/// labelled as compatibility art, never as the requested native texture.
+const REVIEWED_ABSENT_SOURCE_ALTERNATES: &[(&str, &str)] = &[
+    ("block/mud", "minecraft:block/dirt"),
+    ("block/short_grass", "minecraft:block/grass"),
+    ("block/tall_grass", "minecraft:block/grass"),
+    ("block/bush", "minecraft:block/grass"),
+    ("block/firefly_bush", "minecraft:block/grass"),
+    ("block/cactus_flower", "minecraft:block/pink_tulip"),
+    ("block/pink_petals", "minecraft:block/pink_tulip"),
+    ("block/torchflower", "minecraft:block/poppy"),
+    ("block/pitcher_plant", "minecraft:block/fern"),
+    ("block/cherry_leaves", "minecraft:block/oak_leaves"),
+    ("block/cherry_log", "minecraft:block/oak_log"),
+    ("block/cherry_planks", "minecraft:block/oak_planks"),
+    ("block/leaf_litter", "minecraft:block/dirt"),
+    ("block/short_dry_grass", "minecraft:block/dead_bush"),
+    ("block/tall_dry_grass", "minecraft:block/dead_bush"),
+];
+
+fn reviewed_absent_source_alternate(texture_path: &str) -> Option<&'static str> {
+    REVIEWED_ABSENT_SOURCE_ALTERNATES
+        .iter()
+        .find(|(absent, _)| *absent == texture_path)
+        .map(|(_, alternate)| *alternate)
+}
+
 fn request_with_fallback_aliases(
     id: ResourceId,
     pack: &ResourceId,
@@ -419,13 +457,7 @@ fn request_with_fallback_aliases(
     // Reviewed semantic compatibility for absent modern source members. The
     // candidate record keeps the selected image's real origin and this reason;
     // it must not be reported as a native texture for the requested state.
-    let alternate = match id.parts().1 {
-        "block/mud" => Some("minecraft:block/dirt"),
-        "block/short_grass" | "block/tall_grass" | "block/bush" | "block/firefly_bush" => {
-            Some("minecraft:block/grass")
-        }
-        _ => None,
-    };
+    let alternate = reviewed_absent_source_alternate(id.parts().1);
     if let Some(alternate) = alternate {
         let reason = Label::new(&format!(
             "Authored selected-pack compatibility: {id} absent; visibly use {alternate}; not native {id} art"
@@ -1255,9 +1287,14 @@ fn prepare_world_from_sources(
     }
     // The additional full pack supplies only explicitly requested images. Its block
     // definitions must never change the selected pack's terrain geometry.
+    // Only verified immutable source layers may retain parsed definitions: live
+    // providers must continue to observe changes on every lookup.
+    let immutable = matches!(&sources.pack_owner, BindingPackOwner::InstalledNative(native) if native.immutable_definition_sources());
     let sources = DefinitionSources::new(&packs[..1], &[], Some(&compatibility))?;
     let mut compiler = ModelCompiler::new(&sources, limits, budget.clone())?;
     let mut original_compiler = ModelCompiler::new(&compatibility, limits, budget.clone())?;
+    configure_tile_compiler(&mut compiler, immutable);
+    configure_tile_compiler(&mut original_compiler, immutable);
     let collecting = collect_requests.is_some();
     let candidate_count = if supplied_tints.is_none() {
         binding_slot_count(&world, core, cancel)?
@@ -1796,7 +1833,7 @@ pub struct GeneratedViewportSession {
     tiles: Vec<(Region, Region)>,
     imports: Arc<ImportResult>,
     cached_tiles: Option<Vec<BoundTile>>,
-    region: Region,
+    plan: super::surface_viewport::TilePlan,
     scale: f32,
     size: [usize; 2],
     settings: VoxelLandscapeSettings,
@@ -1812,8 +1849,37 @@ impl GeneratedViewportSession {
         budget: ByteBudget,
         cancel: Cancel<'_>,
     ) -> Result<Self> {
+        let plan = super::surface_viewport::plan_tiles(
+            region,
+            &[super::surface_viewport::relative_camera(region)],
+            scale,
+            size,
+        )?;
+        Self::open_plan(
+            plan,
+            scale,
+            size,
+            settings,
+            reviewed_fallback,
+            budget,
+            cancel,
+        )
+    }
+
+    /// Opens the session for a pre-planned tile set, which may span the
+    /// cameras of a whole pan horizon so the session outlives small region
+    /// changes.
+    pub fn open_plan(
+        plan: super::surface_viewport::TilePlan,
+        scale: f32,
+        size: [usize; 2],
+        settings: &VoxelLandscapeSettings,
+        reviewed_fallback: Option<&VoxelLandscapeSettings>,
+        budget: ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self> {
         cancel.check()?;
-        let tiles = super::surface_viewport::visible_tiles(region, scale, size)?;
+        let tiles = plan.tiles.clone();
         let sources =
             BindingSources::open_with_budget(settings, reviewed_fallback, budget, cancel)?;
         let mut requests = BTreeMap::<ResourceId, TextureRequest>::new();
@@ -1845,7 +1911,7 @@ impl GeneratedViewportSession {
             tiles,
             imports,
             cached_tiles: None,
-            region,
+            plan,
             scale,
             size,
             settings: settings.clone(),
@@ -1861,7 +1927,7 @@ impl GeneratedViewportSession {
         settings: &VoxelLandscapeSettings,
         reviewed_fallback: Option<&VoxelLandscapeSettings>,
     ) -> bool {
-        self.region == region
+        super::surface_viewport::plan_covers(&self.plan, region, scale, size)
             && self.scale == scale
             && self.size == size
             && &self.settings == settings
@@ -2467,6 +2533,39 @@ mod supplied_tests {
             source_limitations: Vec::new(),
         }
     }
+    #[test]
+    fn reviewed_absent_source_alternates_are_labelled_compatibility_candidates() {
+        let selected = ResourceId::parse("ilium:java-default").unwrap();
+        let no_aliases = BTreeMap::new();
+        for (absent_path, alternate) in REVIEWED_ABSENT_SOURCE_ALTERNATES {
+            let id = ResourceId::parse(&format!("minecraft:{absent_path}")).unwrap();
+            let request = request_with_fallback_aliases(
+                id.clone(),
+                &selected,
+                &no_aliases,
+                false,
+                None,
+                false,
+                &no_aliases,
+            )
+            .unwrap();
+            assert_eq!(request.requirement.id, id);
+            let expected_alternate = ResourceId::parse(alternate).unwrap();
+            assert!(
+                request.candidates.iter().any(|candidate| {
+                    matches!(
+                        &candidate.location,
+                        TextureLocation::Resource {
+                            id,
+                            alias_reason: Some(_),
+                        } if *id == expected_alternate
+                    )
+                }),
+                "{absent_path} must offer labelled compatibility art from {alternate}"
+            );
+        }
+    }
+
     #[test]
     fn reviewed_fallback_aliases_keep_fallback_pack_provenance() {
         let id = ResourceId::parse("minecraft:block/beehive_top").unwrap();

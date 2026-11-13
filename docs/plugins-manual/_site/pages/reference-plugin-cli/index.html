@@ -1,0 +1,1914 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Plugin command-line reference | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/" aria-current="page">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Plugin command-line reference</h1>
+<h2 id="the-ilium-plugin-command-line">The ilium plugin command line</h2>
+<p>This page is the normative reference for every <code>ilium plugin</code> command: what it reads, what it writes, which flags it takes, which records it prints and which exit code it returns. Other pages show short tables of commands. When a short table and this page disagree, this page wins.</p>
+<p>The <code>ilium plugin</code> commands are part of the <code>ilium</code> binary. Nothing else is installed. A plugin author uses them to create, build, check, test, pack, sign and run a plugin. A user or administrator uses them to install, list, inspect, grant, enable, disable and remove plugins. A test author uses the output formats on this page to write golden tests for the command line itself.</p>
+<p>Rules on this page carry stable ids such as <code>[DEV-004]</code>. A test cites the id. The full list is in <a href="/pages/reference-requirements-dev-tooling/">Requirements of the developer tooling lane</a>. The words MUST, SHOULD and MAY have their usual meaning: MUST is a requirement, SHOULD is a requirement unless there is a stated reason, MAY is an option.</p>
+<p>Terms used on this page:</p>
+<ul>
+<li><strong>Session</strong>: one running Ilium server together with its clients. A session owns the loaded plugins. See <a href="/pages/architecture/">Architecture</a>.</li>
+<li><strong>Offline command</strong>: a command that works with no running session, so a continuous-integration job can run it.</li>
+<li><strong>JSONL</strong>: JSON Lines. One JSON object per line, UTF-8, no pretty printing.</li>
+<li><strong>Record</strong>: one JSON object that a command prints. Its <code>type</code> field names its kind.</li>
+</ul>
+<h2 id="conventions">Conventions</h2>
+<ul>
+<li><strong>[DEV-001]</strong> <code>&lt;dir&gt;</code> MUST default to the current working directory. A command that takes <code>&lt;dir&gt;</code> MUST treat it as the project directory, the one that holds <code>manifest.json</code>.</li>
+<li><strong>[DEV-002]</strong> A command that builds MUST detect the language from the project files. A <code>Cargo.toml</code> means Rust. A <code>package.json</code> means TypeScript. Both files together fail with <code>toolchain.language-ambiguous</code>. Neither file fails with <code>toolchain.language-unknown</code>.</li>
+<li><strong>[DEV-003]</strong> Every command MUST accept the global flags in the table below. A flag that does not apply to a command MUST be accepted and ignored, except <code>--session</code>, which a command that never contacts a session MUST also ignore without error.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--session &lt;name&gt;</code></td>
+<td>string</td>
+<td><code>default</code></td>
+<td>Names the session that a session command talks to.</td>
+</tr>
+<tr>
+<td><code>--cwd &lt;path&gt;</code></td>
+<td>path</td>
+<td>the current directory</td>
+<td>The project directory that identifies the session, as for the bare <code>ilium</code> command. It is not <code>&lt;dir&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Suppresses <code>progress</code> records and, in text mode, all output except errors and the final line.</td>
+</tr>
+<tr>
+<td><code>--no-color</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Prints text output with no colour. The environment variable <code>NO_COLOR</code> has the same effect.</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Selects JSONL output for a command whose default output is text.</td>
+</tr>
+<tr>
+<td><code>--help</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Prints usage to standard output and exits with 0.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-004]</strong> A session command MUST find its session this way: the session named by <code>--session</code>, in the project that <code>--cwd</code> names, defaulting to the session called <code>default</code> of the current directory. No session found at that address MUST fail with <code>session.unreachable</code> and exit code 6. A command MUST NOT start a session itself.</li>
+<li><strong>[DEV-005]</strong> The commands in the offline column of the table below MUST work with no running session, no network and no home-directory configuration beyond the trust store.</li>
+<li><strong>[DEV-006]</strong> A session command that cannot reach its session MUST print one <code>error</code> record with the code <code>session.unreachable</code>, then <code>summary</code>, then <code>result</code>, and exit with 6. It MUST NOT retry.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Needs a session</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>new</code></td>
+<td>no</td>
+<td>Writes files only.</td>
+</tr>
+<tr>
+<td><code>build</code></td>
+<td>no</td>
+<td>Needs the language toolchain.</td>
+</tr>
+<tr>
+<td><code>check</code></td>
+<td>no</td>
+<td>Reads files only.</td>
+</tr>
+<tr>
+<td><code>lint</code></td>
+<td>no</td>
+<td>Reads files only.</td>
+</tr>
+<tr>
+<td><code>test</code></td>
+<td>no</td>
+<td>Native fixtures and <code>--component</code> both run in an embedded test host.</td>
+</tr>
+<tr>
+<td><code>pack</code></td>
+<td>no</td>
+<td>Needs a built <code>dist/</code>.</td>
+</tr>
+<tr>
+<td><code>keygen</code></td>
+<td>no</td>
+<td>Writes a key pair.</td>
+</tr>
+<tr>
+<td><code>sign</code></td>
+<td>no</td>
+<td>Reads a key and edits a package file.</td>
+</tr>
+<tr>
+<td><code>trust</code></td>
+<td>no</td>
+<td>Edits the trust store file. A running session reloads it on change.</td>
+</tr>
+<tr>
+<td><code>publish</code></td>
+<td>no</td>
+<td>Needs a registry. Defined in <a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a>.</td>
+</tr>
+<tr>
+<td><code>inspect &lt;file&gt;</code></td>
+<td>no</td>
+<td>Reads a package or a component.</td>
+</tr>
+<tr>
+<td><code>inspect &lt;id&gt;</code></td>
+<td>yes</td>
+<td>Reads an installed plugin.</td>
+</tr>
+<tr>
+<td><code>doctor</code></td>
+<td>no</td>
+<td>The session check reports <code>warn</code> when no session is found.</td>
+</tr>
+<tr>
+<td><code>install</code>, <code>uninstall</code>, <code>enable</code>, <code>disable</code>, <code>grants</code>, <code>list</code></td>
+<td>yes</td>
+<td>They change or read the loaded set.</td>
+</tr>
+<tr>
+<td><code>dev</code>, <code>logs</code>, <code>log-level</code>, <code>trace</code>, <code>profile</code></td>
+<td>yes</td>
+<td>They read or drive a live instance.</td>
+</tr>
+</tbody>
+</table>
+<p>The output default of each command is in <a href="#which-commands-print-text">Which commands print text</a>.</p>
+<h2 id="exit-codes">Exit codes</h2>
+<p>Codes 7 (policy) and 8 (network) are added by <a href="/pages/reference-plugin-distribution-cli/#exit-codes">Distribution commands</a>.</p>
+<ul>
+<li><strong>[DEV-007]</strong> Every command MUST exit with one of the codes below, and the <code>exit_code</code> field of its <code>result</code> record MUST equal the process exit code.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Name</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>ok</td>
+<td>The command did what was asked. Warnings do not change the code.</td>
+</tr>
+<tr>
+<td>1</td>
+<td>failed</td>
+<td>The operation failed: a build error, a refused install, a write error.</td>
+</tr>
+<tr>
+<td>2</td>
+<td>usage</td>
+<td>A flag or argument is wrong, or a reserved command was used.</td>
+</tr>
+<tr>
+<td>3</td>
+<td>findings</td>
+<td><code>check</code>, <code>lint</code> or <code>test</code> ran to the end and found problems.</td>
+</tr>
+<tr>
+<td>4</td>
+<td>environment</td>
+<td>A tool, target, SDK or version that the command needs is missing or too old.</td>
+</tr>
+<tr>
+<td>5</td>
+<td>not found</td>
+<td>The plugin id, package, key or publisher does not exist.</td>
+</tr>
+<tr>
+<td>6</td>
+<td>no session</td>
+<td>A session command found no reachable session.</td>
+</tr>
+<tr>
+<td>130</td>
+<td>interrupted</td>
+<td>The user pressed Ctrl+C.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-008]</strong> Exit code 0 MUST be returned only when <code>result.ok</code> is <code>true</code>.</li>
+<li><strong>[DEV-009]</strong> Exit code 1 MUST be returned for any failure that is not covered by a more specific code.</li>
+<li><strong>[DEV-010]</strong> Exit code 2 MUST be returned for a usage error before any work starts. The command MUST NOT write files before it returns 2.</li>
+<li><strong>[DEV-011]</strong> Exit code 3 MUST be returned when a <code>check</code> finding of severity <code>error</code> exists, when <code>lint --deny warnings</code> has any finding, when a lint rule of severity <code>error</code> fires, or when at least one test case does not pass. A finding of severity <code>warn</code> under <code>check</code> or plain <code>lint</code> returns 0.</li>
+<li><strong>[DEV-012]</strong> Exit code 4 MUST be returned when a <code>toolchain.*</code> code stops the command, and when <code>doctor</code> reports any item with status <code>fail</code>.</li>
+<li><strong>[DEV-013]</strong> Exit code 5 MUST be returned for <code>plugin.not-found</code>, <code>trust.not-found</code> and <code>inspect.id-unknown</code>.</li>
+<li><strong>[DEV-014]</strong> Exit code 6 MUST be returned for <code>session.unreachable</code> and <code>session.not-found</code>.</li>
+<li><strong>[DEV-015]</strong> Exit code 130 MUST be returned after an interrupt. The command MUST print <code>summary</code> and <code>result</code> with <code>ok</code> set to <code>false</code> before it exits, and MUST leave no half-written output file (see the atomic write rule below).</li>
+</ul>
+<h2 id="output-model">Output model</h2>
+<h3 id="the-jsonl-envelope">The JSONL envelope</h3>
+<ul>
+<li><strong>[DEV-016]</strong> A JSONL command MUST print one JSON object per line on standard output, with the field <code>type</code> as the first key. Human text, if any, MUST go to standard error.</li>
+<li><strong>[DEV-017]</strong> A JSONL command MUST print exactly one <code>summary</code> record and then exactly one <code>result</code> record, in that order, as its last two lines. This fixes the older disagreement between pages. The <code>summary</code> comes first, and the <code>result</code> is always the final line, so a script can read the last line to get the outcome.</li>
+<li><strong>[DEV-018]</strong> Every size MUST be an unsigned integer in bytes. Every duration MUST be an unsigned integer in milliseconds, and its key MUST end in <code>_ms</code>. Every hash MUST be 64 lowercase hexadecimal characters of SHA-256. Every path MUST use <code>/</code> and be relative to the project directory unless the key says <code>absolute</code>.</li>
+<li><strong>[DEV-019]</strong> A record MUST NOT contain a field that this page does not define for its type, except <code>details</code>, an optional object that a record MAY carry. A consumer MUST ignore fields it does not know, so later minor versions can add fields.</li>
+<li><strong>[DEV-020]</strong> <code>--quiet</code> MUST suppress <code>progress</code> records and nothing else.</li>
+</ul>
+<h3 id="the-record-catalogue">The record catalogue</h3>
+<table>
+<thead>
+<tr>
+<th><code>type</code></th>
+<th>Fields</th>
+<th>Printed by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>progress</code></td>
+<td><code>step</code>, <code>message</code>, optional <code>current</code>, <code>total</code></td>
+<td>long commands</td>
+</tr>
+<tr>
+<td><code>warning</code></td>
+<td><code>code</code>, <code>message</code>, optional <code>file</code>, <code>line</code>, <code>column</code></td>
+<td>all</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td><code>code</code>, <code>message</code>, optional <code>file</code>, <code>line</code>, <code>column</code>, <code>key_path</code>, <code>hint</code></td>
+<td>all</td>
+</tr>
+<tr>
+<td><code>artifact</code></td>
+<td><code>kind</code>, <code>path</code>, <code>sha256</code>, <code>bytes</code></td>
+<td><code>build</code>, <code>pack</code>, <code>sign</code>, <code>keygen</code>, <code>test --record</code></td>
+</tr>
+<tr>
+<td><code>check</code></td>
+<td><code>rule</code>, <code>severity</code>, <code>message</code>, optional <code>file</code>, <code>line</code>, <code>column</code>, <code>key_path</code></td>
+<td><code>check</code></td>
+</tr>
+<tr>
+<td><code>lint</code></td>
+<td><code>rule</code>, <code>severity</code>, <code>message</code>, optional <code>file</code>, <code>line</code>, <code>column</code>, <code>key_path</code>, <code>fix</code>, <code>suppressed</code></td>
+<td><code>lint</code></td>
+</tr>
+<tr>
+<td><code>test-case</code></td>
+<td><code>name</code>, <code>fixture</code>, <code>side</code>, <code>status</code>, <code>duration_ms</code>, optional <code>diff</code>, <code>reason</code></td>
+<td><code>test</code></td>
+</tr>
+<tr>
+<td><code>diff</code></td>
+<td><code>subject</code>, <code>expected</code>, <code>actual</code>, optional <code>first_difference</code></td>
+<td><code>test</code>, <code>inspect --verify</code></td>
+</tr>
+<tr>
+<td><code>submission</code></td>
+<td><code>index</code>, <code>correlation</code>, <code>intent</code>, optional <code>dedup_key</code></td>
+<td><code>test</code>, <code>trace</code></td>
+</tr>
+<tr>
+<td><code>outcome</code></td>
+<td><code>correlation</code>, <code>outcome</code>, optional <code>code</code></td>
+<td><code>test</code>, <code>trace</code></td>
+</tr>
+<tr>
+<td><code>reload</code></td>
+<td><code>plugin</code>, <code>side</code>, <code>version</code>, <code>restored_bytes</code>, <code>restore_dropped</code>, <code>build_ms</code></td>
+<td><code>dev</code></td>
+</tr>
+<tr>
+<td><code>log</code></td>
+<td><code>at</code>, <code>plugin</code>, <code>side</code>, <code>level</code>, <code>message</code></td>
+<td><code>dev</code>, <code>logs --json</code></td>
+</tr>
+<tr>
+<td><code>timing</code></td>
+<td><code>plugin</code>, <code>side</code>, <code>export</code>, <code>calls</code>, <code>p50_ms</code>, <code>p99_ms</code>, <code>max_ms</code>, <code>deadline_ms</code></td>
+<td><code>dev --timings</code>, <code>profile</code></td>
+</tr>
+<tr>
+<td><code>trace</code></td>
+<td><code>at</code>, <code>plugin</code>, <code>side</code>, <code>kind</code>, <code>detail</code></td>
+<td><code>trace --json</code></td>
+</tr>
+<tr>
+<td><code>plugin</code></td>
+<td><code>id</code>, <code>version</code>, <code>tier</code>, <code>state</code>, <code>dev</code>, <code>sides</code>, <code>grants_granted</code>, <code>grants_requested</code></td>
+<td><code>list --json</code></td>
+</tr>
+<tr>
+<td><code>grant</code></td>
+<td><code>plugin</code>, <code>grant</code>, <code>risk</code>, <code>state</code></td>
+<td><code>grants --json</code></td>
+</tr>
+<tr>
+<td><code>inspect</code></td>
+<td><code>section</code>, <code>data</code></td>
+<td><code>inspect --json</code></td>
+</tr>
+<tr>
+<td><code>doctor-check</code></td>
+<td><code>item</code>, <code>status</code>, <code>message</code>, <code>fix</code></td>
+<td><code>doctor</code></td>
+</tr>
+<tr>
+<td><code>summary</code></td>
+<td><code>duration_ms</code>, <code>warnings</code>, <code>errors</code></td>
+<td>all JSONL commands</td>
+</tr>
+<tr>
+<td><code>result</code></td>
+<td><code>ok</code>, <code>exit_code</code></td>
+<td>all JSONL commands</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-021]</strong> The <code>step</code> field of <code>progress</code> MUST be one of <code>toolchain</code>, <code>compile</code>, <code>bundle</code>, <code>component</code>, <code>api-version</code>, <code>strip</code>, <code>inventory</code>, <code>pack</code>, <code>sign</code>, <code>check</code>, <code>lint</code>, <code>test</code>, <code>install</code>, <code>watch</code>.</li>
+<li><strong>[DEV-022]</strong> The <code>kind</code> field of <code>artifact</code> MUST be one of <code>component</code>, <code>package</code>, <code>source-map</code>, <code>build-info</code>, <code>key</code>, <code>public-key</code>, <code>signature</code>, <code>replay</code>.</li>
+<li><strong>[DEV-023]</strong> The <code>severity</code> field of <code>check</code> and <code>lint</code> MUST be <code>error</code> or <code>warn</code>. A <code>lint</code> record MAY also use <code>info</code>.</li>
+<li><strong>[DEV-024]</strong> The <code>status</code> field of <code>test-case</code> MUST be <code>pass</code>, <code>fail</code>, <code>trap</code> or <code>skipped</code>. The <code>status</code> field of <code>doctor-check</code> MUST be <code>ok</code>, <code>warn</code> or <code>fail</code>.</li>
+<li><strong>[DEV-025]</strong> The <code>side</code> field MUST be <code>server</code>, <code>client</code>, <code>scene</code> or <code>host</code>. <code>host</code> marks an entry that the host itself wrote.</li>
+</ul>
+<p>A build that succeeds prints:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;progress&quot;,&quot;step&quot;:&quot;compile&quot;,&quot;message&quot;:&quot;Compiling agent-tools&quot;,&quot;current&quot;:1,&quot;total&quot;:3}
+{&quot;type&quot;:&quot;progress&quot;,&quot;step&quot;:&quot;component&quot;,&quot;message&quot;:&quot;Writing server.wasm&quot;,&quot;current&quot;:2,&quot;total&quot;:3}
+{&quot;type&quot;:&quot;progress&quot;,&quot;step&quot;:&quot;api-version&quot;,&quot;message&quot;:&quot;Embedding ilium:api-version 0.1.0&quot;,&quot;current&quot;:3,&quot;total&quot;:3}
+{&quot;type&quot;:&quot;artifact&quot;,&quot;kind&quot;:&quot;component&quot;,&quot;path&quot;:&quot;dist/server.wasm&quot;,&quot;sha256&quot;:&quot;3f9a0c51d7b8e2a4c6f1903b5d7e8a2c4b6d8f0a1c3e5a7b9d1f3a5c7e9b1d3f&quot;,&quot;bytes&quot;:412806}
+{&quot;type&quot;:&quot;artifact&quot;,&quot;kind&quot;:&quot;build-info&quot;,&quot;path&quot;:&quot;dist/build.json&quot;,&quot;sha256&quot;:&quot;7a1b9c3d5e7f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b&quot;,&quot;bytes&quot;:611}
+{&quot;type&quot;:&quot;summary&quot;,&quot;duration_ms&quot;:8120,&quot;warnings&quot;:0,&quot;errors&quot;:0}
+{&quot;type&quot;:&quot;result&quot;,&quot;ok&quot;:true,&quot;exit_code&quot;:0}
+</code></pre>
+<p>A failed command prints its <code>error</code> records, then <code>summary</code> with <code>errors</code> greater than 0, then <code>result</code> with <code>ok</code> false:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;error&quot;,&quot;code&quot;:&quot;toolchain.rust-target&quot;,&quot;message&quot;:&quot;the wasm32-wasip2 target is not installed&quot;,&quot;hint&quot;:&quot;run: rustup target add wasm32-wasip2&quot;}
+{&quot;type&quot;:&quot;summary&quot;,&quot;duration_ms&quot;:41,&quot;warnings&quot;:0,&quot;errors&quot;:1}
+{&quot;type&quot;:&quot;result&quot;,&quot;ok&quot;:false,&quot;exit_code&quot;:4}
+</code></pre>
+<h3 id="which-commands-print-text">Which commands print text</h3>
+<ul>
+<li><strong>[DEV-026]</strong> A command listed as JSONL in the table below MUST print JSONL always. <code>--json</code> on such a command MUST be accepted and have no effect.</li>
+<li><strong>[DEV-027]</strong> A command listed as text MUST print text by default for a person and JSONL with <code>--json</code>. The JSONL form MUST end with <code>summary</code> and <code>result</code> records, as for any JSONL command.</li>
+<li><strong>[DEV-028]</strong> Text output MUST be stable enough to read but is not a contract. Scripts MUST use <code>--json</code>.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Default output</th>
+<th><code>--json</code> form</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>new</code>, <code>build</code>, <code>pack</code>, <code>keygen</code>, <code>sign</code>, <code>trust add</code>, <code>trust remove</code>, <code>install</code>, <code>uninstall</code>, <code>enable</code>, <code>disable</code>, <code>test</code>, <code>dev</code></td>
+<td>JSONL</td>
+<td>the same</td>
+</tr>
+<tr>
+<td><code>check</code>, <code>lint</code></td>
+<td>text</td>
+<td><code>check</code> or <code>lint</code> records</td>
+</tr>
+<tr>
+<td><code>list</code>, <code>trust list</code>, <code>grants</code></td>
+<td>text</td>
+<td><code>plugin</code> or <code>grant</code> records</td>
+</tr>
+<tr>
+<td><code>logs</code>, <code>trace</code>, <code>profile</code></td>
+<td>text</td>
+<td><code>log</code>, <code>trace</code> or <code>timing</code> records</td>
+</tr>
+<tr>
+<td><code>inspect</code>, <code>doctor</code></td>
+<td>text</td>
+<td><code>inspect</code> or <code>doctor-check</code> records</td>
+</tr>
+</tbody>
+</table>
+<p>Contributed subcommands of the form <code>ilium &lt;name&gt;</code> are not <code>ilium plugin</code> commands. They are declared in <code>contributes.cli</code> and described in <a href="/pages/api-cli/">Contributed command-line commands</a>. There is no <code>ilium plugin run</code>. The page on the workspace API uses the contributed form.</p>
+<h3 id="environment-variables">Environment variables</h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NO_COLOR</code></td>
+<td>unset</td>
+<td>Any non-empty value turns colour off, like <code>--no-color</code>.</td>
+</tr>
+<tr>
+<td><code>ILIUM_PLUGIN_LOG_LEVEL</code></td>
+<td><code>info</code></td>
+<td>Read by a session server at start. Sets the default log threshold of every plugin. Values: <code>trace</code>, <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code>.</td>
+</tr>
+<tr>
+<td><code>ILIUM_PLUGIN_UPDATE_GOLDEN</code></td>
+<td>unset</td>
+<td>The value <code>1</code> makes <code>test</code> and the harness rewrite golden files instead of comparing. Same as <code>--update</code>.</td>
+</tr>
+<tr>
+<td><code>ILIUM_PLUGIN_TEST_SEED</code></td>
+<td><code>1</code></td>
+<td>The seed for the harness random source. Same as <code>--seed</code>.</td>
+</tr>
+<tr>
+<td><code>ILIUM_TRUST_STORE</code></td>
+<td>per-user path</td>
+<td>Replaces the trust store path. A CI job uses it to keep keys in a temporary folder.</td>
+</tr>
+<tr>
+<td><code>ILIUM_PLUGIN_SIGNING_KEY</code></td>
+<td>unset</td>
+<td>Path of a secret key file for <code>sign</code> when <code>--key</code> is not given.</td>
+</tr>
+<tr>
+<td><code>ILIUM_PLUGIN_OFFLINE</code></td>
+<td>unset</td>
+<td>The value <code>1</code> is the same as <code>--offline</code> on <code>build</code>.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-029]</strong> A flag MUST override the environment variable that has the same effect.</li>
+<li><strong>[DEV-030]</strong> Output files that a command replaces (<code>dist/*.wasm</code>, the package, the signature, golden files, replay files) MUST be written to a temporary file in the same folder and renamed into place, so an interrupt never leaves a half-written file.</li>
+</ul>
+<h2 id="new">new</h2>
+<p>Creates a project from a template. The templates, their files and their guarantees are in <a href="/pages/reference-project-templates/">Project templates</a>.</p>
+<p><code>ilium plugin new &lt;dir&gt; --id &lt;plugin-id&gt; --lang &lt;rust|typescript&gt; (--template &lt;name&gt; | --side &lt;name&gt;) [flags]</code></p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;dir&gt;</code></td>
+<td>path</td>
+<td>none, required</td>
+<td>The folder to create or fill.</td>
+</tr>
+<tr>
+<td><code>--id</code></td>
+<td>string</td>
+<td>none, required</td>
+<td>The plugin id. It must match <code>[a-z0-9-]+(\.[a-z0-9-]+)+</code>.</td>
+</tr>
+<tr>
+<td><code>--lang</code></td>
+<td><code>rust</code> or <code>typescript</code></td>
+<td>none, required</td>
+<td>The language.</td>
+</tr>
+<tr>
+<td><code>--template</code></td>
+<td>name</td>
+<td>none</td>
+<td><code>server</code>, <code>client</code>, <code>both</code>, <code>scene</code>, <code>pane-kind</code>, <code>core-style</code>, <code>service-provider</code> or <code>extension</code>.</td>
+</tr>
+<tr>
+<td><code>--side</code></td>
+<td>name</td>
+<td>none</td>
+<td>An alias of <code>--template</code> for <code>server</code>, <code>client</code>, <code>both</code> and <code>scene</code>.</td>
+</tr>
+<tr>
+<td><code>--name</code></td>
+<td>string</td>
+<td>the last label of the id</td>
+<td>The display name.</td>
+</tr>
+<tr>
+<td><code>--publisher</code></td>
+<td>string</td>
+<td>the operating system user name</td>
+<td>The <code>publisher</code> manifest value.</td>
+</tr>
+<tr>
+<td><code>--first-party</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Allows an id that starts with <code>ilium.</code>. Needed for <code>core-style</code>.</td>
+</tr>
+<tr>
+<td><code>--ci</code></td>
+<td><code>github</code>, <code>gitlab</code> or <code>none</code></td>
+<td><code>none</code></td>
+<td>Adds a CI file to the project.</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Writes into a non-empty folder. It never deletes a file.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-040]</strong> <code>new</code> MUST require <code>--id</code>, <code>--lang</code> and one of <code>--template</code> or <code>--side</code>. If both are given, they MUST name the same template, or the command fails with <code>usage.conflict</code>.</li>
+<li><strong>[DEV-041]</strong> <code>new</code> MUST fail with <code>new.dir-not-empty</code> when <code>&lt;dir&gt;</code> exists and holds any file, unless <code>--force</code> is given. With <code>--force</code> it MUST overwrite only files that the template writes and MUST leave every other file alone.</li>
+<li><strong>[DEV-042]</strong> <code>new</code> MUST fail with <code>new.id-invalid</code> for an id that does not match the pattern, and with <code>new.id-reserved</code> for an <code>ilium.</code> id without <code>--first-party</code>.</li>
+<li><strong>[DEV-043]</strong> <code>new</code> MUST fail with <code>new.template-unknown</code> for an unknown template name, before it writes any file.</li>
+<li><strong>[DEV-044]</strong> <code>new</code> MUST print one <code>progress</code> record with step <code>inventory</code> for each file it writes, and the message MUST be the relative path of the file. It needs no network and no toolchain, and it writes no <code>artifact</code> record.</li>
+<li><strong>[DEV-045]</strong> A fresh project MUST pass <code>check</code>, <code>lint --deny warnings</code>, <code>test</code> and <code>build</code> with zero warnings, as the template guarantees state.</li>
+</ul>
+<h2 id="build">build</h2>
+<p>Compiles the project into one component per declared side. The stages are in <a href="#the-build-pipeline">The build pipeline</a>.</p>
+<p><code>ilium plugin build [&lt;dir&gt;] [--side &lt;side&gt;] [--debug | --release] [--watch] [--locked] [--offline]</code></p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Type</th>
+<th>Default</th>
+<th>Conflicts</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--side</code></td>
+<td><code>server</code>, <code>client</code> or <code>scene</code></td>
+<td>every declared side</td>
+<td>none</td>
+<td>Builds one side.</td>
+</tr>
+<tr>
+<td><code>--debug</code></td>
+<td>switch</td>
+<td>off</td>
+<td><code>--release</code></td>
+<td>Keeps debug information.</td>
+</tr>
+<tr>
+<td><code>--release</code></td>
+<td>switch</td>
+<td>on</td>
+<td><code>--debug</code></td>
+<td>Strips debug information.</td>
+</tr>
+<tr>
+<td><code>--watch</code></td>
+<td>switch</td>
+<td>off</td>
+<td>none</td>
+<td>Rebuilds after a change. It never installs.</td>
+</tr>
+<tr>
+<td><code>--locked</code></td>
+<td>switch</td>
+<td>off</td>
+<td>none</td>
+<td>Fails when the lockfile would change.</td>
+</tr>
+<tr>
+<td><code>--offline</code></td>
+<td>switch</td>
+<td>off</td>
+<td>none</td>
+<td>Uses only cached dependencies.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-050]</strong> <code>build</code> MUST read <code>manifest.json</code>, build every declared side and write <code>dist/&lt;side&gt;.wasm</code> for each. With <code>--side</code>, a side that the manifest does not declare MUST fail with <code>build.side-undeclared</code>.</li>
+<li><strong>[DEV-051]</strong> <code>build</code> MUST print one <code>artifact</code> record of kind <code>component</code> per side, one of kind <code>build-info</code> for <code>dist/build.json</code>, and, for a <code>--debug</code> build, one of kind <code>source-map</code> per side for TypeScript.</li>
+<li><strong>[DEV-052]</strong> <code>build --watch</code> MUST build once, then watch the project and rebuild 300 ms after the last change. It MUST NOT install, activate or contact a session. The watch set and its ignore rules are the ones of <code>dev</code>. A failed rebuild MUST print its errors and keep watching. <code>--watch</code> ends only on interrupt, with exit code 130.</li>
+<li><strong>[DEV-053]</strong> <code>--locked</code> MUST fail with <code>build.lockfile-missing</code> when <code>Cargo.lock</code> or <code>bun.lock</code> is missing, and with <code>build.lockfile-outdated</code> when building would change it.</li>
+<li><strong>[DEV-054]</strong> <code>--offline</code> MUST fail with <code>build.offline-missing</code> when a dependency is not in the local cache.</li>
+<li><strong>[DEV-055]</strong> <code>build</code> MUST exit with 4 when the toolchain is missing, and with 1 for a compile, bundle or component failure.</li>
+</ul>
+<p>There is no separate <code>watch</code> command. <code>ilium plugin watch</code> is not defined. Use <code>build --watch</code> to build without installing, and <code>dev</code> to build and run.</p>
+<h2 id="check">check</h2>
+<p>Runs the install checks without installing. The rules are in <a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a>.</p>
+<p><code>ilium plugin check [&lt;dir&gt; | &lt;file.iliumpkg&gt;] [--side &lt;side&gt;] [--json]</code></p>
+<p><code>ilium plugin check --print-schema</code></p>
+<p>The second form takes no directory or archive. It writes the manifest JSON Schema that ships with the host to standard output and exits with 0; it never reads the network (<a href="/pages/reference-manifest-schema/">reference-manifest-schema</a>, PKG-563).</p>
+<ul>
+<li><strong>[DEV-070]</strong> <code>check</code> MUST run offline and MUST report the same rule codes (<code>manifest.*</code>, <code>package.*</code>, <code>signature.*</code>) that the install path reports, plus the component rules (<code>component.*</code>).</li>
+<li><strong>[DEV-071]</strong> <code>check</code> on a project directory MUST validate the source manifest and the built components in <code>dist/</code>. A missing <code>dist/</code> for a declared side MUST be reported as <code>component.missing</code>, not as an error of the command.</li>
+<li><strong>[DEV-072]</strong> <code>check</code> on a <code>.iliumpkg</code> file MUST validate the archive as the install path does, without checking trust.</li>
+<li><strong>[DEV-073]</strong> <code>check</code> MUST exit with 3 when any finding has severity <code>error</code>.</li>
+</ul>
+<h2 id="lint">lint</h2>
+<p>Reports advisory problems.</p>
+<p><code>ilium plugin lint [&lt;dir&gt;] [--deny warnings] [--rule &lt;id&gt;]... [--json]</code></p>
+<ul>
+<li><strong>[DEV-075]</strong> <code>lint</code> MUST run offline and MUST report only <code>lint.*</code> rules.</li>
+<li><strong>[DEV-076]</strong> <code>--deny warnings</code> MUST turn every <code>warn</code> finding into an <code>error</code> for the exit code. Without it a <code>warn</code> finding returns 0.</li>
+<li><strong>[DEV-077]</strong> <code>--rule &lt;id&gt;</code> MUST restrict the run to the named rules. An unknown id MUST fail with <code>usage.invalid-value</code>.</li>
+<li><strong>[DEV-078]</strong> A suppressed finding MUST be printed with <code>suppressed: true</code> and MUST NOT count toward the exit code. Suppression is described in the rules page.</li>
+</ul>
+<h2 id="test">test</h2>
+<p>Runs fixtures against the plugin. The harness behind it is in <a href="/pages/reference-test-harness/">Test harness reference</a>. The fixture and expectation formats are in the same page.</p>
+<p><code>ilium plugin test [&lt;dir&gt;] [--fixture &lt;glob&gt;]... [--expect &lt;glob&gt;] [--grants &lt;list&gt; | --grant-manifest] [--side &lt;side&gt;] [--component &lt;file&gt;] [--replay &lt;file&gt;] [--update] [--record &lt;file&gt;] [--seed &lt;n&gt;] [--conformance [--subject &lt;subject&gt;] [--case &lt;id&gt;]] [--coverage [--min-coverage &lt;percent&gt;]]</code></p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--fixture</code></td>
+<td>glob</td>
+<td><code>tests/fixtures/*.json</code></td>
+<td>The fixtures to run. Repeatable.</td>
+</tr>
+<tr>
+<td><code>--expect</code></td>
+<td>glob</td>
+<td><code>tests/fixtures/&lt;name&gt;.expect.json</code></td>
+<td>Expectation files. A fixture without one is replayed with no assertion.</td>
+</tr>
+<tr>
+<td><code>--grants</code></td>
+<td>list</td>
+<td>none</td>
+<td>Grants for fixtures that have no <code>grants</code> key.</td>
+</tr>
+<tr>
+<td><code>--grant-manifest</code></td>
+<td>switch</td>
+<td>on</td>
+<td>Takes grants from the manifest.</td>
+</tr>
+<tr>
+<td><code>--side</code></td>
+<td>side</td>
+<td>the only declared side</td>
+<td>Needed when the package has two sides.</td>
+</tr>
+<tr>
+<td><code>--component</code></td>
+<td>file</td>
+<td><code>dist/&lt;side&gt;.wasm</code></td>
+<td>Runs the built component in component mode. Without it, <code>test</code> uses the component in <code>dist/</code>.</td>
+</tr>
+<tr>
+<td><code>--replay</code></td>
+<td>file</td>
+<td>none</td>
+<td>Replays a replay file. Conflicts with <code>--fixture</code>.</td>
+</tr>
+<tr>
+<td><code>--update</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Writes missing or different expectation and golden files.</td>
+</tr>
+<tr>
+<td><code>--record</code></td>
+<td>file</td>
+<td>none</td>
+<td>With <code>--fixture</code>, writes the replay file of the run and prints an <code>artifact</code> of kind <code>replay</code> ([DEV-088]).</td>
+</tr>
+<tr>
+<td><code>--seed</code></td>
+<td>integer</td>
+<td>1</td>
+<td>The seed of the harness random source.</td>
+</tr>
+<tr>
+<td><code>--conformance</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Runs the <a href="/pages/reference-conformance-suite/">conformance suite</a> instead of the fixtures. <code>--subject</code> and <code>--case</code> narrow it.</td>
+</tr>
+<tr>
+<td><code>--coverage</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Also runs the project's own tests (<code>cargo test</code>, <code>bun test</code>) under a coverage tool and writes <code>.ilium/coverage/</code>.</td>
+</tr>
+<tr>
+<td><code>--min-coverage</code></td>
+<td>percent</td>
+<td>none</td>
+<td>With <code>--coverage</code>, exit 3 when line coverage is lower.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-080]</strong> <code>test</code> MUST run in component mode: it loads the built component into the embedded test host, with the real linker, limits and deadlines. A project with no <code>dist/</code> component for the side MUST fail with <code>test.component-missing</code>.</li>
+<li><strong>[DEV-081]</strong> <code>test</code> MUST print for each fixture one <code>test-case</code> record, and for each submission and outcome produced a <code>submission</code> and an <code>outcome</code> record, in delivery order, before the <code>test-case</code> record of that fixture.</li>
+<li><strong>[DEV-082]</strong> If an expectation file exists, <code>test</code> MUST compare it with the result using the match modes of the harness page. On a mismatch it MUST print a <code>diff</code> record, set the <code>test-case</code> status to <code>fail</code>, and exit with 3.</li>
+<li><strong>[DEV-083]</strong> A fixture with no expectation file MUST pass unless the component traps. It MUST print <code>warning</code> code <code>test.no-expectation</code>.</li>
+<li><strong>[DEV-084]</strong> A component trap during a fixture MUST set the status <code>trap</code>, print the trap reason in <code>reason</code>, and exit with 3.</li>
+<li><strong>[DEV-085]</strong> A package with a <code>server</code> and a <code>client</code> side MUST be given <code>--side</code>, or <code>test</code> MUST fail with <code>usage.missing-argument</code>. A project with one side needs no <code>--side</code>.</li>
+<li><strong>[DEV-086]</strong> <code>--update</code> MUST rewrite only the expectation and golden files that differ, and MUST print a <code>warning</code> with the code <code>test.updated</code> for each file rewritten.</li>
+<li><strong>[DEV-087]</strong> <code>test</code> MUST exit with 0 when every case passes, with 3 when a case fails or traps, and with 1 when a fixture cannot be read (<code>test.fixture-invalid</code>).</li>
+<li><strong>[DEV-089]</strong> <code>test</code> MUST NOT run the project's own unit tests. Those run with <code>cargo test</code> or <code>bun test</code> in native mode. <code>test --coverage</code> is the one case where the command starts them, and it MUST then print their exit status in the <code>summary</code>.</li>
+<li><strong>[DEV-088]</strong> <code>--record &lt;file&gt;</code> MAY be given with <code>--fixture</code>. It MUST write the replay file of the run and print an <code>artifact</code> of kind <code>replay</code>.</li>
+</ul>
+<h2 id="pack">pack</h2>
+<p>Writes the <code>.iliumpkg</code> file.</p>
+<p><code>ilium plugin pack [&lt;dir&gt;] [--out &lt;file&gt;] [--include-src] [--allow-debug]</code></p>
+<ul>
+<li><strong>[DEV-095]</strong> <code>pack</code> MUST refuse a missing or stale <code>dist/</code>. It reads <code>dist/build.json</code> and compares the input hash recorded there with the current sources. A difference MUST fail with <code>pack.stale-build</code>. A missing component MUST fail with <code>pack.not-built</code>.</li>
+<li><strong>[DEV-096]</strong> <code>pack</code> MUST refuse a debug build with <code>pack.debug-build</code>, unless <code>--allow-debug</code> is given, in which case it MUST print a <code>warning</code> with the same code. A debug build is one whose <code>build.json</code> has <code>profile</code> <code>debug</code>.</li>
+<li><strong>[DEV-097]</strong> <code>pack</code> MUST write the <code>files</code> list into the packed manifest, with the length and lowercase SHA-256 of every entry other than <code>manifest.json</code> and <code>signature</code>.</li>
+<li><strong>[DEV-098]</strong> <code>pack</code> MUST NOT store <code>src/**</code> unless <code>--include-src</code> is given. With it, <code>pack</code> MUST store the sources named by the project's <code>src/</code> folder and the source maps of a debug build under <code>src/</code>.</li>
+<li><strong>[DEV-099]</strong> <code>pack</code> MUST be reproducible. Two runs on the same inputs MUST produce byte-identical files. The archive format already fixes entry order, timestamps and compression (see <a href="/pages/packages/">Packages</a>).</li>
+<li><strong>[DEV-100]</strong> <code>pack</code> MUST NOT sign. The default output path is <code>dist/&lt;id&gt;-&lt;version&gt;.iliumpkg</code>, and the command prints one <code>artifact</code> of kind <code>package</code>.</li>
+<li><strong>[DEV-101]</strong> <code>pack</code> MUST fail with <code>package.size-limit</code> when the package is larger than 300 MiB (the package format cap, PKG-130), and MUST print a <code>warning</code> with the separate code <code>pack.size-cap</code> at 100 MiB. See <code>lint.package-size-near-cap</code>.</li>
+<li><strong>[DEV-102]</strong> <code>pack --out &lt;file&gt;</code> MUST refuse to overwrite a file that is not a package of the same id, with <code>pack.out-exists</code>.</li>
+</ul>
+<h2 id="keygen-sign-and-trust">keygen, sign and trust</h2>
+<p><code>ilium plugin keygen --publisher-id &lt;id&gt; --publisher "&lt;name&gt;" --out &lt;dir&gt;</code></p>
+<ul>
+<li><strong>[DEV-110]</strong> <code>keygen</code> MUST create <code>publisher.key</code> (PKCS#8 PEM, mode 0600) and <code>publisher.pub</code> (<code>ilium-pub/1</code> JSON) with Ed25519, as defined in <a href="/pages/reference-signing-and-trust/">Signing and trust</a>. It MUST refuse to overwrite either file with <code>trust.key-exists</code>.</li>
+<li><strong>[DEV-111]</strong> The file forms of the secret and public key are defined only in <a href="/pages/reference-signing-and-trust/">Signing and trust</a> (requirements PKG-210 to PKG-215).</li>
+<li><strong>[DEV-112]</strong> The fingerprint of a key is its <code>key_id</code>, the lowercase hexadecimal SHA-256 of the 32 raw public-key bytes (64 characters). The display form has 16 groups of 4 characters. The short form is the first 8 digits, for example <code>3f2a91c0</code>, shown only beside the full form or in <code>trust list</code> (SEC-177).</li>
+</ul>
+<p><code>ilium plugin sign &lt;file.iliumpkg&gt; [--key &lt;file&gt;] [--replace]</code></p>
+<ul>
+<li><strong>[DEV-115]</strong> <code>sign</code> MUST read the key from <code>--key</code>, or from <code>ILIUM_PLUGIN_SIGNING_KEY</code>. With neither, it MUST fail with <code>usage.missing-argument</code>.</li>
+<li><strong>[DEV-116]</strong> <code>sign</code> MUST fail with <code>sign.key-permissions</code> when the key file is readable by group or others on a system that has such permissions, and with <code>sign.key-unreadable</code> when the key cannot be parsed.</li>
+<li><strong>[DEV-117]</strong> <code>sign</code> MUST add the <code>signature</code> entry atomically, as an <code>ilium-sig/1</code> document over the exact bytes of <code>manifest.json</code>, as defined in <a href="/pages/reference-signing-and-trust/">Signing and trust</a>. The package stays deterministic: signing twice with the same key gives the same bytes.</li>
+<li><strong>[DEV-118]</strong> <code>sign</code> MUST fail with <code>sign.publisher-mismatch</code> when the <code>publisher</code> in the manifest differs from the key's publisher, and with <code>sign.already-signed</code> when a signature exists and <code>--replace</code> is not given.</li>
+<li><strong>[DEV-119]</strong> <code>sign</code> MUST NOT print the secret key, and the key MUST NOT appear in any record.</li>
+</ul>
+<p><code>ilium plugin trust add &lt;publisher.pub&gt; | list | remove &lt;key_id&gt; | export &lt;key_id&gt; | revoke &lt;key_id&gt;</code></p>
+<ul>
+<li><strong>[DEV-125]</strong> The trust store is the file <code>trust.json</code> (format <code>ilium-trust/1</code>) described in <a href="/pages/reference-signing-and-trust/">Signing and trust</a>, at <code>$XDG_STATE_HOME/ilium/trust.json</code> (macOS and Windows: the state folder of [SEC-112]), or at the path in <code>ILIUM_TRUST_STORE</code> when set.</li>
+<li><strong>[DEV-126]</strong> <code>trust add</code> MUST print the fingerprint. It MUST fail with <code>trust.key-malformed</code> for a malformed key file, and with <code>trust.already-trusted</code> for a key already listed (exit code 1).</li>
+<li><strong>[DEV-127]</strong> <code>trust remove &lt;key_id&gt;</code> MUST fail with <code>trust.not-found</code> (exit code 5) when no such key is listed, and with <code>trust.in-use</code> when installed plugins depend on it and <code>--force</code> is absent. Removing a key does not uninstall plugins signed with it. The plugins stay installed and show <code>untrusted</code> in <code>list</code>.</li>
+<li><strong>[DEV-128]</strong> <code>trust list</code> MUST print the publisher, the short fingerprint and the date, one per line, in text mode.</li>
+</ul>
+<h2 id="publish">publish</h2>
+<ul>
+<li><strong>[DEV-135]</strong> <code>ilium plugin publish &lt;file&gt; --registry &lt;url&gt;</code> uploads a signed package to a registry. It is defined in <a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a> (decision D27). Without <code>--registry</code> it MUST fail with <code>usage.missing-argument</code> and exit 2.</li>
+<li><strong>[DEV-136]</strong> A package file, the file <code>publisher.pub</code> and the SHA-256 of the package remain a complete way to share a plugin without a registry. An update from a file is found when the user installs a package of the same id with a higher version.</li>
+</ul>
+<h2 id="install-uninstall-enable-disable">install, uninstall, enable, disable</h2>
+<p><code>ilium plugin install &lt;source&gt; [--allow-unsigned] [--allow-downgrade] [--trust &lt;key_id&gt;] [--channel stable|beta|dev] [--yes] [--grant &lt;grant&gt;]... [--locked] [--unskip]</code></p>
+<ul>
+<li><strong>[DEV-140]</strong> <code>install</code> MUST run the validation pipeline of <a href="/pages/reference-package-format/#the-validation-order">Package format</a> before it runs any plugin code, print every failure as an <code>error</code> with the code of that pipeline, and exit with the code of <a href="/pages/reference-plugin-distribution-cli/#exit-codes">Distribution commands</a>. Sources other than a file are defined there.</li>
+<li><strong>[DEV-141]</strong> <code>install</code> MUST show the review dialog in the attached client unless <code>--yes</code> is given. With <code>--yes</code>, it MUST grant every requested grant whose risk is not high, and MUST grant a high-risk grant only when it is named with <code>--grant</code>.</li>
+<li><strong>[DEV-142]</strong> <code>install</code> with no attached client and no <code>--yes</code> MUST fail with <code>install.review-required</code>.</li>
+<li><strong>[DEV-143]</strong> A declined review MUST fail with <code>install.review-declined</code>. A declined key trust MUST fail with <code>trust.declined</code>. An unsigned package without <code>--allow-unsigned</code> MUST fail with <code>install.unsigned</code>. A lower version without <code>--allow-downgrade</code> MUST fail with <code>package.downgrade</code>.</li>
+<li><strong>[DEV-144]</strong> A successful <code>install</code> MUST print one <code>plugin</code> record for the installed plugin and exit with 0. The plugin is enabled after install.</li>
+</ul>
+<p><code>ilium plugin uninstall &lt;id&gt; [--purge | --keep-data]</code></p>
+<ul>
+<li><strong>[DEV-155]</strong> <code>uninstall</code> MUST deactivate the plugin with reason <code>disabled</code>, withdraw its contributions and remove the package. Without <code>--purge</code> the <code>data</code> folder, the storage and the settings values MUST stay on disk for a later reinstall. <code>--keep-data</code> is accepted, means the same as the default, and MUST NOT ask a question; it excludes <code>--purge</code>, and giving both fails with <code>usage.conflict</code> and exit 2 ([USR-209], [LIF-082]).</li>
+<li><strong>[DEV-156]</strong> <code>uninstall --purge</code> MUST also delete the <code>data</code> and <code>cache</code> folders, the storage buckets, the settings values and the plugin log. It MUST print each removed item as a <code>warning</code> with code <code>uninstall.purged</code>.</li>
+<li><strong>[DEV-157]</strong> <code>uninstall</code> of an unknown id MUST fail with <code>plugin.not-found</code> and exit 5.</li>
+</ul>
+<p><code>ilium plugin reinstall &lt;id&gt;</code></p>
+<p><code>reinstall</code> repairs the store entry of an installed or registry-listed plugin from the cached package and prints one <code>plugin</code> record. It exits 0 on success, 5 for an unknown id, and 1 with <code>package.cache-missing</code> when no cached package exists ([LIF-093]).</p>
+<p><code>ilium plugin enable &lt;id&gt;</code> and <code>ilium plugin disable &lt;id&gt;</code></p>
+<ul>
+<li><strong>[DEV-160]</strong> <code>disable</code> MUST deactivate the plugin with reason <code>disabled</code> and keep its data. <code>enable</code> MUST reset the failure count to zero, as the Settings &gt; Plugins toggle does, and activate the plugin.</li>
+<li><strong>[DEV-161]</strong> Both commands MUST be idempotent: the state they ask for already holding is success with exit code 0.</li>
+</ul>
+<h2 id="list-and-grants">list and grants</h2>
+<p><code>ilium plugin list [--json]</code> prints the installed plugins.</p>
+<ul>
+<li><strong>[DEV-165]</strong> <code>list</code> text mode MUST print one line per plugin with the id, the version, the tier, the state and the grant count. The state word maps from the lifecycle states: <code>running</code> is <code>installed-enabled</code> with an active instance, <code>stopped</code> is <code>installed-enabled</code> with no active instance (including <code>stopped-by-failure</code>), <code>disabled</code> is <code>installed-disabled-by-user</code> or <code>disabled-by-policy</code>, and <code>untrusted</code> is <code>disabled-untrusted</code> or <code>disabled-blocked</code>. <code>list --json</code> MUST print the lifecycle state name itself (LIF-001). A <code>[dev]</code> badge MUST mark a plugin installed by <code>dev</code>.</li>
+</ul>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin list
+example.agent-tools 0.1.0 T3 [dev] running
+                    grants 2 of 2
+ilium.badges        0.1.0 T1 running
+                    grants 3 of 3
+ilium.tasks         0.1.0 T1 disabled
+                    grants 0 of 1
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The default text form of list, wrapped for the width. The dev badge marks a development install.</figcaption>
+</figure>
+
+<p><code>ilium plugin grants &lt;id&gt; [--grant &lt;grant&gt;]... [--revoke &lt;grant&gt;]... [--json]</code></p>
+<ul>
+<li><strong>[DEV-170]</strong> <code>grants</code> with no change flag MUST list every requested grant with its risk and state (<code>granted</code>, <code>declined</code>, <code>revoked</code>).</li>
+<li><strong>[DEV-171]</strong> <code>--revoke</code> MUST withdraw the grant, withdraw the contributions that need it and restart the plugin with the smaller set. The revoke MUST work for T1 plugins.</li>
+<li><strong>[DEV-172]</strong> <code>--grant</code> MUST grant a requested grant that is currently declined or revoked, and MUST fail with <code>grants.not-requested</code> for a grant the manifest does not request. A high-risk grant MUST ask for confirmation in the attached client, and without one MUST fail with <code>install.review-required</code>.</li>
+</ul>
+<h2 id="dev">dev</h2>
+<p>Builds the plugin, installs it as a development copy, and rebuilds and reloads it after each change.</p>
+<p><code>ilium plugin dev [&lt;dir&gt;] [--side &lt;side&gt;] [--timings] [--release] [--grant-all] [--replace-installed] [--purge-on-exit]</code></p>
+<ul>
+<li><strong>[DEV-180]</strong> <code>dev</code> MUST talk to the session found by the rule [DEV-004] and MUST NOT start one. With no session it MUST exit with 6.</li>
+<li><strong>[DEV-181]</strong> <code>dev</code> MUST install the plugin as tier T3 with the <code>dev</code> badge, with a data folder of its own that is kept apart from any real install of the same id. A later real install of the same id MUST start with its own data folder.</li>
+<li><strong>[DEV-182]</strong> <code>dev</code> MUST build with debug information by default, so traps show <code>file:line</code>. <code>--release</code> builds without it.</li>
+<li><strong>[DEV-183]</strong> If a non-dev copy of the same id is installed, <code>dev</code> MUST fail with <code>dev.id-installed</code>. With <code>--replace-installed</code> it MUST disable the installed copy for the time <code>dev</code> runs and enable it again on exit.</li>
+<li><strong>[DEV-184]</strong> The first install by <code>dev</code> MUST show the review dialog. A rebuilt manifest that adds grants MUST show the dialog again for the new grants only. <code>--grant-all</code> MUST grant every non-high-risk grant without a dialog. A high-risk grant MUST always ask.</li>
+<li><strong>[DEV-185]</strong> <code>dev</code> MUST watch the project directory and MUST ignore <code>dist/</code>, <code>target/</code>, <code>node_modules/</code>, <code>.ilium/</code>, <code>.git/</code> and the paths in <code>.gitignore</code>. It MUST start a rebuild 300 ms after the last change.</li>
+<li><strong>[DEV-186]</strong> A change that arrives during a build MUST be queued. When the build ends, <code>dev</code> MUST run exactly one more build for all queued changes.</li>
+<li><strong>[DEV-187]</strong> On a successful rebuild, <code>dev</code> MUST reload each rebuilt side in turn. The server side reloads first, then every attached client side. Each reload deactivates the old instance with the reason <code>upgrade</code>, activates the new one with the restore bytes and prints one <code>reload</code> record. A failed rebuild MUST keep the running instance, print the compiler errors, and send no <code>deactivate</code>.</li>
+<li><strong>[DEV-188]</strong> When restore bytes exceed 1 MiB they are dropped and the <code>reload</code> record MUST have <code>restore_dropped</code> true and <code>restored_bytes</code> 0.</li>
+<li><strong>[DEV-189]</strong> On Ctrl+C <code>dev</code> MUST deactivate the plugin with the reason <code>disabled</code>, uninstall the development copy, keep its data folder unless <code>--purge-on-exit</code> is given, restore any plugin that <code>--replace-installed</code> disabled, print <code>summary</code> and <code>result</code>, and exit with 130.</li>
+<li><strong>[DEV-196]</strong> With <code>--timings</code>, <code>dev</code> MUST print a <code>timing</code> record for each export every 10 seconds while calls happen. See <a href="/pages/reference-debugging-tools/">Debugging tools</a>.</li>
+</ul>
+<h2 id="logs-and-log-level">logs and log-level</h2>
+<p><code>ilium plugin logs &lt;id&gt; [--tail &lt;n&gt;] [--follow] [--level &lt;level&gt;] [--side &lt;side&gt;] [--since &lt;time&gt;] [--json]</code></p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--tail</code></td>
+<td>integer</td>
+<td>all</td>
+<td>The last <code>n</code> entries.</td>
+</tr>
+<tr>
+<td><code>--follow</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Keeps the command open and prints new entries.</td>
+</tr>
+<tr>
+<td><code>--level</code></td>
+<td>level</td>
+<td><code>trace</code></td>
+<td>Shows entries at this level or higher.</td>
+</tr>
+<tr>
+<td><code>--side</code></td>
+<td>side</td>
+<td>all</td>
+<td>Shows one side. <code>host</code> shows only entries the host wrote.</td>
+</tr>
+<tr>
+<td><code>--since</code></td>
+<td>time</td>
+<td>none</td>
+<td>A time <code>YYYY-MM-DD HH:mm:ss</code>, or a duration such as <code>10m</code> or <code>2h</code>.</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>switch</td>
+<td>off</td>
+<td>Prints <code>log</code> records.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-190]</strong> <code>logs</code> MUST print oldest entry first. With <code>--follow</code> it MUST print the entries in the file, then new ones as they arrive, until interrupted, and exit with 130.</li>
+<li><strong>[DEV-191]</strong> <code>logs</code> of an id that is not installed and has no kept log MUST fail with <code>plugin.not-found</code> and exit 5. The text format is fixed in <a href="/pages/reference-debugging-tools/">Debugging tools</a>, the single place for the log format.</li>
+<li><strong>[DEV-192]</strong> <code>ilium plugin log</code> (singular) is not a command. A page that shows it is wrong.</li>
+</ul>
+<p><code>ilium plugin log-level &lt;id&gt; [&lt;level&gt; | --reset]</code></p>
+<ul>
+<li><strong>[DEV-195]</strong> <code>log-level</code> with no argument MUST print the current threshold. With a level it MUST set the threshold for that plugin and all its sides until the session stops. <code>--reset</code> MUST return to the session default.</li>
+</ul>
+<h2 id="trace-profile-inspect-and-doctor">trace, profile, inspect and doctor</h2>
+<p>These commands print text by default and JSONL with <code>--json</code>. Their output content is defined in <a href="/pages/reference-debugging-tools/">Debugging tools</a>.</p>
+<p><code>ilium plugin trace &lt;id&gt; [--last &lt;n&gt;] [--follow] [--kinds &lt;list&gt;] [--side &lt;side&gt;] [--record &lt;file&gt;] [--unredacted] [--json]</code></p>
+<ul>
+<li><strong>[DEV-820]</strong> <code>trace</code> MUST need a session and MUST fail with <code>plugin.not-found</code> for an unknown id.</li>
+<li><strong>[DEV-821]</strong> <code>--last</code> MUST default to 50 records. <code>--kinds</code> MUST accept a comma list of the kinds in the debugging tools page.</li>
+<li><strong>[DEV-822]</strong> <code>--record &lt;file&gt;</code> MUST write a replay file of the recorded events and MUST print an <code>artifact</code> record of kind <code>replay</code>.</li>
+<li><strong>[DEV-823]</strong> <code>--unredacted</code> MUST be refused with <code>trace.unredacted-denied</code> for a plugin that is not a <code>dev</code> install.</li>
+</ul>
+<p><code>ilium plugin profile &lt;id&gt; [--duration &lt;seconds&gt;] [--side &lt;side&gt;] [--json]</code></p>
+<ul>
+<li><strong>[DEV-830]</strong> <code>profile</code> MUST default to <code>--duration 10</code>, MUST accept 1 to 600, and MUST print one <code>timing</code> record per export that ran, then a summary.</li>
+</ul>
+<p><code>ilium plugin inspect (&lt;file.iliumpkg&gt; | &lt;dist-component.wasm&gt; | &lt;id&gt;) [--verify] [--view &lt;target&gt;] [--memory] [--json]</code></p>
+<ul>
+<li><strong>[DEV-800]</strong> <code>inspect &lt;file&gt;</code> MUST work offline. <code>inspect &lt;id&gt;</code> needs a session.</li>
+<li><strong>[DEV-801]</strong> <code>--verify</code> MUST recompute every hash of the package, compare it with the <code>files</code> list and print a <code>diff</code> record per difference. A package with a difference MUST exit with 1 and the code <code>inspect.hash-mismatch</code>.</li>
+<li><strong>[DEV-802]</strong> <code>--view &lt;target&gt;</code> and <code>--memory</code> need a session and the content of the sections is in the debugging tools page.</li>
+<li><strong>[DEV-803]</strong> <code>inspect</code> of an unreadable file MUST fail with <code>inspect.file-unreadable</code>, and of a file that is neither a package nor a component with <code>inspect.not-a-package</code>.</li>
+</ul>
+<p><code>ilium plugin doctor [--json]</code></p>
+<ul>
+<li><strong>[DEV-810]</strong> <code>doctor</code> MUST work offline and MUST print one <code>doctor-check</code> record per item in the table below, in this order.</li>
+<li><strong>[DEV-811]</strong> <code>doctor</code> MUST exit with 4 when any item is <code>fail</code>, and with 0 otherwise. A <code>warn</code> never changes the exit code.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>ok when</th>
+<th>Status when not</th>
+<th>Fix text</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rustc</code></td>
+<td>rustc 1.90 or later</td>
+<td><code>fail</code> if rustc is missing or older, <code>warn</code> if no Rust project is in the current directory</td>
+<td><code>rustup update stable</code></td>
+</tr>
+<tr>
+<td><code>rust-target</code></td>
+<td><code>wasm32-wasip2</code> installed</td>
+<td><code>fail</code></td>
+<td><code>rustup target add wasm32-wasip2</code></td>
+</tr>
+<tr>
+<td><code>bun</code></td>
+<td>Bun 1.2 or later</td>
+<td><code>fail</code> if missing or older, <code>warn</code> outside a TypeScript project</td>
+<td>Install or upgrade Bun</td>
+</tr>
+<tr>
+<td><code>sdk-pin</code></td>
+<td>the project SDK matches the pin in the host</td>
+<td><code>fail</code> on a major or minor mismatch, <code>warn</code> on a patch mismatch</td>
+<td>Update the SDK version</td>
+</tr>
+<tr>
+<td><code>wit-pins</code></td>
+<td><code>wit-bindgen</code> and <code>wit-component</code> match the host</td>
+<td><code>fail</code></td>
+<td>Update the SDK</td>
+</tr>
+<tr>
+<td><code>host-version</code></td>
+<td>the <code>ilium</code> binary supports <code>ilium:plugin@0.1.0</code></td>
+<td><code>fail</code></td>
+<td>Update Ilium</td>
+</tr>
+<tr>
+<td><code>platform-tiers</code></td>
+<td>the platform allows T2 and T3</td>
+<td><code>warn</code> where T3 is disabled by policy</td>
+<td>Ask the administrator</td>
+</tr>
+<tr>
+<td><code>trust-store</code></td>
+<td>the store file is readable and valid</td>
+<td><code>fail</code> if corrupt, <code>ok</code> if absent</td>
+<td>Restore or delete the file</td>
+</tr>
+<tr>
+<td><code>session</code></td>
+<td>a session answers</td>
+<td><code>warn</code></td>
+<td>Start <code>ilium</code></td>
+</tr>
+<tr>
+<td><code>disk</code></td>
+<td>at least 512 MiB free in the project folder</td>
+<td><code>fail</code> below 128 MiB, <code>warn</code> below 512 MiB</td>
+<td>Free space</td>
+</tr>
+</tbody>
+</table>
+<h2 id="the-build-pipeline">The build pipeline</h2>
+<p>The build has fixed stages. Each stage has an input, an output and an error code.</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th><code>step</code></th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Output</th>
+<th>Error</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>toolchain</code></td>
+<td>Check rustc, target</td>
+<td>Check Bun, SDK</td>
+<td>none</td>
+<td><code>toolchain.*</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>compile</code></td>
+<td><code>cargo build --target wasm32-wasip2</code></td>
+<td>none</td>
+<td>a core module or component under <code>target/</code></td>
+<td><code>build.compile-failed</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>bundle</code></td>
+<td>none</td>
+<td><code>bun build</code> to one ES module, <code>ilium:*</code> and <code>wasi:*</code> external</td>
+<td><code>.ilium/cache/&lt;side&gt;.js</code></td>
+<td><code>build.bundle-failed</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>component</code></td>
+<td>wrap and validate</td>
+<td><code>componentize-js</code></td>
+<td><code>.ilium/cache/&lt;side&gt;.component.wasm</code></td>
+<td><code>build.component-failed</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>api-version</code></td>
+<td>embed</td>
+<td>embed</td>
+<td>custom section <code>ilium:api-version</code></td>
+<td><code>build.world-mismatch</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>strip</code></td>
+<td>remove DWARF on release</td>
+<td>remove names of non-exports and the map on release</td>
+<td><code>dist/&lt;side&gt;.wasm</code></td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-300]</strong> <code>build</code> MUST run the stages in this order and MUST print a <code>progress</code> record at the start of each stage.</li>
+<li><strong>[DEV-301]</strong> <code>dist/server.wasm</code>, <code>dist/client.wasm</code> and <code>dist/scene.wasm</code> MUST be the only component names, one per declared side, matching the <code>entry</code> of the manifest.</li>
+<li><strong>[DEV-302]</strong> Stage 5 MUST write the custom section <code>ilium:api-version</code> as three big-endian <code>u16</code> values: major, minor, patch. The build MUST fail with <code>build.world-mismatch</code> when the component's world differs from the world in the manifest.</li>
+<li><strong>[DEV-303]</strong> Under <code>--release</code> the component MUST carry no DWARF information and, for TypeScript, no source map. It MUST keep the function names of the exports, so traps read <code>at handle_batch</code>. Under <code>--debug</code> it MUST keep DWARF (Rust) or write a source map to <code>dist/&lt;side&gt;.wasm.map</code> (TypeScript).</li>
+<li><strong>[DEV-304]</strong> <code>build</code> MUST write <code>dist/build.json</code> with the keys <code>profile</code>, <code>api</code>, <code>input_hash</code>, <code>sides</code> (name, bytes, sha256), <code>toolchain</code> (versions of rustc or Bun and the SDK), and <code>cached</code>.</li>
+<li><strong>[DEV-305]</strong> The <code>input_hash</code> MUST be the SHA-256 over the sorted list of project source files, the lockfile, the manifest and the toolchain versions. An unchanged <code>input_hash</code> MUST reuse the cached component and set <code>cached</code> true.</li>
+<li><strong>[DEV-306]</strong> With a pinned toolchain and a locked dependency set, two builds of the same sources MUST produce byte-identical components. Without <code>--locked</code> the guarantee does not hold.</li>
+<li><strong>[DEV-307]</strong> The build cache MUST live in <code>&lt;dir&gt;/.ilium/cache/</code>. <code>target/</code> and <code>node_modules/</code> keep their usual places. A project <code>.gitignore</code> MUST list <code>dist/</code>, <code>.ilium/</code>, <code>target/</code> and <code>node_modules/</code>.</li>
+</ul>
+<h2 id="error-catalogue">Error catalogue</h2>
+<p>These codes are in addition to the <code>manifest.*</code> codes of <a href="/pages/packages/">Packages</a> and the rule codes of <a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a>. The exit column is the exit code of the command when this code stops it.</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Cause</th>
+<th>Fix</th>
+<th>Exit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>usage.unknown-flag</code></td>
+<td>A flag does not exist</td>
+<td>Check <code>--help</code></td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>usage.missing-argument</code></td>
+<td>A required flag or argument is missing</td>
+<td>Add it</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>usage.conflict</code></td>
+<td>Two flags contradict each other</td>
+<td>Remove one</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>usage.invalid-value</code></td>
+<td>A flag value has the wrong form or an unknown rule id</td>
+<td>Fix the value</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>session.unreachable</code></td>
+<td>No session answers</td>
+<td>Start <code>ilium</code> in the project, or pass <code>--session</code></td>
+<td>6</td>
+</tr>
+<tr>
+<td><code>session.not-found</code></td>
+<td>The named session does not exist</td>
+<td>Use a name from <code>ilium sessions</code></td>
+<td>6</td>
+</tr>
+<tr>
+<td><code>session.version-mismatch</code></td>
+<td>The session runs an older contract</td>
+<td>Restart the session</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>plugin.not-found</code></td>
+<td>The id is not installed and no log is kept</td>
+<td>Check <code>list</code></td>
+<td>5</td>
+</tr>
+<tr>
+<td><code>toolchain.rustc-missing</code></td>
+<td><code>rustc</code> is not on the path</td>
+<td>Install Rust</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>toolchain.rust-version</code></td>
+<td><code>rustc</code> is older than 1.90</td>
+<td><code>rustup update stable</code></td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>toolchain.rust-target</code></td>
+<td><code>wasm32-wasip2</code> is missing</td>
+<td><code>rustup target add wasm32-wasip2</code></td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>toolchain.bun-missing</code></td>
+<td>Bun is not on the path</td>
+<td>Install Bun</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>toolchain.bun-version</code></td>
+<td>Bun is older than 1.2</td>
+<td>Upgrade Bun</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>toolchain.sdk-missing</code></td>
+<td>The TypeScript SDK is not installed</td>
+<td><code>bun install</code></td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>toolchain.sdk-mismatch</code></td>
+<td>The SDK is not supported by the host</td>
+<td>Update the SDK pin</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>toolchain.language-ambiguous</code></td>
+<td>Both <code>Cargo.toml</code> and <code>package.json</code> exist</td>
+<td>Keep one</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>toolchain.language-unknown</code></td>
+<td>Neither file exists</td>
+<td>Run in the project folder</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>new.dir-not-empty</code></td>
+<td>The folder holds files</td>
+<td>Use <code>--force</code> or another folder</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>new.id-invalid</code></td>
+<td>The id fails the pattern</td>
+<td>Fix the id</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>new.id-reserved</code></td>
+<td>An <code>ilium.</code> id without <code>--first-party</code></td>
+<td>Use another id</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>new.template-unknown</code></td>
+<td>The template does not exist</td>
+<td>Use a listed template</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>build.manifest-missing</code></td>
+<td>No <code>manifest.json</code></td>
+<td>Run in the project folder</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>build.manifest-invalid</code></td>
+<td>The manifest does not parse</td>
+<td>Fix the JSON</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>build.side-undeclared</code></td>
+<td><code>--side</code> names a side the manifest lacks</td>
+<td>Declare it</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>build.entry-missing</code></td>
+<td>The source entry of a side is missing</td>
+<td>Create the entry</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>build.compile-failed</code></td>
+<td>The compiler failed</td>
+<td>Read the compiler text</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>build.bundle-failed</code></td>
+<td>The bundler failed</td>
+<td>Read the bundler text</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>build.component-failed</code></td>
+<td>The component step failed</td>
+<td>Check the world</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>build.world-mismatch</code></td>
+<td>The component world differs from the manifest</td>
+<td>Fix the world</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>build.lockfile-missing</code></td>
+<td><code>--locked</code> and no lockfile</td>
+<td>Create the lockfile</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>build.lockfile-outdated</code></td>
+<td><code>--locked</code> and the lockfile would change</td>
+<td>Update and commit it</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>build.offline-missing</code></td>
+<td><code>--offline</code> and a dependency is not cached</td>
+<td>Build once online</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>pack.not-built</code></td>
+<td>A component is missing from <code>dist/</code></td>
+<td>Run <code>build</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>pack.stale-build</code></td>
+<td><code>dist/</code> does not match the sources</td>
+<td>Run <code>build</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>pack.debug-build</code></td>
+<td>The build is a debug build</td>
+<td>Build with <code>--release</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>package.size-limit</code></td>
+<td>The package is over 300 MiB</td>
+<td>Remove assets</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>pack.size-cap</code> (warning)</td>
+<td>The package is over 100 MiB</td>
+<td>Remove assets</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>pack.out-exists</code></td>
+<td><code>--out</code> names a different file</td>
+<td>Choose another path</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>sign.key-unreadable</code></td>
+<td>The key file does not parse</td>
+<td>Check the file</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>sign.key-permissions</code></td>
+<td>The key is readable by others</td>
+<td><code>chmod 600</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>sign.publisher-mismatch</code></td>
+<td>Manifest and key publishers differ</td>
+<td>Fix one</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>sign.already-signed</code></td>
+<td>A signature exists</td>
+<td>Use <code>--replace</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>trust.key-malformed</code></td>
+<td>The public key file is malformed</td>
+<td>Regenerate it</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>trust.already-trusted</code></td>
+<td>The key is listed</td>
+<td>none</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>trust.not-found</code></td>
+<td>The publisher is not listed</td>
+<td>Check <code>trust list</code></td>
+<td>5</td>
+</tr>
+<tr>
+<td><code>test.fixture-invalid</code></td>
+<td>A fixture does not match the schema</td>
+<td>Fix the fixture</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>test.component-missing</code></td>
+<td>There is no built component</td>
+<td>Run <code>build</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>test.no-expectation</code></td>
+<td>A fixture has no expectation (warning)</td>
+<td>Add one</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>test.updated</code></td>
+<td>A file was rewritten by <code>--update</code> (warning)</td>
+<td>Review the change</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>test.mismatch</code></td>
+<td>A result differs from the expectation</td>
+<td>Fix the plugin or update</td>
+<td>3</td>
+</tr>
+<tr>
+<td><code>test.trap</code></td>
+<td>The component trapped</td>
+<td>Read the reason</td>
+<td>3</td>
+</tr>
+<tr>
+<td><code>dev.id-installed</code></td>
+<td>A real copy of the id is installed</td>
+<td><code>--replace-installed</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>dev.build-failed</code></td>
+<td>A rebuild failed (record only)</td>
+<td>Fix the error</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>install.review-required</code></td>
+<td>A review is needed and no client is attached</td>
+<td>Attach or use <code>--yes</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>install.review-declined</code></td>
+<td>The user declined</td>
+<td>none</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>trust.declined</code></td>
+<td>The user declined the key</td>
+<td>none</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>install.unsigned</code></td>
+<td>An unsigned package without <code>--allow-unsigned</code></td>
+<td>Sign it</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>package.downgrade</code></td>
+<td>A lower version without <code>--allow-downgrade</code></td>
+<td>Use the flag</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>grants.not-requested</code></td>
+<td>The grant is not in the manifest</td>
+<td>Request it</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>uninstall.purged</code></td>
+<td>An item was removed (warning)</td>
+<td>none</td>
+<td>0</td>
+</tr>
+<tr>
+<td><code>trace.unredacted-denied</code></td>
+<td><code>--unredacted</code> on a non-dev plugin</td>
+<td>Use a dev install</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>inspect.file-unreadable</code></td>
+<td>The file cannot be read</td>
+<td>Check the path</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>inspect.not-a-package</code></td>
+<td>The file is not a package or component</td>
+<td>Check the file</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>inspect.hash-mismatch</code></td>
+<td>A hash differs from the list</td>
+<td>Repack</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>inspect.id-unknown</code></td>
+<td>The installed id is unknown</td>
+<td>Check <code>list</code></td>
+<td>5</td>
+</tr>
+</tbody>
+</table>
+<p><a href="/pages/reference-errors-and-limits/">Errors and limits</a> lists the runtime codes. The codes on this page are command codes, printed by the command line and never returned by a host import.</p>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>A person who runs <code>ilium plugin doctor</code> on a machine without the Rust target sees one line per item:</p>
+<figure>
+<pre class="term"><span class="t-prompt">$</span> ilium plugin doctor
+<span class="t-ok">ok</span>   rustc        1.90.0
+<span class="t-err">fail</span> rust-target  wasm32-wasip2 missing
+     fix: rustup target add wasm32-wasip2
+<span class="t-ok">ok</span>   bun          1.2.4
+<span class="t-ok">ok</span>   sdk-pin      0.1.0
+<span class="t-warn">warn</span> session      no session found
+<span class="t-ok">ok</span>   disk         41 GiB free
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The doctor text form. The exit code is 4 because one item failed.</figcaption>
+</figure>
+
+<h2 id="edge-cases">Edge cases</h2>
+<ul>
+<li><strong>Two commands at once.</strong> Two <code>build</code> runs in one project would write the same files. The second MUST fail with <code>build.compile-failed</code> and the message <code>another build holds .ilium/lock</code>. The lock file is <code>.ilium/lock</code>.</li>
+<li><strong>Interrupt during pack.</strong> The package is written to a temporary file and renamed, so an interrupt leaves no partial package.</li>
+<li><strong>Read-only folder.</strong> <code>new</code> and <code>build</code> fail with exit code 1 and a <code>build.compile-failed</code> or file error that names the path.</li>
+<li><strong>Unicode paths.</strong> Paths are UTF-8 and compared byte for byte. Case-insensitive file systems are not special-cased.</li>
+<li><strong>No terminal.</strong> When standard output is not a terminal, text commands print no colour and no cursor movement.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li>
+<p><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></p>
+</li>
+<li>
+<p><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></p>
+</li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">Package and share</a></li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-platform-support/"><small>Previous</small>Platform support</a><a class="next" href="/pages/reference-plugin-distribution-cli/"><small>Next</small>Distribution commands</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#the-ilium-plugin-command-line">The ilium plugin command line</a></li><li class="l2"><a href="#conventions">Conventions</a></li><li class="l2"><a href="#exit-codes">Exit codes</a></li><li class="l2"><a href="#output-model">Output model</a></li><li class="l3"><a href="#the-jsonl-envelope">The JSONL envelope</a></li><li class="l3"><a href="#the-record-catalogue">The record catalogue</a></li><li class="l3"><a href="#which-commands-print-text">Which commands print text</a></li><li class="l3"><a href="#environment-variables">Environment variables</a></li><li class="l2"><a href="#new">new</a></li><li class="l2"><a href="#build">build</a></li><li class="l2"><a href="#check">check</a></li><li class="l2"><a href="#lint">lint</a></li><li class="l2"><a href="#test">test</a></li><li class="l2"><a href="#pack">pack</a></li><li class="l2"><a href="#keygen-sign-and-trust">keygen, sign and trust</a></li><li class="l2"><a href="#publish">publish</a></li><li class="l2"><a href="#install-uninstall-enable-disable">install, uninstall, enable, disable</a></li><li class="l2"><a href="#list-and-grants">list and grants</a></li><li class="l2"><a href="#dev">dev</a></li><li class="l2"><a href="#logs-and-log-level">logs and log-level</a></li><li class="l2"><a href="#trace-profile-inspect-and-doctor">trace, profile, inspect and doctor</a></li><li class="l2"><a href="#the-build-pipeline">The build pipeline</a></li><li class="l2"><a href="#error-catalogue">Error catalogue</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

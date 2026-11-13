@@ -1,0 +1,10 @@
+package ilium:host@0.1.0;
+
+interface commands {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Own commands only. Client only.
+  set-state: func(command: string, enabled: bool, checked: option<bool>) -> result<_, plugin-error>;
+  /// Async. Completes with ok once the command has run. Errors: not-found. Times out after 30 s.
+  invoke: func(command: string, arguments-json: string) -> result<request-id, plugin-error>;
+}

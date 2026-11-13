@@ -1,5 +1,20 @@
 use super::*;
 
+#[test]
+fn retained_terminal_key_diagnostic_does_not_disclose_typed_character() {
+    let original = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('秘'),
+        crossterm::event::KeyModifiers::NONE,
+    );
+    let failure = InputFailure::terminal_key(original, Some(RejectReason::Busy), None);
+    assert_eq!(failure.terminal_key_original(), Some(&original));
+    let diagnostic = failure.to_string();
+    assert!(diagnostic.contains("undelivered inline key"));
+    assert!(diagnostic.contains("Busy"));
+    assert!(!diagnostic.contains('秘'));
+    assert!(!diagnostic.contains("Char"));
+}
+
 fn shared_with_extra(bytes: usize) -> Shared {
     let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
         clients: 0,

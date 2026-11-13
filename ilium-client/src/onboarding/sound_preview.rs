@@ -500,9 +500,21 @@ mod tests {
         );
 
         studio.changed();
-        assert!(preview.request(studio.preview_request(), Instant::now()));
+        // The occupied single worker cannot start this replacement yet; the
+        // latest original remains retained until cancellation is collected.
+        assert!(!preview.request(studio.preview_request(), Instant::now()));
+        assert_eq!(
+            preview.pending.as_ref().unwrap().revision,
+            studio.preview_request().revision
+        );
         studio.changed();
-        assert!(preview.request(studio.preview_request(), Instant::now()));
+        // The occupied single worker cannot start this replacement yet; the
+        // latest original remains retained until cancellation is collected.
+        assert!(!preview.request(studio.preview_request(), Instant::now()));
+        assert_eq!(
+            preview.pending.as_ref().unwrap().revision,
+            studio.preview_request().revision
+        );
 
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut started_revisions = Vec::new();

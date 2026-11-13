@@ -1,0 +1,1172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Testing plugins | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details open><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/" aria-current="page">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Concepts</b></p>
+<h1>Testing plugins</h1>
+
+<p>This page is the how-to. The exact contract of the harness, with every method, error code and limit, is <a href="/pages/reference-test-harness/">Test harness reference</a>. If this page and the reference differ, the reference wins.</p>
+<p>A plugin is tested against the same contract that the host runs it under. You write the test in Rust or in TypeScript. The test creates a fake host, grants the capabilities the plugin asks for, delivers events and checks the submissions that come back. For a view, the test renders the view into a grid of cells and compares the text. None of this needs a terminal, a window, a running Ilium or a real agent, so a test runs in milliseconds.</p>
+<p>Ilium's conformance suite uses fixtures of this kind. Each WIT interface has its own corpus, and the Rust and the TypeScript guest of the suite must both pass a fixture before the interface is released. The fixtures ship with Ilium's test suite, not with user plugins. You can read them as examples and write fixtures for your own plugin in the same shape.</p>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>A Rust plugin with the <code>testing</code> feature of <code>ilium-plugin-sdk</code>, or a TypeScript plugin with <code>@ilium/plugin-sdk</code>.</li>
+<li>The capabilities of the plugin in its manifest. The test grants the same ones with <code>grant(...)</code>. A capability that the test does not grant is declined, as it is when the user says no.</li>
+<li>No WebAssembly target. The <code>testing</code> feature replaces the host calls with the fake host, so <code>cargo test</code> links the plugin code for the host target.</li>
+<li>Knowledge of <a href="/pages/events-and-intents/">events and intents</a> and of <a href="/pages/ui-model/">the UI model</a>.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Rust</th>
+<th>TypeScript</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Harness</td>
+<td><code>ilium_plugin_sdk::testing::FakeHost</code></td>
+<td><code>createFakeHost()</code> from <code>@ilium/plugin-sdk/testing</code></td>
+</tr>
+<tr>
+<td>Runner</td>
+<td><code>cargo test</code></td>
+<td><code>bun test</code> against the source</td>
+</tr>
+<tr>
+<td>Grant a capability</td>
+<td><code>.grant("tree.read")</code></td>
+<td><code>.grant('tree.read')</code></td>
+</tr>
+<tr>
+<td>Start the plugin</td>
+<td><code>host.activate::&lt;MyPlugin&gt;()</code></td>
+<td><code>host.activate({ lifecycle, handler })</code></td>
+</tr>
+<tr>
+<td>Deliver events</td>
+<td><code>host.deliver(events)</code> returns the submissions</td>
+<td><code>host.deliver(events)</code></td>
+</tr>
+<tr>
+<td>Render a view</td>
+<td><code>host.render(view, width, height)</code></td>
+<td><code>host.render(view, width, height)</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="fixture-files">Fixture files</h2>
+<p>A fixture is a JSON file with a <code>schema</code> key and the state keys that the test needs. An unknown key fails with <code>fixture.unknown-key</code>. It describes the state that the plugin reads and the events that the test delivers.</p>
+<pre><code class="language-json">{
+  &quot;schema&quot;: 1,
+  &quot;tree&quot;: [],
+  &quot;panes&quot;: [],
+  &quot;agents&quot;: [],
+  &quot;settings&quot;: {},
+  &quot;events&quot;: [
+    {
+      &quot;tag&quot;: &quot;agent-activity-changed&quot;,
+      &quot;val&quot;: { &quot;node&quot;: 42, &quot;previous&quot;: &quot;idle&quot;, &quot;current&quot;: &quot;working&quot;, &quot;revision&quot;: 1 }
+    }
+  ]
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schema</code></td>
+<td>Always 1</td>
+</tr>
+<tr>
+<td><code>tree</code></td>
+<td>Node views that the tree returns to the plugin</td>
+</tr>
+<tr>
+<td><code>panes</code></td>
+<td>Pane information for terminal and basic panes</td>
+</tr>
+<tr>
+<td><code>agents</code></td>
+<td>Agent panes and their current activity</td>
+</tr>
+<tr>
+<td><code>settings</code></td>
+<td>Current values of the plugin's settings</td>
+</tr>
+<tr>
+<td><code>events</code></td>
+<td>Events that the test delivers, each written as <code>{"tag", "val"}</code></td>
+</tr>
+</tbody>
+</table>
+<p>The full key list, with <code>grants</code>, <code>tier</code>, <code>side</code>, <code>clock</code>, <code>storage</code>, <code>files</code>, <code>http</code>, <code>processes</code>, <code>completions</code>, <code>lifecycle</code> and <code>expect_state</code>, is in <a href="/pages/reference-test-harness/#fixtures-and-expectation-files">Test harness reference</a>. <code>with_fixture(path)</code> loads the state keys into the fake host. <code>fixture_events()</code> returns the decoded <code>events</code> list, so the test can pass it to <code>deliver</code>. A fixture holds inputs only. The expected submissions and outcomes are asserted in test code, where the test names them.</p>
+<h2 id="the-fake-host">The fake host</h2>
+<p>A fake host runs one plugin instance. It keeps the grants, the limits and the error codes of the real host. Its main methods are:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Returns</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>new()</code></td>
+<td><code>FakeHost</code></td>
+<td>A host with no grants</td>
+</tr>
+<tr>
+<td><code>grant(name)</code></td>
+<td><code>FakeHost</code></td>
+<td>Grants one capability, for example <code>tree.decorate</code></td>
+</tr>
+<tr>
+<td><code>with_fixture(path)</code></td>
+<td><code>FakeHost</code></td>
+<td>Loads the state and events of a fixture file</td>
+</tr>
+<tr>
+<td><code>activate::&lt;P&gt;()</code></td>
+<td><code>PluginHandle</code></td>
+<td>Runs the activation of a Rust plugin type that is <code>Default</code>. Panics if activation fails. <code>try_activate</code> returns a <code>Result</code>.</td>
+</tr>
+<tr>
+<td><code>deliver(events)</code></td>
+<td><code>Vec&lt;Submission&gt;</code></td>
+<td>Runs <code>on-events</code> once for the batch</td>
+</tr>
+<tr>
+<td><code>render(view, width, height)</code></td>
+<td><code>Screen</code></td>
+<td>Runs <code>views.render</code> and draws the tree into cells</td>
+</tr>
+<tr>
+<td><code>complete(request_id, outcome)</code></td>
+<td>none</td>
+<td>Completes a request that the plugin started</td>
+</tr>
+<tr>
+<td><code>settle()</code></td>
+<td>none</td>
+<td>Delivers queued <code>request-completed</code> events until the queues are empty</td>
+</tr>
+<tr>
+<td><code>grant_now(name)</code>, <code>revoke(name)</code></td>
+<td>none</td>
+<td>Change a grant after activation</td>
+</tr>
+<tr>
+<td><code>fixture_events()</code></td>
+<td><code>Vec&lt;Event&gt;</code></td>
+<td>The events of the loaded fixture</td>
+</tr>
+<tr>
+<td><code>outcomes()</code></td>
+<td><code>Vec&lt;Outcome&gt;</code></td>
+<td>Completions of the submissions, in submission order</td>
+</tr>
+<tr>
+<td><code>pending_requests()</code></td>
+<td><code>Vec&lt;RequestId&gt;</code></td>
+<td>Requests the plugin started and the test has not completed</td>
+</tr>
+<tr>
+<td><code>logs()</code></td>
+<td><code>Vec&lt;LogLine&gt;</code></td>
+<td>Lines that the plugin wrote to its log</td>
+</tr>
+</tbody>
+</table>
+<p>In TypeScript the same methods use camelCase names, and <code>activateModule(path)</code> imports a fresh copy of the plugin module for each test. Outcomes are queued as <code>request-completed</code> events, and <code>settle()</code> delivers them. <code>FakeHost::for_manifest(path)</code> takes the grants, side and tier from the manifest. <code>Screen</code> has <code>row(index)</code>, which returns the text of one row, and <code>cell(row, column)</code>, which returns the symbol and the style of one cell.</p>
+<h2 id="worked-example-a-handler-test">Worked example: a handler test</h2>
+<p>The plugin below sets a badge on an agent's node when the agent starts working. It is the server side of the Rust SDK described on <a href="/pages/rust-sdk/">the Rust SDK page</a>. The tests follow it in the same file. The TypeScript version follows the Rust one.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::AgentActivityEvent;
+use ilium_plugin_sdk::types::intents::SetDecorationSpec;
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+struct Hello;
+
+impl Lifecycle for Hello {
+    fn activate(&amp;mut self, _context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        Ok(())
+    }
+}
+
+impl Handler for Hello {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut submissions = Vec::new();
+        for event in batch {
+            let Event::AgentActivityChanged(AgentActivityEvent { node, current, .. }) = event
+            else {
+                continue;
+            };
+            if current != AgentActivity::Working {
+                continue;
+            }
+            submissions.push(Submission::new(Intent::SetDecoration(SetDecorationSpec {
+                node,
+                slot: &quot;hello&quot;.into(),
+                content: vec![Span::plain(&quot;hi&quot;)],
+                icon: None,
+                sort_key: None,
+                persist: false,
+            })));
+        }
+        submissions
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ilium_plugin_sdk::testing::FakeHost;
+
+    fn became(current: AgentActivity) -&gt; Event {
+        Event::AgentActivityChanged(AgentActivityEvent {
+            node: 42,
+            previous: AgentActivity::Idle,
+            current,
+            revision: 1,
+        })
+    }
+
+    fn host_with_grants() -&gt; FakeHost {
+        FakeHost::new().grant(&quot;agent.read&quot;).grant(&quot;tree.decorate&quot;)
+    }
+
+    #[test]
+    fn working_agent_gets_a_badge() {
+        let mut host = host_with_grants();
+        host.activate::&lt;Hello&gt;();
+        let submissions = host.deliver(vec![became(AgentActivity::Working)]);
+        assert_eq!(submissions.len(), 1);
+        assert!(matches!(submissions[0].intent, Intent::SetDecoration(_)));
+    }
+
+    #[test]
+    fn idle_agent_gets_no_badge() {
+        let mut host = host_with_grants();
+        host.activate::&lt;Hello&gt;();
+        assert!(host.deliver(vec![became(AgentActivity::Idle)]).is_empty());
+    }
+
+    #[test]
+    fn fixture_events_produce_one_badge() {
+        let mut host = host_with_grants().with_fixture(&quot;tests/fixtures/agent-working.json&quot;);
+        host.activate::&lt;Hello&gt;();
+        let events = host.fixture_events();
+        assert_eq!(host.deliver(events).len(), 1);
+    }
+}
+</code></pre>
+<p>Run the tests from the plugin directory with <code>cargo test badge</code>. The filter selects the tests whose names contain <code>badge</code>.</p>
+<p><strong>TypeScript</strong></p>
+<p>The TypeScript plugin behaves the same way. Its handler is exported as the pair that <code>definePlugin</code> returns, and the test runs it with <code>bun test</code>.</p>
+<pre><code class="language-typescript">// src/plugin.ts
+import { definePlugin } from '@ilium/plugin-sdk';
+import { span, type Event, type Submission } from '@ilium/plugin-sdk/types';
+
+let nextCorrelation = 1n;
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  onEvents(batch: Event[]): Submission[] {
+    const submissions: Submission[] = [];
+    for (const event of batch) {
+      if (event.tag !== 'agent-activity-changed') continue;
+      if (event.val.current !== 'working') continue;
+      submissions.push({
+        intent: {
+          tag: 'set-decoration',
+          val: {
+            node: event.val.node,
+            slot: 'hello',
+            content: [span('hi')],
+            icon: undefined,
+            sortKey: undefined,
+            persist: false,
+          },
+        },
+        correlation: nextCorrelation++,
+        dedupKey: undefined,
+      });
+    }
+    return submissions;
+  },
+});
+</code></pre>
+<pre><code class="language-typescript">// src/plugin.test.ts
+import { expect, test } from 'bun:test';
+import type { Event } from '@ilium/plugin-sdk/types';
+import { createFakeHost } from '@ilium/plugin-sdk/testing';
+import { handler, lifecycle } from './plugin';
+
+function activity(current: 'working' | 'idle'): Event {
+  return {
+    tag: 'agent-activity-changed',
+    val: { node: 42n, previous: 'idle', current, revision: 1n },
+  };
+}
+
+test('working agent gets a badge', async () =&gt; {
+  const host = createFakeHost().grant('agent.read').grant('tree.decorate');
+  await host.activate({ lifecycle, handler });
+  const submissions = host.deliver([activity('working')]);
+  expect(submissions.length).toBe(1);
+  expect(submissions[0].intent.tag).toBe('set-decoration');
+});
+
+test('idle agent gets no badge', async () =&gt; {
+  const host = createFakeHost().grant('agent.read').grant('tree.decorate');
+  await host.activate({ lifecycle, handler });
+  expect(host.deliver([activity('idle')])).toEqual([]);
+});
+</code></pre>
+<h2 id="render-tests">Render tests</h2>
+<p>A render test draws a view on the headless host and compares the text of the rows. The host draws the tree that <code>views.render</code> returns into a buffer of cells, so the test reads exactly the text and the styles that a user would see. Borders are the rounded <code>╭╮╰╯</code> corners, and a <code>leader-row</code> shows its <code>…</code> leaders, so the expected strings contain the same characters as the real Ilium.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[test]
+fn notes_panel_lists_open_counts() {
+    let mut host = FakeHost::new()
+        .grant(&quot;tree.read&quot;)
+        .with_fixture(&quot;tests/fixtures/notes-panel.json&quot;);
+    host.activate::&lt;NotesPane&gt;();
+    let screen = host.render(ViewTarget::Pane(42), 40, 4);
+    assert_eq!(screen.row(1), &quot;│ claude-review …………………………… [2 open] │&quot;);
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-typescript">import { expect, test } from 'bun:test';
+import { createFakeHost } from '@ilium/plugin-sdk/testing';
+import { handler, lifecycle, views } from './plugin';
+
+test('notes panel lists open counts', async () =&gt; {
+  const host = createFakeHost().grant('tree.read').withFixture('tests/fixtures/notes-panel.json');
+  await host.activate({ lifecycle, handler, views });
+  const screen = host.render({ tag: 'pane', val: 42n }, 40, 4);
+  expect(screen.row(1)).toBe('│ claude-review …………………………… [2 open] │');
+});
+</code></pre>
+<p>When a row differs, the assertion prints the expected and the actual text. The render below shows such a failure for a notes panel where the count of open notes is missing.</p>
+<figure>
+<pre class="term">
+<span class="t-prompt">$</span> cargo test notes_panel_lists_open_counts
+<span class="t-err">assertion `left == right` failed</span>
+  left: <span class="t-err">"│ claude-review …………………………… [0 open] │"</span>
+ right: <span class="t-dim">"│ claude-review …………………………… [2 open] │"</span>
+<span class="t-err">test result: FAILED. 0 passed; 1 failed</span>
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. A render assertion failure: the count of open notes is wrong in the row.</figcaption>
+</figure>
+
+<p>Render tests check the text and the styles of the cells. They do not show how the output looks in a real terminal. Fonts, colour contrast and animation still need a person to look at the result.</p>
+<h2 id="testing-views-with-the-extended-widgets">Testing views with the extended widgets</h2>
+<p>The extended widgets are drawn by the same fake host, so a test of a <code>check-list</code>, a <code>meter</code>, a <code>notice</code>, a <code>progress-row</code> or a <code>dialog</code> reads their rows the same way. Three rules keep these tests stable:</p>
+<ul>
+<li>Assert the characters the user sees (<code>[x]</code>, <code>█</code>, <code>▶ RUNNING</code>), not the widget props. The props are the plugin's business, and the render is the contract.</li>
+<li>A widget that animates, such as <code>spinner</code>, shows its first frame in the fake host, and one static frame when the test sets reduced motion. Do not assert later frames.</li>
+<li>Give every widget a <code>key</code>, so a test can send an action to it by name.</li>
+</ul>
+<p>The render below is what a member picker draws when one of three items is checked.</p>
+<figure>
+<pre class="term">╭  ≡ ● · Members ────────────────────────╮
+│ <span class="t-dim">Pick the agents to include</span>             │
+│ [x] claude: refactor                   │
+│ [ ] codex: tests                       │
+│ [ ] codex: docs <span class="t-dim">(frozen)</span>               │
+╰────────────────────────────────────────╯</pre>
+<figcaption>Rendered at 48 columns. Illustrative. A check-list inside a block. The first item is checked.</figcaption>
+</figure>
+
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[test]
+fn picking_a_member_updates_the_checklist() {
+    let mut host = FakeHost::new().grant(&quot;panes.read&quot;);
+    host.activate::&lt;MemberPicker&gt;();
+    let first = host.render(ViewTarget::Pane(7), 40, 6);
+    assert_eq!(first.row(2), &quot;│ [x] claude: refactor                   │&quot;);
+
+    host.deliver(vec![action(&quot;members&quot;, ActionKind::Changed, Some(ActionValue::ItemState(&quot;p2&quot;.into(), TriState::On)))]);
+    let second = host.render(ViewTarget::Pane(7), 40, 6);
+    assert_eq!(second.row(3), &quot;│ [x] codex: tests                       │&quot;);
+}
+
+fn action(key: &amp;str, kind: ActionKind, value: Option&lt;ActionValue&gt;) -&gt; Event {
+    Event::UiAction(UiAction {
+        view: ViewTarget::Pane(7),
+        key: key.into(),
+        action_id: key.into(),
+        kind,
+        value,
+    })
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-typescript">function action(key: string, kind: ActionKind, value?: ActionValue): Event {
+  return { tag: 'ui-action', val: { view: { tag: 'pane', val: 7n }, key, actionId: key, kind, value } };
+}
+
+test('picking a member updates the checklist', async () =&gt; {
+  const host = createFakeHost().grant('panes.read');
+  await host.activate({ lifecycle, handler, views });
+  expect(host.render(view, 40, 6).row(2)).toBe('│ [x] claude: refactor                   │');
+
+  host.deliver([action('members', 'changed', { tag: 'item-state', val: ['p2', 'on'] })]);
+  expect(host.render(view, 40, 6).row(3)).toBe('│ [x] codex: tests                       │');
+});
+</code></pre>
+<h2 id="testing-pointer-and-keyboard-input">Testing pointer and keyboard input</h2>
+<p>A node with <code>pointer-events</code> sends <code>pointer</code> actions with a <code>view-pointer</code> value: the kind (<code>down</code>, <code>up</code>, <code>move</code>, <code>drag</code>, wheel kinds), the button, the modifiers, the cell inside the widget, the position inside the cell from 0 to 255 (128 when the terminal reports whole cells), and the click count. A test builds that value and delivers it like any other action. The same pattern covers <code>hover-enter</code>, <code>hover-leave</code>, <code>drag-over</code> and <code>resized</code>.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[test]
+fn double_click_on_a_cell_opens_the_file() {
+    let mut host = FakeHost::new().grant(&quot;fs.read:project&quot;);
+    host.activate::&lt;Explorer&gt;();
+    let pointer = ViewPointer {
+        kind: PointerKind::Down,
+        button: PointerButton::Left,
+        modifiers: PointerModifiers::empty(),
+        column: 4,
+        row: 2,
+        sub_x: 128,
+        sub_y: 128,
+        clicks: 2,
+    };
+    let submissions = host.deliver(vec![action(&quot;files&quot;, ActionKind::Pointer, Some(ActionValue::Pointer(pointer)))]);
+    assert!(matches!(submissions[0].intent, Intent::EditorOpen(_)));
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-typescript">test('double click on a cell opens the file', async () =&gt; {
+  const host = createFakeHost().grant('fs.read:project');
+  await host.activate({ lifecycle, handler, views });
+  const pointer = {
+    kind: 'down', button: 'left',
+    modifiers: { shift: false, control: false, alt: false },
+    column: 4, row: 2, subX: 128, subY: 128, clicks: 2,
+  } as const;
+  const submissions = host.deliver([action('files', 'pointer', { tag: 'pointer', val: pointer })]);
+  expect(submissions[0].intent.tag).toBe('editor-open');
+});
+</code></pre>
+<p>Keyboard input is tested the same way, one level up: send the <code>ui-action</code> that the widget would send after the key (<code>changed</code>, <code>submitted</code>, <code>activated</code>), because the host, not the plugin, handles the key itself. The key table of each widget is in <a href="/pages/widgets-index/">Widget catalogue</a>.</p>
+<h2 id="golden-renders">Golden renders</h2>
+<p>A golden render is a text file that holds the expected rows of a whole view. The test draws the view, joins the rows with line breaks, and compares the result with the file. A mismatch prints the first differing row. <code>assert_golden</code> (<code>assertGolden</code> in TypeScript) reads the file, converts line endings and prints the diff; <code>ILIUM_PLUGIN_UPDATE_GOLDEN=1</code> rewrites it. Keep golden files next to the fixtures, for example <code>tests/golden/files-panel.txt</code>, and review each change to a golden file like a change to code.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">fn screen_text(screen: &amp;Screen, height: u16) -&gt; String {
+    (0..height).map(|index| screen.row(index)).collect::&lt;Vec&lt;_&gt;&gt;().join(&quot;\n&quot;)
+}
+
+#[test]
+fn files_panel_matches_golden() {
+    let mut host = FakeHost::new().with_fixture(&quot;tests/fixtures/files.json&quot;);
+    host.activate::&lt;Explorer&gt;();
+    let drawn = screen_text(&amp;host.render(ViewTarget::Pane(42), 40, 6), 6);
+    assert_golden(&quot;tests/golden/files-panel.txt&quot;, &amp;drawn);
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-typescript">function screenText(screen: Screen, height: number): string {
+  return Array.from({ length: height }, (_, index) =&gt; screen.row(index)).join('\n');
+}
+
+test('files panel matches golden', async () =&gt; {
+  const host = createFakeHost().withFixture('tests/fixtures/files.json');
+  await host.activate({ lifecycle, handler, views });
+  const drawn = screenText(host.render({ tag: 'pane', val: 42n }, 40, 6), 6);
+  assertGolden('tests/golden/files-panel.txt', drawn);
+});
+</code></pre>
+<figure>
+<pre class="term">╭  ≡ ● · Files ──────────────────────────╮
+│ README.md ………………………………………………………… <span class="t-dim">2 KiB</span> │
+│ CHANGELOG.md ………………………………………………… <span class="t-dim">9 KiB</span> │
+│ <span class="t-dim">Esc close · Enter open</span>                 │
+╰────────────────────────────────────────╯</pre>
+<figcaption>Rendered at 48 columns. Illustrative. The content of a golden file for a small file panel: rounded border, title icons, leader dots and a hint line. The test compares it character by character.</figcaption>
+</figure>
+
+<p>Golden files hold the Unicode characters of the real UI. Never replace <code>…</code>, <code>╭</code>, <code>▶</code> or <code>⠋</code> with ASCII stand-ins in a golden file: the test would then pass while the real render differs. The stable-glyph mode is a user setting, and a test for it sets the fake host's icon mode and keeps a second golden file.</p>
+<h2 id="testing-requests-jobs-and-services">Testing requests, jobs and services</h2>
+<p>A call that returns a request id, such as <code>fs.read-all</code>, <code>jobs.start</code>, <code>services.call</code>, <code>catalogs.query-async</code> or <code>geocode.search</code>, is tested by completing the request by hand: the test calls <code>host.complete(request_id, outcome)</code> with the outcome the real host would send, then delivers the <code>request-completed</code> event that follows. This covers <code>ok</code>, <code>cancelled</code> and each <code>failed(code)</code> without a network, a disk or a second plugin.</p>
+<p><strong>Rust</strong></p>
+<pre><code class="language-rust">#[test]
+fn failed_import_is_logged_not_trapped() {
+    let mut host = FakeHost::new().grant(&quot;jobs.run&quot;);
+    host.activate::&lt;WorldImporter&gt;();
+    host.deliver(vec![command(&quot;com.example.worlds/import&quot;)]);
+    let request = host.pending_requests()[0];
+    host.complete(request, Outcome::Failed(PluginError::timed_out(&quot;import timed out&quot;)));
+    assert!(host.logs().iter().any(|line| line.message.contains(&quot;import failed&quot;)));
+}
+</code></pre>
+<p><strong>TypeScript</strong></p>
+<pre><code class="language-typescript">test('failed import is logged, not trapped', async () =&gt; {
+  const host = createFakeHost().grant('jobs.run');
+  await host.activate({ lifecycle, handler });
+  host.deliver([command('com.example.worlds/import')]);
+  const request = host.pendingRequests()[0];
+  host.complete(request, { tag: 'failed', val: { code: 'timed-out', message: 'import timed out' } });
+  expect(host.logs().some((line) =&gt; line.message.includes('import failed'))).toBe(true);
+});
+</code></pre>
+<h2 id="data-flow-of-a-handler-test">Data flow of a handler test</h2>
+<p>The diagram shows the path of one handler test. Events go in, the fake host returns submissions, and the test asserts them.</p>
+<figure>
+<svg viewBox="0 0 420 120" role="img" aria-label="A handler test: fixture events go into the fake host, submissions come out, and the test asserts them" width="630" height="180">
+  <defs>
+    <marker id="testing-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="8" y="20" width="120" height="44" rx="6" fill="none" stroke="currentColor"/>
+  <text x="68" y="37" font-size="11" text-anchor="middle" fill="currentColor">Fixture events</text>
+  <text x="68" y="53" font-size="10" text-anchor="middle" fill="currentColor">events and state</text>
+  <line x1="128" y1="42" x2="148" y2="42" stroke="currentColor" marker-end="url(#testing-arrow)"/>
+  <rect x="150" y="20" width="120" height="44" rx="6" fill="none" stroke="currentColor"/>
+  <text x="210" y="37" font-size="11" text-anchor="middle" fill="currentColor">Fake host</text>
+  <text x="210" y="53" font-size="10" text-anchor="middle" fill="currentColor">grants, no PTY</text>
+  <line x1="270" y1="42" x2="290" y2="42" stroke="currentColor" marker-end="url(#testing-arrow)"/>
+  <rect x="292" y="20" width="120" height="44" rx="6" fill="none" stroke="currentColor"/>
+  <text x="352" y="37" font-size="11" text-anchor="middle" fill="currentColor">Submissions</text>
+  <text x="352" y="53" font-size="10" text-anchor="middle" fill="currentColor">intents, outcomes</text>
+  <line x1="352" y1="64" x2="352" y2="82" stroke="currentColor" marker-end="url(#testing-arrow)"/>
+  <rect x="292" y="84" width="120" height="28" rx="6" fill="none" stroke="currentColor"/>
+  <text x="352" y="102" font-size="10" text-anchor="middle" fill="currentColor">assert_eq! / expect</text>
+</svg>
+<figcaption>The fixture feeds events into the fake host. The test checks the submissions that come back.</figcaption>
+</figure>
+
+<h2 id="running-tests-from-the-command-line">Running tests from the command line</h2>
+<p><code>ilium plugin test</code> is the gate for fixtures. It runs every fixture against the built component, compares each expectation file, and exits 3 when one differs or the component traps. Run the project's own unit tests with <code>cargo test</code> or <code>bun test</code>, and put both in CI. The full flags are in <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a>.</p>
+<figure>
+<pre class="term">
+<span class="t-prompt">$</span> ilium plugin test
+agent-working.json   pass  12 ms
+agent-idle.json      pass   9 ms
+summary: 2 passed, 0 failed, 0 skipped (21 ms)
+</pre>
+<figcaption>Rendered at 48 columns. Illustrative. Text output on a terminal: one line per fixture and a summary line. Piped output or `--json` prints JSONL records instead. The exit code is 0.</figcaption>
+</figure>
+
+<p>The command compares the output of each fixture with its <code>.expect.json</code> file. A fixture without an expectation file only has to run without a trap. Expectation files use the match modes <code>exact</code>, <code>ordered</code> and <code>subset</code>, which <a href="/pages/reference-test-harness/">Test harness reference</a> defines.</p>
+<h2 id="faking-the-world">Faking the world</h2>
+<p>The fake host also fakes the clock, the file system, processes, the network, storage and settings. Each fake is deterministic, and an unexpected call to a fake process or network fails the test. Register what the plugin may call before you deliver the events.</p>
+<pre><code class="language-rust">let mut host = FakeHost::for_manifest(&quot;manifest.json&quot;).unwrap();
+host.processes().expect(&quot;git&quot;, &amp;[&quot;status&quot;, &quot;--short&quot;]).returns(&quot;M src/lib.rs\n&quot;, 0);
+host.fs().write(&quot;project:notes.md&quot;, b&quot;# Notes&quot;);
+host.activate::&lt;Plugin&gt;();
+host.advance_clock(60_000);
+host.settle();
+</code></pre>
+<pre><code class="language-ts">const host = createFakeHost().forManifest('manifest.json');
+host.processes().expect('git', ['status', '--short']).returns('M src/lib.rs\n', 0);
+host.fs().write('project:notes.md', new TextEncoder().encode('# Notes'));
+await host.activateModule('../src/server');
+host.advanceClock(60_000);
+await host.settle();
+</code></pre>
+<h2 id="tests-with-more-than-one-plugin">Tests with more than one plugin</h2>
+<p>Use <code>FakeSession</code> when the behaviour crosses a boundary: two sides of one plugin, a service call between plugins, or a core extension point. <code>FakeHost</code> runs one plugin.</p>
+<pre><code class="language-rust">let mut session = FakeSession::new();
+session.install(&quot;../provider&quot;).install(&quot;../consumer&quot;).start();
+session.plugin(&quot;example.consumer&quot;).deliver(vec![ask_event()]);
+session.pump();
+assert_eq!(session.plugin(&quot;example.consumer&quot;).outcomes(), vec![Outcome::Ok]);
+</code></pre>
+<h2 id="failure-injection-replay-and-coverage">Failure injection, replay and coverage</h2>
+<ul>
+<li><code>inject_trap(code)</code> and <code>inject_failure(import, error)</code> make the next call fail, so you can test the restart rule and error paths.</li>
+<li><code>fuzz_run(seed, rounds)</code> delivers random valid event batches. A failure prints the seed.</li>
+<li><code>record_to(path)</code> and <code>replay(path)</code> record and re-run a session.</li>
+<li><code>ilium plugin test --coverage --min-coverage 80</code> also runs your unit tests under a coverage tool and exits 3 below the minimum.</li>
+<li><code>ilium plugin test --conformance</code> runs the <a href="/pages/reference-conformance-suite/">conformance suite</a>.</li>
+</ul>
+<h2 id="test-lanes">Test lanes</h2>
+<p>A plugin usually has three lanes of tests. Fixture and render tests run on the headless host. End-to-end checks run the installed package in a real Ilium.</p>
+<figure>
+<svg viewBox="0 0 340 164" role="img" aria-label="Three test lanes for a plugin" width="510" height="246">
+  <title>Test harness lanes</title>
+  <desc>Three lanes: fixture tests run a batch of events through the handler and compare the submissions; render tests draw a view on the headless host and compare the cells; end-to-end tests run the package in the real host.</desc>
+  <rect x="6" y="8" width="326" height="44" rx="6" fill="none" stroke="currentColor"/>
+  <text x="16" y="24" font-size="10" fill="currentColor">Fixture tests</text>
+  <text x="16" y="42" font-size="10" fill="currentColor">events in, submissions out, Rust and TypeScript</text>
+  <rect x="6" y="60" width="326" height="44" rx="6" fill="none" stroke="currentColor"/>
+  <text x="16" y="76" font-size="10" fill="currentColor">Render tests</text>
+  <text x="16" y="94" font-size="10" fill="currentColor">headless host draws a view, cells compared</text>
+  <rect x="6" y="112" width="326" height="44" rx="6" fill="none" stroke="currentColor" stroke-dasharray="6 4"/>
+  <text x="16" y="128" font-size="10" fill="currentColor">End-to-end checks</text>
+  <text x="16" y="146" font-size="10" fill="currentColor">installed package, real kernel, manual review</text>
+</svg>
+<figcaption>Fixture and render tests run on the headless host. End-to-end checks need a running Ilium and a person to judge the result.</figcaption>
+</figure>
+
+<h2 id="lifecycle-tests">Lifecycle tests</h2>
+<p>The fake host can drive the lifecycle of <a href="/pages/reference-plugin-lifecycle-states/">Plugin lifecycle states</a> without a real server. These methods exist on <code>FakeHost</code> for contract <code>ilium:plugin@0.1.0</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deactivate(reason)</code></td>
+<td>Calls <code>deactivate</code> with a reason and returns the restore bytes.</td>
+</tr>
+<tr>
+<td><code>restart_with(bytes)</code></td>
+<td>Activates a new instance with <code>restored</code> set.</td>
+</tr>
+<tr>
+<td><code>inject_trap(code)</code></td>
+<td>Traps the instance with a trap code as a failure and applies the restart rule.</td>
+</tr>
+<tr>
+<td><code>advance_clock(ms)</code></td>
+<td>Moves the fixture clock, so back-off and windows pass at once.</td>
+</tr>
+<tr>
+<td><code>revoke(grant)</code>, <code>grant_now(grant)</code></td>
+<td>Fire the <code>revoked</code> and <code>granted</code> reasons.</td>
+</tr>
+<tr>
+<td><code>with_storage_snapshot(path)</code></td>
+<td>Starts with the storage of a JSON file.</td>
+</tr>
+<tr>
+<td><code>with_data_version(n)</code></td>
+<td>Sets the stored data version before activation.</td>
+</tr>
+<tr>
+<td><code>crash_after_journal_write()</code></td>
+<td>Traps after the next journal append is committed.</td>
+</tr>
+<tr>
+<td><code>failures()</code></td>
+<td>Returns the failure window of the plugin side.</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-rust">#[test]
+fn third_failure_disables() {
+    let mut host = FakeHost::for_manifest(&quot;manifest.json&quot;).unwrap();
+    host.activate::&lt;Plugin&gt;();
+    host.inject_trap(&quot;trap.panic&quot;);   // restarts after 1 s
+    host.advance_clock(1_000);
+    host.inject_trap(&quot;trap.panic&quot;);   // restarts after 5 s
+    host.advance_clock(5_000);
+    host.inject_trap(&quot;trap.panic&quot;);   // third failure
+    assert_eq!(host.lifecycle_state(), LifecycleState::StoppedByFailure);
+    assert_eq!(host.failures().len(), 3);
+}
+</code></pre>
+<pre><code class="language-ts">test(&quot;restore bytes survive an upgrade&quot;, async () =&gt; {
+  const host = createFakeHost().forManifest(&quot;manifest.json&quot;);
+  await host.activateModule(&quot;../src/server&quot;);
+  const bytes = await host.deactivate(&quot;upgrade&quot;);
+  await host.restartWith(bytes!);
+  expect(host.restored()).toEqual(bytes);
+});
+</code></pre>
+<p>In an <code>ilium plugin test</code> fixture file, the keys <code>lifecycle</code> (a list of steps such as <code>trap</code>, <code>advance</code>, <code>deactivate</code>) and <code>expect_state</code> run the same steps.</p>
+<h3 id="host-conformance-checklist">Host conformance checklist</h3>
+<p>A host implementation passes when each line holds. Each line cites the requirement that defines it.</p>
+<ul>
+<li>Back-off is 1 s then 5 s and the third failure disables (LIF-025 to LIF-042).</li>
+<li>Activation order follows dependencies (LIF-045 to LIF-059).</li>
+<li>Package and instance transitions match the tables (LIF-001 to LIF-020).</li>
+<li>Install, update and rollback follow the pipeline (LIF-065 to LIF-094).</li>
+<li>Migration runs once, with backup (LIF-100 to LIF-116).</li>
+<li>Health and deadline bounds hold (LIF-122 to LIF-138).</li>
+<li>Capacity refusals do not count as failures (LIF-141).</li>
+<li>
+<p>The survival matrix holds (LIF-150 to LIF-157).</p>
+</li>
+<li>
+<p>[LIF-279] The fake host MUST offer the methods in the table, and its results MUST match the real host for the lines above. Test: run the same fixtures against both.</p>
+</li>
+</ul>
+<h2 id="edge-cases-and-error-codes">Edge cases and error codes</h2>
+<p>A test should cover the refusal path as well as the success path. The fake host returns the same codes as the real host.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>What the test sees</th>
+<th>Code and retry</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The tree capability is declined or not requested</td>
+<td>No tree events arrive. <code>get</code> returns none and <code>find</code> returns an empty list. The plugin log gets one warn line that names <code>tree.read</code>.</td>
+<td>No error code</td>
+</tr>
+<tr>
+<td>An intent needs a grant that the test did not give</td>
+<td>The offending submission is <code>refused(not-permitted)</code>. The other submissions of the batch are <code>refused(cancelled)</code> with the message <code>batch refused: submission &lt;index&gt;</code>.</td>
+<td><code>not-permitted</code>, no retry</td>
+</tr>
+<tr>
+<td>A submission is malformed, such as a missing dedup key for <code>send-input</code></td>
+<td>The whole batch is refused.</td>
+<td><code>invalid-argument</code>, fix the call</td>
+</tr>
+<tr>
+<td>A decoration uses a slot that the manifest does not declare</td>
+<td>The submission is <code>refused(invalid-argument)</code>.</td>
+<td><code>invalid-argument</code>, fix the call</td>
+</tr>
+<tr>
+<td>A decoration targets a node that no longer exists</td>
+<td>The submission is <code>refused(not-found)</code>.</td>
+<td><code>not-found</code>, no retry</td>
+</tr>
+<tr>
+<td>The decoration quota is full</td>
+<td>The submission is <code>refused(quota-exceeded)</code>.</td>
+<td><code>quota-exceeded</code>, free resources first</td>
+</tr>
+<tr>
+<td>A restored pane refuses input</td>
+<td>The submission is <code>refused(pane-not-ready)</code>.</td>
+<td><code>pane-not-ready</code>, retry after <code>tree-changed</code></td>
+</tr>
+</tbody>
+</table>
+<p>A panic in a Rust test or a thrown exception in a TypeScript test fails that test. In the real host the same failure is a trap. The host writes it to the plugin log as <code>trap in &lt;export&gt;</code> with the reason. See <a href="/pages/debugging/">debugging</a> for how to read the trap entry.</p>
+<h2 id="what-the-user-sees">What the user sees</h2>
+<p>Tests run on the developer's machine only. <code>cargo test</code> reports each test with <code>ok</code> or <code>FAILED</code>, and it prints the values of a failed assertion. <code>ilium plugin test</code> prints the JSON lines shown above. The end user sees none of this. A user sees the result only when the built package runs in Ilium, for example as a badge on a node in the tree or as a panel row with the right text.</p>
+<h2 id="advice">Advice</h2>
+<ul>
+<li>Write one fixture for each event that the plugin handles, and one for each error that it expects.</li>
+<li>Keep fixtures small. A fixture that checks one behaviour is easy to read when it fails.</li>
+<li>Grant exactly the capabilities in the manifest. A test that grants more than the manifest asks for hides a missing entry.</li>
+<li>Test the refusal path too: a missing grant should produce <code>not-permitted</code>, and the plugin should hide the feature without a trap.</li>
+<li>Check text in render tests, and check the look by hand in a real terminal.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/capabilities/">Capabilities</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK</a></li>
+<li><a href="/pages/tutorial-01-agent-badge/">Tutorial 1: the agent badge</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+</ul>
+<p>API version checked: <code>ilium:plugin@0.1.0</code>.</p>
+<h3 id="security">Security</h3>
+<p>Security tests and fuzz targets are listed in <a href="/pages/reference-security-testing/">Security testing</a>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/extending-core-plugins/"><small>Previous</small>Extending core plugins</a><a class="next" href="/pages/ui-model/"><small>Next</small>The UI model</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#fixture-files">Fixture files</a></li><li class="l2"><a href="#the-fake-host">The fake host</a></li><li class="l2"><a href="#worked-example-a-handler-test">Worked example: a handler test</a></li><li class="l2"><a href="#render-tests">Render tests</a></li><li class="l2"><a href="#testing-views-with-the-extended-widgets">Testing views with the extended widgets</a></li><li class="l2"><a href="#testing-pointer-and-keyboard-input">Testing pointer and keyboard input</a></li><li class="l2"><a href="#golden-renders">Golden renders</a></li><li class="l2"><a href="#testing-requests-jobs-and-services">Testing requests, jobs and services</a></li><li class="l2"><a href="#data-flow-of-a-handler-test">Data flow of a handler test</a></li><li class="l2"><a href="#running-tests-from-the-command-line">Running tests from the command line</a></li><li class="l2"><a href="#faking-the-world">Faking the world</a></li><li class="l2"><a href="#tests-with-more-than-one-plugin">Tests with more than one plugin</a></li><li class="l2"><a href="#failure-injection-replay-and-coverage">Failure injection, replay and coverage</a></li><li class="l2"><a href="#test-lanes">Test lanes</a></li><li class="l2"><a href="#lifecycle-tests">Lifecycle tests</a></li><li class="l3"><a href="#host-conformance-checklist">Host conformance checklist</a></li><li class="l2"><a href="#edge-cases-and-error-codes">Edge cases and error codes</a></li><li class="l2"><a href="#what-the-user-sees">What the user sees</a></li><li class="l2"><a href="#advice">Advice</a></li><li class="l2"><a href="#see-also">See also</a></li><li class="l3"><a href="#security">Security</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Project templates | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/" aria-current="page">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>Project templates</h1>
+
+<p><code>ilium plugin new</code> writes a complete, working project from a template. This page lists the exact files that each template writes in each language, the flags of the command, the refusal codes, the placeholder rules and the guarantees about a fresh project. The older pages showed only the first three files. This page replaces those lists.</p>
+<p>A template is a plain set of files. The command copies them and replaces a few placeholders. It runs no build and needs no network. A project made from a template builds, passes its own tests, and is ready to edit.</p>
+<p>Terms:</p>
+<ul>
+<li><strong>Template</strong>: a named set of files, one set per language.</li>
+<li><strong>Side</strong>: one of <code>server</code>, <code>client</code> or <code>scene</code>. A plugin has one or more sides, and each side builds to its own component.</li>
+<li><strong>Placeholder</strong>: a token such as <code>@@id@@</code> that <code>new</code> replaces when it writes a file.</li>
+</ul>
+<h2 id="you-will-need">You will need</h2>
+<ul>
+<li>The <code>ilium</code> binary. The command works offline and needs no toolchain.</li>
+<li>A plugin id, for example <code>example.agent-tools</code>, and a language, <code>rust</code> or <code>typescript</code>.</li>
+<li>Background reading: <a href="/pages/getting-started-toolchain/">Set up a toolchain</a> and <a href="/pages/reference-plugin-cli/">Plugin command-line reference</a>.</li>
+</ul>
+<h2 id="the-command">The command</h2>
+<p><code>ilium plugin new &lt;dir&gt; --id &lt;id&gt; --lang &lt;rust|typescript&gt; (--template &lt;name&gt; | --side &lt;name&gt;) [--name &lt;text&gt;] [--publisher &lt;text&gt;] [--first-party] [--ci &lt;github|gitlab|none&gt;] [--force]</code></p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--id</code></td>
+<td>none, required</td>
+<td>Matches <code>[a-z0-9-]+(\.[a-z0-9-]+)+</code>. Fails with <code>new.id-invalid</code>.</td>
+</tr>
+<tr>
+<td><code>--lang</code></td>
+<td>none, required</td>
+<td><code>rust</code> or <code>typescript</code>.</td>
+</tr>
+<tr>
+<td><code>--template</code></td>
+<td>none</td>
+<td>One of the eight names below.</td>
+</tr>
+<tr>
+<td><code>--side</code></td>
+<td>none</td>
+<td>An alias for <code>server</code>, <code>client</code>, <code>both</code> or <code>scene</code>.</td>
+</tr>
+<tr>
+<td><code>--name</code></td>
+<td>the last label of the id, with the first letter in capitals</td>
+<td>The display name.</td>
+</tr>
+<tr>
+<td><code>--publisher</code></td>
+<td>the operating system user name</td>
+<td>The <code>publisher</code> value.</td>
+</tr>
+<tr>
+<td><code>--first-party</code></td>
+<td>off</td>
+<td>Allows an <code>ilium.</code> id. Needed for <code>core-style</code>.</td>
+</tr>
+<tr>
+<td><code>--ci</code></td>
+<td><code>none</code></td>
+<td>Adds a CI file. See <a href="/pages/guide-ci-recipes/">CI recipes</a>.</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td>off</td>
+<td>Writes into a non-empty folder without deleting any file.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-260]</strong> <code>--template</code> and <code>--side</code> MUST name the same template when both are given. <code>--side</code> accepts only <code>server</code>, <code>client</code>, <code>both</code> and <code>scene</code>. All other templates are reachable only through <code>--template</code>.</li>
+<li><strong>[DEV-261]</strong> <code>new</code> MUST fail with <code>new.dir-not-empty</code> for a folder that holds files, <code>new.id-invalid</code> for a bad id, <code>new.id-reserved</code> for an <code>ilium.</code> id without <code>--first-party</code>, and <code>new.template-unknown</code> for an unknown name. No file MUST be written when a check fails.</li>
+<li><strong>[DEV-262]</strong> <code>core-style</code> MUST require <code>--first-party</code> and an id that starts with <code>ilium.</code>. Every other template MUST refuse an <code>ilium.</code> id, even with <code>--first-party</code>, with <code>new.id-reserved</code>. A package built from <code>core-style</code> that is not bundled in the Ilium source tree is refused at install by <code>manifest.id-reserved</code>.</li>
+<li><strong>[DEV-263]</strong> <code>new</code> MUST be deterministic. The same flags and the same <code>ilium</code> version MUST write byte-identical files.</li>
+<li><strong>[DEV-264]</strong> The placeholders are <code>@@id@@</code>, <code>@@name@@</code>, <code>@@publisher@@</code>, <code>@@package@@</code> (the last label of the id, which is the Cargo package name or the npm package name) and <code>@@sdk@@</code> (the SDK version). <code>new</code> MUST replace them in the files marked in the tables below and MUST leave no <code>@@</code> token in any written file.</li>
+<li><strong>[DEV-265]</strong> <code>--name</code> and <code>--publisher</code> MUST be written as JSON strings or TOML strings with escaping, so a quote or a backslash in the value cannot break the file.</li>
+<li><strong>[DEV-266]</strong> The entry source of a TypeScript side MUST be <code>src/&lt;side&gt;.ts</code>: <code>src/server.ts</code>, <code>src/client.ts</code> or <code>src/scene.ts</code>. The entry source of a single-side Rust project MUST be <code>src/lib.rs</code>. This replaces the earlier spellings <code>src/main.ts</code>, <code>src/plugin.ts</code> and <code>src/index.ts</code> on other pages.</li>
+<li><strong>[DEV-267]</strong> A Rust project with two sides MUST be a Cargo workspace with one crate per side (<code>server/</code>, <code>client/</code>) and one shared crate (<code>shared/</code>). Each side crate MUST declare its side in <code>[package.metadata.ilium]</code> as <code>side = "server"</code> or <code>side = "client"</code>, which is how <code>build</code> finds the crate for a side.</li>
+<li><strong>[DEV-268]</strong> Every template MUST write <code>.gitignore</code> with the lines <code>dist/</code>, <code>.ilium/</code>, <code>target/</code> and <code>node_modules/</code>.</li>
+<li><strong>[DEV-269]</strong> Every template MUST write <code>README.md</code> and <code>CHANGELOG.md</code> skeletons and a <code>help/overview.md</code> topic that <code>contributes.help</code> lists, so <code>lint.readme-missing</code>, <code>lint.changelog-missing</code> and <code>lint.help-topic-missing</code> pass on a fresh project.</li>
+</ul>
+<h2 id="the-guarantees-about-a-fresh-project">The guarantees about a fresh project</h2>
+<ul>
+<li><strong>[DEV-270]</strong> A project made by <code>new</code>, with no edits, MUST pass <code>ilium plugin check</code>, <code>ilium plugin lint --deny warnings</code>, <code>ilium plugin build</code> and then <code>ilium plugin test</code> on a machine where <code>ilium plugin doctor</code> reports no <code>fail</code>, with zero warnings.</li>
+<li><strong>[DEV-271]</strong> A fresh project MUST pass its own native unit tests (<code>cargo test</code>, <code>bun test</code>).</li>
+<li><strong>[DEV-272]</strong> A fresh project MUST request the smallest grant set that its template needs and no more.</li>
+<li><strong>[DEV-273]</strong> A fresh project MUST run activation without logging at <code>warn</code> or <code>error</code>.</li>
+</ul>
+<h2 id="common-files">Common files</h2>
+<p>These files are the same in every template, with the placeholders replaced.</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manifest.json</code></td>
+<td>The manifest of the template, see below. Placeholders in <code>id</code>, <code>name</code>, <code>publisher</code>.</td>
+</tr>
+<tr>
+<td><code>.gitignore</code></td>
+<td><code>dist/</code>, <code>.ilium/</code>, <code>target/</code>, <code>node_modules/</code>.</td>
+</tr>
+<tr>
+<td><code>README.md</code></td>
+<td>Title <code>@@name@@</code>, one paragraph, the build and test commands, the list of requested grants.</td>
+</tr>
+<tr>
+<td><code>CHANGELOG.md</code></td>
+<td>Keep a Changelog header with an <code>Unreleased</code> section.</td>
+</tr>
+<tr>
+<td><code>help/overview.md</code></td>
+<td>A help topic with a title line and two short paragraphs.</td>
+</tr>
+<tr>
+<td><code>tests/fixtures/sample.json</code></td>
+<td>A fixture, see <a href="/pages/reference-test-harness/">Test harness reference</a>.</td>
+</tr>
+<tr>
+<td><code>tests/fixtures/sample.expect.json</code></td>
+<td>The expectation of that fixture.</td>
+</tr>
+<tr>
+<td><code>tests/golden/overview.txt</code></td>
+<td>The golden render, in templates with a view.</td>
+</tr>
+<tr>
+<td><code>.github/workflows/plugin.yml</code> or <code>.gitlab-ci.yml</code></td>
+<td>Only with <code>--ci github</code> or <code>--ci gitlab</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The README skeleton:</p>
+<pre><code class="language-markdown"># @@name@@
+
+A plugin for Ilium. Describe what it does in one paragraph.
+
+## Build and test
+
+    ilium plugin check
+    ilium plugin lint --deny warnings
+    ilium plugin test
+    ilium plugin build
+
+## Grants
+
+List each requested grant and why the plugin needs it.
+</code></pre>
+<p>The CHANGELOG skeleton:</p>
+<pre><code class="language-markdown"># Changelog
+
+## [Unreleased]
+
+### Added
+
+- First version.
+</code></pre>
+<p>The help topic skeleton:</p>
+<pre><code class="language-markdown"># @@name@@
+
+One sentence that says what the plugin adds.
+
+Name each command, setting and view the plugin adds, one line each.
+</code></pre>
+<h2 id="the-eight-templates">The eight templates</h2>
+<table>
+<thead>
+<tr>
+<th>Template</th>
+<th>Sides</th>
+<th>Purpose</th>
+<th>Requested grants</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>server</code></td>
+<td>server</td>
+<td>Reacts to events and sets tree decorations</td>
+<td><code>tree.read</code>, <code>tree.decorate</code></td>
+</tr>
+<tr>
+<td><code>client</code></td>
+<td>client</td>
+<td>A panel with one view</td>
+<td><code>ui.panels</code></td>
+</tr>
+<tr>
+<td><code>both</code></td>
+<td>server, client</td>
+<td>A server that sends one message to a client view</td>
+<td><code>ui.panels</code></td>
+</tr>
+<tr>
+<td><code>scene</code></td>
+<td>scene</td>
+<td>An ambient background scene</td>
+<td>none</td>
+</tr>
+<tr>
+<td><code>pane-kind</code></td>
+<td>client</td>
+<td>A new kind of pane with a view</td>
+<td><code>ui.panels</code>, <code>panes.provide-kind</code></td>
+</tr>
+<tr>
+<td><code>core-style</code></td>
+<td>server, client</td>
+<td>A first-party replaceable plugin with an extension point</td>
+<td><code>tree.read</code>, <code>ui.panels</code></td>
+</tr>
+<tr>
+<td><code>service-provider</code></td>
+<td>server</td>
+<td>Provides a named service</td>
+<td><code>services.provide:@@id@@/greeter</code></td>
+</tr>
+<tr>
+<td><code>extension</code></td>
+<td>server</td>
+<td>Fills a hook point of a core plugin</td>
+<td><code>extensions.contribute:ilium.core.smart-copy/after-copy</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[DEV-274]</strong> The requested grants of each template MUST be those in the table, and the manifest <code>capabilities</code> object MUST list them per side.</li>
+</ul>
+<h3 id="server">server</h3>
+<p>Files, Rust: <code>manifest.json</code>, <code>Cargo.toml</code>, <code>src/lib.rs</code>, <code>tests/handler.rs</code>, <code>tests/fixtures/sample.json</code>, <code>tests/fixtures/sample.expect.json</code>, <code>.gitignore</code>, <code>README.md</code>, <code>CHANGELOG.md</code>, <code>help/overview.md</code>.</p>
+<p>Files, TypeScript: <code>manifest.json</code>, <code>package.json</code>, <code>tsconfig.json</code>, <code>bunfig.toml</code>, <code>src/server.ts</code>, <code>tests/handler.test.ts</code>, and the same fixtures and documents.</p>
+<p>The manifest:</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;@@id@@&quot;,
+  &quot;name&quot;: &quot;@@name@@&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;@@publisher@@&quot;,
+  &quot;description&quot;: &quot;Marks agents that start working.&quot;,
+  &quot;license&quot;: &quot;MIT&quot;,
+  &quot;server&quot;: {
+    &quot;entry&quot;: &quot;server.wasm&quot;,
+    &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;,
+    &quot;exports&quot;: []
+  },
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;tree.read&quot;, &quot;tree.decorate&quot;] },
+  &quot;contributes&quot;: {
+    &quot;decoration_slots&quot;: [{ &quot;id&quot;: &quot;work&quot;, &quot;placement&quot;: &quot;badge&quot;, &quot;priority&quot;: 50 }],
+    &quot;help&quot;: [{ &quot;id&quot;: &quot;overview&quot;, &quot;file&quot;: &quot;help/overview.md&quot;, &quot;title&quot;: &quot;@@name@@&quot; }]
+  }
+}
+</code></pre>
+<p>The Rust <code>Cargo.toml</code>:</p>
+<pre><code class="language-toml">[package]
+name = &quot;@@package@@&quot;
+version = &quot;0.1.0&quot;
+edition = &quot;2021&quot;
+rust-version = &quot;1.90&quot;
+
+[package.metadata.ilium]
+side = &quot;server&quot;
+
+[lib]
+crate-type = [&quot;cdylib&quot;, &quot;rlib&quot;]
+
+[dependencies]
+ilium-plugin-sdk = &quot;@@sdk@@&quot;
+
+[dev-dependencies]
+ilium-plugin-sdk = { version = &quot;@@sdk@@&quot;, features = [&quot;testing&quot;] }
+</code></pre>
+<p>The Rust <code>src/lib.rs</code>:</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::host::log::{self, Level};
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::AgentActivityEvent;
+use ilium_plugin_sdk::types::intents::SetDecorationSpec;
+use ilium_plugin_sdk::types::tree::AgentActivity;
+
+#[ilium_plugin(side = &quot;server&quot;)]
+#[derive(Default)]
+pub struct Plugin;
+
+impl Lifecycle for Plugin {
+    fn activate(&amp;mut self, context: Activation) -&gt; Result&lt;(), PluginError&gt; {
+        log::log(Level::Info, &amp;format!(&quot;activate: {} ready&quot;, context.plugin));
+        Ok(())
+    }
+}
+
+impl Handler for Plugin {
+    fn on_events(&amp;mut self, batch: Vec&lt;Event&gt;) -&gt; Vec&lt;Submission&gt; {
+        let mut submissions = Vec::new();
+        for event in batch {
+            let Event::AgentActivityChanged(AgentActivityEvent { node, current, .. }) = event
+            else {
+                continue;
+            };
+            if current != AgentActivity::Working {
+                continue;
+            }
+            submissions.push(Submission::new(Intent::SetDecoration(SetDecorationSpec {
+                node,
+                slot: &quot;work&quot;.into(),
+                content: vec![Span::plain(&quot;work&quot;)],
+                icon: None,
+                sort_key: None,
+                persist: false,
+            })));
+        }
+        submissions
+    }
+}
+</code></pre>
+<p>The Rust <code>tests/handler.rs</code>:</p>
+<pre><code class="language-rust">use ilium_plugin_sdk::testing::FakeHost;
+use ilium_plugin_sdk::prelude::*;
+use ilium_plugin_sdk::types::events::AgentActivityEvent;
+use ilium_plugin_sdk::types::tree::AgentActivity;
+use @@package_ident@@::Plugin;
+
+#[test]
+fn working_agent_gets_a_badge() {
+    let mut host = FakeHost::for_manifest(&quot;manifest.json&quot;).expect(&quot;manifest&quot;);
+    host.activate::&lt;Plugin&gt;();
+    let submissions = host.deliver(vec![Event::AgentActivityChanged(AgentActivityEvent {
+        node: 42,
+        previous: AgentActivity::Idle,
+        current: AgentActivity::Working,
+        revision: 1,
+    })]);
+    assert_eq!(submissions.len(), 1);
+}
+</code></pre>
+<p><code>@@package_ident@@</code> is the package name with hyphens replaced by underscores.</p>
+<ul>
+<li><strong>[DEV-275]</strong> <code>new</code> MUST replace <code>@@package_ident@@</code>, the package name with hyphens replaced by underscores, in the Rust test files, in addition to the placeholders of rule DEV-264.</li>
+</ul>
+<p>The TypeScript <code>package.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;@@package@@&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;private&quot;: true,
+  &quot;type&quot;: &quot;module&quot;,
+  &quot;dependencies&quot;: { &quot;@ilium/plugin-sdk&quot;: &quot;@@sdk@@&quot; },
+  &quot;scripts&quot;: { &quot;test&quot;: &quot;bun test&quot; }
+}
+</code></pre>
+<p>The TypeScript <code>tsconfig.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;compilerOptions&quot;: {
+    &quot;target&quot;: &quot;ES2022&quot;,
+    &quot;module&quot;: &quot;ESNext&quot;,
+    &quot;moduleResolution&quot;: &quot;bundler&quot;,
+    &quot;strict&quot;: true,
+    &quot;noEmit&quot;: true,
+    &quot;types&quot;: [&quot;bun-types&quot;]
+  },
+  &quot;include&quot;: [&quot;src&quot;, &quot;tests&quot;]
+}
+</code></pre>
+<p>The TypeScript <code>bunfig.toml</code>:</p>
+<pre><code class="language-toml">[test]
+preload = [&quot;@ilium/plugin-sdk/testing/setup&quot;]
+</code></pre>
+<p>The preload registers the reset hook of the harness, which gives each test a fresh host (see the isolation rules in <a href="/pages/reference-test-harness/">Test harness reference</a>). The TypeScript <code>src/server.ts</code>:</p>
+<pre><code class="language-ts">import { definePlugin, type Event, type Submission } from '@ilium/plugin-sdk';
+import { log } from '@ilium/plugin-sdk/host/log';
+import { span } from '@ilium/plugin-sdk/types';
+
+let nextCorrelation = 1n;
+
+export const { lifecycle, handler } = definePlugin({
+  side: 'server',
+  activate(context) {
+    log('info', `activate: ${context.plugin} ready`);
+  },
+  onEvents(batch: Event[]): Submission[] {
+    const submissions: Submission[] = [];
+    for (const event of batch) {
+      if (event.tag !== 'agent-activity-changed') continue;
+      if (event.val.current !== 'working') continue;
+      submissions.push({
+        intent: {
+          tag: 'set-decoration',
+          val: {
+            node: event.val.node,
+            slot: 'work',
+            content: [span('work')],
+            icon: undefined,
+            sortKey: undefined,
+            persist: false,
+          },
+        },
+        correlation: nextCorrelation++,
+        dedupKey: undefined,
+      });
+    }
+    return submissions;
+  },
+});
+</code></pre>
+<p>The TypeScript <code>tests/handler.test.ts</code>:</p>
+<pre><code class="language-ts">import { expect, test } from 'bun:test';
+import { createFakeHost } from '@ilium/plugin-sdk/testing';
+
+test('working agent gets a badge', async () =&gt; {
+  const host = createFakeHost().forManifest('manifest.json');
+  await host.activateModule('../src/server');
+  const submissions = host.deliver([
+    { tag: 'agent-activity-changed', val: { node: 42n, previous: 'idle', current: 'working', revision: 1n } },
+  ]);
+  expect(submissions.length).toBe(1);
+});
+</code></pre>
+<p>The fixture <code>tests/fixtures/sample.json</code> and its expectation:</p>
+<pre><code class="language-json">{
+  &quot;schema&quot;: 1,
+  &quot;events&quot;: [
+    { &quot;tag&quot;: &quot;agent-activity-changed&quot;, &quot;val&quot;: { &quot;node&quot;: 42, &quot;previous&quot;: &quot;idle&quot;, &quot;current&quot;: &quot;working&quot;, &quot;revision&quot;: 1 } }
+  ]
+}
+</code></pre>
+<pre><code class="language-json">{
+  &quot;schema&quot;: 1,
+  &quot;submissions&quot;: { &quot;match&quot;: &quot;ordered&quot;, &quot;items&quot;: [ { &quot;intent&quot;: &quot;set-decoration&quot;, &quot;node&quot;: 42, &quot;slot&quot;: &quot;work&quot; } ] }
+}
+</code></pre>
+<h3 id="client">client</h3>
+<p>Files, Rust: <code>manifest.json</code>, <code>Cargo.toml</code>, <code>src/lib.rs</code>, <code>tests/view.rs</code>, <code>tests/handler.rs</code>, <code>tests/fixtures/sample.json</code>, <code>tests/fixtures/sample.expect.json</code>, <code>tests/golden/overview.txt</code>, and the common documents.</p>
+<p>Files, TypeScript: <code>manifest.json</code>, <code>package.json</code>, <code>tsconfig.json</code>, <code>bunfig.toml</code>, <code>src/client.ts</code>, <code>tests/view.test.ts</code>, <code>tests/handler.test.ts</code>, and the same fixtures, golden file and documents.</p>
+<p>The manifest differs from <code>server</code> in these keys:</p>
+<pre><code class="language-json">{
+  &quot;client&quot;: { &quot;entry&quot;: &quot;client.wasm&quot;, &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;, &quot;exports&quot;: [&quot;views&quot;] },
+  &quot;capabilities&quot;: { &quot;client&quot;: [&quot;ui.panels&quot;] },
+  &quot;contributes&quot;: {
+    &quot;commands&quot;: [{ &quot;id&quot;: &quot;open&quot;, &quot;title&quot;: &quot;Open @@name@@&quot;, &quot;icon&quot;: &quot;layout-sidebar&quot; }],
+    &quot;panels&quot;: [{ &quot;id&quot;: &quot;main&quot;, &quot;title&quot;: &quot;@@name@@&quot;, &quot;icon&quot;: &quot;layout-sidebar&quot;, &quot;modal&quot;: false }],
+    &quot;help&quot;: [{ &quot;id&quot;: &quot;overview&quot;, &quot;file&quot;: &quot;help/overview.md&quot;, &quot;title&quot;: &quot;@@name@@&quot; }]
+  }
+}
+</code></pre>
+<p>The view draws a block with one text line. The golden file <code>tests/golden/overview.txt</code> is the render at 40 columns by 4 rows:</p>
+<pre><code class="language-text">╭  ≡ ● · Example ────────────────────────╮
+│ Hello from the plugin                  │
+│                                        │
+╰────────────────────────────────────────╯
+</code></pre>
+<ul>
+<li><strong>[DEV-276]</strong> The golden file MUST be the exact output of the test render at the size used by the test, with Unicode box characters. The sample view test MUST compare against it with <code>assert_golden</code>.</li>
+</ul>
+<h3 id="both">both</h3>
+<p>The manifest has both a <code>server</code> and a <code>client</code> entry, <code>capabilities</code> for the client only, and the client exports <code>views</code>. The server sends a <code>message</code> intent on channel <code>hello</code> when a client attaches, and the client view shows the received text. No grant is needed because messages between the sides of one plugin are always allowed.</p>
+<p>Files, Rust: <code>Cargo.toml</code> (a workspace), <code>shared/Cargo.toml</code>, <code>shared/src/lib.rs</code> (the <code>Hello</code> message type with <code>serde</code>-free manual encoding), <code>server/Cargo.toml</code>, <code>server/src/lib.rs</code>, <code>client/Cargo.toml</code>, <code>client/src/lib.rs</code>, <code>manifest.json</code>, <code>tests/session.rs</code> (a <code>FakeSession</code> test), and the common documents and fixtures.</p>
+<p>Files, TypeScript: <code>manifest.json</code>, <code>package.json</code>, <code>tsconfig.json</code>, <code>bunfig.toml</code>, <code>src/shared.ts</code>, <code>src/server.ts</code>, <code>src/client.ts</code>, <code>tests/session.test.ts</code>, and the common documents and fixtures.</p>
+<p>The Rust root <code>Cargo.toml</code>:</p>
+<pre><code class="language-toml">[workspace]
+members = [&quot;shared&quot;, &quot;server&quot;, &quot;client&quot;]
+resolver = &quot;2&quot;
+</code></pre>
+<ul>
+<li><strong>[DEV-277]</strong> The <code>both</code> template test MUST use <code>FakeSession</code> to start the server and one client of the package and assert that the client view shows the message text after the server handles <code>client-attached</code>.</li>
+</ul>
+<h3 id="scene">scene</h3>
+<p>Files, Rust: <code>manifest.json</code>, <code>Cargo.toml</code>, <code>src/lib.rs</code>, <code>tests/frame.rs</code>, <code>tests/golden/frame-tones.txt</code>, and the common documents. Files, TypeScript: <code>manifest.json</code>, <code>package.json</code>, <code>tsconfig.json</code>, <code>bunfig.toml</code>, <code>src/scene.ts</code>, <code>tests/frame.test.ts</code>, <code>tests/golden/frame-tones.txt</code>, and the common documents.</p>
+<p>The manifest differs from <code>server</code> in these keys:</p>
+<pre><code class="language-json">{
+  &quot;scene&quot;: { &quot;entry&quot;: &quot;scene.wasm&quot;, &quot;world&quot;: &quot;ilium:scene/base@0.1.0&quot;, &quot;exports&quot;: [] },
+  &quot;contributes&quot;: {
+    &quot;scenes&quot;: [
+      {
+        &quot;id&quot;: &quot;waves&quot;,
+        &quot;title&quot;: &quot;Waves&quot;,
+        &quot;family&quot;: &quot;procedural&quot;,
+        &quot;modes&quot;: [&quot;live&quot;],
+        &quot;frame_rate_cap&quot;: 30,
+        &quot;settings_schema&quot;: { &quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {} }
+      }
+    ]
+  }
+}
+</code></pre>
+<p>The scene draws tone only. Colour, dither and display settings are never scene settings, and the template adds none. The golden file holds a tone grid in digits 0 to 9 for a 16 by 4 surface at frame 3. See <a href="/pages/api-scenes/">Ambient scenes</a>.</p>
+<h3 id="pane-kind">pane-kind</h3>
+<p>The manifest adds <code>pane_kinds</code> and the grant <code>panes.provide-kind</code>:</p>
+<pre><code class="language-json">{
+  &quot;client&quot;: { &quot;entry&quot;: &quot;client.wasm&quot;, &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;, &quot;exports&quot;: [&quot;views&quot;] },
+  &quot;capabilities&quot;: { &quot;client&quot;: [&quot;ui.panels&quot;, &quot;panes.provide-kind&quot;] },
+  &quot;contributes&quot;: {
+    &quot;pane_kinds&quot;: [
+      { &quot;id&quot;: &quot;board&quot;, &quot;title&quot;: &quot;@@name@@&quot;, &quot;icon&quot;: &quot;layout-board&quot;, &quot;primitive&quot;: &quot;basic&quot;, &quot;wants_keys&quot;: true, &quot;persist&quot;: &quot;metadata&quot; }
+    ],
+    &quot;help&quot;: [{ &quot;id&quot;: &quot;overview&quot;, &quot;file&quot;: &quot;help/overview.md&quot;, &quot;title&quot;: &quot;@@name@@&quot; }]
+  }
+}
+</code></pre>
+<p>The global id of the pane kind is <code>@@id@@.board</code>. The view test renders <code>ViewTarget::Pane</code> at 40 by 6 and compares the golden file. The handler test sends a key through the <code>key-pressed</code> event and asserts the next render.</p>
+<h3 id="core-style">core-style</h3>
+<p><code>core-style</code> writes a plugin in the style of the bundled first-party plugins: both sides, the <code>ilium.</code> id, tier T1, <code>limits_tier: "first-party"</code>, <code>replaceable: true</code>, and one declared extension point. It is for plugins that live in the Ilium source tree.</p>
+<pre><code class="language-json">{
+  &quot;api&quot;: &quot;ilium:plugin@0.1.0&quot;,
+  &quot;id&quot;: &quot;@@id@@&quot;,
+  &quot;name&quot;: &quot;@@name@@&quot;,
+  &quot;version&quot;: &quot;0.1.0&quot;,
+  &quot;publisher&quot;: &quot;Ilium&quot;,
+  &quot;limits_tier&quot;: &quot;first-party&quot;,
+  &quot;replaceable&quot;: true,
+  &quot;surface&quot;: [],
+  &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;, &quot;exports&quot;: [] },
+  &quot;client&quot;: { &quot;entry&quot;: &quot;client.wasm&quot;, &quot;world&quot;: &quot;ilium:client/base@0.1.0&quot;, &quot;exports&quot;: [&quot;views&quot;] },
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;tree.read&quot;], &quot;client&quot;: [&quot;ui.panels&quot;] },
+  &quot;contributes&quot;: {
+    &quot;extension_points&quot;: [
+      { &quot;id&quot;: &quot;before-open&quot;, &quot;kind&quot;: &quot;hook&quot;, &quot;mode&quot;: &quot;veto&quot;, &quot;title&quot;: &quot;Before open&quot;, &quot;deadline_ms&quot;: 20, &quot;max_handlers&quot;: 8, &quot;version&quot;: &quot;0.1.0&quot; }
+    ],
+    &quot;help&quot;: [{ &quot;id&quot;: &quot;overview&quot;, &quot;file&quot;: &quot;help/overview.md&quot;, &quot;title&quot;: &quot;@@name@@&quot; }]
+  }
+}
+</code></pre>
+<p>The <code>surface</code> list is empty until the plugin defines what a replacement must provide. The tests include a hook test that runs <code>before-open</code> against two stub contributors with <code>FakeSession</code>.</p>
+<ul>
+<li><strong>[DEV-278]</strong> <code>core-style</code> MUST write the file <code>docs/EXTENDING.md</code> with the table of the plugin's extension points, so a plugin that extends it has a document to read.</li>
+</ul>
+<h3 id="service-provider">service-provider</h3>
+<pre><code class="language-json">{
+  &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;, &quot;exports&quot;: [&quot;service-provider&quot;] },
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;services.provide:@@id@@/greeter&quot;] },
+  &quot;contributes&quot;: { &quot;services&quot;: [{ &quot;provides&quot;: [&quot;@@id@@/greeter&quot;] }] }
+}
+</code></pre>
+<p>The Rust handler implements <code>ServiceProvider::handle(call) -&gt; ServiceReply</code> and replies with <code>{"greeting":"hello"}</code>. The test calls the service through <code>FakeSession</code> and a stub consumer, and asserts the reply JSON.</p>
+<h3 id="extension">extension</h3>
+<p>The <code>extension</code> template fills a hook of a core plugin. It requests <code>extensions.contribute:ilium.core.smart-copy/after-copy</code>, exports <code>hook-handler</code>, and declares one entry in <code>contributes.extensions</code>:</p>
+<pre><code class="language-json">{
+  &quot;server&quot;: { &quot;entry&quot;: &quot;server.wasm&quot;, &quot;world&quot;: &quot;ilium:server/base@0.1.0&quot;, &quot;exports&quot;: [&quot;hook-handler&quot;] },
+  &quot;capabilities&quot;: { &quot;server&quot;: [&quot;extensions.contribute:ilium.core.smart-copy/after-copy&quot;] },
+  &quot;contributes&quot;: {
+    &quot;extensions&quot;: [
+      { &quot;point&quot;: &quot;ilium.core.smart-copy/after-copy@0.1.0&quot;, &quot;id&quot;: &quot;strip-keys&quot;, &quot;priority&quot;: 70, &quot;handler&quot;: &quot;strip_keys&quot; }
+    ]
+  }
+}
+</code></pre>
+<p>The test builds a <code>HookCall</code> with a payload that holds a secret, runs the handler with <code>host.run_hook</code> and asserts <code>HookReply::Replace</code>. The core plugin point is described in <a href="/pages/reference-core-extension-points/">Core extension points</a>.</p>
+<h2 id="edge-cases">Edge cases</h2>
+<ul>
+<li><strong>Existing folder.</strong> An empty folder is accepted. A folder with only a <code>.git</code> directory counts as non-empty because of the file rule, so use <code>--force</code> for it.</li>
+<li><strong>Both language files.</strong> The template never writes <code>Cargo.toml</code> and <code>package.json</code> together, because the build refuses that.</li>
+<li><strong>Case in the id.</strong> Upper-case letters in the id fail the pattern. The error names the first bad character.</li>
+<li><strong>Template drift.</strong> A new <code>ilium</code> release can change a template. The README of the project names the <code>ilium</code> version that wrote it, in a comment on its first line.</li>
+</ul>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul>
+<p>API checked against <code>ilium:plugin@0.1.0</code>.</p>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-plugin-scope-and-sessions/"><small>Previous</small>Reference, plugin scope and sessions</a><a class="next" href="/pages/reference-registry/"><small>Next</small>Registry reference</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#you-will-need">You will need</a></li><li class="l2"><a href="#the-command">The command</a></li><li class="l2"><a href="#the-guarantees-about-a-fresh-project">The guarantees about a fresh project</a></li><li class="l2"><a href="#common-files">Common files</a></li><li class="l2"><a href="#the-eight-templates">The eight templates</a></li><li class="l3"><a href="#server">server</a></li><li class="l3"><a href="#client">client</a></li><li class="l3"><a href="#both">both</a></li><li class="l3"><a href="#scene">scene</a></li><li class="l3"><a href="#pane-kind">pane-kind</a></li><li class="l3"><a href="#core-style">core-style</a></li><li class="l3"><a href="#service-provider">service-provider</a></li><li class="l3"><a href="#extension">extension</a></li><li class="l2"><a href="#edge-cases">Edge cases</a></li><li class="l2"><a href="#see-also">See also</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

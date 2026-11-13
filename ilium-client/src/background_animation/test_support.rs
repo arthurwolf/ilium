@@ -102,5 +102,9 @@ pub fn fake_factory(probe: &Arc<FakeProbe>) -> SceneFactory {
 }
 
 pub fn fake_host(probe: &Arc<FakeProbe>) -> AmbientHost {
-    AmbientHost::with_factory(fake_factory(probe))
+    let mut host = AmbientHost::with_factory(fake_factory(probe));
+    host.configure_resources(ilium_ambient::resources::AmbientResources::new(
+        crate::execution::test_client(),
+    ));
+    host
 }

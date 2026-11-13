@@ -90,29 +90,33 @@ impl<T> Stored<T> {
     }
 }
 
-/// One explicit isolated composition for ambient unit fixtures. Pure scene
-/// environments share it rather than starting an execution per constructor.
+/// One explicit composition for an ambient test thread. Constructors within
+/// the test share it; unrelated parallel tests must not spend its credits.
 #[cfg(test)]
 fn create_test_resources() -> (ilium_execution::Execution, AmbientResources) {
-    create_test_resources_with_limits(256, 16 * 1024 * 1024 * 1024)
+    // Hundreds of unit tests share this fixture concurrently; its job and
+    // queue caps only bound parallel test load, never production capacity.
+    create_test_resources_with_limits(256, 16 * 1024 * 1024 * 1024, 256, 256)
 }
 
 #[cfg(test)]
 fn create_isolated_test_resources() -> (ilium_execution::Execution, AmbientResources) {
     // Leave room for the four admitted bank threads (and their bank metadata)
     // before a test deliberately fills the worker budget.
-    create_test_resources_with_limits(20, 2308 * 1024 * 1024)
+    create_test_resources_with_limits(20, 2308 * 1024 * 1024, 16, 8)
 }
 
 #[cfg(test)]
 fn create_test_resources_with_limits(
     worker_threads: usize,
     worker_bytes: usize,
+    jobs: usize,
+    queue_slots: usize,
 ) -> (ilium_execution::Execution, AmbientResources) {
     use ilium_execution::{ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaLimits};
     let quota = QuotaGroup::new(QuotaLimits {
         clients: 8,
-        jobs: 16,
+        jobs,
         service_jobs: 0,
         input_bytes: 512 * 1024 * 1024,
         result_bytes: 512 * 1024 * 1024,
@@ -121,7 +125,7 @@ fn create_test_resources_with_limits(
     });
     let lane = LaneConfig {
         threads: 2,
-        queue_slots: 8,
+        queue_slots,
         priority: None,
         resident_bytes_per_thread: 1024 * 1024,
     };
@@ -141,7 +145,7 @@ fn create_test_resources_with_limits(
     .unwrap();
     let client = execution
         .client(ClientLimits {
-            jobs: 16,
+            jobs,
             service_jobs: 0,
             input_bytes: 512 * 1024 * 1024,
             result_bytes: 512 * 1024 * 1024,
@@ -157,11 +161,30 @@ pub(crate) fn isolated_test_resources() -> (ilium_execution::Execution, AmbientR
     create_isolated_test_resources()
 }
 
+/// `Busy` is a momentary try-lock miss on the admission ledger, never a capacity
+/// refusal: production callers retry it. Tests that need admission to succeed
+/// use this instead of unwrapping the first attempt.
+#[cfg(test)]
+pub(crate) fn retry_while_busy<T>(
+    mut attempt: impl FnMut() -> Result<T, RejectReason>,
+) -> Result<T, RejectReason> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match attempt() {
+            Err(RejectReason::Busy) if std::time::Instant::now() < deadline => {
+                std::thread::yield_now()
+            }
+            result => return result,
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn test_resources() -> AmbientResources {
-    static FIXTURE: std::sync::OnceLock<(ilium_execution::Execution, AmbientResources)> =
-        std::sync::OnceLock::new();
-    FIXTURE.get_or_init(create_test_resources).1.clone()
+    thread_local! {
+        static FIXTURE: (ilium_execution::Execution, AmbientResources) = create_test_resources();
+    }
+    FIXTURE.with(|fixture| fixture.1.clone())
 }
 
 #[cfg(test)]
@@ -175,6 +198,31 @@ mod tests {
         sync::mpsc,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn parallel_fixture_allocations_do_not_spend_another_tests_credits() {
+        let resources = test_resources();
+        let quota = resources.finite().quota_group();
+        let baseline = quota.snapshot().worker_bytes;
+        let rendezvous = Arc::new(std::sync::Barrier::new(2));
+        std::thread::scope(|scope| {
+            let rendezvous_other = Arc::clone(&rendezvous);
+            scope.spawn(move || {
+                let resources = test_resources();
+                let allocation = resources.reserve_storage(1024).unwrap();
+                rendezvous_other.wait();
+                rendezvous_other.wait();
+                drop(allocation);
+            });
+            rendezvous.wait();
+            assert_eq!(quota.snapshot().worker_bytes, baseline);
+            rendezvous.wait();
+        });
+        let allocation = resources.reserve_storage(1024).unwrap();
+        assert_eq!(quota.snapshot().worker_bytes, baseline + 1024);
+        drop(allocation);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+    }
 
     fn isolated() -> (Execution, AmbientResources, QuotaGroup) {
         let quota = QuotaGroup::new(QuotaLimits {
@@ -254,9 +302,10 @@ mod tests {
         ticket
             .join_until(Instant::now() + Duration::from_secs(5))
             .unwrap();
-        // The actual join is complete; the explicitly retained ticket still
-        // owns the supervisor wake state and its original physical claim.
-        assert_eq!(quota.snapshot().worker_threads, 2);
+        // A completed ticket observes retirement without retaining the native
+        // thread's physical claim. Blocked-worker custody is checked above.
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
         drop(ticket);
         assert_eq!(quota.snapshot().worker_threads, 1);
         assert_eq!(quota.snapshot().worker_bytes, baseline);

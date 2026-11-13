@@ -8,6 +8,12 @@
 //! async-task-ownership rule).
 
 use std::path::Path;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
+use crate::connection_health::{
+    ConnectionHealth, Direction, HealthTask, ObservedWriter, ReadPhase, WritePhase,
+};
 
 use ilium_ipc::{ClientRequest, FrameReader, FrameWriter, IpcError, ServerEvent};
 use ilium_transport::SessionEndpoint;
@@ -87,6 +93,20 @@ impl EventRetention {
     }
     /// Admit a NEW heap allocation before copying; cloning this guard alone
     /// never authorizes a copied payload. Shares the original directional cap.
+    pub(crate) fn validate_projection_overlap(
+        &self,
+        bytes: usize,
+    ) -> Result<(), crate::ipc_preparation::StorageRefusal> {
+        self.allocation.validate_projection_overlap(bytes)
+    }
+
+    pub(crate) fn try_reserve_projection(
+        &self,
+        bytes: usize,
+    ) -> Result<Self, crate::ipc_preparation::StorageRefusal> {
+        self.allocation.try_reserve_projection(bytes).map(Self::new)
+    }
+
     pub(crate) fn try_reserve_derived(
         &self,
         bytes: usize,
@@ -206,7 +226,12 @@ impl RequestSender {
                     if error.reason == ilium_execution::RejectReason::Busy {
                         tokio::time::sleep(std::time::Duration::from_millis(1)).await;
                     } else {
-                        notified.await;
+                        // Writer failure need not release any quota. Race closure
+                        // explicitly so a producer cannot wait forever for credit.
+                        tokio::select! {
+                            _ = notified => {},
+                            () = self.sender.closed() => {},
+                        }
                     }
                 }
             }
@@ -350,6 +375,7 @@ pub enum ConnectionError {
 pub struct Connection {
     pub events: mpsc::Receiver<Received<ServerEvent>>,
     pub requests: RequestSender,
+    pub(crate) health: Arc<ConnectionHealth>,
     reader_task: JoinHandle<Result<(), IpcError>>,
     stop_reader: watch::Sender<bool>,
     writer_task: JoinHandle<()>,
@@ -377,11 +403,14 @@ impl Connection {
         execution: &crate::execution::ClientExecution,
         admission: ilium_execution::Client,
     ) -> Result<Self, ConnectionError> {
-        let preparation = execution.ipc_preparation(admission).map_err(|reason| {
-            ConnectionError::CodecBootstrap(IpcError::Io(std::io::Error::other(format!(
-                "codec admission: {reason:?}"
-            ))))
-        })?;
+        let preparation =
+            crate::execution::retry_startup_busy(|| execution.ipc_preparation(admission.clone()))
+                .await
+                .map_err(|reason| {
+                    ConnectionError::CodecBootstrap(IpcError::Io(std::io::Error::other(format!(
+                        "codec admission: {reason:?}"
+                    ))))
+                })?;
         Self::connect_prepared(socket_path, session, preparation, None, None).await
     }
 
@@ -399,6 +428,7 @@ impl Connection {
                 path: socket_path.to_path_buf(),
                 source: std::io::Error::other(source),
             })?;
+        let health = ConnectionHealth::with_server_process_id(stream.peer_process_id());
         let (read_half, write_half) = stream.into_split();
 
         let (event_tx, event_rx) = mpsc::channel::<Received<ServerEvent>>(CHANNEL_CAPACITY);
@@ -409,7 +439,10 @@ impl Connection {
         };
 
         request_tx
-            .send(ClientRequest::AttachInteractive { session })
+            .send(ClientRequest::AttachInteractive {
+                session,
+                hello: Default::default(),
+            })
             .await
             // The receiver can only be closed if `writer_task` already
             // panicked before this line, which can't happen -- it hasn't
@@ -425,28 +458,36 @@ impl Connection {
                 )))
             })?;
 
+        let read_health = health.task(Direction::Read);
+        let write_health = health.task(Direction::Write);
         let (stop_reader, read_stop) = watch::channel(false);
-        let reader_task = tokio::spawn(read_loop(
+        let reader_task = tokio::spawn(read_loop_with_health(
             read_half,
             event_tx,
             preparation.clone(),
             read_stop,
+            read_health,
         ));
-        let writer_task = tokio::spawn(write_loop(write_half, request_rx, preparation));
+        let writer_task = tokio::spawn(write_loop_with_health(
+            write_half,
+            request_rx,
+            preparation,
+            write_health,
+        ));
 
         Ok(Self {
             events: event_rx,
             requests: request_tx,
+            health,
             reader_task,
             stop_reader,
             writer_task,
             _codec_owner: owner,
         })
     }
-    /// Stop at a frame boundary. An admitted body still finishes decoding and
-    /// hands off when storage is available. A blocked storage handoff is instead
-    /// cancelled explicitly and reported by finish_read_shutdown; no partial
-    /// frame is retried and cancellation never claims delivery.
+    /// Stop before admission or at the admitted frame boundary. Its body drains
+    /// while the consumer exists; blocked storage/publication can cancel with
+    /// an explicit error. No partial frame is retried or claimed as delivered.
     pub(crate) fn request_read_shutdown(&self) {
         let _ = self.stop_reader.send(true);
     }
@@ -460,6 +501,7 @@ impl Connection {
 
 impl Drop for Connection {
     fn drop(&mut self) {
+        self.health.cancel();
         self.reader_task.abort();
         self.writer_task.abort();
     }
@@ -477,124 +519,207 @@ impl Drop for Connection {
 /// (The main loop likewise awaits its outbound-request send for lossless
 /// backpressure -- see the comment at `crate::run`'s
 /// `connection.requests.send` call.)
+async fn read_stop_reason(stop: &mut watch::Receiver<bool>) -> &'static str {
+    loop {
+        if *stop.borrow() {
+            return "read shutdown requested";
+        }
+        if stop.changed().await.is_err() {
+            return "read shutdown owner closed";
+        }
+    }
+}
+
+fn read_wait_cancelled(stage: &str, reason: &str) -> IpcError {
+    IpcError::Io(std::io::Error::new(
+        std::io::ErrorKind::Interrupted,
+        format!("connection {stage} cancelled: {reason}; stream abandoned without delivery acknowledgement"),
+    ))
+}
+
+async fn publish_read_event(
+    event_tx: &mpsc::Sender<Received<ServerEvent>>,
+    event: Received<ServerEvent>,
+    stop: &mut watch::Receiver<bool>,
+) -> Result<(), IpcError> {
+    // Preserve graceful drain of admitted frames when a slot is available.
+    // Only a genuinely blocked handoff is interrupted by graceful shutdown.
+    let permit = match event_tx.try_reserve() {
+        Ok(permit) => permit,
+        Err(mpsc::error::TrySendError::Closed(())) => {
+            return Err(read_wait_cancelled(
+                "event publication",
+                "event receiver closed",
+            ));
+        }
+        Err(mpsc::error::TrySendError::Full(())) => {
+            tokio::select! {
+                biased;
+                reason = read_stop_reason(stop) => return Err(read_wait_cancelled("event publication", reason)),
+                permit = event_tx.reserve() => permit.map_err(|_| read_wait_cancelled("event publication", "event receiver closed"))?,
+            }
+        }
+    };
+    permit.send(event);
+    Ok(())
+}
+
+#[cfg(test)]
 async fn read_loop<R: tokio::io::AsyncRead + Unpin>(
     read_half: R,
     event_tx: mpsc::Sender<Received<ServerEvent>>,
     preparation: crate::ipc_preparation::IpcPreparation,
-    mut stop: watch::Receiver<bool>,
+    stop: watch::Receiver<bool>,
 ) -> Result<(), IpcError> {
-    let mut frame_reader = FrameReader::new(read_half);
-    loop {
-        if *stop.borrow() {
-            break;
-        }
-        // The fixed-size header can wait without occupying a CPU job or
-        // payload bytes. Keep this one reader's header/payload order intact.
-        let header = tokio::select! {
-            biased;
-            _ = stop.changed() => break,
-            header = frame_reader.read_encoded_length() => header,
-        };
-        let length = match header {
-            Ok(length) => length,
-            Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(error) => {
-                tracing::warn!(%error, "connection header failed");
-                return Err(error);
-            }
-        };
-        // Admission precedes payload allocation and CPU decoding.
-        let reservation = match preparation.reserve_decoder().await {
-            Ok(reservation) => reservation,
-            Err(error) => {
-                tracing::warn!(%error, "connection decoder admission failed");
-                return Err(error);
-            }
-        };
-        let event = match frame_reader.read_encoded_payload(length).await {
-            Ok(event) => event,
-            Err(IpcError::Io(io_error)) if io_error.kind() == std::io::ErrorKind::UnexpectedEof => {
-                return Err(IpcError::Io(io_error));
-            }
-            Err(error) => {
-                tracing::warn!("connection read failed, closing: {error}");
-                return Err(error);
-            }
-        };
-        let event = match preparation
-            .run_reserved(reservation, move |_| {
-                let event = ilium_ipc::decode_bounded_frame::<ServerEvent>(&event)?;
-                let bytes = event.retained_bytes();
-                Ok((event, bytes))
-            })
-            .await
-        {
-            Ok(event) => event,
-            Err(error) => {
-                tracing::warn!(%error, "connection CPU decoding failed");
-                return Err(error);
-            }
-        };
-        let cancelled = async {
-            let read_stopped = async {
-                loop {
-                    if *stop.borrow() {
-                        return "read shutdown requested";
-                    }
-                    if stop.changed().await.is_err() {
-                        return "read shutdown owner closed";
-                    }
+    let health = ConnectionHealth::new();
+    read_loop_with_health(
+        read_half,
+        event_tx,
+        preparation,
+        stop,
+        health.task(Direction::Read),
+    )
+    .await
+}
+
+async fn read_loop_with_health<R: tokio::io::AsyncRead + Unpin>(
+    read_half: R,
+    event_tx: mpsc::Sender<Received<ServerEvent>>,
+    preparation: crate::ipc_preparation::IpcPreparation,
+    mut stop: watch::Receiver<bool>,
+    task: HealthTask,
+) -> Result<(), IpcError> {
+    let health = Arc::clone(&task.health);
+    let result = async {
+        let mut frame_reader = FrameReader::new(read_half);
+        loop {
+            health.read_phase(ReadPhase::Header);
+            let header = tokio::select! {
+                biased;
+                _ = read_stop_reason(&mut stop) => break,
+                () = event_tx.closed() => break,
+                header = frame_reader.read_encoded_length() => header,
+            };
+            let length = match header {
+                Ok(length) => length,
+                Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(error) => return Err(error),
+            };
+            health.headers_received.fetch_add(1, Ordering::Relaxed);
+            health.last_declared_payload_bytes.store(u64::from(length), Ordering::Relaxed);
+            let input_bytes = frame_reader.encoded_payload_input_bytes(length)?;
+            health.read_phase(ReadPhase::Admission);
+            // Cancellation after consuming a header abandons the stream. Never
+            // resume an uncertain byte prefix or report it as delivered.
+            let reservation = tokio::select! {
+                biased;
+                reason = read_stop_reason(&mut stop) => return Err(read_wait_cancelled("decoder admission", reason)),
+                () = event_tx.closed() => return Err(read_wait_cancelled("decoder admission", "event receiver closed")),
+                reservation = preparation.reserve_decoder_for(input_bytes) => reservation?,
+            };
+            // The body future borrows the reader, while its reservation stays in
+            // this outer scope. Cancelling body intake drops partial bytes before
+            // releasing their reservation, without depending on capture order.
+            health.read_phase(ReadPhase::Body);
+            let event = tokio::select! {
+                biased;
+                () = event_tx.closed() => return Err(read_wait_cancelled("frame intake", "event receiver closed")),
+                event = frame_reader.read_encoded_payload(length) => event?,
+            };
+            // Graceful stop drains an admitted body; consumer loss abandons it.
+            // Keep frame credit even if the CPU future is never first polled.
+            health.bodies_received.fetch_add(1, Ordering::Relaxed);
+            let charged_frame = (event, reservation.retention());
+            health.read_phase(ReadPhase::Decode);
+            let event = tokio::select! {
+                biased;
+                () = event_tx.closed() => return Err(read_wait_cancelled("frame decode", "event receiver closed")),
+                event = preparation.run_reserved(reservation, move |_| {
+                    let result = ilium_ipc::decode_bounded_frame::<ServerEvent>(&charged_frame.0);
+                    drop(charged_frame);
+                    let event = result?;
+                    let bytes = event.retained_bytes();
+                    Ok((event, bytes))
+                }) => event?,
+            };
+            health.events_decoded.fetch_add(1, Ordering::Relaxed);
+            health.read_phase(ReadPhase::Retention);
+            let cancelled = async {
+                tokio::select! {
+                    biased;
+                    reason = read_stop_reason(&mut stop) => reason,
+                    () = event_tx.closed() => "event receiver closed",
                 }
             };
-            tokio::select! {
-                biased;
-                reason = read_stopped => reason,
-                () = event_tx.closed() => "event receiver closed",
-            }
-        };
-        let event = match preparation
-            .retain_decoded_cancellable(event, cancelled)
-            .await
-        {
-            Ok(event) => event,
-            Err(error) => {
-                tracing::warn!(%error, "connection decoded storage handoff failed");
-                return Err(error);
-            }
-        };
-        if event_tx.send(event).await.is_err() {
-            break;
+            let event = preparation
+                .retain_decoded_cancellable(event, cancelled)
+                .await?;
+            health.read_phase(ReadPhase::Publication);
+            publish_read_event(&event_tx, event, &mut stop).await?;
+            health.published();
         }
+        Ok(())
     }
-    Ok(())
+    .await;
+    task.finish(result.is_ok());
+    if let Err(error) = &result {
+        tracing::warn!(%error, connection_health = %health.report(), "connection read failed, closing");
+    }
+    result
 }
 
 /// Encodes and sends every `ClientRequest` received on `request_rx`, until
 /// the sender side is dropped (session shutdown) or a write fails (server
 /// gone).
+#[cfg(test)]
 async fn write_loop<W: tokio::io::AsyncWrite + Unpin>(
+    write_half: W,
+    request_rx: mpsc::Receiver<RequestCommand>,
+    preparation: crate::ipc_preparation::IpcPreparation,
+) {
+    let health = ConnectionHealth::new();
+    write_loop_with_health(
+        write_half,
+        request_rx,
+        preparation,
+        health.task(Direction::Write),
+    )
+    .await;
+}
+
+async fn write_loop_with_health<W: tokio::io::AsyncWrite + Unpin>(
     write_half: W,
     mut request_rx: mpsc::Receiver<RequestCommand>,
     preparation: crate::ipc_preparation::IpcPreparation,
+    task: HealthTask,
 ) {
-    let mut frame_writer = FrameWriter::new(write_half);
-    while let Some(command) = request_rx.recv().await {
+    let health = Arc::clone(&task.health);
+    let mut frame_writer = FrameWriter::new(ObservedWriter::new(write_half, Arc::clone(&health)));
+    loop {
+        health.write_phase(WritePhase::Waiting);
+        let Some(command) = request_rx.recv().await else {
+            break;
+        };
         // Capacity release wakes the UI publisher; it never waits here for
         // a blocked write or requires another keyboard event to retry.
         crate::execution::admission_notification().notify_waiters();
         match command {
             RequestCommand::Request(request) => {
                 let (request, request_retention) = (*request).into_parts();
+                health.write_phase(WritePhase::Encoding);
                 let result = async {
                     let encoded = preparation.prepare_encoded(request).await?;
+                    health.requests_encoded.fetch_add(1, Ordering::Relaxed);
                     frame_writer.write_encoded(&encoded.frame).await
                 }
                 .await;
                 drop(request_retention);
                 if let Err(error) = result {
-                    tracing::warn!("connection write failed, closing: {error}");
-                    break;
+                    task.finish(false);
+                    tracing::warn!(%error, connection_health = %health.report(), "connection write failed, closing");
+                    return;
                 }
+                health.requests_flushed.fetch_add(1, Ordering::Relaxed);
             }
             RequestCommand::Flush(acknowledgement) => {
                 // FrameWriter::write awaits flush before returning. Keeping
@@ -603,6 +728,7 @@ async fn write_loop<W: tokio::io::AsyncWrite + Unpin>(
             }
         }
     }
+    task.finish(true);
 }
 
 #[cfg(test)]
@@ -611,6 +737,134 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll, Waker};
     use tokio::io::AsyncWrite;
+
+    #[tokio::test]
+    async fn partial_header_sampling_counts_no_completed_stage_and_cancel_keeps_phase() {
+        let (_codec_owner, preparation) = test_codec();
+        let health = ConnectionHealth::new();
+        let (read_half, mut write_half) = tokio::io::duplex(1024);
+        let (sent, _received) = mpsc::channel(1);
+        let (_stop, stopped) = watch::channel(false);
+        tokio::io::AsyncWriteExt::write_all(&mut write_half, &[0])
+            .await
+            .expect("one incomplete header byte");
+        let mut reader = Box::pin(read_loop_with_health(
+            read_half,
+            sent,
+            preparation,
+            stopped,
+            health.task(Direction::Read),
+        ));
+        // Poll the real reader through its pending read_exact boundary without
+        // waiting for a timer or relying on another task winning a race.
+        std::future::poll_fn(
+            |context| match std::future::Future::poll(reader.as_mut(), context) {
+                Poll::Pending => Poll::Ready(()),
+                Poll::Ready(result) => panic!("partial header unexpectedly completed: {result:?}"),
+            },
+        )
+        .await;
+        assert_eq!(health.headers_received.load(Ordering::Relaxed), 0);
+        assert_eq!(health.bodies_received.load(Ordering::Relaxed), 0);
+        assert_eq!(health.events_decoded.load(Ordering::Relaxed), 0);
+        assert_eq!(health.events_published.load(Ordering::Relaxed), 0);
+        let report = health.report();
+        assert!(report.contains("phase=header wait (idle or partial header)"));
+        assert!(report.contains("last_publication_age=none yet"));
+        assert!(report.contains("not a server responsiveness measurement"));
+        drop(reader);
+        assert!(health
+            .report()
+            .contains("state=cancelled, phase=header wait"));
+    }
+
+    #[tokio::test]
+    async fn health_tracks_actual_flush_and_retains_cancelled_phase() {
+        let (_codec_owner, preparation) = test_codec();
+        let health = ConnectionHealth::with_server_process_id(Some(12345));
+        let state = Arc::new(Mutex::new(FlushState::default()));
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let (sent, received) = mpsc::channel(1);
+        let writer = tokio::spawn(write_loop_with_health(
+            ControlledWriter {
+                state: state.clone(),
+                entered: entered.clone(),
+            },
+            received,
+            preparation.clone(),
+            health.task(Direction::Write),
+        ));
+        sent.send(RequestCommand::Request(Box::new(
+            crate::ipc_preparation::admit_request(
+                &preparation.outbound_client(),
+                ClientRequest::UpdateDebugLogging { enabled: true },
+            )
+            .expect("admit request"),
+        )))
+        .await
+        .expect("request queued");
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+            .await
+            .expect("actual stream flush reached");
+        let report = health.report();
+        assert!(report.contains("server_process_id=Some(12345)"));
+        assert!(report.contains("phase=flush"));
+        assert_eq!(health.requests_encoded.load(Ordering::Relaxed), 1);
+        assert_eq!(health.requests_flushed.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            health.written_bytes.load(Ordering::Relaxed),
+            state.lock().expect("state").bytes.len() as u64
+        );
+        assert!(health.written_bytes.load(Ordering::Relaxed) > 0);
+        writer.abort();
+        assert!(writer.await.expect_err("aborted writer").is_cancelled());
+        assert!(health.report().contains("state=cancelled, phase=flush"));
+        assert_eq!(health.requests_flushed.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn health_counts_only_completed_read_stages_and_preserves_eof() {
+        let (_codec_owner, preparation) = test_codec();
+        let health = ConnectionHealth::new();
+        let (read_half, write_half) = tokio::io::duplex(1024);
+        let (sent, mut received) = mpsc::channel(1);
+        let (_stop, stopped) = watch::channel(false);
+        let reader = tokio::spawn(read_loop_with_health(
+            read_half,
+            sent,
+            preparation,
+            stopped,
+            health.task(Direction::Read),
+        ));
+        let mut wire = FrameWriter::new(write_half);
+        wire.write(&ServerEvent::DebugLoggingChanged { enabled: true })
+            .await
+            .expect("wire frame");
+        drop(wire);
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), received.recv())
+            .await
+            .expect("publication deadline")
+            .expect("event");
+        assert!(matches!(
+            event.view(),
+            ServerEvent::DebugLoggingChanged { enabled: true }
+        ));
+        tokio::time::timeout(std::time::Duration::from_secs(5), reader)
+            .await
+            .expect("EOF deadline")
+            .expect("reader joined")
+            .expect("clean EOF");
+        assert_eq!(health.headers_received.load(Ordering::Relaxed), 1);
+        assert_eq!(health.bodies_received.load(Ordering::Relaxed), 1);
+        assert_eq!(health.events_decoded.load(Ordering::Relaxed), 1);
+        assert_eq!(health.events_published.load(Ordering::Relaxed), 1);
+        assert!(health.last_declared_payload_bytes.load(Ordering::Relaxed) > 0);
+        health.cancel();
+        assert!(health.report().contains("state=closed, phase=header wait"));
+        assert!(health
+            .report()
+            .contains("not a server responsiveness measurement"));
+    }
 
     #[derive(Default)]
     struct FlushState {
@@ -685,6 +939,52 @@ mod tests {
             self.position += count;
             Poll::Ready(Ok(()))
         }
+    }
+
+    #[tokio::test]
+    async fn blocked_event_publication_is_cancelled_without_success() {
+        let (sent, mut received) = mpsc::channel(1);
+        sent.send(Received::with_retention(
+            ServerEvent::DebugLoggingChanged { enabled: false },
+            None,
+        ))
+        .await
+        .expect("fill");
+        let (stop, mut stopped) = watch::channel(false);
+        stop.send(true).expect("stop");
+        let error = publish_read_event(
+            &sent,
+            Received::with_retention(ServerEvent::DebugLoggingChanged { enabled: true }, None),
+            &mut stopped,
+        )
+        .await
+        .expect_err("blocked publication must report cancellation");
+        assert!(
+            matches!(error, IpcError::Io(ref error) if error.kind() == std::io::ErrorKind::Interrupted)
+        );
+        assert!(matches!(
+            received.recv().await.expect("original").view(),
+            ServerEvent::DebugLoggingChanged { enabled: false }
+        ));
+        assert!(received.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn ready_event_publication_drains_despite_graceful_stop() {
+        let (sent, mut received) = mpsc::channel(1);
+        let (stop, mut stopped) = watch::channel(false);
+        stop.send(true).expect("stop");
+        publish_read_event(
+            &sent,
+            Received::with_retention(ServerEvent::DebugLoggingChanged { enabled: true }, None),
+            &mut stopped,
+        )
+        .await
+        .expect("drain");
+        assert!(matches!(
+            received.recv().await.expect("event").view(),
+            ServerEvent::DebugLoggingChanged { enabled: true }
+        ));
     }
 
     #[tokio::test]
@@ -1320,7 +1620,7 @@ mod tests {
                 &mut app,
                 received.retention.as_ref()
             ),
-            Err(ilium_execution::RejectReason::WorkerBytes)
+            Err(error) if error.reason() == ilium_execution::RejectReason::WorkerBytes
         ));
         assert_eq!(
             app.tree.get(ilium_core::ROOT_ID).expect("root").name,
@@ -1435,7 +1735,7 @@ mod tests {
                 &mut app,
                 received.retention.as_ref()
             ),
-            Err(ilium_execution::RejectReason::WorkerBytes)
+            Err(error) if error.reason() == ilium_execution::RejectReason::WorkerBytes
         ));
         let crate::app::Mode::CreateAgentWorkspace(state) = &app.mode else {
             panic!("same dialog")
@@ -1877,7 +2177,7 @@ mod tests {
         )
         .err()
         .expect("real table admission refuses");
-        assert_eq!(error, ilium_execution::RejectReason::WorkerBytes);
+        assert_eq!(error.reason(), ilium_execution::RejectReason::WorkerBytes);
         app.pending_terminal_events.push_front(head);
         app.pending_terminal_events
             .push_back(events.try_recv().expect("original following terminal"));
@@ -1931,7 +2231,7 @@ mod tests {
                 &mut app,
                 Some(owner)
             ),
-            Err(ilium_execution::RejectReason::WorkerBytes)
+            Err(error) if error.reason() == ilium_execution::RejectReason::WorkerBytes
         ));
         assert_eq!(preparation.decoded_blocked_projections(), 1);
         drop(fill);
@@ -2066,5 +2366,190 @@ mod tests {
             assert_eq!(observer.decoder_usage_jobs(), 0);
             drop(stop);
         }
+    }
+    #[tokio::test]
+    async fn impossible_projection_exits_event_application_with_original_custody_and_full_reason() {
+        let (_owner, base) = test_codec();
+        let capacity = 64 * 1024;
+        let preparation = base.with_test_decoded_capacity(capacity);
+        let mut app =
+            crate::app::App::new("synthetic-impossible-projection".into(), Default::default());
+        app.open_create_agent_workspace_dialog(
+            ilium_core::BuiltinAgentProvider::Claude,
+            ilium_core::ROOT_ID,
+            false,
+        );
+        let _ = app.take_outbound_requests();
+        if let crate::app::Mode::CreateAgentWorkspace(state) = &mut app.mode {
+            state.branch.buf = "authored-branch".into();
+            state.branch_is_auto = false;
+            state.base_ref.buf = "authored-base".into();
+        } else {
+            panic!("workspace dialog fixture must open");
+        }
+        let previous_tree = app.tree.clone();
+        // Source fits the isolated fixture ceiling, but mandatory derived
+        // display strings cannot coexist with that exact retained source.
+        let message = "synthetic large error: ".to_owned() + &"x".repeat(24 * 1024);
+        let original_pointer = message.as_ptr();
+        let received = pressure_received(&preparation, ServerEvent::Error { message }).await;
+        let original_owner = received
+            .retention
+            .as_ref()
+            .expect("real decoded storage guard");
+        let original_bytes = original_owner.declared_bytes();
+        let weak_allocation = Arc::downgrade(&original_owner.allocation);
+        let (naming_tx, _naming_rx) = mpsc::channel(8);
+        let mut naming = crate::naming_workers::NamingWorkers::new(
+            naming_tx,
+            &ilium_inference::InferenceSettings::default(),
+        )
+        .unwrap();
+        let mut icons = crate::icon_search_workers::IconSearchWorkers::new();
+        let directory = tempfile::tempdir().unwrap();
+        let mut trigger_lease = crate::trigger_execution_lease::TriggerExecutionLease::open(
+            &directory.path().join("synthetic-projection.sock"),
+        );
+        let (_events_tx, mut events_rx) = mpsc::channel(2);
+        crate::apply_server_events(
+            &mut app,
+            &mut events_rx,
+            received,
+            &mut naming,
+            &mut icons,
+            &mut trigger_lease,
+            None,
+        );
+        assert!(matches!(
+            app.exit_reason,
+            Some(crate::app::ClientExitReason::Quit)
+        ));
+        assert!(
+            app.projection_admission_wake.is_none(),
+            "permanent impossibility must not park admission"
+        );
+        assert!(app.projection_busy_retry_at.is_none());
+        assert_eq!(app.pending_terminal_events.len(), 1);
+        let retained = app.pending_terminal_events.front().unwrap();
+        let ServerEvent::Error { message } = retained.view() else {
+            panic!("original event kind preserved")
+        };
+        assert_eq!(
+            message.as_ptr(),
+            original_pointer,
+            "the same source allocation must remain owned"
+        );
+        assert_eq!(
+            retained.retention.as_ref().unwrap().declared_bytes(),
+            original_bytes
+        );
+        assert!(weak_allocation.upgrade().is_some());
+        assert_eq!(preparation.decoded_storage_bytes(), original_bytes);
+        assert_eq!(preparation.decoder_usage_jobs(), 0);
+        assert_eq!(app.tree, previous_tree);
+        let crate::app::Mode::CreateAgentWorkspace(state) = &app.mode else {
+            panic!("dialog preserved")
+        };
+        assert_eq!(state.branch.buf, "authored-branch");
+        assert!(!state.branch_is_auto);
+        assert_eq!(state.base_ref.buf, "authored-base");
+        let details = app
+            .projection_admission_details
+            .as_ref()
+            .expect("complete final error details");
+        for field in [
+            "SourceOverlapTooLarge",
+            "source:",
+            "requested:",
+            "capacity: 65536",
+            "original event retained",
+            "stream delivery stopped",
+        ] {
+            assert!(details.contains(field), "missing {field}: {details}");
+        }
+        assert_eq!(app.status_message.as_ref(), Some(details));
+        // The final error type must preserve the same full diagnostic for
+        // stderr even though Quit prevents a subsequent interactive F9.
+        let displayed =
+            crate::error::ClientError::TerminalSetup(std::io::Error::other(details.clone()))
+                .to_string();
+        assert!(displayed.contains(details));
+        drop(app); // Models the final original-event owner release at shutdown.
+        assert!(weak_allocation.upgrade().is_none());
+        assert_eq!(preparation.decoded_storage_bytes(), 0);
+    }
+
+    #[tokio::test]
+    async fn projection_prepare_preflights_combined_derivation_and_registry_growth() {
+        let (_owner, base) = test_codec();
+        let event = ServerEvent::PaneCreateFinished {
+            request_id: 987_654,
+            result: Err("synthetic combined preflight".repeat(160)),
+        };
+        let mut app =
+            crate::app::App::new("synthetic-combined-preflight".into(), Default::default());
+        let source_bytes = event.retained_bytes()
+            + crate::incoming_projection::projection_metadata_bytes(&event)
+            + 512;
+        let derived_bytes = app
+            .incoming_derivation_bytes(&event)
+            .expect("error derivation");
+        let metadata_bytes =
+            crate::incoming_projection::registry_metadata_bytes_for_test(1).unwrap();
+        let derived_credit = derived_bytes + 512;
+        let metadata_credit = metadata_bytes + 512;
+        // Each individual allocation fits with the original, their mandatory
+        // overlap does not. This remains an isolated TEST ceiling only.
+        let capacity = source_bytes + derived_credit.max(metadata_credit);
+        assert!(source_bytes + derived_credit <= capacity);
+        assert!(source_bytes + metadata_credit <= capacity);
+        assert!(source_bytes + derived_credit + metadata_credit > capacity);
+        let preparation = base.with_test_decoded_capacity(capacity);
+        let received = pressure_received(&preparation, event).await;
+        let owner = received.retention.as_ref().unwrap();
+        assert_eq!(owner.declared_bytes(), source_bytes);
+        drop(
+            owner
+                .try_reserve_projection(derived_bytes)
+                .expect("derivation alone fits"),
+        );
+        drop(
+            owner
+                .try_reserve_projection(metadata_bytes)
+                .expect("registry growth alone fits"),
+        );
+        let previous_tree = app.tree.clone();
+        let error = crate::incoming_projection::ProjectionRetention::prepare_owned(
+            received.view(),
+            &mut app,
+            Some(owner),
+        )
+        .err()
+        .expect("combined immutable overlap cannot be admitted");
+        assert!(error.is_permanent());
+        match error {
+            crate::incoming_projection::ProjectionAdmissionError::Storage(
+                crate::ipc_preparation::StorageRefusal::SourceOverlapTooLarge {
+                    source,
+                    requested,
+                    capacity: recorded_capacity,
+                },
+            ) => {
+                assert_eq!(source, source_bytes);
+                assert_eq!(requested, derived_credit + metadata_credit);
+                assert_eq!(recorded_capacity, capacity);
+            }
+            other => panic!("combined refusal lost exact required credits: {other:?}"),
+        }
+        assert_eq!(
+            preparation.decoded_storage_bytes(),
+            source_bytes,
+            "preflight must run before either new credit is taken"
+        );
+        assert_eq!(app.tree, previous_tree);
+        assert!(matches!(app.mode, crate::app::Mode::Normal));
+        drop(received);
+        drop(app);
+        assert_eq!(preparation.decoded_storage_bytes(), 0);
     }
 }

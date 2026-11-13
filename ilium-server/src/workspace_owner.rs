@@ -17,6 +17,8 @@ use uuid::Uuid;
 const MARKER_FILE: &str = "ilium-workspace-owner.json";
 const MAX_MARKER_BYTES: u64 = 4096;
 const MAX_PATH_BYTES: usize = 4096;
+// Include marker-append spare and transient backing during exact reservation.
+const MAX_CANONICAL_BACKING_BYTES: usize = 2 * (MAX_PATH_BYTES + MARKER_FILE.len() + 1);
 const MAX_IO_INPUT_BYTES: usize = MAX_MARKER_BYTES as usize + MAX_PATH_BYTES;
 const MAX_REGISTERED_WORKTREES: usize = 1024;
 
@@ -147,24 +149,106 @@ fn io_cost(input_bytes: usize, result_bytes: usize) -> io::Result<JobCost> {
     })
 }
 
-async fn run_io<T: Send + 'static>(
+// Only these audited result shapes may cross this local I/O boundary. A
+// generic execution callback cannot promise that its input has been destroyed
+// or determine every allocation retained by an arbitrary result type.
+trait WorkspaceIoResult: Send + 'static {
+    const MAX_BACKING_BYTES: usize;
+    fn backing_bytes(&self) -> usize;
+}
+
+impl WorkspaceIoResult for () {
+    const MAX_BACKING_BYTES: usize = 0;
+    fn backing_bytes(&self) -> usize {
+        0
+    }
+}
+
+impl WorkspaceIoResult for bool {
+    const MAX_BACKING_BYTES: usize = 0;
+    fn backing_bytes(&self) -> usize {
+        0
+    }
+}
+
+impl WorkspaceIoResult for PathBuf {
+    const MAX_BACKING_BYTES: usize = MAX_CANONICAL_BACKING_BYTES;
+    fn backing_bytes(&self) -> usize {
+        self.capacity()
+    }
+}
+
+impl WorkspaceIoResult for Option<Vec<u8>> {
+    const MAX_BACKING_BYTES: usize = MAX_MARKER_BYTES as usize + 1;
+    fn backing_bytes(&self) -> usize {
+        self.as_ref().map_or(0, Vec::capacity)
+    }
+}
+
+fn result_storage_bytes<T: WorkspaceIoResult>(backing_bytes: usize) -> io::Result<usize> {
+    // Include the Retained wrapper's Arc pointer as well as T and its backing.
+    let payload_bytes = std::mem::size_of::<Retained<T>>()
+        .checked_add(backing_bytes)
+        .ok_or_else(|| io::Error::other("workspace result storage size overflow"))?;
+    ilium_execution::retained_result_storage_bytes::<T>(payload_bytes).map_err(|error| {
+        io::Error::other(format!("workspace result storage sizing failed: {error:?}"))
+    })
+}
+
+async fn run_io<T: WorkspaceIoResult>(
     client: &ExecutionClient,
-    cost: JobCost,
+    mut cost: JobCost,
     operation: impl FnOnce(ilium_execution::JobContext) -> io::Result<T> + Send + 'static,
 ) -> io::Result<Retained<T>> {
+    // Fund the typed payload and its surviving Arc-owned debit before work.
+    // This changes declarations, never the shared root or tenant ceilings.
+    cost.result_bytes = cost
+        .result_bytes
+        .max(result_storage_bytes::<T>(T::MAX_BACKING_BYTES)?);
     let reservation = client.reserve(Lane::Io, cost).await.map_err(|error| {
         io::Error::other(format!("workspace marker I/O admission failed: {error:?}"))
     })?;
-    let retained =
-        client
-            .run_reserved(reservation, operation)
-            .await
-            .map_err(|error| match error {
-                ExecutionError::Failed(error) => {
-                    io::Error::new(error.view().kind(), error.view().to_string())
+    let mut retained = client
+        .run_reserved(reservation, operation)
+        .await
+        .map_err(|error| match error {
+            ExecutionError::Failed(error) => {
+                io::Error::new(error.view().kind(), error.view().to_string())
+            }
+            other => io::Error::other(format!("workspace marker I/O worker failed: {other:?}")),
+        })?;
+    let backing_bytes = retained.view().backing_bytes();
+    if backing_bytes > T::MAX_BACKING_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "workspace I/O result exceeds its admitted backing limit",
+        ));
+    }
+    let storage_bytes = result_storage_bytes::<T>(backing_bytes)?;
+    // Every audited successful callback consumes its input captures. Only the
+    // worker's final receipt hold may briefly prevent this atomic subtraction.
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            match retained.try_reduce_to_result_storage(storage_bytes) {
+                Ok(()) => return Ok(()),
+                Err(ilium_execution::RejectReason::Busy) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
                 }
-                other => io::Error::other(format!("workspace marker I/O worker failed: {other:?}")),
-            })?;
+                Err(error) => {
+                    return Err(io::Error::other(format!(
+                        "workspace result storage transfer failed: {error:?}"
+                    )));
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            "workspace result completion transfer timed out",
+        )
+    })??;
     Ok(retained)
 }
 
@@ -295,7 +379,13 @@ pub(crate) async fn canonical_path(
     path: &Path,
 ) -> std::io::Result<Retained<PathBuf>> {
     let path = path.to_path_buf();
-    let cost = io_cost(path.as_os_str().as_encoded_bytes().len(), MAX_PATH_BYTES)?;
+    let mut cost = io_cost(path.as_os_str().as_encoded_bytes().len(), MAX_PATH_BYTES)?;
+    // Exact reservation can briefly own the native canonical allocation and
+    // its replacement together. Fund that working copy and the owned input.
+    cost.input_bytes = std::mem::size_of::<PathBuf>()
+        .checked_add(path.capacity())
+        .and_then(|bytes| bytes.checked_add(MAX_CANONICAL_BACKING_BYTES))
+        .ok_or_else(|| io::Error::other("canonical path working size overflow"))?;
     run_io(client, cost, move |context| {
         if context.stop_requested() {
             return Err(io::Error::new(
@@ -303,7 +393,21 @@ pub(crate) async fn canonical_path(
                 "path canonicalization cancelled",
             ));
         }
-        ilium_platform::paths::canonicalize(&path)
+        let mut canonical = ilium_platform::paths::canonicalize(&path)?;
+        if canonical.as_os_str().len() > MAX_PATH_BYTES
+            || canonical.capacity() > MAX_CANONICAL_BACKING_BYTES
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "canonical path exceeds its bounded size",
+            ));
+        }
+        // The ownership validator later appends this one fixed filename. Its
+        // spare must survive the storage conversion, avoiding a new allocation.
+        canonical
+            .try_reserve_exact(MARKER_FILE.len() + 1)
+            .map_err(io::Error::other)?;
+        Ok(canonical)
     })
     .await
 }
@@ -405,7 +509,11 @@ pub(crate) async fn validated_marker_path_for(
             "Git metadata is outside worktrees directory",
         ));
     }
-    Ok(metadata_dir.map(|path| path.join(MARKER_FILE)))
+    Ok(metadata_dir.map(|mut path| {
+        // canonical_path prepaid and retained this exact append capacity.
+        path.push(MARKER_FILE);
+        path
+    }))
 }
 
 async fn read_marker_bytes(
@@ -449,8 +557,20 @@ async fn read_marker_bytes_if_present(
         if metadata.len() > MAX_MARKER_BYTES {
             return Err(std::io::Error::other("marker is too large"));
         }
-        let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        file.take(MAX_MARKER_BYTES + 1).read_to_end(&mut bytes)?;
+        // A fixed owned backing includes the one-byte oversize probe. Growing
+        // read_to_end can retain more than the original marker declaration.
+        let mut file = file;
+        let mut bytes = vec![0; MAX_MARKER_BYTES as usize + 1];
+        let mut length = 0;
+        while length < bytes.len() {
+            match file.read(&mut bytes[length..]) {
+                Ok(0) => break,
+                Ok(count) => length += count,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        bytes.truncate(length);
         Ok(Some(bytes))
     })
     .await?;
@@ -473,6 +593,135 @@ mod tests {
 
     fn client() -> ExecutionClient {
         crate::execution::test_general_client()
+    }
+
+    #[tokio::test]
+    async fn completed_canonical_paths_leave_general_io_live_at_connection_capacity() {
+        let directory = TempDir::new().expect("isolated canonical path");
+        let expected =
+            ilium_platform::paths::canonicalize(directory.path()).expect("fixture canonical path");
+        let owner = crate::execution::ServerExecution::start().expect("independent finite bank");
+        let client = &owner.client;
+        let mut paths = Vec::new();
+        // Retaining sixty old canonical results consumes every General job.
+        for _ in 0..60 {
+            paths.push(
+                canonical_path(client, directory.path())
+                    .await
+                    .expect("canonical path"),
+            );
+        }
+        let follow_up = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            is_directory(client, directory.path()),
+        )
+        .await;
+        if matches!(&follow_up, Ok(Ok(true))) {
+            // Preserve the actual 64-connection capacity target.
+            for _ in 60..64 {
+                paths.push(
+                    canonical_path(client, directory.path())
+                        .await
+                        .expect("remaining path"),
+                );
+            }
+        }
+        let count = paths.len();
+        let all_equal = paths.iter().all(|path| path.view() == &expected);
+        let usage = client.foundation.usage();
+        let retained_backing: usize = paths
+            .iter()
+            .map(|path| std::mem::size_of::<Retained<PathBuf>>() + path.view().capacity())
+            .sum();
+        drop(paths);
+        owner.request_shutdown();
+
+        assert!(follow_up
+            .expect("completed paths cannot exhaust General jobs")
+            .expect("real follow-up directory query"));
+        assert_eq!(count, 64);
+        assert!(all_equal, "conversion preserves every canonical result");
+        assert_eq!(
+            usage.jobs, 0,
+            "completed paths must release execution credits"
+        );
+        assert_eq!(
+            usage.input_bytes, 0,
+            "completed native captures must be destroyed"
+        );
+        assert!(
+            usage.result_bytes >= retained_backing,
+            "every original PathBuf allocation remains charged"
+        );
+    }
+
+    #[tokio::test]
+    async fn validated_marker_path_retains_its_final_backing_without_a_job_credit() {
+        let (_directory, workspace) = linked_workspace().await;
+        let expected = ilium_git::head_paths(&workspace.worktree_root)
+            .await
+            .expect("real Git HEAD path")
+            .head
+            .parent()
+            .expect("Git metadata directory")
+            .join(MARKER_FILE);
+        let owner = crate::execution::ServerExecution::start().expect("independent finite bank");
+        let path = super::validated_marker_path_for(
+            &owner.client,
+            &workspace.repo_common_dir,
+            &workspace.worktree_root,
+        )
+        .await
+        .expect("validated marker path");
+        let usage = owner.client.foundation.usage();
+        let final_backing = std::mem::size_of::<Retained<PathBuf>>() + path.view().capacity();
+        let actual = path.view().clone();
+        drop(path);
+        let released = owner.client.foundation.usage();
+        owner.request_shutdown();
+
+        assert_eq!(actual, expected);
+        assert_eq!(usage.jobs, 0);
+        assert_eq!(usage.input_bytes, 0);
+        assert!(
+            usage.result_bytes
+                >= final_backing + ilium_execution::retained_result_storage_overhead_bytes(),
+            "the marker filename append must stay inside the charged allocation"
+        );
+        assert_eq!(
+            released.result_bytes, 0,
+            "path ownership releases its storage on drop"
+        );
+    }
+
+    #[tokio::test]
+    async fn maximum_marker_read_keeps_actual_backing_charged_after_completion() {
+        let directory = TempDir::new().expect("isolated marker directory");
+        let path = directory.path().join(MARKER_FILE);
+        std_fs::write(&path, vec![b'x'; 4096]).expect("maximum-sized marker fixture");
+        let owner = crate::execution::ServerExecution::start().expect("independent finite bank");
+        let bytes = read_marker_bytes_if_present(&owner.client, &path)
+            .await
+            .expect("maximum marker read");
+        let value = bytes.view().as_ref().expect("marker is present");
+        let length = value.len();
+        let backing = std::mem::size_of::<Retained<Option<Vec<u8>>>>() + value.capacity();
+        let usage = owner.client.foundation.usage();
+        drop(bytes);
+        let released = owner.client.foundation.usage();
+        owner.request_shutdown();
+
+        assert_eq!(
+            length, 4096,
+            "the full existing marker size remains supported"
+        );
+        assert_eq!(usage.jobs, 0);
+        assert_eq!(usage.input_bytes, 0);
+        assert!(
+            usage.result_bytes
+                >= backing + ilium_execution::retained_result_storage_overhead_bytes()
+        );
+        assert_eq!(released.result_bytes, 0);
     }
 
     #[test]

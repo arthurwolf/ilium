@@ -43,30 +43,8 @@ pub fn validate_leaf(name: &str) -> io::Result<()> {
     }
     Ok(())
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FileIdentity {
-    pub device: u64,
-    pub inode: u64,
-}
-#[cfg(unix)]
-fn identity(file: &File) -> io::Result<FileIdentity> {
-    use std::os::unix::fs::MetadataExt;
-
-    let metadata = file.metadata()?;
-    Ok(FileIdentity {
-        device: metadata.dev(),
-        inode: metadata.ino(),
-    })
-}
-#[cfg(windows)]
-fn identity(file: &File) -> io::Result<FileIdentity> {
-    let (device, inode) = crate::secure_fs::file_generation(file)?;
-    Ok(FileIdentity { device, inode })
-}
-#[cfg(not(any(unix, windows)))]
-fn identity(_file: &File) -> io::Result<FileIdentity> {
-    Err(unsupported())
-}
+use crate::file_identity::identity;
+pub use crate::file_identity::FileIdentity;
 pub struct PinnedFile {
     file: File,
     identity: FileIdentity,
@@ -932,7 +910,12 @@ fn unix_list_with_progress(
         }
         entries.push(DirectoryEntry {
             name: name.to_owned(),
-            bytes: stat.st_size.max(0) as u64,
+            // A directory's inode size is filesystem metadata, not payload.
+            bytes: if kind == libc::S_IFDIR {
+                0
+            } else {
+                stat.st_size.max(0) as u64
+            },
             is_directory: kind == libc::S_IFDIR,
         });
         if scanned % 64 == 0 {
@@ -1067,7 +1050,11 @@ fn windows_list_with_progress(
                 }
                 entries.push(DirectoryEntry {
                     name,
-                    bytes: information.EndOfFile.max(0) as u64,
+                    bytes: if information.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
+                        0
+                    } else {
+                        information.EndOfFile.max(0) as u64
+                    },
                     is_directory: information.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0,
                 });
                 if scanned % 64 == 0 {

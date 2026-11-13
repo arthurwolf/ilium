@@ -1,0 +1,3039 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>WIT reference | Ilium Plugin Developer Manual</title>
+<link rel="stylesheet" href="/assets/css/manual.css">
+
+</head>
+<body>
+<div class="shell">
+<nav class="sidebar" aria-label="Manual sections">
+<a class="brand" href="/"><b>ilium<i>/</i>plugins</b><small>Developer manual</small></a>
+<input class="filter" type="search" placeholder="filter pages" aria-label="Filter pages">
+<div class="tree">
+<details><summary>Start here<span>4</span></summary><ul>
+<li><a href="/pages/landing/">Plugin manual</a></li>
+<li><a href="/pages/getting-started-first-plugin/">Your first plugin in five minutes</a></li>
+<li><a href="/pages/getting-started-overview/">What a plugin is</a></li>
+<li><a href="/pages/getting-started-toolchain/">Set up a toolchain</a></li>
+</ul></details>
+<details><summary>Core plugins<span>31</span></summary><ul>
+<li><a href="/pages/core-plugins/">Core plugins</a></li>
+<li><a href="/pages/core-plugin-tree/">Tree</a></li>
+<li><a href="/pages/core-plugin-layout/">Layout</a></li>
+<li><a href="/pages/core-plugin-terminal/">Terminal</a></li>
+<li><a href="/pages/core-plugin-smart-copy/">Smart Copy</a></li>
+<li><a href="/pages/core-plugin-editor/">Editor</a></li>
+<li><a href="/pages/core-plugin-kanban/">Kanban</a></li>
+<li><a href="/pages/core-plugin-agent-detect/">Agent detection</a></li>
+<li><a href="/pages/core-plugin-agent-toolbar/">Agent toolbar</a></li>
+<li><a href="/pages/core-plugin-fleet/">Fleet</a></li>
+<li><a href="/pages/core-plugin-cost/">Cost</a></li>
+<li><a href="/pages/core-plugin-titles/">Titles and organisation</a></li>
+<li><a href="/pages/core-plugin-inference/">Inference providers</a></li>
+<li><a href="/pages/core-plugin-notifications/">Notifications</a></li>
+<li><a href="/pages/core-plugin-voice/">Voice</a></li>
+<li><a href="/pages/core-plugin-scheduler/">Scheduler</a></li>
+<li><a href="/pages/core-plugin-text-triggers/">Text triggers</a></li>
+<li><a href="/pages/core-plugin-progress/">Progress</a></li>
+<li><a href="/pages/core-plugin-chatroom/">Chatroom</a></li>
+<li><a href="/pages/core-plugin-worktrees/">Worktrees</a></li>
+<li><a href="/pages/core-plugin-sessions/">Sessions</a></li>
+<li><a href="/pages/core-plugin-compaction/">Compaction</a></li>
+<li><a href="/pages/core-plugin-settings/">Settings</a></li>
+<li><a href="/pages/core-plugin-keys-and-help/">Keys and help</a></li>
+<li><a href="/pages/core-plugin-search/">Workspace search</a></li>
+<li><a href="/pages/core-plugin-ambient/">Ambient look</a></li>
+<li><a href="/pages/core-plugin-scenes/">Scenes</a></li>
+<li><a href="/pages/core-plugin-recap/">Recap</a></li>
+<li><a href="/pages/core-plugin-session-convert/">Session conversion</a></li>
+<li><a href="/pages/core-plugin-agent-setup/">Agent setup</a></li>
+<li><a href="/pages/core-plugin-diagnostics/">Diagnostics</a></li>
+</ul></details>
+<details><summary>Tutorials<span>23</span></summary><ul>
+<li><a href="/pages/tutorial-01-agent-badge/">1. Agent badge</a></li>
+<li><a href="/pages/tutorial-02-command-and-settings/">2. Command, keybinding and settings</a></li>
+<li><a href="/pages/tutorial-03-panel/">3. A panel with a table</a></li>
+<li><a href="/pages/tutorial-04-finished-notice/">4. Finished-agent notice and toolbar button</a></li>
+<li><a href="/pages/tutorial-05-todo-scanner/">5. TODO scanner with files and jobs</a></li>
+<li><a href="/pages/tutorial-06-notes-pane/">6. Notes pane with drag and drop</a></li>
+<li><a href="/pages/tutorial-07-ambient-scene/">7. Ambient scene</a></li>
+<li><a href="/pages/tutorial-08-typescript/">8. The same plugin in TypeScript</a></li>
+<li><a href="/pages/tutorial-09-package-and-share/">9. Package and share</a></li>
+<li><a href="/pages/tutorial-10-settings-new-tab/">10. A settings tab of your own</a></li>
+<li><a href="/pages/tutorial-11-settings-extend-tab/">11. Add settings to an existing tab</a></li>
+<li><a href="/pages/tutorial-12-hello-cli/">12. Your first CLI subcommand</a></li>
+<li><a href="/pages/tutorial-13-keys-and-when/">13. Keybindings, chords and when expressions</a></li>
+<li><a href="/pages/tutorial-14-toast-and-status/">14. A toast and a status-bar segment</a></li>
+<li><a href="/pages/tutorial-15-context-menu/">15. A context-menu entry</a></li>
+<li><a href="/pages/tutorial-16-remember-a-counter/">16. Remember a counter in storage</a></li>
+<li><a href="/pages/tutorial-17-help-and-sound/">17. A help topic and a custom sound</a></li>
+<li><a href="/pages/tutorial-18-add-an-extension-point/">18. Offer an extension point: a link preview plugin</a></li>
+<li><a href="/pages/tutorial-19-stop-core-actions-with-hooks/">19. Stop core actions with hooks: quiet hours</a></li>
+<li><a href="/pages/tutorial-20-extend-six-core-plugins/">20. Extend six core plugins from one package: a team pack</a></li>
+<li><a href="/pages/tutorial-21-replace-a-core-plugin/">21. Replace a core plugin: Titles Lite</a></li>
+<li><a href="/pages/tutorial-22-versioned-service-with-fallbacks/">22. A versioned service with fallbacks</a></li>
+<li><a href="/pages/tutorial-23-review-swarm/">23. Drive the fleet: a review swarm</a></li>
+</ul></details>
+<details><summary>Concepts<span>20</span></summary><ul>
+<li><a href="/pages/architecture/">Architecture</a></li>
+<li><a href="/pages/background-jobs/">Background jobs</a></li>
+<li><a href="/pages/capabilities/">Capabilities and grants</a></li>
+<li><a href="/pages/debugging/">Debugging</a></li>
+<li><a href="/pages/errors-and-limits/">Errors and limits</a></li>
+<li><a href="/pages/events-and-intents/">Events and intents</a></li>
+<li><a href="/pages/file-access/">File access</a></li>
+<li><a href="/pages/layout/">Layout constraints</a></li>
+<li><a href="/pages/lifecycle/">Lifecycle</a></li>
+<li><a href="/pages/packages/">Packages and manifests</a></li>
+<li><a href="/pages/primitives/">Pane primitives</a></li>
+<li><a href="/pages/requests-and-outcomes/">Requests and outcomes</a></li>
+<li><a href="/pages/retained-mode/">Retained mode</a></li>
+<li><a href="/pages/services/">Services</a></li>
+<li><a href="/pages/extending-core-plugins/">Extending core plugins</a></li>
+<li><a href="/pages/testing/">Testing plugins</a></li>
+<li><a href="/pages/ui-model/">The UI model</a></li>
+<li><a href="/pages/versioning/">Versioning</a></li>
+<li><a href="/pages/worlds-and-sides/">Worlds and sides</a></li>
+<li><a href="/pages/settings-extension/">Extending Settings</a></li>
+</ul></details>
+<details><summary>Host API<span>57</span></summary><ul>
+<li><a href="/pages/api-audio/">audio</a></li>
+<li><a href="/pages/api-cli/">cli</a></li>
+<li><a href="/pages/api-clipboard/">clipboard</a></li>
+<li><a href="/pages/api-clock-and-timers/">clock and timers</a></li>
+<li><a href="/pages/api-codec/">codec</a></li>
+<li><a href="/pages/api-commands/">commands</a></li>
+<li><a href="/pages/api-events/">Events</a></li>
+<li><a href="/pages/api-exports/">Plugin exports</a></li>
+<li><a href="/pages/api-fs/">fs</a></li>
+<li><a href="/pages/api-help-and-plugins/">help and plugins</a></li>
+<li><a href="/pages/api-http/">http</a></li>
+<li><a href="/pages/api-http-api/">http-api</a></li>
+<li><a href="/pages/api-inference/">inference</a></li>
+<li><a href="/pages/api-intents/">intents</a></li>
+<li><a href="/pages/api-jobs/">jobs</a></li>
+<li><a href="/pages/api-keys/">keys</a></li>
+<li><a href="/pages/api-location/">location</a></li>
+<li><a href="/pages/api-log/">log</a></li>
+<li><a href="/pages/api-media/">media</a></li>
+<li><a href="/pages/api-messages-and-topics/">Messages and topics</a></li>
+<li><a href="/pages/api-notifications/">Notifications and sounds</a></li>
+<li><a href="/pages/api-panes/">panes</a></li>
+<li><a href="/pages/api-process-control/">Process control</a></li>
+<li><a href="/pages/api-scenes/">Scenes</a></li>
+<li><a href="/pages/api-services/">services</a></li>
+<li><a href="/pages/api-extension-points/">extension points</a></li>
+<li><a href="/pages/api-settings/">settings</a></li>
+<li><a href="/pages/api-storage/">storage</a></li>
+<li><a href="/pages/api-tree/">tree</a></li>
+<li><a href="/pages/api-ui/">ui</a></li>
+<li><a href="/pages/api-workspace/">workspace</a></li>
+<li><a href="/pages/api-toast/">Toast</a></li>
+<li><a href="/pages/api-catalogs/">Catalogs</a></li>
+<li><a href="/pages/api-client-requests/">Client requests</a></li>
+<li><a href="/pages/api-command-palette/">Command palette</a></li>
+<li><a href="/pages/api-durable-timers/">Durable timers and journal</a></li>
+<li><a href="/pages/api-tree-chrome/">Tree and window chrome</a></li>
+<li><a href="/pages/api-pane-lifecycle/">Pane lifecycle and tree restructuring</a></li>
+<li><a href="/pages/api-surface-v2/">Surface v2</a></li>
+<li><a href="/pages/api-pointer/">Pointer</a></li>
+<li><a href="/pages/api-popovers/">Popovers and tooltips</a></li>
+<li><a href="/pages/api-menus/">Menus</a></li>
+<li><a href="/pages/api-geocode/">Geocode and location picker</a></li>
+<li><a href="/pages/api-sessions/">sessions</a></li>
+<li><a href="/pages/api-fs-atomic-and-tail/">fs: atomic write, revisions, tail, agent homes</a></li>
+<li><a href="/pages/api-http-streams/">http streams</a></li>
+<li><a href="/pages/api-gpu/">gpu</a></li>
+<li><a href="/pages/api-vector/">vector and embeddings</a></li>
+<li><a href="/pages/api-kernel-settings-and-keymap/">kernel settings and keymap reads</a></li>
+<li><a href="/pages/api-intent-send-input/">intent: send-input stages</a></li>
+<li><a href="/pages/api-intent-pane-lifecycle/">intents: pane lifecycle</a></li>
+<li><a href="/pages/api-intent-tree-structure/">intents: tree structure and restructure</a></li>
+<li><a href="/pages/api-intent-chrome/">intents: toast, status segments, open-external</a></li>
+<li><a href="/pages/api-menu-provider/">menu provider</a></li>
+<li><a href="/pages/api-virtual-rows-provider/">virtual rows provider</a></li>
+<li><a href="/pages/api-token-provider/">token provider</a></li>
+<li><a href="/pages/api-surface-glyph-plane/">Glyph plane and frame receipts</a></li>
+</ul></details>
+<details><summary>Pane primitives<span>9</span></summary><ul>
+<li><a href="/pages/primitives-agent/">Agent primitive</a></li>
+<li><a href="/pages/primitives-basic/">Basic primitive</a></li>
+<li><a href="/pages/primitives-editor/">Editor primitive</a></li>
+<li><a href="/pages/primitives-terminal/">Terminal primitive</a></li>
+<li><a href="/pages/primitives-terminal-reads/">Terminal reads</a></li>
+<li><a href="/pages/primitives-terminal-pointer/">Terminal pointer</a></li>
+<li><a href="/pages/primitives-terminal-input/">Terminal input</a></li>
+<li><a href="/pages/primitives-agent-transcript/">Agent transcript and signals</a></li>
+<li><a href="/pages/primitives-editor-viewport/">Editor viewport and tokens</a></li>
+</ul></details>
+<details><summary>Widgets<span>9</span></summary><ul>
+<li><a href="/pages/widgets-collections/">Collections</a></li>
+<li><a href="/pages/widgets-data-display/">Data display</a></li>
+<li><a href="/pages/widgets-index/">Widget catalogue</a></li>
+<li><a href="/pages/widgets-input/">Input</a></li>
+<li><a href="/pages/widgets-layout-and-containers/">Layout and containers</a></li>
+<li><a href="/pages/widgets-media-and-embedded/">Media and embedded views</a></li>
+<li><a href="/pages/widgets-text/">Text</a></li>
+<li><a href="/pages/widgets-status-and-feedback/">Status and feedback</a></li>
+<li><a href="/pages/widgets-pickers/">Pickers</a></li>
+</ul></details>
+<details><summary>Capabilities<span>70</span></summary><ul>
+<li><a href="/pages/capability-agent-control/">agent.control</a></li>
+<li><a href="/pages/capability-agent-read/">agent.read</a></li>
+<li><a href="/pages/capability-agent-read-prompts/">agent.read-prompts</a></li>
+<li><a href="/pages/capability-agent-signatures/">agent.signatures</a></li>
+<li><a href="/pages/capability-always-granted/">Always-granted capabilities</a></li>
+<li><a href="/pages/capability-audio/">audio</a></li>
+<li><a href="/pages/capability-cli-contribute/">cli.contribute</a></li>
+<li><a href="/pages/capability-clipboard/">clipboard</a></li>
+<li><a href="/pages/capability-commands-invoke/">commands.invoke</a></li>
+<li><a href="/pages/capability-editor-edit/">editor.edit</a></li>
+<li><a href="/pages/capability-editor-provide/">editor.provide</a></li>
+<li><a href="/pages/capability-editor-read/">editor.read</a></li>
+<li><a href="/pages/capability-fs-pick/">fs.pick</a></li>
+<li><a href="/pages/capability-fs-read/">fs.read:&lt;scope&gt;</a></li>
+<li><a href="/pages/capability-fs-watch/">fs.watch</a></li>
+<li><a href="/pages/capability-fs-write/">fs.write</a></li>
+<li><a href="/pages/capability-help-read/">help.read</a></li>
+<li><a href="/pages/capability-http/">http</a></li>
+<li><a href="/pages/capability-http-api-route/">http-api.route</a></li>
+<li><a href="/pages/capability-inference/">inference</a></li>
+<li><a href="/pages/capability-inference-provide/">inference.provide</a></li>
+<li><a href="/pages/capability-jobs-run/">jobs.run</a></li>
+<li><a href="/pages/capability-keys-intercept/">keys.intercept</a></li>
+<li><a href="/pages/capability-location-observer/">location.observer</a></li>
+<li><a href="/pages/capability-media-video/">media.video</a></li>
+<li><a href="/pages/capability-messages-peer/">messages.peer</a></li>
+<li><a href="/pages/capability-extensions-provide/">extensions.provide</a></li>
+<li><a href="/pages/capability-extensions-contribute/">extensions.contribute</a></li>
+<li><a href="/pages/capability-notify-desktop/">notify.desktop</a></li>
+<li><a href="/pages/capability-panes-create/">panes.create</a></li>
+<li><a href="/pages/capability-panes-provide-kind/">panes.provide-kind</a></li>
+<li><a href="/pages/capability-panes-read/">panes.read</a></li>
+<li><a href="/pages/capability-panes-signal/">panes.signal</a></li>
+<li><a href="/pages/capability-plugins-manage/">plugins.manage</a></li>
+<li><a href="/pages/capability-process-run/">process.run</a></li>
+<li><a href="/pages/capability-services/">services</a></li>
+<li><a href="/pages/capability-settings-all/">settings.read-all and settings.write-all</a></li>
+<li><a href="/pages/capability-sound-play/">sound.play</a></li>
+<li><a href="/pages/capability-terminal-output-filter/">terminal.output-filter</a></li>
+<li><a href="/pages/capability-terminal-pointer/">terminal.pointer</a></li>
+<li><a href="/pages/capability-terminal-read-screen/">terminal.read-screen</a></li>
+<li><a href="/pages/capability-terminal-write/">terminal.write</a></li>
+<li><a href="/pages/capability-topics-subscribe/">topics.subscribe</a></li>
+<li><a href="/pages/capability-tree-decorate/">tree.decorate</a></li>
+<li><a href="/pages/capability-tree-metadata/">tree.metadata</a></li>
+<li><a href="/pages/capability-tree-read/">tree.read</a></li>
+<li><a href="/pages/capability-tree-write/">tree.write</a></li>
+<li><a href="/pages/capability-ui-panels/">ui.panels</a></li>
+<li><a href="/pages/capability-workspace-manage/">workspace.manage</a></li>
+<li><a href="/pages/capability-terminal-read-cells/">terminal.read-cells</a></li>
+<li><a href="/pages/capability-terminal-history/">terminal.history</a></li>
+<li><a href="/pages/capability-terminal-input-lock/">terminal.input-lock</a></li>
+<li><a href="/pages/capability-terminal-raw-input/">terminal.raw-input</a></li>
+<li><a href="/pages/capability-panes-lifecycle/">panes.lifecycle</a></li>
+<li><a href="/pages/capability-tree-restructure/">tree.restructure</a></li>
+<li><a href="/pages/capability-tree-attention/">tree.attention</a></li>
+<li><a href="/pages/capability-ui-chrome/">ui.chrome</a></li>
+<li><a href="/pages/capability-open-external/">open-external</a></li>
+<li><a href="/pages/capability-sessions-cross/">sessions.cross</a></li>
+<li><a href="/pages/capability-process-long-lived/">process.long-lived</a></li>
+<li><a href="/pages/capability-settings-read-kernel/">settings.read-kernel:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-settings-contribute/">settings.contribute:&lt;kernel-tab-id&gt;</a></li>
+<li><a href="/pages/capability-keymap-read/">keymap.read</a></li>
+<li><a href="/pages/capability-agent-transcript/">agent.transcript</a></li>
+<li><a href="/pages/capability-location-geocode/">location.geocode</a></li>
+<li><a href="/pages/capability-inference-embed/">inference.embed</a></li>
+<li><a href="/pages/capability-notify-toast/">notify.toast</a></li>
+<li><a href="/pages/capability-journal-read/">journal.read</a></li>
+<li><a href="/pages/capability-gpu-kernels/">gpu.kernels</a></li>
+<li><a href="/pages/capability-settings-write-kernel/">settings.write-kernel:&lt;kernel-tab-id&gt;</a></li>
+</ul></details>
+<details><summary>Agent docs<span>5</span></summary><ul>
+<li><a href="/pages/agent-docs/">Providing the docs to agents</a></li>
+<li><a href="/pages/agent-docs-llms-txt/">llms.txt and Markdown pages</a></li>
+<li><a href="/pages/agent-docs-project-files/">Project instruction files</a></li>
+<li><a href="/pages/agent-docs-skill/">The Ilium plugin skill</a></li>
+<li><a href="/pages/agent-docs-maintenance/">Keeping the kit current</a></li>
+</ul></details>
+<details open><summary>Reference<span>80</span></summary><ul>
+<li><a href="/pages/reference-capabilities/">Capability table</a></li>
+<li><a href="/pages/reference-errors-and-limits/">Error codes and limits</a></li>
+<li><a href="/pages/reference-events-and-intents/">Event and intent tables</a></li>
+<li><a href="/pages/reference-manifest/">Manifest reference</a></li>
+<li><a href="/pages/reference-core-extension-points/">Core extension points</a></li>
+<li><a href="/pages/reference-settings-schema/">Settings schema reference</a></li>
+<li><a href="/pages/reference-settings-rows/">Settings row gallery</a></li>
+<li><a href="/pages/reference/">Reference</a></li>
+<li><a href="/pages/reference-admin-policy/">Admin policy reference</a></li>
+<li><a href="/pages/reference-audit-log/">Audit log</a></li>
+<li><a href="/pages/reference-check-and-lint-rules/">Check and lint rules</a></li>
+<li><a href="/pages/reference-cli-compatibility/">CLI compatibility</a></li>
+<li><a href="/pages/reference-config-and-data-migration/">Config and data migration</a></li>
+<li><a href="/pages/reference-conformance-suite/">Conformance suite</a></li>
+<li><a href="/pages/reference-debugging-tools/">Debugging tools</a></li>
+<li><a href="/pages/reference-dependency-resolution/">Versions and dependencies reference</a></li>
+<li><a href="/pages/reference-extension-security/">Extension security</a></li>
+<li><a href="/pages/reference-feature-traceability/">Feature traceability</a></li>
+<li><a href="/pages/reference-grant-review-and-consent/">Grant review and consent</a></li>
+<li><a href="/pages/reference-health-and-watchdog/">Reference, health and watchdog</a></li>
+<li><a href="/pages/reference-host-architecture/">Host architecture</a></li>
+<li><a href="/pages/reference-host-budgets/">Performance budgets and benchmarks</a></li>
+<li><a href="/pages/reference-host-helper/">Sandbox helper protocol</a></li>
+<li><a href="/pages/reference-host-ipc/">Plugin traffic over IPC</a></li>
+<li><a href="/pages/reference-host-rendering/">Rendering pipeline for plugins</a></li>
+<li><a href="/pages/reference-host-runtime/">Host runtime</a></li>
+<li><a href="/pages/reference-host-scheduling/">Scheduling, deadlines and cancellation</a></li>
+<li><a href="/pages/reference-host-telemetry/">Telemetry and plugin health</a></li>
+<li><a href="/pages/reference-install-and-update/">Install, update and uninstall reference</a></li>
+<li><a href="/pages/reference-install-update-uninstall/">Reference, install, update and uninstall</a></li>
+<li><a href="/pages/reference-kernel-and-boot/">Kernel and boot reference</a></li>
+<li><a href="/pages/reference-manifest-schema/">Manifest schema and error catalogue</a></li>
+<li><a href="/pages/reference-network-egress/">Network egress reference</a></li>
+<li><a href="/pages/reference-offline-and-low-disk/">Reference, offline and low disk</a></li>
+<li><a href="/pages/reference-package-format/">Package format reference</a></li>
+<li><a href="/pages/reference-persistence-and-restart/">Reference, persistence and restart</a></li>
+<li><a href="/pages/reference-platform-support/">Platform support</a></li>
+<li><a href="/pages/reference-plugin-cli/">Plugin command-line reference</a></li>
+<li><a href="/pages/reference-plugin-distribution-cli/">Distribution commands</a></li>
+<li><a href="/pages/reference-plugin-files/">Plugin files on disk</a></li>
+<li><a href="/pages/reference-plugin-lifecycle-states/">Reference, plugin lifecycle states</a></li>
+<li><a href="/pages/reference-plugin-policy/">Plugin policy</a></li>
+<li><a href="/pages/reference-plugin-scope-and-sessions/">Reference, plugin scope and sessions</a></li>
+<li><a href="/pages/reference-project-templates/">Project templates</a></li>
+<li><a href="/pages/reference-registry/">Registry reference</a></li>
+<li><a href="/pages/reference-requirements-api-host/">Requirements for the host API</a></li>
+<li><a href="/pages/reference-requirements-author-guides/">Requirements for author guides</a></li>
+<li><a href="/pages/reference-requirements-capabilities/">Requirements for capabilities</a></li>
+<li><a href="/pages/reference-requirements-core-parity/">Core parity requirements</a></li>
+<li><a href="/pages/reference-requirements-dev-tooling/">Requirements for developer tooling</a></li>
+<li><a href="/pages/reference-requirements-events-intents/">Requirements for events and intents</a></li>
+<li><a href="/pages/reference-requirements-extension-points/">Requirements for extension points</a></li>
+<li><a href="/pages/reference-requirements-kernel-host/">Requirements: kernel and host</a></li>
+<li><a href="/pages/reference-requirements-lifecycle-ops/">Requirements, lifecycle and operations</a></li>
+<li><a href="/pages/reference-requirements-manifest-package/">Requirements for manifest and package</a></li>
+<li><a href="/pages/reference-requirements-panes/">Requirements for panes</a></li>
+<li><a href="/pages/reference-requirements-primitives/">Requirements for pane primitives</a></li>
+<li><a href="/pages/reference-requirements-rendering/">Requirements for rendering</a></li>
+<li><a href="/pages/reference-requirements-requests-outcomes/">Requirements for requests and outcomes</a></li>
+<li><a href="/pages/reference-requirements-security-policy/">Security and policy requirements</a></li>
+<li><a href="/pages/reference-requirements-services-topics/">Requirements for services and topics</a></li>
+<li><a href="/pages/reference-requirements-settings/">Requirements for settings</a></li>
+<li><a href="/pages/reference-requirements-user-admin/">User and administrator requirements</a></li>
+<li><a href="/pages/reference-requirements-widgets/">Requirements for widgets</a></li>
+<li><a href="/pages/reference-requirements/">Requirements index</a></li>
+<li><a href="/pages/reference-resource-accounting/">Reference, resource accounting</a></li>
+<li><a href="/pages/reference-runtime-model/">Runtime model</a></li>
+<li><a href="/pages/reference-sandbox/">Sandbox reference</a></li>
+<li><a href="/pages/reference-secrets/">Secrets</a></li>
+<li><a href="/pages/reference-security-response/">Security response</a></li>
+<li><a href="/pages/reference-security-testing/">Security testing</a></li>
+<li><a href="/pages/reference-signing-and-trust/">Signing and trust reference</a></li>
+<li><a href="/pages/reference-test-harness/">Test harness reference</a></li>
+<li><a href="/pages/reference-threat-model/">Threat model</a></li>
+<li><a href="/pages/reference-trust-and-supply-chain/">Trust and supply chain</a></li>
+<li><a href="/pages/reference-wit/" aria-current="page">WIT reference</a></li>
+<li><a href="/pages/reference-abi-evolution/">ABI evolution</a></li>
+<li><a href="/pages/reference-host-conformance/">Host conformance matrix</a></li>
+<li><a href="/pages/reference-requirements-wit-abi/">Requirements for WIT and ABI</a></li>
+<li><a href="/pages/reference-widget-input-map/">Widget input map</a></li>
+</ul></details>
+<details><summary>Guides<span>21</span></summary><ul>
+<li><a href="/pages/accessibility-and-theming/">Theming and readable output</a></li>
+<li><a href="/pages/performance/">Performance</a></li>
+<li><a href="/pages/porting-iliumanim/">Moving from .iliumanim to .iliumpkg</a></li>
+<li><a href="/pages/rust-sdk/">Rust SDK reference</a></li>
+<li><a href="/pages/settings-screens/">Building settings screens</a></li>
+<li><a href="/pages/typescript-sdk/">TypeScript SDK reference</a></li>
+<li><a href="/pages/guide-administration/">Plugin administration guide</a></li>
+<li><a href="/pages/guide-ci-recipes/">CI recipes</a></li>
+<li><a href="/pages/guide-compatibility-and-upgrades/">Compatibility and upgrades</a></li>
+<li><a href="/pages/guide-data-migration/">Guide, data migration</a></li>
+<li><a href="/pages/guide-enterprise-deployment/">Enterprise deployment</a></li>
+<li><a href="/pages/guide-faq/">Author FAQ</a></li>
+<li><a href="/pages/guide-internationalisation/">Internationalisation</a></li>
+<li><a href="/pages/guide-patterns-cookbook/">Patterns cookbook</a></li>
+<li><a href="/pages/guide-plugin-administration/">Plugin administration</a></li>
+<li><a href="/pages/guide-plugin-documentation/">Plugin documentation guide</a></li>
+<li><a href="/pages/guide-porting-from-other-plugin-systems/">Porting from other plugin systems</a></li>
+<li><a href="/pages/guide-publishing-and-support/">Publishing and support</a></li>
+<li><a href="/pages/guide-publishing/">Publishing guide</a></li>
+<li><a href="/pages/guide-quality-checklist/">Quality checklist</a></li>
+<li><a href="/pages/guide-troubleshooting/">Troubleshooting for authors</a></li>
+</ul></details>
+<details><summary>For users<span>13</span></summary><ul>
+<li><a href="/pages/user-core-plugins/">Core plugins for users</a></li>
+<li><a href="/pages/user-extensions-tab/">The Extensions tab</a></li>
+<li><a href="/pages/user-faq/">Plugin FAQ</a></li>
+<li><a href="/pages/user-install-and-manage/">Install and manage plugins</a></li>
+<li><a href="/pages/user-managing-plugins/">Managing plugins</a></li>
+<li><a href="/pages/user-permissions-explained/">Permissions explained</a></li>
+<li><a href="/pages/user-plugin-health/">Plugin health for users</a></li>
+<li><a href="/pages/user-plugin-security-and-privacy/">Plugin security and privacy for users</a></li>
+<li><a href="/pages/user-plugin-store/">Plugin store</a></li>
+<li><a href="/pages/user-plugins-overview/">Plugins for users</a></li>
+<li><a href="/pages/user-privacy/">Plugin privacy</a></li>
+<li><a href="/pages/user-safe-mode-and-troubleshooting/">Safe mode and recovery</a></li>
+<li><a href="/pages/user-troubleshooting/">Troubleshooting plugins</a></li>
+</ul></details>
+<details><summary>Project<span>4</span></summary><ul>
+<li><a href="/pages/design-decisions/">Design decisions</a></li>
+<li><a href="/pages/glossary/">Glossary</a></li>
+<li><a href="/pages/roadmap/">Roadmap</a></li>
+<li><a href="/pages/security/">Security model</a></li>
+</ul></details>
+</div>
+</nav>
+<div class="main">
+<article class="page">
+<p class="crumbs"><b>Reference</b></p>
+<h1>WIT reference</h1>
+
+<p>This page is the canonical listing of the contract <code>ilium:plugin@0.1.0</code>. It holds every interface, record, variant, enum, flags type, resource and function that a plugin can import or export. A plugin author generates bindings from this listing. A host author implements it. A test author derives round-trip tests from it. Where a snippet on another page differs from this page, this page wins [ABI-001].</p>
+<p>The contract is a family of WIT packages that share one version. The name <code>ilium:plugin@0.1.0</code> is the umbrella identity: it is the value of the manifest key <code>api</code> and of the <code>ilium:api-version</code> custom section of a plugin component (see <a href="/pages/reference-abi-evolution/">ABI evolution</a>). There is no other contract version.</p>
+<h3 id="what-you-need">What you need</h3>
+<ul>
+<li><strong>A reader of WIT.</strong> Know the five type forms (<code>record</code>, <code>variant</code>, <code>enum</code>, <code>flags</code>, <code>resource</code>), the type aliases (<code>type x = ...</code>) and the generic types <code>option</code>, <code>result</code>, <code>list</code> and <code>tuple</code>. The <a href="https://component-model.bytecodealliance.org/design/wit.html">component model book</a> explains them.</li>
+<li><strong>An SDK, if you only write plugins.</strong> The <a href="/pages/rust-sdk/">Rust SDK</a> and the <a href="/pages/typescript-sdk/">TypeScript SDK</a> generate the bindings, so you read this page only for names, limits and error codes.</li>
+<li><strong>The tool limit.</strong> The listing was checked by structure only: every name used is declared once, and every declaration appears once. No <code>wasm-tools</code> parse is part of this repository yet. A conforming parse is a requirement of the host build, see [ABI-001] in <a href="/pages/reference-requirements-wit-abi/">Requirements: WIT and ABI</a>.</li>
+</ul>
+<h2 id="1-how-to-read-this-page">1. How to read this page</h2>
+<ul>
+<li><strong>One package family.</strong> The listing has seven packages: <code>ilium:types</code>, <code>ilium:host</code>, <code>ilium:primitives</code>, <code>ilium:exports</code>, <code>ilium:server</code>, <code>ilium:client</code> and <code>ilium:anim</code>. All are at <code>@0.1.0</code>.</li>
+<li><strong>Doc comments carry the rules.</strong> A <code>///</code> comment gives units, limits, error codes, deadlines and the grant. A trailing <code>//</code> comment is an aside.</li>
+<li><strong>Grants.</strong> <code>Grant:</code> names the capability that a function needs. <code>Grant: none</code> means the function is always available to the side that imports it. A call without its grant fails as described in <a href="/pages/reference-host-conformance/">Host conformance matrix</a>.</li>
+<li><strong>Async pairs.</strong> A function that returns <code>result&lt;request-id, plugin-error&gt;</code> is a slow call. Its answer arrives as the event <code>request-completed</code>, then the plugin calls the <code>take-*</code> function named in the comment. See <a href="/pages/requests-and-outcomes/">Requests and outcomes</a>.</li>
+<li><strong>Stability.</strong> <code>@since(version = 0.1.0)</code> marks stable items. <code>@unstable(feature = x)</code> marks items that need the manifest opt-in. Four features exist: <code>ui-calendar</code>, <code>plugin-services</code>, <code>gpu-kernels</code> and <code>websocket</code>. In this listing a stable item carries no marker, because every item of 0.1.0 is <code>@since(version = 0.1.0)</code>.</li>
+<li><strong>Names.</strong> WIT names are kebab-case. Rust uses <code>snake_case</code> and <code>PascalCase</code>. TypeScript uses <code>camelCase</code>. Section 10 gives the mapping.</li>
+<li><strong>Excerpts.</strong> Other pages show parts of this listing as excerpts. An excerpt starts with the comment <code>// Excerpt of ilium:&lt;package&gt;/&lt;interface&gt; in reference-wit</code> and has to match this page [ABI-005]. The owner page of an interface holds the full listing of that interface and its explanation. The rule is in <a href="/pages/reference-requirements-wit-abi/#how-the-rows-are-tested">Conventions for authors</a>.</li>
+</ul>
+<h2 id="2-conventions">2. Conventions</h2>
+<p>These rules apply to every interface below. Limit tables on other pages link here instead of repeating them [ABI-016].</p>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Identifiers</td>
+<td><code>node-id</code>, <code>request-id</code>, <code>client-id</code>, <code>buffer-id</code>, <code>timer-id</code>, <code>watch-id</code>, <code>lock-id</code>, <code>stream-id</code>, <code>child-id</code>, <code>grab-id</code> and <code>index-id</code> are unsigned integers. Ids are opaque and never reused inside one server run. <code>plugin-id</code> is a string such as <code>acme.git-status</code>: 3 to 64 characters from <code>[a-z0-9.-]</code>.</td>
+</tr>
+<tr>
+<td>Correlation numbers</td>
+<td><code>submission.correlation</code> is a <code>u64</code> chosen by the plugin. Values below 2^63 belong to the plugin. Values from 2^63 up belong to the SDK, which uses them for the submissions it makes for you.</td>
+</tr>
+<tr>
+<td>Strings</td>
+<td>UTF-8 only. A host rejects an invalid byte sequence at the ABI boundary with a trap. See <a href="/pages/reference-runtime-model/">Runtime model</a>.</td>
+</tr>
+<tr>
+<td>String lengths</td>
+<td>A limit in "characters" counts Unicode scalar values. A limit in "bytes" counts UTF-8 bytes. Terminal widths use <code>ui.display-width</code>, which counts cells. Grapheme limits (glyph fields) are named as such.</td>
+</tr>
+<tr>
+<td>Colours</td>
+<td><code>u32</code> as <code>0x00RRGGBB</code>. The top byte MUST be zero. A non-zero top byte is <code>invalid-argument</code>. The <code>color</code> variant adds theme roles and 256-colour indexes for styled text.</td>
+</tr>
+<tr>
+<td>Time</td>
+<td><code>epoch-ms</code> is a <code>u64</code> count of milliseconds since the Unix epoch, UTC. A duration is a <code>u32</code> or <code>u64</code> count of milliseconds and its field name ends in <code>-ms</code> or <code>-millis</code>. Percent is <code>f32</code> from 0 to 100. A ratio is <code>f64</code> from 0 to 1. Per-mille is a <code>u16</code> from 0 to 1000.</td>
+</tr>
+<tr>
+<td>JSON</td>
+<td>A field whose name ends in <code>-json</code> is UTF-8 JSON text (RFC 8259). See the JSON rule in <a href="/pages/reference-runtime-model/#8-json-in-strings">Runtime model</a>.</td>
+</tr>
+<tr>
+<td>Paths</td>
+<td><code>fs-path</code> is a scope name plus a relative path with <code>/</code> separators. Parent segments (<code>..</code>) and absolute paths are <code>invalid-argument</code>.</td>
+</tr>
+<tr>
+<td>Positions</td>
+<td>Lines and columns are 0-based. A text column counts Unicode scalar values. A cell column counts terminal cells.</td>
+</tr>
+<tr>
+<td>Lists</td>
+<td>A list that the host returns is never <code>null</code>. An empty list is a valid value. Where a function states a maximum, a longer input is <code>invalid-argument</code> unless the page says it traps.</td>
+</tr>
+<tr>
+<td>Case order</td>
+<td>The case order of every <code>variant</code>, <code>enum</code> and <code>flags</code> type is part of the canonical ABI. A case is only ever appended [ABI-019].</td>
+</tr>
+<tr>
+<td>Empty types</td>
+<td>No record, flags, enum or variant is empty, because the component model forbids it. A variant case without data has no payload.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="length-and-size-limits-that-apply-everywhere">Length and size limits that apply everywhere</h3>
+<table>
+<thead>
+<tr>
+<th>Field class</th>
+<th>Limit</th>
+<th>Unit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Command id</td>
+<td>1 to 96</td>
+<td>characters, from <code>[a-z0-9._:/-]</code></td>
+</tr>
+<tr>
+<td>Key of a widget</td>
+<td>1 to 64</td>
+<td>characters</td>
+</tr>
+<tr>
+<td>Dedup key</td>
+<td>1 to 128</td>
+<td>characters from <code>[A-Za-z0-9._:/-]</code></td>
+</tr>
+<tr>
+<td>Toast title</td>
+<td>60</td>
+<td>characters</td>
+</tr>
+<tr>
+<td>Toast body</td>
+<td>200</td>
+<td>characters</td>
+</tr>
+<tr>
+<td>Notification title</td>
+<td>80</td>
+<td>characters</td>
+</tr>
+<tr>
+<td><code>mark-attention</code> reason</td>
+<td>80</td>
+<td>characters</td>
+</tr>
+<tr>
+<td>Message channel</td>
+<td>1 to 64</td>
+<td>characters from <code>[a-z0-9.-]</code></td>
+</tr>
+<tr>
+<td>Message payload</td>
+<td>1,048,576</td>
+<td>bytes</td>
+</tr>
+<tr>
+<td>Clipboard text</td>
+<td>1,048,576</td>
+<td>bytes</td>
+</tr>
+<tr>
+<td><code>*-json</code> payload of a service call or command</td>
+<td>65,536</td>
+<td>bytes</td>
+</tr>
+<tr>
+<td>Journal payload</td>
+<td>4,096</td>
+<td>bytes</td>
+</tr>
+<tr>
+<td>Restore bytes from <code>deactivate</code></td>
+<td>1,048,576</td>
+<td>bytes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="3-package-and-interface-layout">3. Package and interface layout</h2>
+<p>The SDK ships these files in its <code>wit/</code> folder. The frozen copy of the same layout lives in <code>wit/since_v0_1/</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Interface</th>
+<th>What it holds</th>
+<th>Section</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>ids</code></td>
+<td>id aliases</td>
+<td>4.1</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>errors</code></td>
+<td><code>error-code</code>, <code>plugin-error</code></td>
+<td>4.2</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>text</code></td>
+<td>colours, styles, spans, rich text, tooltips</td>
+<td>4.3</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>paths</code></td>
+<td><code>fs-path</code></td>
+<td>4.4</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>editing</code></td>
+<td>text positions, buffers, viewport</td>
+<td>4.5</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>layout</code></td>
+<td>constraints and flex</td>
+<td>4.6</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>net</code></td>
+<td>HTTP header</td>
+<td>4.7a</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>geo</code></td>
+<td>points and places</td>
+<td>4.7</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>tree</code></td>
+<td>nodes, panes, agents</td>
+<td>4.8</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>ui</code></td>
+<td>widgets, ui tree, actions, state, theme</td>
+<td>4.9</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>requests</code></td>
+<td>request refs and outcomes</td>
+<td>4.10</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>intents</code></td>
+<td>the 42 intents and their specs</td>
+<td>4.11</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>events</code></td>
+<td>the 56 events and their payloads</td>
+<td>4.12</td>
+</tr>
+<tr>
+<td><code>ilium:types</code></td>
+<td><code>lifecycle</code></td>
+<td>activation and deactivation</td>
+<td>4.13</td>
+</tr>
+<tr>
+<td><code>ilium:host</code></td>
+<td>39 interfaces</td>
+<td>everything a plugin imports</td>
+<td>5</td>
+</tr>
+<tr>
+<td><code>ilium:primitives</code></td>
+<td><code>terminal</code>, <code>agent</code>, <code>editor</code>, <code>basic</code></td>
+<td>pane primitives</td>
+<td>6</td>
+</tr>
+<tr>
+<td><code>ilium:anim</code></td>
+<td><code>surface</code>, <code>fonts</code>, <code>renderer-types</code></td>
+<td>background scenes</td>
+<td>7</td>
+</tr>
+<tr>
+<td><code>ilium:exports</code></td>
+<td>16 interfaces</td>
+<td>what a plugin implements</td>
+<td>8</td>
+</tr>
+<tr>
+<td><code>ilium:server</code>, <code>ilium:client</code>, <code>ilium:anim</code></td>
+<td><code>base</code> worlds and <code>with-*</code> fragments</td>
+<td>what a plugin links</td>
+<td>9</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-package-iliumtypes">4. Package ilium:types</h2>
+<p>All items of this package are shared data. A plugin never imports <code>ilium:types</code> as a whole. It imports the host interfaces, and the types come with them.</p>
+<h3 id="41-ids">4.1 ids</h3>
+<pre><code class="language-wit">package ilium:types@0.1.0;
+
+interface ids {
+  /// A node of the session tree: a container, a pane or a folder. Never reused in one server run.
+  type node-id = u64;
+  /// The id of a slow host call. Unique per plugin side for the whole server run, starting at 1 at
+  /// server start, and never reused, also across instance restarts.
+  type request-id = u64;
+  /// Reverse-DNS style plugin id, 3 to 64 characters from [a-z0-9.-].
+  type plugin-id = string;
+  /// One attached client of the session.
+  type client-id = u64;
+  /// One editor buffer.
+  type buffer-id = u64;
+  /// One timer, volatile or durable.
+  type timer-id = u64;
+  /// A file watch taken through fs.watch.
+  type watch-id = u64;
+  /// An advisory file lock taken through fs.lock.
+  type lock-id = u64;
+  /// An open HTTP or websocket stream.
+  type stream-id = u64;
+  /// A vector index created through vector.create-index.
+  type index-id = u32;
+  /// A child process spawned through process.spawn.
+  type child-id = u64;
+  /// A key grab taken through keys.grab.
+  type grab-id = u64;
+  /// Milliseconds since the Unix epoch, UTC.
+  type epoch-ms = u64;
+}
+</code></pre>
+<h3 id="42-errors">4.2 errors</h3>
+<pre><code class="language-wit">interface errors {
+  /// The order is part of the ABI. Meaning of each code: see Errors and limits.
+  enum error-code {
+    not-permitted, not-found, invalid-argument, conflict, quota-exceeded, rate-limited,
+    busy, timed-out, cancelled, unsupported, pane-not-ready, revoked, io, network, internal,
+  }
+  record plugin-error {
+    code: error-code,
+    /// Plain text for logs. At most 256 characters. Never parsed by the SDK.
+    message: string,
+    /// Present with rate-limited and busy: wait at least this long before a retry.
+    retry-after-ms: option&lt;u32&gt;,
+  }
+}
+</code></pre>
+<h3 id="43-text">4.3 text</h3>
+<pre><code class="language-wit">interface text {
+  enum color-role { foreground, muted, accent, success, warning, danger, info, selection, border }
+  variant color { role(color-role), rgb(u32), indexed(u8) }
+  flags modifiers { bold, dim, italic, underlined, slow-blink, rapid-blink, reversed, hidden, crossed-out }
+  /// An empty style (no colours, no modifiers) inherits the theme.
+  record style { fg: option&lt;color&gt;, bg: option&lt;color&gt;, add: modifiers, remove: modifiers }
+  record span { text: string, style: style }
+  /// One line of styled text.
+  type styled-text = list&lt;span&gt;;
+  type styled-lines = list&lt;styled-text&gt;;
+
+  /// Where a clickable span goes.
+  variant span-target {
+    none,
+    /// An own command or one covered by commands.invoke. Arrives as command-invoked with origin text.
+    command(string),
+    /// Arrives as a ui-action of kind activated with value text(&lt;string&gt;) on the widget key.
+    action(string),
+    /// A URL, opened only through the open-external rules.
+    link(string),
+  }
+  record rich-span { text: string, style: style, target: span-target, tooltip: option&lt;string&gt; }
+  type rich-text = list&lt;rich-span&gt;;
+  type rich-lines = list&lt;rich-text&gt;;
+
+  /// Hover help. At most 200 characters in all. Default delay 500 ms, allowed 0 to 2000.
+  record tooltip { lines: styled-lines, delay-ms: option&lt;u16&gt; }
+
+  /// A preview in a choice dialog.
+  variant preview {
+    /// One grapheme, drawn with icon widths.
+    glyph(string),
+    /// 1 to 16 colours, drawn as a strip of half blocks.
+    swatch(list&lt;u32&gt;),
+    /// 1 to 4 lines of at most 8 cells, drawn in the muted colour.
+    pattern(list&lt;string&gt;),
+  }
+
+  enum tri-state { off, on, mixed }
+  /// The one tone enum. Toast, notice, badge, status segment and meter use it.
+  enum tone { info, success, warning, danger, muted }
+}
+</code></pre>
+<h3 id="44-paths">4.4 paths</h3>
+<pre><code class="language-wit">interface paths {
+  /// `scope` is a granted scope name such as project, data or agent-sessions:codex.
+  /// `path` is relative to the scope root and uses '/' separators.
+  record fs-path { scope: string, path: string }
+}
+</code></pre>
+<h3 id="45-editing">4.5 editing</h3>
+<pre><code class="language-wit">interface editing {
+  use ilium:types/ids@0.1.0.{buffer-id, node-id};
+  use ilium:types/paths@0.1.0.{fs-path};
+  /// Both fields are 0-based. `column` counts Unicode scalar values.
+  record text-position { line: u32, column: u32 }
+  record text-range { start: text-position, end: text-position }
+  record text-edit { range: text-range, replacement: string }
+  record buffer-ref {
+    buffer: buffer-id, pane: option&lt;node-id&gt;, path: option&lt;fs-path&gt;, language: option&lt;string&gt;,
+    revision: u64, line-count: u32, dirty: bool,
+  }
+  record editor-viewport { buffer: buffer-id, pane: node-id, first-line: u32, last-line: u32, columns: u16, rows: u16 }
+}
+</code></pre>
+<h3 id="46-layout">4.6 layout</h3>
+<pre><code class="language-wit">interface layout {
+  enum direction { horizontal, vertical }
+  variant constraint { length(u16), min(u16), max(u16), percentage(u16), ratio(tuple&lt;u32, u32&gt;), fill(u16) }
+  enum flex { legacy, start, end, center, space-between, space-around, space-evenly }
+  variant spacing { space(u16), overlap(u16) }
+  record margin { horizontal: u16, vertical: u16 }
+  enum alignment { left, center, right }
+  /// A size in cells.
+  record area { columns: u16, rows: u16 }
+}
+</code></pre>
+<h3 id="47-geo">4.7 geo</h3>
+<pre><code class="language-wit">interface geo {
+  /// WGS 84 degrees. Latitude -90 to 90 and longitude -180 to 180, else invalid-argument.
+  record geo-point { lat: f64, lon: f64 }
+  record geo-place { point: geo-point, label: string, country-code: option&lt;string&gt;, kind: option&lt;string&gt; }
+}
+</code></pre>
+<h3 id="47a-net">4.7a net</h3>
+<pre><code class="language-wit">interface net {
+  record header { name: string, value: string }
+}
+</code></pre>
+<h3 id="48-tree">4.8 tree</h3>
+<pre><code class="language-wit">interface tree {
+  use ilium:types/ids@0.1.0.{node-id, plugin-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  enum node-class { container, pane, folder }
+  enum agent-activity { none, working, idle, awaiting-approval, done, menu }
+  record agent-view { signature: string, activity: agent-activity, objective: option&lt;string&gt;, goal: option&lt;string&gt; }
+  record node-view {
+    id: node-id, parent: option&lt;node-id&gt;, class: node-class,
+    /// &quot;ilium.terminal&quot;, &quot;ilium.editor&quot;, &quot;ilium.board&quot; or &quot;&lt;plugin-id&gt;.&lt;kind&gt;&quot;.
+    content-kind: option&lt;string&gt;,
+    title: string, cwd: option&lt;string&gt;, agent: option&lt;agent-view&gt;, locked: bool, revision: u64,
+  }
+  record node-query { content-kind: option&lt;string&gt;, signature: option&lt;string&gt;, under: option&lt;node-id&gt; }
+  enum primitive-kind { terminal, editor, basic }
+  record pane-info {
+    node: node-id, content-kind: string, primitive: primitive-kind,
+    columns: u16, rows: u16, focused: bool, title: string, is-restored: bool,
+  }
+  /// Where a node goes relative to a target. One definition for the whole contract.
+  enum placement { before, after, inside-first, inside-last }
+  enum split-direction { horizontal, vertical }
+  enum pane-lifecycle-state { running, frozen, restarting, exited }
+  enum signal { interrupt, terminate, kill, hangup }
+  /// The model an agent runs. source is statusline, transcript or signature.
+  record agent-model { model: string, provider: option&lt;string&gt;, context-window: option&lt;u32&gt;, source: string }
+  /// Where a title came from.
+  enum title-source { plugin, inferred }
+  enum title-origin { osc, manual, inferred }
+}
+</code></pre>
+<p>The enum <code>split-direction</code> has the same two cases as <code>direction</code> in <code>layout</code>. They stay two types: <code>direction</code> lays out widgets, <code>split-direction</code> splits panes. The intent <code>create-split</code> uses <code>split-direction</code>.</p>
+<h3 id="49-ui">4.9 ui</h3>
+<p>The <code>widget</code> variant has 51 cases. The order is the order of the families in <a href="/pages/widgets-index/">Widgets index</a>: layout (10), text (5), collections (6), data (10), input (11), status (4), media (5). A container holds child indexes in <code>ui-node.children</code>, never nested widgets, so no type is recursive.</p>
+<pre><code class="language-wit">interface ui {
+  use ilium:types/ids@0.1.0.{node-id, plugin-id, buffer-id};
+  use ilium:types/text@0.1.0.{color, style, styled-text, styled-lines, rich-text, rich-lines, tooltip, tri-state, tone, preview};
+  use ilium:types/layout@0.1.0.{direction, constraint, flex, spacing, margin, alignment, area};
+  use ilium:types/paths@0.1.0.{fs-path};
+  use ilium:types/geo@0.1.0.{geo-point};
+
+  // ---- layout and containers
+  record layout-spec { direction: direction, constraints: list&lt;constraint&gt;, flex: flex, spacing: spacing, margin: margin }
+  flags borders { top, right, bottom, left }
+  enum border-type { plain, rounded, double, thick, quadrant-inside, quadrant-outside }
+  enum title-position { top, bottom }
+  record block-title { text: styled-text, position: title-position, alignment: alignment }
+  record padding { left: u16, right: u16, top: u16, bottom: u16 }
+  record block-spec {
+    borders: borders, border-type: border-type, titles: list&lt;block-title&gt;, padding: padding,
+    style: style, border-style: style,
+  }
+  record tabs-spec {
+    titles: list&lt;styled-text&gt;, divider: string, padding-left: u16, padding-right: u16,
+    highlight-style: style,
+  }
+  /// id is the key of the popup node. Size: see the popup rules on the layout and containers page.
+  record popup-spec { id: string, title: option&lt;styled-text&gt;, modal: bool, width: constraint, height: constraint }
+  enum scrollbar-orientation { vertical-right, vertical-left, horizontal-bottom, horizontal-top }
+  record scrollbar-spec { orientation: scrollbar-orientation, target-key: string }
+  /// position is per mille, 50 to 950.
+  record split-spec { direction: direction, position: u16, min-first: u16, min-second: u16, resizable: bool }
+  record separator-spec { direction: direction, label: option&lt;styled-text&gt;, style: style }
+  enum dialog-kind { plain, confirm, danger-confirm }
+  enum button-role { primary, secondary, danger }
+  record dialog-button { id: string, label: string, role: button-role, is-cancel: bool }
+  record dialog-spec {
+    title: styled-text, kind: dialog-kind, buttons: list&lt;dialog-button&gt;,
+    width: constraint, height: constraint, message: option&lt;styled-lines&gt;,
+  }
+  record scroll-view-spec { content-rows: u32, show-scrollbar: bool, follow-tail: bool }
+
+  // ---- text
+  record paragraph-spec {
+    lines: styled-lines, rich: option&lt;rich-lines&gt;, wrap: option&lt;bool&gt;, alignment: alignment,
+    style: style, scrollable: bool,
+  }
+  record markdown-spec { source: string, link-command: option&lt;string&gt;, task-click: bool, images: bool, base: option&lt;fs-path&gt; }
+  record leader-spec { label: styled-text, value: styled-text }
+  record key-hint { keys: string, label: string, command: option&lt;string&gt; }
+  enum diff-line-kind { added, removed, context }
+  record diff-line { kind: diff-line-kind, old-line: option&lt;u32&gt;, new-line: option&lt;u32&gt;, text: string }
+  record diff-hunk { header: string, lines: list&lt;diff-line&gt; }
+  enum diff-layout { unified, split }
+  record diff-view-spec { hunks: list&lt;diff-hunk&gt;, layout: diff-layout, language: option&lt;string&gt;, word-diff: bool }
+
+  // ---- collections
+  enum list-direction { top-to-bottom, bottom-to-top }
+  enum highlight-spacing { always, when-selected, never }
+  record list-item {
+    id: option&lt;string&gt;, lines: styled-lines, style: style, icon: option&lt;string&gt;, trailing: option&lt;styled-text&gt;,
+    tooltip: option&lt;tooltip&gt;, disabled-reason: option&lt;string&gt;,
+  }
+  record list-spec {
+    items: list&lt;list-item&gt;, highlight-symbol: string, highlight-style: style, highlight-spacing: highlight-spacing,
+    repeat-highlight-symbol: bool, direction: list-direction, filter: bool, filter-placeholder: option&lt;string&gt;,
+    multi-select: bool, follow-tail: bool, empty: option&lt;styled-lines&gt;, item-tooltip: bool,
+  }
+  record table-column {
+    id: string, title: styled-text, width: constraint, min-width: u16, priority: u8,
+    align: alignment, sortable: bool,
+  }
+  record table-row { id: option&lt;string&gt;, cells: list&lt;styled-lines&gt;, height: u16, style: style }
+  record table-spec {
+    columns: list&lt;table-column&gt;, rows: list&lt;table-row&gt;, sort: option&lt;tuple&lt;string, bool&gt;&gt;,
+    multi-select: bool, follow-tail: bool, column-spacing: u16, highlight-symbol: string,
+    highlight-spacing: highlight-spacing,
+  }
+  record tree-item {
+    id: string, label: styled-text, depth: u16, expandable: bool, expanded: bool, icon: option&lt;string&gt;,
+    trailing: option&lt;styled-text&gt;, badge: option&lt;string&gt;, tooltip: option&lt;tooltip&gt;, draggable: bool, drop-target: bool,
+  }
+  record tree-list-spec { items: list&lt;tree-item&gt;, multi-select: bool }
+  record menu-item { id: string, label: string, icon: option&lt;string&gt;, enabled: bool, shortcut: option&lt;string&gt;, separator-before: bool }
+  record menu-spec { entries: list&lt;menu-entry&gt;, items: list&lt;menu-item&gt; }
+  record menu-entry {
+    id: string, label: string, icon: option&lt;string&gt;, shortcut: option&lt;string&gt;,
+    /// Id of a submenu entry. Depth is at most 2.
+    parent: option&lt;string&gt;,
+    is-submenu: bool, separator-before: bool,
+    checked: option&lt;tri-state&gt;,
+    /// At most 40 characters.
+    disabled-reason: option&lt;string&gt;,
+    tooltip: option&lt;tooltip&gt;, danger: bool,
+  }
+  record check-item { id: string, label: styled-text, state: tri-state, disabled-reason: option&lt;string&gt;, children: list&lt;check-item&gt; }
+  record check-list-spec { items: list&lt;check-item&gt;, all-toggle: bool, max-height: option&lt;u16&gt; }
+  enum item-format { glob, url, host, path, regex, chord }
+  record list-field { id: string, title: string, kind: string, width: u16 }
+  record list-editor-spec {
+    items: list&lt;string&gt;, item-format: option&lt;item-format&gt;, object-fields: list&lt;list-field&gt;,
+    reorderable: bool, max-items: u32, item-states: list&lt;row-state&gt;, placeholder: option&lt;string&gt;,
+  }
+  enum row-state-kind { idle, loading, pending, error }
+  /// message is at most 80 characters.
+  record row-state { kind: row-state-kind, message: option&lt;string&gt; }
+
+  // ---- data display
+  record gauge-spec { ratio: f64, label: option&lt;styled-text&gt;, use-unicode: bool, gauge-style: style }
+  enum line-set { normal, thick, double }
+  record line-gauge-spec { ratio: f64, label: option&lt;styled-text&gt;, filled-style: style, unfilled-style: style, line-set: line-set }
+  enum render-direction { left-to-right, right-to-left }
+  record sparkline-spec { data: list&lt;option&lt;u64&gt;&gt;, max: option&lt;u64&gt;, direction: render-direction, style: style }
+  record bar-item { value: u64, label: option&lt;string&gt;, text-value: option&lt;string&gt;, style: style }
+  record bar-group { label: option&lt;string&gt;, bars: list&lt;bar-item&gt; }
+  enum bar-direction { vertical, horizontal }
+  record bar-chart-spec { groups: list&lt;bar-group&gt;, bar-width: u16, bar-gap: u16, group-gap: u16, direction: bar-direction, max: option&lt;u64&gt; }
+  enum marker { dot, block, bar, braille, half-block, quadrant, sextant, octant }
+  enum graph-type { scatter, line, bar }
+  record dataset { name: string, marker: marker, graph-type: graph-type, points: list&lt;tuple&lt;f64, f64&gt;&gt;, style: style }
+  record axis { title: option&lt;styled-text&gt;, bounds: tuple&lt;f64, f64&gt;, labels: list&lt;styled-text&gt; }
+  enum legend-position { top, top-right, top-left, left, right, bottom, bottom-right, bottom-left }
+  record chart-spec { datasets: list&lt;dataset&gt;, x-axis: axis, y-axis: axis, legend-position: option&lt;legend-position&gt; }
+  record canvas-line { x1: f64, y1: f64, x2: f64, y2: f64, color: color }
+  record canvas-rectangle { x: f64, y: f64, width: f64, height: f64, color: color }
+  record canvas-circle { x: f64, y: f64, radius: f64, color: color }
+  record canvas-points { coords: list&lt;tuple&lt;f64, f64&gt;&gt;, color: color }
+  record canvas-label { x: f64, y: f64, text: styled-text }
+  enum map-resolution { low, high }
+  record canvas-map { resolution: map-resolution, color: color }
+  variant shape {
+    line(canvas-line), rectangle(canvas-rectangle), circle(canvas-circle),
+    points(canvas-points), label(canvas-label), world-map(canvas-map),
+  }
+  record canvas-spec { x-bounds: tuple&lt;f64, f64&gt;, y-bounds: tuple&lt;f64, f64&gt;, marker: marker, shapes: list&lt;shape&gt; }
+  record marked-day { day: u8, style: style }
+  /// Gate ui-calendar.
+  record calendar-spec { year: u32, month: u8, marked: list&lt;marked-day&gt;, show-month-header: bool, show-weekdays: bool }
+  enum progress-state { waiting, running, done, error }
+  record progress-row-spec {
+    state: progress-state, title: styled-text, percent: option&lt;f32&gt;, message: option&lt;string&gt;, details: option&lt;styled-lines&gt;,
+  }
+  record meter-segment { label: string, value: f64, tone: tone }
+  enum orientation { horizontal, vertical }
+  /// At most 8 segments.
+  record meter-spec { segments: list&lt;meter-segment&gt;, max: f64, label: option&lt;styled-text&gt;, show-values: bool, orientation: orientation }
+  record minimap-mark { line: u32, color: color, lane: u8 }
+  record minimap-spec { density: list&lt;u8&gt;, marks: list&lt;minimap-mark&gt;, viewport: tuple&lt;u32, u32&gt;, total-lines: u32 }
+
+  // ---- input
+  record button-spec { label: string, icon: option&lt;string&gt;, enabled: bool, role: button-role }
+  enum toggle-style { switch, checkbox, icon }
+  record toggle-spec { label: string, value: bool, style: toggle-style, tri-state: bool, icon-on: option&lt;string&gt;, icon-off: option&lt;string&gt; }
+  enum choice-style { stepper, list, dialog }
+  enum view-mode { list, grid }
+  enum disabled-marker { reason, cross }
+  record catalog-item {
+    id: string, title: string,
+    /// At most 120 characters.
+    description: option&lt;string&gt;,
+    preview: option&lt;preview&gt;,
+    /// Heading in the choice dialog, at most 32 characters.
+    group: option&lt;string&gt;,
+    /// At most 8, matched by the filter.
+    keywords: list&lt;string&gt;,
+    /// At most 40 characters.
+    disabled-reason: option&lt;string&gt;,
+  }
+  record choice-spec {
+    label: string, options: list&lt;string&gt;, selected: u32, style: choice-style, items: list&lt;catalog-item&gt;,
+    source: option&lt;string&gt;, selected-id: option&lt;string&gt;, filter: bool, view-modes: list&lt;view-mode&gt;,
+    disabled-marker: disabled-marker, allow-custom: bool,
+  }
+  enum number-style { stepper, slider }
+  record number-spec {
+    label: string, value: f64, minimum: f64, maximum: f64, step: f64, unit: option&lt;string&gt;, style: number-style,
+    steps: list&lt;f64&gt;, special-values: list&lt;tuple&lt;f64, string&gt;&gt;, scale: u32, debounce-ms: u32,
+  }
+  record text-input-spec {
+    label: string, initial: string, placeholder: option&lt;string&gt;, secret: bool, reveal-last: u8, reveal: bool,
+    max-length: u32, submit-on-enter: bool, debounce-ms: u32, validation: option&lt;string&gt;, suggestions: option&lt;string&gt;,
+  }
+  /// max-bytes 0 means no limit.
+  record text-area-spec {
+    initial: string, placeholder: option&lt;string&gt;, wrap: bool, line-numbers: bool, max-bytes: u32,
+    debounce-ms: u32, tab-moves-focus: bool,
+  }
+  record schema-form-spec { plugin: plugin-id, section: string }
+  record key-capture-spec { chord: option&lt;string&gt;, allow-modifier-only: bool, reserved-check: bool }
+  record color-picker-spec { value: string, palette: option&lt;string&gt;, allow-theme-roles: bool }
+  enum path-kind { open-file, open-directory, save-file }
+  record path-field-spec { kind: path-kind, value: option&lt;fs-path&gt;, display: string, extensions: list&lt;string&gt;, editable: bool }
+  record location-picker-spec {
+    value: option&lt;geo-point&gt;, label: option&lt;string&gt;, search: bool, allow-current: bool, zoom: bool, bind: option&lt;string&gt;,
+  }
+
+  // ---- status and feedback
+  record badge-spec { label: option&lt;string&gt;, count: option&lt;u32&gt;, dot: bool, tone: tone }
+  variant spinner-frames { braille, blocks, moons, quarters, custom(list&lt;string&gt;) }
+  record spinner-spec { frames: spinner-frames, interval-ms: u16, label: option&lt;styled-text&gt; }
+  record notice-action { label: string, command: string }
+  record notice-spec {
+    tone: tone, title: option&lt;string&gt;, text: rich-lines, actions: list&lt;notice-action&gt;, dismissible: bool,
+  }
+  record icon-spec { name: string, tone: option&lt;tone&gt; }
+
+  // ---- media and embedded views
+  enum pixel-format { mask8, mono1, gray8, rgb8, rgba8 }
+  record rgba-image { width: u32, height: u32, rgba: list&lt;u8&gt; }
+  record encoded-image { bytes: list&lt;u8&gt;, mime: string }
+  variant image-source { asset(string), file(fs-path), decoded(rgba-image), encoded(encoded-image) }
+  enum media-fit { contain, cover, fill }
+  record image-spec { source: image-source, fit: media-fit }
+  record surface-spec { format: pixel-format, min-columns: u16, min-rows: u16, glyph-plane: bool, owner-ids: bool }
+  record code-view-spec { buffer: buffer-id, read-only: bool, line-numbers: bool, wrap: bool, minimap: bool }
+  record terminal-view-spec { pane: node-id, rows: option&lt;u16&gt;, interactive: bool, scrollback: bool, highlights: option&lt;string&gt; }
+  record video-range { path: fs-path, start-millis: u64, end-millis: option&lt;u64&gt; }
+  variant video-source { asset(string), file(fs-path), range(video-range) }
+  record video-spec { source: video-source, autoplay: bool, looped: bool, muted: bool, controls: bool, fit: media-fit }
+
+  /// The 51 widgets. The order is the ABI.
+  variant widget {
+    // layout (10)
+    layout(layout-spec), block(block-spec), tabs(tabs-spec), popup(popup-spec), clear,
+    scrollbar(scrollbar-spec), split(split-spec), separator(separator-spec), dialog(dialog-spec),
+    scroll-view(scroll-view-spec),
+    // text (5)
+    paragraph(paragraph-spec), markdown(markdown-spec), leader-row(leader-spec), key-hints(list&lt;key-hint&gt;),
+    diff-view(diff-view-spec),
+    // collections (6)
+    %list(list-spec), table(table-spec), tree-list(tree-list-spec), menu(menu-spec),
+    check-list(check-list-spec), list-editor(list-editor-spec),
+    // data (10)
+    gauge(gauge-spec), line-gauge(line-gauge-spec), sparkline(sparkline-spec), bar-chart(bar-chart-spec),
+    chart(chart-spec), canvas(canvas-spec),
+    // @unstable(feature = ui-calendar)
+    calendar(calendar-spec),
+    progress-row(progress-row-spec), meter(meter-spec), minimap(minimap-spec),
+    // input (11)
+    button(button-spec), toggle(toggle-spec), choice(choice-spec), number(number-spec),
+    text-input(text-input-spec), text-area(text-area-spec), schema-form(schema-form-spec),
+    key-capture(key-capture-spec), color-picker(color-picker-spec), path-field(path-field-spec),
+    location-picker(location-picker-spec),
+    // status (4)
+    badge(badge-spec), spinner(spinner-spec), notice(notice-spec), icon(icon-spec),
+    // media (5)
+    image(image-spec), surface(surface-spec), code-view(code-view-spec), terminal-view(terminal-view-spec),
+    video(video-spec),
+  }
+
+  /// The order is the ABI. The last two flags switch on hover and pointer actions.
+  flags node-flags { focusable, draggable, drop-target, hidden, hover-events, pointer-events }
+  record ui-node {
+    /// Widget key, 1 to 64 characters, unique across the whole view, not only among siblings.
+    /// A duplicate traps with ui.duplicate-key. Required for every widget that sends actions.
+    key: option&lt;string&gt;,
+    widget: widget,
+    /// Indexes into ui-tree.nodes. Every index is greater than the index of its parent and less
+    /// than nodes.len(). Every node except the root appears exactly once in exactly one list.
+    children: list&lt;u32&gt;,
+    %flags: node-flags,
+    /// Shown after the delay on hover, or on focus with F1.
+    tooltip: option&lt;tooltip&gt;,
+    /// Focus order: 1 and above first, ascending; then none and 0 in pre-order. Negative: click and
+    /// set-focus only, skipped by Tab.
+    tab-index: option&lt;s16&gt;,
+    /// The node is drawn muted, ignores input, stays in the focus order and the reason shows as its tooltip.
+    disabled-reason: option&lt;string&gt;,
+  }
+  /// root MUST be 0. At most 4,096 nodes and 1 MiB. A tree deeper than 32 levels (root = 1) traps
+  /// ui.too-deep. Any invalid tree traps with a ui.* code; views.render has no result type.
+  record ui-tree { version: u32, nodes: list&lt;ui-node&gt;, root: u32 }
+
+  // ---- views, state and actions
+  variant view-target { panel(string), pane(node-id), popup(string), settings-page(string), onboarding-step(string) }
+
+  variant widget-state {
+    none, selected(option&lt;u32&gt;), offset(u32), tab(u32), text(string), expanded(list&lt;string&gt;), checked(bool),
+    /// Check-list items, or a tri-state toggle under key &quot;&quot;.
+    tri(list&lt;tuple&lt;string, tri-state&gt;&gt;),
+    /// location-picker.
+    geo(option&lt;geo-point&gt;),
+    /// number, slider.
+    number(f64),
+    /// Split divider position in per mille.
+    split(u16),
+    /// Multi-selection in the list, table and tree-list.
+    ids(list&lt;string&gt;),
+  }
+
+  variant popup-anchor {
+    centered(tuple&lt;constraint, constraint&gt;), at-cell(tuple&lt;u16, u16&gt;), below-key(string),
+    at-key(key-anchor),
+    /// Next to a tree row (tree toolbar popovers, row actions).
+    at-tree-node(node-id),
+    /// At the last pointer position (context menus in own views).
+    at-pointer,
+  }
+  enum anchor-side { below, above, right, left }
+  record key-anchor { key: string, side: anchor-side }
+  /// Overrides the modal and close-on-escape fields of the spec.
+  record popup-options { modal: bool, pinnable: bool, dismiss-on-leave: bool, close-on-escape: bool }
+
+  record theme-tokens {
+    foreground: u32, background: u32, accent: u32, muted: u32, success: u32, warning: u32, danger: u32,
+    is-dark: bool,
+    /// Derived convenience field: always equal to (icon-mode == stable) in every delivery.
+    stable-glyphs: bool,
+  }
+  enum density { compact, normal, comfortable }
+  /// Widgets and the host follow icon-mode.
+  enum icon-mode { normal, stable }
+  record theme-extras { reduced-motion: bool, density: density, info: u32, selection: u32, border: u32, icon-mode: icon-mode }
+
+  /// 17 cases. The first 11 are the base set, the last 6 were appended.
+  enum action-kind {
+    activated, changed, submitted, selected, toggled, scrolled, dropped,
+    context-requested, closed, focus-gained, focus-lost,
+    hover-enter, hover-leave, pointer, drag-over, resized, filter-changed,
+  }
+
+  enum pointer-kind { down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right }
+  enum pointer-button { none, left, middle, right }
+  flags pointer-modifiers { shift, control, alt }
+  record view-pointer {
+    kind: pointer-kind, button: pointer-button, modifiers: pointer-modifiers,
+    /// Cell inside the widget area, 0-based.
+    column: u16, row: u16,
+    /// Position inside the cell, 0 to 255 from left or top. 128 when the terminal reports cells only.
+    sub-x: u8, sub-y: u8,
+    /// 1, 2 or 3 for down events, 0 otherwise.
+    clicks: u8,
+  }
+  enum drop-accept { none, before, after, inside }
+  record drop-value { source-key: string, target-key: string, index: u32 }
+  record drag-over-value { source-key: string, target-key: string, index: u32, accept: drop-accept }
+  record cell-position { column: u16, row: u16 }
+
+  /// 12 cases. The first 6 are the base set, the last 6 were appended or added later.
+  variant action-value {
+    none, text(string), index(u32), number(f64), flag(bool),
+    drop(drop-value),
+    cell(cell-position),
+    pointer(view-pointer),
+    drag-over(drag-over-value),
+    /// Check-list item id, or &quot;&quot; for a tri-state toggle.
+    item-state(tuple&lt;string, tri-state&gt;),
+    /// location-picker.
+    geo(geo-point),
+    /// Multi-selection in the list, table and tree-list.
+    ids(list&lt;string&gt;),
+  }
+  /// In 0.1.0 `action-id` is always a copy of `key`. value is none for button activated, menu closed,
+  /// key-capture closed and the hover and focus kinds.
+  record ui-action { view: view-target, key: string, action-id: string, kind: action-kind, value: option&lt;action-value&gt; }
+
+}
+</code></pre>
+<p>The <code>action-value</code> count is 12: <code>none</code>, <code>text</code>, <code>index</code>, <code>number</code>, <code>flag</code>, <code>drop</code>, <code>cell</code>, <code>pointer</code>, <code>drag-over</code>, <code>item-state</code>, <code>geo</code> and <code>ids</code>. The event <code>ui-action</code> carries <code>value</code> as an option, so a widget with no value sends <code>none</code> in the option, and <code>action-value.none</code> is kept for SDK builders that always fill the field.</p>
+<p>The enum <code>orientation</code> here belongs to <code>meter</code>. It has the cases of <code>direction</code>, but it is a separate type because it names a bar, not a split.</p>
+<h3 id="410-requests">4.10 requests</h3>
+<pre><code class="language-wit">interface requests {
+  use ilium:types/ids@0.1.0.{node-id, request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Which request a result belongs to. submission(n) is a submission with correlation n.
+  /// call(id) is a slow host call with that request-id.
+  variant request-ref { submission(u64), call(request-id) }
+  /// The order is the ABI.
+  variant outcome {
+    ok,
+    ok-node(node-id),
+    duplicate(request-ref),
+    refused(plugin-error),
+    failed(plugin-error),
+    cancelled,
+    /// send-input on an agent pane was applied. The value is the new prompt epoch.
+    ok-epoch(u64),
+  }
+  record request-result { request: request-ref, outcome: outcome }
+}
+</code></pre>
+<h3 id="411-intents">4.11 intents</h3>
+<p>The <code>intent</code> variant has 42 cases. The first 19 are the base set. The last 23 were appended in the order shown. A submission carries one intent.</p>
+<pre><code class="language-wit">interface intents {
+  use ilium:types/ids@0.1.0.{node-id, plugin-id, buffer-id, client-id};
+  use ilium:types/text@0.1.0.{rich-text, tooltip, styled-text, tone};
+  use ilium:types/paths@0.1.0.{fs-path};
+  use ilium:types/editing@0.1.0.{text-edit};
+  use ilium:types/tree@0.1.0.{placement, split-direction, signal, title-source, agent-activity};
+  use ilium:types/ui@0.1.0.{view-target, pointer-kind, pointer-button, pointer-modifiers};
+
+  record submission { intent: intent, correlation: u64, dedup-key: option&lt;string&gt; }
+
+  // ---- tree
+  record rename-node-spec { node: node-id, title: string, source: title-source, expected-revision: option&lt;u64&gt; }
+  record move-node-spec { node: node-id, target: node-id, placement: placement }
+  record set-node-locked-spec { node: node-id, locked: bool }
+
+  // ---- panes
+  /// parent none means the root of the tree.
+  record create-pane-spec {
+    parent: option&lt;node-id&gt;, title: string, content-kind: string, cwd: option&lt;string&gt;,
+    command: option&lt;list&lt;string&gt;&gt;, initial-input: option&lt;string&gt;,
+  }
+  record signal-pane-spec { pane: node-id, signal: signal }
+  enum delivery { typed, submitted, pasted }
+  record input-stage { text: string, delay-ms: u16, delivery: delivery }
+  record terminal-mouse {
+    kind: pointer-kind, button: pointer-button, column: u16, row: u16, modifiers: pointer-modifiers,
+  }
+  record input-precondition { activity: option&lt;agent-activity&gt;, screen-revision: option&lt;u64&gt;, foreground: option&lt;string&gt; }
+  record send-input-spec {
+    pane: node-id,
+    /// Ignored when stages is not empty.
+    text: string,
+    delivery: delivery,
+    /// refused(conflict) when stale.
+    prompt-epoch: option&lt;u64&gt;,
+    /// At most 16 stages, total delay at most 10 s.
+    stages: list&lt;input-stage&gt;,
+    /// At most 64 KiB. Needs terminal.raw-input.
+    raw: option&lt;list&lt;u8&gt;&gt;,
+    /// Needs terminal.raw-input.
+    mouse: option&lt;list&lt;terminal-mouse&gt;&gt;,
+    if-current: option&lt;input-precondition&gt;,
+    /// At most 2 s. Needs terminal.input-lock.
+    lock-user-input: bool,
+    /// Write a journal entry before the PTY write.
+    journal: bool,
+  }
+  record agent-action-spec { pane: node-id, action-id: string }
+
+  // ---- decorations and virtual rows
+  record decoration-key { node: node-id, slot: string }
+  enum decoration-visibility { always, on-hover }
+  record set-decoration-spec {
+    node: node-id, slot: string, content: styled-text, icon: option&lt;string&gt;, sort-key: option&lt;s64&gt;, persist: bool,
+    spans: option&lt;rich-text&gt;, tooltip: option&lt;tooltip&gt;,
+    /// 2 to 16 frames.
+    frames: list&lt;styled-text&gt;,
+    /// At least 90.
+    frame-ms: u16,
+    trailing: bool, visibility: decoration-visibility, tone: option&lt;tone&gt;,
+  }
+  record virtual-row {
+    id: string, label: rich-text, icon: option&lt;string&gt;, command: option&lt;string&gt;,
+    parent: option&lt;string&gt;, expandable: bool, accepts-drop: bool, tooltip: option&lt;tooltip&gt;, trailing: option&lt;styled-text&gt;,
+  }
+  record set-virtual-rows-spec { row-kind: string, rows: list&lt;virtual-row&gt; }
+
+  // ---- sound, notification, views, commands, messages
+  enum urgency { low, normal, high }
+  record notify-spec {
+    title: string, body: option&lt;string&gt;, urgency: urgency, sound: option&lt;string&gt;,
+    /// At most 60,000. 0 or no key: no coalescing.
+    coalesce-key: option&lt;string&gt;, coalesce-window-ms: u32,
+  }
+  record open-view-spec { view: view-target, focus: bool }
+  record invoke-command-spec { command: string, arguments-json: string }
+  enum plugin-side { server, client }
+  record message-target { plugin: plugin-id, side: plugin-side, client: option&lt;client-id&gt; }
+  record message-spec { to: message-target, channel: string, payload: list&lt;u8&gt; }
+
+  // ---- editor
+  record editor-apply-edits-spec { buffer: buffer-id, base-revision: u64, edits: list&lt;text-edit&gt; }
+  enum editor-placement { new-pane, split, replace }
+  record editor-open-spec { path: fs-path, line: option&lt;u32&gt;, placement: editor-placement }
+
+  // ---- appended: pane lifecycle
+  record freeze-pane-spec { pane: node-id }
+  record unfreeze-pane-spec { pane: node-id }
+  record replace-pane-command-spec { pane: node-id, command: list&lt;string&gt;, cwd: option&lt;fs-path&gt;, keep-scrollback: bool }
+  /// grace-ms is at most 10,000.
+  record terminate-pane-process-spec { pane: node-id, grace-ms: u32 }
+  record resize-pane-spec { pane: node-id, columns: option&lt;u16&gt;, rows: option&lt;u16&gt; }
+
+  // ---- appended: tree structure
+  record create-group-spec { parent: option&lt;node-id&gt;, title: string, placement: placement, children: list&lt;node-id&gt; }
+  record create-folder-spec { parent: option&lt;node-id&gt;, title: string, path: option&lt;fs-path&gt; }
+  record create-project-spec { title: string, root: fs-path }
+  /// 2 to 4 panes.
+  record create-split-spec { panes: list&lt;node-id&gt;, direction: split-direction }
+  record set-bookmarked-spec { node: node-id, bookmarked: bool }
+  variant expand-target { node(node-id), virtual-row(string) }
+  record set-expanded-spec { target: expand-target, expanded: bool }
+  variant restructure-op {
+    move(move-node-spec),
+    create-group(create-group-spec),
+    ungroup(node-id),
+    rename(rename-node-spec),
+  }
+  /// At most 256 operations.
+  record restructure-spec { operations: list&lt;restructure-op&gt;, label: string }
+
+  // ---- appended: chrome
+  record set-inferred-icon-spec { node: node-id, icon: option&lt;string&gt;, source: string }
+  /// reason is at most 80 characters.
+  record mark-attention-spec { node: node-id, reason: string }
+  variant external-target { url(string), file(fs-path), settings(string) }
+  record open-external-spec { target: external-target }
+  record set-status-segment-spec { segment: string, content: rich-text, tooltip: option&lt;tooltip&gt;, tone: option&lt;tone&gt; }
+  record set-frame-slot-spec { pane: node-id, slot: string, content: rich-text, icon: option&lt;string&gt;, tooltip: option&lt;tooltip&gt; }
+  record clear-frame-slot-spec { pane: node-id, slot: string }
+  /// label is at most 24 characters.
+  record toast-action { label: string, command: string }
+  record toast-spec {
+    /// A toast with the same id is replaced in place.
+    id: option&lt;string&gt;,
+    tone: tone,
+    /// At most 60 characters.
+    title: string,
+    /// At most 200 characters of text.
+    body: option&lt;rich-text&gt;,
+    /// At most 2.
+    actions: list&lt;toast-action&gt;,
+    /// 1,000 to 30,000.
+    duration-ms: option&lt;u32&gt;,
+  }
+
+  /// 42 cases. The order is the ABI.
+  variant intent {
+    rename-node(rename-node-spec),
+    move-node(move-node-spec),
+    close-node(node-id),
+    set-node-locked(set-node-locked-spec),
+    create-pane(create-pane-spec),
+    signal-pane(signal-pane-spec),
+    send-input(send-input-spec),
+    agent-action(agent-action-spec),
+    set-decoration(set-decoration-spec),
+    clear-decoration(decoration-key),
+    set-virtual-rows(set-virtual-rows-spec),
+    play-sound(string),
+    notify(notify-spec),
+    open-view(open-view-spec),
+    close-view(view-target),
+    invoke-command(invoke-command-spec),
+    message(message-spec),
+    editor-apply-edits(editor-apply-edits-spec),
+    editor-open(editor-open-spec),
+    // appended in this order
+    freeze-pane(freeze-pane-spec),
+    unfreeze-pane(unfreeze-pane-spec),
+    replace-pane-command(replace-pane-command-spec),
+    terminate-pane-process(terminate-pane-process-spec),
+    resize-pane(resize-pane-spec),
+    create-group(create-group-spec),
+    create-folder(create-folder-spec),
+    create-project(create-project-spec),
+    create-split(create-split-spec),
+    set-bookmarked(set-bookmarked-spec),
+    set-expanded(set-expanded-spec),
+    restructure(restructure-spec),
+    revert-restructure(u64),
+    set-inferred-icon(set-inferred-icon-spec),
+    mark-attention(mark-attention-spec),
+    ack-attention(node-id),
+    open-external(open-external-spec),
+    set-status-segment(set-status-segment-spec),
+    clear-status-segment(string),
+    set-frame-slot(set-frame-slot-spec),
+    clear-frame-slot(clear-frame-slot-spec),
+    toast(toast-spec),
+    dismiss-toast(string),
+  }
+}
+</code></pre>
+<p>The case <code>intent.message</code> uses <code>message-spec</code>. The old <code>set-timer</code> and <code>cancel-timer</code> intents do not exist. Timers are the <code>ilium:host/timers</code> import.</p>
+<h3 id="412-events">4.12 events</h3>
+<p>The <code>event</code> variant has 56 cases: 38 base cases and 18 appended cases. A reader who counts table rows in the event catalogue finds 35 rows for the base set, because <code>editor-opened</code> and <code>editor-closed</code>, <code>key-pressed</code> and <code>key-released</code>, and <code>client-attached</code> and <code>client-detached</code> share a row each. The case count is 38. Both numbers are correct, and the case count is the one that matters for the ABI [ABI-002].</p>
+<p>Payload naming rule: a payload with several fields is a record named <code>&lt;case&gt;-event</code>. A payload with one value of an existing type uses that type. Delivery policy, grant and coalescing key of every case are in the <a href="/pages/reference-host-conformance/#4-event-matrix">Host conformance matrix</a> and the <a href="/pages/reference-events-and-intents/">Event and intent tables</a>.</p>
+<pre><code class="language-wit">interface events {
+  use ilium:types/ids@0.1.0.{node-id, plugin-id, client-id, buffer-id, request-id, timer-id, watch-id, stream-id, child-id, grab-id, epoch-ms};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+  use ilium:types/net@0.1.0.{header};
+  use ilium:types/editing@0.1.0.{buffer-ref, editor-viewport, text-position};
+  use ilium:types/tree@0.1.0.{pane-info, agent-activity, agent-model, pane-lifecycle-state, title-origin};
+  use ilium:types/ui@0.1.0.{view-target, ui-action, view-pointer, pointer-kind, pointer-button, pointer-modifiers};
+  use ilium:types/requests@0.1.0.{request-result};
+  use ilium:types/intents@0.1.0.{plugin-side};
+
+  // ---- payload records
+  record pane-exited-event { node: node-id, status: option&lt;s32&gt;, signal: option&lt;string&gt; }
+  record pane-resized-event { node: node-id, columns: u16, rows: u16 }
+  record pane-title-changed-event { node: node-id, title: string, source: title-origin }
+  record agent-identified-event { node: node-id, signature: string }
+  record agent-activity-event { node: node-id, previous: agent-activity, current: agent-activity, revision: u64 }
+  record agent-goal-event { node: node-id, goal: option&lt;string&gt; }
+  enum input-source { user, plugin, scheduled, voice }
+  record input-submitted-event { node: node-id, text: string, source: input-source, epoch: u64 }
+  record output-matched-event { node: node-id, filter-id: string, line: string, row: u32 }
+  record link-activated-event { node: node-id, detector-id: string, text: string }
+  /// Reported only while the plugin has claimed the pointer of the pane.
+  /// kind move is reported only while the pointer is over the pane.
+  record pointer-event {
+    node: node-id, row: u32, column: u16, kind: pointer-kind, button: pointer-button,
+    modifiers: pointer-modifiers, sub-x: u8, sub-y: u8,
+  }
+  record editor-changed-event { buffer: buffer-id, revision: u64, first-line: u32, last-line: u32 }
+  record editor-saved-event { buffer: buffer-id, path: fs-path }
+
+  enum settings-origin { user, plugin, reset, other-plugin, file }
+  /// keys are the changed keys. origin is the last origin when several changes merged.
+  /// side tells which side owns the keys.
+  record settings-change { keys: list&lt;string&gt;, origin: settings-origin, side: plugin-side }
+
+  record job-progress-event { job: request-id, percent: f32 }
+  record message-event {
+    %from: plugin-id, from-side: plugin-side, from-client: option&lt;client-id&gt;,
+    channel: string, payload: list&lt;u8&gt;,
+  }
+  record topic-published-event { topic: string, %from: plugin-id, payload-json: string }
+
+  /// 13 origins.
+  enum command-origin {
+    keybinding, palette, toolbar, menu, voice, cli, toast, row-action, status-segment,
+    tree-toolbar, frame-slot, virtual-row-drop, text,
+  }
+  record command-context {
+    pane: option&lt;node-id&gt;, view: option&lt;view-target&gt;, buffer: option&lt;buffer-id&gt;, line: option&lt;u32&gt;,
+    virtual-row: option&lt;string&gt;, menu-item: option&lt;string&gt;,
+  }
+  record command-invoked-event {
+    command: string, arguments-json: string, origin: command-origin, context: command-context,
+  }
+  record key-event { grab: grab-id, pane: option&lt;node-id&gt;, chord: string, repeat: bool }
+  record view-visibility-event { view: view-target, visible: bool }
+  record fs-changed-event { watch: watch-id, paths: list&lt;string&gt; }
+  record audio-frames-event { capture: u64, samples: list&lt;s16&gt; }
+  record cli-invoked-event { invocation: u64, name: string, argv: list&lt;string&gt;, cwd: string }
+  record http-called-event {
+    call: u64, method: string, path: string, headers: list&lt;header&gt;, body: list&lt;u8&gt;,
+  }
+  record dropped-count { event: string, source: option&lt;string&gt;, count: u32 }
+
+  // ---- appended events
+  record screen-changed-event { pane: node-id, first-row: u32, last-row: u32, revision: u64 }
+  record user-line-event { pane: node-id, text: string, at: epoch-ms }
+  record signal-changed-event { pane: node-id, signal: string, value: string }
+  record agent-model-event { pane: node-id, model: agent-model }
+  record editor-pointer-event { buffer: buffer-id, pane: node-id, position: text-position, pointer: view-pointer }
+  record http-stream-data-event {
+    %stream: stream-id, status: option&lt;u16&gt;, headers: option&lt;list&lt;header&gt;&gt;, chunk: list&lt;u8&gt;,
+  }
+  variant stream-outcome { ended, cancelled, failed(plugin-error) }
+  record http-stream-closed-event { %stream: stream-id, outcome: stream-outcome }
+  enum output-stream { stdout, stderr }
+  record child-output-event { child: child-id, %stream: output-stream, bytes: list&lt;u8&gt; }
+  record child-exited-event { child: child-id, status: option&lt;s32&gt;, signal: option&lt;string&gt; }
+  record pane-lifecycle-event { pane: node-id, state: pane-lifecycle-state, by: option&lt;plugin-id&gt; }
+  record attention-event { node: node-id, marked: bool, reason: option&lt;string&gt;, by: option&lt;plugin-id&gt; }
+  record client-request-event { call: u64, kind: string, payload-json: string }
+  record kernel-settings-event { tab: string, keys: list&lt;string&gt; }
+  /// late-by-millis is how long after its due time the timer fired, in milliseconds.
+  record durable-timer-event { timer: timer-id, name: string, late-by-millis: u64 }
+  record input-uncertain-event { pane: node-id, dedup-key: string }
+
+  /// 56 cases. The order is the ABI.
+  variant event {
+    tree-changed(list&lt;node-id&gt;),
+    node-removed(node-id),
+    pane-created(pane-info),
+    pane-exited(pane-exited-event),
+    pane-focused(option&lt;node-id&gt;),
+    pane-resized(pane-resized-event),
+    pane-title-changed(pane-title-changed-event),
+    agent-identified(agent-identified-event),
+    agent-activity-changed(agent-activity-event),
+    agent-goal-changed(agent-goal-event),
+    input-submitted(input-submitted-event),
+    output-matched(output-matched-event),
+    link-activated(link-activated-event),
+    pointer(pointer-event),
+    editor-opened(buffer-ref),
+    editor-closed(buffer-ref),
+    editor-changed(editor-changed-event),
+    editor-saved(editor-saved-event),
+    settings-changed(settings-change),
+    timer-fired(timer-id),
+    request-completed(request-result),
+    job-progress(job-progress-event),
+    message(message-event),
+    topic-published(topic-published-event),
+    command-invoked(command-invoked-event),
+    ui-action(ui-action),
+    key-pressed(key-event),
+    key-released(key-event),
+    view-visibility(view-visibility-event),
+    fs-changed(fs-changed-event),
+    audio-frames(audio-frames-event),
+    cli-invoked(cli-invoked-event),
+    cli-cancelled(u64),
+    http-called(http-called-event),
+    client-attached(client-id),
+    client-detached(client-id),
+    theme-changed,
+    events-dropped(list&lt;dropped-count&gt;),
+    // appended in this order
+    screen-changed(screen-changed-event),
+    user-line-submitted(user-line-event),
+    signal-changed(signal-changed-event),
+    agent-model-changed(agent-model-event),
+    editor-pointer(editor-pointer-event),
+    editor-viewport-changed(editor-viewport),
+    http-stream-data(http-stream-data-event),
+    http-stream-closed(http-stream-closed-event),
+    child-output(child-output-event),
+    child-exited(child-exited-event),
+    pane-lifecycle-changed(pane-lifecycle-event),
+    attention-changed(attention-event),
+    client-request(client-request-event),
+    kernel-settings-changed(kernel-settings-event),
+    keymap-changed,
+    durable-timer-fired(durable-timer-event),
+    input-uncertain(input-uncertain-event),
+    display-mode-changed(option&lt;string&gt;),
+  }
+}
+</code></pre>
+<p>The record <code>header</code> is declared once in <code>ilium:types/net</code>. The events and the <code>http</code> host interface both import it from there.</p>
+<h3 id="413-lifecycle">4.13 lifecycle</h3>
+<pre><code class="language-wit">interface lifecycle {
+  use ilium:types/ids@0.1.0.{plugin-id};
+  /// The order is the ABI. crash-restart is reserved: the host never delivers it, because a
+  /// crashed instance has already stopped and cannot be called. Five reasons are delivered.
+  /// revoked and granted precede a re-activation with the changed granted list.
+  enum deactivation-reason { shutdown, disabled, upgrade, crash-restart, revoked, granted }
+  record activation {
+    plugin: plugin-id,
+    /// Always &quot;ilium:plugin@0.1.0&quot;.
+    api: string,
+    /// Unique per activation of this plugin on this side. Starts at 1.
+    instance: u64,
+    /// &quot;server&quot;, &quot;client&quot; or &quot;scene&quot;.
+    side: string,
+    /// The plugin's own settings as one JSON object.
+    settings-json: string,
+    /// The capabilities actually granted, as strings.
+    granted: list&lt;string&gt;,
+    /// The bytes that the previous deactivate returned. None after a first start or a dropped restore.
+    restored: option&lt;list&lt;u8&gt;&gt;,
+  }
+}
+</code></pre>
+<p>The field <code>activation.side</code> is a string and not the <code>plugin-side</code> enum, because a scene plugin has the side <code>scene</code> and <code>plugin-side</code> has two cases. Messages address only server and client plugins, so <code>message-target.side</code> uses <code>plugin-side</code>.</p>
+<h2 id="5-package-iliumhost">5. Package ilium:host</h2>
+<p>Every interface of this package is imported by a plugin. The line under each heading gives the sides that may import it (S server, C client, A scene) and the grant. The column "sync or async" of every function is in the <a href="/pages/reference-host-conformance/">Host conformance matrix</a>. A function that returns <code>result&lt;request-id, plugin-error&gt;</code> is async, and its <code>take-*</code> partner is named in the comment on the same line. For all async calls the rules of section 5.40 apply.</p>
+<p>Common errors: every function that returns <code>plugin-error</code> can return <code>not-permitted</code> for a missing grant, <code>invalid-argument</code> for a bad value, <code>quota-exceeded</code> and <code>rate-limited</code> for a limit, and <code>internal</code> for a host fault. The lists below add only the codes that are specific to the function.</p>
+<pre><code class="language-wit">package ilium:host@0.1.0;
+</code></pre>
+<h3 id="51-log">5.1 log</h3>
+<p>S C A. Grant: none. API page: <a href="/pages/api-log/">Log</a>.</p>
+<pre><code class="language-wit">interface log {
+  enum level { trace, debug, info, warn, error }
+  /// One entry per line. The budget is 200 lines per second per side instance (limits.log_lines_per_second,
+  /// 1,000 for bundled plugins). Lines over the budget are dropped and counted.
+  log: func(level: level, message: string);
+}
+</code></pre>
+<h3 id="52-clock">5.2 clock</h3>
+<p>S C A. Grant: none. API page: <a href="/pages/api-clock-and-timers/">Clock and timers</a>.</p>
+<pre><code class="language-wit">interface clock {
+  /// UTC wall clock in milliseconds. May jump when the user changes the clock.
+  now-unix-millis: func() -&gt; u64;
+  /// Milliseconds since an unspecified start. Never goes backwards. Not comparable between instances.
+  monotonic-millis: func() -&gt; u64;
+}
+</code></pre>
+<h3 id="53-timers">5.3 timers</h3>
+<p>S C. Grant: none. API pages: <a href="/pages/api-clock-and-timers/">Clock and timers</a> and <a href="/pages/api-durable-timers/">Durable timers</a>.</p>
+<pre><code class="language-wit">interface timers {
+  use ilium:types/ids@0.1.0.{timer-id, epoch-ms};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// A volatile timer. after-millis and repeat-millis are at least 50. Fires timer-fired.
+  /// Errors: invalid-argument below 50 ms, quota-exceeded above the timer limit.
+  set: func(after-millis: u32, repeat-millis: option&lt;u32&gt;) -&gt; result&lt;timer-id, plugin-error&gt;;
+  cancel: func(timer: timer-id);
+  /// A durable timer, kept in the snapshot. Fires durable-timer-fired, late after a downtime.
+  /// name is 1 to 64 characters and unique per plugin: the same name replaces the earlier timer.
+  at: func(epoch: epoch-ms, name: string) -&gt; result&lt;timer-id, plugin-error&gt;;
+  cancel-durable: func(name: string);
+}
+</code></pre>
+<h3 id="54-journal">5.4 journal</h3>
+<p>S C. Grant: none for own entries, <code>journal.read</code> for others. API page: <a href="/pages/api-durable-timers/">Durable timers</a>.</p>
+<pre><code class="language-wit">interface journal {
+  use ilium:types/ids@0.1.0.{node-id, epoch-ms};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  record journal-entry { at: epoch-ms, pane: option&lt;node-id&gt;, source: string, kind: string, payload-json: string }
+  /// payload-json is at most 4 KiB. The oldest entries are trimmed at limits.journal_entries.
+  log-event: func(pane: option&lt;node-id&gt;, kind: string, payload-json: string) -&gt; result&lt;_, plugin-error&gt;;
+  /// Own entries, newest last. limit is at most 1,000; a larger limit is clamped to 1,000.
+  read: func(pane: option&lt;node-id&gt;, since: epoch-ms, limit: u32) -&gt; list&lt;journal-entry&gt;;
+}
+</code></pre>
+<h3 id="55-tree">5.5 tree</h3>
+<p>S C. Grant: <code>tree.read</code>; <code>tree.metadata</code> for the metadata calls. API page: <a href="/pages/api-tree/">Tree</a>.</p>
+<pre><code class="language-wit">interface tree {
+  use ilium:types/ids@0.1.0.{node-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/tree@0.1.0.{node-view, node-query};
+  get: func(node: node-id) -&gt; option&lt;node-view&gt;;
+  children: func(node: node-id) -&gt; list&lt;node-id&gt;;
+  roots: func() -&gt; list&lt;node-id&gt;;
+  /// At most 4,096 ids.
+  find: func(query: node-query) -&gt; list&lt;node-id&gt;;
+  /// The plugin's own metadata map for the node. At most 64 KiB per node.
+  metadata: func(node: node-id) -&gt; option&lt;list&lt;u8&gt;&gt;;
+  set-metadata: func(node: node-id, bytes: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="56-panes">5.6 panes</h3>
+<p>S C. Grant: <code>panes.read</code>. API page: <a href="/pages/api-panes/">Panes</a>.</p>
+<pre><code class="language-wit">interface panes {
+  use ilium:types/ids@0.1.0.{node-id};
+  use ilium:types/tree@0.1.0.{pane-info};
+  info: func(pane: node-id) -&gt; option&lt;pane-info&gt;;
+  focused: func() -&gt; option&lt;node-id&gt;;
+}
+</code></pre>
+<h3 id="57-intents">5.7 intents</h3>
+<p>S C. Grant: depends on the intent. API page: <a href="/pages/api-intents/">Intents</a>.</p>
+<pre><code class="language-wit">interface intents-host {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/intents@0.1.0.{submission};
+  /// For use outside a batch. Carries one submission. Completes as request-completed with request-ref
+  /// submission(correlation), taken from the submission passed in. The returned request-id is
+  /// informational: it never appears in a completion.
+  /// Errors: invalid-argument (malformed submission), not-permitted (grant missing: reported at once),
+  /// rate-limited.
+  submit: func(submission: submission) -&gt; result&lt;request-id, plugin-error&gt;;
+}
+</code></pre>
+<p>The interface name <code>intents-host</code> avoids a clash with <code>ilium:types/intents</code> in generated names. In the SDKs it is the module <code>intents</code>.</p>
+<h3 id="58-storage">5.8 storage</h3>
+<p>S C A (A: <code>get</code> only). Grant: none. API page: <a href="/pages/api-storage/">Storage</a>.</p>
+<pre><code class="language-wit">interface storage {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// shared is visible to every plugin that holds the grant `storage.shared:&lt;name&gt;`.
+  enum bucket { global, project, session, shared }
+  /// key is 1 to 256 bytes. A value is at most 1 MiB. A bucket holds 16 MiB by default (limits.storage_bucket_mib).
+  get: func(bucket: bucket, key: string) -&gt; option&lt;list&lt;u8&gt;&gt;;
+  put: func(bucket: bucket, key: string, value: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  remove: func(bucket: bucket, key: string);
+  keys: func(bucket: bucket, prefix: string) -&gt; list&lt;string&gt;;
+  /// none removes the key.
+  record entry { key: string, value: option&lt;list&lt;u8&gt;&gt; }
+  /// All entries or none. At most 256 entries and 4 MiB of key and value bytes together.
+  /// Errors: invalid-argument above the limits, quota-exceeded, conflict for a stale data version.
+  write-batch: func(bucket: bucket, entries: list&lt;entry&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  /// true for the one caller that may refresh the shared key. ttl-millis 1 to 3,600,000.
+  lease: func(key: string, ttl-millis: u32) -&gt; bool;
+}
+</code></pre>
+<h3 id="59-settings">5.9 settings</h3>
+<p>S C. Grant: none for own values, <code>settings.read-all</code> and <code>settings.write-all</code> for other plugins. API pages: <a href="/pages/api-settings/">Settings</a> and <a href="/pages/reference-settings-schema/">Settings schema</a>.</p>
+<pre><code class="language-wit">interface settings {
+  use ilium:types/ids@0.1.0.{plugin-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{rich-text};
+  use ilium:types/intents@0.1.0.{plugin-side};
+  use ilium:types/ui@0.1.0.{catalog-item, row-state, meter-segment};
+
+  record choice-option { value: string, title: string }
+  record item-state { index: u32, state: row-state }
+  record settings-ref {
+    plugin: plugin-id, tab: string, section: option&lt;string&gt;, title: string, side: plugin-side,
+    kernel-tab: option&lt;string&gt;,
+  }
+  record field-error { key: string, message: string }
+
+  /// Own values as one JSON object. Always allowed.
+  get-json: func() -&gt; string;
+  /// Merge patch (RFC 7396), validated against the schema. Does not call settings-validate.
+  /// Errors: invalid-argument for a key of the other side or one that is not in the schema.
+  set-json: func(patch: string) -&gt; result&lt;_, plugin-error&gt;;
+
+  // own rows
+  /// info row with live true. At most 120 characters.
+  set-info: func(key: string, text: string) -&gt; result&lt;_, plugin-error&gt;;
+  /// choice row with dynamic true. 1 to 64 options.
+  set-choices: func(key: string, options: list&lt;choice-option&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  /// A dim note under the description. At most 120 characters.
+  set-row-note: func(key: string, note: option&lt;string&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  set-row-state: func(key: string, state: row-state) -&gt; result&lt;_, plugin-error&gt;;
+  set-item-states: func(key: string, items: list&lt;item-state&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  set-choice-items: func(key: string, items: list&lt;catalog-item&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  set-info-rich: func(key: string, text: rich-text) -&gt; result&lt;_, plugin-error&gt;;
+  /// At most 8 segments.
+  set-meter: func(id: string, segments: list&lt;meter-segment&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  /// Client only. Opens the settings page of the plugin, or a target.
+  open: func(target: string) -&gt; result&lt;_, plugin-error&gt;;
+
+  // other plugins
+  /// Grant settings.read-all.
+  list-settings: func() -&gt; list&lt;settings-ref&gt;;
+  get-plugin-json: func(plugin: plugin-id) -&gt; result&lt;string, plugin-error&gt;;
+  /// Grant settings.write-all.
+  set-plugin-json: func(plugin: plugin-id, patch: string) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="510-codec">5.10 codec</h3>
+<p>S C A. Grant: none. API page: <a href="/pages/api-codec/">Codec</a>.</p>
+<pre><code class="language-wit">interface codec {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  enum compression { zlib, gzip, deflate-raw }
+  record image-info { width: u32, height: u32, frames: u32 }
+  record decoded-image { width: u32, height: u32, rgba: list&lt;u8&gt; }
+  record raster-text { text: string, size-px: u16, max-width-px: u32 }
+  /// Errors: invalid-argument for corrupt data, quota-exceeded when the output passes max-output.
+  inflate: func(format: compression, data: list&lt;u8&gt;, max-output: u32) -&gt; result&lt;list&lt;u8&gt;, plugin-error&gt;;
+  /// level 0 to 9.
+  deflate: func(format: compression, data: list&lt;u8&gt;, level: u8) -&gt; result&lt;list&lt;u8&gt;, plugin-error&gt;;
+  image-info: func(data: list&lt;u8&gt;) -&gt; result&lt;image-info, plugin-error&gt;;
+  /// Errors: quota-exceeded when width times height passes max-pixels.
+  decode-image: func(data: list&lt;u8&gt;, frame: u32, max-pixels: u32) -&gt; result&lt;decoded-image, plugin-error&gt;;
+  sha256: func(data: list&lt;u8&gt;) -&gt; list&lt;u8&gt;;
+  /// Gray in the alpha channel.
+  rasterize-text: func(request: raster-text) -&gt; result&lt;decoded-image, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="511-fs">5.11 fs</h3>
+<p>S C. Grant: <code>fs.read:&lt;scope&gt;</code>, <code>fs.write:&lt;scope&gt;</code>, <code>fs.watch:&lt;scope&gt;</code>, <code>fs.pick</code>. API pages: <a href="/pages/api-fs/">Files</a> and <a href="/pages/api-fs-atomic-and-tail/">Atomic writes and tail</a>.</p>
+<pre><code class="language-wit">interface fs {
+  use ilium:types/ids@0.1.0.{request-id, watch-id, lock-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+
+  enum entry-kind { file, directory, symlink, other }
+  record fs-metadata { kind: entry-kind, length: u64, modified-unix-millis: option&lt;u64&gt;, read-only: bool }
+  record dir-entry { name: string, metadata: fs-metadata }
+  record scope-root { scope: string, writable: bool }
+  record scanned-entry { relative-path: string, entry: dir-entry }
+  enum write-mode { create-new, replace, append }
+  enum pick-kind { open-file, open-directory, save-file }
+  record pick-spec { kind: pick-kind, title: string, extensions: list&lt;string&gt; }
+  /// Opaque. Equal tokens mean equal content.
+  type revision-token = string;
+  record revisioned { bytes: list&lt;u8&gt;, revision: revision-token }
+  /// truncated: the file shrank or was replaced, and the next read restarts at 0.
+  record tail-chunk { bytes: list&lt;u8&gt;, cursor: u64, truncated: bool }
+
+  /// Granted scopes and whether each is writable.
+  roots: func() -&gt; list&lt;scope-root&gt;;
+  /// Sync. Errors: not-found.
+  metadata: func(path: fs-path) -&gt; result&lt;fs-metadata, plugin-error&gt;;
+  /// Sync. max-entries at most 4,096.
+  list-dir: func(path: fs-path, max-entries: u32) -&gt; result&lt;list&lt;dir-entry&gt;, plugin-error&gt;;
+  /// Sync. max-bytes at most 1 MiB.
+  read: func(path: fs-path, offset: u64, max-bytes: u32) -&gt; result&lt;list&lt;u8&gt;, plugin-error&gt;;
+  /// Async, take-bytes. At most 64 MiB.
+  read-all: func(path: fs-path) -&gt; result&lt;request-id, plugin-error&gt;;
+  /// Async, take-entries. glob follows the scope root. max-entries at most 100,000.
+  scan: func(path: fs-path, glob: string, max-entries: u32) -&gt; result&lt;request-id, plugin-error&gt;;
+  /// Async, take-written is not used: the answer is request-completed ok. replace is atomic.
+  write: func(path: fs-path, data: list&lt;u8&gt;, mode: write-mode) -&gt; result&lt;request-id, plugin-error&gt;;
+  create-dir: func(path: fs-path) -&gt; result&lt;_, plugin-error&gt;;
+  /// Async. request-completed ok.
+  remove: func(path: fs-path) -&gt; result&lt;request-id, plugin-error&gt;;
+  /// Async. Same scope only. request-completed ok.
+  rename: func(source: fs-path, target: fs-path) -&gt; result&lt;request-id, plugin-error&gt;;
+  /// Grant fs.watch. Fires fs-changed.
+  watch: func(path: fs-path, recursive: bool) -&gt; result&lt;watch-id, plugin-error&gt;;
+  unwatch: func(watch: watch-id);
+  /// Async, take-lock. Advisory lock. timeout-millis at most 60,000. Errors: timed-out, busy.
+  lock: func(path: fs-path, exclusive: bool, timeout-millis: u32) -&gt; result&lt;request-id, plugin-error&gt;;
+  unlock: func(lock: lock-id);
+  /// Async, take-picked. Client only. Grant fs.pick. none: the user cancelled.
+  pick: func(spec: pick-spec) -&gt; result&lt;request-id, plugin-error&gt;;
+  /// Async, take-revisioned.
+  read-with-revision: func(path: fs-path) -&gt; result&lt;request-id, plugin-error&gt;;
+  /// Async, take-written. expected none: create only, conflict if the file exists.
+  /// expected some(token): replace only if unchanged, else conflict.
+  write-atomic: func(path: fs-path, data: list&lt;u8&gt;, expected: option&lt;revision-token&gt;) -&gt; result&lt;request-id, plugin-error&gt;;
+  /// Sync. max-bytes at most 1 MiB.
+  tail: func(path: fs-path, cursor: u64, max-bytes: u32) -&gt; result&lt;tail-chunk, plugin-error&gt;;
+
+  take-bytes: func(request: request-id) -&gt; option&lt;list&lt;u8&gt;&gt;;
+  take-entries: func(request: request-id) -&gt; option&lt;list&lt;scanned-entry&gt;&gt;;
+  take-lock: func(request: request-id) -&gt; option&lt;lock-id&gt;;
+  take-picked: func(request: request-id) -&gt; option&lt;fs-path&gt;;
+  take-revisioned: func(request: request-id) -&gt; option&lt;revisioned&gt;;
+  take-written: func(request: request-id) -&gt; option&lt;revision-token&gt;;
+}
+</code></pre>
+<h3 id="512-http">5.12 http</h3>
+<p>S C. Grant: <code>http:&lt;host-pattern&gt;</code>. API pages: <a href="/pages/api-http/">HTTP</a> and <a href="/pages/api-http-streams/">HTTP streams</a>.</p>
+<pre><code class="language-wit">interface http {
+  use ilium:types/ids@0.1.0.{request-id, stream-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/net@0.1.0.{header};
+  record http-request { method: string, url: string, headers: list&lt;header&gt;, body: option&lt;list&lt;u8&gt;&gt;, timeout-millis: u32 }
+  record http-response { status: u16, headers: list&lt;header&gt;, body: list&lt;u8&gt; }
+  enum stream-framing { raw, lines, server-sent-events, ndjson }
+  /// max-chunk-bytes at most 64 KiB.
+  record stream-request { request: http-request, framing: stream-framing, max-chunk-bytes: u32 }
+  /// Async, take-response. Body at most 8 MiB by default. Errors: network, timed-out.
+  fetch: func(request: http-request) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-response: func(request: request-id) -&gt; option&lt;http-response&gt;;
+  /// Delivers http-stream-data and http-stream-closed events. At most 4 streams per plugin by default, 64 per session.
+  open-stream: func(request: stream-request) -&gt; result&lt;stream-id, plugin-error&gt;;
+  close-stream: func(stream: stream-id);
+  // @unstable(feature = websocket)
+  open-websocket: func(url: string, protocols: list&lt;string&gt;) -&gt; result&lt;stream-id, plugin-error&gt;;
+  // @unstable(feature = websocket)
+  send-websocket: func(stream: stream-id, text: string) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="513-jobs">5.13 jobs</h3>
+<p>S C A. Grant: <code>jobs.run</code>. API page: <a href="/pages/api-jobs/">Jobs</a>.</p>
+<pre><code class="language-wit">interface jobs {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// kind must be in contributes.jobs. input at most 4 MiB. Fires job-progress, then request-completed.
+  start: func(kind: string, input: list&lt;u8&gt;) -&gt; result&lt;request-id, plugin-error&gt;;
+  cancel: func(job: request-id);
+  take-output: func(job: request-id) -&gt; option&lt;list&lt;u8&gt;&gt;;
+  /// Valid only inside job-runner.run. Elsewhere a no-op.
+  report-progress: func(percent: f32);
+  /// Valid only inside job-runner.run. Elsewhere false.
+  is-cancelled: func() -&gt; bool;
+  /// Valid only inside job-runner.run. Blocks until the request completes or the timeout passes.
+  wait-request: func(request: request-id, timeout-millis: u32) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="514-process">5.14 process</h3>
+<p>S C. Grant: <code>process.run:&lt;program&gt;</code>, <code>process.long-lived</code>. API pages: <a href="/pages/api-process-control/">Process control</a>.</p>
+<pre><code class="language-wit">interface process {
+  use ilium:types/ids@0.1.0.{request-id, child-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+  /// timeout-millis at most 600,000.
+  record process-spec {
+    program: string, arguments: list&lt;string&gt;, cwd: option&lt;fs-path&gt;, stdin: option&lt;list&lt;u8&gt;&gt;,
+    environment: list&lt;tuple&lt;string, string&gt;&gt;, timeout-millis: u32,
+  }
+  /// status none when the process was killed by a signal. stdout and stderr are each cut at 4 MiB.
+  record process-exit { status: option&lt;s32&gt;, signal: option&lt;string&gt;, stdout: list&lt;u8&gt;, stderr: list&lt;u8&gt; }
+  record spawn-spec { process: process-spec, stdin-open: bool, line-mode: bool }
+  /// Async, take-exit.
+  run: func(spec: process-spec) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-exit: func(request: request-id) -&gt; option&lt;process-exit&gt;;
+  resource child {
+    /// For display only.
+    pid-hint: func() -&gt; u32;
+    write-stdin: func(bytes: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
+    close-stdin: func();
+    /// interrupt, terminate, kill or hangup.
+    signal: func(signal: string) -&gt; result&lt;_, plugin-error&gt;;
+    /// The id carried by child-output and child-exited events.
+    id: func() -&gt; child-id;
+  }
+  /// Delivers child-output and child-exited. At most 2 children per plugin by default, 16 per session.
+  spawn: func(spec: spawn-spec) -&gt; result&lt;child, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="515-inference">5.15 inference</h3>
+<p>S C. Grant: <code>inference</code>; <code>inference.provide</code> for provider replies. API pages: <a href="/pages/api-inference/">Inference</a> and <a href="/pages/services/">Services</a>.</p>
+<pre><code class="language-wit">interface inference {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  record chat-message { role: string, content: string }
+  record completion-request {
+    messages: list&lt;chat-message&gt;, max-output-tokens: option&lt;u32&gt;, json-schema: option&lt;string&gt;, purpose: string,
+  }
+  record completion { text: string, model: string, input-tokens: u32, output-tokens: u32 }
+  /// Async, take-completion.
+  complete: func(request: completion-request) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-completion: func(request: request-id) -&gt; option&lt;completion&gt;;
+  /// Async, take-models.
+  models: func() -&gt; result&lt;request-id, plugin-error&gt;;
+  take-models: func(request: request-id) -&gt; option&lt;list&lt;string&gt;&gt;;
+  /// Grant inference.provide. Answers inference-provider.complete.
+  /// Errors: not-found for an unknown or already answered call id.
+  provider-reply: func(call: u64, outcome: result&lt;completion, plugin-error&gt;) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="516-vector">5.16 vector</h3>
+<p>S C. Grant: <code>inference.embed</code>. API page: <a href="/pages/api-vector/">Vector</a>.</p>
+<pre><code class="language-wit">interface vector {
+  use ilium:types/ids@0.1.0.{request-id, index-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Async, take-vectors. At most 256 texts of at most 8 KiB each.
+  embed: func(texts: list&lt;string&gt;, purpose: string) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-vectors: func(request: request-id) -&gt; option&lt;list&lt;list&lt;f32&gt;&gt;&gt;;
+  /// Persisted in the plugin's data scope. dimensions 1 to 4,096.
+  create-index: func(name: string, dimensions: u16) -&gt; result&lt;index-id, plugin-error&gt;;
+  upsert: func(index: index-id, entries: list&lt;tuple&lt;string, list&lt;f32&gt;&gt;&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  remove-entries: func(index: index-id, ids: list&lt;string&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  /// Cosine similarity. k at most 100.
+  top-k: func(index: index-id, query: list&lt;f32&gt;, k: u16) -&gt; result&lt;list&lt;tuple&lt;string, f32&gt;&gt;, plugin-error&gt;;
+  drop-index: func(index: index-id);
+}
+</code></pre>
+<h3 id="517-sounds">5.17 sounds</h3>
+<p>S C. Grant: none for the catalogue, <code>sound.play</code> for the intent. API page: <a href="/pages/capability-sound-play/">Capability: sound play</a>.</p>
+<pre><code class="language-wit">interface sounds {
+  /// Bundled and contributed sound ids.
+  catalog: func() -&gt; list&lt;string&gt;;
+}
+</code></pre>
+<h3 id="518-topics">5.18 topics</h3>
+<p>S C. Grant: <code>topics.subscribe:&lt;topic-pattern&gt;</code> to subscribe. Publishing needs no grant, only the plugin's own topic prefix and a publishes entry in the manifest. API page: <a href="/pages/api-messages-and-topics/">Messages and topics</a>.</p>
+<pre><code class="language-wit">interface topics {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Only topics declared under the plugin's own id. payload-json is at most 64 KiB.
+  publish: func(topic: string, payload-json: string) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="519-commands">5.19 commands</h3>
+<p>S C. Grant: none for own commands, <code>commands.invoke:&lt;pattern&gt;</code>. API pages: <a href="/pages/api-commands/">Commands</a>, <a href="/pages/api-command-palette/">Command palette</a> and <a href="/pages/api-menus/">Menus</a>.</p>
+<pre><code class="language-wit">interface commands {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Own commands only. Client only.
+  set-state: func(command: string, enabled: bool, checked: option&lt;bool&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  /// Async. Completes with ok once the command has run. Errors: not-found. Times out after 30 s.
+  invoke: func(command: string, arguments-json: string) -&gt; result&lt;request-id, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="520-services">5.20 services</h3>
+<p>S C. Grant: <code>services.use:&lt;name&gt;</code> for callers, <code>services.provide:&lt;name&gt;</code> for providers. Unstable feature <code>plugin-services</code> for calls between plugins. API page: <a href="/pages/services/">Services</a>.</p>
+<pre><code class="language-wit">interface services {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Async, take-reply. A call to the plugin's own service is queued, see Runtime model.
+  // @unstable(feature = plugin-services)
+  call: func(service: string, method: string, payload-json: string) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-reply: func(request: request-id) -&gt; option&lt;string&gt;;
+  /// Provider side, for deferred replies. Errors: not-found for an unknown call id.
+  reply: func(call: u64, outcome: result&lt;string, plugin-error&gt;) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="521-ui">5.21 ui</h3>
+<p>C. Grant: none for own views. API pages: <a href="/pages/ui-model/">UI model</a> and <a href="/pages/api-ui/">UI</a>. This is the one table of <code>ui</code> functions; the Widgets index links here.</p>
+<pre><code class="language-wit">interface ui-host {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/ui@0.1.0.{view-target, widget-state, popup-anchor, popup-options, theme-tokens, theme-extras, pixel-format};
+  /// Marks the view as stale. The host calls views.render before the next frame. Always granted for own views.
+  invalidate: func(view: view-target);
+  /// Errors: not-found when the panel is not declared.
+  open-panel: func(panel: string) -&gt; result&lt;_, plugin-error&gt;;
+  close-panel: func(panel: string);
+  /// Errors: not-found when no popup or dialog node with that key is in the last committed tree of any
+  /// open view, invalid-argument when two match, quota-exceeded for a fifth open popup in one view.
+  open-popup: func(popup: string, anchor: popup-anchor) -&gt; result&lt;_, plugin-error&gt;;
+  open-popup-with: func(popup: string, anchor: popup-anchor, options: popup-options) -&gt; result&lt;_, plugin-error&gt;;
+  /// An id that is not open is a no-op.
+  close-popup: func(popup: string);
+  widget-state: func(view: view-target, key: string) -&gt; option&lt;widget-state&gt;;
+  /// Errors: not-found for an unknown key, invalid-argument when the case does not fit the widget.
+  set-widget-state: func(view: view-target, key: string, state: widget-state) -&gt; result&lt;_, plugin-error&gt;;
+  /// Width in cells by the cell width rule of the UI model page (grapheme clusters, UAX #29).
+  display-width: func(text: string) -&gt; u16;
+  theme: func() -&gt; theme-tokens;
+  theme-extras: func() -&gt; theme-extras;
+  /// Rows are top to bottom. Rows that fall at or past the surface height are ignored.
+  /// Rows are top to bottom. first-row plus the rows written must be within the surface height.
+  /// Errors: not-found for a key with no surface, invalid-argument for a bad length.
+  write-surface: func(view: view-target, key: string, first-row: u32, format: pixel-format, data: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<p>The interface is named <code>ui-host</code> in the package so that it does not clash with <code>ilium:types/ui</code>. The SDK module is <code>ui</code>.</p>
+<h3 id="522-keys">5.22 keys</h3>
+<p>C. Grant: <code>keys.intercept</code>. API page: <a href="/pages/api-keys/">Keys</a>.</p>
+<pre><code class="language-wit">interface keys {
+  use ilium:types/ids@0.1.0.{node-id, grab-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// chords: 1 to 32. until-release stops the grab when the chord is released.
+  record grab-spec { chords: list&lt;string&gt;, pane: option&lt;node-id&gt;, until-release: bool }
+  /// Errors: conflict when a reserved chord is named, quota-exceeded above 8 grabs.
+  grab: func(spec: grab-spec) -&gt; result&lt;grab-id, plugin-error&gt;;
+  release: func(grab: grab-id);
+}
+</code></pre>
+<h3 id="523-cli">5.23 cli</h3>
+<p>S. Grant: <code>cli.contribute</code>. API page: <a href="/pages/api-cli/">CLI</a>.</p>
+<pre><code class="language-wit">interface cli {
+  use ilium:types/ids@0.1.0.{node-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  record pane-selection { panes: list&lt;node-id&gt;, all: bool }
+  /// Output &quot;jsonl&quot;. One JSON object per line.
+  write-line: func(invocation: u64, jsonl: string) -&gt; result&lt;_, plugin-error&gt;;
+  /// Plain text to stderr.
+  write-error: func(invocation: u64, text: string) -&gt; result&lt;_, plugin-error&gt;;
+  /// Output &quot;text&quot;.
+  write-text: func(invocation: u64, text: string) -&gt; result&lt;_, plugin-error&gt;;
+  write-stderr: func(invocation: u64, text: string) -&gt; result&lt;_, plugin-error&gt;;
+  finish: func(invocation: u64, exit-code: u8);
+  /// Async, take-stdin. At most 4 MiB in total.
+  read-stdin: func(invocation: u64, max-bytes: u32) -&gt; result&lt;u64, plugin-error&gt;;
+  /// An empty list is the end of input.
+  take-stdin: func(request: u64) -&gt; option&lt;list&lt;u8&gt;&gt;;
+  /// Whether stdout and stderr are terminals.
+  is-tty: func(invocation: u64) -&gt; tuple&lt;bool, bool&gt;;
+  /// The pane the command ran in, from ILIUM_PANE_ID.
+  caller-pane: func(invocation: u64) -&gt; option&lt;node-id&gt;;
+  selected-panes: func(invocation: u64) -&gt; option&lt;pane-selection&gt;;
+}
+</code></pre>
+<h3 id="524-http-api">5.24 http-api</h3>
+<p>S. Grant: <code>http-api.route:&lt;path&gt;</code>. API page: <a href="/pages/api-http-api/">HTTP API</a>.</p>
+<pre><code class="language-wit">interface http-api {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Answers http-called. Errors: not-found for an unknown or answered call.
+  respond: func(call: u64, status: u16, headers: list&lt;tuple&lt;string, string&gt;&gt;, body: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="525-workspace">5.25 workspace</h3>
+<p>S. Grant: <code>workspace.manage</code>. API page: <a href="/pages/api-workspace/">Workspace</a>.</p>
+<pre><code class="language-wit">interface workspace {
+  use ilium:types/ids@0.1.0.{node-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+  record workspace-spec { repository: fs-path, path: fs-path, branch: string, base: option&lt;string&gt;, owner: option&lt;node-id&gt; }
+  record workspace-info { id: u64, path: fs-path, branch: string, owner: option&lt;node-id&gt;, in-use: bool }
+  register: func(spec: workspace-spec) -&gt; result&lt;u64, plugin-error&gt;;
+  release: func(workspace: u64) -&gt; result&lt;_, plugin-error&gt;;
+  %list: func() -&gt; list&lt;workspace-info&gt;;
+}
+</code></pre>
+<h3 id="526-clipboard">5.26 clipboard</h3>
+<p>C. Grant: <code>clipboard.read</code>, <code>clipboard.write</code>. API page: <a href="/pages/api-clipboard/">Clipboard</a>.</p>
+<pre><code class="language-wit">interface clipboard {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// At most 1 MiB in UTF-8 bytes. Longer text is cut at a scalar boundary.
+  read-text: func() -&gt; option&lt;string&gt;;
+  /// Errors: invalid-argument above 1 MiB.
+  write-text: func(text: string) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="527-audio">5.27 audio</h3>
+<p>C A. Grant: <code>audio.capture</code>, <code>audio.loopback</code>, <code>audio.playback</code>. API page: <a href="/pages/api-audio/">Audio</a>.</p>
+<pre><code class="language-wit">interface audio {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  record audio-device { id: string, name: string, is-input: bool, is-default: bool }
+  /// Needs any audio grant; with none held it returns an empty list (no error code).
+  devices: func() -&gt; list&lt;audio-device&gt;;
+  /// Delivers audio-frames. sample-rate 8,000 to 48,000. channels 1 or 2.
+  open-capture: func(device: option&lt;string&gt;, sample-rate: u32, channels: u8) -&gt; result&lt;u64, plugin-error&gt;;
+  open-loopback: func(sample-rate: u32, channels: u8) -&gt; result&lt;u64, plugin-error&gt;;
+  close-capture: func(capture: u64);
+  /// Async. request-completed ok when playback ends.
+  play: func(samples: list&lt;s16&gt;, sample-rate: u32, channels: u8) -&gt; result&lt;request-id, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="528-media">5.28 media</h3>
+<p>C A. Grant: <code>media.video</code>. API page: <a href="/pages/api-media/">Media</a>.</p>
+<pre><code class="language-wit">interface media {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+  record video-info { width: u32, height: u32, frames-per-second: f32, duration-millis: option&lt;u64&gt; }
+  open-video: func(path: fs-path) -&gt; result&lt;tuple&lt;u64, video-info&gt;, plugin-error&gt;;
+  /// At most 16 MiB.
+  open-video-bytes: func(bytes: list&lt;u8&gt;, mime: string) -&gt; result&lt;tuple&lt;u64, video-info&gt;, plugin-error&gt;;
+  open-video-range: func(path: fs-path, start-millis: u64, end-millis: option&lt;u64&gt;) -&gt; result&lt;tuple&lt;u64, video-info&gt;, plugin-error&gt;;
+  /// RGB8 frame decoded ahead natively. none at the end of the clip.
+  next-frame: func(video: u64, width: u32, height: u32) -&gt; result&lt;option&lt;list&lt;u8&gt;&gt;, plugin-error&gt;;
+  seek: func(video: u64, millis: u64) -&gt; result&lt;_, plugin-error&gt;;
+  close-video: func(video: u64);
+}
+</code></pre>
+<h3 id="529-location">5.29 location</h3>
+<p>C A. Grant: <code>location.observer</code>. API page: <a href="/pages/api-location/">Location</a>.</p>
+<pre><code class="language-wit">interface location {
+  /// Latitude and longitude, or none when unknown.
+  current: func() -&gt; option&lt;tuple&lt;f64, f64&gt;&gt;;
+}
+</code></pre>
+<h3 id="530-help">5.30 help</h3>
+<p>C. Grant: <code>help.read</code>. API page: <a href="/pages/api-help-and-plugins/">Help and plugins</a>.</p>
+<pre><code class="language-wit">interface help {
+  /// Markdown. none for an unknown topic.
+  topic: func(id: string) -&gt; option&lt;string&gt;;
+}
+</code></pre>
+<h3 id="531-plugins">5.31 plugins</h3>
+<p>C. Grant: <code>plugins.manage</code>. API page: <a href="/pages/api-help-and-plugins/">Help and plugins</a>.</p>
+<pre><code class="language-wit">interface plugins {
+  use ilium:types/ids@0.1.0.{plugin-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  enum package-state {
+    not-installed, installed-enabled, installed-disabled-by-user, disabled-untrusted,
+    disabled-blocked, disabled-by-policy, refused-at-load, update-staged, uninstall-pending,
+  }
+  enum instance-state {
+    inactive, activating, waiting-dependency, active, deactivating, restart-scheduled,
+    stopped-by-failure, stopped,
+  }
+  enum health-state { healthy, degraded, restarting, failed, disabled, dormant, refused }
+  record side-state {
+    /// &quot;server&quot;, &quot;client&quot; or &quot;scene&quot;.
+    side: string,
+    /// &quot;server&quot;, or the attached client id.
+    scope: string,
+    state: instance-state,
+    failures-in-window: u32,
+    /// For example &quot;trap.deadline&quot;.
+    last-error-code: option&lt;string&gt;,
+    restart-at-unix-ms: option&lt;u64&gt;,
+  }
+  record plugin-info {
+    id: plugin-id, name: string, version: string, tier: string, enabled: bool, failed: bool,
+    state: package-state, side-states: list&lt;side-state&gt;,
+    /// &quot;global&quot; in 0.1.0.
+    scope: string,
+    disabled-reason: option&lt;string&gt;, health: health-state,
+    publisher: string, publisher-key: option&lt;string&gt;,
+    source: string, channel: string, pinned: bool,
+    update-available: option&lt;string&gt;, deprecated: bool, yanked: bool,
+  }
+  %list: func() -&gt; list&lt;plugin-info&gt;;
+  /// scope is &quot;global&quot; in 0.1.0.
+  set-enabled: func(plugin: plugin-id, enabled: bool, scope: string) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="532-catalogs">5.32 catalogs</h3>
+<p>S C. Grant: none. API page: <a href="/pages/api-catalogs/">Catalogs</a>.</p>
+<pre><code class="language-wit">interface catalogs {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/ui@0.1.0.{catalog-item};
+  record catalog-page { items: list&lt;catalog-item&gt;, next: option&lt;string&gt;, total: option&lt;u32&gt; }
+  /// limit 1 to 256.
+  record catalog-query { catalog: string, filter: string, cursor: option&lt;string&gt;, limit: u16 }
+  /// Sync, for host catalogues.
+  query: func(q: catalog-query) -&gt; result&lt;catalog-page, plugin-error&gt;;
+  /// Async, take-page. For plugin catalogues.
+  query-async: func(q: catalog-query) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-page: func(request: request-id) -&gt; option&lt;catalog-page&gt;;
+  lookup: func(catalog: string, id: string) -&gt; option&lt;catalog-item&gt;;
+}
+</code></pre>
+<h3 id="533-geocode">5.33 geocode</h3>
+<p>S C A. Grant: <code>location.geocode</code>. API page: <a href="/pages/api-geocode/">Geocode</a>.</p>
+<pre><code class="language-wit">interface geocode {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/geo@0.1.0.{geo-point, geo-place};
+  /// text 2 to 200 characters. limit 1 to 8.
+  record geocode-query { text: string, near: option&lt;geo-point&gt;, limit: u8, language: option&lt;string&gt; }
+  /// Async, take-places.
+  search: func(q: geocode-query) -&gt; result&lt;request-id, plugin-error&gt;;
+  /// Async, take-places. At most one place.
+  reverse: func(point: geo-point) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-places: func(request: request-id) -&gt; option&lt;list&lt;geo-place&gt;&gt;;
+}
+</code></pre>
+<h3 id="534-sessions">5.34 sessions</h3>
+<p>S. Grant: <code>sessions.cross</code>. API page: <a href="/pages/api-sessions/">Sessions</a>.</p>
+<pre><code class="language-wit">interface sessions {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  record live-session { name: string, project: string, socket-id: string, panes: u32, attached-clients: u32, is-self: bool }
+  record cross-request { session: string, command: string, arguments-json: string }
+  list-live: func() -&gt; list&lt;live-session&gt;;
+  /// Async, take-reply.
+  send: func(request: cross-request) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-reply: func(request: request-id) -&gt; option&lt;string&gt;;
+}
+</code></pre>
+<h3 id="535-kernel-settings">5.35 kernel-settings</h3>
+<p>S C. Grant: <code>settings.read-kernel:&lt;tab-id&gt;</code>. API page: <a href="/pages/api-kernel-settings-and-keymap/">Kernel settings and keymap</a>.</p>
+<pre><code class="language-wit">interface kernel-settings {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// A JSON object of that tab's values. Secrets are &quot;&lt;redacted&gt;&quot;.
+  read: func(tab: string) -&gt; result&lt;string, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="536-keymap">5.36 keymap</h3>
+<p>C. Grant: <code>keymap.read</code>. API page: <a href="/pages/api-kernel-settings-and-keymap/">Kernel settings and keymap</a>.</p>
+<pre><code class="language-wit">interface keymap {
+  record binding { command: string, chords: list&lt;string&gt;, context: string, is-default: bool }
+  bindings: func() -&gt; list&lt;binding&gt;;
+  /// The user-visible form, for example &quot;Ctrl+Shift+K&quot;.
+  chord-label: func(chord: string) -&gt; string;
+}
+</code></pre>
+<h3 id="537-gpu">5.37 gpu</h3>
+<p>C A. Grant: <code>gpu.kernels</code>. Unstable feature <code>gpu-kernels</code>. API page: <a href="/pages/api-gpu/">GPU</a>.</p>
+<pre><code class="language-wit">interface gpu {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  enum gpu-kernel { blur, threshold, palette-map, dither-ordered, scale }
+  // @unstable(feature = gpu-kernels)
+  run: func(kernel: gpu-kernel, input: list&lt;u8&gt;, width: u32, height: u32, params-json: string) -&gt; result&lt;list&lt;u8&gt;, plugin-error&gt;;
+  // @unstable(feature = gpu-kernels)
+  available: func() -&gt; bool;
+}
+</code></pre>
+<h3 id="538-client-requests">5.38 client-requests</h3>
+<p>S and C. Grant: none for declared kinds. API page: <a href="/pages/api-client-requests/">Client requests</a>.</p>
+<pre><code class="language-wit">interface client-requests {
+  use ilium:types/ids@0.1.0.{client-id, request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Server side. Async, take-answer. timeout-millis 1 to 30,000.
+  request: func(client: client-id, kind: string, payload-json: string, timeout-millis: u32) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-answer: func(request: request-id) -&gt; option&lt;string&gt;;
+  /// Client side. Errors: not-found for an unknown call id.
+  respond: func(call: u64, outcome: result&lt;string, plugin-error&gt;) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="539-extensions">5.39 extensions</h3>
+<p>S C. Grant: <code>extensions.provide:&lt;point&gt;</code>, <code>extensions.contribute:&lt;point&gt;</code>. API page: <a href="/pages/api-extension-points/">Extension points</a>.</p>
+<pre><code class="language-wit">interface extensions {
+  use ilium:types/ids@0.1.0.{plugin-id, request-id};
+  record extension-entry {
+    /// Contributor-chosen id, unique per contributor and point.
+    extension: string,
+    contributor: plugin-id,
+    priority: u8,
+    /// The validated entry.
+    entry-json: string,
+  }
+  /// A payload-less enum: the error model of this interface is the code only.
+  enum extension-error { unknown-point, not-granted, schema-mismatch, cap-exceeded, reentrant, not-dynamic, not-found }
+  // owner side
+  list: func(point: string) -&gt; result&lt;list&lt;extension-entry&gt;, extension-error&gt;;
+  /// Async, take-reply.
+  run-hook: func(point: string, payload-json: string) -&gt; result&lt;request-id, extension-error&gt;;
+  take-reply: func(request: request-id) -&gt; option&lt;string&gt;;
+  // contributor side, collect points with dynamic true
+  register: func(point: string, extension: string, priority: u8, entry-json: string) -&gt; result&lt;_, extension-error&gt;;
+  unregister: func(point: string, extension: string) -&gt; result&lt;_, extension-error&gt;;
+}
+</code></pre>
+<p><code>extension-error</code> is separate from <code>plugin-error</code> because the owner and the contributor need the exact failure of the registry, and the registry has no free-text message. The SDKs map it to <code>PluginError</code> with the code <code>invalid-argument</code>, <code>not-permitted</code>, <code>quota-exceeded</code>, <code>conflict</code> or <code>not-found</code> for the seven cases, and keep the case name in the message [ABI-001].</p>
+<h3 id="540-take-rules">5.40 Take rules</h3>
+<p>These rules apply to every <code>take-*</code> function of this package [ABI-014].</p>
+<ul>
+<li>A result is held for 30 seconds. The hold starts when <code>on-events</code> returns for the batch that delivered <code>request-completed</code>. After that the result is dropped and the request no longer counts toward <code>pending_requests</code>.</li>
+<li>A <code>take-*</code> call before <code>request-completed</code> returns none. The plugin has to wait for the event.</li>
+<li>A second <code>take-*</code> call for the same request returns none. The first call consumed the result.</li>
+<li>A <code>take-*</code> call for an unknown request id returns none.</li>
+<li>A result a plugin never takes is dropped on restart. A restarted instance starts with an empty table. A <code>take-*</code> call with an id from an earlier instance returns none (the SDK wrapper reports <code>not-found</code>). After a trap or restart, completions whose ref is <code>submission(correlation)</code> and that were queued or produced after the trap are delivered once to the new instance after <code>activate</code> returns <code>ok</code>. Completions whose ref is <code>call(id)</code> are discarded because the ids belong to the dead instance, and their held results are freed. Slow calls still pending at the trap are cancelled and complete nowhere.</li>
+<li>A plugin holds at most 64 pending requests by default (<code>pending_requests</code>, ceiling 256 for tier T1). A session holds at most 4,096. The call that would exceed a limit returns <code>busy</code> at once.</li>
+<li>A <code>request-id</code> is a <code>u64</code>, unique per plugin side for the whole server run. It starts at 1 at server start and is never reused, also across instance restarts.</li>
+<li>A failed request completes with <code>failed(&lt;error&gt;)</code>, and then <code>take-*</code> returns none.</li>
+</ul>
+<p>The full table of slow calls is in <a href="/pages/requests-and-outcomes/">Requests and outcomes</a>.</p>
+<h2 id="6-package-iliumprimitives">6. Package ilium:primitives</h2>
+<p>Primitives are the typed access to the built-in pane kinds. A primitive is imported by client and server plugins as the table in section 3 says. Each function names its grant in the comment.</p>
+<pre><code class="language-wit">package ilium:primitives@0.1.0;
+</code></pre>
+<h3 id="61-terminal">6.1 terminal</h3>
+<p>S C. Grants: <code>terminal.read-screen</code>, <code>terminal.read-cells</code>, <code>terminal.history</code>, <code>terminal.output-filter</code>, <code>terminal.pointer</code>, <code>terminal.input-lock</code>. API pages: <a href="/pages/primitives-terminal/">Terminal</a>, <a href="/pages/primitives-terminal-reads/">Terminal reads</a>, <a href="/pages/primitives-terminal-pointer/">Terminal pointer</a> and <a href="/pages/primitives-terminal-input/">Terminal input</a>.</p>
+<pre><code class="language-wit">interface terminal {
+  use ilium:types/ids@0.1.0.{node-id, request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{style, color, modifiers};
+  use ilium:types/ui@0.1.0.{pointer-modifiers};
+
+  record screen { columns: u16, rows: list&lt;string&gt;, cursor-row: u16, cursor-column: u16, title: option&lt;string&gt;, revision: u64 }
+  enum screen-part { visible, scrollback }
+  record selection { first-row: u32, first-column: u16, last-row: u32, last-column: u16, text: string }
+  record output-filter { id: string, regex: string, rate-per-second: u16 }
+  record cell-region { first-row: u32, first-column: u16, last-row: u32, last-column: u16, style: style, label: option&lt;string&gt; }
+  record cell { text: string, fg: option&lt;color&gt;, bg: option&lt;color&gt;, add: modifiers, wide: bool }
+  record cell-rows { first-row: u32, columns: u16, rows: list&lt;list&lt;cell&gt;&gt;, revision: u64 }
+  flags terminal-mode { alternate-screen, mouse-reporting, bracketed-paste, application-cursor, focus-reporting, synchronized-output }
+  record foreground-process { name: string, command-line: list&lt;string&gt;, cwd: option&lt;string&gt; }
+  record history-match { row: u32, column: u16, length: u16 }
+
+  /// terminal.read-screen. Sync. max-rows is clamped to 10,000.
+  read-screen: func(pane: node-id, part: screen-part, max-rows: u32) -&gt; option&lt;screen&gt;;
+  selection: func(pane: node-id) -&gt; option&lt;selection&gt;;
+  /// terminal.output-filter. regex is a bounded RE2-style expression. At most 8 filters per pane per plugin.
+  add-output-filter: func(pane: node-id, filter: output-filter) -&gt; result&lt;_, plugin-error&gt;;
+  remove-output-filter: func(pane: node-id, filter-id: string);
+  /// terminal.pointer. Errors: conflict when another plugin holds the claim.
+  claim-pointer: func(pane: node-id) -&gt; result&lt;_, plugin-error&gt;;
+  /// Claims only the gestures that carry these modifiers. Errors: invalid-argument for an empty set.
+  claim-pointer-gesture: func(pane: node-id, modifiers: pointer-modifiers) -&gt; result&lt;_, plugin-error&gt;;
+  release-pointer: func(pane: node-id);
+  set-highlights: func(pane: node-id, layer: string, regions: list&lt;cell-region&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  clear-highlights: func(pane: node-id, layer: string);
+  /// terminal.read-cells. count at most 1,000.
+  read-cells: func(pane: node-id, part: screen-part, first-row: u32, count: u32) -&gt; option&lt;cell-rows&gt;;
+  modes: func(pane: node-id) -&gt; option&lt;terminal-mode&gt;;
+  foreground-process: func(pane: node-id) -&gt; option&lt;foreground-process&gt;;
+  /// A stable copy of screen and scrollback. At most 4 snapshots per plugin.
+  freeze-snapshot: func(pane: node-id) -&gt; result&lt;u64, plugin-error&gt;;
+  read-snapshot-cells: func(snapshot: u64, first-row: u32, count: u32) -&gt; option&lt;cell-rows&gt;;
+  drop-snapshot: func(snapshot: u64);
+  /// terminal.history. Async, take-history. max-bytes at most 4 MiB, the newest text is kept.
+  history-text: func(pane: node-id, max-bytes: u32) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-history: func(request: request-id) -&gt; option&lt;string&gt;;
+  /// Async, take-matches. max-matches at most 1,000.
+  search-history: func(pane: node-id, regex: string, max-matches: u16) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-matches: func(request: request-id) -&gt; option&lt;list&lt;history-match&gt;&gt;;
+  /// terminal.input-lock. millis at most 2,000. User keys are queued, not lost.
+  lock-input: func(pane: node-id, millis: u16) -&gt; result&lt;_, plugin-error&gt;;
+  /// Releases this plugin's lock. No result: a no-op when no lock is held or the pane is missing.
+  unlock-input: func(pane: node-id);
+}
+</code></pre>
+<h3 id="62-agent">6.2 agent</h3>
+<p>S C. Grants: <code>agent.read</code>, <code>agent.read-prompts</code>, <code>agent.transcript</code>, <code>agent.signatures</code>, <code>agent.control</code>. API pages: <a href="/pages/primitives-agent/">Agent</a> and <a href="/pages/primitives-agent-transcript/">Agent transcript</a>.</p>
+<pre><code class="language-wit">interface agent {
+  use ilium:types/ids@0.1.0.{node-id, request-id, epoch-ms};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/tree@0.1.0.{agent-view, agent-model, agent-activity};
+
+  record agent-pane { pane: node-id, view: agent-view }
+  /// A path inside the scope agent-sessions:&lt;agent&gt;.
+  record session-ref { scope: string, path: string, session-id: string }
+  record signature-action { id: string, keys: string, allowed-when: option&lt;list&lt;agent-activity&gt;&gt; }
+  record signature-spec {
+    id: string, process-names: list&lt;string&gt;, aliases: list&lt;string&gt;, icon: option&lt;string&gt;,
+    resume: option&lt;list&lt;string&gt;&gt;, actions: list&lt;signature-action&gt;,
+    session-scope: option&lt;string&gt;, submit-keys: option&lt;string&gt;,
+  }
+  enum turn-role { user, assistant, tool, system }
+  record transcript-turn { role: turn-role, text: string, tool: option&lt;string&gt;, at: option&lt;epoch-ms&gt;, tokens: option&lt;u32&gt; }
+  /// last-turns at most 512. max-bytes at most 4 MiB.
+  record transcript-query { pane: node-id, last-turns: u32, max-bytes: u32 }
+
+  agents: func() -&gt; list&lt;agent-pane&gt;;
+  view: func(pane: node-id) -&gt; option&lt;agent-view&gt;;
+  session: func(pane: node-id) -&gt; option&lt;session-ref&gt;;
+  /// agent.read-prompts.
+  last-prompt: func(pane: node-id) -&gt; option&lt;string&gt;;
+  /// agent.signatures. Runtime signatures come from settings.
+  register-signature: func(spec: signature-spec) -&gt; result&lt;_, plugin-error&gt;;
+  /// agent.control.
+  set-toolbar-state: func(button: string, pane: option&lt;node-id&gt;, enabled: bool, label: option&lt;string&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  model: func(pane: node-id) -&gt; option&lt;agent-model&gt;;
+  /// The epoch that send-input compares against.
+  prompt-epoch: func(pane: node-id) -&gt; option&lt;u64&gt;;
+  /// agent.transcript. Async, take-transcript.
+  transcript: func(query: transcript-query) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-transcript: func(request: request-id) -&gt; option&lt;list&lt;transcript-turn&gt;&gt;;
+}
+</code></pre>
+<h3 id="63-editor">6.3 editor</h3>
+<p>C. Grants: <code>editor.read</code>, <code>editor.edit</code>. API pages: <a href="/pages/primitives-editor/">Editor</a> and <a href="/pages/primitives-editor-viewport/">Editor viewport</a>.</p>
+<pre><code class="language-wit">interface editor {
+  use ilium:types/ids@0.1.0.{node-id, buffer-id, request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+  use ilium:types/text@0.1.0.{style, color};
+  use ilium:types/editing@0.1.0.{buffer-ref, text-range, editor-viewport};
+
+  record range-decoration { range: text-range, style: style, hover: option&lt;string&gt; }
+  record gutter-mark { line: u32, icon: string, tooltip: option&lt;string&gt;, command: option&lt;string&gt; }
+  /// lane 0 to 2.
+  record minimap-mark { line: u32, color: color, lane: u8 }
+
+  buffers: func() -&gt; list&lt;buffer-ref&gt;;
+  buffer-for-pane: func(pane: node-id) -&gt; option&lt;buffer-ref&gt;;
+  /// count at most 1,000.
+  read-lines: func(buffer: buffer-id, first-line: u32, count: u32) -&gt; result&lt;list&lt;string&gt;, plugin-error&gt;;
+  selections: func(buffer: buffer-id) -&gt; list&lt;text-range&gt;;
+  /// At most 4,096 items per layer.
+  set-decorations: func(buffer: buffer-id, layer: string, items: list&lt;range-decoration&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  set-gutter: func(buffer: buffer-id, layer: string, marks: list&lt;gutter-mark&gt;) -&gt; result&lt;_, plugin-error&gt;;
+  /// editor.edit. For a code-view widget.
+  create-buffer: func(initial: string, language: option&lt;string&gt;) -&gt; result&lt;buffer-id, plugin-error&gt;;
+  /// editor.edit plus fs.read. Async, take-buffer.
+  load-file: func(path: fs-path) -&gt; result&lt;request-id, plugin-error&gt;;
+  take-buffer: func(request: request-id) -&gt; option&lt;buffer-id&gt;;
+  /// editor.edit plus fs.write. Async, request-completed ok.
+  save-buffer: func(buffer: buffer-id, path: option&lt;fs-path&gt;) -&gt; result&lt;request-id, plugin-error&gt;;
+  /// Grant: editor.edit. Closes a buffer and frees its quota slot.
+  close-buffer: func(buffer: buffer-id);
+  viewport: func(pane: node-id) -&gt; option&lt;editor-viewport&gt;;
+  /// At most 4,096 marks per layer.
+  set-minimap-marks: func(buffer: buffer-id, layer: string, marks: list&lt;minimap-mark&gt;) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<p>The editor-provider status is decided: the editor is a built-in pane kind, a plugin does not provide its own <code>ilium.editor</code> kind, and the grant <code>editor.provide</code> does not exist. A plugin that wants its own text pane uses the <code>basic</code> primitive with a <code>panes.provide-kind</code> grant. See <a href="/pages/capability-editor-provide/">Capability: editor provide</a>.</p>
+<h3 id="64-basic">6.4 basic</h3>
+<p>C. Grant: <code>panes.provide-kind</code> for the pane kinds the plugin contributes. API page: <a href="/pages/primitives-basic/">Basic pane primitive</a>.</p>
+<pre><code class="language-wit">interface basic {
+  use ilium:types/ids@0.1.0.{node-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{styled-text};
+  use ilium:types/tree@0.1.0.{agent-activity};
+
+  /// Own panes only. Errors: not-permitted for a pane of another kind.
+  set-title: func(pane: node-id, title: string) -&gt; result&lt;_, plugin-error&gt;;
+  /// One line in the footer of the pane frame.
+  set-status: func(pane: node-id, status: styled-text) -&gt; result&lt;_, plugin-error&gt;;
+  request-focus: func(pane: node-id) -&gt; result&lt;_, plugin-error&gt;;
+  /// Inner columns and rows.
+  size: func(pane: node-id) -&gt; option&lt;tuple&lt;u16, u16&gt;&gt;;
+  /// Drives the activity icon of the tree.
+  report-activity: func(pane: node-id, activity: agent-activity) -&gt; result&lt;_, plugin-error&gt;;
+  /// A dirty pane asks before it is closed.
+  set-dirty: func(pane: node-id, dirty: bool) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h2 id="7-package-iliumanim">7. Package ilium:anim</h2>
+<p>Imported by scene plugins only. A scene also imports <code>log</code>, <code>clock</code>, <code>storage</code>, <code>fs</code>, <code>codec</code>, <code>jobs</code>, <code>http</code>, <code>audio</code>, <code>media</code>, <code>location</code>, <code>geocode</code> and <code>gpu</code> from <code>ilium:host</code>, as the import matrix says.</p>
+<pre><code class="language-wit">package ilium:anim@0.1.0;
+</code></pre>
+<h3 id="71-surface">7.1 surface</h3>
+<p>Grant: none. Manifest keys: <code>glyph_plane: true</code> for the glyph methods. API pages: <a href="/pages/api-scenes/">Scenes</a> and <a href="/pages/api-surface-glyph-plane/">Glyph plane and receipts</a>.</p>
+<pre><code class="language-wit">interface surface {
+  use ilium:types/ids@0.1.0.{epoch-ms};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{modifiers};
+  use ilium:types/ui@0.1.0.{pixel-format};
+
+  /// An occupancy value per cell, set by the host from the pane text: true where text is drawn.
+  record occupancy-grid { columns: u16, rows: u16, cells: list&lt;bool&gt; }
+  record scene-pointer { column: u16, row: u16, sub-x: u8, sub-y: u8, pressed: bool }
+  record glyph-cell { column: u16, row: u16, text: string, fg: option&lt;u32&gt;, bg: option&lt;u32&gt;, add: modifiers }
+  /// pointer-owner is the owner id under the pointer at the presented frame.
+  record frame-receipt { frame: u64, presented-at-millis: u64, dropped-before: u32, pointer-owner: option&lt;u16&gt; }
+
+  resource frame-surface {
+    /// Width and height in pixels.
+    size: func() -&gt; tuple&lt;u32, u32&gt;;
+    /// Rows are top to bottom. Rows that fall at or past the height are ignored.
+    /// Rows are top to bottom. first-row plus the rows written must be within the height.
+    /// Errors: invalid-argument for a format the scene did not declare, empty data, or first-row at or past the height. A partial trailing row is dropped, not an error.
+    write-rows: func(first-row: u32, format: pixel-format, data: list&lt;u8&gt;) -&gt; result&lt;_, plugin-error&gt;;
+    /// Needs uses-cell-colors. One 0xRRGGBB value per cell, row by row.
+    write-cell-colors: func(first-row: u32, colors: list&lt;u32&gt;) -&gt; result&lt;_, plugin-error&gt;;
+    /// Needs wants-occupancy.
+    occupancy: func() -&gt; option&lt;occupancy-grid&gt;;
+    /// Needs wants-pointer.
+    pointer: func() -&gt; option&lt;scene-pointer&gt;;
+    /// Ends the frame. A render call that returns without present drops the frame.
+    present: func();
+    /// Needs glyph_plane true. At most 131,072 cells per frame.
+    write-glyphs: func(cells: list&lt;glyph-cell&gt;) -&gt; result&lt;_, plugin-error&gt;;
+    clear-glyphs: func();
+    /// One id per pixel, 0 means none.
+    set-owner-ids: func(first-row: u32, ids: list&lt;u16&gt;) -&gt; result&lt;_, plugin-error&gt;;
+    last-receipt: func() -&gt; option&lt;frame-receipt&gt;;
+  }
+}
+</code></pre>
+<h3 id="72-fonts">7.2 fonts</h3>
+<p>Grant: none. Scene only.</p>
+<pre><code class="language-wit">interface fonts {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  resource font {
+    /// asset is the path of a font file inside the plugin package.
+    constructor(asset: string);
+    /// Returns width, height and a gray8 bitmap.
+    rasterize: func(text: string, size-px: u16) -&gt; result&lt;tuple&lt;u32, u32, list&lt;u8&gt;&gt;, plugin-error&gt;;
+  }
+}
+</code></pre>
+<h3 id="73-renderer-types">7.3 renderer types</h3>
+<pre><code class="language-wit">interface renderer-types {
+  /// The order is the ABI.
+  enum readiness { ready, preparing, failed }
+  record frame-input {
+    time-millis: u64, wall-millis: u64, now-unix-millis: u64, width: u32, height: u32, palette-rgb: list&lt;u32&gt;,
+  }
+}
+</code></pre>
+<h2 id="8-package-iliumexports">8. Package ilium:exports</h2>
+<p>This package holds everything a plugin implements. The host calls these interfaces. A plugin exports <code>lifecycle</code> and, on server and client, <code>handler</code>. Optional exports are named in the manifest <code>exports</code> list, and required exports are never listed there [ABI-018].</p>
+<pre><code class="language-wit">package ilium:exports@0.1.0;
+</code></pre>
+<h3 id="81-lifecycle">8.1 lifecycle</h3>
+<pre><code class="language-wit">interface lifecycle {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/lifecycle@0.1.0.{activation, deactivation-reason};
+  /// Called once per instance, before any event. An error stops the activation and counts as a failure.
+  activate: func(context: activation) -&gt; result&lt;_, plugin-error&gt;;
+  /// Called with the reason. The returned bytes (at most 1 MiB) arrive in the next activation as restored.
+  deactivate: func(reason: deactivation-reason) -&gt; option&lt;list&lt;u8&gt;&gt;;
+}
+</code></pre>
+<h3 id="82-handler">8.2 handler</h3>
+<pre><code class="language-wit">interface handler {
+  use ilium:types/events@0.1.0.{event};
+  use ilium:types/intents@0.1.0.{submission};
+  /// At most 256 events in, at most 256 submissions out. More submissions trap the call.
+  on-events: func(batch: list&lt;event&gt;) -&gt; list&lt;submission&gt;;
+}
+</code></pre>
+<h3 id="83-views">8.3 views</h3>
+<pre><code class="language-wit">interface views {
+  use ilium:types/ui@0.1.0.{view-target, ui-tree};
+  use ilium:types/layout@0.1.0.{area};
+  /// Pure with respect to the host: no intents are accepted from here.
+  render: func(view: view-target, area: area) -&gt; ui-tree;
+}
+</code></pre>
+<h3 id="84-detector">8.4 detector</h3>
+<pre><code class="language-wit">interface detector {
+  use ilium:types/tree@0.1.0.{agent-activity};
+  record detector-screen { columns: u16, rows: list&lt;string&gt;, cursor-row: u16, title: option&lt;string&gt;, revision: u64 }
+  record detector-process { name: string, argv: list&lt;string&gt; }
+  record classification { activity: agent-activity, objective: option&lt;string&gt;, goal: option&lt;string&gt; }
+  identify: func(processes: list&lt;detector-process&gt;) -&gt; option&lt;string&gt;;
+  classify: func(signature: string, screen: detector-screen) -&gt; classification;
+}
+</code></pre>
+<h3 id="85-job-runner">8.5 job-runner</h3>
+<pre><code class="language-wit">interface job-runner {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Runs in a job instance, see Runtime model. The output is at most 4 MiB.
+  run: func(kind: string, input: list&lt;u8&gt;) -&gt; result&lt;list&lt;u8&gt;, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="86-service-provider">8.6 service-provider</h3>
+<pre><code class="language-wit">interface service-provider {
+  use ilium:types/ids@0.1.0.{plugin-id};
+  variant service-reply { done(string), deferred }
+  record service-call { call: u64, service: string, method: string, payload-json: string, caller: plugin-id }
+  /// deferred means the plugin answers later with services.reply.
+  handle: func(call: service-call) -&gt; service-reply;
+}
+</code></pre>
+<h3 id="87-inference-provider">8.7 inference-provider</h3>
+<pre><code class="language-wit">interface inference-provider {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:host/inference@0.1.0.{completion-request};
+  record provider-call { call: u64, request: completion-request }
+  /// Answer later with inference.provider-reply.
+  complete: func(call: provider-call) -&gt; result&lt;_, plugin-error&gt;;
+  models: func() -&gt; list&lt;string&gt;;
+}
+</code></pre>
+<h3 id="88-annotator">8.8 annotator</h3>
+<pre><code class="language-wit">interface annotator {
+  use ilium:types/ids@0.1.0.{buffer-id};
+  use ilium:types/text@0.1.0.{style};
+  record line-annotation { line: u32, first-column: u32, last-column: u32, style: style }
+  annotate: func(buffer: buffer-id, revision: u64, first-line: u32, lines: list&lt;string&gt;) -&gt; list&lt;line-annotation&gt;;
+}
+</code></pre>
+<h3 id="89-settings-validate">8.9 settings-validate</h3>
+<pre><code class="language-wit">interface settings-validate {
+  use ilium:host/settings@0.1.0.{field-error};
+  /// 100 ms deadline. A message is at most 120 characters of plain text.
+  settings-validate: func(patch: string, merged: string) -&gt; result&lt;_, list&lt;field-error&gt;&gt;;
+}
+</code></pre>
+<h3 id="810-catalog-provider">8.10 catalog-provider</h3>
+<pre><code class="language-wit">interface catalog-provider {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:host/catalogs@0.1.0.{catalog-query, catalog-page};
+  query-catalog: func(q: catalog-query) -&gt; result&lt;catalog-page, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="811-menu-provider">8.11 menu-provider</h3>
+<pre><code class="language-wit">interface menu-provider {
+  use ilium:types/ids@0.1.0.{node-id, buffer-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{tooltip, tri-state};
+  use ilium:types/ui@0.1.0.{view-target};
+  record menu-context {
+    menu: string, node: option&lt;node-id&gt;, pane: option&lt;node-id&gt;, view: option&lt;view-target&gt;,
+    key: option&lt;string&gt;, buffer: option&lt;buffer-id&gt;, line: option&lt;u32&gt;, selection: option&lt;string&gt;,
+  }
+  record menu-entry {
+    id: string, label: string, icon: option&lt;string&gt;, shortcut: option&lt;string&gt;,
+    /// Id of a submenu entry. Depth is at most 2.
+    parent: option&lt;string&gt;,
+    is-submenu: bool, separator-before: bool,
+    checked: option&lt;tri-state&gt;,
+    /// At most 40 characters.
+    disabled-reason: option&lt;string&gt;,
+    tooltip: option&lt;tooltip&gt;, danger: bool,
+  }
+  /// At most 64 entries.
+  menu-items: func(context: menu-context) -&gt; list&lt;menu-entry&gt;;
+}
+</code></pre>
+<h3 id="812-virtual-rows-provider">8.12 virtual-rows-provider</h3>
+<pre><code class="language-wit">interface virtual-rows-provider {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{rich-text, tooltip};
+  record virtual-row-child {
+    id: string, label: rich-text, icon: option&lt;string&gt;, expandable: bool, command: option&lt;string&gt;,
+    tooltip: option&lt;tooltip&gt;, accepts-drop: bool,
+  }
+  /// Returns a page and the next cursor. none means the last page.
+  list-virtual-children: func(row-kind: string, parent: string, cursor: option&lt;string&gt;)
+    -&gt; result&lt;tuple&lt;list&lt;virtual-row-child&gt;, option&lt;string&gt;&gt;, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="813-token-provider">8.13 token-provider</h3>
+<pre><code class="language-wit">interface token-provider {
+  use ilium:types/ids@0.1.0.{buffer-id};
+  enum token-kind { keyword, string, number, comment, type-name, function, variable, operator, punctuation, constant, tag, attribute, plain }
+  record token { line: u32, start: u32, length: u32, kind: token-kind }
+  tokens: func(buffer: buffer-id, first-line: u32, lines: list&lt;string&gt;, state-in: option&lt;list&lt;u8&gt;&gt;)
+    -&gt; tuple&lt;list&lt;token&gt;, option&lt;list&lt;u8&gt;&gt;&gt;;
+}
+</code></pre>
+<h3 id="814-hook-handler">8.14 hook-handler</h3>
+<pre><code class="language-wit">interface hook-handler {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  record hook-call { call: u64, point: string, payload-json: string }
+  variant hook-reply { pass, replace(string), refuse(string), answer(string) }
+  /// The owner of the point calls it through extensions.run-hook.
+  handle-hook: func(call: hook-call) -&gt; result&lt;hook-reply, plugin-error&gt;;
+}
+</code></pre>
+<h3 id="815-renderer">8.15 renderer</h3>
+<pre><code class="language-wit">interface renderer {
+  use ilium:anim/surface@0.1.0.{frame-surface};
+  use ilium:anim/renderer-types@0.1.0.{readiness, frame-input};
+  resource scene-renderer {
+    /// spec-json holds scene, settings, palette and mode.
+    constructor(spec-json: string);
+    readiness: func() -&gt; readiness;
+    frames-per-second: func() -&gt; u32;
+    wants-pointer: func() -&gt; bool;
+    wants-occupancy: func() -&gt; bool;
+    uses-cell-colors: func() -&gt; bool;
+    render: func(frame: frame-input, surface: borrow&lt;frame-surface&gt;);
+    set-palette: func(palette-rgb: list&lt;u32&gt;);
+    /// false asks the host to restart the scene.
+    reconfigure: func(settings-json: string) -&gt; bool;
+    status: func() -&gt; option&lt;string&gt;;
+  }
+}
+</code></pre>
+<h3 id="816-migrator">8.16 migrator</h3>
+<pre><code class="language-wit">interface migrator {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// The host calls it once per side before activate when the manifest data_version rose.
+  /// It MUST be idempotent: an interrupted run starts again from the same arguments.
+  migrate: func(from: u32, to: u32) -&gt; result&lt;_, plugin-error&gt;;
+}
+</code></pre>
+<h2 id="9-worlds">9. Worlds</h2>
+<p>A world is one base plus fragments. A fragment is a world that <code>include</code>s nothing and only adds exports; the SDK composes them. Each fragment name is the one used in the manifest-independent tables of <a href="/pages/worlds-and-sides/">Worlds and sides</a>.</p>
+<pre><code class="language-wit">package ilium:server@0.1.0;
+
+world base {
+  import ilium:host/log@0.1.0;
+  import ilium:host/clock@0.1.0;
+  import ilium:host/timers@0.1.0;
+  import ilium:host/journal@0.1.0;
+  import ilium:host/tree@0.1.0;
+  import ilium:host/panes@0.1.0;
+  import ilium:host/intents-host@0.1.0;
+  import ilium:host/storage@0.1.0;
+  import ilium:host/settings@0.1.0;
+  import ilium:host/codec@0.1.0;
+  import ilium:host/fs@0.1.0;
+  import ilium:host/http@0.1.0;
+  import ilium:host/jobs@0.1.0;
+  import ilium:host/process@0.1.0;
+  import ilium:host/inference@0.1.0;
+  import ilium:host/vector@0.1.0;
+  import ilium:host/sounds@0.1.0;
+  import ilium:host/topics@0.1.0;
+  import ilium:host/commands@0.1.0;
+  import ilium:host/services@0.1.0;
+  import ilium:host/cli@0.1.0;
+  import ilium:host/http-api@0.1.0;
+  import ilium:host/workspace@0.1.0;
+  import ilium:host/catalogs@0.1.0;
+  import ilium:host/geocode@0.1.0;
+  import ilium:host/sessions@0.1.0;
+  import ilium:host/kernel-settings@0.1.0;
+  import ilium:host/client-requests@0.1.0;
+  import ilium:host/extensions@0.1.0;
+  import ilium:primitives/terminal@0.1.0;
+  import ilium:primitives/agent@0.1.0;
+  export ilium:exports/lifecycle@0.1.0;
+  export ilium:exports/handler@0.1.0;
+}
+
+world with-detector { export ilium:exports/detector@0.1.0; }
+world with-jobs { export ilium:exports/job-runner@0.1.0; }
+world with-service { export ilium:exports/service-provider@0.1.0; }
+world with-inference-provider { export ilium:exports/inference-provider@0.1.0; }
+world with-settings-validate { export ilium:exports/settings-validate@0.1.0; }
+world with-catalog { export ilium:exports/catalog-provider@0.1.0; }
+world with-virtual-rows { export ilium:exports/virtual-rows-provider@0.1.0; }
+world with-hook-handler { export ilium:exports/hook-handler@0.1.0; }
+world with-migrator { export ilium:exports/migrator@0.1.0; }
+</code></pre>
+<pre><code class="language-wit">package ilium:client@0.1.0;
+
+world base {
+  import ilium:host/log@0.1.0;
+  import ilium:host/clock@0.1.0;
+  import ilium:host/timers@0.1.0;
+  import ilium:host/journal@0.1.0;
+  import ilium:host/tree@0.1.0;
+  import ilium:host/panes@0.1.0;
+  import ilium:host/intents-host@0.1.0;
+  import ilium:host/storage@0.1.0;
+  import ilium:host/settings@0.1.0;
+  import ilium:host/codec@0.1.0;
+  import ilium:host/fs@0.1.0;
+  import ilium:host/http@0.1.0;
+  import ilium:host/jobs@0.1.0;
+  import ilium:host/process@0.1.0;
+  import ilium:host/inference@0.1.0;
+  import ilium:host/vector@0.1.0;
+  import ilium:host/sounds@0.1.0;
+  import ilium:host/topics@0.1.0;
+  import ilium:host/commands@0.1.0;
+  import ilium:host/services@0.1.0;
+  import ilium:host/ui-host@0.1.0;
+  import ilium:host/keys@0.1.0;
+  import ilium:host/clipboard@0.1.0;
+  import ilium:host/audio@0.1.0;
+  import ilium:host/media@0.1.0;
+  import ilium:host/location@0.1.0;
+  import ilium:host/help@0.1.0;
+  import ilium:host/plugins@0.1.0;
+  import ilium:host/catalogs@0.1.0;
+  import ilium:host/geocode@0.1.0;
+  import ilium:host/kernel-settings@0.1.0;
+  import ilium:host/keymap@0.1.0;
+  import ilium:host/gpu@0.1.0;
+  import ilium:host/client-requests@0.1.0;
+  import ilium:host/extensions@0.1.0;
+  import ilium:primitives/terminal@0.1.0;
+  import ilium:primitives/agent@0.1.0;
+  import ilium:primitives/editor@0.1.0;
+  import ilium:primitives/basic@0.1.0;
+  export ilium:exports/lifecycle@0.1.0;
+  export ilium:exports/handler@0.1.0;
+}
+
+world with-views { export ilium:exports/views@0.1.0; }
+world with-annotator { export ilium:exports/annotator@0.1.0; }
+world with-jobs { export ilium:exports/job-runner@0.1.0; }
+world with-service { export ilium:exports/service-provider@0.1.0; }
+world with-inference-provider { export ilium:exports/inference-provider@0.1.0; }
+world with-settings-validate { export ilium:exports/settings-validate@0.1.0; }
+world with-catalog { export ilium:exports/catalog-provider@0.1.0; }
+world with-menus { export ilium:exports/menu-provider@0.1.0; }
+world with-virtual-rows { export ilium:exports/virtual-rows-provider@0.1.0; }
+world with-tokens { export ilium:exports/token-provider@0.1.0; }
+world with-hook-handler { export ilium:exports/hook-handler@0.1.0; }
+world with-migrator { export ilium:exports/migrator@0.1.0; }
+</code></pre>
+<pre><code class="language-wit">package ilium:anim@0.1.0;
+
+world base {
+  import ilium:host/log@0.1.0;
+  import ilium:host/clock@0.1.0;
+  import ilium:host/storage@0.1.0;
+  import ilium:host/codec@0.1.0;
+  import ilium:host/fs@0.1.0;
+  import ilium:host/http@0.1.0;
+  import ilium:host/jobs@0.1.0;
+  import ilium:host/audio@0.1.0;
+  import ilium:host/media@0.1.0;
+  import ilium:host/location@0.1.0;
+  import ilium:host/geocode@0.1.0;
+  import ilium:host/gpu@0.1.0;
+  import ilium:anim/surface@0.1.0;
+  import ilium:anim/fonts@0.1.0;
+  export ilium:exports/lifecycle@0.1.0;
+  export ilium:exports/renderer@0.1.0;
+}
+
+world with-jobs { export ilium:exports/job-runner@0.1.0; }
+</code></pre>
+<p>The umbrella identity is <code>ilium:plugin@0.1.0</code>. It is not a WIT package. It is the value of the manifest <code>api</code> field and of the <code>ilium:api-version</code> custom section, and the host compares it before linking [ABI-021].</p>
+<p>World fragments with the same name in different packages are separate worlds. The SDK composes a base and its fragments into one component world, and the manifest <code>exports</code> list has to match the exports of that component.</p>
+<h2 id="10-mapping-rules-for-rust-and-typescript">10. Mapping rules for Rust and TypeScript</h2>
+<p>The SDKs generate their types from this page. The rules below are the only naming and shape conversions [ABI-020].</p>
+<table>
+<thead>
+<tr>
+<th>WIT</th>
+<th>Rust</th>
+<th>TypeScript</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kebab-case</code> function</td>
+<td><code>snake_case</code> function in a module named for the interface</td>
+<td><code>camelCase</code> function in a namespace for the interface</td>
+</tr>
+<tr>
+<td><code>record</code></td>
+<td><code>struct</code> with <code>snake_case</code> fields</td>
+<td><code>interface</code> with <code>camelCase</code> fields</td>
+</tr>
+<tr>
+<td><code>variant</code></td>
+<td><code>enum</code> with one tuple field per payload case</td>
+<td>tagged union <code>{ tag: 'case-name', val: T }</code></td>
+</tr>
+<tr>
+<td><code>enum</code></td>
+<td>fieldless <code>enum</code></td>
+<td>string union of the case names</td>
+</tr>
+<tr>
+<td><code>flags</code></td>
+<td>struct of <code>bool</code> fields with <code>bitflags</code> style operators</td>
+<td>object of optional booleans</td>
+</tr>
+<tr>
+<td><code>option&lt;T&gt;</code></td>
+<td><code>Option&lt;T&gt;</code></td>
+<td><code>T or undefined</code></td>
+</tr>
+<tr>
+<td><code>result&lt;T, E&gt;</code></td>
+<td><code>Result&lt;T, E&gt;</code></td>
+<td>returns <code>T</code>, throws <code>PluginError</code> for <code>plugin-error</code></td>
+</tr>
+<tr>
+<td><code>list&lt;u8&gt;</code></td>
+<td><code>Vec&lt;u8&gt;</code></td>
+<td><code>Uint8Array</code></td>
+</tr>
+<tr>
+<td><code>u64</code>, <code>s64</code></td>
+<td><code>u64</code>, <code>i64</code></td>
+<td><code>bigint</code></td>
+</tr>
+<tr>
+<td><code>u8</code>, <code>u16</code>, <code>u32</code>, <code>s16</code>, <code>s32</code>, <code>f32</code>, <code>f64</code></td>
+<td>the same width</td>
+<td><code>number</code></td>
+</tr>
+<tr>
+<td><code>tuple&lt;A, B&gt;</code></td>
+<td><code>(A, B)</code></td>
+<td><code>[A, B]</code></td>
+</tr>
+<tr>
+<td><code>resource</code></td>
+<td>owned handle type with a <code>Drop</code></td>
+<td>class with <code>[Symbol.dispose]</code></td>
+</tr>
+<tr>
+<td><code>%name</code></td>
+<td>the Rust keyword is escaped as <code>r#name</code> where needed</td>
+<td>the same name</td>
+</tr>
+</tbody>
+</table>
+<p>A <code>take-*</code> function returns <code>Option&lt;T&gt;</code> in Rust and <code>T or undefined</code> in TypeScript. A function with no <code>result</code> cannot fail; a trap is not catchable.</p>
+<h3 id="wrapper-names-in-the-sdks">Wrapper names in the SDKs</h3>
+<p>The conversions above change names only. The SDKs add two wrapper forms on top of them, and no others.</p>
+<table>
+<thead>
+<tr>
+<th>WIT function</th>
+<th>Rust</th>
+<th>TypeScript</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fetch</code> returns <code>result&lt;request-id, plugin-error&gt;</code></td>
+<td><code>http::fetch(request).await</code></td>
+<td><code>await fetch(request)</code></td>
+<td>The plain name starts the call and awaits the outcome. It returns the typed value.</td>
+</tr>
+<tr>
+<td>the same function</td>
+<td><code>http::fetch_request(request)</code></td>
+<td><code>fetchRequest(request)</code></td>
+<td>The <code>_request</code> / <code>Request</code> form starts the call and returns the <code>RequestId</code> at once, so the plugin can await it later or complete it by hand.</td>
+</tr>
+<tr>
+<td><code>get-json</code>, <code>set-json</code>, <code>get-plugin-json</code>, <code>set-plugin-json</code>, and any function that takes <code>payload-json</code></td>
+<td><code>settings::get_json()</code>, <code>settings::set_json(&amp;patch)</code></td>
+<td><code>getJson()</code>, <code>setJson(patch)</code></td>
+<td>A name that ends in <code>-json</code> keeps the suffix as <code>_json</code> / <code>Json</code>. The value is JSON text: a Rust <code>String</code>, a TypeScript <code>string</code>. The SDK never parses it.</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>[ABI-051]</strong> Every WIT function that returns <code>request-id</code> MUST have an awaiting wrapper with the WIT name and a starting wrapper with the suffix <code>_request</code> in Rust and <code>Request</code> in TypeScript. A WIT name that ends in <code>-json</code> MUST keep the suffix as <code>_json</code> in Rust and <code>Json</code> in TypeScript.</li>
+</ul>
+<h2 id="11-where-each-name-is-defined">11. Where each name is defined</h2>
+<p>Every type is defined once, with two deliberate exceptions: <code>minimap-mark</code> is declared in <code>ilium:types/ui</code> (for <code>minimap-spec</code>) and in the <code>editor</code> primitive interface (for <code>set-minimap-marks</code>), and <code>menu-entry</code> is declared in <code>ilium:types/ui</code> (for <code>menu-spec</code>) and in the <code>menu-provider</code> export interface (for <code>menu-items</code>). A package cannot use a type from a package that depends on it, so each pair stays as two records with identical fields, and an SDK exposes each pair as one type. This index names the owner of each group of names. A page that needs a type links to the section.</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Interface</th>
+<th>Section</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Identifiers</td>
+<td><code>ilium:types/ids</code></td>
+<td>4.1</td>
+</tr>
+<tr>
+<td><code>plugin-error</code>, <code>error-code</code></td>
+<td><code>ilium:types/errors</code></td>
+<td>4.2</td>
+</tr>
+<tr>
+<td>Colour, style, rich text, tone, tooltip</td>
+<td><code>ilium:types/text</code></td>
+<td>4.3</td>
+</tr>
+<tr>
+<td><code>fs-path</code></td>
+<td><code>ilium:types/paths</code></td>
+<td>4.4</td>
+</tr>
+<tr>
+<td>Buffers, positions, edits</td>
+<td><code>ilium:types/editing</code></td>
+<td>4.5</td>
+</tr>
+<tr>
+<td>Constraints, direction, flex</td>
+<td><code>ilium:types/layout</code></td>
+<td>4.6</td>
+</tr>
+<tr>
+<td>Geographic points and places</td>
+<td><code>ilium:types/geo</code></td>
+<td>4.7</td>
+</tr>
+<tr>
+<td>Tree nodes, panes, agents</td>
+<td><code>ilium:types/tree</code></td>
+<td>4.8</td>
+</tr>
+<tr>
+<td>Widgets, view trees, widget state, pointer, actions</td>
+<td><code>ilium:types/ui</code></td>
+<td>4.9</td>
+</tr>
+<tr>
+<td><code>outcome</code>, <code>request-ref</code>, <code>request-result</code></td>
+<td><code>ilium:types/requests</code></td>
+<td>4.10</td>
+</tr>
+<tr>
+<td><code>intent</code>, <code>submission</code> and every spec</td>
+<td><code>ilium:types/intents</code></td>
+<td>4.11</td>
+</tr>
+<tr>
+<td><code>event</code> and every payload</td>
+<td><code>ilium:types/events</code></td>
+<td>4.12</td>
+</tr>
+<tr>
+<td><code>activation</code>, <code>deactivation-reason</code></td>
+<td><code>ilium:types/lifecycle</code></td>
+<td>4.13</td>
+</tr>
+<tr>
+<td>Host calls</td>
+<td><code>ilium:host/*</code></td>
+<td>5.1 to 5.39</td>
+</tr>
+<tr>
+<td>Terminal, agent, editor, basic</td>
+<td><code>ilium:primitives/*</code></td>
+<td>6.1 to 6.4</td>
+</tr>
+<tr>
+<td>Scene surface, fonts, renderer types</td>
+<td><code>ilium:anim/*</code></td>
+<td>7.1 to 7.3</td>
+</tr>
+<tr>
+<td>Everything a plugin implements</td>
+<td><code>ilium:exports/*</code></td>
+<td>8.1 to 8.16</td>
+</tr>
+<tr>
+<td>Worlds</td>
+<td><code>ilium:server</code>, <code>ilium:client</code>, <code>ilium:anim</code></td>
+<td>9</td>
+</tr>
+</tbody>
+</table>
+<nav class="pager" aria-label="Page navigation"><a class="prev" href="/pages/reference-trust-and-supply-chain/"><small>Previous</small>Trust and supply chain</a><a class="next" href="/pages/reference-abi-evolution/"><small>Next</small>ABI evolution</a></nav>
+<p class="site-footer">Ilium Plugin Developer Manual</p>
+</article>
+
+<aside class="rail" aria-label="On this page"><b>On this page</b><ul><li class="l2"><a href="#what-you-need">What you need</a></li><li class="l2"><a href="#1-how-to-read-this-page">1. How to read this page</a></li><li class="l2"><a href="#2-conventions">2. Conventions</a></li><li class="l3"><a href="#length-and-size-limits-that-apply-everywhere">Length and size limits that apply everywhere</a></li><li class="l2"><a href="#3-package-and-interface-layout">3. Package and interface layout</a></li><li class="l2"><a href="#4-package-iliumtypes">4. Package ilium:types</a></li><li class="l3"><a href="#41-ids">4.1 ids</a></li><li class="l3"><a href="#42-errors">4.2 errors</a></li><li class="l3"><a href="#43-text">4.3 text</a></li><li class="l3"><a href="#44-paths">4.4 paths</a></li><li class="l3"><a href="#45-editing">4.5 editing</a></li><li class="l3"><a href="#46-layout">4.6 layout</a></li><li class="l3"><a href="#47-geo">4.7 geo</a></li><li class="l3"><a href="#47a-net">4.7a net</a></li><li class="l3"><a href="#48-tree">4.8 tree</a></li><li class="l3"><a href="#49-ui">4.9 ui</a></li><li class="l3"><a href="#410-requests">4.10 requests</a></li><li class="l3"><a href="#411-intents">4.11 intents</a></li><li class="l3"><a href="#412-events">4.12 events</a></li><li class="l3"><a href="#413-lifecycle">4.13 lifecycle</a></li><li class="l2"><a href="#5-package-iliumhost">5. Package ilium:host</a></li><li class="l3"><a href="#51-log">5.1 log</a></li><li class="l3"><a href="#52-clock">5.2 clock</a></li><li class="l3"><a href="#53-timers">5.3 timers</a></li><li class="l3"><a href="#54-journal">5.4 journal</a></li><li class="l3"><a href="#55-tree">5.5 tree</a></li><li class="l3"><a href="#56-panes">5.6 panes</a></li><li class="l3"><a href="#57-intents">5.7 intents</a></li><li class="l3"><a href="#58-storage">5.8 storage</a></li><li class="l3"><a href="#59-settings">5.9 settings</a></li><li class="l3"><a href="#510-codec">5.10 codec</a></li><li class="l3"><a href="#511-fs">5.11 fs</a></li><li class="l3"><a href="#512-http">5.12 http</a></li><li class="l3"><a href="#513-jobs">5.13 jobs</a></li><li class="l3"><a href="#514-process">5.14 process</a></li><li class="l3"><a href="#515-inference">5.15 inference</a></li><li class="l3"><a href="#516-vector">5.16 vector</a></li><li class="l3"><a href="#517-sounds">5.17 sounds</a></li><li class="l3"><a href="#518-topics">5.18 topics</a></li><li class="l3"><a href="#519-commands">5.19 commands</a></li><li class="l3"><a href="#520-services">5.20 services</a></li><li class="l3"><a href="#521-ui">5.21 ui</a></li><li class="l3"><a href="#522-keys">5.22 keys</a></li><li class="l3"><a href="#523-cli">5.23 cli</a></li><li class="l3"><a href="#524-http-api">5.24 http-api</a></li><li class="l3"><a href="#525-workspace">5.25 workspace</a></li><li class="l3"><a href="#526-clipboard">5.26 clipboard</a></li><li class="l3"><a href="#527-audio">5.27 audio</a></li><li class="l3"><a href="#528-media">5.28 media</a></li><li class="l3"><a href="#529-location">5.29 location</a></li><li class="l3"><a href="#530-help">5.30 help</a></li><li class="l3"><a href="#531-plugins">5.31 plugins</a></li><li class="l3"><a href="#532-catalogs">5.32 catalogs</a></li><li class="l3"><a href="#533-geocode">5.33 geocode</a></li><li class="l3"><a href="#534-sessions">5.34 sessions</a></li><li class="l3"><a href="#535-kernel-settings">5.35 kernel-settings</a></li><li class="l3"><a href="#536-keymap">5.36 keymap</a></li><li class="l3"><a href="#537-gpu">5.37 gpu</a></li><li class="l3"><a href="#538-client-requests">5.38 client-requests</a></li><li class="l3"><a href="#539-extensions">5.39 extensions</a></li><li class="l3"><a href="#540-take-rules">5.40 Take rules</a></li><li class="l2"><a href="#6-package-iliumprimitives">6. Package ilium:primitives</a></li><li class="l3"><a href="#61-terminal">6.1 terminal</a></li><li class="l3"><a href="#62-agent">6.2 agent</a></li><li class="l3"><a href="#63-editor">6.3 editor</a></li><li class="l3"><a href="#64-basic">6.4 basic</a></li><li class="l2"><a href="#7-package-iliumanim">7. Package ilium:anim</a></li><li class="l3"><a href="#71-surface">7.1 surface</a></li><li class="l3"><a href="#72-fonts">7.2 fonts</a></li><li class="l3"><a href="#73-renderer-types">7.3 renderer types</a></li><li class="l2"><a href="#8-package-iliumexports">8. Package ilium:exports</a></li><li class="l3"><a href="#81-lifecycle">8.1 lifecycle</a></li><li class="l3"><a href="#82-handler">8.2 handler</a></li><li class="l3"><a href="#83-views">8.3 views</a></li><li class="l3"><a href="#84-detector">8.4 detector</a></li><li class="l3"><a href="#85-job-runner">8.5 job-runner</a></li><li class="l3"><a href="#86-service-provider">8.6 service-provider</a></li><li class="l3"><a href="#87-inference-provider">8.7 inference-provider</a></li><li class="l3"><a href="#88-annotator">8.8 annotator</a></li><li class="l3"><a href="#89-settings-validate">8.9 settings-validate</a></li><li class="l3"><a href="#810-catalog-provider">8.10 catalog-provider</a></li><li class="l3"><a href="#811-menu-provider">8.11 menu-provider</a></li><li class="l3"><a href="#812-virtual-rows-provider">8.12 virtual-rows-provider</a></li><li class="l3"><a href="#813-token-provider">8.13 token-provider</a></li><li class="l3"><a href="#814-hook-handler">8.14 hook-handler</a></li><li class="l3"><a href="#815-renderer">8.15 renderer</a></li><li class="l3"><a href="#816-migrator">8.16 migrator</a></li><li class="l2"><a href="#9-worlds">9. Worlds</a></li><li class="l2"><a href="#10-mapping-rules-for-rust-and-typescript">10. Mapping rules for Rust and TypeScript</a></li><li class="l3"><a href="#wrapper-names-in-the-sdks">Wrapper names in the SDKs</a></li><li class="l2"><a href="#11-where-each-name-is-defined">11. Where each name is defined</a></li></ul></aside>
+</div>
+</div>
+<script src="/assets/js/manual.js" defer></script>
+</body>
+</html>

@@ -10,8 +10,9 @@ use super::assets::{
     models::{oriented_quad, DefinitionOrigin, Direction, ModelQuad, NormalizedState},
     texture::Encoding,
 };
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc};
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlphaMode {
     Opaque,
     Cutout {
@@ -27,7 +28,7 @@ pub enum AlphaMode {
     /// Pinned translucent layer keeps source alpha for ordered composition.
     NativeBlend,
 }
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FaceMaterial {
     pub texture: TextureHandle,
     pub alpha: AlphaMode,
@@ -102,7 +103,7 @@ impl BindingPolicy for MaterialTable {
         })
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BoundQuad {
     pub points: [[f64; 3]; 4],
     pub uv: [[f32; 2]; 4],
@@ -173,6 +174,72 @@ impl BoundModel {
             bank: bank.identity(),
             medium: None,
             medium_boundaries: [false; 6],
+            _reservation: reservation,
+        })
+    }
+
+    /// Rebuild a model read back from the prepared-data cache. The cache file is
+    /// untrusted: quads are re-validated against the freshly imported bank and the
+    /// model is charged to the scene account exactly like a freshly bound one.
+    #[allow(clippy::too_many_arguments)] // mirrors the model's fields one to one
+    pub(crate) fn from_cached(
+        state: BlockState,
+        quads: Vec<BoundQuad>,
+        opaque_boundaries: [bool; 6],
+        origins: Vec<DefinitionOrigin>,
+        medium: Option<ResourceId>,
+        medium_boundaries: [bool; 6],
+        bank: &TextureBank,
+        budget: &ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self> {
+        cancel.check()?;
+        if quads.is_empty() || quads.len() > 8192 || origins.len() > 8192 {
+            return Err(metadata::invalid("cached model quad or origin count"));
+        }
+        for quad in &quads {
+            cancel.check()?;
+            if quad.points.iter().flatten().any(|value| !value.is_finite())
+                || quad.uv.iter().flatten().any(|value| !value.is_finite())
+                || quad.normal.iter().any(|value| !value.is_finite())
+                || quad
+                    .material
+                    .tint
+                    .iter()
+                    .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+            {
+                return Err(metadata::invalid("cached model face is not finite"));
+            }
+            for handle in [
+                Some(quad.material.texture),
+                quad.material.normal_map,
+                quad.material.specular_map,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let texture = bank
+                    .texture(handle)
+                    .ok_or_else(|| metadata::invalid("cached model texture is stale"))?;
+                if !texture.uses_budget(budget) {
+                    return Err(metadata::invalid(
+                        "cached model texture differs from scene account",
+                    ));
+                }
+            }
+        }
+        let reservation = budget.reserve(
+            32768 + quads.len() as u64 * 512 + origins.len() as u64 * 4096,
+            cancel,
+        )?;
+        Ok(Self {
+            state,
+            quads,
+            opaque_boundaries,
+            origins,
+            bank: bank.identity(),
+            medium,
+            medium_boundaries,
             _reservation: reservation,
         })
     }
@@ -278,8 +345,16 @@ impl BoundModel {
             .iter()
             .map(|(_, model)| model.origins.len())
             .sum();
+        // Retained bytes per bound model: the struct itself (its real size, with
+        // room for the Arc counts and allocator rounding) is charged once per
+        // distinct model. Each quad is charged 512 bytes, which covers a
+        // BoundQuad plus Vec doubling slack because quads are pushed one at a
+        // time. Each origin keeps its strings and is charged 4 KiB, a bound
+        // the origin strings have not been measured against.
         let reservation = budget.reserve(
-            32768 + count as u64 * 512 + origin_count as u64 * 4096,
+            (std::mem::size_of::<BoundModel>() + 256) as u64
+                + count as u64 * 512
+                + origin_count as u64 * 4096,
             cancel,
         )?;
         let mut quads = Vec::new();
@@ -378,21 +453,27 @@ impl BoundModel {
     }
 }
 /// Complete collision-free owner key: camera/window origins are deliberately absent.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FaceOwner {
     pub position: [i32; 3],
     pub part: u16,
     pub face: u16,
     pub layer: u16,
 }
+/// The block position lives only in `owner`, which is the collision-free key.
+/// Keeping a second copy here cost 8 bytes per retained face on every tile.
 #[derive(Clone, Debug)]
 pub struct MeshFace {
-    pub position: [i32; 3],
     pub model: Arc<BoundModel>,
     pub quad_index: u16,
     pub owner: FaceOwner,
 }
-#[derive(Clone, Copy, Debug)]
+impl MeshFace {
+    pub fn position(&self) -> [i32; 3] {
+        self.owner.position
+    }
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct MeshRegion {
     pub minimum: [i32; 2],
     pub maximum: [i32; 2],
@@ -408,6 +489,54 @@ impl PreparedMesh {
     // Keep the shared budget identity explicit.
     pub(crate) fn uses_budget(&self, budget: &ByteBudget) -> bool {
         self._reservation.belongs_to(budget)
+    }
+    /// Rebuild a mesh read back from the prepared-data cache from `(position,
+    /// model, quad index)` triples. Owners are recomputed from the quads, never
+    /// trusted from the file.
+    pub(crate) fn from_cached(
+        placed: Vec<([i32; 3], Arc<BoundModel>, u16)>,
+        region: MeshRegion,
+        bank: Digest256,
+        budget: &ByteBudget,
+        cancel: Cancel<'_>,
+    ) -> Result<Self> {
+        cancel.check()?;
+        let reservation = budget.reserve(
+            4096 + placed.len() as u64 * std::mem::size_of::<MeshFace>() as u64,
+            cancel,
+        )?;
+        let mut faces = Vec::new();
+        faces
+            .try_reserve_exact(placed.len())
+            .map_err(|_| AssetError::Allocation)?;
+        for (position, model, quad_index) in placed {
+            cancel.check()?;
+            let quad = model
+                .quads
+                .get(usize::from(quad_index))
+                .ok_or_else(|| metadata::invalid("cached mesh quad index out of range"))?;
+            if model.bank != bank {
+                return Err(metadata::invalid(
+                    "cached mesh model belongs to another bank",
+                ));
+            }
+            faces.push(MeshFace {
+                quad_index,
+                owner: FaceOwner {
+                    position,
+                    part: quad.part,
+                    face: quad.face,
+                    layer: quad.material.layer,
+                },
+                model,
+            });
+        }
+        Ok(Self {
+            faces,
+            bank,
+            region,
+            _reservation: reservation,
+        })
     }
     /// Input includes any needed one-cell halo. Missing samples are visible, never assumed opaque.
     pub fn build(
@@ -536,7 +665,6 @@ impl PreparedMesh {
                     continue;
                 }
                 faces.push(MeshFace {
-                    position: *position,
                     model: Arc::clone(model),
                     quad_index: index as u16,
                     owner: FaceOwner {
@@ -726,6 +854,60 @@ mod native_builtin_combination_tests {
         assert!(stand
             .with_source_native_builtin(vec![bell_face(&wrong_bank)], &bank, &budget, cancel)
             .is_err());
+    }
+
+    #[test]
+    fn cached_model_and_mesh_round_trip_and_reject_a_different_bank() {
+        let stop = AtomicBool::new(false);
+        let cancel = Cancel::new(&stop);
+        let budget = ByteBudget::new(256 << 20).unwrap();
+        let bank = fixture_bank(&budget, [220, 170, 40, 255]);
+        let original = stand(&budget, &bank);
+        let quads: Vec<BoundQuad> =
+            serde_json::from_slice(&serde_json::to_vec(&original.quads).unwrap()).unwrap();
+        let rebuild = |bank: &TextureBank| {
+            BoundModel::from_cached(
+                original.state.clone(),
+                quads.clone(),
+                original.opaque_boundaries,
+                original.origins.clone(),
+                original.medium.clone(),
+                original.medium_boundaries,
+                bank,
+                &budget,
+                cancel,
+            )
+        };
+        let restored = Arc::new(rebuild(&bank).unwrap());
+        assert_eq!(restored.quads.len(), original.quads.len());
+        assert_eq!(restored.bank, bank.identity());
+        let mesh = PreparedMesh::from_cached(
+            vec![
+                ([0, 0, 0], Arc::clone(&restored), 0),
+                ([1, 0, 0], restored, 5),
+            ],
+            MeshRegion {
+                minimum: [0, 0],
+                maximum: [2, 1],
+            },
+            bank.identity(),
+            &budget,
+            cancel,
+        )
+        .unwrap();
+        assert_eq!(mesh.faces.len(), 2);
+        let out_of_range = PreparedMesh::from_cached(
+            vec![([0, 0, 0], Arc::new(rebuild(&bank).unwrap()), 6)],
+            mesh.region,
+            bank.identity(),
+            &budget,
+            cancel,
+        );
+        assert!(out_of_range.is_err());
+        // A bank with other contents has another identity: cached handles are refused.
+        let other = fixture_bank(&budget, [40, 170, 220, 255]);
+        assert_ne!(bank.identity(), other.identity());
+        assert!(rebuild(&other).is_err());
     }
 
     #[test]

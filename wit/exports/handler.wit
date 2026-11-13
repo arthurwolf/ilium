@@ -1,0 +1,8 @@
+package ilium:exports@0.1.0;
+
+interface handler {
+  use ilium:types/events@0.1.0.{event};
+  use ilium:types/intents@0.1.0.{submission};
+  /// At most 256 events in, at most 256 submissions out. More submissions trap the call.
+  on-events: func(batch: list<event>) -> list<submission>;
+}

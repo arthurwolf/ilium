@@ -1,0 +1,10 @@
+╭─ Workspace search ───────────────────────────╮
+│ Search why did the build fail▏               │
+│                                              │
+│ Meaning                                      │
+│   ▸ build shell                              │
+│     score 0.82   pane: build shell           │
+│     claude: fix linker error                 │
+│     score 0.64   pane: claude                │
+│                                              │
+╰──────────────────────────────────────────────╯

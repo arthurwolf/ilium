@@ -1,0 +1,16 @@
+  - Switch to a stronger inpainter so the filled areas look like the surrounding
+    scene.
+  - Add the final plausibility gate and the non-zero exit.
+  - Then re-run Cupid, Sans-culotte, Tiepolo, Marat and Point-de-convention.
+
+  You don't need to do anything.
+
+✻ Cogitated for 29s · done 8:27 AM
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  [CAVEMAN] | Model: Sonnet 5.5 | Account: [redacted] | Cost: $27.…
+  Session: [██░░░░░░░░░░░░░░] 13.0% used | shared observation (first seen 25m…
+  Context: [██░░░░░░░░░░░░░░] 144k/1000k (14%) | Weekly: [████████████████] 1…
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents

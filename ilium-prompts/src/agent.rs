@@ -8,6 +8,20 @@ pub const PROGRESS_INSTRUCTIONS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/agent/progress-instructions.hbs"
 ));
+pub const COMPACT_CHATROOM_INSTRUCTIONS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/templates/agent/compact-chatroom-instructions.hbs"
+));
+pub const COMPACT_PROGRESS_INSTRUCTIONS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/templates/agent/compact-progress-instructions.hbs"
+));
+/// Appended to the initial prompt of every worktree agent, so the agent knows
+/// how to wrap up its own worktree through `ilium close-pane`.
+pub const WORKTREE_WRAP_UP_INSTRUCTIONS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/templates/agent/worktree-wrap-up.hbs"
+));
 pub const COORDINATION_GUIDANCE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/agent/coordination-guidance.hbs"
@@ -98,6 +112,15 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     ),
     ("agent/chatroom-instructions", CHATROOM_INSTRUCTIONS),
     ("agent/progress-instructions", PROGRESS_INSTRUCTIONS),
+    (
+        "agent/compact-chatroom-instructions",
+        COMPACT_CHATROOM_INSTRUCTIONS,
+    ),
+    (
+        "agent/compact-progress-instructions",
+        COMPACT_PROGRESS_INSTRUCTIONS,
+    ),
+    ("agent/worktree-wrap-up", WORKTREE_WRAP_UP_INSTRUCTIONS),
     ("agent/coordination-guidance", COORDINATION_GUIDANCE),
     ("agent/ask-for-update", ASK_FOR_UPDATE),
     ("agent/managed-block", MANAGED_BLOCK),

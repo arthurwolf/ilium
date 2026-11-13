@@ -1,0 +1,19 @@
+---
+description: Rules for writing Ilium plugins in Rust or TypeScript (events in, intents out, capabilities, retained mode)
+globs: manifest.json, src/**/*.rs, src/**/*.ts, Cargo.toml, package.json
+alwaysApply: false
+---
+<!-- contract: 0.1 -->
+<!-- generated-with: manual -->
+<!-- Install as .cursor/rules/ilium-plugin.mdc. Cursor also reads AGENTS.md at the repository root. -->
+
+This project is an Ilium plugin. Follow AGENTS.md at the repository root; the essentials are repeated here.
+
+- Docs: fetch http://127.0.0.1:4327/llms.txt, then the page you need as Markdown. Do not invent APIs, manifest keys or capability names.
+- Commands: `ilium plugin new`, `build`, `check`, `dev`, `pack`. TypeScript uses Bun only.
+- Events in, intents out. Handler: Rust `fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission>`; TypeScript `onEvents(batch: Event[]): Submission[]`.
+- Declare capabilities and every contribution in `manifest.json`. Ask for the smallest grant.
+- Never block: `on-events` has a 20 ms deadline. Slow work is a request or a background job.
+- Retained mode: set decorations, virtual rows and toolbar state once; views return from `render`.
+- Test with the fake host (`FakeHost` in Rust, `createFakeHost()` in TypeScript).
+- Every example and answer covers both Rust and TypeScript unless the project uses one.

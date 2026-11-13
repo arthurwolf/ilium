@@ -1,0 +1,16 @@
+package ilium:host@0.1.0;
+
+interface jobs {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// kind must be in contributes.jobs. input at most 4 MiB. Fires job-progress, then request-completed.
+  start: func(kind: string, input: list<u8>) -> result<request-id, plugin-error>;
+  cancel: func(job: request-id);
+  take-output: func(job: request-id) -> option<list<u8>>;
+  /// Valid only inside job-runner.run. Elsewhere a no-op.
+  report-progress: func(percent: f32);
+  /// Valid only inside job-runner.run. Elsewhere false.
+  is-cancelled: func() -> bool;
+  /// Valid only inside job-runner.run. Blocks until the request completes or the timeout passes.
+  wait-request: func(request: request-id, timeout-millis: u32) -> result<_, plugin-error>;
+}

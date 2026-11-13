@@ -55,7 +55,6 @@ fn agents_are_told_to_block_with_the_wait_commands_instead_of_polling() {
     for required in [
         "ilium progress set --command '<probe>' --interval-seconds <n> --wait",
         "ilium progress wait <monitor_id>",
-        "--timeout-seconds",
         "never start a second one",
         "takes precedence over any general rule about sleep loops",
         "MUST use `--wait`",
@@ -72,7 +71,6 @@ fn every_wait_exit_status_is_named() {
         "3 task error",
         "4 monitor failed",
         "5 monitor replaced or cleared",
-        "6 `--timeout-seconds` elapsed",
     ] {
         assert!(text.contains(required), "missing {required}");
     }
@@ -90,5 +88,51 @@ fn several_monitors_and_replacing_are_explained() {
         "may-also-arrive",
     ] {
         assert!(text.contains(required), "missing {required}");
+    }
+}
+
+#[test]
+fn harness_background_mode_is_not_a_substitute_for_a_monitor() {
+    let text = instructions();
+    assert!(
+        text.contains("is not a substitute either: still register a monitor for the task"),
+        "missing background-mode rule"
+    );
+    assert!(text.contains("`run_in_background`"));
+}
+
+#[test]
+fn probe_contract_offers_an_optional_whole_second_eta() {
+    let text = instructions();
+    for required in ["`eta_seconds`", "whole-second", "omit it rather than guess"] {
+        assert!(text.contains(required), "missing {required}");
+    }
+}
+
+#[test]
+fn compact_contract_keeps_selection_guards_and_defers_the_procedure() {
+    let progress = ilium_prompts::agent::COMPACT_PROGRESS_INSTRUCTIONS;
+    for required in [
+        "at least three minutes",
+        "MUST use",
+        "MUST NOT poll",
+        "goal-monitor-details.md",
+        "progress-probes.md",
+        "recovering",
+        "Never duplicate, stop, clear, or restart another owner's job",
+        "one attempt",
+    ] {
+        assert!(progress.contains(required), "missing {required}");
+    }
+    assert!(progress.len() < 1500);
+    let chatroom = ilium_prompts::agent::COMPACT_CHATROOM_INSTRUCTIONS;
+    for required in [
+        "do not read chatroom context at startup",
+        "chatroom.md",
+        "--since-last-read",
+        "never routine progress narration",
+        "Never rewrite",
+    ] {
+        assert!(chatroom.contains(required), "missing {required}");
     }
 }

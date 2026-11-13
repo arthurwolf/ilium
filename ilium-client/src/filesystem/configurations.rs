@@ -29,9 +29,16 @@ pub(crate) struct AnimationPickerSave {
     pub project_path: PathBuf,
     pub candidate: ilium_ambient::GeoLocation,
     // Last: the admitted candidate allocation is destroyed before its lease.
+    #[expect(
+        dead_code,
+        reason = "Held only so the storage admission is released when the result drops"
+    )]
     pub location_storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
 pub(crate) enum ConfigurationIntent {
+    NumberRead {
+        token: Arc<()>,
+    },
     ValueDialog {
         token: Arc<()>,
     },
@@ -60,6 +67,7 @@ pub(crate) enum ConfigurationIntent {
     TextTriggers {
         dialog: Option<ilium_ipc::TextTrigger>,
     },
+    CustomAgents,
     Onboarding {
         revision: u64,
         dismiss: bool,

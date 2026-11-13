@@ -23,6 +23,8 @@ pub(crate) struct NativePaste {
 pub(crate) enum InputIntent {
     AdmittedRequest(crate::ipc_preparation::AdmittedRequest),
     Paste(String),
+    /// Inline key ownership; encoding waits for outbound admission.
+    Key(crossterm::event::KeyEvent),
     NativePaste(crate::terminal_input_owner::InputEvent),
     LinkProbe {
         id: u64,
@@ -56,6 +58,7 @@ impl InputIntent {
                 ..
             } => crate::ipc_preparation::request_retained_bytes(request.view())
                 .saturating_add(*result_capacity),
+            Self::Key(_) => std::mem::size_of::<Self>(),
             Self::Paste(text) => text.capacity().saturating_add(12),
             Self::NativePaste(event) => event.retained_payload_bytes().saturating_add(12),
             Self::ClipboardPaste {
@@ -102,6 +105,26 @@ impl TerminalInput {
         match pending.intent {
             InputIntent::NativePaste(event) => Some(event),
             _ => unreachable!("the located original is a native Paste"),
+        }
+    }
+
+    pub(crate) fn take_key(&mut self) -> Option<crossterm::event::KeyEvent> {
+        let (pane, index) = self.panes.iter().find_map(|(pane, queue)| {
+            queue
+                .iter()
+                .position(|pending| matches!(pending.intent, InputIntent::Key(_)))
+                .map(|index| (*pane, index))
+        })?;
+        let queue = self.panes.get_mut(&pane)?;
+        let pending = queue.remove(index)?;
+        self.bytes -= pending.bytes;
+        self.count -= 1;
+        if queue.is_empty() {
+            self.panes.remove(&pane);
+        }
+        match pending.intent {
+            InputIntent::Key(key) => Some(key),
+            _ => unreachable!("located the exact inline key"),
         }
     }
 
@@ -154,6 +177,9 @@ impl TerminalInput {
                     .map(|pending| (*id, pending.identity.clone()))
             })
             .collect()
+    }
+    pub(crate) fn pending_panes(&self) -> Vec<NodeId> {
+        self.panes.keys().copied().collect()
     }
     pub(crate) fn next_generation(&mut self) -> Option<u64> {
         self.generation = self.generation.checked_add(1)?;

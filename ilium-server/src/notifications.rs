@@ -503,14 +503,13 @@ mod tests {
     async fn notification_is_dropped_when_io_admission_is_saturated() {
         let execution = crate::execution::ServerExecution::start().expect("execution bank");
         let monitor = execution.test_monitor();
-        let limits = monitor.health().quota.limits;
         let occupied = execution
             .client
             .foundation
             .try_reserve(
                 ilium_execution::Lane::Io,
                 ilium_execution::JobCost {
-                    input_bytes: limits.input_bytes,
+                    input_bytes: crate::execution::GENERAL_INPUT_BYTES,
                     result_bytes: 0,
                 },
             )

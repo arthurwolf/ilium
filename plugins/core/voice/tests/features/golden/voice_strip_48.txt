@@ -1,0 +1,5 @@
+╭─ Voice ──────────────────────────────────────╮
+│ ● Listening   ▁▂▃▅▆▇▅▃▂▁▁▂▃▄                 │
+│ close the pane called docs                   │
+│ F8 release to send · Esc cancel              │
+╰──────────────────────────────────────────────╯

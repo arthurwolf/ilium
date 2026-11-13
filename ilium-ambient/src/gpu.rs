@@ -606,8 +606,17 @@ mod tests {
     }
 
     fn admitted_worker(runner: Arc<dyn GpuRunner>) -> GpuFrameWorker {
-        GpuFrameWorker::new(runner, &crate::resources::test_resources())
-            .expect("test GPU worker admission")
+        let resources = crate::resources::test_resources();
+        crate::resources::retry_while_busy(|| {
+            GpuFrameWorker::new(Arc::clone(&runner), &resources).map_err(|message| {
+                if message.ends_with("Busy") {
+                    ilium_execution::RejectReason::Busy
+                } else {
+                    panic!("test GPU worker admission: {message}")
+                }
+            })
+        })
+        .expect("test GPU worker admission")
     }
 
     #[test]

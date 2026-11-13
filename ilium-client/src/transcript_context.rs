@@ -73,20 +73,38 @@ struct SequencedEntry {
 /// lands in `earliest` only while it isn't yet full, and every later entry
 /// goes to `recent` instead, so a short transcript's entries all end up in
 /// `earliest` without ever being double-counted in `recent`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct KindEntries {
     earliest: VecDeque<SequencedEntry>,
     recent: VecDeque<SequencedEntry>,
     dropped_count: usize,
+    earliest_cap: usize,
+    recent_cap: usize,
+}
+
+impl Default for KindEntries {
+    fn default() -> Self {
+        Self::with_caps(EARLIEST_ENTRY_COUNT_PER_KIND, RECENT_ENTRY_COUNT_PER_KIND)
+    }
 }
 
 impl KindEntries {
+    fn with_caps(earliest_cap: usize, recent_cap: usize) -> Self {
+        Self {
+            earliest: VecDeque::new(),
+            recent: VecDeque::new(),
+            dropped_count: 0,
+            earliest_cap,
+            recent_cap,
+        }
+    }
+
     fn push(&mut self, sequence: u64, entry: TranscriptEntry) {
-        if self.earliest.len() < EARLIEST_ENTRY_COUNT_PER_KIND {
+        if self.earliest.len() < self.earliest_cap {
             self.earliest.push_back(SequencedEntry { sequence, entry });
             return;
         }
-        if self.recent.len() == RECENT_ENTRY_COUNT_PER_KIND {
+        if self.recent.len() == self.recent_cap {
             self.recent.pop_front();
             self.dropped_count += 1;
         }
@@ -101,7 +119,7 @@ impl KindEntries {
     /// of this kind, so the first surviving recent entry's sequence is at
     /// least two past the last earliest entry's, leaving room.
     fn into_entries(self) -> impl Iterator<Item = SequencedEntry> {
-        let gap_marker = (self.dropped_count > 0).then(|| {
+        let gap_marker = (self.dropped_count > 0 && !self.earliest.is_empty()).then(|| {
             let last_earliest = self
                 .earliest
                 .back()
@@ -133,6 +151,16 @@ struct RecentEntries {
 }
 
 impl RecentEntries {
+    /// Keeps the newest `user_cap` user entries with no pinned earliest ones
+    /// and so no gap marker, while assistant and tool entries keep the usual
+    /// small windows.
+    fn with_user_cap(user_cap: usize) -> Self {
+        Self {
+            user: KindEntries::with_caps(0, user_cap),
+            ..Self::default()
+        }
+    }
+
     fn push(&mut self, kind: TranscriptEntryKind, content: impl Into<String>) {
         let content = content.into();
         let content = content.trim();
@@ -190,6 +218,98 @@ pub fn recent_transcript_entries(
     Ok(extract_transcript_entries(class, lines))
 }
 
+/// Every user prompt of one verified transcript, oldest first, capped at the
+/// newest `max_prompts`. Unlike [`recent_user_prompts`] it keeps no gap
+/// markers, so the result is safe to browse as a prompt history. Agents
+/// without a JSONL user stream (Antigravity, unknown) return an empty list.
+pub fn user_prompt_history(
+    class: &AgentClass,
+    transcript_path: &Path,
+    max_prompts: usize,
+) -> anyhow::Result<Vec<String>> {
+    Ok(read_user_prompts(class, transcript_path, 0, max_prompts)?.prompts)
+}
+
+/// Prompts read from a transcript, and where the next read should resume.
+#[derive(Debug, PartialEq, Eq)]
+pub struct PromptRead {
+    pub prompts: Vec<String>,
+    /// Byte offset just past the last complete line consumed.
+    pub next_offset: u64,
+    /// `true`: `prompts` is the whole history (replace what is known);
+    /// `false`: `prompts` are only those appended since `from_offset`.
+    pub replace: bool,
+}
+
+/// Reads user prompts, resuming at `from_offset` (a value earlier returned as
+/// `next_offset`) so a growing Claude transcript is tailed instead of parsed
+/// again. A truncated file, offset 0 and Codex (whose event and response
+/// records are deduplicated across the whole stream) read everything.
+pub fn read_user_prompts(
+    class: &AgentClass,
+    transcript_path: &Path,
+    from_offset: u64,
+    max_prompts: usize,
+) -> anyhow::Result<PromptRead> {
+    use std::io::{BufRead, Seek, SeekFrom};
+
+    if !matches!(class, AgentClass::Claude | AgentClass::Codex) {
+        return Ok(PromptRead {
+            prompts: Vec::new(),
+            next_offset: 0,
+            replace: true,
+        });
+    }
+    let mut file = std::fs::File::open(transcript_path)?;
+    let length = file.metadata()?.len();
+    let incremental =
+        matches!(class, AgentClass::Claude) && from_offset > 0 && from_offset <= length;
+    let start = if incremental { from_offset } else { 0 };
+    file.seek(SeekFrom::Start(start))?;
+    let mut reader = BufReader::new(file);
+    let mut offset = start;
+    let mut buffer = Vec::new();
+    let mut read_error = None;
+    let lines = std::iter::from_fn(|| {
+        buffer.clear();
+        let read = match reader.read_until(b'\n', &mut buffer) {
+            Ok(read) => read,
+            Err(error) => {
+                read_error = Some(error);
+                return None;
+            }
+        };
+        // A line still being written has no terminator yet: leave it for the
+        // next read instead of parsing half of it.
+        if read == 0 || buffer.last() != Some(&b'\n') {
+            return None;
+        }
+        offset += read as u64;
+        Some(String::from_utf8_lossy(&buffer).into_owned())
+    });
+    let recent = RecentEntries::with_user_cap(max_prompts.max(1));
+    let entries = match class {
+        AgentClass::Claude => claude_entries_into(lines, recent),
+        _ => codex_entries_into(lines, recent),
+    };
+    if let Some(error) = read_error {
+        return Err(error.into());
+    }
+    let mut prompts: Vec<String> = entries
+        .into_iter()
+        .filter(|entry| entry.kind == TranscriptEntryKind::User)
+        .map(|entry| ilium_agent_session::unwrap_claude_command(&entry.content))
+        .collect();
+    if prompts.len() > max_prompts {
+        prompts.drain(..prompts.len() - max_prompts);
+    }
+    Ok(PromptRead {
+        prompts,
+        next_offset: offset,
+        replace: !incremental,
+    })
+}
+
 /// Compatibility-shaped projection used by project restructuring, which only
 /// asks for user-authored intent. Session retitling consumes the full typed
 /// stream through `recent_transcript_entries`.
@@ -220,7 +340,13 @@ pub(crate) fn extract_transcript_entries(
 /// tool-use request blocks are deliberately excluded: they are neither an
 /// answer shown to the user nor tool output.
 fn claude_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
-    let mut recent = RecentEntries::default();
+    claude_entries_into(lines, RecentEntries::default())
+}
+
+fn claude_entries_into(
+    lines: impl Iterator<Item = String>,
+    mut recent: RecentEntries,
+) -> Vec<TranscriptEntry> {
     for entry in lines.filter_map(|line| serde_json::from_str::<Value>(&line).ok()) {
         if entry
             .get("isSidechain")
@@ -282,12 +408,19 @@ fn assistant_content(content: Option<&Value>) -> Option<String> {
 /// results live in `response_item` records; injected user/developer messages,
 /// reasoning, and tool-call requests are excluded.
 fn codex_entries(lines: impl Iterator<Item = String>) -> Vec<TranscriptEntry> {
-    let mut recent = RecentEntries::default();
+    codex_entries_into(lines, RecentEntries::default())
+}
+
+fn codex_entries_into(
+    lines: impl Iterator<Item = String>,
+    mut recent: RecentEntries,
+) -> Vec<TranscriptEntry> {
     // Codex has used two different user-turn records. Keep their bounded
     // windows separate, then prefer the complete response-item stream when
     // present so duplicate event records cannot evict genuine user turns.
-    let mut event_users = KindEntries::default();
-    let mut response_users = KindEntries::default();
+    let mut event_users = KindEntries::with_caps(recent.user.earliest_cap, recent.user.recent_cap);
+    let mut response_users =
+        KindEntries::with_caps(recent.user.earliest_cap, recent.user.recent_cap);
     let mut has_response_user = false;
     for entry in lines.filter_map(|line| serde_json::from_str::<Value>(&line).ok()) {
         match entry.get("type").and_then(Value::as_str) {
@@ -435,6 +568,72 @@ mod tests {
 
     fn lines_of(text: &str) -> impl Iterator<Item = String> + '_ {
         text.lines().map(str::to_string)
+    }
+
+    #[test]
+    fn user_prompt_history_shows_goal_as_typed_and_has_no_gap_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        let mut lines = vec![
+            r#"{"type":"user","message":{"content":"<command-name>/goal</command-name>\n<command-message>goal</command-message>\n<command-args>ship it</command-args>"}}"#.to_string(),
+        ];
+        for index in 0..25 {
+            lines.push(format!(
+                r#"{{"type":"user","message":{{"content":"prompt {index}"}}}}"#
+            ));
+        }
+        std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+
+        let all = user_prompt_history(&AgentClass::Claude, &path, 50).unwrap();
+        assert_eq!(all[0], "/goal ship it");
+        assert_eq!(all.len(), 26);
+
+        let newest = user_prompt_history(&AgentClass::Claude, &path, 5).unwrap();
+        assert_eq!(newest.len(), 5);
+        assert_eq!(newest[4], "prompt 24");
+        assert!(newest.iter().all(|prompt| prompt.starts_with("prompt ")));
+    }
+
+    #[test]
+    fn read_user_prompts_tails_appended_lines_and_skips_a_partial_one() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.jsonl");
+        std::fs::write(
+            &path,
+            "{\"type\":\"user\",\"message\":{\"content\":\"one\"}}\n",
+        )
+        .unwrap();
+
+        let first = read_user_prompts(&AgentClass::Claude, &path, 0, 50).unwrap();
+        assert_eq!(first.prompts, vec!["one"]);
+        assert!(first.replace);
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        file.write_all(
+            b"{\"type\":\"user\",\"message\":{\"content\":\"two\"}}\n{\"type\":\"user\",\"mess",
+        )
+        .unwrap();
+        let second = read_user_prompts(&AgentClass::Claude, &path, first.next_offset, 50).unwrap();
+        assert_eq!(second.prompts, vec!["two"]);
+        assert!(!second.replace);
+
+        file.write_all(b"age\":{\"content\":\"three\"}}\n").unwrap();
+        let third = read_user_prompts(&AgentClass::Claude, &path, second.next_offset, 50).unwrap();
+        assert_eq!(third.prompts, vec!["three"]);
+
+        std::fs::write(
+            &path,
+            "{\"type\":\"user\",\"message\":{\"content\":\"fresh\"}}\n",
+        )
+        .unwrap();
+        let truncated =
+            read_user_prompts(&AgentClass::Claude, &path, third.next_offset, 50).unwrap();
+        assert_eq!(truncated.prompts, vec!["fresh"]);
+        assert!(truncated.replace);
     }
 
     #[test]

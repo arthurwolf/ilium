@@ -1,0 +1,24 @@
+package ilium:host@0.1.0;
+
+interface cli {
+  use ilium:types/ids@0.1.0.{node-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  record pane-selection { panes: list<node-id>, all: bool }
+  /// Output "jsonl". One JSON object per line.
+  write-line: func(invocation: u64, jsonl: string) -> result<_, plugin-error>;
+  /// Plain text to stderr.
+  write-error: func(invocation: u64, text: string) -> result<_, plugin-error>;
+  /// Output "text".
+  write-text: func(invocation: u64, text: string) -> result<_, plugin-error>;
+  write-stderr: func(invocation: u64, text: string) -> result<_, plugin-error>;
+  finish: func(invocation: u64, exit-code: u8);
+  /// Async, take-stdin. At most 4 MiB in total.
+  read-stdin: func(invocation: u64, max-bytes: u32) -> result<u64, plugin-error>;
+  /// An empty list is the end of input.
+  take-stdin: func(request: u64) -> option<list<u8>>;
+  /// Whether stdout and stderr are terminals.
+  is-tty: func(invocation: u64) -> tuple<bool, bool>;
+  /// The pane the command ran in, from ILIUM_PANE_ID.
+  caller-pane: func(invocation: u64) -> option<node-id>;
+  selected-panes: func(invocation: u64) -> option<pane-selection>;
+}

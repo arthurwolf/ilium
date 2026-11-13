@@ -1,0 +1,8 @@
+╭─ Inference ──────────────────────────────────────────╮
+│ Provider ………………………………… ‹ OpenAI-compatible ›         │
+│ Model …………………………………………………… ‹ gpt-5.6-terra ›         │
+│ Test provider …………………………………………… [ Run test ]         │
+│ Last test ……………………………… 812 ms, gpt-5.6-terra         │
+│ Prompts and screen text go to the provider you       │
+│ choose. Nothing is sent when no provider is set.     │
+╰──────────────────────────────────────────────────────╯

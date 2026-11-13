@@ -1,0 +1,23 @@
+[package]
+name = "ilium-plugin-api"
+description = "Pure contract types of the Ilium plugin platform: WIT mirror types, manifest, grants, limits, lifecycle and the kernel facade"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.18"
+semver = "1.0.28"
+
+[dev-dependencies]
+proptest = "1"
+sha2 = "0.10"
+
+[[test]]
+name = "abi"
+path = "tests/abi/main.rs"
