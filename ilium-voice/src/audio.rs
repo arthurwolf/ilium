@@ -635,10 +635,10 @@ impl AudioEngine {
             }
         })?;
 
-        let capture_gate = Arc::new(CallbackGate::new(matches!(
-            input_mode,
-            VoiceInputMode::SemanticVad
-        )));
+        // The gate starts closed in every mode: the realtime session opens it once
+        // the provider accepted the configuration, so samples captured while the
+        // socket connects never overrun the bounded raw queue.
+        let capture_gate = Arc::new(CallbackGate::new(false));
         let raw_capture = Arc::new(RawCapture::new());
         let (capture_sender, capture_receiver) = mpsc::channel(CAPTURE_CHANNEL_CAPACITY);
         let capture_health = Arc::new(CaptureHealth::default());
@@ -1042,7 +1042,8 @@ where
                     health.changed.notify_one();
                 }
             },
-            move |_error| {
+            move |error| {
+                tracing::error!(direction = "input", %error, "native audio stream error");
                 error_health.device_failed.fetch_add(1, Ordering::Release);
                 error_health.changed.notify_one();
             },
@@ -1128,7 +1129,8 @@ where
         .build_output_stream(
             *config,
             move |output: &mut [T], _| render_output(output, channels, &playback),
-            move |_error| {
+            move |error| {
+                tracing::error!(direction = "output", %error, "native audio stream error");
                 health.device_failed.fetch_add(1, Ordering::Release);
                 health.changed.notify_one();
             },

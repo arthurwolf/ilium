@@ -20,7 +20,7 @@ use ilium_execution::{
 use ilium_ipc::ClientRequest;
 use ilium_session_convert::{
     convert_session_with_cancel, ConversionEvent, ConversionOutcome, ConversionRequest,
-    MAX_TRANSCRIPT_BYTES,
+    MAX_LINE_BYTES, MAX_SOURCE_TRANSCRIPT_BYTES,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -37,20 +37,31 @@ use crate::theme;
 /// Upper bound on retained log lines; a conversion emits tens of lines, this
 /// only guards against a runaway producer.
 const MAX_LOG_LINES: usize = 500;
-pub(crate) const CONVERSION_WORKING_BYTES: usize = 528 * 1024 * 1024;
+const CONVERSION_FIXED_WORKING_BYTES: usize = 64 * 1024 * 1024;
+/// Fixed reservation: the streaming converter holds one source line (at most
+/// `MAX_LINE_BYTES`) plus bounded bookkeeping, whatever the file size.
+pub(crate) const CONVERSION_WORKING_BYTES: usize =
+    CONVERSION_FIXED_WORKING_BYTES + MAX_LINE_BYTES as usize;
 pub(crate) const CONVERSION_RESULT_BYTES: usize = 2 * 1024 * 1024;
-const CONVERSION_FIXED_WORKING_BYTES: u64 = 16 * 1024 * 1024;
-const CONVERSION_TRANSCRIPT_WORKING_MULTIPLIER: u64 = 4;
 const MAX_PROGRESS_TEXT_BYTES: usize = 4 * 1024;
 const UI_EVENT_CAPACITY: usize = 64;
 
-/// Charges transcript-sized conversion work, including copies and fixed
-/// bookkeeping, without clamping the estimate below the required charge.
-fn conversion_working_bytes(source_transcript_bytes: u64) -> usize {
-    let estimated_bytes = source_transcript_bytes
-        .saturating_mul(CONVERSION_TRANSCRIPT_WORKING_MULTIPLIER)
-        .saturating_add(CONVERSION_FIXED_WORKING_BYTES);
-    usize::try_from(estimated_bytes).unwrap_or(usize::MAX)
+/// Memory charged for one conversion. Streaming makes it independent of the
+/// transcript size, so the argument only documents that nothing scales.
+fn conversion_working_bytes(_source_transcript_bytes: u64) -> usize {
+    CONVERSION_WORKING_BYTES
+}
+
+/// Refuses sources above the sanity cap; the message names the limit and the
+/// disk-space requirement of the output file.
+fn check_source_size(source_transcript_bytes: u64) -> Result<(), String> {
+    if source_transcript_bytes > MAX_SOURCE_TRANSCRIPT_BYTES {
+        return Err(format!(
+            "The source transcript is larger than the {} GiB conversion limit (the converted copy also needs free disk space). Resume the original session with Enter.",
+            MAX_SOURCE_TRANSCRIPT_BYTES / (1024 * 1024 * 1024)
+        ));
+    }
+    Ok(())
 }
 
 /// Where the conversion currently is. `Failed` keeps the agent-stopped fact so
@@ -306,8 +317,8 @@ impl ConversionWorkers {
                 )
             })?
             .len();
-        if source_transcript_bytes_at_admission > MAX_TRANSCRIPT_BYTES {
-            return Err(conversion_failure(&job, "The source transcript exceeds the 128 MiB conversion limit. Resume the original session with Enter."));
+        if let Err(message) = check_source_size(source_transcript_bytes_at_admission) {
+            return Err(conversion_failure(&job, &message));
         }
         let input_bytes = conversion_working_bytes(source_transcript_bytes_at_admission);
         let pane_id = job.pane_id;
@@ -1024,11 +1035,11 @@ mod tests {
     #[test]
     fn maximum_supported_transcript_is_fully_charged() {
         let mebibyte = 1024 * 1024;
+        assert_eq!(CONVERSION_WORKING_BYTES, 320 * mebibyte as usize);
         assert_eq!(
-            conversion_working_bytes(128 * mebibyte),
-            528 * mebibyte as usize
+            conversion_working_bytes(MAX_SOURCE_TRANSCRIPT_BYTES),
+            CONVERSION_WORKING_BYTES
         );
-        assert!(CONVERSION_WORKING_BYTES >= 528 * mebibyte as usize);
     }
 
     #[test]
@@ -1199,14 +1210,42 @@ mod tests {
     }
 
     #[test]
-    fn conversion_working_set_scales_to_transcript_size_and_respects_the_cap() {
+    fn conversion_reservation_is_fixed_and_independent_of_file_size() {
         let mebibyte = 1024 * 1024;
-        assert_eq!(conversion_working_bytes(0), 16 * mebibyte);
-        assert_eq!(conversion_working_bytes(1024), 16 * mebibyte + 4 * 1024);
+        assert_eq!(conversion_working_bytes(0), 320 * mebibyte);
+        assert_eq!(conversion_working_bytes(1024), 320 * mebibyte);
         assert_eq!(
-            conversion_working_bytes(128 * 1024 * 1024),
+            conversion_working_bytes(3 * 1024 * 1024 * 1024),
             CONVERSION_WORKING_BYTES
         );
+        assert_eq!(
+            conversion_working_bytes(MAX_SOURCE_TRANSCRIPT_BYTES),
+            CONVERSION_WORKING_BYTES
+        );
+    }
+
+    // The client slice must stay within the 528 MiB general children share;
+    // checked at compile time because both sides are constants.
+    const _: () = assert!(CONVERSION_WORKING_BYTES <= 528 * 1024 * 1024);
+
+    #[test]
+    fn sparse_three_gib_source_passes_admission() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rollout.jsonl");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(3 * 1024 * 1024 * 1024).unwrap();
+        let length = std::fs::metadata(&path).unwrap().len();
+        assert_eq!(length, 3 * 1024 * 1024 * 1024);
+        assert!(check_source_size(length).is_ok());
+    }
+
+    #[test]
+    fn source_over_the_cap_is_refused_with_the_new_message() {
+        assert!(check_source_size(MAX_SOURCE_TRANSCRIPT_BYTES).is_ok());
+        let message = check_source_size(MAX_SOURCE_TRANSCRIPT_BYTES + 1).unwrap_err();
+        assert!(message.contains("64 GiB"));
+        assert!(message.contains("disk space"));
+        assert!(!message.contains("128 MiB"));
     }
 
     #[tokio::test]

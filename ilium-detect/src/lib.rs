@@ -1267,9 +1267,19 @@ fn looks_like_background_wait_line(screen_text: &str) -> bool {
 fn is_background_wait_line(line: &str) -> bool {
     // Use to_ascii_lowercase() for ASCII terminal output (faster than to_lowercase() for typical case)
     let lower = line.to_ascii_lowercase();
-    normalize_goal_status_line(line).starts_with("waiting for ")
-        && lower.contains("background")
-        && (lower.contains("agent") || lower.contains("task"))
+    if !normalize_goal_status_line(line).starts_with("waiting for ") {
+        return false;
+    }
+    // Claude Code words the same blocked-on-dispatched-work state two ways:
+    // "Waiting for 2 background agents to finish" and, for a dynamic workflow
+    // script, "Waiting for 1 dynamic workflow to finish" (no "background"
+    // or "agent"). Both are an actively blocked turn, so both qualify; the
+    // workflow form additionally requires the "to finish" tail so prose that
+    // merely mentions a workflow does not match.
+    let names_background_work =
+        lower.contains("background") && (lower.contains("agent") || lower.contains("task"));
+    let names_workflow = lower.contains("workflow") && lower.contains("to finish");
+    names_background_work || names_workflow
 }
 
 /// The `WORKING_MARKER` rule as a per-line predicate, so evidence recovery
@@ -2766,6 +2776,32 @@ mod tests {
             classify_activity(&fixture("claude_code_waiting_background.txt")),
             AgentTurn::WaitingSubagents
         );
+    }
+
+    #[test]
+    fn claude_code_waiting_on_dynamic_workflow_is_waiting_subagents() {
+        let fixture_text = fixture("claude_code_waiting_dynamic_workflow.txt");
+        assert_eq!(
+            classify_activity(&fixture_text),
+            AgentTurn::WaitingSubagents
+        );
+        let classified = classify_activity_for_agent_detailed(&AgentClass::Claude, &fixture_text);
+        assert_eq!(classified.turn, AgentTurn::WaitingSubagents);
+        assert_eq!(classified.evidence, ActivityEvidence::BackgroundWait);
+    }
+
+    #[test]
+    fn workflow_mentioned_in_prose_is_not_a_wait() {
+        for screen in [
+            "I will start a dynamic workflow soon.\n❯",
+            "Waiting for the workflow design review.\n❯",
+        ] {
+            assert_eq!(
+                classify_activity_for_agent(&AgentClass::Claude, screen),
+                AgentTurn::Idle,
+                "{screen}"
+            );
+        }
     }
 
     #[test]

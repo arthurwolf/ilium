@@ -48,7 +48,8 @@ pub fn on_tick(
     let resource_saved = app.tick_resource_dialog(now);
     let budget_saved = app.tick_restructure_budget_autosave(now)
         | app.tick_inference_number_autosave(now)
-        | app.tick_remote_compaction_save(now);
+        | app.tick_remote_compaction_save(now)
+        | app.tick_custom_status_rules_save(now);
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
     let attention_changed = app.tick_attention() | app.tick_attention_dialog();

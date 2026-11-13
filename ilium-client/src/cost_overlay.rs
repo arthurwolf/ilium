@@ -689,6 +689,7 @@ mod tests {
             model_costs: Vec::new(),
             reported_usd: None,
             quota: vec![("primary".to_owned(), 41.0)],
+            context_fill: None,
             spend_points: Vec::new(),
             token_spend_points: Vec::new(),
             storage: Default::default(),

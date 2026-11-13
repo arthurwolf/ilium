@@ -12,11 +12,13 @@
 //! polls its cancel flag between steps and while waiting on the subprocess.
 
 mod app_server;
+mod bounded_lines;
 mod claude_to_codex;
 mod claude_writer;
 mod codex_rollout;
 mod codex_to_claude;
 mod error;
+mod lenient_json;
 mod paths;
 mod report;
 
@@ -32,9 +34,22 @@ pub use error::ConvertError;
 
 use report::Reporter;
 
-/// Hard ceiling for source transcripts, parser buffers, and generated output.
-/// Reads use this limit before allocating complete transcript strings.
-pub const MAX_TRANSCRIPT_BYTES: u64 = 128 * 1024 * 1024;
+/// Sanity ceiling for a source transcript (64 GiB). Conversion streams the
+/// source line by line, so memory does not grow with this value; the bound
+/// only rejects absurd or runaway files.
+pub const MAX_SOURCE_TRANSCRIPT_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+/// Ceiling for the generated transcript (8 GiB), checked while it is written.
+pub const MAX_OUTPUT_TRANSCRIPT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+/// Longest single transcript line that is read into memory (256 MiB, above
+/// the 32.5 MB observed in real rollouts). Longer lines are skipped and
+/// counted as unreadable instead of allocated; peak memory is proportional to
+/// this value, not to the file size.
+pub const MAX_LINE_BYTES: u64 = 256 * 1024 * 1024;
+/// Tool results longer than this are cut while the source is parsed, so one
+/// command dump can neither dominate the replayed context nor sit in memory.
+pub(crate) const MAX_TOOL_RESULT_CHARS: usize = 30_000;
+/// Ceiling for the Codex import ledger (16 MiB): it is one JSON document that
+/// is parsed whole, unlike the line-streamed transcripts.
 pub(crate) const MAX_IMPORT_LEDGER_BYTES: u64 = 16 * 1024 * 1024;
 
 /// What to convert and where the agents keep their data.

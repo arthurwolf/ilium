@@ -69,17 +69,13 @@ pub struct TabLayout {
 pub fn tab_layout(area: Rect, settings: &PaddingSettings) -> TabLayout {
     let inner_x = area.x.saturating_add(SIDE_MARGIN);
     let inner_width = area.width.saturating_sub(SIDE_MARGIN * 2);
-    let card_width = inner_width.saturating_sub(CARD_GAP * 2) / 3;
     let top = area.y.saturating_add(INTRO_ROWS);
-    let card = |index: u16| {
-        Rect::new(
-            inner_x + index * (card_width + CARD_GAP),
-            top,
-            card_width,
-            CARD_HEIGHT,
-        )
-    };
-    let cards = [card(0), card(1), card(2)];
+    let row = crate::selectable_cards::layout(
+        Rect::new(inner_x, top, inner_width, CARD_HEIGHT),
+        3,
+        CARD_GAP,
+    );
+    let cards = [row[0], row[1], row[2]];
 
     let inside = Block::default().borders(Borders::ALL).inner(cards[1]);
     let input_row = inside.bottom().saturating_sub(1);
@@ -204,29 +200,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         ) || (mode == PaddingMode::WidthDependent
             && matches!(ui.hover, Some(PaddingHit::Step(_) | PaddingHit::Field)));
         let is_focused = state.selected_row == ROW_MODE && is_selected;
-        let marker = if is_selected { "●" } else { "○" };
-        let title_style = if is_selected {
-            theme::selected_style().add_modifier(Modifier::BOLD)
-        } else if is_hovered {
-            Style::new().add_modifier(Modifier::BOLD)
-        } else {
-            Style::new()
+        let chrome = crate::selectable_cards::CardChrome {
+            selected: is_selected,
+            hovered: is_hovered,
+            focused: state.selected_row == ROW_MODE,
         };
+        let marker = if is_selected { "●" } else { "○" };
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(crate::selectable_cards::border_style(is_selected, is_hovered))
+            .border_type(chrome.border_type())
+            .border_style(chrome.border_style())
             .title(Line::from(Span::styled(
                 format!(" {marker} {} ", mode.label()),
-                title_style,
+                chrome.title_style(),
             )));
         let inside = block.inner(card);
         frame.render_widget(block, card);
-        let summary_style = if is_selected || is_hovered {
-            Style::new()
-        } else {
-            Style::new().add_modifier(Modifier::DIM)
-        };
+        let summary_style = chrome.body_style();
         let summary: Vec<Line> = wrap(mode.summary(), usize::from(inside.width.max(1)))
             .into_iter()
             .take(SUMMARY_ROWS)
