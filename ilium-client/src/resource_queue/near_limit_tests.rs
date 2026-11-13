@@ -112,7 +112,7 @@ fn rendered_text(app: &App, pane: NodeId, detail: bool) -> String {
 
 #[tokio::test]
 async fn near_limit_snapshot_admission_projection_replacement_and_fresh_attach_release_credit() {
-    let (_execution, preparation) = IpcPreparation::standalone().unwrap();
+    let (_execution, preparation) = IpcPreparation::standalone().await.unwrap();
     assert_eq!(preparation.decoded_storage_bytes(), 0);
     let mut prior_charge = None;
     // A fresh App is the transport-reconnect consumer: its wait registry starts
@@ -184,7 +184,7 @@ async fn near_limit_snapshot_admission_projection_replacement_and_fresh_attach_r
 
 #[tokio::test]
 async fn near_limit_snapshot_refuses_insufficient_decoded_quota_without_installing_partial_state() {
-    let (_execution, preparation) = IpcPreparation::standalone().unwrap();
+    let (_execution, preparation) = IpcPreparation::standalone().await.unwrap();
     let preparation = preparation.with_test_decoded_capacity(1024);
     let (_, event) = snapshot(1);
     let frame = ilium_ipc::encode_frame(&event).unwrap();
