@@ -571,6 +571,10 @@ impl HeapBytes for crate::resource::ResourceReply {
 impl HeapBytes for ServerEvent {
     fn heap_bytes(&self) -> usize {
         match self {
+            Self::MonitoringEvents { result, .. } | Self::MonitoringAck { result, .. } => {
+                result.heap_bytes()
+            }
+            Self::ControlWrite { result, .. } => result.heap_bytes(),
             Self::StatusScreenObserved(observation) => observation
                 .matched
                 .heap_bytes()

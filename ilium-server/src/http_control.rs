@@ -57,6 +57,8 @@ pub(crate) fn routes() -> Router<Arc<ServerState>> {
     Router::new()
         .route("/v1/guide", get(guide_index))
         .route("/v1/guide/{topic}", get(guide_topic))
+        .route("/v1/events", get(monitoring_events))
+        .route("/v1/digest", get(monitoring_digest))
         .route("/v1/ops", get(list_operations).post(apply_operation))
         .route("/v1/tree", get(tree))
         .route("/v1/projects/{selector}", get(project))
@@ -65,6 +67,85 @@ pub(crate) fn routes() -> Router<Arc<ServerState>> {
         .route("/v1/panes/{id}", get(pane))
         .route("/v1/panes/{id}/input", post(pane_input))
         .route("/v1/voice", post(voice_text))
+}
+
+async fn monitoring_events(
+    State(state): State<Arc<ServerState>>,
+    Query(parameters): Query<HashMap<String, String>>,
+) -> ApiResult {
+    monitoring_read(state, parameters, ilium_ipc::MonitoringView::Events).await
+}
+
+async fn monitoring_digest(
+    State(state): State<Arc<ServerState>>,
+    Query(parameters): Query<HashMap<String, String>>,
+) -> ApiResult {
+    monitoring_read(state, parameters, ilium_ipc::MonitoringView::Digest).await
+}
+
+async fn monitoring_read(
+    state: Arc<ServerState>,
+    parameters: HashMap<String, String>,
+    view: ilium_ipc::MonitoringView,
+) -> ApiResult {
+    use ilium_ipc::{MonitoringFormat, MonitoringQuery};
+    let invalid = |message: &str| failure(StatusCode::BAD_REQUEST, "invalid-argument", message);
+    let parse_limit = |name: &str, default| -> Result<usize, _> {
+        parameters.get(name).map_or(Ok(default), |value| {
+            value.parse().map_err(|_| invalid("invalid output budget"))
+        })
+    };
+    let format = match parameters.get("format").map(String::as_str) {
+        None | Some("compact") => MonitoringFormat::Compact,
+        Some("json") => MonitoringFormat::Json,
+        _ => return Err(invalid("format must be compact or json")),
+    };
+    let kinds = parameters
+        .get("kinds")
+        .map(|value| {
+            value
+                .split(',')
+                .map(|kind| {
+                    crate::monitoring_query::parse_kind(kind)
+                        .ok_or_else(|| invalid("unknown event kind"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let pane_id = parameters
+        .get("pane")
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map(NodeId)
+                .map_err(|_| invalid("pane must be a numeric identifier"))
+        })
+        .transpose()?;
+    let query = MonitoringQuery {
+        view,
+        since: parameters.get("since").cloned(),
+        consumer: parameters.get("as").cloned(),
+        follow: parameters
+            .get("follow")
+            .is_some_and(|value| value == "true" || value == "1"),
+        min_severity: parameters.get("min-severity").cloned(),
+        kinds,
+        project: parameters.get("project").cloned(),
+        agent: parameters.get("agent").cloned(),
+        pane_id,
+        max_items: parse_limit("max-items", 12)?,
+        max_chars: parse_limit("max-chars", 4000)?,
+        format,
+    };
+    let text = crate::monitoring_query::read_query_with_state(&state, &query)
+        .await
+        .map_err(|error| failure(StatusCode::BAD_REQUEST, "invalid-cursor-or-query", error))?;
+    let content_type = match format {
+        MonitoringFormat::Compact => "text/plain; charset=utf-8",
+        MonitoringFormat::Json => "application/json",
+    };
+    Ok(([(header::CONTENT_TYPE, content_type)], text).into_response())
 }
 
 fn format_of(parameters: &HashMap<String, String>) -> Result<Format, (StatusCode, Json<Value>)> {
@@ -226,6 +307,30 @@ async fn pane(
     Path(selector): Path<String>,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> ApiResult {
+    if parameters
+        .get("brief")
+        .is_some_and(|value| value != "0" && value != "false")
+    {
+        if parameters.contains_key("screen") || parameters.contains_key("lines") {
+            return Err(failure(
+                StatusCode::BAD_REQUEST,
+                "invalid-argument",
+                "brief conflicts with screen and lines",
+            ));
+        }
+        let pane_id = {
+            let tree = state.tree.read().await;
+            resolve_pane(&tree, &selector).map_err(select_failure)?
+        };
+        let text = crate::monitoring_query::read_brief(&state, pane_id)
+            .await
+            .map_err(|error| failure(StatusCode::BAD_REQUEST, "brief", error))?;
+        return Ok((
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            text,
+        )
+            .into_response());
+    }
     let format = format_of(&parameters)?;
     let (mut document, pane_id) = {
         let tree = state.tree.read().await;
@@ -312,6 +417,7 @@ async fn capture_screen(
 
 async fn apply_operation(
     State(state): State<Arc<ServerState>>,
+    axum::Extension(level): axum::Extension<ilium_control::access::AccessLevel>,
     Json(body): Json<Value>,
 ) -> ApiResult {
     let operation: Operation = serde_json::from_value(body).map_err(|error| {
@@ -321,18 +427,19 @@ async fn apply_operation(
             format!("not a valid operation: {error}; GET /v1/ops lists examples"),
         )
     })?;
-    run_operation(&state, operation).await
+    run_operation(&state, level, operation).await
 }
 
 /// `POST /v1/panes`: the body is a `new_pane` operation without its `op` tag.
 async fn create_pane(
     State(state): State<Arc<ServerState>>,
+    axum::Extension(level): axum::Extension<ilium_control::access::AccessLevel>,
     Json(mut body): Json<Value>,
 ) -> ApiResult {
     if let Some(object) = body.as_object_mut() {
         object.entry("op").or_insert(json!("new_pane"));
     }
-    apply_operation(State(state), Json(body)).await
+    apply_operation(State(state), axum::Extension(level), Json(body)).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -353,6 +460,7 @@ const fn default_enter() -> bool {
 /// `POST /v1/panes/{id}/input`: `{"text": "...", "enter": true}` or `{"keys": [...]}`.
 async fn pane_input(
     State(state): State<Arc<ServerState>>,
+    axum::Extension(level): axum::Extension<ilium_control::access::AccessLevel>,
     Path(id): Path<u64>,
     Json(body): Json<InputBody>,
 ) -> ApiResult {
@@ -371,7 +479,7 @@ async fn pane_input(
             ))
         }
     };
-    run_operation(&state, operation).await
+    run_operation(&state, level, operation).await
 }
 
 #[derive(Deserialize)]
@@ -388,8 +496,12 @@ const VOICE_REPLY_TIMEOUT: Duration = Duration::from_secs(20);
 /// sentences into the live voice session, like `ilium voice say`.
 async fn voice_text(
     State(state): State<Arc<ServerState>>,
+    axum::Extension(level): axum::Extension<ilium_control::access::AccessLevel>,
     Json(body): Json<VoiceBody>,
 ) -> ApiResult {
+    crate::control_access::audit(&state, level, None, "voice_text", Value::Null)
+        .await
+        .map_err(|error| failure(StatusCode::INTERNAL_SERVER_ERROR, "audit-failed", error))?;
     let (sender, mut receiver) = reply_channel(&state)?;
     let request = ClientRequest::SubmitVoiceText {
         request_id: next_request_id(),
@@ -457,7 +569,23 @@ fn workspace_refusal_failure(reasons: &[String]) -> (StatusCode, Json<Value>) {
     )
 }
 
-async fn run_operation(state: &Arc<ServerState>, operation: Operation) -> ApiResult {
+async fn run_operation(
+    state: &Arc<ServerState>,
+    level: ilium_control::access::AccessLevel,
+    operation: Operation,
+) -> ApiResult {
+    level
+        .authorize(&operation)
+        .map_err(|error| failure(StatusCode::FORBIDDEN, "forbidden", error))?;
+    crate::control_access::audit(
+        state,
+        level,
+        None,
+        operation.name(),
+        crate::control_access::operation_target(&operation),
+    )
+    .await
+    .map_err(|error| failure(StatusCode::INTERNAL_SERVER_ERROR, "audit-failed", error))?;
     let before = state.tree.read().await.clone();
     let requests = operation
         .requests(&before, next_request_id())

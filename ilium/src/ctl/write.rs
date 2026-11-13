@@ -367,6 +367,16 @@ async fn create_worktree_agent(
             setup_command,
         }
     };
+    link.authorize_write(&Operation::NewPane {
+        parent,
+        launch: PaneLaunch::Agent {
+            provider,
+            prompt: args.prompt.clone(),
+        },
+        cwd: args.workdir.clone(),
+        keep_open: args.keep_open,
+    })
+    .await?;
     link.send(ClientRequest::CreateAgentInWorkspace {
         request_id,
         parent_group,

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub mod allocation;
+pub mod attention;
 pub mod resource_queue;
 pub use allocation::AllocationSize;
 pub mod agent_recovery;

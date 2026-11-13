@@ -1,6 +1,28 @@
 //! Agent-facing help: how to drive an Ilium session from the command line or
 //! over HTTP. Plain text so it prints well in a terminal and inside a prompt.
 
+/// The complete low-token monitoring loop, available without a live server.
+pub const AGENT_GUIDE: &str = "\
+Monitor Ilium with deltas; read screens only when needed.
+1. Discover: ilium ctl sessions. Select a session with --socket PATH.
+2. Block: ilium ctl events --follow --as manager
+3. Prioritize: ilium ctl digest --as manager --max-items 12 --max-chars 4000
+4. Drill: ilium ctl pane 12 --brief; ilium ctl screen 12 --lines 20
+5. Handle delivered items, then: ilium ctl ack CURSOR --as manager
+6. Repeat events --follow. Resume explicitly with --since CURSOR.
+Tree/find/events/digest accept --all. Wait uses --all-sessions for session scope.
+All-session --since is a JSON socket-to-cursor map; ack each with --socket PATH.
+A cursor belongs to one server lifetime and session. Reading never acknowledges.
+Expired or foreign cursors are errors; inspect the session before resynchronizing.
+Overflow retains undisplayed matches. Use a distinct --as name per manager.
+Wait for selected panes: ilium ctl wait 12 18 --all --state idle,done
+Act only on an explicit session and pane: ilium ctl --socket PATH send 12 'text'
+Outside callers default to read. An act token permits ordinary writes;
+terminate and kill-session require admin. Never use blanket write targets.
+Unknown message or state age is null; a disconnected wait has unknown outcome.
+Use ilium ctl guide for full command and HTTP help.
+";
+
 /// One help topic.
 pub struct Topic {
     pub name: &'static str,
@@ -62,6 +84,8 @@ Rules of thumb
      with \"type\":\"error\" and a non-zero exit status.
    - Target another session with --session NAME, or every session with --all
      on read commands. Inside an Ilium pane the pane's own session is the default.
+   - Outside callers default to read. Select --access act for ordinary writes;
+     --access admin is required for terminate and kill-session.
    - Ids are stable while a pane lives. Re-read the tree before acting on old ids.
    - Anything the CLI can do is also available over HTTP: ilium ctl guide http
    - More: ilium ctl guide topics
@@ -73,6 +97,7 @@ const TOPICS: &[Topic] = &[
         summary: "The shortest useful tour: read, create, control, arrange.",
         body: ESSENTIALS,
     },
+    Topic { name: "monitoring", summary: "Block for changes, digest, drill, acknowledge and act safely.", body: AGENT_GUIDE },
     Topic {
         name: "reading",
         summary: "Tree, project, pane, find and screen commands and their formats.",
@@ -188,6 +213,9 @@ GET  /v1/guide[?topic=T]                 this help as text/plain
 GET  /v1/tree?format=json|yaml|markdown&depth=N&details=0|1
 GET  /v1/projects/{selector}?format=...&depth=N
 GET  /v1/nodes/{id}?format=...&depth=N
+GET  /v1/events?follow=true&as=manager&format=compact
+GET  /v1/digest?as=manager&max-items=12&max-chars=4000
+GET  /v1/panes/{id}?brief=true             minimal state/message/age
 GET  /v1/panes/{id}?format=...&screen=1&lines=N
 GET  /v1/panes?agent=claude&state=idle&project=P      flat filtered list
 POST /v1/ops                             one operation: {\"op\":\"rename\",\"node\":12,\"title\":\"x\"}
@@ -200,6 +228,11 @@ Operations (the \"op\" values): rename close move_step reparent new_project
 new_group new_folder change_project_folder new_pane send_text send_keys schedule
 enqueue clear_queue bookmark expand lock_closed terminate apply_restructure
 revert_restructure revert_project_restructure kill_session. Fields match the CLI flags; ilium ctl ops lists them with examples.
+
+Writes require Authorization: Bearer TOKEN from the session runtime token file.
+Use act for ordinary operations and admin for terminate/kill_session.
+Unauthenticated callers have read access. Invalid tokens return 401, insufficient
+grants 403, and audit persistence failures 500 before dispatch.
 
 Errors: JSON {\"error\": \"...\"} with 400 (bad request or selector), 404 (no such
 node), 409 (ambiguous selector), 503 (session shutting down). A successful
@@ -253,6 +286,36 @@ mod tests {
             "--worktree",
         ] {
             assert!(ESSENTIALS.contains(command), "{command}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod monitoring_guide_tests {
+    use super::AGENT_GUIDE;
+    #[test]
+    fn agent_guide_fits_the_budget_and_teaches_the_complete_loop_and_safety_boundary() {
+        assert!(AGENT_GUIDE.chars().count() <= 1500);
+        for command in [
+            "events --follow",
+            "digest",
+            "--brief",
+            "--lines",
+            "ack",
+            "--as",
+            "--since",
+            "--max-chars",
+            "send",
+            "read",
+            "act",
+            "admin",
+            "explicit",
+            "cursor",
+        ] {
+            assert!(
+                AGENT_GUIDE.contains(command),
+                "agent guide must explain {command}"
+            );
         }
     }
 }

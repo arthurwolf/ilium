@@ -41,6 +41,8 @@ PTY destruction and ordinary pane teardown only request cancellation. The existi
 
 Server-created PTYs reserve their full persistent worker set before starting the child: five OS threads on Unix and six on Windows, each with a requested 4 MiB stack (`ilium_pty::PTY_WORKER_STACK_BYTES`). PTYs are charged to their own quota group (`ServerExecution::pty_quota_group`), not to the shared server pool, so execution jobs, output replay and recovery frames can never crowd terminals out. That group's limits are a multiple of the per-pane cost: `MAX_OWNED_WORKERS` (8,192) threads and `MAX_OWNED_WORKERS × 4 MiB` of declared stack, so the effective PTY ceiling is the owned-worker table (about 1,600 panes on Unix). The quota holds the charge through physical join, including timed-out shutdown; insufficient admission refuses the launch before a child exists. The shared server pool (execution, output, services) keeps a 4 GiB worker-byte budget, partitioned to preserve visible capture, ordinary output, visible output and exact retirement metadata headroom. Stacks are virtual reservations; these are admission declarations, not measured RSS bounds or proof that every library thread is charged. Capacity gates such as the 128-PTY pool regression test must never be lowered to make a test pass.
 
+Client conversion jobs reserve input on a dedicated client directly under the process quota. Its 4 GiB allowance is added to the root alongside the existing 528 MiB general and two 128 MiB codec allowances, preserving headroom for each. A best-effort execution-bank registry names large outstanding declarations through their final retention; it is diagnostic only and does not replace quota accounting. Claude-to-Codex preparation produces a bounded private copy under Claude's projects root, as required by Codex's canonical source-path check. A specific discovery refusal triggers an explicit retry of the original input, so the importer itself can still use more memory than the prepared-copy path.
+
 A failed pane start during restore never removes the pane. The restore first registers every saved pane as `PaneResource::Unrestored` (its saved kind, progress monitor and last requested size), so its tree node and command stay in every snapshot; `start_snapshot_pane` then replaces the placeholder with the live resource. Panes whose start failed keep the placeholder, a `Restore incomplete` error event names them, and one owned retry task (`unrestored.rs`) retries with backoff (5 s up to every 5 minutes) until each starts or is closed. Input to a placeholder is refused with the failure reason. Each start also copies the loaded snapshot to `<name>.pre-restore.json` (keeping the previous start's as `.pre-restore.1.json`), independent of the rolling-backup setting.
 
 Blocking errors must never be silent. Operations that prevent a pane, project, or session from working retain a scoped, bounded diagnostic through the shared server error service; logging alone is insufficient. Attach replays active diagnostics, recovery clears only its own operation, and the client renders a caution triangle with the concrete messages on hover. Child failures aggregate onto project/container rows; unscoped failures are labelled Session. Locally refused requests retain client-side diagnostics separately. Pane creation has a connection-local request identity and a terminal success/failure result; tree growth is never its acknowledgement. A missing confirmation stops the spinner and reports uncertainty without automatically retrying. Unavailable terminal placeholders display known blocking reasons. New blocking paths must use this reporting contract and include failure/recovery coverage.
@@ -110,9 +112,9 @@ The blocked/waiting-for-approval state wasn't explicitly requested but falls out
 
 Claude activity classification treats the latest recognized completed-turn summary as a boundary: earlier working and background-wait rows belong to the previous turn. The summary's own still-running suffix and newer activity stay eligible; approval checks retain the full screen. Goal completion remains independent of current activity.
 
-Terminal panes allocate prompt and progress sections only while their content is visible. The shared viewport drives rendering, hit testing and child terminal dimensions; appearance, removal, expiry and settings changes resize the affected terminals. Editors and boards do not reserve terminal metadata space, and small panes preserve a terminal cell where physically possible.
+Terminal panes reserve enabled prompt and progress sections even when empty, preventing their appearance, removal or expiry from resizing the child terminal. The shared viewport drives rendering, hit testing and child terminal dimensions; explicit settings and outer layout changes still resize affected terminals. Empty slots have no hit targets. Editors and boards do not reserve terminal metadata space, and small panes preserve a terminal cell where physically possible.
 
-Completed progress footers are a client presentation policy. `[ui].completed_progress_hide_after_seconds` defaults to 60; zero keeps them visible. Settings → Agent Monitoring changes the delay in 30-second steps. Done and Error footers expire from the server's last observation time, including during continuous input/output; expiry releases their rows and resizes the child without clearing reports, acknowledging results, changing sidebar signals or affecting queued notification delivery.
+Completed progress footers are a client presentation policy. `[ui].completed_progress_hide_after_seconds` defaults to 60; zero keeps them visible. Settings → Agent Monitoring changes the delay in 30-second steps. Done and Error footers expire from the server's last observation time, including during continuous input/output; expiry hides their content without resizing the child, clearing reports, acknowledging results, changing sidebar signals or affecting queued notification delivery.
 
 ## Form row leaders
 
@@ -192,6 +194,10 @@ Custom tree status icons use ordered client-side rules over shared pane facts an
 ## Guided setup
 
 [Detailed design](architecture/guided-setup.md).
+
+## Agent monitoring and local control
+
+[Design boundaries](architecture/monitoring-cli.md); [user commands](src/docs/monitoring-cli.md).
 
 ## Attention queue
 

@@ -60,6 +60,17 @@ fn path_value(path: &std::path::Path) -> Value {
     Value::String(path.to_string_lossy().into_owned())
 }
 
+/// Stable state name shared by briefs, waits and full pane views.
+pub fn pane_state_name(status: &PaneStatus) -> &'static str {
+    match status {
+        PaneStatus::PlainShell => "shell",
+        PaneStatus::Editor { .. } => "editor",
+        PaneStatus::Board => "board",
+        PaneStatus::Agent(agent) => turn_name(agent.turn, agent.completion_unread),
+        PaneStatus::AgentUnavailable(_) => "agent_unavailable",
+    }
+}
+
 /// The status of a pane as a small tagged object.
 fn status_view(status: &PaneStatus) -> Value {
     match status {

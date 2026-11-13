@@ -15,6 +15,7 @@ use ilium_core::AgentClass;
 use serde_json::Value;
 
 mod codex_thread_name;
+pub mod final_output;
 pub mod goal_evidence;
 mod request_evidence;
 pub use codex_thread_name::official_thread_name;

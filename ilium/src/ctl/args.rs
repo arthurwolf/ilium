@@ -9,7 +9,7 @@ use ilium_control::Format;
 
 use super::CtlFailure;
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub(crate) struct CtlArgs {
     /// Session to address, within the project given by --cwd. Inside an Ilium
     /// pane the pane's own session is the default.
@@ -18,22 +18,43 @@ pub(crate) struct CtlArgs {
     /// Address one live session by its socket path (see `ilium ctl sessions`).
     #[arg(long, global = true, value_name = "PATH", conflicts_with = "session")]
     pub(crate) socket: Option<PathBuf>,
-    /// Output format of read commands: json, jsonl, yaml or markdown.
-    #[arg(long, global = true, default_value = "json")]
-    pub(crate) format: String,
+    /// Read every live session; writes always require an explicit session.
+    #[arg(long, global = true)]
+    pub(crate) all_sessions: bool,
+    /// Output format of reads: json, jsonl, yaml or markdown; events also accepts compact.
+    #[arg(long, global = true)]
+    pub(crate) format: Option<String>,
+    /// Explicit local automation grant: read, act or admin. Outside default: read.
+    #[arg(long, global = true)]
+    pub(crate) access: Option<String>,
+    /// Use a token instead of selecting one from this session's owner-only token file.
+    #[arg(long, global = true)]
+    pub(crate) token: Option<String>,
     #[command(subcommand)]
     pub(crate) command: CtlCommand,
 }
 
 /// Which session a command addresses.
+#[derive(Clone)]
 pub(crate) struct Target {
+    pub(crate) access: Option<String>,
+    pub(crate) token: Option<String>,
     pub(crate) session: Option<String>,
     pub(crate) socket: Option<PathBuf>,
 }
 
 impl CtlArgs {
+    pub(crate) fn across_sessions(&self) -> bool {
+        self.all_sessions
+            || match &self.command {
+                CtlCommand::Events(options) | CtlCommand::Digest(options) => options.all,
+                CtlCommand::Tree { all, .. } | CtlCommand::Find { all, .. } => *all,
+                _ => false,
+            }
+    }
+
     pub(crate) fn format(&self) -> Result<Format, CtlFailure> {
-        Format::parse(&self.format).ok_or_else(|| {
+        Format::parse(self.format.as_deref().unwrap_or("json")).ok_or_else(|| {
             CtlFailure::usage(format!(
                 "unknown format {:?}; use json, jsonl, yaml or markdown",
                 self.format
@@ -43,14 +64,58 @@ impl CtlArgs {
 
     pub(crate) fn target(&self) -> Target {
         Target {
+            access: self.access.clone(),
+            token: self
+                .token
+                .clone()
+                .or_else(|| std::env::var("ILIUM_CONTROL_TOKEN").ok()),
             session: self.session.clone(),
             socket: self.socket.clone(),
         }
     }
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Args, Debug, Clone)]
+pub(crate) struct MonitoringArgs {
+    /// Read every live session with an independent cursor for each socket.
+    #[arg(long)]
+    pub(crate) all: bool,
+    #[arg(long)]
+    pub(crate) since: Option<String>,
+    #[arg(long)]
+    pub(crate) follow: bool,
+    #[arg(long = "as")]
+    pub(crate) consumer: Option<String>,
+    #[arg(long)]
+    pub(crate) min_severity: Option<String>,
+    #[arg(long, value_delimiter = ',')]
+    pub(crate) kinds: Vec<String>,
+    #[arg(long)]
+    pub(crate) project: Option<String>,
+    #[arg(long)]
+    pub(crate) agent: Option<String>,
+    #[arg(long)]
+    pub(crate) pane: Option<u64>,
+    #[arg(long, default_value_t = 12)]
+    pub(crate) max_items: usize,
+    #[arg(long, default_value_t = 4000)]
+    pub(crate) max_chars: usize,
+}
+
+#[derive(Subcommand, Debug, Clone)]
 pub(crate) enum CtlCommand {
+    /// The complete monitoring loop and safety rules in at most 1500 characters.
+    AgentGuide,
+    /// Acknowledge a previously returned monitoring cursor for one consumer.
+    Ack {
+        cursor: String,
+        #[arg(long = "as")]
+        consumer: Option<String>,
+    },
+    /// Read or follow a bounded page of session monitoring events.
+    Events(MonitoringArgs),
+    /// Priority-sorted changes: needs-you, failed-or-stuck, finished and working count.
+    Digest(MonitoringArgs),
     /// How to remote-control Ilium: essentials with example commands, or one
     /// topic (essentials, reading, creating, controlling, arranging, http).
     Guide { topic: Option<String> },
@@ -63,6 +128,9 @@ pub(crate) enum CtlCommand {
     Whoami,
     /// The whole session tree (or one project) in the chosen format.
     Tree {
+        /// Read every live session.
+        #[arg(long)]
+        all: bool,
         /// Levels of children to include.
         #[arg(long)]
         depth: Option<usize>,
@@ -92,6 +160,9 @@ pub(crate) enum CtlCommand {
     /// Full details of one pane; --screen adds its current screen text.
     Pane {
         id: String,
+        /// Minimal state and verified latest assistant message, without screen or prompts.
+        #[arg(long, conflicts_with_all = ["screen", "lines"])]
+        brief: bool,
         #[arg(long)]
         screen: bool,
         /// With --screen: only the last N lines.
@@ -100,6 +171,9 @@ pub(crate) enum CtlCommand {
     },
     /// A flat list of panes matching every given filter.
     Find {
+        /// Read every live session.
+        #[arg(long)]
+        all: bool,
         #[arg(long)]
         agent: Option<String>,
         /// Agent state, comma separated: working, idle, done, waiting_approval...
@@ -119,9 +193,16 @@ pub(crate) enum CtlCommand {
         #[arg(long)]
         lines: Option<usize>,
     },
-    /// Block until a pane's agent state is one of --state (or the pane closes).
+    /// Block on live events until any/all selected panes match --state or close.
     Wait {
-        id: String,
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+        /// Complete when any selected pane matches (the default).
+        #[arg(long, conflicts_with = "all")]
+        any: bool,
+        /// Complete only when every selected pane matches.
+        #[arg(long)]
+        all: bool,
         /// Comma separated target states, e.g. idle,done.
         #[arg(long, default_value = "idle,done")]
         state: String,
@@ -275,7 +356,7 @@ pub(crate) enum CtlCommand {
     Op { json: String },
 }
 
-#[derive(Args, Debug, Default)]
+#[derive(Args, Debug, Default, Clone)]
 pub(crate) struct NewPaneArgs {
     /// Project to place the pane in: id, path, directory or display name. An
     /// absolute path that is not yet a project is added as one first.
@@ -344,6 +425,7 @@ impl CtlCommand {
 /// Output for commands that need no session at all (help text).
 pub(crate) fn offline(command: &CtlCommand, format: Format) -> Result<Option<String>, CtlFailure> {
     match command {
+        CtlCommand::AgentGuide => Ok(Some(guide::AGENT_GUIDE.to_owned())),
         CtlCommand::Guide { topic } => match topic.as_deref() {
             None => Ok(Some(guide::ESSENTIALS.to_owned())),
             Some("topics") => Ok(Some(guide::topic_list())),
@@ -387,6 +469,48 @@ mod tests {
             Some(crate::Command::Ctl(args)) => args.command,
             _ => panic!("not a ctl command"),
         }
+    }
+
+    #[test]
+    fn events_accepts_delta_follow_filters_and_output_budgets() {
+        assert!(parse(&[
+            "ctl",
+            "events",
+            "--since",
+            "epoch:9",
+            "--follow",
+            "--as",
+            "manager",
+            "--min-severity",
+            "warning",
+            "--kinds",
+            "error,needs_input",
+            "--project",
+            "project",
+            "--agent",
+            "codex",
+            "--pane",
+            "42",
+            "--max-items",
+            "12",
+            "--max-chars",
+            "4000",
+            "--format",
+            "json",
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn events_defaults_to_compact_without_changing_other_read_defaults() {
+        let Some(crate::Command::Ctl(events)) = parse(&["ctl", "events"]).unwrap().command else {
+            panic!("expected ctl events");
+        };
+        assert!(events.format.is_none());
+        let Some(crate::Command::Ctl(tree)) = parse(&["ctl", "tree"]).unwrap().command else {
+            panic!("expected ctl tree");
+        };
+        assert_eq!(tree.format().unwrap(), ilium_control::Format::Json);
     }
 
     #[test]
@@ -474,6 +598,7 @@ mod tests {
         assert!(ops.contains("\"op\": \"rename\""));
         assert!(offline(
             &CtlCommand::Tree {
+                all: false,
                 depth: None,
                 project: None,
                 no_details: false

@@ -134,17 +134,17 @@ You can continue a Claude Code conversation under Codex, or a Codex conversation
 1. Right-click the agent's terminal pane in the tree and choose **Convert to Codex** (for a Claude pane) or **Convert to Claude Code** (for a Codex pane). The entry appears only when the pane has a verified session, no other conversion is running, and the pane is not a worktree pane.
 2. Ilium checks that the source transcript exists, freezes the pane, opens the **Convert ... session to ...** dialog and stops the agent process.
 3. The dialog shows each step with progress and a log. If the shared worker budget is busy, it waits briefly for capacity; press `Esc` to cancel the wait or conversion.
-   - Claude to Codex: locate the Claude Code transcript, inspect it, start a private `codex app-server`, import the session using Codex's own importer, verify the Codex rollout, stop the app-server.
+   - Claude to Codex: locate and inspect the Claude Code transcript, prepare a private copy, start a private `codex app-server`, import the session using Codex's own importer, verify the Codex rollout, then stop the app-server. The prepared copy omits bookkeeping records and truncates long tool results; the log reports both counts and truncated results carry a note. The temporary copy is kept under Claude's projects directory because Codex requires that location, and is removed after the import. If Codex cannot discover the copy, or an earlier interrupted conversion left a copy at the same path, Ilium logs this and retries with the original transcript without those reductions.
    - Codex to Claude: locate the Codex rollout, parse it, convert it to Claude Code lines, write the Claude Code transcript, verify it, register it with Claude Code. User prompts, assistant text and shell or tool calls with results are carried over. Reasoning and token events are dropped.
 4. On success the frozen pane is replaced by a new pane that resumes the converted session in the other agent.
 5. If conversion fails and the original agent had already been stopped, press `Enter` to resume the original session, or `Esc` to close the dialog.
 
-Conversion streams the transcript line by line, so memory use stays small (a few hundred MiB at most) whatever the session size; multi-gigabyte sessions convert normally. Limits:
+Conversion processes the transcript line by line, so its working set does not scale with the whole session size. Ilium reserves estimated capacity before starting: conversion has a separate 4 GiB input allowance and each conversion currently reserves 2 GiB. These reservations coordinate work; they are not measured RAM or an operating-system memory limit. Limits:
 
 - The source transcript may be up to 64 GiB. A larger file is refused before anything is read, with a message naming the limit.
 - The converted copy may be up to 8 GiB, and conversion to Claude Code first checks that the disk has room for it; if not, it stops before writing.
-- Any single line over 256 MiB is skipped and counted instead of loaded.
-- In a Codex to Claude conversion, each tool output is cut to 30,000 characters, with a note saying how many characters were left out.
+- Claude-to-Codex preparation refuses a line over 64 MiB rather than silently discarding potentially essential content. Other conversion readers skip and count lines over 256 MiB. Codex's importer has its own memory behavior when it requires the original transcript.
+- Codex-to-Claude limits each tool output to 30,000 characters and records how many were omitted. Claude-to-Codex retains up to 3,000 UTF-8 bytes of text per tool result, places a truncation notice before the retained excerpt, and reports the number of affected results.
 - If the Codex rollout changes while it is being converted (for example the agent is still writing), the conversion is refused rather than producing a mixed result.
 
 The original transcript is read, not modified. Antigravity sessions cannot be converted.
