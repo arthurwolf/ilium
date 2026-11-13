@@ -25,6 +25,7 @@ const PROCESS_WORKER_THREADS: usize = CPU_THREADS + IO_THREADS + SERVICE_THREADS
 // The optional parser-state/snapshot pool is controlled by terminal settings.
 // Keep shared storage custody without a second aggregate ceiling when that pool is Off.
 const PROCESS_WORKER_BYTES: usize = 4096 * MIB;
+pub(crate) const CONVERSION_INPUT_BYTES: usize = 4096 * MIB;
 pub(crate) const TERMINAL_STORAGE_BYTES: usize = usize::MAX;
 pub(crate) const TERMINAL_REPLACEMENT_HEADROOM: usize = 8 * 128 * MIB;
 
@@ -76,10 +77,10 @@ fn create_process_quota() -> QuotaGroup {
             service_jobs: 1,
             // General children collectively 528 MiB; independent
             // decoder128 + encoder128 MiB retain dedicated headroom.
-            input_bytes: 784 * MIB,
+            input_bytes: CONVERSION_INPUT_BYTES + 784 * MIB,
             // General result capacity grew for ambient replacement overlap;
             // retain both codec directions' dedicated 128 MiB headroom too.
-            result_bytes: GENERAL_RESULT_BYTES + 2 * 128 * MIB,
+            result_bytes: GENERAL_RESULT_BYTES + 2 * 128 * MIB + 2 * MIB,
             worker_threads: PROCESS_WORKER_THREADS
                 + ilium_animation_js::helper::HelperLimits::default().worker_capacity(),
             // Shared ceiling for selected charged owners; retiring native
@@ -632,6 +633,14 @@ impl ClientExecution {
     pub async fn client_when_ready(&self, limits: ClientLimits) -> Result<Client, RejectReason> {
         retry_startup_busy(|| self.client(limits)).await
     }
+    /// Conversion has its own aggregate so long-lived general work cannot
+    /// consume its allowance. The common process root still accounts for both.
+    pub async fn conversion_client_when_ready(
+        &self,
+        limits: ClientLimits,
+    ) -> Result<Client, RejectReason> {
+        retry_startup_busy(|| self.execution.client(limits)).await
+    }
     /// Shares the execution bank's bounded CPU disposal owner with adapters
     /// that retain admitted input after interactive processing completes.
     pub fn retirement(&self) -> ilium_execution::RetirementHandle {
@@ -817,6 +826,62 @@ pub(crate) fn test_document_client() -> Client {
 #[cfg(test)]
 mod composition_tests {
     use super::*;
+
+    #[test]
+    fn conversion_capacity_coexists_with_existing_general_and_codec_budgets() {
+        let root = create_process_quota().snapshot().limits;
+        let general = general_admission_group()
+            .expect("general admission")
+            .usage()
+            .limits;
+        assert!(root.input_bytes >= (4096 + 784) * MIB);
+        assert_eq!(general.input_bytes, 528 * MIB);
+    }
+
+    #[test]
+    fn general_work_and_conversion_reserve_and_release_independently() {
+        let quota = create_process_quota();
+        let general_limits = ClientLimits {
+            jobs: 4,
+            service_jobs: 1,
+            input_bytes: 528 * MIB,
+            result_bytes: GENERAL_RESULT_BYTES,
+        };
+        let group = quota.admission_group(general_limits).unwrap();
+        let mut execution = Execution::start(quota.clone(), bank_config()).unwrap();
+        let general = execution.client_in_group(&group, general_limits).unwrap();
+        let conversion = execution
+            .client(ClientLimits {
+                jobs: 1,
+                service_jobs: 0,
+                input_bytes: CONVERSION_INPUT_BYTES,
+                result_bytes: 2 * MIB,
+            })
+            .unwrap();
+        let other = general
+            .try_reserve_external(JobCost {
+                input_bytes: 512 * MIB,
+                result_bytes: MIB,
+            })
+            .unwrap();
+        let convert = conversion
+            .try_reserve_external(JobCost {
+                input_bytes: 2048 * MIB,
+                result_bytes: MIB,
+            })
+            .unwrap();
+        assert_eq!(quota.snapshot().input_bytes, 2560 * MIB);
+        assert_eq!(conversion.significant_reservations().len(), 2);
+        drop(convert);
+        assert_eq!(quota.snapshot().input_bytes, 512 * MIB);
+        drop(other);
+        assert_eq!(quota.snapshot().input_bytes, 0);
+        assert!(conversion.significant_reservations().is_empty());
+        execution.request_shutdown(ShutdownMode::Cancel);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+    }
 
     #[test]
     fn parallel_fixture_process_credits_are_isolated_but_local_clones_share_limits() {

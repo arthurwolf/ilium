@@ -393,6 +393,7 @@ impl Connection {
         crate::execution::bootstrap_process_quota()
             .map_err(|error| ConnectionError::CodecBootstrap(IpcError::Io(error)))?;
         let (owner, preparation) = crate::ipc_preparation::IpcPreparation::standalone()
+            .await
             .map_err(ConnectionError::CodecBootstrap)?;
         Self::connect_prepared(socket_path, session, preparation, Some(owner), None).await
     }
@@ -740,7 +741,7 @@ mod tests {
 
     #[tokio::test]
     async fn partial_header_sampling_counts_no_completed_stage_and_cancel_keeps_phase() {
-        let (_codec_owner, preparation) = test_codec();
+        let (_codec_owner, preparation) = test_codec().await;
         let health = ConnectionHealth::new();
         let (read_half, mut write_half) = tokio::io::duplex(1024);
         let (sent, _received) = mpsc::channel(1);
@@ -780,7 +781,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_tracks_actual_flush_and_retains_cancelled_phase() {
-        let (_codec_owner, preparation) = test_codec();
+        let (_codec_owner, preparation) = test_codec().await;
         let health = ConnectionHealth::with_server_process_id(Some(12345));
         let state = Arc::new(Mutex::new(FlushState::default()));
         let entered = Arc::new(tokio::sync::Notify::new());
@@ -824,7 +825,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_counts_only_completed_read_stages_and_preserves_eof() {
-        let (_codec_owner, preparation) = test_codec();
+        let (_codec_owner, preparation) = test_codec().await;
         let health = ConnectionHealth::new();
         let (read_half, write_half) = tokio::io::duplex(1024);
         let (sent, mut received) = mpsc::channel(1);
@@ -1008,7 +1009,7 @@ mod tests {
             gate: gate.clone(),
             entered: entered.clone(),
         };
-        let (_owner, preparation) = test_codec();
+        let (_owner, preparation) = test_codec().await;
         let (sent, mut received) = mpsc::channel(1);
         let (stop, stopped) = watch::channel(false);
         let task = tokio::spawn(read_loop(reader, sent, preparation, stopped));
@@ -1040,38 +1041,18 @@ mod tests {
         assert!(received.recv().await.is_none());
     }
 
-    fn test_codec() -> (
+    async fn test_codec() -> (
         ilium_execution::Execution,
         crate::ipc_preparation::IpcPreparation,
     ) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
-            match crate::ipc_preparation::IpcPreparation::standalone() {
-                Ok(codec) => return codec,
-                Err(IpcError::Io(error))
-                    if error
-                        .get_ref()
-                        .and_then(|source| source.downcast_ref::<ilium_execution::StartError>())
-                        .is_some_and(|source| {
-                            matches!(
-                                source,
-                                ilium_execution::StartError::Admission(
-                                    ilium_execution::RejectReason::Busy
-                                )
-                            )
-                        })
-                        && std::time::Instant::now() < deadline =>
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-                Err(error) => panic!("test codec startup: {error}"),
-            }
-        }
+        crate::ipc_preparation::IpcPreparation::standalone()
+            .await
+            .expect("test codec startup")
     }
 
     #[tokio::test]
     async fn request_barrier_cannot_acknowledge_a_frame_with_blocked_stream_flush() {
-        let (_codec_owner, preparation) = test_codec();
+        let (_codec_owner, preparation) = test_codec().await;
         let state = Arc::new(Mutex::new(FlushState::default()));
         let entered = Arc::new(tokio::sync::Notify::new());
         let (sent, received) = mpsc::channel(4);
@@ -1133,7 +1114,7 @@ mod tests {
         let (write_half, peer) = tokio::io::duplex(8);
         drop(peer);
         let (sent, received) = mpsc::channel(4);
-        let (_codec_owner, preparation) = test_codec();
+        let (_codec_owner, preparation) = test_codec().await;
         let admission = preparation.outbound_client();
         let writer = tokio::spawn(write_loop(write_half, received, preparation));
         sent.send(RequestCommand::Request(Box::new(
@@ -1159,7 +1140,7 @@ mod tests {
     }
     #[tokio::test]
     async fn blocked_writer_returns_original_without_stalling_ui_and_keeps_fifo() {
-        let (_codec_owner, preparation) = test_codec();
+        let (_codec_owner, preparation) = test_codec().await;
         let state = Arc::new(Mutex::new(FlushState::default()));
         let entered = Arc::new(tokio::sync::Notify::new());
         let (sent, received) = mpsc::channel(2);
@@ -1249,7 +1230,7 @@ mod tests {
     }
     #[tokio::test]
     async fn decoded_storage_follows_channel_and_consumer_after_codec_join() {
-        let (mut owner, preparation) = test_codec();
+        let (mut owner, preparation) = test_codec().await;
         let mut message = String::with_capacity(8192);
         message.push_str("original decoded allocation");
         let pointer = message.as_ptr();
@@ -1321,7 +1302,7 @@ mod tests {
     }
     #[tokio::test]
     async fn installed_tree_charge_releases_only_after_actual_projection_replacement() {
-        let (_owner, preparation) = test_codec();
+        let (_owner, preparation) = test_codec().await;
         let mut app = crate::app::App::new(
             "charged-tree".into(),
             std::path::PathBuf::from("/tmp/charged-tree-fixture"),
@@ -1426,7 +1407,7 @@ mod tests {
     }
     #[tokio::test]
     async fn accepted_dialog_error_owner_survives_stale_same_kind_response() {
-        let (_owner, preparation) = test_codec();
+        let (_owner, preparation) = test_codec().await;
         let mut app =
             crate::app::App::new("dialog-owner".into(), "/tmp/dialog-owner-fixture".into());
         app.open_create_agent_workspace_dialog(
@@ -1522,7 +1503,7 @@ mod tests {
 
     #[tokio::test]
     async fn derived_heap_copies_need_independent_credit_before_allocation() {
-        let (_owner, preparation) = test_codec();
+        let (_owner, preparation) = test_codec().await;
         let reservation = preparation
             .reserve_decoder()
             .await
@@ -1569,7 +1550,7 @@ mod tests {
     }
     #[tokio::test]
     async fn refused_projection_metadata_preserves_original_and_changes_no_consumer_state() {
-        let (_owner, preparation) = test_codec();
+        let (_owner, preparation) = test_codec().await;
         let mut app = crate::app::App::new(
             "metadata-pressure".into(),
             "/tmp/metadata-pressure-fixture".into(),
@@ -1653,7 +1634,7 @@ mod tests {
     }
     #[tokio::test]
     async fn facts_copy_refusal_keeps_original_draft_and_retries_original_received_owner() {
-        let (_owner, preparation) = test_codec();
+        let (_owner, preparation) = test_codec().await;
         let mut app = crate::app::App::new(
             "facts-pressure".into(),
             "/tmp/facts-pressure-fixture".into(),
@@ -1779,7 +1760,7 @@ mod tests {
 
     #[tokio::test]
     async fn legitimate_replay_pressure_waits_for_consumption_and_keeps_original_bytes() {
-        let (_owner, preparation) = test_codec();
+        let (_owner, preparation) = test_codec().await;
         let mut first_bytes = vec![b'a'; 32 * 1024 * 1024 + 2];
         first_bytes[..2].copy_from_slice(b"\x1bc");
         let first_reservation = preparation.reserve_decoder().await.expect("first decoder");
@@ -1923,7 +1904,7 @@ mod tests {
 
     #[tokio::test]
     async fn decoded_pressure_original_credit_and_cancellation_controls() {
-        let (_owner, base) = test_codec();
+        let (_owner, base) = test_codec().await;
         let capacity = 64 * 1024;
         // Force FIFO handoff and last-clone retention.
         {
@@ -2133,7 +2114,7 @@ mod tests {
 
     #[tokio::test]
     async fn decoded_pressure_fifo_projection_refusal_revokes_an_existing_wait() {
-        let (_owner, base) = test_codec();
+        let (_owner, base) = test_codec().await;
         let capacity = 64 * 1024;
         let preparation = base.with_test_decoded_capacity(capacity);
         let mut app = crate::app::App::new("pressure-fifo".into(), "/tmp/pressure-fifo".into());
@@ -2250,7 +2231,7 @@ mod tests {
 
     #[tokio::test]
     async fn decoded_pressure_reader_fifo_shutdown_and_receiver_controls() {
-        let (_owner, base) = test_codec();
+        let (_owner, base) = test_codec().await;
         for action in 0..5 {
             let preparation = base.clone().with_test_decoded_capacity(64 * 1024);
             let wire = Arc::new(Mutex::new(FlushState {
@@ -2369,7 +2350,7 @@ mod tests {
     }
     #[tokio::test]
     async fn impossible_projection_exits_event_application_with_original_custody_and_full_reason() {
-        let (_owner, base) = test_codec();
+        let (_owner, base) = test_codec().await;
         let capacity = 64 * 1024;
         let preparation = base.with_test_decoded_capacity(capacity);
         let mut app =
@@ -2481,7 +2462,7 @@ mod tests {
 
     #[tokio::test]
     async fn projection_prepare_preflights_combined_derivation_and_registry_growth() {
-        let (_owner, base) = test_codec();
+        let (_owner, base) = test_codec().await;
         let event = ServerEvent::PaneCreateFinished {
             request_id: 987_654,
             result: Err("synthetic combined preflight".repeat(160)),

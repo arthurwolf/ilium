@@ -458,7 +458,7 @@ mod tests {
         let keys: HashSet<&str> = catalogue.iter().map(Condition::key).collect();
         assert_eq!(
             keys.len(),
-            41,
+            43,
             "every Condition variant has a catalogue entry: {keys:?}"
         );
         for category in ConditionCategory::ALL {

@@ -22,6 +22,45 @@ use std::fs::OpenOptions;
 use std::io;
 use std::path::Path;
 
+/// Admission modes for private regular storage. Append may create a new file;
+/// CreateNew refuses every existing path, including nonregular files.
+pub enum PrivateFileMode {
+    Read,
+    Append,
+    CreateNew,
+}
+
+/// Admit the opened handle before any data access. Nonblocking opens prevent
+/// a pre-planted FIFO from occupying a finite I/O worker indefinitely.
+pub fn open_private_regular_file(path: &Path, mode: PrivateFileMode) -> io::Result<std::fs::File> {
+    let mut options = private_open_options();
+    match mode {
+        PrivateFileMode::Read => {
+            options.read(true);
+        }
+        PrivateFileMode::Append => {
+            options.append(true).create(true);
+        }
+        PrivateFileMode::CreateNew => {
+            options.write(true).create_new(true);
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "private storage requires a regular file",
+        ));
+    }
+    validate_private_open_file(&file)?;
+    Ok(file)
+}
+
 /// Opens an existing regular file for reading, preserving ordinary symlink
 /// resolution. Validate the opened handle rather than a raced path metadata
 /// check. On Unix, a FIFO swapped into the path cannot block the open.

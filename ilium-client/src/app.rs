@@ -1484,6 +1484,7 @@ pub enum ContextMenuAction {
     NewSplitView,
     NewFolder,
     AddChatroom,
+    RemoveChatroom,
     NewResource,
     LinkResource,
     /// Resource-row section of the tree context menu.
@@ -1551,7 +1552,7 @@ impl ContextMenuAction {
             Self::NewGroup => (2, 3),
             Self::NewSplitView => (2, 4),
             Self::NewFolder => (2, 5),
-            Self::AddChatroom => (2, 6),
+            Self::AddChatroom | Self::RemoveChatroom => (2, 6),
             Self::NewResource => (2, 7),
             Self::LinkResource => (2, 8),
             Self::ResourceOpenPanel => (7, 0),
@@ -1618,7 +1619,9 @@ impl ContextMenuAction {
             Self::NewAgent(BuiltinAgentProvider::Antigravity) => IconTarget::Antigravity,
             Self::NewEditor => IconTarget::Editor,
             Self::NewFolder | Self::ChangeProjectFolder => IconTarget::Folder,
-            Self::AddChatroom | Self::NewResource | Self::LinkResource => IconTarget::Project,
+            Self::AddChatroom | Self::RemoveChatroom | Self::NewResource | Self::LinkResource => {
+                IconTarget::Project
+            }
             Self::ResourceOpenPanel
             | Self::ResourceEdit
             | Self::ResourcePause
@@ -1664,6 +1667,7 @@ impl ContextMenuAction {
             Self::NewSplitView => "New split view\u{2026}".to_string(),
             Self::NewFolder => "Open folder\u{2026}".to_string(),
             Self::AddChatroom => "Add chatroom to project".to_string(),
+            Self::RemoveChatroom => "Remove chatroom from project".to_string(),
             Self::NewResource => "New resource…".to_string(),
             Self::LinkResource => "Link existing resource…".to_string(),
             Self::ResourceOpenPanel => "Resource: open control panel".to_string(),
@@ -5001,10 +5005,12 @@ impl App {
                 } else {
                     viewport
                 };
-                let viewport = if self.shows_last_prompt_banner(viewport.pane_id) {
+                // Keep enabled metadata slots allocated even while empty. A
+                // prompt or progress transition must not resize a running TUI.
+                let viewport = if self.ui_settings.last_prompt_enabled {
                     // In a physically clipped pane, leave room for the progress
                     // gauge and a detail row as well as the terminal itself.
-                    let minimum_progress_rows = if self.shows_progress_footer(viewport.pane_id) {
+                    let minimum_progress_rows = if self.ui_settings.progress_monitor_enabled {
                         2.min(viewport.content_area.height.saturating_sub(2))
                     } else {
                         0
@@ -5018,7 +5024,7 @@ impl App {
                             .height
                             .saturating_sub(1 + minimum_progress_rows),
                     );
-                    viewport.with_last_prompt_reserved(
+                    let mut reserved = viewport.with_last_prompt_reserved(
                         prompt_rows,
                         // Footer rows plus its frame rule stay available.
                         if minimum_progress_rows > 0 {
@@ -5027,18 +5033,28 @@ impl App {
                             0
                         },
                         self.ui_settings.section_frames_enabled,
-                    )
+                    );
+                    if !self.shows_last_prompt_banner(viewport.pane_id) {
+                        reserved.last_prompt_area = None;
+                        reserved.last_prompt_bottom_rule = None;
+                    }
+                    reserved
                 } else {
                     viewport
                 };
                 let viewport = self.with_briefing_slot(viewport);
-                if self.shows_progress_footer(viewport.pane_id) {
-                    viewport.with_progress_reserved(
+                if self.ui_settings.progress_monitor_enabled {
+                    let mut reserved = viewport.with_progress_reserved(
                         crate::progress_bar::reserved_height(
                             self.ui_settings.progress_max_lines.into(),
                         ),
                         self.ui_settings.section_frames_enabled,
-                    )
+                    );
+                    if !self.shows_progress_footer(viewport.pane_id) {
+                        reserved.progress_area = None;
+                        reserved.progress_rule = None;
+                    }
+                    reserved
                 } else {
                     viewport
                 }
@@ -5059,7 +5075,7 @@ impl App {
     /// terminal's size and the box can never disagree. The box asks for what
     /// is left after the terminal's minimum height and the progress footer.
     fn with_briefing_slot(&self, viewport: PaneViewport) -> PaneViewport {
-        let minimum_progress_rows = if self.shows_progress_footer(viewport.pane_id) {
+        let minimum_progress_rows = if self.ui_settings.progress_monitor_enabled {
             2.min(viewport.content_area.height.saturating_sub(2))
         } else {
             0
@@ -5929,6 +5945,26 @@ impl App {
             return;
         };
         let intent = crate::filesystem::integrations::IntegrationIntent::AddRoom(
+            crate::filesystem::integrations::RoomTarget {
+                id: project_id,
+                path,
+            },
+        );
+        let _ = self.enqueue_integration(intent);
+    }
+
+    pub fn action_remove_chatroom_from_project(&mut self, project_id: NodeId) {
+        let Some(path) = self
+            .tree
+            .get(project_id)
+            .filter(|node| node.is_project())
+            .and_then(Node::project_path)
+            .map(Path::to_path_buf)
+        else {
+            self.status_message = Some("That entry is not a project".into());
+            return;
+        };
+        let intent = crate::filesystem::integrations::IntegrationIntent::RemoveRoom(
             crate::filesystem::integrations::RoomTarget {
                 id: project_id,
                 path,
@@ -17528,7 +17564,14 @@ impl App {
             }
             Some(node) if node.is_project() => {
                 actions.push(ContextMenuAction::SendMessageToAll);
-                actions.insert(0, ContextMenuAction::AddChatroom);
+                actions.insert(
+                    0,
+                    if self.chatroom_projects.contains(&target) {
+                        ContextMenuAction::RemoveChatroom
+                    } else {
+                        ContextMenuAction::AddChatroom
+                    },
+                );
                 actions.insert(0, ContextMenuAction::NewResource);
                 actions.insert(0, ContextMenuAction::LinkResource);
                 actions.insert(0, ContextMenuAction::ChangeProjectFolder);
@@ -17687,6 +17730,7 @@ impl App {
             ContextMenuAction::NewSplitView => self.open_create_split_dialog(),
             ContextMenuAction::NewFolder => self.action_new_folder(),
             ContextMenuAction::AddChatroom => self.action_add_chatroom_to_project(target),
+            ContextMenuAction::RemoveChatroom => self.action_remove_chatroom_from_project(target),
             ContextMenuAction::NewResource => self.open_resource_dialog(target, false),
             ContextMenuAction::LinkResource => self.open_resource_dialog(target, true),
             ContextMenuAction::ResourceOpenPanel
@@ -23205,7 +23249,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_progress_expiry_reclaims_rows_without_losing_result() {
+    fn completed_progress_expiry_preserves_geometry_and_result() {
         use ilium_core::{PaneProgress, ProgressTaskReport, ProgressTaskStatus};
         use ratatui::{backend::TestBackend, Terminal};
         let mut app = app();
@@ -23257,9 +23301,9 @@ mod tests {
 
         assert!(app.tick_completed_progress_display(61_000));
         let after = app.pane_viewport(pane_id).unwrap();
-        assert!(after.content_area.height > before.content_area.height);
+        assert_eq!(after.content_area, before.content_area);
         assert!(!app.shows_progress_footer(pane_id));
-        assert!(app
+        assert!(!app
             .take_outbound_requests()
             .iter()
             .any(|request| matches!(request, ClientRequest::ResizePane { .. })));
@@ -23351,11 +23395,11 @@ mod tests {
             assert!(app.tick_completed_progress_display(61_000));
             let done_after = app.pane_viewport(done).unwrap();
             let busy_after = app.pane_viewport(busy).unwrap();
-            assert!(done_after.content_area.height > done_before.content_area.height);
+            assert_eq!(done_after.content_area, done_before.content_area);
             assert!(!app.shows_progress_footer(done));
             assert_eq!(busy_after, busy_before);
             assert!(!app.tree.pane_progress(done).is_empty());
-            assert!(app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { pane_id, .. } if *pane_id == done)));
+            assert!(!app.take_outbound_requests().iter().any(|request| matches!(request, ClientRequest::ResizePane { pane_id, .. } if *pane_id == done)));
             app.ui_settings.completed_progress_hide_after_seconds = 0;
             app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
             assert!(app.pane_viewport(done).unwrap().progress_area.is_some());
@@ -24545,6 +24589,25 @@ mod tests {
             app.status_message.as_deref(),
             Some("Inference test failed: connection refused")
         );
+    }
+
+    #[test]
+    fn project_with_chatroom_does_not_offer_to_add_another() {
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(std::path::PathBuf::from("/tmp/chatroom-menu"))
+            .unwrap();
+        assert!(app
+            .context_actions_for(project)
+            .contains(&ContextMenuAction::AddChatroom));
+        app.chatroom_projects.insert(project);
+        assert!(!app
+            .context_actions_for(project)
+            .contains(&ContextMenuAction::AddChatroom));
+        assert!(app
+            .context_actions_for(project)
+            .contains(&ContextMenuAction::RemoveChatroom));
     }
 
     #[test]
@@ -26983,6 +27046,11 @@ mod tests {
                 )
                 .unwrap();
         };
+
+        // Custom animations wake only for rows the last frame drew.
+        app.record_composed_tree_rows(crate::tree_ui::PaintedTreeRows::drawn_rows_for_test(&[
+            pane_id,
+        ]));
 
         // Normal mode: the built-in working spinner keeps its clock.
         set_status(&mut app, None);

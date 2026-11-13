@@ -6575,8 +6575,44 @@ pub(crate) struct AgentMonitoringView {
     pub(crate) configure_hit_width: u16,
 }
 
-/// Text of the Configure button, also the exact extent of its hit zone.
-pub(crate) const CONFIGURE_BUTTON_LABEL: &str = "  [ Configure custom icons ]";
+/// Rows the framed Configure button occupies; all of them are its hit zone.
+pub(crate) const CONFIGURE_BUTTON_ROWS: u16 = 3;
+
+/// Left indent of the Configure button, in cells.
+const CONFIGURE_BUTTON_INDENT: &str = "  ";
+
+/// The framed Configure button: a rounded three-row box whose middle row
+/// names the action and the rule summary.
+pub(crate) fn configure_button_lines(summary: &str) -> Vec<Line<'static>> {
+    let label = configure_button_label(summary);
+    let edge = "─".repeat(UnicodeWidthStr::width(label.as_str()));
+    let style = theme::selected_style().add_modifier(Modifier::BOLD);
+    vec![
+        Line::from(Span::styled(
+            format!("{CONFIGURE_BUTTON_INDENT}╭{edge}╮"),
+            style,
+        )),
+        Line::from(vec![
+            Span::styled(format!("{CONFIGURE_BUTTON_INDENT}│"), style),
+            Span::styled(label, style),
+            Span::styled("│", style),
+        ]),
+        Line::from(Span::styled(
+            format!("{CONFIGURE_BUTTON_INDENT}╰{edge}╯"),
+            style,
+        )),
+    ]
+}
+
+/// Cells from the left edge of the button to its right edge, inclusive.
+pub(crate) fn configure_button_width(summary: &str) -> u16 {
+    let inner = UnicodeWidthStr::width(configure_button_label(summary).as_str());
+    (UnicodeWidthStr::width(CONFIGURE_BUTTON_INDENT) + inner + 2) as u16
+}
+
+fn configure_button_label(summary: &str) -> String {
+    format!(" Configure custom icons · {summary} · press C ")
+}
 
 /// "22 rules, 21 enabled", shown beside the Configure button.
 pub(crate) fn custom_rules_summary(
@@ -6820,21 +6856,10 @@ pub(crate) fn agent_monitoring_view(
     view.cards = block.cards;
     if app.ui_settings.agent_monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Custom
     {
+        let summary = custom_rules_summary(&app.custom_status_rules);
         view.configure_line = Some(view.lines.len() as u16);
-        view.configure_hit_width = UnicodeWidthStr::width(CONFIGURE_BUTTON_LABEL) as u16;
-        view.lines.push(Line::from(vec![
-            Span::styled(
-                CONFIGURE_BUTTON_LABEL,
-                theme::selected_style().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!(
-                    "  ·  press C  ·  {}",
-                    custom_rules_summary(&app.custom_status_rules)
-                ),
-                dim,
-            ),
-        ]));
+        view.configure_hit_width = configure_button_width(&summary);
+        view.lines.extend(configure_button_lines(&summary));
     }
     view.lines.push(Line::from(""));
     view.lines.push(Line::from(Span::styled(
@@ -6952,8 +6977,11 @@ pub fn agent_monitoring_content_hit(
     if let Some(index) = crate::selectable_cards::hit(&rects, virtual_position) {
         return Some(AgentMonitoringContentHit::Mode(view.cards[index].0));
     }
-    if view.configure_line == Some(virtual_line) && virtual_position.x < view.configure_hit_width {
-        return Some(AgentMonitoringContentHit::Configure);
+    if let Some(top) = view.configure_line {
+        let rows = top..top.saturating_add(CONFIGURE_BUTTON_ROWS);
+        if rows.contains(&virtual_line) && virtual_position.x < view.configure_hit_width {
+            return Some(AgentMonitoringContentHit::Configure);
+        }
     }
     let row = view
         .row_lines
@@ -7639,6 +7667,31 @@ mod tests {
     use ratatui::Terminal;
 
     use super::*;
+
+    #[test]
+    fn configure_button_is_a_framed_three_row_box_of_one_width() {
+        let summary = "22 rules, 21 enabled";
+        let lines = configure_button_lines(summary);
+        assert_eq!(lines.len(), usize::from(CONFIGURE_BUTTON_ROWS));
+        let widths: Vec<usize> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+                    .sum()
+            })
+            .collect();
+        assert!(
+            widths
+                .iter()
+                .all(|width| *width == usize::from(configure_button_width(summary))),
+            "every row spans the hit width: {widths:?}"
+        );
+        assert!(lines[1].to_string().contains("Configure custom icons"));
+        assert!(lines[1].to_string().contains(summary));
+        assert!(lines[0].to_string().contains('╭') && lines[2].to_string().contains('╰'));
+    }
 
     #[test]
     fn boolean_switch_states_use_the_same_seven_terminal_cells() {
@@ -8349,6 +8402,27 @@ mod tests {
                     );
                 }
             }
+        }
+
+        // The custom status rules editor is its own screen; its heading,
+        // column and THEN-row topics are anchored there, one per column.
+        app.custom_status_rules = ilium_core::status_rule_expression::default_rules();
+        for column in [
+            crate::status_rules_editor::EditorColumn::Rules,
+            crate::status_rules_editor::EditorColumn::ConditionAndVisual,
+            crate::status_rules_editor::EditorColumn::Preview,
+        ] {
+            let mut editor = crate::status_rules_editor::EditorState::new(&app.custom_status_rules);
+            editor.column = column;
+            reachable.extend(
+                crate::status_rules_editor::help_anchor_lines(
+                    ratatui::layout::Rect::new(0, 0, 120, 30),
+                    &app,
+                    &editor,
+                )
+                .into_iter()
+                .map(|(topic, _, _)| topic.to_owned()),
+            );
         }
 
         let catalog_ids = crate::settings_help::catalog::all()
@@ -9111,7 +9185,7 @@ mod tests {
             .custom_status_rules
             .rules
             .iter_mut()
-            .find(|rule| rule.id == "working-goal")
+            .find(|rule| rule.id == "working")
             .unwrap();
         working.then.kind = VisualKind::Glyph("X".to_owned());
         let after = crate::status_demo::preview_span(

@@ -653,16 +653,18 @@ Exit status is `0` when the run finished, including with failed or stale panes; 
 
 `ilium ctl` is the full remote-control surface for agents and scripts. It reads the live tree and changes it: anything the interface does to panes, projects and groups has a command. Start with `ilium ctl guide`, which prints the essentials as example commands; `ilium ctl guide topics` lists deeper topics (reading, creating, controlling, arranging, http) and `ilium ctl ops` prints one JSON example of every operation.
 
-Global options: `--session NAME` (session of the `--cwd` project), `--socket PATH` (one live session, see `ilium ctl sessions`), `--format json|jsonl|yaml|markdown` for reads. Inside an Ilium pane the pane's own session is the default. Nodes are addressed by numeric id; projects also by absolute path, directory name or display name when unambiguous.
+For a managing agent, start with `ilium ctl agent-guide` and the [monitoring commands](monitoring-cli.md). Use `events --follow`, bounded `digest` output and `ack` to handle changes without repeated full-tree reads. Outside callers default to read access; writes require `--access act` or an act token, and `terminate`/`kill-session` require admin. Authorized writes record a durable audit attempt before dispatch.
+
+Global options: `--all-sessions` (all live sessions, read commands only), `--access read|act|admin`, `--token TOKEN`, `--session NAME` (session of the `--cwd` project), `--socket PATH` (one live session, see `ilium ctl sessions`), `--format json|jsonl|yaml|markdown` for reads. Inside an Ilium pane the pane's own session is the default. Nodes are addressed by numeric id; projects also by absolute path, directory name or display name when unambiguous.
 
 | Command | What it does |
 | --- | --- |
-| `ctl tree [--depth N] [--project P] [--no-details]` | The whole session. |
+| `ctl tree [--all] [--depth N] [--project P] [--no-details]` | The whole session. |
 | `ctl project P` / `ctl node ID` | One project or node and its subtree. |
-| `ctl pane ID [--screen] [--lines N]` | Everything known about one pane, optionally with its screen text. |
-| `ctl find [--agent A] [--state S] [--kind K] [--project P] [--name-contains T]` | Flat list of matching panes. |
+| `ctl pane ID [--brief \| --screen] [--lines N]` | A minimal state/message brief or full pane details, optionally with screen text. |
+| `ctl find [--all] [--agent A] [--state S] [--kind K] [--project P] [--name-contains T]` | Flat list of matching panes. |
 | `ctl screen ID [--lines N]` | Current screen text of a terminal pane. |
-| `ctl wait ID [--state idle,done] [--timeout S]` | Block until an agent reaches a state or the pane closes. |
+| `ctl wait ID... [--any \| --all] [--state idle,done] [--timeout S]` | Block until any/all selected panes reach a state or close. |
 | `ctl whoami`, `ctl sessions` | The calling pane; live sessions. |
 | `ctl new-pane [--project P \| --parent ID] [--workdir DIR] [--agent claude\|codex\|agy [--prompt T]] [--worktree --branch B [--base REF]] [--editor FILE] [--keep-open] [-- CMD]` | Create a shell, command, editor or agent pane; a worktree pane creates the Git worktree first. |
 | `ctl new-project DIR`, `new-group NAME`, `new-folder DIR`, `new-split-view NAME ID ID...`, `change-folder P DIR` | Create and re-point containers and split views. |
@@ -737,7 +739,7 @@ Error messages worth knowing:
 
 ## Other binaries and hidden commands
 
-- `ilium-server`: the background daemon, one per project session. You normally never start it yourself; `ilium` spawns it detached with internal arguments. It also accepts unauthenticated `POST /create_agent` requests on `127.0.0.1:8872`; any local process can submit one, so keep that listener private (the port is `[api].port` in `config.toml`). See [Automation](automation.md).
+- `ilium-server`: the background daemon, one per project session. You normally never start it yourself; `ilium` spawns it detached with internal arguments. Its loopback API defaults to `127.0.0.1:8872`; writes, including `POST /create_agent`, require a bearer token (the port is `[api].port` in `config.toml`). See [Automation](automation.md) and [control grants](monitoring-cli.md#grant-control-and-record-writes).
 - `ilium-animation-helper`: the confined helper that runs bundled `.iliumanim` animations. It and the animations must stay beside `ilium`. See [Animations](animations.md).
 - Hidden subcommands exist for internal and release qualification use (`clipboard-helper`, `release-embedding-probe`, `release-animation-probe`). They are not part of the user interface and may change without notice.
 - Flatpak builds forward the `ilium` command to the host so panes can use host tools. See [Installation](installation.md).

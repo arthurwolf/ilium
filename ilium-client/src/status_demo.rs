@@ -9,9 +9,7 @@
 
 use std::sync::OnceLock;
 
-use ilium_core::status_rule_expression::{
-    DemoSituation, Observation, ScreenPattern, ScreenRegion,
-};
+use ilium_core::status_rule_expression::{DemoSituation, Observation, ScreenPattern, ScreenRegion};
 use ratatui::text::Span;
 
 use crate::agent_monitoring::AgentMonitoringMode;
@@ -23,7 +21,9 @@ pub(crate) fn situations() -> &'static [DemoSituation] {
     SITUATIONS.get_or_init(ilium_core::status_rule_expression::demo_situations)
 }
 
-/// Names of the demo situations, in catalogue order.
+/// Names of the demo situations, in catalogue order (the tests check the
+/// card tree's names against this list).
+#[cfg(test)]
 pub(crate) fn names() -> Vec<&'static str> {
     situations()
         .iter()

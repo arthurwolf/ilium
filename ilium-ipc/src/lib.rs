@@ -15,6 +15,7 @@ mod allocation;
 mod bounded_decode;
 mod error;
 mod framing;
+mod monitoring;
 pub mod plugin;
 mod protocol;
 pub mod resource;
@@ -35,6 +36,9 @@ pub use ilium_agent_debug::{
     AgentDebugEventMetadata, AgentDebugField, AgentDebugFieldPresentation, AgentDebugSeverity,
     AgentDebugSource, PaneDebugLog, PaneResizeCause,
 };
+pub use monitoring::{
+    MonitoringEvent, MonitoringEventKind, MonitoringFormat, MonitoringQuery, MonitoringView,
+};
 pub use plugin::PLUGIN_PROTOCOL_VERSION;
 pub use protocol::{
     AgentDetectionSettings, AgentDetectionSettingsError, AntigravityStatuslineAction,
@@ -43,9 +47,9 @@ pub use protocol::{
     PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
     ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
-    StatusScreenObservation, StatusScreenWatch, StatusScreenWatchRejection, WorkspaceClosePolicy, WorkspaceCreateSpec,
-    WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus, WorkspaceGitVersion,
-    WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
+    StatusScreenObservation, StatusScreenWatch, StatusScreenWatchRejection, WorkspaceClosePolicy,
+    WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus,
+    WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
     WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
     WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget, WorkspaceWorktreeFact,
 };

@@ -277,6 +277,7 @@ After a restart, Ilium restores the layout and relaunches pane programs, resumin
 | `ilium chat --help` / `ilium progress --help` | Chatroom and progress commands. |
 | `ilium voice say --help` | Typed voice input. |
 | `ilium ctl <command>` | Full remote control for agents and scripts: read the tree as JSON/YAML/Markdown, create, move, rename, close and drive panes. Start with `ilium ctl guide`. |
+| `ilium ctl agent-guide` | Learn the [agent monitoring loop](src/docs/monitoring-cli.md): block for changes, read a bounded digest, drill into one pane and acknowledge handled evidence. |
 | `ilium panes` / `ilium broadcast <message>` | List panes, or message agents, across every running session; filter by project, agent, state, text or regex. |
 
 Every command and flag: [Command-line reference](src/docs/cli-reference.md).

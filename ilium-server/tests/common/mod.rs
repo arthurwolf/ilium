@@ -453,7 +453,12 @@ impl TestServer {
         // dropped at the end of the test.
         let live_server_guard = LIVE_SERVER_LOCK.lock().await;
         let dir = tempfile::tempdir().expect("create tempdir");
-        let snapshot_path = dir.path().join(format!("{session_name}.snapshot.json"));
+        // Match the production layout so lifecycle and control audit logs stay
+        // inside this fixture rather than sharing the system temporary parent.
+        let snapshot_path = dir
+            .path()
+            .join(".ilium/sessions")
+            .join(format!("{session_name}.json"));
         // The socket deliberately does not live under `dir`. A Unix socket
         // address is a fixed-size `sockaddr_un` -- 104 bytes on macOS -- and a
         // platform temporary directory can spend most of that on its own:

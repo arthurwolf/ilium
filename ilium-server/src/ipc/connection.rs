@@ -202,13 +202,15 @@ impl Drop for TerminalSubscriptionGuard {
 }
 
 /// Per-connection replay phase shared by the request reader and event writer.
-/// Connections may issue lifecycle commands before attaching, so only the
-/// interval in which an Attach replay is actively being assembled is gated.
+/// Connections may issue lifecycle commands before attaching. Monitoring-only
+/// connections discard session broadcasts while continuing to drain journals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AttachPhase {
     Open,
     Replaying,
     Ready,
+    /// A direct monitoring read needs replies, not the session tree stream.
+    Monitoring,
 }
 
 /// Normal disconnects drain final replies. A failed attach seed must instead
@@ -318,6 +320,7 @@ where
     // Connection ownership bounds work and aborts queries on disconnect.
     let mut repository_queries = tokio::task::JoinSet::new();
     let mut resource_waits = tokio::task::JoinSet::new();
+    let mut monitoring_waits = tokio::task::JoinSet::new();
     // Connection-owned tasks are cancelled when the connection closes.
     let mut resource_snapshot = tokio::task::JoinSet::new();
     let mut screen_watches = tokio::task::JoinSet::new();
@@ -528,6 +531,64 @@ where
             }
         }
 
+        if let ClientRequest::MonitoringAck {
+            request_id,
+            consumer,
+            cursor,
+        } = request
+        {
+            if *attach_phase_tx.borrow() == AttachPhase::Open {
+                attach_phase_tx.send_replace(AttachPhase::Monitoring);
+            }
+            let result = crate::monitoring_query::acknowledge(&state.events, consumer, cursor).map(
+                |sequence| {
+                    format!(
+                        "{}:{sequence}",
+                        state
+                            .events
+                            .monitoring
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .epoch()
+                    )
+                },
+            );
+            let _ = direct_tx
+                .send(ServerEvent::MonitoringAck {
+                    request_id: *request_id,
+                    result,
+                })
+                .await;
+            continue;
+        }
+        if let ClientRequest::MonitoringEvents { request_id, query } = request {
+            let monitoring_only = *attach_phase_tx.borrow() == AttachPhase::Open;
+            if monitoring_only {
+                attach_phase_tx.send_replace(AttachPhase::Monitoring);
+            }
+            while monitoring_waits.try_join_next().is_some() {}
+            if monitoring_waits.len() >= 128 {
+                let _ = direct_tx
+                    .send(ServerEvent::MonitoringEvents {
+                        request_id: *request_id,
+                        result: Err("too many monitoring subscriptions".into()),
+                    })
+                    .await;
+            } else {
+                let wait_state = Arc::clone(&state);
+                let replies = direct_tx.clone();
+                let query = query.clone();
+                let request_id = *request_id;
+                monitoring_waits.spawn(async move {
+                    let result =
+                        crate::monitoring_query::read_query_with_state(&wait_state, &query).await;
+                    let _ = replies
+                        .send(ServerEvent::MonitoringEvents { request_id, result })
+                        .await;
+                });
+            }
+            continue;
+        }
         if let ClientRequest::Resource {
             request_id,
             request: resource_request,
@@ -834,6 +895,7 @@ async fn write_replies_inner<W, E>(
                 // worth flushing, so drain what's already pending and then
                 // stop, rather than waiting indefinitely for more.
                 None => {
+                    if *attach_phase_rx.borrow() != AttachPhase::Monitoring {
                     drain_pending_broadcasts(
                         &mut broadcast_rx,
                         &mut frame_writer,
@@ -842,6 +904,7 @@ async fn write_replies_inner<W, E>(
                         resynchronization_state.as_deref(),
                     )
                     .await;
+                    }
                     break;
                 }
             },
@@ -947,7 +1010,7 @@ async fn write_replies_inner<W, E>(
                 Ok(event) => (event.into(), true, None, None),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::warn!("connection lagged behind the session broadcast, skipped {skipped} event(s)");
-                    if let Some(state) = &resynchronization_state {
+                    if let Some(state) = resynchronization_state.as_ref().filter(|_| *attach_phase_rx.borrow() != AttachPhase::Monitoring) {
                         if !write_resynchronization(
                             &mut frame_writer,
                             state,
@@ -972,6 +1035,12 @@ async fn write_replies_inner<W, E>(
             },
         };
 
+        if is_session_event && *attach_phase_rx.borrow() == AttachPhase::Monitoring {
+            if !acknowledge_ordered_event(&ordered_rx, journal_sequence) {
+                break;
+            }
+            continue;
+        }
         if is_session_event && !should_forward_terminal_event(&event, &terminal_stream_selection) {
             if !acknowledge_ordered_event(&ordered_rx, journal_sequence) {
                 break;
@@ -2345,6 +2414,45 @@ mod tests {
         .unwrap();
         assert_eq!(received, tree_event);
 
+        writer.abort();
+    }
+
+    #[tokio::test]
+    async fn monitoring_only_connection_sends_direct_pages_without_tree_broadcasts() {
+        let (server_stream, mut client_stream) = duplex(4096);
+        let (broadcast_tx, broadcast_rx) = broadcast::channel(8);
+        let (direct_tx, direct_rx) = DirectEventSender::channel(8);
+        let (_attach_phase_tx, attach_phase_rx) = watch::channel(AttachPhase::Monitoring);
+        let writer = tokio::spawn(write_replies(
+            server_stream,
+            broadcast_rx,
+            direct_rx,
+            attach_phase_rx,
+            mpsc::channel(1).1,
+            None,
+        ));
+        broadcast_tx
+            .send(ServerEvent::TreeSnapshot(Tree::new()))
+            .unwrap();
+        let page = ServerEvent::MonitoringEvents {
+            request_id: 17,
+            result: Ok("quiet\n".into()),
+        };
+        direct_tx.send(page.clone()).await.unwrap();
+        let received = timeout(
+            Duration::from_secs(1),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(received, page);
+        assert!(timeout(
+            Duration::from_millis(100),
+            read_frame::<ServerEvent, _>(&mut client_stream)
+        )
+        .await
+        .is_err());
         writer.abort();
     }
 
