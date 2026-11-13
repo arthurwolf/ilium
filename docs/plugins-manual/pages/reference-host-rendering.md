@@ -315,3 +315,8 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions (round 13)
 
 - **[PRO-001]** The system must, when a client terminal is narrower than 20 columns or shorter than 6 rows, replace the whole screen with one line 'Terminal too small: need 20x6, have WxH' in the plain role, must call views.render for no plugin view while that state lasts, must keep server work, panes and PTYs running, and must restore the previous layout, focus and scroll positions within 100 ms of the first resize that meets the minimum.
+
+## Production additions (round 14)
+
+- **[PRN-010]** The system must give each terminal pane one PTY size, the minimum columns and minimum rows over the clients currently viewing it, and must recompute it within 100 ms when a client attaches, detaches or resizes. Each larger client must draw the pane at that size and show the unused area as a visible margin. A client in the background or too small (PRO-001) must not count. The system must emit one pane-resized event per change, and a test with clients of 80x24 and 120x40 must read back identical PTY dimensions in both.
+- **[PRN-014]** The system must lay out status-area contributions by declared priority, then by core-first owner order. When the width is insufficient it must drop whole items from the lowest priority up, never cut one in the middle. It must show a '+N' overflow marker that opens a list of all items and their owners with keyboard access. Trusted host items (safe mode, consent, crash banners) must never be dropped. A test contributes 20 items at widths 40, 80 and 200 and checks the visible set, the marker count and that a plugin cannot raise its own priority above host items.

@@ -96,3 +96,7 @@ invoke: func(command: string, arguments-json: string) -> result<request-id, plug
 ### Security
 
 Palette entries show the plugin name and are sanitised ([SEC-378], [SEC-380]).
+
+## Production additions (round 14)
+
+- **[PRN-013]** The system must order palette results by match quality, then by use in the last 30 days for that user, then by owner (core first) and title. It must list a command of a disabled plugin only in a separate 'Unavailable' group with the enable action (PRQ-007). With an empty query it must show the 5 most recent commands first. The same query on the same data must give the same order in every client and language, and a test checks this for two languages.

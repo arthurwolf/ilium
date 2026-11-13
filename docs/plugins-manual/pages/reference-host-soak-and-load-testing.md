@@ -115,3 +115,7 @@ A server session can run for weeks. Growth that a short soak run hides, such as 
 - [Sandbox helper](/pages/reference-host-helper/) for helper restarts.
 
 API version checked: `ilium:plugin@0.1.0`.
+
+## Production additions (round 14)
+
+- **[PRN-003]** The system must pass a release gate that runs 200 consecutive install, update, rollback and uninstall cycles of the same plugin id and ends with the data root, open file descriptor count and installed.json size within 1 percent of their starting values, failing with soak.lifecycle-leak and naming the first growing artefact.

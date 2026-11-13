@@ -302,3 +302,7 @@ The review dialog lists plugins that will be installed or updated because of a d
 ## Production additions (round 7)
 
 - **[PRU-007]** A dependency id with no installed copy MUST resolve only from the source and publisher namespace of the requiring plugin, or from a source the administrator lists for that id. A higher version of the same id from another configured source MUST NOT win the tie-break, and the host MUST refuse with dependency.source-mismatch naming both sources.
+
+## Production additions (round 14)
+
+- **[PRN-017]** The system must validate every `source` in an `ilium-plugins.lock` against the configured registries, mirrors and the policy source allow-list before any network or file access. It must refuse an entry with scheme http, a loopback or private-range host, or a path outside the lock file's project, failing with `dependency.lock-source-refused` and exit 2 without making any request. A lock from a project that is not trusted must not be applied by `--locked` without the project-trust dialog of SEC-116. Test: a lock with `source` set to `http://127.0.0.1:8080/x`, then to `file:///etc`, then to an unlisted https host. Assert zero outbound connections and the error code each time.

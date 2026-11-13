@@ -506,3 +506,7 @@ API version checked: `ilium:plugin@0.1.0`.
 
 - **[PRP-015]** The system must retry a rename or delete that fails because another process holds the file, with backoff for at most 10 seconds, then abort with install.file-busy (exit 4) naming the path and holder, keeping the previous version active, removing staging and leaving installed.json unchanged.
 - **[PRP-020]** The system must not delete the store entry, compile cache entry or helper binary of a superseded or uninstalled version while any live server holds a lease on it, deferring deletion to a sweep within 24 hours after the last lease ends.
+
+## Production additions (round 14)
+
+- **[PRN-002]** The system must, when the cached revocation list is older than plugins.revocation_max_age_days and no network is reachable, keep already-installed plugins running unchanged, refuse a new install or update with trust.revocation-stale unless the user confirms in a dialog naming the age in days, and record the confirmation in the audit log.

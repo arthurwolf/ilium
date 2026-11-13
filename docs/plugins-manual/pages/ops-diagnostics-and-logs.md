@@ -106,3 +106,7 @@ The log shows the deadline trap as the cause. The operator then reads the plugin
 ## Production additions (round 13)
 
 - **[PRO-022]** The system must provide `ilium plugin host-status --json` that prints one record with safe_mode, crash_marks_in_window, disk_step, revocation_age_seconds, plugins_by_health counts, update_pending count and last_backup_age_seconds when a backup directory is configured, with a documented exit code 0 healthy, 1 degraded, 2 critical, and stable field names under the CLI output stability policy.
+
+## Production additions (round 14)
+
+- **[PRN-004]** The system must cap a support bundle at 25 MiB by default, truncate by dropping the oldest log lines first while always keeping the header, the last crash record and the operation-id index, and state in a bundle manifest entry each file that was truncated and by how many bytes.

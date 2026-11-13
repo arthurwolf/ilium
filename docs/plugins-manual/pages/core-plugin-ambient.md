@@ -675,3 +675,7 @@ Requirement wording: USR-307 and AUT-502 cover the host and plugin timers; the f
 - [Core plugins](/pages/core-plugins/)
 - [Scenes plugin](/pages/core-plugin-scenes/), the scenes that use this look
 - [Settings plugin](/pages/core-plugin-settings/)
+
+## Production additions (round 14)
+
+- **[PRN-011]** The system must stop all ambient and scene rendering work, including frame generation and video decode, within 1 second when no client is attached or the client reports a hidden terminal. It must resume without a visible jump on the next attach. While running, it must cap the process CPU use at the configured budget (default 5 percent of one core at 24 fps on the 80x24 reference) and lower the frame rate automatically when the cap is exceeded. A test measures CPU use with zero clients and with a hidden client.

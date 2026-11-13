@@ -300,3 +300,7 @@ A published plugin inherits the risk of the SDK it was built with. [SEC-173] pin
 
 - **[PRO-027]** The system must refuse a revocation feed, release blocklist or policy blocklist whose `issued` is more than 24 hours after the host clock, with audit `signature-failure` naming both times and without raising the stored last-issued mark; a fixture feed issued 30 days in the future is refused, and a following feed with a normal `issued` time is accepted.
 - **[PRO-028]** The system must measure the revocation staleness age and `max_revocation_age` with the monotonic clock since the last verified refresh, persisted with the boot id. A backward wall-clock change of at least 1 hour must not make the data look fresher, and after a reboot the age must be at least the larger of the persisted elapsed value and the wall-clock difference. A test setting the clock back 30 days on a stale feed must still give `trust.revocation-stale`.
+
+## Production additions (round 14)
+
+- **[PRN-019]** The system must, when revocation data is stale per EXT-072, show a line `Revocation data is N days old` in the install and update review dialog and in `ilium plugin install --json` as `revocation_age_days`. It must require `--accept-stale-revocation` for a non-interactive T2 install or update, and must refuse with exit 8 when the admin policy sets `require_fresh_revocation = true`. Test: age the list by 8 days and assert the notice, the flag requirement and the policy refusal.

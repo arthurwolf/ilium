@@ -763,3 +763,7 @@ Both points run on the server: the complete manifest grants `extensions.provide`
 - [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Fleet](/pages/core-plugin-fleet/), which calls the usage service to show cost in `ilium panes`.
 - [Agent detection](/pages/core-plugin-agent-detect/), which supplies the agents that this plugin prices.
+
+## Production additions (round 14)
+
+- **[PRN-012]** The Cost plugin must show spend for a model with no matching price as 'unpriced', never as zero, and must exclude it from totals and from the budget comparison. It must show one line 'N requests unpriced' with an action that opens the prices setting. The built-in table must carry an issue date, and the plugin must show a stale-prices notice when that date is more than 90 days old. A test sends usage for an unknown model and checks the displayed totals, the unpriced count and that the budget alert does not treat it as free.

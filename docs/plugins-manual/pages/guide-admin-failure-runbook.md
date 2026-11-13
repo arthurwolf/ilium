@@ -362,3 +362,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions (round 13)
 
 - **[PRO-019]** The system must, when a plugin updated within the last 30 minutes reaches stopped-by-failure on its new version and the previous version is still in the store, show a notice with a one-command rollback and, when the admin policy key plugins.auto_rollback_on_probation is true, roll back automatically, mark the new version skip, log update.rolled-back with reason probation and write one audit record.
+
+## Production additions (round 14)
+
+- **[PRN-018]** The system must provide `ilium plugin exposure <id> [--since <time>] [--json]`. It prints, from the audit log and the grant history, the intervals in which the plugin was enabled, the grants held in each interval, the resolved file roots, the pane kinds and agent configuration folders in reach, whether it held `http` or `inference` egress, and the names of secrets it holds. It must label each item 'could have' or 'did', and never state 'none' where the audit log lacks the data (it says 'unknown'). Test: install a plugin with fs.read:project and http, kill it, and assert the output lists both grants with the correct interval and marks reads as 'could have'.

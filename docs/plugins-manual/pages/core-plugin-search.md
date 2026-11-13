@@ -686,3 +686,8 @@ Side basis: `ilium.core.search/rank` is server because the server `capabilities`
 - [Core replacement matrix](/pages/reference-core-replacement-matrix/) for the surface, stored data, CLI names and install codes that a replacement of this plugin must keep.
 - [Core plugins](/pages/core-plugins/)
 - [Compaction plugin](/pages/core-plugin-compaction/), which shows the job runner in full
+
+## Production additions (round 14)
+
+- **[PRN-008]** The system must not embed, index, summarise or compact the text of a pane marked private, a pane in a private project, or a pane in a directory on the plugin's exclude list. Search, Recap and Compaction must send no byte of such a pane to any inference provider and must not store it in their data scope. Each must show the pane as 'excluded (private)' in its result list or command, and one privacy-log record must name the exclusion without the text.
+- **[PRN-009]** The system must remove a pane's search-index entries within 5 seconds of the pane closing and remove all entries of a session when it is deleted. It must cap the on-disk index at a configurable size (default 64 MiB) by evicting the oldest entries first. It must drop and rebuild the index after the selected embedding model changes, and show 'Index rebuilding' while it does. A test closes 100 panes, deletes a session and switches model, then reads back the index entry count, size and model stamp.

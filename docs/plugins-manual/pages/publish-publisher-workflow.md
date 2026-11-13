@@ -134,3 +134,7 @@ A publish token lasts 90 days and works for one publisher id only ([PKG-968](/pa
 ## Production additions (round 12)
 
 - **[PRP-002]** The system must provide ilium plugin publish --verify and ilium plugin verify-published that install the published version into a throw-away data root with a fresh trust store, check signature, hash and manifest against the local dist build, activate it, and exit non-zero with publish.verify-failed and the failing step, never touching the real installed set.
+
+## Production additions (round 14)
+
+- **[PRN-005]** The system must let a publisher register a trusted CI identity (issuer, repository, workflow) for a namespace, and the registry must exchange a verifiable CI identity assertion for a publish credential that expires within 15 minutes, is valid for one publisher id, and is refused with registry.auth when the assertion's repository or workflow does not match the registration.

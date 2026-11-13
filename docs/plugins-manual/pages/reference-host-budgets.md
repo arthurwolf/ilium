@@ -142,3 +142,7 @@ API version checked: `ilium:plugin@0.1.0`.
 ## Production additions (round 10)
 
 - **[PRR-006]** The system must, after SIGKILL of the server with 40 installed plugins and an interrupted update in staging, restart and accept its first client within 5 seconds with plugins loading in the background, and a benchmark must report time spent in each recovery step.
+
+## Production additions (round 14)
+
+- **[PRN-001]** The system must, with 40 enabled plugins and no user input for 10 minutes, keep whole-host CPU use at or below 1 percent of one core on the reference machine and keep resident memory growth at or below 8 MiB over that period, and the soak harness must fail with budget.idle-exceeded otherwise.

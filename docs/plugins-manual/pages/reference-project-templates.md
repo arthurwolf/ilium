@@ -655,3 +655,7 @@ API checked against `ilium:plugin@0.1.0`.
 ## Requirement statements
 
 - **[DEV-935]** `new` MUST write a `.gitignore` that lists `dist/`, `target/`, `node_modules/`, `publisher.key` and `*.tmp` (and `.ilium/`, as DEV-268 requires), and a `README.md` naming the build, test, dev and pack commands. `new --license <spdx-id>` MUST write a `LICENSE` and set the manifest `license` field; an id not in the SPDX list MUST fail with `new.license-unknown` before writing files.
+
+## Production additions (round 14)
+
+- **[PRN-007]** Each built-in template must ship a development-environment definition that pins the toolchain versions of reference-toolchain-support-matrix (Rust, Node, wasm tooling and the ilium CLI). A CI test must open it from a clean checkout and run `ilium plugin doctor`, `build`, `check` and `test` to success with no network access beyond the registry and package mirrors.

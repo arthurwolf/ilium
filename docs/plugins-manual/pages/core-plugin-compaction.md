@@ -635,3 +635,7 @@ Both points run on the server: the complete manifest grants `extensions.provide`
 - [Core plugins](/pages/core-plugins/)
 - [Settings plugin](/pages/core-plugin-settings/), which hosts the Optimization tab
 - [Agent toolbar plugin](/pages/core-plugin-agent-toolbar/), which owns the compact button
+
+## Production additions (round 14)
+
+- **[PRN-015]** With Automatic on, the Compaction plugin must compact only a pane whose turn state is Idle, must skip it with one notice when the agent is working or awaiting approval, and must not compact the same pane twice within 10 minutes. It must write a pre-compaction snapshot reference to the notice log, and on provider failure it must change nothing in the pane and show the cause. A test drives a fixture agent through working, idle and failed-compaction states.
