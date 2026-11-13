@@ -832,7 +832,9 @@ impl TerminalPaneRuntime {
             process_identity: self.session_process_identity.clone()?,
             session_id: self.session_id.clone()?,
             transcript_path: self.session_transcript_path.clone()?,
-            monitor_running: self.progress_monitors().any(|monitor| !monitor.is_settled()),
+            monitor_running: self
+                .progress_monitors()
+                .any(|monitor| !monitor.is_settled()),
         })
     }
 

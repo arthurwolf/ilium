@@ -106,52 +106,135 @@ mod tests {
     #[test]
     fn disabled_or_unverified_provider_never_schedules_a_ping() {
         let mut settings = CacheKeepaliveSettings::default();
-        let input = ScheduleInput { now_millis: 4_000_000, last_request_millis: 1_000, last_attempt_millis: None, attempt_in_flight: false, provider_ready: true, wait: waiting() };
+        let input = ScheduleInput {
+            now_millis: 4_000_000,
+            last_request_millis: 1_000,
+            last_attempt_millis: None,
+            attempt_in_flight: false,
+            provider_ready: true,
+            wait: waiting(),
+        };
         assert_eq!(settings.next_ping(&crate::AgentClass::Claude, &input), None);
         settings.enabled = true;
-        assert_eq!(settings.next_ping(&crate::AgentClass::Claude, &ScheduleInput { provider_ready: false, ..input }), None);
-        assert_eq!(settings.next_ping(&crate::AgentClass::Antigravity, &input), None);
+        assert_eq!(
+            settings.next_ping(
+                &crate::AgentClass::Claude,
+                &ScheduleInput {
+                    provider_ready: false,
+                    ..input
+                }
+            ),
+            None
+        );
+        assert_eq!(
+            settings.next_ping(&crate::AgentClass::Antigravity, &input),
+            None
+        );
     }
 
     #[test]
     fn selected_wait_conditions_are_disjunctions_and_unknown_waits_do_not_qualify() {
-        let settings = CacheKeepaliveSettings { enabled: true, on_monitor: false, on_command: true, on_subagent: false, ..Default::default() };
-        let mut input = ScheduleInput { now_millis: 3_000_000, last_request_millis: 0, last_attempt_millis: None, attempt_in_flight: false, provider_ready: true, wait: waiting() };
+        let settings = CacheKeepaliveSettings {
+            enabled: true,
+            on_monitor: false,
+            on_command: true,
+            on_subagent: false,
+            ..Default::default()
+        };
+        let mut input = ScheduleInput {
+            now_millis: 3_000_000,
+            last_request_millis: 0,
+            last_attempt_millis: None,
+            attempt_in_flight: false,
+            provider_ready: true,
+            wait: waiting(),
+        };
         assert_eq!(settings.next_ping(&crate::AgentClass::Codex, &input), None);
         input.wait.command_waiting = true;
-        assert_eq!(settings.next_ping(&crate::AgentClass::Codex, &input), Some(1_500_000));
+        assert_eq!(
+            settings.next_ping(&crate::AgentClass::Codex, &input),
+            Some(1_500_000)
+        );
         input.wait.command_waiting = false;
         assert_eq!(settings.next_ping(&crate::AgentClass::Codex, &input), None);
     }
 
     #[test]
     fn latest_real_request_or_attempt_moves_the_deadline_and_inflight_blocks_duplicates() {
-        let settings = CacheKeepaliveSettings { enabled: true, ..Default::default() };
-        let input = ScheduleInput { now_millis: 4_000_000, last_request_millis: 500_000, last_attempt_millis: Some(900_000), attempt_in_flight: false, provider_ready: true, wait: waiting() };
-        assert_eq!(settings.next_ping(&crate::AgentClass::Codex, &input), Some(2_400_000));
-        assert_eq!(settings.next_ping(&crate::AgentClass::Codex, &ScheduleInput { attempt_in_flight: true, ..input }), None);
+        let settings = CacheKeepaliveSettings {
+            enabled: true,
+            ..Default::default()
+        };
+        let input = ScheduleInput {
+            now_millis: 4_000_000,
+            last_request_millis: 500_000,
+            last_attempt_millis: Some(900_000),
+            attempt_in_flight: false,
+            provider_ready: true,
+            wait: waiting(),
+        };
+        assert_eq!(
+            settings.next_ping(&crate::AgentClass::Codex, &input),
+            Some(2_400_000)
+        );
+        assert_eq!(
+            settings.next_ping(
+                &crate::AgentClass::Codex,
+                &ScheduleInput {
+                    attempt_in_flight: true,
+                    ..input
+                }
+            ),
+            None
+        );
     }
 
     #[test]
     fn a_late_wait_does_not_postpone_an_already_due_refresh() {
-        let settings = CacheKeepaliveSettings { enabled: true, ..Default::default() };
+        let settings = CacheKeepaliveSettings {
+            enabled: true,
+            ..Default::default()
+        };
         let input = ScheduleInput {
             now_millis: 2_000_000,
             last_request_millis: 1_000,
             last_attempt_millis: None,
             attempt_in_flight: false,
             provider_ready: true,
-            wait: WaitObservation { wait_started_millis: 1_900_000, ..waiting() },
+            wait: WaitObservation {
+                wait_started_millis: 1_900_000,
+                ..waiting()
+            },
         };
-        assert_eq!(settings.next_ping(&crate::AgentClass::Codex, &input), Some(1_501_000));
+        assert_eq!(
+            settings.next_ping(&crate::AgentClass::Codex, &input),
+            Some(1_501_000)
+        );
     }
 
     #[test]
     fn zero_interval_is_rejected_and_deadlines_saturate_without_wrapping() {
-        let settings = CacheKeepaliveSettings { enabled: true, codex_interval_minutes: 0, ..Default::default() };
-        let input = ScheduleInput { now_millis: u64::MAX, last_request_millis: u64::MAX - 1, last_attempt_millis: None, attempt_in_flight: false, provider_ready: true, wait: waiting() };
+        let settings = CacheKeepaliveSettings {
+            enabled: true,
+            codex_interval_minutes: 0,
+            ..Default::default()
+        };
+        let input = ScheduleInput {
+            now_millis: u64::MAX,
+            last_request_millis: u64::MAX - 1,
+            last_attempt_millis: None,
+            attempt_in_flight: false,
+            provider_ready: true,
+            wait: waiting(),
+        };
         assert_eq!(settings.next_ping(&crate::AgentClass::Codex, &input), None);
-        let settings = CacheKeepaliveSettings { codex_interval_minutes: 25, ..settings };
-        assert_eq!(settings.next_ping(&crate::AgentClass::Codex, &input), Some(u64::MAX));
+        let settings = CacheKeepaliveSettings {
+            codex_interval_minutes: 25,
+            ..settings
+        };
+        assert_eq!(
+            settings.next_ping(&crate::AgentClass::Codex, &input),
+            Some(u64::MAX)
+        );
     }
 }

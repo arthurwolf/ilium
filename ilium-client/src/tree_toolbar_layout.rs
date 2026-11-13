@@ -58,7 +58,9 @@ impl TreeToolbarEntry {
         if let Some(profile_id) = key.strip_prefix(CUSTOM_PREFIX) {
             return (!profile_id.is_empty()).then(|| Self::CustomAgent(profile_id.to_owned()));
         }
-        Self::ALL.into_iter().find(|entry| entry.builtin_key() == key)
+        Self::ALL
+            .into_iter()
+            .find(|entry| entry.builtin_key() == key)
     }
 
     fn builtin_key(&self) -> &'static str {
@@ -139,7 +141,12 @@ impl TreeToolbarLayout {
     pub fn available(&self, profile_ids: &[String]) -> Vec<TreeToolbarEntry> {
         TreeToolbarEntry::ALL
             .into_iter()
-            .chain(profile_ids.iter().cloned().map(TreeToolbarEntry::CustomAgent))
+            .chain(
+                profile_ids
+                    .iter()
+                    .cloned()
+                    .map(TreeToolbarEntry::CustomAgent),
+            )
             .filter(|entry| !self.entries.contains(entry))
             .collect()
     }
@@ -244,13 +251,22 @@ mod tests {
                 TreeToolbarEntry::CustomAgent("b".into())
             ]
         );
-        assert!(layout.entries.ends_with(&TreeToolbarLayout::ANCHORED_SUFFIX));
+        assert!(layout
+            .entries
+            .ends_with(&TreeToolbarLayout::ANCHORED_SUFFIX));
         assert!(!layout.reconcile_custom_agents(&ids));
-        layout.entries.retain(|e| *e != TreeToolbarEntry::CustomAgent("a".into()));
+        layout
+            .entries
+            .retain(|e| *e != TreeToolbarEntry::CustomAgent("a".into()));
         assert!(!layout.reconcile_custom_agents(&ids));
-        assert_eq!(layout.available(&ids), vec![TreeToolbarEntry::CustomAgent("a".into())]);
+        assert_eq!(
+            layout.available(&ids),
+            vec![TreeToolbarEntry::CustomAgent("a".into())]
+        );
         assert!(layout.reconcile_custom_agents(&["b".to_owned()]));
-        assert!(!layout.entries.contains(&TreeToolbarEntry::CustomAgent("a".into())));
+        assert!(!layout
+            .entries
+            .contains(&TreeToolbarEntry::CustomAgent("a".into())));
     }
 
     #[test]
