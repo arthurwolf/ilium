@@ -10,6 +10,7 @@ pub mod new_split;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use ilium_plugin_sdk::generated::host::tree::HostTree;
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, Activation, Alignment, Area, BlockSpec, BlockTitle, BorderType,
     Borders, CreatePaneSpec, CreateSplitSpec, ErrorCode, Event, Intent, MessageSpec, MessageTarget,
@@ -17,7 +18,7 @@ use ilium_plugin_sdk::types::{
     PluginSide, PointerKind, RequestRef, ResizePaneSpec, Span, SplitDirection, Style, Submission,
     TitlePosition, UiNode, UiTree, ViewTarget, Widget,
 };
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, Views};
 
 /// The plugin id, also the target of the client-to-server messages.
 const PLUGIN_ID: &str = "ilium.core.layout";
@@ -237,6 +238,35 @@ impl Lifecycle for LayoutClient {
     }
 }
 
+/// Most nodes the dialog reads from the tree; a larger tree offers its first panes only.
+const TREE_READ_LIMIT: usize = 4096;
+
+/// Builds the "New split view" dialog for a group from the tree as it is drawn. Without the
+/// `tree.read` grant the tree reads empty and the dialog offers no pane.
+fn new_split_dialog(parent: u64) -> new_split::Dialog {
+    let mut api = host();
+    let roots = HostTree::roots(&mut *api);
+    let root = roots.first().map_or(0, |root| root.0);
+    let mut nodes = Vec::new();
+    let mut panes = Vec::new();
+    let mut stack: Vec<NodeId> = roots.into_iter().rev().collect();
+    while let Some(id) = stack.pop() {
+        if nodes.len() >= TREE_READ_LIMIT {
+            break;
+        }
+        let Some(view) = HostTree::get(&mut *api, id) else {
+            continue;
+        };
+        let fact = new_split::TreeFact::from_view(&view);
+        if fact.kind == "pane" {
+            panes.push(fact.id);
+        }
+        nodes.push(fact);
+        stack.extend(HostTree::children(&mut *api, id).into_iter().rev());
+    }
+    new_split::Dialog::from_facts(parent, root, &nodes, &panes)
+}
+
 impl Handler for LayoutClient {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
         let mut submissions = Vec::new();
@@ -253,8 +283,9 @@ impl Handler for LayoutClient {
                     }
                 }
                 Event::CommandInvoked(invoked) if invoked.command == NEW_SPLIT_CHANNEL => {
-                    // Arguments that do not parse open nothing: there is no group to split in.
-                    if let Some(dialog) = new_split::Dialog::open(&invoked.arguments_json) {
+                    // Arguments without a group open nothing: there is nothing to split in.
+                    if let Some(parent) = new_split::parent_argument(&invoked.arguments_json) {
+                        let dialog = new_split_dialog(parent);
                         CLIENT.with(|cell| cell.borrow_mut().dialog = Some(dialog));
                         submissions.push(Submission::new(Intent::OpenView(OpenViewSpec {
                             view: new_split::view(),
@@ -607,7 +638,7 @@ mod spec_tests {
         );
         assert_eq!(
             string_array(&manifest["capabilities"]["client"]),
-            ["panes.read", "ui.panels"]
+            ["panes.read", "tree.read", "agent.read", "ui.panels"]
         );
     }
 

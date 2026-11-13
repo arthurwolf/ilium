@@ -5,6 +5,7 @@
 
 pub mod commands;
 pub mod host;
+pub mod keybindings;
 pub mod popup;
 pub mod screens_rig;
 pub mod widget_rig;

@@ -438,7 +438,7 @@ impl ImportsFixtureBuilder {
             panes_import: PanesImport,
             process_import: ProcessImport,
             settings_import: SettingsImport,
-            timers_import: TimersImport,
+            timers_import: TimersImport::default(),
             tree_import: TreeImport,
             save_trace: Vec::new(),
             validate_trap_pending: false,

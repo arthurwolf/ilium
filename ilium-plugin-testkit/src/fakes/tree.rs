@@ -89,6 +89,15 @@ impl FakeTree {
         id
     }
 
+    /// Adds a node under the id it carries, delivers `tree-changed` and returns that id. For
+    /// tests that name their nodes; later ids continue after the highest one.
+    pub fn add_with_id(&mut self, node: TreeNode) -> u64 {
+        let id = node.id;
+        self.insert_with_id(node);
+        self.emit(Event::TreeChanged(vec![NodeId(id)]));
+        id
+    }
+
     fn emit(&self, event: Event) {
         self.outbox.borrow_mut().push(event);
     }
@@ -242,7 +251,9 @@ impl FakeTree {
 
     /// The plugin metadata bytes stored on a node (lane hook, see manual_gaps_fakes.md; DEV-470).
     pub fn metadata(&self, id: u64) -> Option<Vec<u8>> {
-        self.extras.get(&id).and_then(|extras| extras.metadata.clone())
+        self.extras
+            .get(&id)
+            .and_then(|extras| extras.metadata.clone())
     }
 
     /// Stores plugin metadata bytes on a node (lane hook, see manual_gaps_fakes.md; DEV-470).

@@ -19,8 +19,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use ilium_plugin_api::generated::host::log::Level;
 use ilium_plugin_api::generated::types::events::{
-    CommandContext, CommandInvokedEvent, CommandOrigin, Event,
+    CommandContext, CommandInvokedEvent, CommandOrigin, Event, TopicPublishedEvent,
 };
 use ilium_plugin_api::generated::types::ids::PluginId;
 use ilium_plugin_api::generated::types::intents::Submission;
@@ -39,13 +40,15 @@ use crate::contributions::{ContributionOp, ContributionRegistry, Entry};
 use crate::engine::{CompiledComponent, PluginEngine};
 use crate::error::HostError;
 use crate::imports::backed::{
-    command_result, CommandQueue, KernelIntents, KernelPanes, KernelTree, LogSink,
-    RegistryCommands, ResultQueue, SinkLog,
+    command_result, CommandQueue, KernelAgent, KernelIntents, KernelPanes, KernelTerminal,
+    KernelTree, LogSink, RegistryCommands, ResultQueue, SinkLog,
 };
 use crate::imports::clock::ClockImport;
 use crate::imports::extensions::ExtensionsImport;
 use crate::imports::generated_dispatch::{ImportSet, IMPORT_INTERFACES};
 use crate::imports::settings::SettingsImport;
+use crate::imports::timers::{self, TimerBook, TimersImport};
+use crate::imports::topics::{self, PluginTopics, TopicOutbox};
 use crate::imports::ui_host::UiHostImport;
 use crate::instance::{ExportCall, ExportReply, PluginInstance};
 use crate::linker::LinkerCache;
@@ -232,6 +235,11 @@ pub struct HostRuntime {
     contributions: Arc<Mutex<ContributionRegistry>>,
     results: ResultQueue,
     commands: CommandQueue,
+    /// The timers of the current instance of each plugin. Behind a lock because
+    /// `build_imports` creates a book while the runtime is borrowed shared.
+    timer_books: Mutex<BTreeMap<String, TimerBook>>,
+    /// Topic messages plugins published since the last pump.
+    topic_outbox: TopicOutbox,
     next_instance: u64,
     job_panics: u64,
     next_activation: u64,
@@ -262,6 +270,8 @@ impl HostRuntime {
             contributions: Arc::new(Mutex::new(ContributionRegistry::new())),
             results: ResultQueue::default(),
             commands: CommandQueue::default(),
+            timer_books: Mutex::new(BTreeMap::new()),
+            topic_outbox: TopicOutbox::default(),
             next_instance: 1,
             job_panics: 0,
             next_activation: 1,
@@ -390,7 +400,16 @@ impl HostRuntime {
     }
 
     fn build_imports(&self, plugin: &str, record: &PluginRecord, instance: u64) -> ImportSet {
+        // A new instance starts without timers: the book of the previous one is replaced.
+        let timer_book = TimerBook::default();
+        lock(&self.timer_books).insert(plugin.to_owned(), Arc::clone(&timer_book));
         let mut set = ImportSet {
+            timers: Some(Box::new(TimersImport::with_book(timer_book))),
+            topics: Some(Box::new(PluginTopics::new(
+                plugin,
+                topics::declared_topics(&record.manifest),
+                Arc::clone(&self.topic_outbox),
+            ))),
             log: Some(Box::new(SinkLog::new(
                 Arc::clone(&self.log),
                 plugin,
@@ -399,8 +418,20 @@ impl HostRuntime {
             clock: Some(Box::new(ClockImport)),
             settings: Some(Box::new(SettingsImport)),
             extensions: Some(Box::new(ExtensionsImport)),
-            tree: Some(Box::new(KernelTree::new(Arc::clone(&self.kernel)))),
+            tree: Some(Box::new(KernelTree::new(
+                Arc::clone(&self.kernel),
+                plugin,
+                &record.granted,
+            ))),
             panes: Some(Box::new(KernelPanes::new(Arc::clone(&self.kernel)))),
+            agent: Some(Box::new(KernelAgent::new(
+                Arc::clone(&self.kernel),
+                &record.granted,
+            ))),
+            terminal: Some(Box::new(KernelTerminal::new(
+                Arc::clone(&self.kernel),
+                &record.granted,
+            ))),
             intents_host: Some(Box::new(KernelIntents::new(
                 Arc::clone(&self.kernel),
                 plugin,
@@ -658,14 +689,123 @@ impl HostRuntime {
         )
     }
 
-    /// Delivers the commands plugins asked for and the queued request results. Returns the
-    /// failures; a failed plugin is stopped and the others continue.
-    pub fn pump(&mut self) -> Vec<RuntimeError> {
+    /// The active plugins, in id order.
+    fn active_plugins(&self) -> Vec<String> {
+        self.plugins
+            .iter()
+            .filter(|(_, record)| record.state == PluginState::Active)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Delivers events to one plugin in batches the ABI accepts; stops at the first failure.
+    fn deliver_chunked(&mut self, plugin: &str, events: &[Event]) -> Option<RuntimeError> {
+        events
+            .chunks(ilium_plugin_api::abi::MAX_EVENTS_PER_BATCH)
+            .find_map(|chunk| self.deliver(plugin, chunk.to_vec()).err())
+    }
+
+    /// Delivers `timer-fired` and `durable-timer-fired` for every due timer of an active
+    /// plugin. The timers of a plugin that is not active are dropped with its book.
+    fn fire_timers(&mut self) -> Vec<RuntimeError> {
+        let active = self.active_plugins();
+        let books: Vec<(String, TimerBook)> = {
+            let mut books = lock(&self.timer_books);
+            books.retain(|plugin, _| active.contains(plugin));
+            books
+                .iter()
+                .map(|(plugin, book)| (plugin.clone(), Arc::clone(book)))
+                .collect()
+        };
+        let now = Instant::now();
+        let now_unix_millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| {
+                u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+            });
         let mut failures = Vec::new();
+        for (plugin, book) in books {
+            let events = timers::take_due(&book, now, now_unix_millis);
+            if events.is_empty() {
+                continue;
+            }
+            failures.extend(self.deliver_chunked(&plugin, &events));
+        }
+        failures
+    }
+
+    /// A pump nobody waits for: each failure goes to the log of the plugin it stopped.
+    fn pump_and_log(&mut self) {
+        for failure in self.pump() {
+            let plugin = match &failure {
+                RuntimeError::Trapped { plugin, .. } => plugin.clone(),
+                _ => String::new(),
+            };
+            self.log
+                .line(&plugin, self.side, Level::Error, &failure.to_string());
+        }
+    }
+
+    /// When a held timer next needs a pump; `None` when no plugin holds a timer. The
+    /// runtime thread wakes no later than this.
+    pub fn next_timer_due(&self) -> Option<Instant> {
+        lock(&self.timer_books)
+            .values()
+            .filter_map(timers::next_due)
+            .min()
+    }
+
+    /// Delivers `topic-published` for every queued message to the active plugins of this
+    /// runtime that hold `topics.subscribe:<topic>` or `topics.subscribe:*`. Messages do not
+    /// cross to the other side's runtime here.
+    fn route_topics(&mut self) -> Vec<RuntimeError> {
+        let published: Vec<topics::Published> = lock(&self.topic_outbox).drain(..).collect();
+        if published.is_empty() {
+            return Vec::new();
+        }
+        let mut by_plugin: BTreeMap<String, Vec<Event>> = BTreeMap::new();
+        for (plugin, record) in &self.plugins {
+            if record.state != PluginState::Active {
+                continue;
+            }
+            for message in &published {
+                let subscribed = record.granted.iter().any(|grant| {
+                    grant == "topics.subscribe:*"
+                        || grant
+                            .strip_prefix("topics.subscribe:")
+                            .is_some_and(|topic| topic == message.topic)
+                });
+                if subscribed {
+                    by_plugin
+                        .entry(plugin.clone())
+                        .or_default()
+                        .push(Event::TopicPublished(TopicPublishedEvent {
+                            topic: message.topic.clone(),
+                            from: PluginId(message.from.clone()),
+                            payload_json: message.payload_json.clone(),
+                        }));
+                }
+            }
+        }
+        by_plugin
+            .into_iter()
+            .filter_map(|(plugin, events)| self.deliver_chunked(&plugin, &events))
+            .collect()
+    }
+
+    /// Fires due timers, routes published topic messages, then delivers the commands plugins
+    /// asked for and the queued request results. Returns the failures; a failed plugin is
+    /// stopped and the others continue.
+    pub fn pump(&mut self) -> Vec<RuntimeError> {
+        let mut failures = self.fire_timers();
         for _ in 0..PUMP_ROUNDS {
+            // A plugin may publish while it handles a timer, a command or a result, so the
+            // outbox is routed in every round.
+            let had_topics = !lock(&self.topic_outbox).is_empty();
+            failures.extend(self.route_topics());
             let commands: Vec<_> = lock(&self.commands).drain(..).collect();
             let results: VecDeque<_> = std::mem::take(&mut *lock(&self.results));
-            if commands.is_empty() && results.is_empty() {
+            if commands.is_empty() && results.is_empty() && !had_topics {
                 break;
             }
             for pending in commands {
@@ -881,7 +1021,25 @@ impl RuntimeThread {
             .name("ilium-plugin-host".to_owned())
             .spawn(move || {
                 // The loop ends when every sender is dropped, which `shutdown` does.
-                while let Ok(job) = receiver.recv() {
+                loop {
+                    // With a timer held the thread wakes when it is due and pumps, so a
+                    // timer fires even when the host posts nothing.
+                    let job: RuntimeJob = match runtime.next_timer_due() {
+                        None => match receiver.recv() {
+                            Ok(job) => job,
+                            Err(_) => break,
+                        },
+                        Some(due) => {
+                            let wait = due.saturating_duration_since(Instant::now());
+                            match receiver.recv_timeout(wait) {
+                                Ok(job) => job,
+                                Err(mpsc::RecvTimeoutError::Timeout) => {
+                                    Box::new(HostRuntime::pump_and_log)
+                                }
+                                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                            }
+                        }
+                    };
                     // A panicking job must not end the only executor thread: the job is
                     // lost, its caller sees a closed reply channel, the loop goes on.
                     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

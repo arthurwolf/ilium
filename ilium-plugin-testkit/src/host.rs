@@ -15,8 +15,9 @@ use ilium_plugin_sdk_core::primitives::{SessionRef, SignatureSpec, TranscriptTur
 use ilium_plugin_sdk_core::types::{
     ActionKind, ActionValue, Activation, AgentModel, Color, ColorRole, DeactivationReason,
     ErrorCode, Event, Intent, Outcome, PluginError, PluginId, PluginSide, PointerModifiers,
-    RequestId, RequestRef, RequestResult, Submission, UiTree, ViewTarget,
+    RequestId, RequestRef, RequestResult, Submission, UiAction, UiTree, ViewTarget,
 };
+use ilium_plugin_sdk_core::types::Area;
 use ilium_plugin_sdk_core::NativeEntry;
 use serde_json::Value;
 
@@ -455,6 +456,7 @@ trait ErasedPlugin {
     fn run_job(&mut self, kind: String, input: Vec<u8>) -> Option<Result<Vec<u8>, PluginError>>;
     fn handle_service(&mut self, call: ServiceCall) -> Option<ServiceReply>;
     fn handle_hook(&mut self, call: HookCall) -> Option<Result<HookReply, PluginError>>;
+    fn render(&mut self, view: ViewTarget, area: Area) -> Option<UiTree>;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
@@ -479,6 +481,9 @@ impl<P: NativeEntry + 'static> ErasedPlugin for NativeWrapper<P> {
     fn handle_hook(&mut self, call: HookCall) -> Option<Result<HookReply, PluginError>> {
         self.0.native_handle_hook(call)
     }
+    fn render(&mut self, view: ViewTarget, area: Area) -> Option<UiTree> {
+        self.0.native_render(view, area)
+    }
     fn as_any_mut(&mut self) -> &mut dyn Any {
         &mut self.0
     }
@@ -502,6 +507,7 @@ mod bridge_kernel;
 mod delivery;
 mod native;
 mod setup;
+mod view;
 
 /// One plugin on one side with deterministic fakes.
 #[derive(Debug)]
@@ -537,6 +543,8 @@ pub struct FakeHost {
     restored: Option<Vec<u8>>,
     exports: &'static [&'static str],
     plugin: Opaque<Option<Box<dyn ErasedPlugin>>>,
+    /// The views rendered so far, newest render of each.
+    rendered: Vec<view::RenderedView>,
     factory: Opaque<Option<PluginFactory>>,
     submitted: Vec<Submission>,
     pending: Vec<PendingRequest>,
@@ -618,6 +626,7 @@ impl FakeHost {
             restored: None,
             exports: &[],
             plugin: Opaque(None),
+            rendered: Vec::new(),
             factory: Opaque(None),
             submitted: Vec::new(),
             pending: Vec::new(),
@@ -978,6 +987,7 @@ impl FakeHost {
             return Err(error);
         }
         self.plugin.0 = Some(plugin);
+        self.rendered.clear();
         self.state = InstanceState::Active;
         self.replay_tree();
         Ok(PluginHandle {
@@ -1208,6 +1218,7 @@ impl FakeHost {
             message: message.to_string(),
         });
         self.plugin.0 = None;
+        self.rendered.clear();
         let count = self.failures.len();
         match RESTART_DELAYS_MS.get(count.saturating_sub(1)) {
             Some(delay) if count >= 1 => {
@@ -1382,8 +1393,11 @@ impl FakeHost {
         }
     }
 
-    /// Renders a view; the size must be 10..=500 by 1..=200 (DEV-440).
-    pub fn render(&mut self, _target: ViewTarget, columns: u16, rows: u16) -> Screen {
+    /// Renders a view; the size must be 10..=500 by 1..=200 (DEV-440). The plugin's `render`
+    /// export gives the tree; the screen shows it as plain text, one widget line under the
+    /// other (see `host/view.rs`), not in the client's layout. A plugin without the `views`
+    /// export renders blank.
+    pub fn render(&mut self, target: ViewTarget, columns: u16, rows: u16) -> Screen {
         if !(10..=500).contains(&columns) || !(1..=200).contains(&rows) {
             fail(
                 codes::RENDER_SIZE,
@@ -1391,24 +1405,66 @@ impl FakeHost {
             );
         }
         self.require_active("render");
-        Screen::blank(columns, rows)
+        let view = target.clone();
+        let tree = self
+            .call_plugin(|plugin| plugin.render(view, Area { columns, rows }))
+            .flatten()
+            .unwrap_or(UiTree {
+                version: 1,
+                nodes: Vec::new(),
+                root: 0,
+            });
+        let (screen, hits) = view::draw(&tree, columns, rows);
+        self.rendered.retain(|rendered| rendered.target != target);
+        self.rendered
+            .push(view::RenderedView { target, tree, hits });
+        screen
     }
 
-    /// Sends a widget action to a view.
+    /// Delivers a widget action of a view to the plugin, as `deliver_one` does. The action id
+    /// is empty; a dialog button is reached with `click` or by delivering a `ui-action` event.
     pub fn send_action(
         &mut self,
-        _target: ViewTarget,
-        _key: &str,
-        _kind: ActionKind,
-        _value: ActionValue,
+        target: ViewTarget,
+        key: &str,
+        kind: ActionKind,
+        value: ActionValue,
     ) {
         self.require_active("send_action");
+        self.deliver_one(Event::UiAction(UiAction {
+            view: target,
+            key: key.to_owned(),
+            action_id: String::new(),
+            kind,
+            value: Some(value),
+        }));
     }
 
-    /// Clicks a cell of a view; true when a widget took the click.
-    pub fn click(&mut self, _target: ViewTarget, _column: u16, _row: u16) -> bool {
+    /// Clicks a cell of a view as it was last rendered; true when a widget took the click.
+    /// The widget's action is delivered to the plugin. A view never rendered takes no click.
+    pub fn click(&mut self, target: ViewTarget, column: u16, row: u16) -> bool {
         self.require_active("click");
-        false
+        let hit = self
+            .rendered
+            .iter()
+            .find(|rendered| rendered.target == target)
+            .and_then(|rendered| {
+                rendered.hits.iter().find(|hit| {
+                    hit.row == row && (hit.first_column..hit.end_column).contains(&column)
+                })
+            })
+            .cloned();
+        let Some(hit) = hit else {
+            return false;
+        };
+        self.deliver_one(Event::UiAction(UiAction {
+            view: target,
+            key: hit.key,
+            action_id: hit.action_id,
+            kind: hit.kind,
+            value: hit.value,
+        }));
+        true
     }
 
     /// Sends a key to a view.
@@ -1421,13 +1477,19 @@ impl FakeHost {
         None
     }
 
-    /// The last UI tree a view produced.
-    pub fn last_tree(&self, _target: ViewTarget) -> UiTree {
-        UiTree {
-            version: 1,
-            nodes: Vec::new(),
-            root: 0,
-        }
+    /// The tree the last `render` of a view produced; an empty tree before the first render.
+    pub fn last_tree(&self, target: ViewTarget) -> UiTree {
+        self.rendered
+            .iter()
+            .find(|rendered| rendered.target == target)
+            .map_or(
+                UiTree {
+                    version: 1,
+                    nodes: Vec::new(),
+                    root: 0,
+                },
+                |rendered| rendered.tree.clone(),
+            )
     }
 
     /// Views the plugin invalidated.

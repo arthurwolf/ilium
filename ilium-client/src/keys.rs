@@ -913,6 +913,9 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
                 if !only_navigation_actions || action.uses_navigation_prefix() {
                     execute_action(app, action);
                 }
+            } else if !only_navigation_actions {
+                // A key no kernel or user binding holds may be bound by a plugin.
+                app.run_plugin_prefix_binding(binding_key);
             }
         }
         // Actions that open a sub-mode (Rename/Move/Help/Explorer/...)

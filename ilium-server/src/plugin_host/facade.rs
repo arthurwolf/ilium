@@ -27,10 +27,12 @@ use ilium_plugin_api::generated::types::tree::{
     AgentActivity, AgentView, ContainerKind, NodeClass,
 };
 use ilium_plugin_api::generated::types::{
-    ErrorCode, Event, Intent, NodeId, Outcome, Placement, PluginError, PluginSide, SplitDirection,
+    Color, ErrorCode, Event, Intent, Modifiers, NodeId, Outcome, Placement, PluginError,
+    PluginSide, SplitDirection,
 };
 use ilium_plugin_api::kernel::{
-    Cell, IntentResult, KernelFacade, Origin, PaneRead, TreeNode, TreeRead, WorkspaceAccess,
+    Cell, FacadeError, IntentResult, KernelFacade, Origin, PaneRead, TreeAnnotations, TreeNode,
+    TreeRead, WorkspaceAccess,
 };
 use ilium_plugin_api::platform::ProcessKind;
 use ilium_plugin_api::side::Side;
@@ -69,7 +71,13 @@ pub(crate) struct ServerFacade {
     next_envelope: Arc<AtomicU64>,
     project_dir: PathBuf,
     session_name: String,
+    /// What plugins keep on tree nodes, by plugin id and node id. Lives as long as the
+    /// server; an entry whose node is gone is dropped the next time the store is written.
+    node_metadata: Mutex<BTreeMap<(String, u64), Vec<u8>>>,
 }
+
+/// Most nodes one plugin keeps metadata on.
+const METADATA_NODES_PER_PLUGIN: usize = 4096;
 
 fn to_core(node: NodeId) -> ilium_core::NodeId {
     ilium_core::NodeId(node.0)
@@ -146,7 +154,15 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
         NodeKind::Folder { .. } | NodeKind::Pane { .. } => None,
     };
     let agent = match &node.kind {
-        NodeKind::Pane { status, .. } => status.agent_state().map(agent_view),
+        // An agent whose composer is not available keeps its identity and reads with the
+        // activity `none`, so a plugin can tell it from a plain shell and from a live agent.
+        NodeKind::Pane { status, .. } => status.known_agent_state().map(|state| {
+            let mut view = agent_view(state);
+            if status.agent_state().is_none() {
+                view.activity = AgentActivity::None;
+            }
+            view
+        }),
         NodeKind::Container(_) | NodeKind::Folder { .. } => None,
     };
     let (class, content_kind) = match &node.kind {
@@ -285,6 +301,7 @@ impl ServerFacade {
             next_envelope,
             project_dir: state.session_cwd.clone(),
             session_name: state.session_name.clone(),
+            node_metadata: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -541,7 +558,87 @@ impl ServerFacade {
     }
 }
 
+impl TreeAnnotations for ServerFacade {
+    fn metadata(&self, plugin: &str, node: NodeId) -> Option<Vec<u8>> {
+        // A removed node has no metadata, whatever the store still holds for its id.
+        self.with_tree(|tree| tree.get(to_core(node)).is_some())
+            .filter(|exists| *exists)?;
+        let store = self
+            .node_metadata
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        store.get(&(plugin.to_owned(), node.0)).cloned()
+    }
+
+    fn set_metadata(&self, plugin: &str, node: NodeId, bytes: Vec<u8>) -> Result<(), FacadeError> {
+        let Some(live) = self.with_tree(|tree| {
+            preorder_ids(tree)
+                .into_iter()
+                .map(|id| id.0)
+                .collect::<std::collections::BTreeSet<u64>>()
+        }) else {
+            return Err(FacadeError::new(ErrorCode::NotFound, "no such node"));
+        };
+        if !live.contains(&node.0) {
+            return Err(FacadeError::new(ErrorCode::NotFound, "no such node"));
+        }
+        let mut store = self
+            .node_metadata
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        store.retain(|(_, kept), _| live.contains(kept));
+        let key = (plugin.to_owned(), node.0);
+        if bytes.is_empty() {
+            store.remove(&key);
+            return Ok(());
+        }
+        let held = store.keys().filter(|(owner, _)| owner == plugin).count();
+        if !store.contains_key(&key) && held >= METADATA_NODES_PER_PLUGIN {
+            return Err(FacadeError::new(
+                ErrorCode::QuotaExceeded,
+                "the plugin keeps metadata on too many nodes",
+            ));
+        }
+        store.insert(key, bytes);
+        Ok(())
+    }
+}
+
+/// One cell of a terminal screen as plugins read it.
+fn plugin_cell(cell: &vt100::Cell) -> Cell {
+    let colour = |colour: vt100::Color| match colour {
+        vt100::Color::Default => None,
+        vt100::Color::Idx(index) => Some(Color::Indexed(index)),
+        vt100::Color::Rgb(red, green, blue) => Some(Color::Rgb(
+            (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue),
+        )),
+    };
+    let mut add = 0;
+    for (set, flag) in [
+        (cell.bold(), Modifiers::BOLD),
+        (cell.dim(), Modifiers::DIM),
+        (cell.italic(), Modifiers::ITALIC),
+        (cell.underline(), Modifiers::UNDERLINED),
+        (cell.inverse(), Modifiers::REVERSED),
+    ] {
+        if set {
+            add |= flag.0;
+        }
+    }
+    Cell {
+        text: cell.contents().to_owned(),
+        fg: colour(cell.fgcolor()),
+        bg: colour(cell.bgcolor()),
+        add: Modifiers(add),
+        wide: cell.is_wide(),
+    }
+}
+
 impl KernelFacade for ServerFacade {
+    fn annotations(&self) -> Option<&dyn TreeAnnotations> {
+        Some(self)
+    }
+
     fn apply_intent(&self, origin: &Origin, intent: Intent) -> IntentResult {
         match intent {
             Intent::RenameNode(spec) => {
@@ -691,12 +788,26 @@ impl PaneRead for ServerFacade {
         self.screen(pane, |screen| screen.contents())
     }
 
-    fn cells(&self, _pane: NodeId, _rows: std::ops::Range<u16>) -> Option<Vec<Vec<Cell>>> {
-        // Styled cells and scrollback are served once the terminal primitive is ported
-        // (foundation contract section 12.4).
-        None
+    /// The styled cells of visible rows. The second half of a wide character is left out, so
+    /// a row with wide characters holds fewer cells than the pane has columns.
+    fn cells(&self, pane: NodeId, rows: std::ops::Range<u16>) -> Option<Vec<Vec<Cell>>> {
+        self.screen(pane, move |screen| {
+            let (height, width) = screen.size();
+            (rows.start..rows.end.min(height))
+                .map(|row| {
+                    (0..width)
+                        .filter_map(|column| screen.cell(row, column))
+                        .filter(|cell| !cell.is_wide_continuation())
+                        .map(plugin_cell)
+                        .collect()
+                })
+                .collect()
+        })
     }
 
+    /// Scrollback lines are not readable here: the pane owner hands out its screen read-only
+    /// and the terminal emulator needs a write to show a scrolled-back view. Answers none
+    /// until the pane owner serves history lines (foundation contract section 17.4).
     fn history(&self, _pane: NodeId, _lines: u32) -> Option<Vec<String>> {
         None
     }

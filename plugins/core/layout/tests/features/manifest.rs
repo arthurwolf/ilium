@@ -88,11 +88,11 @@ fn doc_cor_050_server_capabilities_are_panes_read_panes_lifecycle_panes_create_t
 
 /// REQ: COR-050, F-003
 #[test]
-fn doc_cor_050_client_capabilities_are_panes_read_ui_panels() {
+fn doc_cor_050_client_capabilities_are_panes_read_tree_read_agent_read_ui_panels() {
     let manifest = manifest_value();
     assert_eq!(
         strings(&manifest["capabilities"]["client"]),
-        ["panes.read", "ui.panels"]
+        ["panes.read", "tree.read", "agent.read", "ui.panels"]
     );
 }
 

@@ -16,13 +16,18 @@ use ilium_plugin_api::generated::host::intents_host::HostIntentsHost;
 use ilium_plugin_api::generated::host::log::{HostLog, Level};
 use ilium_plugin_api::generated::host::panes::HostPanes;
 use ilium_plugin_api::generated::host::tree::HostTree;
-use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
-use ilium_plugin_api::generated::types::ids::{NodeId, PluginId, RequestId};
-use ilium_plugin_api::generated::types::intents::Submission;
-use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef, RequestResult};
+use ilium_plugin_api::generated::primitives::agent::{
+    AgentPane, HostAgent, SessionRef, SignatureSpec, TranscriptQuery, TranscriptTurn,
+};
+use ilium_plugin_api::generated::primitives::terminal::{
+    CellRegion, CellRows, ForegroundProcess, HistoryMatch, HostTerminal, OutputFilter, Screen,
+    ScreenPart, Selection, TerminalMode,
+};
+use ilium_plugin_api::generated::types::tree::{AgentModel, AgentView};
 use ilium_plugin_api::generated::types::tree::{
     NodeClass, NodeQuery, NodeView, PaneInfo, PrimitiveKind,
 };
+use ilium_plugin_api::generated::types::ui::PointerModifiers;
 use ilium_plugin_api::kernel::{KernelFacade, Origin};
 use ilium_plugin_api::Side;
 
@@ -90,12 +95,50 @@ impl HostLog for SinkLog {
 /// `ilium:host/tree` over the kernel tree reader.
 pub struct KernelTree {
     kernel: Arc<dyn KernelFacade>,
+    /// The plugin this import belongs to; node metadata is kept per plugin.
+    plugin: String,
+    /// Whether the plugin holds `tree.read`; without it every read answers nothing.
+    reads_tree: bool,
+    /// Whether the plugin holds `agent.read`; without it the `agent` field reads none.
+    reads_agents: bool,
+    /// Whether the plugin holds `tree.metadata`.
+    keeps_metadata: bool,
 }
 
+/// Whether a plugin holds a capability. An interface unlocks as a whole with any capability
+/// of its family, so each call that needs a specific one checks it here.
+fn holds(granted: &[String], name: &str) -> bool {
+    granted.iter().any(|grant| grant == name)
+}
+
+/// Most bytes one plugin keeps on one node: the default of the limit `node_metadata_kib`.
+const NODE_METADATA_LIMIT_BYTES: usize = 64 * 1024;
+
 impl KernelTree {
-    /// A tree import reading the given kernel.
-    pub fn new(kernel: Arc<dyn KernelFacade>) -> Self {
-        Self { kernel }
+    /// A tree import of one plugin instance reading the given kernel. `granted` is what the
+    /// plugin holds on this side.
+    pub fn new(kernel: Arc<dyn KernelFacade>, plugin: &str, granted: &[String]) -> Self {
+        Self {
+            kernel,
+            plugin: plugin.to_owned(),
+            reads_tree: holds(granted, "tree.read"),
+            reads_agents: holds(granted, "agent.read"),
+            keeps_metadata: holds(granted, "tree.metadata"),
+        }
+    }
+
+    /// The nodes as this plugin may see them.
+    fn nodes(&self) -> Vec<NodeView> {
+        if !self.reads_tree {
+            return Vec::new();
+        }
+        let mut nodes = self.kernel.tree().nodes();
+        if !self.reads_agents {
+            for node in &mut nodes {
+                node.agent = None;
+            }
+        }
+        nodes
     }
 }
 
@@ -119,13 +162,18 @@ fn is_under(nodes: &[NodeView], node: &NodeView, ancestor: NodeId) -> bool {
 
 impl HostTree for KernelTree {
     fn get(&mut self, node: NodeId) -> Option<NodeView> {
-        self.kernel.tree().node(node)
+        if !self.reads_tree {
+            return None;
+        }
+        let mut view = self.kernel.tree().node(node)?;
+        if !self.reads_agents {
+            view.agent = None;
+        }
+        Some(view)
     }
 
     fn children(&mut self, node: NodeId) -> Vec<NodeId> {
-        self.kernel
-            .tree()
-            .nodes()
+        self.nodes()
             .into_iter()
             .filter(|candidate| candidate.parent == Some(node))
             .map(|candidate| candidate.id)
@@ -133,9 +181,7 @@ impl HostTree for KernelTree {
     }
 
     fn roots(&mut self) -> Vec<NodeId> {
-        self.kernel
-            .tree()
-            .nodes()
+        self.nodes()
             .into_iter()
             .filter(|candidate| candidate.parent.is_none())
             .map(|candidate| candidate.id)
@@ -143,7 +189,7 @@ impl HostTree for KernelTree {
     }
 
     fn find(&mut self, query: NodeQuery) -> Vec<NodeId> {
-        let nodes = self.kernel.tree().nodes();
+        let nodes = self.nodes();
         nodes
             .iter()
             .filter(|node| {
@@ -168,22 +214,41 @@ impl HostTree for KernelTree {
             .collect()
     }
 
-    fn metadata(&mut self, _node: NodeId) -> Option<Vec<u8>> {
-        // Node metadata has no kernel store yet (contract section 11, open item).
-        None
+    fn metadata(&mut self, node: NodeId) -> Option<Vec<u8>> {
+        if !self.keeps_metadata {
+            return None;
+        }
+        self.kernel.annotations()?.metadata(&self.plugin, node)
     }
 
-    fn set_metadata(&mut self, node: NodeId, _bytes: Vec<u8>) -> Result<(), PluginError> {
+    fn set_metadata(&mut self, node: NodeId, bytes: Vec<u8>) -> Result<(), PluginError> {
+        if !self.keeps_metadata {
+            return Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                "the grant tree.metadata is missing",
+            ));
+        }
+        if bytes.len() > NODE_METADATA_LIMIT_BYTES {
+            return Err(PluginError::new(
+                ErrorCode::QuotaExceeded,
+                "node metadata is limited to 64 KiB for each node",
+            ));
+        }
         if self.kernel.tree().node(node).is_none() {
             return Err(PluginError::new(
                 ErrorCode::NotFound,
                 "the node does not exist",
             ));
         }
-        Err(PluginError::new(
-            ErrorCode::Unsupported,
-            "node metadata is not stored by this kernel yet",
-        ))
+        let Some(store) = self.kernel.annotations() else {
+            return Err(PluginError::new(
+                ErrorCode::Unsupported,
+                "node metadata is not stored on this side",
+            ));
+        };
+        store
+            .set_metadata(&self.plugin, node, bytes)
+            .map_err(|error| PluginError::new(error.code, error.message))
     }
 }
 
@@ -528,5 +593,278 @@ mod tests {
             refused.map_err(|error| error.code),
             Err(ErrorCode::Unsupported)
         );
+    }
+}
+
+/// `ilium:primitives/agent` with the agent of each pane read from the kernel tree. Every call
+/// the tree cannot answer goes to the session-less import, except signature registration:
+/// nothing in this kernel reads a registered signature yet, so it is refused instead of
+/// accepted without effect.
+pub struct KernelAgent {
+    kernel: Arc<dyn KernelFacade>,
+    rest: super::agent::AgentImport,
+    /// Whether the plugin holds `agent.read`.
+    reads_agents: bool,
+}
+
+impl KernelAgent {
+    /// An agent import of one plugin instance reading the given kernel.
+    pub fn new(kernel: Arc<dyn KernelFacade>, granted: &[String]) -> Self {
+        Self {
+            kernel,
+            rest: super::agent::AgentImport,
+            reads_agents: holds(granted, "agent.read"),
+        }
+    }
+}
+
+impl HostAgent for KernelAgent {
+    fn agents(&mut self) -> Vec<AgentPane> {
+        if !self.reads_agents {
+            return Vec::new();
+        }
+        self.kernel
+            .tree()
+            .nodes()
+            .into_iter()
+            .filter_map(|node| {
+                node.agent.map(|view| AgentPane {
+                    pane: node.id,
+                    view,
+                })
+            })
+            .collect()
+    }
+
+    fn view(&mut self, pane: NodeId) -> Option<AgentView> {
+        if !self.reads_agents {
+            return None;
+        }
+        self.kernel.tree().node(pane)?.agent
+    }
+
+    fn session(&mut self, pane: NodeId) -> Option<SessionRef> {
+        self.rest.session(pane)
+    }
+
+    fn last_prompt(&mut self, pane: NodeId) -> Option<String> {
+        self.rest.last_prompt(pane)
+    }
+
+    fn register_signature(&mut self, _spec: SignatureSpec) -> Result<(), PluginError> {
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "agent signatures from plugins are not used by this kernel yet",
+        ))
+    }
+
+    fn set_toolbar_state(
+        &mut self,
+        button: String,
+        pane: Option<NodeId>,
+        enabled: bool,
+        label: Option<String>,
+    ) -> Result<(), PluginError> {
+        self.rest.set_toolbar_state(button, pane, enabled, label)
+    }
+
+    fn model(&mut self, pane: NodeId) -> Option<AgentModel> {
+        self.rest.model(pane)
+    }
+
+    fn prompt_epoch(&mut self, pane: NodeId) -> Option<u64> {
+        self.rest.prompt_epoch(pane)
+    }
+
+    fn transcript(&mut self, query: TranscriptQuery) -> Result<RequestId, PluginError> {
+        self.rest.transcript(query)
+    }
+
+    fn take_transcript(&mut self, request: RequestId) -> Option<Vec<TranscriptTurn>> {
+        self.rest.take_transcript(request)
+    }
+}
+
+/// `ilium:primitives/terminal` with screen reads answered by the kernel pane reader. The pane
+/// reader asks the pane's owner; nothing here holds or touches a PTY. Every other call goes to
+/// the session-less import, except input locks, which are refused until the kernel enforces
+/// them.
+pub struct KernelTerminal {
+    kernel: Arc<dyn KernelFacade>,
+    rest: super::terminal::TerminalImport,
+    /// What the plugin holds of `terminal.read-screen`, `terminal.history` and
+    /// `terminal.read-cells`, in that order.
+    reads: (bool, bool, bool),
+}
+
+impl KernelTerminal {
+    /// A terminal import of one plugin instance reading the given kernel.
+    pub fn new(kernel: Arc<dyn KernelFacade>, granted: &[String]) -> Self {
+        Self {
+            kernel,
+            rest: super::terminal::TerminalImport,
+            reads: (
+                holds(granted, "terminal.read-screen"),
+                holds(granted, "terminal.history"),
+                holds(granted, "terminal.read-cells"),
+            ),
+        }
+    }
+}
+
+impl HostTerminal for KernelTerminal {
+    /// The visible rows or the last `max_rows` lines of history. The pane reader does not
+    /// report the cursor or a screen revision, so both read 0.
+    fn read_screen(&mut self, pane: NodeId, part: ScreenPart, max_rows: u32) -> Option<Screen> {
+        let (screen, history, _) = self.reads;
+        let permitted = match part {
+            ScreenPart::Visible => screen,
+            ScreenPart::Scrollback => history,
+        };
+        if !permitted {
+            return None;
+        }
+        let panes = self.kernel.panes();
+        let rows: Vec<String> = match part {
+            ScreenPart::Visible => panes
+                .screen_text(pane)?
+                .lines()
+                .take(max_rows as usize)
+                .map(str::to_owned)
+                .collect(),
+            ScreenPart::Scrollback => panes.history(pane, max_rows)?,
+        };
+        let columns = panes.size(pane).map_or(0, |(columns, _)| columns);
+        Some(Screen {
+            columns,
+            rows,
+            cursor_row: 0,
+            cursor_column: 0,
+            title: self.kernel.tree().node(pane).map(|node| node.title),
+            revision: 0,
+        })
+    }
+
+    fn get_selection(&mut self, pane: NodeId) -> Option<Selection> {
+        self.rest.get_selection(pane)
+    }
+
+    fn add_output_filter(&mut self, pane: NodeId, filter: OutputFilter) -> Result<(), PluginError> {
+        self.rest.add_output_filter(pane, filter)
+    }
+
+    fn remove_output_filter(&mut self, pane: NodeId, filter_id: String) {
+        self.rest.remove_output_filter(pane, filter_id);
+    }
+
+    fn claim_pointer(&mut self, pane: NodeId) -> Result<(), PluginError> {
+        self.rest.claim_pointer(pane)
+    }
+
+    fn claim_pointer_gesture(
+        &mut self,
+        pane: NodeId,
+        modifiers: PointerModifiers,
+    ) -> Result<(), PluginError> {
+        self.rest.claim_pointer_gesture(pane, modifiers)
+    }
+
+    fn release_pointer(&mut self, pane: NodeId) {
+        self.rest.release_pointer(pane);
+    }
+
+    fn set_highlights(
+        &mut self,
+        pane: NodeId,
+        layer: String,
+        regions: Vec<CellRegion>,
+    ) -> Result<(), PluginError> {
+        self.rest.set_highlights(pane, layer, regions)
+    }
+
+    fn clear_highlights(&mut self, pane: NodeId, layer: String) {
+        self.rest.clear_highlights(pane, layer);
+    }
+
+    /// Styled cells of visible rows; scrollback cells are not readable through the pane reader.
+    fn read_cells(
+        &mut self,
+        pane: NodeId,
+        part: ScreenPart,
+        first_row: u32,
+        count: u32,
+    ) -> Option<CellRows> {
+        if part != ScreenPart::Visible || !self.reads.2 {
+            return None;
+        }
+        let panes = self.kernel.panes();
+        let first = u16::try_from(first_row).ok()?;
+        let last = first.saturating_add(u16::try_from(count).unwrap_or(u16::MAX));
+        let rows = panes.cells(pane, first..last)?;
+        Some(CellRows {
+            first_row,
+            columns: panes.size(pane).map_or(0, |(columns, _)| columns),
+            rows,
+            revision: 0,
+        })
+    }
+
+    fn modes(&mut self, pane: NodeId) -> Option<TerminalMode> {
+        self.rest.modes(pane)
+    }
+
+    fn get_foreground_process(&mut self, pane: NodeId) -> Option<ForegroundProcess> {
+        self.rest.get_foreground_process(pane)
+    }
+
+    fn freeze_snapshot(&mut self, pane: NodeId) -> Result<u64, PluginError> {
+        self.rest.freeze_snapshot(pane)
+    }
+
+    fn read_snapshot_cells(
+        &mut self,
+        snapshot: u64,
+        first_row: u32,
+        count: u32,
+    ) -> Option<CellRows> {
+        self.rest.read_snapshot_cells(snapshot, first_row, count)
+    }
+
+    fn drop_snapshot(&mut self, snapshot: u64) {
+        self.rest.drop_snapshot(snapshot);
+    }
+
+    fn history_text(&mut self, pane: NodeId, max_bytes: u32) -> Result<RequestId, PluginError> {
+        self.rest.history_text(pane, max_bytes)
+    }
+
+    fn take_history(&mut self, request: RequestId) -> Option<String> {
+        self.rest.take_history(request)
+    }
+
+    fn search_history(
+        &mut self,
+        pane: NodeId,
+        regex: String,
+        max_matches: u16,
+    ) -> Result<RequestId, PluginError> {
+        self.rest.search_history(pane, regex, max_matches)
+    }
+
+    fn take_matches(&mut self, request: RequestId) -> Option<Vec<HistoryMatch>> {
+        self.rest.take_matches(request)
+    }
+
+    /// Refused: nothing in this kernel holds back input for a locked pane yet, and a lock that
+    /// answers `ok` without holding anything would mislead the plugin.
+    fn lock_input(&mut self, _pane: NodeId, _millis: u16) -> Result<(), PluginError> {
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "input locks are not enforced by this kernel yet",
+        ))
+    }
+
+    fn unlock_input(&mut self, pane: NodeId) {
+        self.rest.unlock_input(pane);
     }
 }

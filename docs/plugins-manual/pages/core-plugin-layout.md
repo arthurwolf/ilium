@@ -59,7 +59,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "publisher": "Ilium",
   "capabilities": {
     "server": ["panes.read", "panes.lifecycle", "panes.create", "tree.restructure"],
-    "client": ["panes.read", "ui.panels"]
+    "client": ["panes.read", "tree.read", "agent.read", "ui.panels"]
   }
 }
 ```
@@ -96,6 +96,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "client": [
       "panes.read",
+      "tree.read",
+      "agent.read",
       "ui.panels"
     ]
   },
@@ -470,8 +472,8 @@ The client side keeps the dialog state and describes each page as a view whose r
 
 | Step | Who | What happens |
 |---|---|---|
-| 1 | kernel | Runs `new-split` with JSON arguments: `root`, `parent` (the group the selection points at), `nodes` (id, parent, kind, content, agent, title of every tree node) and `panes` (pane ids in tree order). |
-| 2 | client side | Builds the pane choices, then submits `open-view` for the popup `new-split`. |
+| 1 | kernel | Runs `new-split` with the JSON arguments `{"parent": id}`: the group the selection points at. |
+| 2 | client side | Reads the tree (`tree.roots`, `tree.children`, `tree.get`) in drawn order, builds the pane choices, then submits `open-view` for the popup `new-split`. |
 | 3 | client side | Page one is a `choice` with key `orientation` and the buttons `choose`, `empty` and `cancel`. Page two is a `check-list` with key `members` and the buttons `create` and `cancel`. |
 | 4 | client side | On `empty` or `create`, sends the message `new-split` to the server side with the JSON payload `{"parent", "direction", "panes"}` and submits `close-view`. |
 | 5 | server side | Submits one `create-split` intent with that parent, direction and pane list. |
@@ -484,7 +486,7 @@ Rules the plugin applies:
 - Creating with no pane checked, or "Create empty" on page one, makes an empty split view.
 - Escape and a click outside the popup close it. The kernel does this itself and then tells the plugin with a `closed` action, so the dialog can always be left.
 
-The `nodes` and `panes` arguments are a stopgap: the client world cannot yet read the tree with the kind of each container. When it can, the arguments shrink to `parent`.
+The client side needs `tree.read` for the tree and `agent.read` for the agent of a pane. A pane whose agent has the activity `none` is labelled `agent unavailable`. Without `tree.read` the dialog opens and offers no pane.
 
 ### Extension points
 

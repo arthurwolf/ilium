@@ -562,7 +562,15 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
         NodeKind::Folder { .. } | NodeKind::Pane { .. } => None,
     };
     let agent = match &node.kind {
-        NodeKind::Pane { status, .. } => status.agent_state().map(agent_view),
+        // An agent whose composer is not available keeps its identity and reads with the
+        // activity `none`, so a plugin can tell it from a plain shell and from a live agent.
+        NodeKind::Pane { status, .. } => status.known_agent_state().map(|state| {
+            let mut view = agent_view(state);
+            if status.agent_state().is_none() {
+                view.activity = AgentActivity::None;
+            }
+            view
+        }),
         NodeKind::Container(_) | NodeKind::Folder { .. } => None,
     };
     let (class, content_kind) = match &node.kind {
@@ -1046,6 +1054,21 @@ impl ClientPlugins {
             .map(|(id, _)| id.clone())
             .collect();
         wiring::plugin_rows(&self.catalogue, &disabled, &self.server_states)
+    }
+
+    /// The command the first enabled plugin binds to a post-leader key, in catalogue order.
+    pub(crate) fn prefix_binding_command(&self, key: crate::keymap::BindingKey) -> Option<String> {
+        self.catalogue
+            .iter()
+            .filter(|plugin| {
+                !self
+                    .server_states
+                    .get(&plugin.id)
+                    .is_some_and(|state| wiring::is_disabled_state(state))
+            })
+            .flat_map(|plugin| super::keybindings::prefix_bindings(&plugin.id, &plugin.manifest))
+            .find(|binding| binding.key == key)
+            .map(|binding| binding.command)
     }
 
     /// The last refused enable or disable request, if the newest request was refused.

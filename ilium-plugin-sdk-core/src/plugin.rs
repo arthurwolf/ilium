@@ -326,6 +326,15 @@ pub trait NativeEntry: Sized {
         let _ = call;
         None
     }
+    /// Dispatches `views.render`; `None` when the plugin does not export `views`.
+    fn native_render(
+        &mut self,
+        view: crate::types::ViewTarget,
+        area: crate::types::Area,
+    ) -> Option<crate::types::UiTree> {
+        let _ = (view, area);
+        None
+    }
 }
 
 #[cfg(test)]

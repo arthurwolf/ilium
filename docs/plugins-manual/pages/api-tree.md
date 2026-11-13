@@ -41,7 +41,7 @@ The records and their fields:
 | `NodeView` | `content_kind` | `Option<String>` | `string \| undefined` | Such as `ilium.terminal`, `ilium.editor`, `ilium.board` or `<plugin-id>.<kind>`. |
 | `NodeView` | `title` | `String` | `string` | The title the user sees. |
 | `NodeView` | `cwd` | `Option<String>` | `string \| undefined` | A display string. It grants no file access. |
-| `NodeView` | `agent` | `Option<AgentView>` | `AgentView \| undefined` | Present only for a pane that runs an agent, and only with `agent.read`. |
+| `NodeView` | `agent` | `Option<AgentView>` | `AgentView \| undefined` | Present only for a pane that runs an agent, and only with `agent.read`. An agent that is currently unavailable keeps its view, with the activity `none`. |
 | `NodeView` | `locked` | `bool` | `boolean` | True when the user or a plugin locked the node. |
 | `NodeView` | `revision` | `u64` | `bigint` | Rises whenever a field above changes. Compare it to detect a change cheaply. |
 | `NodeQuery` | `content_kind` | `Option<String>` | `contentKind?: string` | Match nodes of this content kind. |

@@ -25,6 +25,8 @@
     ],
     "client": [
       "panes.read",
+      "tree.read",
+      "agent.read",
       "ui.panels"
     ]
   },

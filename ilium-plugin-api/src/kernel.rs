@@ -56,6 +56,16 @@ pub trait PaneRead: Send + Sync {
 }
 
 /// What the plugin host needs from the kernel (reference-host-architecture.md).
+/// What plugins attach to tree nodes. Every entry belongs to one plugin: a plugin never reads
+/// or replaces the bytes of another.
+pub trait TreeAnnotations: Send + Sync {
+    /// The bytes `plugin` keeps on `node`, or none.
+    fn metadata(&self, plugin: &str, node: NodeId) -> Option<Vec<u8>>;
+    /// Replaces the bytes `plugin` keeps on `node`; empty bytes remove the entry. The caller
+    /// has checked the grant and the size limit; the store refuses an unknown node.
+    fn set_metadata(&self, plugin: &str, node: NodeId, bytes: Vec<u8>) -> Result<(), FacadeError>;
+}
+
 pub trait KernelFacade: Send + Sync {
     /// Applies one intent for an origin (reference-events-and-intents.md).
     fn apply_intent(&self, origin: &Origin, intent: Intent) -> IntentResult;
@@ -96,6 +106,10 @@ pub trait KernelFacade: Send + Sync {
     }
     /// The help catalogue; client only.
     fn help(&self) -> Option<&dyn HelpCatalog> {
+        None
+    }
+    /// The store of what plugins attach to tree nodes; `None` on a side that keeps none.
+    fn annotations(&self) -> Option<&dyn TreeAnnotations> {
         None
     }
     /// The clipboard; client only.

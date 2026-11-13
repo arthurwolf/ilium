@@ -29,7 +29,12 @@ impl HostTree for NativeBridge {
         if !self.reads_tree() {
             return None;
         }
-        self.host().tree.view(node.0)
+        let mut view = self.host().tree.view(node.0)?;
+        // The agent of a pane is filled in only for a plugin that holds `agent.read`.
+        if self.permit("agent.read").is_err() {
+            view.agent = None;
+        }
+        Some(view)
     }
 
     fn children(&mut self, node: NodeId) -> Vec<NodeId> {

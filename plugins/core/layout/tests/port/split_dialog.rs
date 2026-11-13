@@ -1,12 +1,13 @@
 //! The "New split view" dialog, moved here from the kernel client. Each test names the kernel
 //! test it replaces (`PORT:<file>::<test>`); the kernel copies are deleted.
 
-use ilium_plugin_core_layout::new_split::{self, Answer, Dialog, Page, Step};
+use ilium_plugin_core_layout::new_split::{self, Answer, Dialog, Page, Step, TreeFact};
 use ilium_plugin_core_layout::LayoutClient;
-use ilium_plugin_sdk::testing::FakeHost;
+use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    ActionKind, ActionValue, CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent,
-    SplitDirection, Submission, TriState, UiAction, Widget,
+    ActionKind, ActionValue, AgentActivity, AgentView, CommandContext, CommandInvokedEvent,
+    CommandOrigin, ContainerKind, Event, Intent, NodeClass, NodeId, NodeView, SplitDirection,
+    Submission, TriState, UiAction, Widget,
 };
 use serde_json::json;
 
@@ -14,30 +15,95 @@ use crate::common::*;
 
 const GROUP: u64 = 10;
 
-/// The kernel's command arguments for: root 0 > project 1 > group 10 > panes, plus a split
-/// view 20 holding pane 21 and a worktree 30 holding pane 31.
-fn arguments(free_panes: &[u64]) -> String {
+fn fact(id: u64, parent: u64, kind: &str, title: &str) -> TreeFact {
+    TreeFact {
+        id,
+        parent: Some(parent),
+        kind: kind.to_owned(),
+        content: (kind == "pane").then(|| "terminal".to_owned()),
+        agent: None,
+        title: title.to_owned(),
+    }
+}
+
+/// The tree as facts: root 0 > project 1 > group 10 > panes, plus a split view 20 holding
+/// pane 21 and a worktree 30 holding pane 31. Returns the facts and the panes in tree order.
+fn facts(free_panes: &[u64]) -> (Vec<TreeFact>, Vec<u64>) {
     let mut nodes = vec![
-        json!({"id": 1, "parent": 0, "kind": "project", "title": "ilium"}),
-        json!({"id": GROUP, "parent": 1, "kind": "group", "title": "work"}),
-        json!({"id": 20, "parent": GROUP, "kind": "split", "title": "Vertical split"}),
-        json!({"id": 21, "parent": 20, "kind": "pane", "content": "terminal", "title": "held"}),
-        json!({"id": 30, "parent": 1, "kind": "worktree", "title": "feature"}),
-        json!({"id": 31, "parent": 30, "kind": "pane", "content": "terminal", "title": "tree"}),
+        fact(1, 0, "project", "ilium"),
+        fact(GROUP, 1, "group", "work"),
+        fact(20, GROUP, "split", "Vertical split"),
+        fact(21, 20, "pane", "held"),
+        fact(30, 1, "worktree", "feature"),
+        fact(31, 30, "pane", "tree"),
     ];
     let mut panes: Vec<u64> = free_panes.to_vec();
     for pane in free_panes {
-        nodes.push(json!({
-            "id": pane, "parent": GROUP, "kind": "pane", "content": "editor",
-            "title": format!("pane {pane}"),
-        }));
+        nodes.push(TreeFact {
+            content: Some("editor".to_owned()),
+            ..fact(*pane, GROUP, "pane", &format!("pane {pane}"))
+        });
     }
     panes.extend([21, 31]);
-    json!({"root": 0, "parent": GROUP, "nodes": nodes, "panes": panes}).to_string()
+    (nodes, panes)
+}
+
+/// The same tree in the fake host, which the plugin reads through the tree import.
+fn grow_tree(host: &mut FakeHost, free_panes: &[u64]) {
+    let container = |id: u64, parent: Option<u64>, name: &str| TreeNode {
+        id,
+        parent,
+        name: name.to_owned(),
+        class: NodeClass::Container,
+        content_kind: None,
+        agent: None,
+    };
+    let pane = |id: u64, parent: u64, name: &str, content: &str| TreeNode {
+        id,
+        parent: Some(parent),
+        name: name.to_owned(),
+        class: NodeClass::Pane,
+        content_kind: Some(content.to_owned()),
+        agent: None,
+    };
+    let tree = host.tree();
+    tree.add_with_id(container(0, None, "root"));
+    tree.add_with_id(container(1, Some(0), "ilium"));
+    tree.set_container(1, ContainerKind::Project);
+    tree.add_with_id(container(GROUP, Some(1), "work"));
+    tree.add_with_id(container(20, Some(GROUP), "Vertical split"));
+    tree.set_container(20, ContainerKind::SplitVertical);
+    tree.add_with_id(pane(21, 20, "held", "ilium.terminal"));
+    tree.add_with_id(container(30, Some(1), "feature"));
+    tree.set_container(30, ContainerKind::Worktree);
+    tree.add_with_id(pane(31, 30, "tree", "ilium.terminal"));
+    for id in free_panes {
+        tree.add_with_id(pane(*id, GROUP, &format!("pane {id}"), "ilium.editor"));
+    }
+}
+
+fn parent_arguments() -> String {
+    json!({ "parent": GROUP }).to_string()
+}
+
+fn node_view(class: NodeClass, container: Option<ContainerKind>) -> NodeView {
+    NodeView {
+        id: NodeId(7),
+        parent: Some(NodeId(1)),
+        class,
+        content_kind: None,
+        title: "node".to_owned(),
+        cwd: None,
+        agent: None,
+        locked: false,
+        revision: 0,
+        container,
+    }
 }
 
 fn dialog(free_panes: &[u64]) -> Dialog {
-    Dialog::open(&arguments(free_panes)).expect("the arguments parse")
+    let (nodes, panes) = facts(free_panes);
+    Dialog::from_facts(GROUP, 0, &nodes, &panes)
 }
 
 fn activate(dialog: &mut Dialog, button: &str) -> Step {
@@ -104,16 +170,120 @@ fn port_002_choices_exclude_panes_already_in_a_split_and_panes_of_a_worktree() {
 /// REQ: PORT:ilium-client/src/app.rs::split_creation_choices_exclude_panes_already_in_a_split
 #[test]
 fn port_002_an_agent_pane_is_labelled_as_an_agent() {
-    let arguments = json!({
-        "root": 0, "parent": 1, "panes": [2],
-        "nodes": [
-            {"id": 1, "parent": 0, "kind": "project", "title": "ilium"},
-            {"id": 2, "parent": 1, "kind": "pane", "content": "terminal", "agent": "agent",
-             "title": "claude"},
-        ],
-    });
-    let dialog = Dialog::open(&arguments.to_string()).expect("the arguments parse");
+    let nodes = [
+        fact(1, 0, "project", "ilium"),
+        TreeFact {
+            agent: Some("agent".to_owned()),
+            ..fact(2, 1, "pane", "claude")
+        },
+    ];
+    let dialog = Dialog::from_facts(1, 0, &nodes, &[2]);
     assert_eq!(dialog.choices[0].label, "[agent] ilium / claude");
+}
+
+/// REQ: F-003
+#[test]
+fn a_node_view_becomes_the_fact_the_rules_use() {
+    let kind = |class, container| TreeFact::from_view(&node_view(class, container)).kind;
+    assert_eq!(kind(NodeClass::Pane, None), "pane");
+    assert_eq!(kind(NodeClass::Folder, None), "folder");
+    assert_eq!(
+        kind(NodeClass::Container, Some(ContainerKind::Project)),
+        "project"
+    );
+    assert_eq!(
+        kind(NodeClass::Container, Some(ContainerKind::Worktree)),
+        "worktree"
+    );
+    assert_eq!(
+        kind(NodeClass::Container, Some(ContainerKind::SplitVertical)),
+        "split"
+    );
+    assert_eq!(
+        kind(NodeClass::Container, Some(ContainerKind::Group)),
+        "group"
+    );
+
+    let agent = |activity| {
+        let mut view = node_view(NodeClass::Pane, None);
+        view.content_kind = Some("ilium.terminal".to_owned());
+        view.agent = Some(AgentView {
+            signature: "claude".to_owned(),
+            activity,
+            objective: None,
+            goal: None,
+        });
+        TreeFact::from_view(&view)
+    };
+    assert_eq!(agent(AgentActivity::Idle).agent.as_deref(), Some("agent"));
+    assert_eq!(
+        agent(AgentActivity::None).agent.as_deref(),
+        Some("agent unavailable")
+    );
+    assert_eq!(
+        agent(AgentActivity::Idle).content.as_deref(),
+        Some("terminal")
+    );
+}
+
+/// REQ: F-003
+#[test]
+fn the_fake_host_renders_the_open_dialog_and_keeps_its_tree() {
+    let mut host = activated_client();
+    grow_tree(&mut host, &[11]);
+    host.settle();
+    assert!(host.last_tree(new_split::view()).nodes.is_empty());
+    host.deliver_one(new_split_command(parent_arguments()));
+    host.render(new_split::view(), 60, 20);
+    let tree = host.last_tree(new_split::view());
+    assert!(tree
+        .nodes
+        .iter()
+        .any(|node| matches!(node.widget, Widget::Dialog(_))));
+    // The first row is the dialog title, which takes no click.
+    assert!(!host.click(new_split::view(), 0, 0));
+}
+
+/// REQ: F-003
+#[test]
+fn the_command_builds_the_choices_from_the_tree_the_plugin_reads() {
+    let mut host = activated_client();
+    grow_tree(&mut host, &[11, 12]);
+    host.settle();
+    host.deliver_one(new_split_command(parent_arguments()));
+    host.deliver_one(popup_action(
+        "dialog",
+        "choose",
+        ActionKind::Activated,
+        None,
+    ));
+    host.deliver_one(popup_action(
+        new_split::MEMBERS_KEY,
+        "",
+        ActionKind::Toggled,
+        Some(ActionValue::ItemState(("12".to_owned(), TriState::On))),
+    ));
+    // Pane 21 sits in a split view, so the plugin never offered it and ignores the toggle.
+    host.deliver_one(popup_action(
+        new_split::MEMBERS_KEY,
+        "",
+        ActionKind::Toggled,
+        Some(ActionValue::ItemState(("21".to_owned(), TriState::On))),
+    ));
+    let ended = host.deliver_one(popup_action(
+        "dialog",
+        "create",
+        ActionKind::Activated,
+        None,
+    ));
+    assert_eq!(
+        messages_to_server(&ended),
+        [Answer {
+            parent: GROUP,
+            direction: SplitDirection::Vertical,
+            panes: vec![12],
+        }]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/keys.rs::split_orientation_dialog_can_skip_the_optional_member_picker
@@ -140,7 +310,9 @@ fn port_001_the_orientation_step_can_skip_the_optional_member_picker() {
 #[test]
 fn port_003_skipping_the_member_picker_sends_one_empty_split_to_the_server_side() {
     let mut host = activated_client();
-    let opened = host.deliver_one(new_split_command(arguments(&[11])));
+    grow_tree(&mut host, &[11]);
+    host.settle();
+    let opened = host.deliver_one(new_split_command(parent_arguments()));
     assert!(opened
         .iter()
         .any(|submission| matches!(&submission.intent, Intent::OpenView(spec) if spec.view == new_split::view())));

@@ -1,15 +1,16 @@
 //! The "New split view" dialog: pick an orientation, then optionally the panes that join.
 //!
-//! Everything here is plain data and rules; `lib.rs` connects it to events and intents. The
-//! kernel opens the dialog by running the `new-split` command with the tree as it is drawn
-//! (JSON arguments); which panes may join, how they are labelled and how many fit is decided
-//! here.
+//! Everything here is plain data and rules; `lib.rs` connects it to events, the tree and
+//! intents. The kernel opens the dialog by running the `new-split` command with the group to
+//! split in; the plugin reads the tree itself. Which panes may join, how they are labelled and
+//! how many fit is decided here.
 
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, ButtonRole, CheckItem, CheckListSpec, ChoiceSpec, ChoiceStyle,
     Constraint, DialogButton, DialogKind, DialogSpec, DisabledMarker, NodeFlags, Span,
     SplitDirection, Style, TriState, UiNode, UiTree, ViewTarget, Widget,
 };
+use ilium_plugin_sdk::types::{AgentActivity, ContainerKind, NodeClass, NodeView};
 use serde_json::Value;
 
 /// The most panes one split view holds.
@@ -28,7 +29,7 @@ pub fn view() -> ViewTarget {
     ViewTarget::Popup(POPUP.to_owned())
 }
 
-/// One node of the tree, as the kernel reports it in the command arguments.
+/// One node of the tree, reduced to what the dialog rules use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeFact {
     pub id: u64,
@@ -188,42 +189,57 @@ pub struct Dialog {
     pub notice: Option<String>,
 }
 
-fn parse_fact(value: &Value) -> Option<TreeFact> {
-    let text = |name: &str| value.get(name).and_then(Value::as_str).map(str::to_owned);
-    Some(TreeFact {
-        id: value.get("id")?.as_u64()?,
-        parent: value.get("parent").and_then(Value::as_u64),
-        kind: text("kind")?,
-        content: text("content"),
-        agent: text("agent"),
-        title: text("title").unwrap_or_default(),
-    })
+/// The group to split in, from the `new-split` command arguments `{"parent": id}`.
+pub fn parent_argument(arguments_json: &str) -> Option<u64> {
+    let value: Value = serde_json::from_str(arguments_json).ok()?;
+    value.get("parent")?.as_u64()
+}
+
+impl TreeFact {
+    /// The fact of one node as the tree import reports it.
+    pub fn from_view(view: &NodeView) -> Self {
+        let kind = match (view.class, view.container) {
+            (NodeClass::Pane, _) => "pane",
+            (NodeClass::Folder, _) => "folder",
+            (NodeClass::Container, Some(ContainerKind::Project)) => "project",
+            (NodeClass::Container, Some(ContainerKind::Worktree)) => "worktree",
+            (
+                NodeClass::Container,
+                Some(ContainerKind::SplitHorizontal | ContainerKind::SplitVertical),
+            ) => "split",
+            (NodeClass::Container, Some(ContainerKind::Group) | None) => "group",
+        };
+        Self {
+            id: view.id.0,
+            parent: view.parent.map(|parent| parent.0),
+            kind: kind.to_owned(),
+            content: view
+                .content_kind
+                .as_deref()
+                .map(|content| content.strip_prefix("ilium.").unwrap_or(content).to_owned()),
+            agent: view.agent.as_ref().map(|agent| {
+                match agent.activity {
+                    AgentActivity::None => "agent unavailable",
+                    _ => "agent",
+                }
+                .to_owned()
+            }),
+            title: view.title.clone(),
+        }
+    }
 }
 
 impl Dialog {
-    /// Opens the dialog from the `new-split` command arguments:
-    /// `{"root": id, "parent": id, "nodes": [fact], "panes": [id in tree order]}`.
-    pub fn open(arguments_json: &str) -> Option<Self> {
-        let value: Value = serde_json::from_str(arguments_json).ok()?;
-        let parent = value.get("parent")?.as_u64()?;
-        let root = value.get("root").and_then(Value::as_u64).unwrap_or(0);
-        let nodes: Vec<TreeFact> = value
-            .get("nodes")
-            .and_then(Value::as_array)
-            .map(|nodes| nodes.iter().filter_map(parse_fact).collect())
-            .unwrap_or_default();
-        let panes: Vec<u64> = value
-            .get("panes")
-            .and_then(Value::as_array)
-            .map(|panes| panes.iter().filter_map(Value::as_u64).collect())
-            .unwrap_or_default();
-        Some(Self {
+    /// Opens the dialog for a group, from the tree: `nodes` are the facts of every node and
+    /// `panes` the pane ids in drawn order.
+    pub fn from_facts(parent: u64, root: u64, nodes: &[TreeFact], panes: &[u64]) -> Self {
+        Self {
             parent,
             direction: SplitDirection::Vertical,
             page: Page::Orientation,
-            choices: choices(&nodes, root, &panes),
+            choices: choices(nodes, root, panes),
             notice: None,
-        })
+        }
     }
 
     pub fn selected(&self) -> Vec<u64> {

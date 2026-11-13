@@ -1,13 +1,16 @@
 //! Host implementation of `ilium:host/topics`.
 //!
-//! Hand-owned. The publisher identity and its declared topics live in a per-thread context
-//! because the import carries no session handle yet; the host installs the real manifest values
-//! with [`set_publisher_context`] before the plugin runs.
+//! Hand-owned. Two imports share one set of checks. [`PluginTopics`] is what the runtime gives
+//! a plugin instance: it knows its plugin and declared topics and queues each accepted message
+//! in the runtime's [`TopicOutbox`], which the runtime drains to the subscribers.
+//! [`TopicsImport`] checks only, against a per-thread context set with
+//! [`set_publisher_context`]; the test harness uses it.
 
 use ilium_plugin_api::generated::host::topics::HostTopics;
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 /// Largest topic payload, in bytes of valid JSON (SVC-022).
@@ -58,74 +61,163 @@ fn topic_error(code: ErrorCode, message: &str) -> PluginError {
     }
 }
 
-/// Host side of the `topics` interface.
+/// One accepted message waiting for delivery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Published {
+    /// The publishing plugin.
+    pub from: String,
+    /// The topic, `<plugin>/<name>`.
+    pub topic: String,
+    /// The payload, valid JSON.
+    pub payload_json: String,
+}
+
+/// Accepted messages of every plugin of one runtime, oldest first.
+pub type TopicOutbox = Arc<Mutex<VecDeque<Published>>>;
+
+/// Most messages the outbox holds between two drains.
+const OUTBOX_LIMIT: usize = 4096;
+
+/// The topics a manifest declares under `contributes.topics.publishes`.
+pub fn declared_topics(manifest: &serde_json::Value) -> Vec<String> {
+    manifest
+        .get("contributes")
+        .and_then(|contributes| contributes.get("topics"))
+        .and_then(|topics| topics.get("publishes"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|topic| topic.as_str().map(str::to_owned))
+        .collect()
+}
+
+/// Host side of the `topics` interface for one plugin instance of a runtime.
+pub struct PluginTopics {
+    context: PublisherContext,
+    outbox: TopicOutbox,
+}
+
+impl std::fmt::Debug for PluginTopics {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PluginTopics")
+            .field("plugin", &self.context.plugin_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PluginTopics {
+    /// The import of `plugin_id`, which may publish `declared_topics` into `outbox`.
+    pub fn new(plugin_id: &str, declared_topics: Vec<String>, outbox: TopicOutbox) -> Self {
+        Self {
+            context: PublisherContext {
+                plugin_id: plugin_id.to_string(),
+                declared_topics,
+                recent_publishes: VecDeque::new(),
+            },
+            outbox,
+        }
+    }
+}
+
+impl HostTopics for PluginTopics {
+    fn publish(&mut self, topic: String, payload_json: String) -> Result<(), PluginError> {
+        let mut outbox = self.outbox.lock().unwrap_or_else(PoisonError::into_inner);
+        if outbox.len() >= OUTBOX_LIMIT {
+            return Err(PluginError {
+                code: ErrorCode::RateLimited,
+                message: "too many published messages are waiting for delivery".to_string(),
+                retry_after_ms: Some(100),
+            });
+        }
+        check_publish(&mut self.context, &topic, &payload_json)?;
+        outbox.push_back(Published {
+            from: self.context.plugin_id.clone(),
+            topic,
+            payload_json,
+        });
+        Ok(())
+    }
+}
+
+/// Host side of the `topics` interface that checks a publish and delivers nothing.
 #[derive(Debug)]
 pub struct TopicsImport;
 
 impl HostTopics for TopicsImport {
     fn publish(&mut self, topic: String, payload_json: String) -> Result<(), PluginError> {
-        PUBLISHER.with(|cell| {
-            let mut context = cell.borrow_mut();
-            let own_prefix = format!("{}/", context.plugin_id);
-            if topic.is_empty()
-                || topic.starts_with(KERNEL_NAMESPACE_PREFIX)
-                || !topic.starts_with(&own_prefix)
-            {
-                return Err(topic_error(
-                    ErrorCode::NotPermitted,
-                    "a plugin may publish only topics under its own id",
-                ));
-            }
-            if topic.chars().count() > TOPIC_NAME_LIMIT_CHARS {
-                return Err(topic_error(
-                    ErrorCode::InvalidArgument,
-                    "the topic name is longer than 128 characters",
-                ));
-            }
-            if !context.declared_topics.contains(&topic) {
-                return Err(topic_error(
-                    ErrorCode::InvalidArgument,
-                    "the topic is not declared in contributes.topics.publishes",
-                ));
-            }
-            if payload_json.len() > PAYLOAD_LIMIT_BYTES {
-                return Err(topic_error(
-                    ErrorCode::InvalidArgument,
-                    "the payload is larger than 64 KiB",
-                ));
-            }
-            if serde_json::from_str::<serde_json::Value>(&payload_json).is_err() {
-                return Err(topic_error(
-                    ErrorCode::InvalidArgument,
-                    "the payload is not valid JSON",
-                ));
-            }
-            let now = Instant::now();
-            let window = Duration::from_secs(1);
-            while context
-                .recent_publishes
-                .front()
-                .is_some_and(|oldest| now.duration_since(*oldest) >= window)
-            {
-                context.recent_publishes.pop_front();
-            }
-            if context.recent_publishes.len() >= PUBLISH_RATE_PER_SECOND {
-                let oldest_age = context
-                    .recent_publishes
-                    .front()
-                    .map(|oldest| now.duration_since(*oldest))
-                    .unwrap_or_default();
-                let wait = window.saturating_sub(oldest_age).as_millis().max(1);
-                return Err(PluginError {
-                    code: ErrorCode::RateLimited,
-                    message: "more than 100 publishes in one second".to_string(),
-                    retry_after_ms: Some(u32::try_from(wait).unwrap_or(1_000)),
-                });
-            }
-            context.recent_publishes.push_back(now);
-            Ok(())
-        })
+        PUBLISHER.with(|cell| check_publish(&mut cell.borrow_mut(), &topic, &payload_json))
     }
+}
+
+/// Checks one publish against the publisher's rules and counts it in its rate window.
+fn check_publish(
+    context: &mut PublisherContext,
+    topic: &str,
+    payload_json: &str,
+) -> Result<(), PluginError> {
+    let own_prefix = format!("{}/", context.plugin_id);
+    if topic.is_empty()
+        || topic.starts_with(KERNEL_NAMESPACE_PREFIX)
+        || !topic.starts_with(&own_prefix)
+    {
+        return Err(topic_error(
+            ErrorCode::NotPermitted,
+            "a plugin may publish only topics under its own id",
+        ));
+    }
+    if topic.chars().count() > TOPIC_NAME_LIMIT_CHARS {
+        return Err(topic_error(
+            ErrorCode::InvalidArgument,
+            "the topic name is longer than 128 characters",
+        ));
+    }
+    if !context
+        .declared_topics
+        .iter()
+        .any(|declared| declared == topic)
+    {
+        return Err(topic_error(
+            ErrorCode::InvalidArgument,
+            "the topic is not declared in contributes.topics.publishes",
+        ));
+    }
+    if payload_json.len() > PAYLOAD_LIMIT_BYTES {
+        return Err(topic_error(
+            ErrorCode::InvalidArgument,
+            "the payload is larger than 64 KiB",
+        ));
+    }
+    if serde_json::from_str::<serde_json::Value>(payload_json).is_err() {
+        return Err(topic_error(
+            ErrorCode::InvalidArgument,
+            "the payload is not valid JSON",
+        ));
+    }
+    let now = Instant::now();
+    let window = Duration::from_secs(1);
+    while context
+        .recent_publishes
+        .front()
+        .is_some_and(|oldest| now.duration_since(*oldest) >= window)
+    {
+        context.recent_publishes.pop_front();
+    }
+    if context.recent_publishes.len() >= PUBLISH_RATE_PER_SECOND {
+        let oldest_age = context
+            .recent_publishes
+            .front()
+            .map(|oldest| now.duration_since(*oldest))
+            .unwrap_or_default();
+        let wait = window.saturating_sub(oldest_age).as_millis().max(1);
+        return Err(PluginError {
+            code: ErrorCode::RateLimited,
+            message: "more than 100 publishes in one second".to_string(),
+            retry_after_ms: Some(u32::try_from(wait).unwrap_or(1_000)),
+        });
+    }
+    context.recent_publishes.push_back(now);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -271,5 +363,38 @@ mod tests {
             .retry_after_ms
             .expect("rate-limited must set retry-after-ms");
         assert!(retry_after_ms > 0, "retry-after-ms must be positive");
+    }
+
+    #[test]
+    fn a_plugin_import_queues_an_accepted_message_and_nothing_for_a_refused_one() {
+        let outbox = super::TopicOutbox::default();
+        let mut topics = super::PluginTopics::new(
+            "example.notes",
+            vec![DECLARED_TOPIC.to_string()],
+            std::sync::Arc::clone(&outbox),
+        );
+        topics
+            .publish(DECLARED_TOPIC.to_string(), "{}".to_string())
+            .expect("accepted");
+        let refused = topics.publish("example.notes/other".to_string(), "{}".to_string());
+        expect_error(refused, ErrorCode::InvalidArgument);
+        let queued: Vec<_> = outbox.lock().expect("outbox").drain(..).collect();
+        assert_eq!(
+            queued,
+            vec![super::Published {
+                from: "example.notes".to_string(),
+                topic: DECLARED_TOPIC.to_string(),
+                payload_json: "{}".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn declared_topics_reads_the_publishes_list_of_a_manifest() {
+        let manifest = serde_json::json!({
+            "contributes": { "topics": { "publishes": ["a/b", 3, "a/c"], "subscribes": ["x/y"] } }
+        });
+        assert_eq!(super::declared_topics(&manifest), vec!["a/b", "a/c"]);
+        assert!(super::declared_topics(&serde_json::json!({})).is_empty());
     }
 }

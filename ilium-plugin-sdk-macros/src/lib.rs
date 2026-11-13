@@ -156,6 +156,19 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote! {}
     };
+    let render_fn = if has("views") {
+        quote! {
+            fn native_render(
+                &mut self,
+                view: #krate::types::ViewTarget,
+                area: #krate::types::Area,
+            ) -> ::core::option::Option<#krate::types::UiTree> {
+                ::core::option::Option::Some(<Self as #krate::Views>::render(self, view, area))
+            }
+        }
+    } else {
+        quote! {}
+    };
     let component_glue = component::glue(side, exports, krate, name);
     quote! {
         #item_struct
@@ -190,6 +203,7 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
             #run_job_fn
             #handle_service_fn
             #handle_hook_fn
+            #render_fn
         }
     }
     .into()
