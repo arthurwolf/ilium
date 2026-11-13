@@ -347,8 +347,13 @@ impl GrowthScene {
         }
     }
     fn idx(&self, x: i32, y: i32) -> Option<usize> {
-        (x >= 0 && y >= 0 && x < self.dot_width() && y < self.dot_height())
-            .then_some(y as usize * self.dot_width() as usize + x as usize)
+        // Bounds first: `then_some` would evaluate the product eagerly, and a negative
+        // neighbour coordinate cast to `usize` overflows it.
+        if x >= 0 && y >= 0 && x < self.dot_width() && y < self.dot_height() {
+            Some(y as usize * self.dot_width() as usize + x as usize)
+        } else {
+            None
+        }
     }
     fn cell_occupied(&self, cell_x: i32, cell_y: i32) -> bool {
         self.mask.is_occupied(cell_x, cell_y)
