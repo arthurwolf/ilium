@@ -1418,9 +1418,6 @@ impl TerminalState {
     pub(crate) fn output_sequence(&self) -> u64 {
         self.last_output_sequence
     }
-    pub(crate) fn live_size(&self) -> (u16, u16) {
-        self.parser.screen().size()
-    }
     pub(crate) fn input_peak_bytes(&self, bytes: &[u8]) -> usize {
         let chunk = bytes.len();
         let columns = usize::from(self.parser.screen().size().1);
