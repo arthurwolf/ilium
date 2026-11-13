@@ -2550,15 +2550,29 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .await,
         "expected Labeling to persist"
     );
-    let (summary_column, summary_row) = tui
-        .with_screen(|screen| {
-            let row = rows_containing(screen, "Title style")
-                .into_iter()
-                .find(|row| column_of_text_in_row(screen, *row, "→").is_some())?;
-            let column = column_of_text_in_row(screen, row, "→")?;
-            Some((column, row))
-        })
-        .expect("Title style next control should be visible");
+    // Read the control from a settled frame: the Labeling write above repaints
+    // this row, and a one-shot capture can land mid-rewrite.
+    let mut summary_control = None;
+    wait_until(
+        || {
+            summary_control = tui.with_screen(|screen| {
+                let row = rows_containing(screen, "Title style")
+                    .into_iter()
+                    .find(|row| column_of_text_in_row(screen, *row, "→").is_some())?;
+                let column = column_of_text_in_row(screen, row, "→")?;
+                Some((column, row))
+            });
+            summary_control.is_some()
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    let (summary_column, summary_row) = summary_control.unwrap_or_else(|| {
+        panic!(
+            "Title style next control should be visible: {:?}",
+            tui.screen_text()
+        )
+    });
     tui.write(&sgr_mouse_down(0, summary_column, summary_row))
         .expect("clicking Summarization");
     tui.write(&sgr_mouse_up(summary_column, summary_row))
@@ -6870,26 +6884,26 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         "expected the nested group to gain its pane, got: {:?}",
         tui.screen_text()
     );
-    // A left click on a group row toggles it. Click until a capture shows it
-    // expanded, waiting for each click's result rather than trusting one
-    // capture, which can land mid-way through a row rewrite.
-    for _ in 0..3 {
-        if wait_until(|| nested_marker('\u{25bc}'), Duration::from_secs(2)).await {
-            break;
-        }
+    // A left click on a group row toggles it, so click exactly once and give
+    // that click the full timeout: retrying a toggle lets a late first click
+    // and a retry cancel each other out.
+    if !wait_until(|| nested_marker('\u{25bc}'), Duration::from_secs(2)).await {
         // Past the client's 400 ms double-click window, so this is no rename.
         tokio::time::sleep(Duration::from_millis(500)).await;
-        let Some(nested_row) = tui
+        let nested_row = tui
             .with_screen(|screen| rows_containing(screen, "nested"))
             .first()
             .copied()
-        else {
-            continue;
-        };
+            .unwrap_or_else(|| panic!("nested group row: {:?}", tui.screen_text()));
         tui.write(&sgr_mouse_down(0, 8, nested_row))
             .expect("press collapsed nested group row");
         tui.write(&sgr_mouse_up(8, nested_row))
             .expect("release collapsed nested group row");
+        assert!(
+            wait_until(|| nested_marker('\u{25bc}'), WAIT_TIMEOUT).await,
+            "expected one click to expand the nested group, got: {:?}",
+            tui.screen_text()
+        );
     }
     // Read both rows from the same settled frame that satisfied the wait; a
     // later separate capture can land mid-repaint (seen under ConPTY).
