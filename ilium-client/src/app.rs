@@ -447,8 +447,8 @@ pub enum Mode {
     ConfirmWorkspaceCloseOffer(NodeId),
     /// The "New group" destination picker is open.
     CreateGroup(CreateGroupState),
-    CreateSplitOrientation(CreateSplitOrientationState),
-    CreateSplitMembers(CreateSplitMembersState),
+    /// A popup a plugin opened; the plugin owns the content, the kernel the chrome.
+    PluginPopup(crate::plugin_host::popup::PopupState),
     /// Board creation owns its storage choice and destination before a tree
     /// node exists, so a cancelled dialog cannot leave a phantom pane.
     CreateBoard(CreateBoardState),
@@ -1973,23 +1973,6 @@ pub struct CreateGroupState {
     pub destinations: Vec<GroupListing>,
     pub selected_index: usize,
     pub name: TextPromptState,
-}
-
-pub struct CreateSplitOrientationState {
-    pub orientation: SplitOrientation,
-}
-
-pub struct SplitPaneChoice {
-    pub pane_id: NodeId,
-    pub label: String,
-    pub selected: bool,
-}
-
-pub struct CreateSplitMembersState {
-    pub parent_group: NodeId,
-    pub orientation: SplitOrientation,
-    pub choices: Vec<SplitPaneChoice>,
-    pub selected_index: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -9999,6 +9982,25 @@ impl App {
                     needs_redraw = true;
                 }
                 crate::plugin_host::host::Output::Redraw => needs_redraw = true,
+                crate::plugin_host::host::Output::PopupOpened { plugin, popup } => {
+                    if matches!(self.mode, Mode::Normal) {
+                        self.mode = Mode::PluginPopup(crate::plugin_host::popup::PopupState::new(
+                            plugin, popup,
+                        ));
+                    } else if let Some(plugins) = self.wasm_plugins.as_ref() {
+                        // Another modal has the screen: the popup never shows.
+                        plugins.dismiss_popup(&plugin, &popup);
+                    }
+                    needs_redraw = true;
+                }
+                crate::plugin_host::host::Output::PopupClosed { plugin, popup } => {
+                    if matches!(&self.mode, Mode::PluginPopup(open)
+                        if open.plugin == plugin && open.popup == popup)
+                    {
+                        self.mode = Mode::Normal;
+                    }
+                    needs_redraw = true;
+                }
             }
         }
         needs_redraw
@@ -15062,12 +15064,6 @@ impl App {
         admitted
     }
 
-    pub fn open_create_split_dialog(&mut self) {
-        self.mode = Mode::CreateSplitOrientation(CreateSplitOrientationState {
-            orientation: SplitOrientation::Vertical,
-        });
-    }
-
     fn normal_group_for_node(&self, node_id: NodeId) -> Option<NodeId> {
         let node = self.tree.get(node_id)?;
         if node.accepts_normal_children() {
@@ -15084,7 +15080,7 @@ impl App {
         self.tree.parent_of(parent)
     }
 
-    fn split_parent_group(&self) -> NodeId {
+    pub(crate) fn split_parent_group(&self) -> NodeId {
         self.selected_node_id()
             .and_then(|node_id| self.normal_group_for_node(node_id))
             .or_else(|| {
@@ -15100,144 +15096,6 @@ impl App {
                 })
             })
             .unwrap_or(ROOT_ID)
-    }
-
-    fn pane_tree_path_label(&self, pane_id: NodeId) -> String {
-        let mut names = Vec::new();
-        let mut current = Some(pane_id);
-        while let Some(node_id) = current {
-            let Some(node) = self.tree.get(node_id) else {
-                break;
-            };
-            if node_id != ROOT_ID {
-                names.push(node.name.clone());
-            }
-            current = node.parent;
-        }
-        names.reverse();
-        names.join(" / ")
-    }
-
-    /// Produces the stable user-facing pane category shown beside each path
-    /// in the split member picker. Agent terminals are identified separately
-    /// because that distinction is useful when assembling a mixed view.
-    fn split_choice_kind_label(&self, pane_id: NodeId) -> &'static str {
-        match self.tree.get(pane_id).map(|node| &node.kind) {
-            Some(NodeKind::Pane {
-                status: PaneStatus::Agent(_),
-                ..
-            }) => "agent",
-            Some(NodeKind::Pane {
-                status: PaneStatus::AgentUnavailable(_),
-                ..
-            }) => "agent unavailable",
-            Some(NodeKind::Pane {
-                content: PaneContentKind::Terminal,
-                ..
-            }) => "terminal",
-            Some(NodeKind::Pane {
-                content: PaneContentKind::Editor,
-                ..
-            }) => "editor",
-            Some(NodeKind::Pane {
-                content: PaneContentKind::Board,
-                ..
-            }) => "board",
-            _ => "pane",
-        }
-    }
-
-    pub fn continue_create_split(&mut self, orientation: SplitOrientation) {
-        let choices = self
-            .tree
-            .pane_ids_in_tree_order()
-            .into_iter()
-            .filter(|pane_id| self.tree.worktree_container_for_node(*pane_id).is_none())
-            .filter(|pane_id| {
-                self.tree
-                    .parent_of(*pane_id)
-                    .and_then(|parent| self.tree.get(parent))
-                    .is_none_or(|parent| !parent.is_split_view())
-            })
-            .map(|pane_id| SplitPaneChoice {
-                pane_id,
-                label: format!(
-                    "[{}] {}",
-                    self.split_choice_kind_label(pane_id),
-                    self.pane_tree_path_label(pane_id)
-                ),
-                selected: false,
-            })
-            .collect();
-        self.mode = Mode::CreateSplitMembers(CreateSplitMembersState {
-            parent_group: self.split_parent_group(),
-            orientation,
-            choices,
-            selected_index: 0,
-        });
-    }
-
-    /// Creates a split without opening the optional pane picker. This is
-    /// deliberately a first-class path rather than a synthetic empty picker
-    /// state, so the orientation dialog can truthfully offer both workflows.
-    pub fn commit_empty_split(&mut self, orientation: SplitOrientation) {
-        if !self.queue_create_split(self.split_parent_group(), orientation, Vec::new()) {
-            self.mode = Mode::CreateSplitOrientation(CreateSplitOrientationState { orientation });
-        }
-    }
-
-    pub fn toggle_create_split_member(&mut self, state: &mut CreateSplitMembersState) {
-        let selected_count = state
-            .choices
-            .iter()
-            .filter(|choice| choice.selected)
-            .count();
-        let Some(choice) = state.choices.get_mut(state.selected_index) else {
-            return;
-        };
-        if !choice.selected && selected_count >= ilium_core::MAXIMUM_SPLIT_VIEW_PANES {
-            self.status_message = Some("A split view can contain at most four panes".to_string());
-            return;
-        }
-        choice.selected = !choice.selected;
-    }
-
-    pub fn commit_create_split(&mut self, state: CreateSplitMembersState) {
-        let pane_ids = state
-            .choices
-            .iter()
-            .filter(|choice| choice.selected)
-            .map(|choice| choice.pane_id)
-            .collect();
-        if !self.queue_create_split(state.parent_group, state.orientation, pane_ids) {
-            self.mode = Mode::CreateSplitMembers(state);
-        }
-    }
-
-    /// Queues the single atomic server mutation shared by the empty and
-    /// member-picker creation paths, keeping naming and modal teardown in one
-    /// place so the two paths cannot drift.
-    fn queue_create_split(
-        &mut self,
-        parent_group: NodeId,
-        orientation: SplitOrientation,
-        pane_ids: Vec<NodeId>,
-    ) -> bool {
-        let name = match orientation {
-            SplitOrientation::Vertical => "Vertical split",
-            SplitOrientation::Horizontal => "Horizontal split",
-        };
-        let admitted = self.queue_request(ClientRequest::CreateSplitView {
-            parent_group,
-            name: name.to_string(),
-            orientation,
-            pane_ids,
-        });
-        if admitted {
-            self.mode = Mode::Normal;
-            self.begin_pending_toolbar_action(TreeToolbarAction::Split);
-        }
-        admitted
     }
 
     /// Builds the right-click context menu for `target`, anchored at the
@@ -17773,7 +17631,9 @@ impl App {
                 let preselected = self.create_group_target_for_click(target);
                 self.open_create_group_dialog(preselected);
             }
-            ContextMenuAction::NewSplitView => self.open_create_split_dialog(),
+            ContextMenuAction::NewSplitView => {
+                self.action_new_split_view(ilium_plugin_api::generated::types::CommandOrigin::Menu);
+            }
             ContextMenuAction::NewFolder => self.action_new_folder(),
             ContextMenuAction::AddChatroom => self.action_add_chatroom_to_project(target),
             ContextMenuAction::NewResource => self.open_resource_dialog(target, false),
@@ -27684,81 +27544,6 @@ mod tests {
     }
 
     #[test]
-    fn split_creation_choices_exclude_panes_already_in_a_split() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let available = app
-            .tree
-            .add_pane(group, "available", PaneContentKind::Editor)
-            .unwrap();
-        let contained = app
-            .tree
-            .add_pane(group, "contained", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .create_split_view(
-                group,
-                "Vertical split",
-                SplitOrientation::Vertical,
-                &[contained],
-            )
-            .unwrap();
-
-        app.continue_create_split(SplitOrientation::Horizontal);
-
-        let Mode::CreateSplitMembers(state) = &app.mode else {
-            panic!("expected split member selector");
-        };
-        assert_eq!(state.choices.len(), 1);
-        assert_eq!(state.choices[0].pane_id, available);
-        assert_eq!(state.choices[0].label, "[editor] work / available");
-    }
-
-    #[test]
-    fn committing_an_empty_split_queues_one_atomic_request() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        app.tree_state.select(vec![group]);
-        app.continue_create_split(SplitOrientation::Horizontal);
-        let Mode::CreateSplitMembers(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("expected split member selector");
-        };
-
-        app.commit_create_split(state);
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::CreateSplitView {
-                parent_group: group,
-                name: "Horizontal split".to_string(),
-                orientation: SplitOrientation::Horizontal,
-                pane_ids: Vec::new(),
-            }]
-        );
-    }
-
-    #[test]
-    fn skipping_the_member_picker_queues_an_empty_split_directly() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        app.tree_state.select(vec![group]);
-        app.open_create_split_dialog();
-
-        app.commit_empty_split(SplitOrientation::Vertical);
-
-        assert!(matches!(app.mode, Mode::Normal));
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::CreateSplitView {
-                parent_group: group,
-                name: "Vertical split".to_string(),
-                orientation: SplitOrientation::Vertical,
-                pane_ids: Vec::new(),
-            }]
-        );
-    }
-
-    #[test]
     fn split_layout_resizes_only_visible_terminal_members_to_their_slots() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -32818,18 +32603,13 @@ mod pending_dialog_submit_spinner_tests {
     use super::*;
 
     #[test]
-    fn editor_and_split_submits_start_their_toolbar_spinner_once_admitted() {
+    fn editor_submit_starts_its_toolbar_spinner_once_admitted() {
         let mut app = App::new("dialog-submit-spinners".into(), std::env::temp_dir());
         app.outbound_admission = Some(crate::execution::test_document_client());
         assert!(app.request_new_editor(ROOT_ID, std::env::temp_dir().join("note.txt")));
         assert_eq!(
             app.pending_toolbar_mask(),
             TreeToolbarAction::Editor.pending_bit()
-        );
-        assert!(app.queue_create_split(ROOT_ID, SplitOrientation::Vertical, Vec::new()));
-        assert_eq!(
-            app.pending_toolbar_mask(),
-            TreeToolbarAction::Editor.pending_bit() | TreeToolbarAction::Split.pending_bit()
         );
     }
 }

@@ -11,6 +11,10 @@ use ilium_plugin_sdk::types::{
 
 pub const PANEL: &str = "layout.presets";
 
+pub fn id_bytes(node: u64) -> Vec<u8> {
+    node.to_le_bytes().to_vec()
+}
+
 pub fn manifest_value() -> serde_json::Value {
     let text = std::fs::read_to_string(manifest_path()).expect("manifest.json is readable");
     serde_json::from_str(&text).expect("manifest.json is JSON")

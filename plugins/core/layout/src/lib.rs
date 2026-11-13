@@ -1,8 +1,11 @@
 //! Core plugin `ilium.core.layout` (manual page core-plugin-layout.md).
 //!
-//! The client side forwards the four split commands and divider drags to the server side and draws
-//! the layout preview panel. The server side turns those messages into `create-pane`,
+//! The client side forwards the four split commands and divider drags to the server side, draws
+//! the layout preview panel, and owns the "New split view" dialog (orientation step, then the
+//! optional member picker). The server side turns the client's messages into `create-pane`,
 //! `create-split` and `resize-pane` intents.
+
+pub mod new_split;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -10,8 +13,8 @@ use std::collections::HashMap;
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, Activation, Alignment, Area, BlockSpec, BlockTitle, BorderType,
     Borders, CreatePaneSpec, CreateSplitSpec, ErrorCode, Event, Intent, MessageSpec, MessageTarget,
-    NodeFlags, NodeId, Outcome, Padding, ParagraphSpec, PluginError, PluginId, PluginSide,
-    PointerKind, RequestRef, ResizePaneSpec, Span, SplitDirection, Style, Submission,
+    NodeFlags, NodeId, OpenViewSpec, Outcome, Padding, ParagraphSpec, PluginError, PluginId,
+    PluginSide, PointerKind, RequestRef, ResizePaneSpec, Span, SplitDirection, Style, Submission,
     TitlePosition, UiNode, UiTree, ViewTarget, Widget,
 };
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
@@ -22,8 +25,9 @@ const PLUGIN_ID: &str = "ilium.core.layout";
 const SPLIT_CHANNELS: [&str; 4] = ["split-right", "split-left", "split-down", "split-up"];
 /// Channel of the divider drag message (focused id, then columns).
 const RESIZE_CHANNEL: &str = "resize";
-/// Channel of the "New split view" dialog answer that skips the member picker (payload: the group id).
-const SPLIT_EMPTY_VERTICAL_CHANNEL: &str = "split-empty-vertical";
+/// Channel of the "New split view" dialog answer and name of the command that opens the dialog.
+/// The payload is JSON: `{"parent": id, "direction": "vertical"|"horizontal", "panes": [id]}`.
+const NEW_SPLIT_CHANNEL: &str = "new-split";
 /// Content kind of the pane a split creates.
 const NEW_PANE_KIND: &str = "ilium.terminal";
 /// Key of the preview widget that receives the divider drag.
@@ -163,12 +167,12 @@ fn server_message(channel: &str, payload: &[u8]) -> Option<Submission> {
                 rows: None,
             })))
         }
-        SPLIT_EMPTY_VERTICAL_CHANNEL => {
-            // The payload is the group; the split view starts with no members.
-            read_node(payload)?;
+        NEW_SPLIT_CHANNEL => {
+            let answer = new_split::Answer::from_payload(payload)?;
             Some(Submission::new(Intent::CreateSplit(CreateSplitSpec {
-                panes: Vec::new(),
-                direction: SplitDirection::Vertical,
+                panes: answer.panes.into_iter().map(NodeId).collect(),
+                direction: answer.direction,
+                parent: Some(NodeId(answer.parent)),
             })))
         }
         _ => None,
@@ -193,6 +197,7 @@ fn split_after_pane(request: RequestRef, outcome: Outcome) -> Option<Submission>
     Some(Submission::new(Intent::CreateSplit(CreateSplitSpec {
         panes,
         direction: pending.direction,
+        parent: None,
     })))
 }
 
@@ -207,6 +212,8 @@ struct ClientState {
     focused: Option<u64>,
     /// False while the preview is hidden; defaults to visible.
     hidden: bool,
+    /// The open "New split view" dialog.
+    dialog: Option<new_split::Dialog>,
 }
 
 impl ClientState {
@@ -244,6 +251,24 @@ impl Handler for LayoutClient {
                             pane.0.to_le_bytes().to_vec(),
                         ));
                     }
+                }
+                Event::CommandInvoked(invoked) if invoked.command == NEW_SPLIT_CHANNEL => {
+                    // Arguments that do not parse open nothing: there is no group to split in.
+                    if let Some(dialog) = new_split::Dialog::open(&invoked.arguments_json) {
+                        CLIENT.with(|cell| cell.borrow_mut().dialog = Some(dialog));
+                        submissions.push(Submission::new(Intent::OpenView(OpenViewSpec {
+                            view: new_split::view(),
+                            focus: true,
+                        })));
+                    }
+                }
+                Event::UiAction(action) if action.view == new_split::view() => {
+                    submissions.extend(new_split_action(
+                        &action.key,
+                        &action.action_id,
+                        action.kind,
+                        action.value,
+                    ));
                 }
                 Event::PaneResized(resized) => CLIENT.with(|cell| {
                     let mut state = cell.borrow_mut();
@@ -294,6 +319,40 @@ impl Handler for LayoutClient {
     }
 }
 
+/// Applies one action of the "New split view" dialog; when it ends the dialog, returns the
+/// message for the server side (if a split is wanted) and the intent that closes the popup.
+fn new_split_action(
+    key: &str,
+    action_id: &str,
+    kind: ActionKind,
+    value: Option<ActionValue>,
+) -> Vec<Submission> {
+    let step = CLIENT.with(|cell| {
+        let mut state = cell.borrow_mut();
+        let step = state
+            .dialog
+            .as_mut()
+            .map(|dialog| dialog.act(key, action_id, kind, value));
+        if matches!(
+            step,
+            Some(new_split::Step::Create(_) | new_split::Step::Cancel)
+        ) {
+            state.dialog = None;
+        }
+        step
+    });
+    let close = || Submission::new(Intent::CloseView(new_split::view()));
+    match step {
+        Some(new_split::Step::Create(answer)) => vec![
+            message_to_server(NEW_SPLIT_CHANNEL, answer.to_payload()),
+            close(),
+        ],
+        // The kernel already removed a popup it closed itself; every other end closes it here.
+        Some(new_split::Step::Cancel) if kind != ActionKind::Closed => vec![close()],
+        _ => Vec::new(),
+    }
+}
+
 fn is_preview(view: &ViewTarget) -> bool {
     matches!(view, ViewTarget::Panel(name) if name == "layout.presets")
 }
@@ -324,8 +383,14 @@ fn divider_drag(kind: ActionKind, value: Option<ActionValue>) -> Option<Submissi
 }
 
 impl Views for LayoutClient {
-    fn render(&mut self, _view: ViewTarget, area: Area) -> UiTree {
-        CLIENT.with(|cell| build_preview(&cell.borrow(), usize::from(area.columns)))
+    fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
+        CLIENT.with(|cell| {
+            let state = cell.borrow();
+            match &state.dialog {
+                Some(dialog) if view == new_split::view() => dialog.render(),
+                _ => build_preview(&state, usize::from(area.columns)),
+            }
+        })
     }
 }
 
@@ -577,9 +642,23 @@ mod spec_tests {
             string_array(&manifest["activation"]),
             [
                 "command:ilium.core.layout/preset",
+                "command:ilium.core.layout/new-split",
                 "view:ilium.core.layout/presets"
             ]
         );
+    }
+
+    /// REQ: COR-050
+    #[test]
+    fn manifest_contributes_the_new_split_command() {
+        let manifest = parsed_manifest();
+        let commands: Vec<String> = manifest["contributes"]["commands"]
+            .as_array()
+            .expect("contributes.commands is an array")
+            .iter()
+            .map(|command| command["id"].as_str().expect("a command id").to_owned())
+            .collect();
+        assert_eq!(commands, ["preset", "new-split"]);
     }
 
     /// REQ: COR-050

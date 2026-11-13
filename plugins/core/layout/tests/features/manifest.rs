@@ -104,6 +104,7 @@ fn doc_cor_050_activation_triggers_are_command_and_view() {
         strings(&manifest["activation"]),
         [
             "command:ilium.core.layout/preset",
+            "command:ilium.core.layout/new-split",
             "view:ilium.core.layout/presets"
         ]
     );

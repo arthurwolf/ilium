@@ -19,9 +19,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{
     AgentToolbarModelSubmenuState, App, BoardDeleteTarget, BoardRenameTarget, ContextMenu,
-    CreateBoardState, CreateGroupState, CreateSplitMembersState, CreateSplitOrientationState,
-    FocusTarget, Mode, PaneRuntime, RightPanelTarget, SubmenuItemAction,
-    FROZEN_DIALOG_BUTTON_LABEL,
+    CreateBoardState, CreateGroupState, FocusTarget, Mode, PaneRuntime, RightPanelTarget,
+    SubmenuItemAction, FROZEN_DIALOG_BUTTON_LABEL,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::icon_settings::IconTarget;
@@ -1224,10 +1223,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         Mode::CreateGroup(state) => {
             cursor = draw_create_group(frame, app, state).or(cursor);
         }
-        Mode::CreateSplitOrientation(state) => {
-            draw_create_split_orientation(frame, area, state, &app.ui_settings.icons);
-        }
-        Mode::CreateSplitMembers(state) => draw_create_split_members(frame, area, state),
+        Mode::PluginPopup(state) => crate::plugin_host::popup::draw(frame, area, state, app),
         Mode::CreateBoard(state) => {
             cursor = draw_create_board(frame, area, state).or(cursor);
         }
@@ -1708,105 +1704,6 @@ fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) ->
         layout.hint_row,
     );
     cursor
-}
-
-fn draw_create_split_orientation(
-    frame: &mut Frame,
-    area: Rect,
-    state: &CreateSplitOrientationState,
-    icons: &crate::icon_settings::IconSettings,
-) {
-    let popup = modal::create_split_orientation_dialog_area(area);
-    frame.render_widget(Clear, popup);
-    let block = theme::block(true).title(theme::chrome_title("New split view"));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-    let vertical_marker = if state.orientation == ilium_core::SplitOrientation::Vertical {
-        "›"
-    } else {
-        " "
-    };
-    let horizontal_marker = if state.orientation == ilium_core::SplitOrientation::Horizontal {
-        "›"
-    } else {
-        " "
-    };
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from("Choose how two or three panes are arranged:"),
-            Line::from(""),
-            Line::from(format!(
-                "{vertical_marker} {}  Vertical — side by side",
-                icons.glyph(IconTarget::SplitVertical)
-            )),
-            Line::from(format!(
-                "{horizontal_marker} {}  Horizontal — stacked",
-                icons.glyph(IconTarget::SplitHorizontal)
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "E  Create empty with this orientation",
-                Style::new().fg(Color::Cyan),
-            )),
-            Line::from(Span::styled(
-                "←/→ choose · Enter choose panes · E create empty · Esc cancel",
-                Style::new().add_modifier(Modifier::DIM),
-            )),
-        ]),
-        inner,
-    );
-}
-
-fn draw_create_split_members(frame: &mut Frame, area: Rect, state: &CreateSplitMembersState) {
-    let popup = modal::create_split_members_dialog_area(area, state.choices.len());
-    frame.render_widget(Clear, popup);
-    let block = theme::block(true).title(theme::chrome_title("Add panes to split"));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-    let (start, end) =
-        modal::create_split_member_visible_window(state.selected_index, state.choices.len());
-    let selected_count = state
-        .choices
-        .iter()
-        .filter(|choice| choice.selected)
-        .count();
-    let mut lines = vec![
-        Line::from(format!(
-            "Select up to four panes ({selected_count}/4). Selecting none creates an empty split."
-        )),
-        Line::from(""),
-    ];
-    if state.choices.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "No eligible panes; all existing panes are already in split views.",
-            Style::new().add_modifier(Modifier::DIM),
-        )));
-    } else {
-        for (index, choice) in state.choices[start..end].iter().enumerate() {
-            let absolute_index = start + index;
-            let marker = if absolute_index == state.selected_index {
-                "›"
-            } else {
-                " "
-            };
-            let checkbox = if choice.selected { "[x]" } else { "[ ]" };
-            let style = if absolute_index == state.selected_index {
-                theme::selected_style()
-            } else {
-                Style::new()
-            };
-            lines.push(Line::from(Span::styled(
-                format!("{marker} {checkbox} {}", choice.label),
-                style,
-            )));
-        }
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "↑/↓ navigate · Space toggle · Enter create · Esc cancel",
-        Style::new().add_modifier(Modifier::DIM),
-    )));
-    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Draws the close-confirmation popup, falling back to a generic message
@@ -3756,8 +3653,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::WaitingWorkspaceCloseOffer { .. } => "CHECKING WORKTREE",
         Mode::ConfirmWorkspaceCloseOffer(..) => "WORKTREE CLOSE",
         Mode::CreateGroup(_) => "NEW GROUP",
-        Mode::CreateSplitOrientation(_) => "NEW SPLIT",
-        Mode::CreateSplitMembers(_) => "SELECT SPLIT PANES",
+        Mode::PluginPopup(_) => "PLUGIN DIALOG",
         Mode::CreateBoard(_) => "NEW BOARD",
         Mode::BoardPathPicker(_) => "BOARD PATH",
         Mode::BoardCardPrompt(_, _) => "NEW CARD",
@@ -4086,35 +3982,6 @@ mod tests {
     use ratatui::Terminal;
     use ratatui_textarea::TextArea;
     use std::path::PathBuf;
-
-    #[test]
-    fn split_orientation_dialog_shows_complete_cancel_instruction_at_demo_size() {
-        let mut terminal = Terminal::new(TestBackend::new(163, 51)).unwrap();
-        let state = CreateSplitOrientationState {
-            orientation: SplitOrientation::Vertical,
-        };
-        terminal
-            .draw(|frame| {
-                draw_create_split_orientation(
-                    frame,
-                    frame.area(),
-                    &state,
-                    &crate::icon_settings::IconSettings::default(),
-                );
-            })
-            .unwrap();
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-        assert!(
-            rendered.contains("Esc cancel"),
-            "the cancel instruction must be fully visible"
-        );
-    }
 
     #[test]
     fn terminal_placeholder_prioritizes_concrete_blocking_failure() {

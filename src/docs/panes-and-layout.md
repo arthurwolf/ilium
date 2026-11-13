@@ -135,10 +135,12 @@ A split view shows two, three or four panes of a group at the same time, so an a
 ### Create a split view
 
 1. Press `Ctrl+B` `"` (or right-click and choose **New split view**).
-2. In the first dialog choose the orientation: `Left`, `Right`, `Up`, `Down` or `Tab` toggles between vertical and horizontal.
-3. Press `Enter` to continue and choose the members, or press `e` to create an empty split and fill it later.
+2. In the first dialog choose the orientation: `Up` and `Down` switch between vertical and horizontal.
+3. Press `Enter` to continue and choose the members, or move to **Create empty** with `Tab` and press `Enter` to create an empty split and fill it later.
 4. In the member list, `Up` and `Down` (or `k` and `j`) move, `Space` ticks or unticks a pane. Panes that are already in another split view are not offered. Ticking a fifth pane shows "A split view can contain at most four panes".
 5. Press `Enter` to create the split view.
+
+The dialog is provided by the Layout plugin. With that plugin off, **New split view** reports that Layout is not running.
 
 The split view appears as a row in the tree with its members as children. Select it and press `Enter`, click it, or choose **Show split view** to display it.
 

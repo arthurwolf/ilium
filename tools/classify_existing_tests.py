@@ -18,11 +18,28 @@ DEFAULT_LEDGER = Path("/home/arthur/dev/ai/ilium/docs/research/plugin-platform/e
 DEFAULT_TRACE = ROOT / "docs/plugins-manual/pages/reference-feature-traceability.md"
 DEFAULT_PLUGINS = ROOT / "plugins/core"
 DEFAULT_OUT = ROOT / "tools/test_port_map.tsv"
+DEFAULT_OVERRIDES = ROOT / "tools/test_port_overrides.tsv"
 LEDGER_COLUMNS = ["file", "test", "attr", "ignored", "owner", "class"]
 EXTRA_COLUMNS = ["target_crate", "feature_ids", "status"]
 PLUGIN_CLASSES = ("moves-to-plugin", "adapt-to-plugin-api")
 KERNEL = "kernel"
 ROW_ID = re.compile(r"^F-\d{3}$")
+
+
+def apply_overrides(header: list[str], rows: list[list[str]], path: Path) -> int:
+    """Rows a finished port changed (file, test, then the columns to set); the ledger is older."""
+    if not path.exists():
+        return 0
+    lines = [line.split("\t") for line in path.read_text(encoding="utf-8").splitlines() if line]
+    columns, wanted = lines[0], {(line[0], line[1]): line for line in lines[1:]}
+    applied = 0
+    for row in rows:
+        override = wanted.get((row[0], row[1]))
+        if override:
+            for name, value in zip(columns[2:], override[2:]):
+                row[header.index(name)] = value
+            applied += 1
+    return applied
 
 
 def plugin_names(plugins_dir: Path) -> list[str]:
@@ -81,11 +98,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--traceability", type=Path, default=DEFAULT_TRACE)
     parser.add_argument("--plugins-dir", type=Path, default=DEFAULT_PLUGINS)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--overrides", type=Path, default=DEFAULT_OVERRIDES)
     args = parser.parse_args(argv)
     names = plugin_names(args.plugins_dir)
     features = load_feature_map(args.traceability, names)
     lines = args.ledger.read_text(encoding="utf-8").splitlines()
     header, rows, by_class, by_owner, unknown = classify(lines, names, features)
+    applied = apply_overrides(header, rows, args.overrides)
     args.out.write_text(
         "\n".join("\t".join(r) for r in [header] + rows) + "\n", encoding="utf-8"
     )
@@ -95,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"type": "summary", "owner": owner, "tests": by_owner[owner]}))
     for owner in unknown:
         print(json.dumps({"type": "error", "code": "unknown-owner", "owner": owner}))
-    print(json.dumps({"type": "result", "rows": len(rows), "out": str(args.out), "unknown_owners": len(unknown)}))
+    print(json.dumps({"type": "result", "rows": len(rows), "out": str(args.out), "unknown_owners": len(unknown), "overrides": applied}))
     return 1 if unknown else 0
 
 

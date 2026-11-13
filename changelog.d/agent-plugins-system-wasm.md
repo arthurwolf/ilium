@@ -1,4 +1,5 @@
 ### Added
+- Client plugins can open a popup dialog (`open-view` with a popup target): the kernel draws it, reports keys and clicks as actions, and always closes it on `Esc`.
 - Plugin SDK: `#[ilium_plugin]` now emits the WebAssembly component glue on `wasm32-wasip2` when the crate feature `component-server` or `component-client` is on, so a core plugin crate builds into a real component for each side.
 - New crate `ilium-plugin-bundle` that builds the core plugins as WebAssembly components and exposes them as an embedded catalogue (off by default; `mode = lenient` or `strict` in `ilium-plugin-bundle/bundle-build.conf`, or the environment variable `ILIUM_PLUGIN_BUNDLE_MODE`, turns the build on).
 - Plugin host: a composed runtime (`HostRuntime`) that loads the plugin catalogue, links WASI and the host imports per plugin grant, activates plugins on their triggers, delivers events and commands, renders views and disables or enables a plugin while running; a contribution registry for the 23 manifest contribution kinds. Not yet started by the server or the client.
@@ -8,6 +9,8 @@
 - Settings has a Plugins tab that lists every plugin with its version and state and an on/off switch.
 
 ### Changed
+- The "New split view" dialog is now provided by the Layout plugin instead of built-in code. It looks and works the same with `Enter`, `Space` and the arrow keys; an empty split is created with the **Create empty** button instead of the `e` key, the orientation is switched with `Up` and `Down`, and the toolbar Split button no longer shows a spinner. With the Layout plugin off, the action reports that Layout is not running.
+- Plugin contract: `create-split-spec` has an optional `parent` group and accepts 0 to 4 panes, so a plugin can create an empty split view in a chosen group.
 - Plugin contract: a check list is flat (`check-item.children` holds item ids), and five host functions whose names collided with a type are now `get-image-info`, `get-widget-state`, `get-theme-extras`, `get-selection` and `get-foreground-process`.
 - Plugin contract: `wit/` again matches the manual, which adds the `telemetry`, `self-limits` and `self-describe` interfaces, `codec.hmac-sha256` and `codec.constant-time-equal`.
 - Plugin SDK: events now reach a plugin's `Handler` implementation whether or not `exports` names `handler`, as the manual states; before, such a plugin silently received no events.

@@ -92,6 +92,10 @@
       {
         "id": "preset",
         "title": "Apply layout preset"
+      },
+      {
+        "id": "new-split",
+        "title": "New split view"
       }
     ],
     "panels": [
@@ -103,6 +107,7 @@
   },
   "activation": [
     "command:ilium.core.layout/preset",
+    "command:ilium.core.layout/new-split",
     "view:ilium.core.layout/presets"
   ],
   "limits_tier": "first-party"

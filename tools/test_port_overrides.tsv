@@ -1,0 +1,7 @@
+file	test	owner	class	target_crate	status
+ilium-client/src/app.rs	committing_an_empty_split_queues_one_atomic_request	layout	moves-to-plugin	plugins/core/layout	ported
+ilium-client/src/app.rs	skipping_the_member_picker_queues_an_empty_split_directly	layout	moves-to-plugin	plugins/core/layout	ported
+ilium-client/src/app.rs	split_creation_choices_exclude_panes_already_in_a_split	layout	moves-to-plugin	plugins/core/layout	ported
+ilium-client/src/keys.rs	split_orientation_dialog_can_skip_the_optional_member_picker	layout	moves-to-plugin	plugins/core/layout	ported
+ilium-client/src/mouse.rs	clicking_inside_the_popup_on_the_vertical_row_advances_to_the_member_picker	layout	moves-to-plugin	plugins/core/layout	ported
+ilium-client/src/mouse.rs	clicking_outside_the_popup_on_an_orientation_row_cancels_instead_of_advancing	kernel	kernel-stays	ilium-client	ported

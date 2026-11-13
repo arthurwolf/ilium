@@ -22,7 +22,7 @@ enum placement { before, after, inside-first, inside-last }           // as for 
 record create-group-spec   { parent: option<node-id>, title: string, placement: placement, children: list<node-id> }
 record create-folder-spec  { parent: option<node-id>, title: string, path: option<fs-path> }
 record create-project-spec { title: string, root: fs-path }
-record create-split-spec   { panes: list<node-id>, direction: split-direction }   // 2 to 4 panes
+record create-split-spec   { panes: list<node-id>, direction: split-direction, parent: option<node-id> }   // 0 to 4 panes
 record set-bookmarked-spec { node: node-id, bookmarked: bool }
 variant expand-target { node(node-id), virtual-row(string) }
 record set-expanded-spec   { target: expand-target, expanded: bool }
@@ -38,7 +38,7 @@ record restructure-spec    { operations: list<restructure-op>, label: string }  
 | `create-group` | Creates a group under `parent` at `placement` and moves `children` into it. | `ok-node` with the new group |
 | `create-folder` | Creates a folder node, optionally bound to a directory `path`. | `ok-node` |
 | `create-project` | Creates a project node rooted at `root`. | `ok-node` |
-| `create-split` | Joins 2 to 4 panes into one split container. | `ok-node` with the split container |
+| `create-split` | Joins up to 4 panes into one split container under `parent`; no panes makes an empty split view. | `ok-node` with the split container |
 | `set-bookmarked` | Sets or clears the bookmark star on a node. | `ok` |
 | `set-expanded` | Expands or collapses a node, or one of the plugin's own virtual rows. | `ok` |
 | `restructure` | Applies up to 256 operations (move, create-group, ungroup, rename) as one change with a `label` for the undo. | `ok-node` carrying an undo token node id (0 when nothing changed) |

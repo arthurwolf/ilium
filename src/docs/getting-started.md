@@ -263,7 +263,7 @@ Common dialog keys:
 | --- | --- |
 | Rename and command prompt | `Enter` confirms, `Esc` cancels. |
 | New group | `Up` / `Down` pick the destination, type the name, `Enter` confirms, `Esc` cancels. |
-| New split, step 1 | `Left` / `Right` / `Up` / `Down` / `Tab` switch vertical and horizontal, `Enter` continues to the pane picker, `e` creates an empty split, `Esc` cancels. |
+| New split, step 1 | `Up` / `Down` (or `k` / `j`) switch vertical and horizontal, `Left` / `Right` / `Tab` move between the buttons, `Enter` presses the highlighted button (**Choose panes** first, **Create empty** for an empty split), `Esc` cancels. |
 | New split, step 2 | `Up` / `Down` (or `k` / `j`) move, `Space` ticks a pane, `Enter` creates the split, `Esc` cancels. |
 | Close confirmation | `y` or `Enter` confirms, `n` or `Esc` cancels. |
 | Context menu | `Up` / `Down` select, `Enter` runs, `Esc` or `Left` closes a submenu or the menu. |

@@ -442,19 +442,11 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         handle_create_group_mouse(app, state, mouse);
         return;
     }
-    if matches!(app.mode, Mode::CreateSplitOrientation(_)) {
-        let Mode::CreateSplitOrientation(state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            unreachable!("just matched Mode::CreateSplitOrientation above");
+    if matches!(app.mode, Mode::PluginPopup(_)) {
+        let Mode::PluginPopup(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            unreachable!("just matched Mode::PluginPopup above");
         };
-        handle_create_split_orientation_mouse(app, state, mouse);
-        return;
-    }
-    if matches!(app.mode, Mode::CreateSplitMembers(_)) {
-        let Mode::CreateSplitMembers(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            unreachable!("just matched Mode::CreateSplitMembers above");
-        };
-        handle_create_split_members_mouse(app, state, mouse);
+        app.plugin_popup_mouse(state, mouse);
         return;
     }
     if let Mode::TextTriggerDialog(state) = &app.mode {
@@ -1070,77 +1062,6 @@ fn handle_search_mouse(
     }
 }
 
-fn handle_create_split_orientation_mouse(
-    app: &mut App,
-    state: crate::app::CreateSplitOrientationState,
-    mouse: MouseEvent,
-) {
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        app.mode = Mode::CreateSplitOrientation(state);
-        return;
-    }
-    let position = Position::new(mouse.column, mouse.row);
-    let popup = crate::modal::create_split_orientation_dialog_area(app.layout.screen_area);
-    // A click outside the popup (e.g. over the tree/pane area, which is
-    // still live underneath this modal) must cancel rather than fall
-    // through to the row-only checks below, which otherwise match on
-    // `mouse.row` alone and would misfire for any column on that terminal
-    // row -- mirroring every sibling dialog handler's outside-click cancel.
-    if !popup.contains(position) {
-        app.mode = Mode::Normal;
-        return;
-    }
-    let orientation = match mouse.row {
-        row if row == popup.y.saturating_add(3) => Some(ilium_core::SplitOrientation::Vertical),
-        row if row == popup.y.saturating_add(4) => Some(ilium_core::SplitOrientation::Horizontal),
-        _ => None,
-    };
-    if let Some(orientation) = orientation {
-        app.continue_create_split(orientation);
-    } else if mouse.row == popup.y.saturating_add(6) {
-        app.commit_empty_split(state.orientation);
-    } else {
-        app.mode = Mode::CreateSplitOrientation(state);
-    }
-}
-
-fn handle_create_split_members_mouse(
-    app: &mut App,
-    mut state: crate::app::CreateSplitMembersState,
-    mouse: MouseEvent,
-) {
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        app.mode = Mode::CreateSplitMembers(state);
-        return;
-    }
-    let position = Position::new(mouse.column, mouse.row);
-    if let Some(index) = crate::modal::create_split_member_row_at(
-        app.layout.screen_area,
-        state.selected_index,
-        state.choices.len(),
-        position,
-    ) {
-        state.selected_index = index;
-        app.toggle_create_split_member(&mut state);
-        app.mode = Mode::CreateSplitMembers(state);
-        return;
-    }
-    let popup =
-        crate::modal::create_split_members_dialog_area(app.layout.screen_area, state.choices.len());
-    // A click outside the popup cancels, matching every other creation
-    // dialog's mouse handler in this file (create-group, create-board,
-    // create-agent-from-line, scheduled-input, prompt-queue, ...).
-    if !popup.contains(position) {
-        app.mode = Mode::Normal;
-        return;
-    }
-    if mouse.row == popup.bottom().saturating_sub(2) {
-        app.commit_create_split(state);
-    } else {
-        app.mode = Mode::CreateSplitMembers(state);
-    }
-}
-
 /// Selects tree rows, opens the right-click menu, scrolls, and handles the
 /// toolbar/row hover controls.
 fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
@@ -1630,7 +1551,9 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
             return;
         }
         TreeToolbarAction::Split => {
-            app.open_create_split_dialog();
+            app.action_new_split_view(
+                ilium_plugin_api::generated::types::CommandOrigin::TreeToolbar,
+            );
             return;
         }
         // `action_new_editor` only opens the file picker (or reports its
@@ -4544,64 +4467,6 @@ mod drop_target_tests {
 }
 
 #[cfg(test)]
-mod create_split_orientation_mouse_tests {
-    use super::*;
-    use crate::app::App;
-    use crossterm::event::KeyModifiers;
-
-    /// Regression test: the Vertical/Horizontal row hit-tests used to match
-    /// on `mouse.row` alone, with no `x`/popup-containment guard -- unlike
-    /// the same function's own empty-split branch. A click on that row's
-    /// `y` but far outside the popup's `x` range (e.g. over the tree panel
-    /// rendered underneath this modal) must cancel, not advance the flow.
-    #[test]
-    fn clicking_outside_the_popup_on_an_orientation_row_cancels_instead_of_advancing() {
-        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.open_create_split_dialog();
-        let popup = crate::modal::create_split_orientation_dialog_area(app.layout.screen_area);
-        assert!(
-            popup.x > 0,
-            "popup must be inset from the screen edge for this test to be meaningful"
-        );
-
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: 0,
-                row: popup.y + 3,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-
-        assert!(matches!(app.mode, Mode::Normal));
-    }
-
-    /// The row-only match is otherwise correct: clicking the Vertical row
-    /// inside the popup still advances into the pane-picker step.
-    #[test]
-    fn clicking_inside_the_popup_on_the_vertical_row_advances_to_the_member_picker() {
-        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.open_create_split_dialog();
-        let popup = crate::modal::create_split_orientation_dialog_area(app.layout.screen_area);
-
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: popup.x + 1,
-                row: popup.y + 3,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-
-        assert!(matches!(app.mode, Mode::CreateSplitMembers(_)));
-    }
-}
-
-#[cfg(test)]
 mod tree_rename_mouse_tests {
     use super::*;
     use crate::app::App;
@@ -4716,8 +4581,11 @@ mod tree_rename_mouse_tests {
 
         // A press dispatched while a modal owns the screen: not part of the
         // pair, whatever it lands on.
-        app.open_create_split_dialog();
-        let popup = crate::modal::create_split_orientation_dialog_area(app.layout.screen_area);
+        app.open_create_group_dialog(ilium_core::ROOT_ID);
+        let popup = crate::modal::create_group_dialog_area(
+            app.layout.screen_area,
+            app.tree.list_groups().len(),
+        );
         handle_mouse_event(
             &mut app,
             MouseEvent {

@@ -480,13 +480,22 @@ impl KernelFacade for ServerFacade {
                 })
             }
             Intent::CreateSplit(spec) => {
-                let Some(first) = spec.panes.first().copied() else {
-                    return refused(ErrorCode::InvalidArgument, "a split needs panes");
+                if spec.panes.len() > ilium_core::MAXIMUM_SPLIT_VIEW_PANES {
+                    return refused(
+                        ErrorCode::InvalidArgument,
+                        "a split view holds at most four panes",
+                    );
+                }
+                // The named group wins; else the group of the first pane; an empty split with
+                // no group goes to the root.
+                let parent = match (spec.parent, spec.panes.first().copied()) {
+                    (Some(parent), _) => to_core(parent),
+                    (None, Some(first)) => self
+                        .with_tree(|tree| tree.parent_of(to_core(first)))
+                        .flatten()
+                        .unwrap_or(ilium_core::ROOT_ID),
+                    (None, None) => ilium_core::ROOT_ID,
                 };
-                let parent = self
-                    .with_tree(|tree| tree.parent_of(to_core(first)))
-                    .flatten()
-                    .unwrap_or(ilium_core::ROOT_ID);
                 let (name, orientation) = match spec.direction {
                     SplitDirection::Horizontal => {
                         ("Horizontal split", SplitOrientation::Horizontal)

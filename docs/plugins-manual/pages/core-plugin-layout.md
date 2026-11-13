@@ -163,6 +163,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       {
         "id": "preset",
         "title": "Apply layout preset"
+      },
+      {
+        "id": "new-split",
+        "title": "New split view"
       }
     ],
     "panels": [
@@ -174,13 +178,14 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "activation": [
     "command:ilium.core.layout/preset",
+    "command:ilium.core.layout/new-split",
     "view:ilium.core.layout/presets"
   ],
   "limits_tier": "first-party"
 }
 ```
 
-The server side holds `panes.create` because the `create-pane` intent that the split samples submit is opened only by that grant ([panes.create](/pages/capability-panes-create/)). The two activation triggers name a command and a view that the plugin registers itself at run time through the command and view registries ([commands](/pages/api-commands/), [UI model](/pages/ui-model/)), not through `contributes`. The trigger `command:ilium.core.layout/preset` starts the plugin when that command is first run, and `view:ilium.core.layout/presets` when the presets panel is first shown. A trigger whose name the plugin never registers never fires, and the plugin then starts only at the next explicit use.
+The server side holds `panes.create` because the `create-pane` intent that the split samples submit is opened only by that grant ([panes.create](/pages/capability-panes-create/)). The activation triggers name two commands and a view. The trigger `command:ilium.core.layout/preset` starts the plugin when that command is first run, `command:ilium.core.layout/new-split` when the "New split view" dialog is first asked for, and `view:ilium.core.layout/presets` when the presets panel is first shown. A trigger whose name the plugin never registers never fires, and the plugin then starts only at the next explicit use.
 
 ### Samples
 
@@ -444,6 +449,42 @@ const resize = (pane: bigint, columns: number): Submission => ({
   dedupKey: undefined,
 });
 ```
+
+#### New split view dialog
+
+The "New split view" key binding, the Split button of the tree toolbar and the "New split view" entry of the tree context menu run the command `ilium.core.layout/new-split`. The dialog itself belongs to this plugin: the kernel has no built-in copy, so with Layout off these three entry points report that Layout is not running.
+
+<figure>
+<pre class="term">╭─ New split view ─────────────────────────────────────────────────────╮
+│Choose how two or three panes are arranged:                           │
+│<span class="t-hi">› (•) Vertical — side by side</span>                                         │
+│  ( ) Horizontal — stacked                                            │
+│                                                                      │
+│ <span class="t-hi">[ Choose panes ]</span> <span class="t-dim">[ Create empty ] [ Cancel ]</span>                         │
+╰──────────────────────────────────────────────────────────────────────╯
+</pre>
+<figcaption>Rendered at 72 columns. Illustrative. The first page of the dialog. "Choose panes" opens the second page, a check list of the panes that may join.</figcaption>
+</figure>
+
+The client side keeps the dialog state and describes each page as a view whose root is a `dialog` widget; the kernel draws it as a popup and reports keys and clicks as `ui-action` events ([UI model](/pages/ui-model/)).
+
+| Step | Who | What happens |
+|---|---|---|
+| 1 | kernel | Runs `new-split` with JSON arguments: `root`, `parent` (the group the selection points at), `nodes` (id, parent, kind, content, agent, title of every tree node) and `panes` (pane ids in tree order). |
+| 2 | client side | Builds the pane choices, then submits `open-view` for the popup `new-split`. |
+| 3 | client side | Page one is a `choice` with key `orientation` and the buttons `choose`, `empty` and `cancel`. Page two is a `check-list` with key `members` and the buttons `create` and `cancel`. |
+| 4 | client side | On `empty` or `create`, sends the message `new-split` to the server side with the JSON payload `{"parent", "direction", "panes"}` and submits `close-view`. |
+| 5 | server side | Submits one `create-split` intent with that parent, direction and pane list. |
+
+Rules the plugin applies:
+
+- A pane is offered only when its parent is not already a split view and no ancestor is a worktree.
+- A pane is labelled `[kind] path / to / pane`. The kind is `agent`, `agent unavailable`, `terminal`, `editor` or `board`.
+- At most four panes can be checked. A fifth is refused with the line "A split view can contain at most four panes".
+- Creating with no pane checked, or "Create empty" on page one, makes an empty split view.
+- Escape and a click outside the popup close it. The kernel does this itself and then tells the plugin with a `closed` action, so the dialog can always be left.
+
+The `nodes` and `panes` arguments are a stopgap: the client world cannot yet read the tree with the kind of each container. When it can, the arguments shrink to `parent`.
 
 ### Extension points
 

@@ -1,4 +1,4 @@
-// @generated from wit/ sha256=cbd0c95eaff12f66df0a1fff3c8053cc6ccf21ab71dfe47c106029b853a42c27
+// @generated from wit/ sha256=6920214d06495bdbeebe5f2635790bfcd244bf7a19f95dd9e7a12446f143b4d2
 // output: ilium-plugin-sdk-core/src/wasm/glue.rs
 //! wasm32 guest glue: wit-bindgen bindings of every import interface, the conversions to
 //! and from the mirror types, the import wrappers and the macros `#[ilium_plugin]` expands.
@@ -5516,6 +5516,7 @@ impl IntoWit<b::ilium::types::intents::CreateSplitSpec> for m::types::intents::C
         b::ilium::types::intents::CreateSplitSpec {
             panes: IntoWit::into_wit(self.panes),
             direction: IntoWit::into_wit(self.direction),
+            parent: IntoWit::into_wit(self.parent),
         }
     }
 }
@@ -5524,6 +5525,7 @@ impl IntoMirror<m::types::intents::CreateSplitSpec> for b::ilium::types::intents
         m::types::intents::CreateSplitSpec {
             panes: IntoMirror::into_mirror(self.panes),
             direction: IntoMirror::into_mirror(self.direction),
+            parent: IntoMirror::into_mirror(self.parent),
         }
     }
 }

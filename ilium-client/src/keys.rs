@@ -248,10 +248,7 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
             }
         }
         Mode::CreateGroup(state) => handle_create_group_event(app, state, &event),
-        Mode::CreateSplitOrientation(state) => {
-            handle_create_split_orientation_event(app, state, &event)
-        }
-        Mode::CreateSplitMembers(state) => handle_create_split_members_event(app, state, &event),
+        Mode::PluginPopup(state) => handle_plugin_popup_event(app, state, &event),
         Mode::CreateBoard(state) => handle_create_board_event(app, state, &event),
         Mode::BoardPathPicker(overlay) => handle_board_path_picker_event(app, overlay, &event),
         Mode::BoardCardPrompt(pane_id, state) => {
@@ -1026,7 +1023,9 @@ fn execute_action(app: &mut App, action: Action) {
             let preselected = app.create_group_preselect_target();
             app.open_create_group_dialog(preselected);
         }
-        Action::NewSplitView => app.open_create_split_dialog(),
+        Action::NewSplitView => {
+            app.action_new_split_view(ilium_plugin_api::generated::types::CommandOrigin::Keybinding)
+        }
         Action::NewFolder => app.action_new_folder(),
         Action::Rename => app.action_start_rename(),
         Action::ToggleMove => app.mode = Mode::Move,
@@ -1929,64 +1928,14 @@ fn handle_create_group_event(
     }
 }
 
-fn handle_create_split_orientation_event(
+fn handle_plugin_popup_event(
     app: &mut App,
-    mut state: crate::app::CreateSplitOrientationState,
+    state: crate::plugin_host::popup::PopupState,
     event: &Event,
 ) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::CreateSplitOrientation(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::CreateSplitOrientation(state);
-        return;
-    }
-    match key.code {
-        KeyCode::Esc => app.mode = Mode::Normal,
-        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Tab => {
-            state.orientation = match state.orientation {
-                ilium_core::SplitOrientation::Vertical => ilium_core::SplitOrientation::Horizontal,
-                ilium_core::SplitOrientation::Horizontal => ilium_core::SplitOrientation::Vertical,
-            };
-            app.mode = Mode::CreateSplitOrientation(state);
-        }
-        KeyCode::Enter => app.continue_create_split(state.orientation),
-        KeyCode::Char('e') | KeyCode::Char('E') => app.commit_empty_split(state.orientation),
-        _ => app.mode = Mode::CreateSplitOrientation(state),
-    }
-}
-
-fn handle_create_split_members_event(
-    app: &mut App,
-    mut state: crate::app::CreateSplitMembersState,
-    event: &Event,
-) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::CreateSplitMembers(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::CreateSplitMembers(state);
-        return;
-    }
-    match key.code {
-        KeyCode::Esc => app.mode = Mode::Normal,
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.selected_index = state.selected_index.saturating_sub(1);
-            app.mode = Mode::CreateSplitMembers(state);
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.selected_index =
-                (state.selected_index + 1).min(state.choices.len().saturating_sub(1));
-            app.mode = Mode::CreateSplitMembers(state);
-        }
-        KeyCode::Char(' ') => {
-            app.toggle_create_split_member(&mut state);
-            app.mode = Mode::CreateSplitMembers(state);
-        }
-        KeyCode::Enter => app.commit_create_split(state),
-        _ => app.mode = Mode::CreateSplitMembers(state),
+    match event {
+        Event::Key(key) if is_press(key) => app.plugin_popup_key(state, key.code),
+        _ => app.mode = Mode::PluginPopup(state),
     }
 }
 
@@ -5884,30 +5833,6 @@ mod indent_outdent_tests {
         // Every line-ending flavor collapses to exactly one '\n' -- no
         // literal carriage returns may survive into the queued prompt.
         assert_eq!(state.text.buf, "one\ntwo\nthree\nfour");
-    }
-
-    #[test]
-    fn split_orientation_dialog_can_skip_the_optional_member_picker() {
-        let mut app = App::new("test".to_string(), std::env::temp_dir());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        app.tree_state.select(vec![group]);
-        app.open_create_split_dialog();
-
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE)),
-        );
-
-        assert!(matches!(app.mode, Mode::Normal));
-        assert!(matches!(
-            app.take_outbound_requests().as_slice(),
-            [ClientRequest::CreateSplitView {
-                parent_group,
-                orientation: ilium_core::SplitOrientation::Vertical,
-                pane_ids,
-                ..
-            }] if *parent_group == group && pane_ids.is_empty()
-        ));
     }
 
     #[test]

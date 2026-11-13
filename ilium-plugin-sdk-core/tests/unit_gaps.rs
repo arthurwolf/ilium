@@ -115,6 +115,7 @@ fn sample_create_split() -> CreateSplitSpec {
     CreateSplitSpec {
         panes: Vec::new(),
         direction: SplitDirection::Horizontal,
+        parent: None,
     }
 }
 

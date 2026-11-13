@@ -41,10 +41,6 @@ pub fn message_from_client(channel: &str, payload: Vec<u8>) -> Event {
     })
 }
 
-pub fn id_bytes(node: u64) -> Vec<u8> {
-    node.to_le_bytes().to_vec()
-}
-
 pub fn create_splits(submissions: &[Submission]) -> Vec<CreateSplitSpec> {
     submissions
         .iter()

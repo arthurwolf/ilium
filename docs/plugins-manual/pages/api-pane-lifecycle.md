@@ -55,7 +55,7 @@ record resize-pane-spec { pane: node-id, columns: option<u16>, rows: option<u16>
 record create-group-spec { parent: option<node-id>, title: string, placement: placement, children: list<node-id> }
 record create-folder-spec { parent: option<node-id>, title: string, path: option<fs-path> }
 record create-project-spec { title: string, root: fs-path }
-record create-split-spec { panes: list<node-id>, direction: split-direction }   // 2 to 4 panes
+record create-split-spec { panes: list<node-id>, direction: split-direction, parent: option<node-id> }   // 0 to 4 panes
 record set-bookmarked-spec { node: node-id, bookmarked: bool }
 record restructure-spec { operations: list<restructure-op>, label: string }    // at most 256
 record mark-attention-spec { node: node-id, reason: string }                   // at most 80 characters
@@ -387,7 +387,7 @@ export function openStatusPage(): Submission {
 | `freeze-pane` on Windows | `refused(unsupported)` |
 | `unfreeze-pane` on a pane that is not frozen | `refused(conflict)` |
 | `freeze-pane` on a pane that is exited, restarting or already frozen | `refused(conflict)` |
-| `create-split` with fewer than 2 or more than 4 panes | `refused(invalid-argument)` |
+| `create-split` with more than 4 panes | `refused(invalid-argument)` |
 | `open-external` with a `file` target that is not an absolute existing path, or a `settings` target outside `ilium://settings/` | `refused(invalid-argument)` |
 | `terminate-pane-process` with `grace-ms` above 10,000 | `refused(invalid-argument)` |
 | `resize-pane` the layout cannot give | `refused(conflict)`, message names the neighbour |

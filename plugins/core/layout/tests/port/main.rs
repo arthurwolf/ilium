@@ -1,5 +1,5 @@
-//! Port twins of the Layout core plugin: baseline tests of `ilium-client/src/keys.rs` whose behaviour
-//! (creating split views) belongs to the layout plugin. Tags: `PORT:<file>::<test>`.
+//! Tests moved from the kernel client with the "New split view" dialog, which the layout plugin
+//! now owns. Tags: `PORT:<file>::<test>` name the kernel test each one replaces.
 
 #[path = "../shared/split_host.rs"]
 mod common;

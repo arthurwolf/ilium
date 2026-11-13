@@ -3409,7 +3409,7 @@ ilium-client/src/app.rs	closing_the_agent_toolbar_hides_it_and_resizes_the_pty_b
 ilium-client/src/app.rs	closing_the_last_item_also_closes_its_emptied_group_chain	plain		tree	kernel-stays		F-001,F-004,F-005,F-006	pending
 ilium-client/src/app.rs	codex_max_reasoning_level_adds_the_advanced_reasoning_stage	plain		kernel	kernel-stays		F-001,F-002,F-003,F-004,F-007,F-008,F-011,F-012,F-013,F-014,F-019,F-024,F-058,F-073,F-074,F-075,F-078,F-079,F-085,F-086,F-087,F-091,F-092,F-093,F-094,F-104,F-105,F-106,F-111	pending
 ilium-client/src/app.rs	codex_reasoning_level_stages_the_full_keystroke_sequence_across_ticks	plain		keys-and-help	kernel-stays		F-007,F-010	pending
-ilium-client/src/app.rs	committing_an_empty_split_queues_one_atomic_request	plain		layout	kernel-stays		F-003	pending
+ilium-client/src/app.rs	committing_an_empty_split_queues_one_atomic_request	plain		layout	moves-to-plugin	plugins/core/layout	F-003	ported
 ilium-client/src/app.rs	completed_agent_close_action_queues_close_without_forwarding_a_terminal_click	plain		terminal	kernel-stays		F-013,F-014,F-015,F-017,F-018	pending
 ilium-client/src/app.rs	completed_board_open_survives_real_outbound_saturation_without_ghost_focus	plain		kanban	adapt-to-plugin-api	plugins/core/kanban	F-024,F-025	pending
 ilium-client/src/app.rs	completed_progress_expiry_hides_text_without_resizing_or_losing_result	plain		progress	adapt-to-plugin-api	plugins/core/progress	F-059,F-060,F-061,F-108	pending
@@ -3559,14 +3559,14 @@ ilium-client/src/app.rs	settings_tabs_cycle_through_inference_and_every_existing
 ilium-client/src/app.rs	setup_rows_include_both_features_for_global_and_launch_project_targets	plain		kernel	kernel-stays		F-001,F-002,F-003,F-004,F-007,F-008,F-011,F-012,F-013,F-014,F-019,F-024,F-058,F-073,F-074,F-075,F-078,F-079,F-085,F-086,F-087,F-091,F-092,F-093,F-094,F-104,F-105,F-106,F-111	pending
 ilium-client/src/app.rs	shift_end_returns_terminal_history_to_live_without_forwarding_input	plain		terminal	kernel-stays		F-013,F-014,F-015,F-017,F-018	pending
 ilium-client/src/app.rs	shutdown_without_editor_drains_board_creation_and_reports_open_cancellation	tokio		kanban	adapt-to-plugin-api	plugins/core/kanban	F-024,F-025	pending
-ilium-client/src/app.rs	skipping_the_member_picker_queues_an_empty_split_directly	plain		layout	kernel-stays		F-003	pending
+ilium-client/src/app.rs	skipping_the_member_picker_queues_an_empty_split_directly	plain		layout	moves-to-plugin	plugins/core/layout	F-003	ported
 ilium-client/src/app.rs	smart_copy_freezes_the_visible_screen_and_accepts_a_unique_streamed_record	plain		smart-copy	adapt-to-plugin-api	plugins/core/smart-copy	F-016,F-065,F-066	pending
 ilium-client/src/app.rs	sound_changes_persist_and_queue_one_live_server_update	plain		notifications	adapt-to-plugin-api	plugins/core/notifications	F-047,F-048,F-049	pending
 ilium-client/src/app.rs	sound_preview_design_publishers_preserve_refusal_and_selected_source	plain		notifications	adapt-to-plugin-api	plugins/core/notifications	F-047,F-048,F-049	pending
 ilium-client/src/app.rs	sound_preview_muted_does_not_publish_a_request	plain		notifications	adapt-to-plugin-api	plugins/core/notifications	F-047,F-048,F-049	pending
 ilium-client/src/app.rs	sound_preview_refusal_retry_reports_only_admitted_request	plain		notifications	adapt-to-plugin-api	plugins/core/notifications	F-047,F-048,F-049	pending
 ilium-client/src/app.rs	sound_preview_sends_missing_file_validation_to_server	plain		notifications	adapt-to-plugin-api	plugins/core/notifications	F-047,F-048,F-049	pending
-ilium-client/src/app.rs	split_creation_choices_exclude_panes_already_in_a_split	plain		layout	kernel-stays		F-003	pending
+ilium-client/src/app.rs	split_creation_choices_exclude_panes_already_in_a_split	plain		layout	moves-to-plugin	plugins/core/layout	F-003	ported
 ilium-client/src/app.rs	split_layout_resizes_only_visible_terminal_members_to_their_slots	plain		layout	kernel-stays		F-003	pending
 ilium-client/src/app.rs	split_separator_transfer_control_pastes_only_from_its_adjacent_source	plain		layout	kernel-stays		F-003	pending
 ilium-client/src/app.rs	split_slot_click_focuses_that_member_and_uses_slot_relative_coordinates	plain		layout	kernel-stays		F-003	pending
@@ -4600,7 +4600,7 @@ ilium-client/src/keys.rs	same_id_concurrent_change_refuses_actual_save_and_prese
 ilium-client/src/keys.rs	scheduled_input_keyboard_edits_toggles_and_submits_the_form	plain		keys-and-help	adapt-to-plugin-api	plugins/core/keys-and-help	F-007,F-010	pending
 ilium-client/src/keys.rs	search_typing_updates_the_visible_prompt_without_running_a_scan	plain		keys-and-help	adapt-to-plugin-api	plugins/core/keys-and-help	F-007,F-010	pending
 ilium-client/src/keys.rs	setup_path_paste_never_submits_or_leaks_trailing_keys_into_settings	plain		keys-and-help	adapt-to-plugin-api	plugins/core/keys-and-help	F-007,F-010	pending
-ilium-client/src/keys.rs	split_orientation_dialog_can_skip_the_optional_member_picker	plain		keys-and-help	adapt-to-plugin-api	plugins/core/keys-and-help	F-007,F-010	pending
+ilium-client/src/keys.rs	split_orientation_dialog_can_skip_the_optional_member_picker	plain		layout	moves-to-plugin	plugins/core/layout	F-007,F-010	ported
 ilium-client/src/keys.rs	stale_success_preserves_newer_error_after_edit_away_and_back	tokio		keys-and-help	adapt-to-plugin-api	plugins/core/keys-and-help	F-007,F-010	pending
 ilium-client/src/keys.rs	text_trigger_actual_delete_key_persists_an_explicit_empty_list	plain		keys-and-help	adapt-to-plugin-api	plugins/core/keys-and-help	F-007,F-010	pending
 ilium-client/src/keys.rs	text_trigger_disk_save_failure_keeps_draft_and_durable_bytes	plain		keys-and-help	adapt-to-plugin-api	plugins/core/keys-and-help	F-007,F-010	pending
@@ -4804,8 +4804,8 @@ ilium-client/src/mouse.rs	clicking_add_opens_editor_and_escape_returns_to_settin
 ilium-client/src/mouse.rs	clicking_create_submits_the_dialog_prompt	plain		diagnostics	adapt-to-plugin-api	plugins/core/diagnostics	F-032	pending
 ilium-client/src/mouse.rs	clicking_existing_scrolled_rule_opens_edit_without_mutation	plain		terminal	kernel-stays		F-013,F-014,F-015,F-017,F-018	pending
 ilium-client/src/mouse.rs	clicking_headers_spacers_and_hint_does_not_open_an_editor	plain		editor	adapt-to-plugin-api	plugins/core/editor	F-019,F-020,F-021,F-022,F-023,F-114	pending
-ilium-client/src/mouse.rs	clicking_inside_the_popup_on_the_vertical_row_advances_to_the_member_picker	plain		terminal	kernel-stays		F-013,F-014,F-015,F-017,F-018	pending
-ilium-client/src/mouse.rs	clicking_outside_the_popup_on_an_orientation_row_cancels_instead_of_advancing	plain		terminal	kernel-stays		F-013,F-014,F-015,F-017,F-018	pending
+ilium-client/src/mouse.rs	clicking_inside_the_popup_on_the_vertical_row_advances_to_the_member_picker	plain		layout	moves-to-plugin	plugins/core/layout	F-013,F-014,F-015,F-017,F-018	ported
+ilium-client/src/mouse.rs	clicking_outside_the_popup_on_an_orientation_row_cancels_instead_of_advancing	plain		kernel	kernel-stays	ilium-client	F-013,F-014,F-015,F-017,F-018	ported
 ilium-client/src/mouse.rs	clicking_retitle_on_a_plain_shell_row_queues_a_retitle_request	plain		titles	adapt-to-plugin-api	plugins/core/titles	F-018,F-041,F-042,F-043,F-044,F-045,F-046,F-103	pending
 ilium-client/src/mouse.rs	clicking_the_retitle_slot_on_a_group_row_is_a_no_op	plain		titles	adapt-to-plugin-api	plugins/core/titles	F-018,F-041,F-042,F-043,F-044,F-045,F-046,F-103	pending
 ilium-client/src/mouse.rs	clicking_the_retitle_slot_on_an_editor_row_is_a_no_op	plain		titles	adapt-to-plugin-api	plugins/core/titles	F-018,F-041,F-042,F-043,F-044,F-045,F-046,F-103	pending

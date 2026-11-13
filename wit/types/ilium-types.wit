@@ -632,8 +632,9 @@ interface intents {
   record create-group-spec { parent: option<node-id>, title: string, placement: placement, children: list<node-id> }
   record create-folder-spec { parent: option<node-id>, title: string, path: option<fs-path> }
   record create-project-spec { title: string, root: fs-path }
-  /// 2 to 4 panes.
-  record create-split-spec { panes: list<node-id>, direction: split-direction }
+  /// 0 to 4 panes. parent is the group that receives the split view; none means the group of
+  /// the first pane, or the root when there is no pane.
+  record create-split-spec { panes: list<node-id>, direction: split-direction, parent: option<node-id> }
   record set-bookmarked-spec { node: node-id, bookmarked: bool }
   variant expand-target { node(node-id), virtual-row(string) }
   record set-expanded-spec { target: expand-target, expanded: bool }

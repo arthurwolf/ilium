@@ -122,6 +122,7 @@ pub fn split(kernel: &ServerKernel, panes: &[NodeId], direction: SplitDirection)
         Intent::CreateSplit(CreateSplitSpec {
             panes: panes.to_vec(),
             direction,
+            parent: None,
         }),
     )
 }

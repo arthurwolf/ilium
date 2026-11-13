@@ -28,7 +28,8 @@ use ilium_plugin_api::generated::host::log::Level;
 use ilium_plugin_api::generated::types::events::MessageEvent;
 use ilium_plugin_api::generated::types::tree::NodeClass;
 use ilium_plugin_api::generated::types::{
-    ErrorCode, Event, Intent, NodeId, Outcome, PluginError, PluginId, PluginSide,
+    ActionKind, Area, CommandContext, CommandOrigin, ErrorCode, Event, Intent, NodeId,
+    OpenViewSpec, Outcome, PluginError, PluginId, PluginSide, UiAction, UiTree, ViewTarget,
 };
 use ilium_plugin_api::kernel::{
     Cell, FacadeError, IntentResult, KernelFacade, Origin, PaneRead, TreeNode, TreeRead, UiSink,
@@ -98,6 +99,18 @@ pub(crate) enum Output {
     Toast { plugin: String, toast_json: String },
     /// A plugin view changed.
     Redraw,
+    /// A plugin opened a popup; the event loop gives it the screen if no other modal has it.
+    PopupOpened { plugin: String, popup: String },
+    /// The open popup of a plugin went away (the plugin closed it or its view failed).
+    PopupClosed { plugin: String, popup: String },
+}
+
+/// The one popup a plugin has open, with the view the plugin last rendered for it.
+#[derive(Debug, Clone)]
+struct PopupSlot {
+    plugin: String,
+    popup: String,
+    tree: Option<UiTree>,
 }
 
 /// State the host thread and the event loop share. Every lock is held for a few statements
@@ -112,6 +125,10 @@ struct Shared {
     next_seq: AtomicU64,
     stopping: AtomicBool,
     panels: Mutex<BTreeMap<(String, String), String>>,
+    /// The open plugin popup, if any. One at a time: the kernel has one modal layer.
+    popup: Mutex<Option<PopupSlot>>,
+    /// Columns and rows of the screen, as the event loop last reported them.
+    screen: Mutex<(u16, u16)>,
     runtime: Mutex<Option<RuntimeThread>>,
     project_dir: String,
     session_name: String,
@@ -145,6 +162,81 @@ impl Shared {
             .lock()
             .ok()
             .is_some_and(|slot| slot.as_ref().is_some_and(|thread| thread.post(job)))
+    }
+
+    /// Records the popup a plugin opened and tells the event loop.
+    fn open_popup(&self, plugin: &str, popup: String) {
+        if let Ok(mut slot) = self.popup.lock() {
+            *slot = Some(PopupSlot {
+                plugin: plugin.to_owned(),
+                popup: popup.clone(),
+                tree: None,
+            });
+        }
+        self.push(Output::PopupOpened {
+            plugin: plugin.to_owned(),
+            popup,
+        });
+    }
+
+    /// Forgets the popup if it is the open one. Returns whether it was.
+    fn close_popup(&self, plugin: &str, popup: &str) -> bool {
+        let was_open = self.popup.lock().is_ok_and(|mut slot| {
+            let is_open = slot
+                .as_ref()
+                .is_some_and(|open| open.plugin == plugin && open.popup == popup);
+            if is_open {
+                *slot = None;
+            }
+            is_open
+        });
+        if was_open {
+            self.push(Output::PopupClosed {
+                plugin: plugin.to_owned(),
+                popup: popup.to_owned(),
+            });
+        }
+        was_open
+    }
+
+    fn set_screen(&self, screen: (u16, u16)) {
+        if let Ok(mut slot) = self.screen.lock() {
+            *slot = screen;
+        }
+    }
+
+    /// Asks the owning plugin for the current view of the open popup. Runs on the host
+    /// thread after anything that may have changed the plugin's state; never called from
+    /// inside a plugin call. A view that fails to render closes the popup.
+    fn refresh_popup(&self, runtime: &mut HostRuntime) {
+        let Some((plugin, popup)) = self.popup.lock().ok().and_then(|slot| {
+            slot.as_ref()
+                .map(|open| (open.plugin.clone(), open.popup.clone()))
+        }) else {
+            return;
+        };
+        let (columns, rows) = self.screen.lock().map(|screen| *screen).unwrap_or((0, 0));
+        match runtime.render(
+            &plugin,
+            ViewTarget::Popup(popup.clone()),
+            Area { columns, rows },
+        ) {
+            Ok(tree) => {
+                if let Ok(mut slot) = self.popup.lock() {
+                    if let Some(open) = slot
+                        .as_mut()
+                        .filter(|open| open.plugin == plugin && open.popup == popup)
+                    {
+                        open.tree = Some(tree);
+                    }
+                }
+                self.push(Output::Redraw);
+            }
+            Err(error) => {
+                tracing::warn!("popup {popup} of {plugin} did not render: {error}");
+                self.close_popup(&plugin, &popup);
+            }
+        }
     }
 }
 
@@ -260,6 +352,19 @@ impl KernelFacade for ClientFacade {
         };
         match intent {
             Intent::Message(_) => self.message(plugin, intent),
+            // A popup is client-local: the kernel's modal layer shows it, the server never
+            // hears of it. Other views still go to the server until their seams exist.
+            Intent::OpenView(OpenViewSpec {
+                view: ViewTarget::Popup(popup),
+                ..
+            }) => {
+                self.shared.open_popup(&plugin.0, popup);
+                Outcome::Ok
+            }
+            Intent::CloseView(ViewTarget::Popup(popup)) => {
+                self.shared.close_popup(&plugin.0, &popup);
+                Outcome::Ok
+            }
             other => self.submit(&plugin.0, &other),
         }
     }
@@ -499,6 +604,8 @@ impl ClientPlugins {
             next_seq: AtomicU64::new(1),
             stopping: AtomicBool::new(false),
             panels: Mutex::new(BTreeMap::new()),
+            popup: Mutex::new(None),
+            screen: Mutex::new((0, 0)),
             runtime: Mutex::new(None),
             project_dir: session_cwd.to_string_lossy().into_owned(),
             session_name: session_name.to_owned(),
@@ -738,6 +845,83 @@ impl ClientPlugins {
                 }
             }
         }
+    }
+
+    /// Runs a plugin command (`<plugin id>/<command>`) on the client side of its plugin, with
+    /// the focused pane as context. Returns at once; false when no plugin host is running.
+    /// A command no enabled plugin contributes becomes a toast, so the user is told.
+    pub(crate) fn invoke_command(
+        &self,
+        command: &str,
+        arguments_json: String,
+        origin: CommandOrigin,
+        screen: (u16, u16),
+    ) -> bool {
+        self.shared.set_screen(screen);
+        let shared = Arc::clone(&self.shared);
+        let command = command.to_owned();
+        self.shared.post(move |runtime| {
+            let context = CommandContext {
+                pane: shared.focused.lock().ok().and_then(|focused| *focused),
+                ..CommandContext::default()
+            };
+            if let Err(error) = runtime.invoke_command(&command, &arguments_json, origin, context) {
+                let toast = serde_json::json!({
+                    "message": format!("{command} is not available: {error}"),
+                });
+                shared.push(Output::Toast {
+                    plugin: "plugins".to_owned(),
+                    toast_json: toast.to_string(),
+                });
+            }
+            log_errors("pump", runtime.pump());
+            shared.refresh_popup(runtime);
+        })
+    }
+
+    /// The view the plugin last rendered for its open popup; `None` before the first one.
+    pub(crate) fn popup_tree(&self, plugin: &str, popup: &str) -> Option<UiTree> {
+        self.shared.popup.lock().ok().and_then(|slot| {
+            slot.as_ref()
+                .filter(|open| open.plugin == plugin && open.popup == popup)
+                .and_then(|open| open.tree.clone())
+        })
+    }
+
+    /// Delivers one action of the open popup to its plugin and refreshes the view.
+    pub(crate) fn popup_action(&self, plugin: &str, action: UiAction, screen: (u16, u16)) {
+        self.shared.set_screen(screen);
+        let shared = Arc::clone(&self.shared);
+        let plugin = plugin.to_owned();
+        self.shared.post(move |runtime| {
+            if let Err(error) = runtime.deliver(&plugin, vec![Event::UiAction(action)]) {
+                tracing::debug!("popup action not delivered to {plugin}: {error}");
+            }
+            log_errors("pump", runtime.pump());
+            shared.refresh_popup(runtime);
+        });
+    }
+
+    /// Closes the open popup on the kernel's own authority (Escape, a click outside, another
+    /// modal taking the screen) and tells the plugin with a `closed` action.
+    pub(crate) fn dismiss_popup(&self, plugin: &str, popup: &str) {
+        if !self.shared.close_popup(plugin, popup) {
+            return;
+        }
+        let closed = UiAction {
+            view: ViewTarget::Popup(popup.to_owned()),
+            key: String::new(),
+            action_id: String::new(),
+            kind: ActionKind::Closed,
+            value: None,
+        };
+        let plugin = plugin.to_owned();
+        self.shared.post(move |runtime| {
+            if let Err(error) = runtime.deliver(&plugin, vec![Event::UiAction(closed)]) {
+                tracing::debug!("popup close not delivered to {plugin}: {error}");
+            }
+            log_errors("pump", runtime.pump());
+        });
     }
 
     /// The rows of the Settings plugin list.
