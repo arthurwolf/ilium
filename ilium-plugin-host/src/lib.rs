@@ -81,6 +81,7 @@ pub mod theme;
 pub mod trust;
 pub mod view;
 pub mod wasm_guest;
+pub mod wiring;
 
 pub use error::HostError;
 

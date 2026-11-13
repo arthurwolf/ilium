@@ -394,7 +394,15 @@ impl Connection {
             .map_err(|error| ConnectionError::CodecBootstrap(IpcError::Io(error)))?;
         let (owner, preparation) = crate::ipc_preparation::IpcPreparation::standalone()
             .map_err(ConnectionError::CodecBootstrap)?;
-        Self::connect_prepared(socket_path, session, preparation, Some(owner), None).await
+        Self::connect_prepared(
+            socket_path,
+            session,
+            preparation,
+            Some(owner),
+            None,
+            Default::default(),
+        )
+        .await
     }
 
     pub(crate) async fn connect_admitted(
@@ -402,6 +410,7 @@ impl Connection {
         session: String,
         execution: &crate::execution::ClientExecution,
         admission: ilium_execution::Client,
+        hello: ilium_ipc::plugin::PluginHello,
     ) -> Result<Self, ConnectionError> {
         let preparation =
             crate::execution::retry_startup_busy(|| execution.ipc_preparation(admission.clone()))
@@ -411,7 +420,7 @@ impl Connection {
                         "codec admission: {reason:?}"
                     ))))
                 })?;
-        Self::connect_prepared(socket_path, session, preparation, None, None).await
+        Self::connect_prepared(socket_path, session, preparation, None, None, hello).await
     }
 
     async fn connect_prepared(
@@ -420,6 +429,8 @@ impl Connection {
         preparation: crate::ipc_preparation::IpcPreparation,
         owner: Option<ilium_execution::Execution>,
         admission: Option<ilium_execution::Client>,
+        // What this client tells the server about its plugins (empty without a plugin host).
+        hello: ilium_ipc::plugin::PluginHello,
     ) -> Result<Self, ConnectionError> {
         let stream = SessionEndpoint::from_path(socket_path)
             .connect()
@@ -439,10 +450,7 @@ impl Connection {
         };
 
         request_tx
-            .send(ClientRequest::AttachInteractive {
-                session,
-                hello: Default::default(),
-            })
+            .send(ClientRequest::AttachInteractive { session, hello })
             .await
             // The receiver can only be closed if `writer_task` already
             // panicked before this line, which can't happen -- it hasn't

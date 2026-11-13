@@ -590,6 +590,8 @@ pub enum SettingsTab {
     RemoteCompaction,
     Debug,
     Api,
+    /// The WebAssembly plugins of this installation, each with an on/off switch.
+    Plugins,
     About,
 }
 
@@ -749,7 +751,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 29] = [
+    pub const ALL: [SettingsTab; 30] = [
         Self::Appearance,
         Self::Padding,
         Self::Icons,
@@ -777,6 +779,7 @@ impl SettingsTab {
         Self::CustomAgents,
         Self::Debug,
         Self::Api,
+        Self::Plugins,
         Self::About,
         Self::Setup,
     ];
@@ -811,6 +814,7 @@ impl SettingsTab {
             Self::RemoteCompaction => "Remote compaction",
             Self::Debug => "Debug",
             Self::Api => "API",
+            Self::Plugins => "Plugins",
             Self::About => "About",
         }
     }
@@ -2358,6 +2362,9 @@ pub struct App {
         Option<crate::animation_plugins::preparation::CataloguePreparation>,
     pub(crate) plugin_catalogue:
         Option<ilium_execution::Retained<crate::animation_plugins::PluginCatalogue>>,
+    /// The WebAssembly plugin host of this client, when plugins are on. Named apart from the
+    /// animation plugin fields around it, which are a different, older mechanism.
+    pub(crate) wasm_plugins: Option<crate::plugin_host::host::ClientPlugins>,
     semantic_presentation: semantic_presentation::SemanticPresentation,
     // These leases outlive all App-owned animation snapshots and presentation
     // caches. Each version is separately charged before its first deep copy.
@@ -3131,6 +3138,7 @@ impl App {
             failed_animation_settings: None,
             plugin_catalogue_preparation: None,
             plugin_catalogue: None,
+            wasm_plugins: None,
             animation_frame: Default::default(),
             plugin_permission_session: None,
             semantic_presentation: semantic_presentation::SemanticPresentation::new(
@@ -9954,6 +9962,87 @@ impl App {
             .and_then(|owner| owner.request());
         if let Err(error) = result {
             self.status_message = Some(error);
+        }
+    }
+
+    /// Carries out what the WebAssembly plugin host asked for since the last call: requests
+    /// go to the server through the ordinary queue, a toast becomes the status line, and a
+    /// changed view asks for a redraw. Returns whether to redraw.
+    pub(crate) fn collect_wasm_plugin_outputs(&mut self) -> bool {
+        let Some(outputs) = self
+            .wasm_plugins
+            .as_ref()
+            .map(|plugins| plugins.take_outputs())
+        else {
+            return false;
+        };
+        let mut needs_redraw = false;
+        for output in outputs {
+            match output {
+                crate::plugin_host::host::Output::Request(request) => {
+                    // A refused request already told the user; the plugin sees a timeout.
+                    let _ = self.queue_request(request);
+                }
+                crate::plugin_host::host::Output::Toast { plugin, toast_json } => {
+                    let text = serde_json::from_str::<serde_json::Value>(&toast_json)
+                        .ok()
+                        .and_then(|toast| {
+                            ["title", "message", "text"].iter().find_map(|key| {
+                                toast
+                                    .get(key)
+                                    .and_then(|value| value.as_str())
+                                    .map(str::to_owned)
+                            })
+                        })
+                        .unwrap_or_else(|| "notification".to_owned());
+                    self.status_message = Some(format!("{plugin}: {text}"));
+                    needs_redraw = true;
+                }
+                crate::plugin_host::host::Output::Redraw => needs_redraw = true,
+            }
+        }
+        needs_redraw
+    }
+
+    /// The rows of the Settings plugin list; empty when this client runs without plugins.
+    pub(crate) fn wasm_plugin_rows(&self) -> Vec<ilium_plugin_host::wiring::PluginRow> {
+        self.wasm_plugins
+            .as_ref()
+            .map(|plugins| plugins.rows())
+            .unwrap_or_default()
+    }
+
+    /// Flips the plugin on one row of the Settings plugin list. The server persists the
+    /// choice and reports the new state, which then updates the row; nothing changes here
+    /// until it does.
+    pub(crate) fn settings_toggle_wasm_plugin(&mut self, row: usize) {
+        let Some(row) = self.wasm_plugin_rows().into_iter().nth(row) else {
+            return;
+        };
+        let is_enabled = !ilium_plugin_host::wiring::is_disabled_state(&row.state);
+        if is_enabled && row.essential {
+            self.status_message = Some(format!(
+                "{} is part of the core and cannot be disabled",
+                row.title
+            ));
+            return;
+        }
+        let Some(request) = self
+            .wasm_plugins
+            .as_ref()
+            .map(|plugins| plugins.enable_request(&row.id, !is_enabled))
+        else {
+            return;
+        };
+        // A refused request already told the user why.
+        let _ = self.queue_request(request);
+    }
+
+    /// Mirrors the current tree for the WebAssembly plugin host.
+    pub(crate) fn sync_wasm_plugin_tree(&mut self) {
+        let focused = self.focused_pane_id();
+        if let Some(plugins) = self.wasm_plugins.as_mut() {
+            plugins.sync_tree(&self.tree, focused);
         }
     }
 
@@ -30464,7 +30553,8 @@ mod tests {
         assert_eq!(SettingsTab::TextTriggers.next(), SettingsTab::CustomAgents);
         assert_eq!(SettingsTab::CustomAgents.next(), SettingsTab::Debug);
         assert_eq!(SettingsTab::Debug.next(), SettingsTab::Api);
-        assert_eq!(SettingsTab::Api.next(), SettingsTab::About);
+        assert_eq!(SettingsTab::Api.next(), SettingsTab::Plugins);
+        assert_eq!(SettingsTab::Plugins.next(), SettingsTab::About);
         assert_eq!(SettingsTab::About.next(), SettingsTab::Setup);
         assert_eq!(SettingsTab::Setup.next(), SettingsTab::Appearance);
         assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::Setup);

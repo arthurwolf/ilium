@@ -8,7 +8,7 @@ use crate::common::*;
 const HALF_HOUR_MS: u64 = 30 * 60 * 1000;
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 
-fn small_tree(kernel: &ilium_server::plugin_host::ServerKernel) {
+fn small_tree(kernel: &crate::plugin_model::ServerKernel) {
     let root = project(kernel, "api");
     terminal(kernel, Some(root), "shell", &["sh"]);
 }
@@ -80,7 +80,7 @@ fn f_073_snapshot_file_is_owner_only() {
 /// REQ: F-073, COR-001
 #[test]
 fn f_073_a_named_session_uses_its_own_snapshot_file() {
-    let kernel = ilium_server::plugin_host::ServerKernel::for_parity_world_named(
+    let kernel = crate::plugin_model::ServerKernel::for_parity_world_named(
         StartMode::Normal,
         "",
         "review",

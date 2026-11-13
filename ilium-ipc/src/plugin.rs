@@ -195,6 +195,25 @@ pub enum ControlBody {
     GrantsChanged,
     /// Ask for statistics.
     Stats,
+    /// Client or CLI to server: enable or disable a plugin for this session and persist the
+    /// choice in `installed.json`. Appended after `Stats` (append-only rule); the envelope's
+    /// `plugin` field is empty because the request is not addressed to a plugin.
+    SetEnabled {
+        /// The plugin id.
+        plugin: String,
+        /// Whether it should run.
+        enabled: bool,
+    },
+    /// Server to client: the state of one plugin's server side changed, or its state at
+    /// attach. `state` is a host state name (`running`, `loaded`, `disabled`,
+    /// `manifest-only`, `stopped`, `failed:<code>`), or `refused:<code>` in the reply to a
+    /// `SetEnabled` the server did not apply.
+    PluginState {
+        /// The plugin id.
+        plugin: String,
+        /// The state name.
+        state: String,
+    },
 }
 
 /// The handshake record a client sends on attach (HST-103).

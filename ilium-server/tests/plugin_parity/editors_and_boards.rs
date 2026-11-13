@@ -9,7 +9,7 @@ use ilium_plugin_api::kernel::KernelFacade;
 use crate::common::*;
 
 fn open_editor(
-    kernel: &ilium_server::plugin_host::ServerKernel,
+    kernel: &crate::plugin_model::ServerKernel,
     path: &str,
     line: Option<u32>,
 ) -> Outcome {

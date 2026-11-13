@@ -15,7 +15,7 @@ use crate::common::*;
 
 /// A terminal pane running `command` that is created with `initial_input`.
 fn terminal_with_initial_input(
-    kernel: &ilium_server::plugin_host::ServerKernel,
+    kernel: &crate::plugin_model::ServerKernel,
     command: &[&str],
     initial_input: &str,
 ) -> NodeId {

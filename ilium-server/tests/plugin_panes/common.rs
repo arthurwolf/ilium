@@ -5,7 +5,7 @@ use ilium_plugin_api::generated::types::{
 };
 use ilium_plugin_api::kernel::{KernelFacade, Origin};
 use ilium_plugin_api::Side;
-use ilium_server::plugin_host::ServerKernel;
+use crate::plugin_model::ServerKernel;
 
 pub const RUNNING_PANE: NodeId = NodeId(10);
 pub const RESTORED_PANE: NodeId = NodeId(11);

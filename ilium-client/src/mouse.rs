@@ -4035,6 +4035,16 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         app.settings_toggle_file_logging();
                     }
                 }
+            } else if state.tab == crate::app::SettingsTab::Plugins {
+                if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(
+                    layout.content_area,
+                    state.scroll,
+                    position,
+                    app.wasm_plugin_rows().len(),
+                ) {
+                    state.selected_row = index;
+                    app.settings_toggle_wasm_plugin(index);
+                }
             } else if state.tab == crate::app::SettingsTab::Api {
                 if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(
                     layout.content_area,

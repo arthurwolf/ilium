@@ -171,8 +171,20 @@ pub async fn run(options: ServerOptions) -> Result<(), ServerError> {
 /// Consuming the resource value prevents an accidental second bank from using
 /// the same bootstrap value; clones held by logger/storage retain the ledger.
 pub async fn run_with_resources(
+    options: ServerOptions,
+    resources: ServerResources,
+) -> Result<(), ServerError> {
+    run_with_plugins(options, resources, None).await
+}
+
+/// `run_with_resources` plus the plugin host. The host starts after the session snapshot is
+/// restored and stops before the session drain, so plugins see the restored tree and can
+/// still persist while they deactivate. `None` runs a server without plugins, which is what
+/// embedders and fixtures that do not ship a catalogue get.
+pub async fn run_with_plugins(
     mut options: ServerOptions,
     resources: ServerResources,
+    plugins: Option<plugin_host::PluginStart>,
 ) -> Result<(), ServerError> {
     let endpoint = SessionEndpoint::from_path(&options.socket_path);
     // A live session must never be displaced; only a crashed predecessor's
@@ -346,6 +358,15 @@ pub async fn run_with_resources(
     if let Some(phase) = &startup {
         phase.finish().await;
     }
+    // After restore: the first thing a plugin reads is the restored tree. Loading runs on the
+    // host's own thread, so this does not delay accepting clients.
+    let plugin_feed_task = plugins
+        .and_then(|start| plugin_host::start(&state, start))
+        .map(|host| {
+            // Set once per server; a second value cannot exist.
+            let _ = state.plugins.set(Arc::clone(&host));
+            AbortOnDropHandle::new(plugin_host::spawn_feed(Arc::clone(&state), host))
+        });
     let _resource_task = AbortOnDropHandle::new(resources::spawn(Arc::clone(&state)));
     let detection_task = AbortOnDropHandle::new(detection::spawn(Arc::clone(&state)));
     let workspace_git_requests = state.take_workspace_git_full_receiver().await;
@@ -387,6 +408,13 @@ pub async fn run_with_resources(
         task.abort();
     }
     session_backup_task.abort();
+    if let Some(task) = plugin_feed_task {
+        task.abort();
+    }
+    // Plugins deactivate while the tree, the panes and the snapshot writer still exist.
+    if let Some(host) = state.plugins.get() {
+        host.stop().await;
+    }
     // Gives already-broadcast events (notably `KillSession`'s final
     // `TreeSnapshot`) a chance to actually reach attached clients before
     // their connection tasks are cancelled -- see this constant's doc

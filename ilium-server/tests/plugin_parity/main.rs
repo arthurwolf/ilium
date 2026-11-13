@@ -5,6 +5,8 @@
 
 mod automation;
 mod common;
+#[path = "../support/plugin_model.rs"]
+mod plugin_model;
 mod editors_and_boards;
 mod fleet_kernel_ports;
 mod how_it_works;

@@ -262,9 +262,12 @@ async fn handle_scoped_request(
             .await;
             false
         }
-        // Plugin envelopes are routed by the plugin kernel once it exists (skeleton: ignored).
-        ClientRequest::Plugin(_) => {
-            tracing::debug!("plugin envelope ignored: plugin kernel not implemented");
+        // Plugin envelopes go to the plugin host; a server started without plugins drops them.
+        ClientRequest::Plugin(envelope) => {
+            match state.plugins.get() {
+                Some(host) => host.handle_envelope(envelope, direct_tx).await,
+                None => tracing::debug!("plugin envelope dropped: plugins are off"),
+            }
             false
         }
         ClientRequest::TerminalHistory {
@@ -2675,6 +2678,9 @@ async fn admitted_state_synchronization_events(
                                 &custom_signatures,
                             )),
                         });
+                        if let Some(host) = state.plugins.get() {
+                            events.extend(host.attach_events());
+                        }
                         events.push(ServerEvent::InitialStateSyncComplete);
                     }
                     Some(events)
@@ -2848,6 +2854,9 @@ async fn state_synchronization_events(
                 &custom_signatures,
             )),
         });
+        if let Some(host) = state.plugins.get() {
+            events.extend(host.attach_events());
+        }
         events.push(ServerEvent::InitialStateSyncComplete);
     }
     events
@@ -12922,7 +12931,9 @@ mod tests {
 
         let done = settle_wait_test_monitor(&state, pane_id, 71).await;
         assert!(hand_outcome_to_progress_waiters(&state, pane_id, 71, &done).await);
-        let outcome = next_wait_reply(&mut receiver).await.expect("actual outcome");
+        let outcome = next_wait_reply(&mut receiver)
+            .await
+            .expect("actual outcome");
         assert_eq!(outcome.monitor_id, 71);
         assert_eq!(outcome.progress, Some(done.clone()));
         assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Settled);

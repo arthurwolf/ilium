@@ -4,4 +4,6 @@ mod api_pane_lifecycle;
 mod api_panes;
 mod capability_panes_create;
 mod common;
+#[path = "../support/plugin_model.rs"]
+mod plugin_model;
 mod detector_loop;

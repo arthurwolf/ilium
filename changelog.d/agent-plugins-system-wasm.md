@@ -2,6 +2,10 @@
 - Plugin SDK: `#[ilium_plugin]` now emits the WebAssembly component glue on `wasm32-wasip2` when the crate feature `component-server` or `component-client` is on, so a core plugin crate builds into a real component for each side.
 - New crate `ilium-plugin-bundle` that builds the core plugins as WebAssembly components and exposes them as an embedded catalogue (off by default; `ILIUM_PLUGIN_BUNDLE_MODE=lenient` or `strict` turns the build on).
 - Plugin host: a composed runtime (`HostRuntime`) that loads the plugin catalogue, links WASI and the host imports per plugin grant, activates plugins on their triggers, delivers events and commands, renders views and disables or enables a plugin while running; a contribution registry for the 23 manifest contribution kinds. Not yet started by the server or the client.
+- The server and the client now start the WebAssembly plugin host: the server after the session is restored, the client beside its event loop. Plugins see the live tree, can submit a first set of intents (rename, move, close, lock, bookmark, expand, resize, create pane, group or split, message) and stop cleanly before the session drains.
+- `ilium plugin list`, `ilium plugin enable <id>` and `ilium plugin disable <id>`: the choice is stored in `plugins/installed.json` under the data directory and, when a server runs for the project, applied at once. Core plugins cannot be disabled.
+- `--no-plugins` starts Ilium (client and a server it spawns) without any plugin; `--safe-plugins` starts only the core ones.
+- Settings has a Plugins tab that lists every plugin with its version and state and an on/off switch.
 
 ### Changed
 - Plugin SDK: events now reach a plugin's `Handler` implementation whether or not `exports` names `handler`, as the manual states; before, such a plugin silently received no events.

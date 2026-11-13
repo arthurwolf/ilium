@@ -415,3 +415,31 @@ fn hst_109_delta_cap_constant_is_4_mib() {
 fn hst_109_delta_cap_is_below_the_frame_limit() {
     assert!((MAX_DELTA_BYTES as u64) < u64::from(MAX_FRAME_LEN));
 }
+
+/// The enable request and the state record were appended after `Stats`, so their variant
+/// indices are 4 and 5 and the four earlier records keep theirs.
+#[test]
+fn control_enable_and_state_records_round_trip_at_appended_indices() {
+    let enable = ControlBody::SetEnabled {
+        plugin: "ilium.core.voice".into(),
+        enabled: false,
+    };
+    let state = ControlBody::PluginState {
+        plugin: "ilium.core.voice".into(),
+        state: "disabled".into(),
+    };
+    for (body, index) in [(enable, 4u32), (state, 5u32)] {
+        let bytes = bincode::serialize(&body).expect("encode");
+        assert_eq!(&bytes[..4], &index.to_le_bytes());
+        let decoded: ControlBody = bincode::deserialize(&bytes).expect("decode");
+        assert_eq!(decoded, body);
+        let request = ClientRequest::Plugin(envelope(3, EnvelopeBody::Control(body.clone())));
+        let request_bytes = bincode::serialize(&request).expect("encode request");
+        let back: ClientRequest = bincode::deserialize(&request_bytes).expect("decode request");
+        assert_eq!(back, request);
+    }
+    assert_eq!(
+        &bincode::serialize(&ControlBody::Stats).expect("encode")[..4],
+        &3u32.to_le_bytes()
+    );
+}

@@ -652,6 +652,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             api_lines(&app.api_settings, state.selected_row),
             state.scroll,
         ),
+        SettingsTab::Plugins => render_scrollable(
+            frame,
+            layout.content_area,
+            plugin_lines(app, state.selected_row),
+            state.scroll,
+        ),
         SettingsTab::About => {
             render_scrollable(frame, layout.content_area, about_lines(), state.scroll);
         }
@@ -780,6 +786,19 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::About => {}
+        SettingsTab::Plugins => {
+            // One topic explains the switch every row carries.
+            for index in 0..app.wasm_plugin_rows().len().max(1) {
+                push_help_anchor(
+                    &mut anchors,
+                    layout,
+                    "PLUGIN-01",
+                    1 + index as u16 * 3,
+                    state.scroll,
+                    state.selected_row == index,
+                );
+            }
+        }
         SettingsTab::Toolbar => {
             push_help_anchor(&mut anchors, layout, "TOOLBAR-01", 2, 0, true);
         }
@@ -1430,6 +1449,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::CustomAgents => "✦",
         SettingsTab::Debug => "⌕",
         SettingsTab::Api => "⇄",
+        SettingsTab::Plugins => "⬡",
         SettingsTab::About => "ⓘ",
         SettingsTab::Setup => "⚙",
     }
@@ -2211,6 +2231,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             .len() as u16,
         SettingsTab::Api => api_lines(&app.api_settings, selected_row).len() as u16,
         SettingsTab::LlmInstructions => 0,
+        SettingsTab::Plugins => plugin_lines(app, selected_row).len() as u16,
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
@@ -6082,6 +6103,55 @@ fn api_lines(settings: &crate::config::ApiSettings, selected: usize) -> Vec<Line
         )],
         selected,
     )
+}
+
+/// The Plugins tab: one switch row per WebAssembly plugin, in the shared three-line row
+/// shape, so the generic row hit test and help rail line up with it.
+fn plugin_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
+    let rows = app.wasm_plugin_rows();
+    if rows.is_empty() {
+        return setting_lines(
+            &[(
+                "Plugins",
+                "off".to_owned(),
+                "This client runs without plugins. Start Ilium without --no-plugins to use them.",
+            )],
+            selected,
+        );
+    }
+    let described: Vec<(String, String, String)> = rows
+        .into_iter()
+        .map(|row| {
+            let is_enabled = !ilium_plugin_host::wiring::is_disabled_state(&row.state);
+            let core = if row.essential {
+                " · core, always on"
+            } else {
+                ""
+            };
+            (
+                row.title,
+                crate::value_control::boolean_switch(is_enabled).to_owned(),
+                format!("{} {} · {}{core}", row.id, row.version, row.state),
+            )
+        })
+        .collect();
+    let borrowed: Vec<(&str, String, &str)> = described
+        .iter()
+        .map(|(title, value, description)| (title.as_str(), value.clone(), description.as_str()))
+        .collect();
+    let mut lines = setting_lines(&borrowed, selected);
+    if let Some(refusal) = app
+        .wasm_plugins
+        .as_ref()
+        .and_then(|plugins| plugins.last_refusal())
+    {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("    Last request refused: {refusal}"),
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+    }
+    lines
 }
 
 fn reset_planning_lines(app: &App, selected: usize) -> Vec<Line<'static>> {

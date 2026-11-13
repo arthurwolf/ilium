@@ -150,6 +150,21 @@ fn run_launch(launch: ServerLaunch) -> ExitCode {
 
 /// Called only after runtime work stops, or on a post-initialization startup
 /// error. The main thread may wait here; Tokio/UI coordination never does.
+/// The plugins this build ships and where their state lives. `None` (no user data directory)
+/// runs the server without plugins.
+fn plugin_start() -> Option<ilium_server::plugin_host::PluginStart> {
+    let directories = directories::ProjectDirs::from("", "", "ilium")?;
+    Some(ilium_server::plugin_host::PluginStart {
+        catalogue: ilium_plugin_host::wiring::catalogue(
+            ilium_plugin_bundle::plugins()
+                .iter()
+                .map(|plugin| (plugin.id, plugin.manifest, plugin.component("server"))),
+        ),
+        data_dir: directories.data_dir().to_path_buf(),
+        mode: ilium_plugin_host::wiring::start_mode_from_env(),
+    })
+}
+
 fn finish_logging(exit_code: ExitCode) -> ExitCode {
     let drained = match ilium_logging::request_shutdown() {
         Ok(receipt) => receipt.wait_timeout(Duration::from_secs(5)),
@@ -203,7 +218,8 @@ async fn async_main(
         progress_monitor_enabled: server_config.progress_monitor_enabled,
         session_backups_enabled: server_config.session_backups_enabled,
     };
-    let mut exit_code = match ilium_server::run_with_resources(options, resources).await {
+    let plugins = plugin_start();
+    let mut exit_code = match ilium_server::run_with_plugins(options, resources, plugins).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!("server exited with an error: {error}");

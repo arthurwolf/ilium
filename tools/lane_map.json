@@ -484,8 +484,10 @@
         "ilium-plugin-host/src/**",
         "ilium-plugin-helper/src/**",
         "ilium-ipc/src/plugin.rs",
-        "ilium-server/src/plugin_host.rs",
+        "ilium-server/src/plugin_host/**",
+        "ilium-server/tests/support/plugin_model.rs",
         "ilium-client/src/plugin_host.rs",
+        "ilium-client/src/plugin_host/host.rs",
         "ilium/src/plugin_cmd.rs"
       ]
     },

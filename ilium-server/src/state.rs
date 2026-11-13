@@ -321,6 +321,9 @@ pub struct ServerState {
     pub(crate) execution: std::sync::OnceLock<crate::execution::ServerExecution>,
     /// Native publication owns its path and generations; no process-global path.
     pub(crate) startup_progress: std::sync::OnceLock<Arc<crate::startup_progress::Publisher>>,
+    /// The plugin host of this session, set once after restore when plugins are on. It holds
+    /// the state only weakly, so the two do not keep each other alive.
+    pub(crate) plugins: std::sync::OnceLock<Arc<crate::plugin_host::PluginHostHandle>>,
     /// Keep applied logging transitions and their IPC broadcasts in one order.
     pub(crate) debug_logging_transaction: Mutex<()>,
     /// Serializes schedule replacement with the executor's final freshness
@@ -586,6 +589,7 @@ impl ServerState {
             snapshot_io: tokio::sync::OnceCell::new(),
             execution: std::sync::OnceLock::new(),
             startup_progress: std::sync::OnceLock::new(),
+            plugins: std::sync::OnceLock::new(),
             debug_logging_transaction: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
             prompt_queue_transaction: Mutex::new(()),

@@ -1,12 +1,15 @@
-//! The server's plugin host: boot order and the `KernelFacade` over a tree model
-//! (reference-host-architecture.md).
+//! Test-only model of the server kernel for the plugin-parity and plugin-pane test lanes
+//! (parity-and-coverage.md). It lived in `ilium-server/src/plugin_host.rs` until the real host
+//! composition took that module (foundation contract sections 2.2 and 12); the production
+//! server never used it.
 //!
 //! `ServerKernel` is an in-process model of the server's tree, panes, settings, project files and
-//! job banks that implements the kernel facade. It is built from the pieces the plugin-parity tests
-//! (`ilium-server/tests/plugin_parity`, parity-and-coverage.md) drive: the `for_parity_world*`
-//! constructors build a kernel over a temporary project in a start mode, and the drivers and
-//! observers below let a test act on it like a running server. Nothing in the running server calls
-//! it yet, so no existing code path changes behaviour.
+//! job banks that implements the kernel facade. The `for_parity_world*` constructors build a
+//! kernel over a temporary project in a start mode, and the drivers and observers below let a
+//! test act on it like a running server. Each test binary includes this file with `#[path]`.
+
+// Every test binary that includes this support module uses a different part of it.
+#![allow(dead_code)]
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
@@ -532,7 +535,10 @@ impl ServerKernel {
     pub fn mouse_wheel(&self, pane: NodeId, column: u16, row: u16, up: bool) {
         self.lock().record(
             pane.0,
-            &format!("mouse-wheel:{column},{row},{}", if up { "up" } else { "down" }),
+            &format!(
+                "mouse-wheel:{column},{row},{}",
+                if up { "up" } else { "down" }
+            ),
         );
     }
 
@@ -684,7 +690,11 @@ impl ServerKernel {
         SETTINGS_SCHEMA
             .iter()
             .map(|(table, key, default)| {
-                ((*table).to_owned(), (*key).to_owned(), (*default).to_owned())
+                (
+                    (*table).to_owned(),
+                    (*key).to_owned(),
+                    (*default).to_owned(),
+                )
             })
             .collect()
     }
@@ -782,7 +792,10 @@ impl ServerKernel {
 
     /// The exit code of a pane's process, once it ended.
     pub fn pane_exit_code(&self, pane: NodeId) -> Option<i32> {
-        self.lock().nodes.get(&pane.0).and_then(|node| node.exit_code)
+        self.lock()
+            .nodes
+            .get(&pane.0)
+            .and_then(|node| node.exit_code)
     }
 
     /// Names of the events emitted for a node, in order.
@@ -805,13 +818,22 @@ impl ServerKernel {
         if count == 0 {
             return Vec::new();
         }
-        let is_vertical = node.title.contains("vertical") || node.content_kind.as_deref() == Some("split.vertical");
+        let is_vertical = node.title.contains("vertical")
+            || node.content_kind.as_deref() == Some("split.vertical");
         let mut rects = Vec::new();
-        let (total, other) = if is_vertical { (rows, columns) } else { (columns, rows) };
+        let (total, other) = if is_vertical {
+            (rows, columns)
+        } else {
+            (columns, rows)
+        };
         let share = total / count;
         let mut cursor = 0;
         for index in 0..count {
-            let length = if index + 1 == count { total - cursor } else { share };
+            let length = if index + 1 == count {
+                total - cursor
+            } else {
+                share
+            };
             rects.push(if is_vertical {
                 (0, cursor, other, length)
             } else {
@@ -824,7 +846,11 @@ impl ServerKernel {
 
     /// The rectangle `(x, y, width, height)` of a node at a terminal size.
     pub fn layout_rect(&self, node: NodeId, columns: u16, rows: u16) -> (u16, u16, u16, u16) {
-        let parent = self.lock().nodes.get(&node.0).and_then(|entry| entry.parent);
+        let parent = self
+            .lock()
+            .nodes
+            .get(&node.0)
+            .and_then(|entry| entry.parent);
         let Some(parent) = parent else {
             return (0, 0, columns, rows);
         };
@@ -879,12 +905,14 @@ impl ServerKernel {
 
     /// Whether a file exists under the project root.
     pub fn project_file_exists(&self, path: &str) -> bool {
-        self.project_path(path).is_some_and(|target| target.is_file())
+        self.project_path(path)
+            .is_some_and(|target| target.is_file())
     }
 
     /// Whether a directory exists under the project root.
     pub fn project_dir_exists(&self, path: &str) -> bool {
-        self.project_path(path).is_some_and(|target| target.is_dir())
+        self.project_path(path)
+            .is_some_and(|target| target.is_dir())
     }
 
     /// The permission bits of a file under the project root.
@@ -897,7 +925,11 @@ impl ServerKernel {
         }
         #[cfg(not(unix))]
         {
-            Some(if metadata.permissions().readonly() { 0o444 } else { 0o644 })
+            Some(if metadata.permissions().readonly() {
+                0o444
+            } else {
+                0o644
+            })
         }
     }
 
@@ -908,7 +940,11 @@ impl ServerKernel {
 
     /// Names of the backup files.
     pub fn backup_files(&self) -> Vec<String> {
-        self.lock().backups.iter().map(|(name, _)| name.clone()).collect()
+        self.lock()
+            .backups
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect()
     }
 
     /// Names of the backup files younger than `ms`.
@@ -995,7 +1031,10 @@ impl ServerKernel {
                 let value = name.and_then(|name| self.lock().environment.get(name).cloned());
                 (200, serde_json::json!({ "value": value }))
             }
-            _ => (404, serde_json::json!({ "error": "not-found", "path": path })),
+            _ => (
+                404,
+                serde_json::json!({ "error": "not-found", "path": path }),
+            ),
         }
     }
 
@@ -1010,7 +1049,10 @@ impl ServerKernel {
                 let count = self.lock().nodes.len();
                 (200, serde_json::json!({ "nodes": count }))
             }
-            _ => (404, serde_json::json!({ "error": "not-found", "path": path })),
+            _ => (
+                404,
+                serde_json::json!({ "error": "not-found", "path": path }),
+            ),
         }
     }
 
@@ -1057,12 +1099,20 @@ impl ServerKernel {
 
     /// Worker threads of a job bank.
     pub fn bank_worker_count(&self, bank: &str) -> usize {
-        self.lock().jobs.banks.get(bank).map_or(0, |stats| stats.workers)
+        self.lock()
+            .jobs
+            .banks
+            .get(bank)
+            .map_or(0, |stats| stats.workers)
     }
 
     /// Peak concurrency a job bank reached.
     pub fn bank_peak_concurrency(&self, bank: &str) -> usize {
-        self.lock().jobs.banks.get(bank).map_or(0, |stats| stats.peak)
+        self.lock()
+            .jobs
+            .banks
+            .get(bank)
+            .map_or(0, |stats| stats.peak)
     }
 }
 
@@ -1091,7 +1141,10 @@ impl TreeRead for ServerKernel {
     }
 
     fn node(&self, id: NodeId) -> Option<TreeNode> {
-        self.lock().nodes.get(&id.0).map(|node| tree_node_view(id.0, node))
+        self.lock()
+            .nodes
+            .get(&id.0)
+            .map(|node| tree_node_view(id.0, node))
     }
 
     fn epoch(&self) -> u64 {
@@ -1102,16 +1155,26 @@ impl TreeRead for ServerKernel {
 impl PaneRead for ServerKernel {
     fn screen_text(&self, pane: NodeId) -> Option<String> {
         let state = self.lock();
-        let node = state.nodes.get(&pane.0).filter(|node| node.class == NodeClass::Pane)?;
+        let node = state
+            .nodes
+            .get(&pane.0)
+            .filter(|node| node.class == NodeClass::Pane)?;
         Some(node.screen.join("\n"))
     }
 
     fn cells(&self, pane: NodeId, rows: std::ops::Range<u16>) -> Option<Vec<Vec<Cell>>> {
         let state = self.lock();
-        let node = state.nodes.get(&pane.0).filter(|node| node.class == NodeClass::Pane)?;
+        let node = state
+            .nodes
+            .get(&pane.0)
+            .filter(|node| node.class == NodeClass::Pane)?;
         Some(
             rows.map(|row| {
-                let line = node.screen.get(usize::from(row)).cloned().unwrap_or_default();
+                let line = node
+                    .screen
+                    .get(usize::from(row))
+                    .cloned()
+                    .unwrap_or_default();
                 line.chars()
                     .map(|character| Cell {
                         text: character.to_string(),
@@ -1125,7 +1188,10 @@ impl PaneRead for ServerKernel {
 
     fn history(&self, pane: NodeId, lines: u32) -> Option<Vec<String>> {
         let state = self.lock();
-        let node = state.nodes.get(&pane.0).filter(|node| node.class == NodeClass::Pane)?;
+        let node = state
+            .nodes
+            .get(&pane.0)
+            .filter(|node| node.class == NodeClass::Pane)?;
         let skip = node.screen.len().saturating_sub(lines as usize);
         Some(node.screen[skip..].to_vec())
     }
@@ -1138,19 +1204,24 @@ impl ServerKernel {
         };
         let required = required_grant(intent)?;
         let state = self.lock();
-        let granted = state
-            .grants
-            .as_ref()
-            .is_some_and(|(owner, grants)| *owner == plugin.0 && grants.iter().any(|grant| grant == required));
-        (!granted).then(|| refusal(ErrorCode::NotPermitted, &format!("grant {required} is missing")))
+        let granted = state.grants.as_ref().is_some_and(|(owner, grants)| {
+            *owner == plugin.0 && grants.iter().any(|grant| grant == required)
+        });
+        (!granted).then(|| {
+            refusal(
+                ErrorCode::NotPermitted,
+                &format!("grant {required} is missing"),
+            )
+        })
     }
 
     fn pane_missing(state: &KernelState, pane: u64) -> Option<Outcome> {
         match state.nodes.get(&pane) {
             None => Some(refusal(ErrorCode::NotFound, "no such pane")),
-            Some(node) if node.class != NodeClass::Pane => {
-                Some(refusal(ErrorCode::InvalidArgument, "the node is not a pane"))
-            }
+            Some(node) if node.class != NodeClass::Pane => Some(refusal(
+                ErrorCode::InvalidArgument,
+                "the node is not a pane",
+            )),
             Some(_) => None,
         }
     }
@@ -1169,11 +1240,17 @@ impl ServerKernel {
                 if node.locked {
                     return refusal(ErrorCode::Conflict, "the node is locked");
                 }
-                if spec.expected_revision.is_some_and(|revision| revision != node.revision) {
+                if spec
+                    .expected_revision
+                    .is_some_and(|revision| revision != node.revision)
+                {
                     return refusal(ErrorCode::Conflict, "stale revision");
                 }
                 if spec.title.is_empty() || spec.title.chars().count() > 256 {
-                    return refusal(ErrorCode::InvalidArgument, "title must be 1 to 256 characters");
+                    return refusal(
+                        ErrorCode::InvalidArgument,
+                        "title must be 1 to 256 characters",
+                    );
                 }
                 node.title = spec.title;
                 node.revision += 1;
@@ -1199,7 +1276,10 @@ impl ServerKernel {
                     return refusal(ErrorCode::InvalidArgument, "a node cannot move into itself");
                 }
                 state.detach(node);
-                let inside = matches!(spec.placement, Placement::InsideFirst | Placement::InsideLast);
+                let inside = matches!(
+                    spec.placement,
+                    Placement::InsideFirst | Placement::InsideLast
+                );
                 let new_parent = if inside {
                     Some(target)
                 } else {
@@ -1210,10 +1290,17 @@ impl ServerKernel {
                     entry.revision += 1;
                 }
                 let siblings = match new_parent {
-                    Some(parent) => state.nodes.get(&parent).map(|entry| entry.children.clone()).unwrap_or_default(),
+                    Some(parent) => state
+                        .nodes
+                        .get(&parent)
+                        .map(|entry| entry.children.clone())
+                        .unwrap_or_default(),
                     None => state.roots.clone(),
                 };
-                let position = siblings.iter().position(|sibling| *sibling == target).unwrap_or(siblings.len());
+                let position = siblings
+                    .iter()
+                    .position(|sibling| *sibling == target)
+                    .unwrap_or(siblings.len());
                 let index = match spec.placement {
                     Placement::Before => position,
                     Placement::After => position + 1,
@@ -1248,10 +1335,17 @@ impl ServerKernel {
                         return refusal(ErrorCode::NotFound, "no such parent");
                     }
                 }
-                let mut node = ModelNode::new(NodeClass::Pane, &spec.title, spec.parent.map(|parent| parent.0));
+                let mut node = ModelNode::new(
+                    NodeClass::Pane,
+                    &spec.title,
+                    spec.parent.map(|parent| parent.0),
+                );
                 node.content_kind = Some(spec.content_kind.clone());
                 node.cwd = spec.cwd.map(|path| path.path);
-                let program = spec.command.as_ref().and_then(|command| command.first().cloned());
+                let program = spec
+                    .command
+                    .as_ref()
+                    .and_then(|command| command.first().cloned());
                 node.program = program.clone();
                 node.process_running = spec.content_kind == "ilium.terminal";
                 if node.process_running {
@@ -1266,7 +1360,11 @@ impl ServerKernel {
                 Outcome::OkNode(NodeId(id))
             }
             Intent::CreateGroup(spec) => {
-                let mut node = ModelNode::new(NodeClass::Container, &spec.title, spec.parent.map(|parent| parent.0));
+                let mut node = ModelNode::new(
+                    NodeClass::Container,
+                    &spec.title,
+                    spec.parent.map(|parent| parent.0),
+                );
                 node.content_kind = None;
                 let id = state.allocate(node, None);
                 for child in spec.children {
@@ -1283,7 +1381,11 @@ impl ServerKernel {
                 Outcome::OkNode(NodeId(id))
             }
             Intent::CreateFolder(spec) => {
-                let mut node = ModelNode::new(NodeClass::Folder, &spec.title, spec.parent.map(|parent| parent.0));
+                let mut node = ModelNode::new(
+                    NodeClass::Folder,
+                    &spec.title,
+                    spec.parent.map(|parent| parent.0),
+                );
                 node.cwd = spec.path.map(|path| path.path);
                 Outcome::OkNode(NodeId(state.allocate(node, None)))
             }
@@ -1297,11 +1399,18 @@ impl ServerKernel {
                 if !(2..=4).contains(&spec.panes.len()) {
                     return refusal(ErrorCode::InvalidArgument, "a split holds 2 to 4 panes");
                 }
-                if spec.panes.iter().any(|pane| !state.nodes.contains_key(&pane.0)) {
+                if spec
+                    .panes
+                    .iter()
+                    .any(|pane| !state.nodes.contains_key(&pane.0))
+                {
                     return refusal(ErrorCode::NotFound, "no such pane");
                 }
                 let mut node = ModelNode::new(NodeClass::Container, "split", None);
-                node.content_kind = Some(format!("split.{}", format!("{:?}", spec.direction).to_lowercase()));
+                node.content_kind = Some(format!(
+                    "split.{}",
+                    format!("{:?}", spec.direction).to_lowercase()
+                ));
                 let id = state.allocate(node, None);
                 for pane in spec.panes {
                     state.detach(pane.0);
@@ -1334,7 +1443,11 @@ impl ServerKernel {
                 if let Some(missing) = Self::pane_missing(&state, spec.pane.0) {
                     return missing;
                 }
-                if !state.nodes.get(&spec.pane.0).is_some_and(|node| node.process_running) {
+                if !state
+                    .nodes
+                    .get(&spec.pane.0)
+                    .is_some_and(|node| node.process_running)
+                {
                     return refusal(ErrorCode::PaneNotReady, "the pane has no running process");
                 }
                 state.set_lifecycle(spec.pane.0, PaneLifecycleState::Frozen, cause);
@@ -1360,16 +1473,31 @@ impl ServerKernel {
                     return missing;
                 }
                 if state.windows {
-                    return refusal(ErrorCode::Unsupported, "signals are unsupported on this platform");
+                    return refusal(
+                        ErrorCode::Unsupported,
+                        "signals are unsupported on this platform",
+                    );
                 }
-                if matches!(spec.signal, Signal::Terminate | Signal::Kill | Signal::Hangup)
-                    && state.nodes.get(&spec.pane.0).is_some_and(|node| node.process_running)
+                if matches!(
+                    spec.signal,
+                    Signal::Terminate | Signal::Kill | Signal::Hangup
+                ) && state
+                    .nodes
+                    .get(&spec.pane.0)
+                    .is_some_and(|node| node.process_running)
                 {
-                    let ignores = state.nodes.get(&spec.pane.0).is_some_and(|node| node.ignore_terminate);
+                    let ignores = state
+                        .nodes
+                        .get(&spec.pane.0)
+                        .is_some_and(|node| node.ignore_terminate);
                     if spec.signal == Signal::Kill || !ignores {
                         if let Some(node) = state.nodes.get_mut(&spec.pane.0) {
                             node.process_running = false;
-                            node.exit_code = Some(if spec.signal == Signal::Kill { 137 } else { 143 });
+                            node.exit_code = Some(if spec.signal == Signal::Kill {
+                                137
+                            } else {
+                                143
+                            });
                         }
                         state.set_lifecycle(spec.pane.0, PaneLifecycleState::Exited, cause);
                     }
@@ -1389,7 +1517,11 @@ impl ServerKernel {
                 if !node.process_running {
                     return refusal(ErrorCode::PaneNotReady, "the pane has no running process");
                 }
-                node.kill_after_ms = if node.ignore_terminate { u64::from(spec.grace_ms) } else { 0 };
+                node.kill_after_ms = if node.ignore_terminate {
+                    u64::from(spec.grace_ms)
+                } else {
+                    0
+                };
                 node.process_running = false;
                 node.exit_code = Some(if node.ignore_terminate { 137 } else { 143 });
                 state.set_lifecycle(spec.pane.0, PaneLifecycleState::Exited, cause);
@@ -1439,7 +1571,10 @@ impl ServerKernel {
                 state.editor_text.entry(id).or_default();
                 Outcome::OkNode(NodeId(id))
             }
-            _ => refusal(ErrorCode::Unsupported, "the intent is not supported by this kernel"),
+            _ => refusal(
+                ErrorCode::Unsupported,
+                "the intent is not supported by this kernel",
+            ),
         }
     }
 }
@@ -1496,7 +1631,10 @@ impl ServerPluginHost {
                 .map(|id| format!("ilium.core.{id}"))
                 .collect(),
         };
-        *self.started.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = started.clone();
+        *self
+            .started
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = started.clone();
         StartReport {
             started,
             failed: Vec::new(),
@@ -1505,7 +1643,10 @@ impl ServerPluginHost {
 
     /// Reverse order within the shutdown budget.
     pub fn shutdown(&self) -> ShutdownReport {
-        let mut started = self.started.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut started = self
+            .started
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut deactivated: Vec<String> = started.drain(..).collect();
         deactivated.reverse();
         ShutdownReport {
@@ -1614,7 +1755,10 @@ impl ServerKernel {
             title: node.map(|entry| entry.title.clone()).unwrap_or_default(),
             place: (
                 parent.map(NodeId),
-                siblings.iter().position(|sibling| *sibling == pane.0).unwrap_or(0),
+                siblings
+                    .iter()
+                    .position(|sibling| *sibling == pane.0)
+                    .unwrap_or(0),
             ),
             size: node.map_or((0, 0), |entry| (entry.columns, entry.rows)),
         }
@@ -1651,7 +1795,10 @@ impl ServerKernel {
 
     /// Milliseconds between the terminate and the kill signal sent to a pane's process.
     pub fn kill_was_sent_after_ms(&self, pane: NodeId) -> u64 {
-        self.lock().nodes.get(&pane.0).map_or(0, |node| node.kill_after_ms)
+        self.lock()
+            .nodes
+            .get(&pane.0)
+            .map_or(0, |node| node.kill_after_ms)
     }
 
     /// A fingerprint of the whole tree (structure, titles, sizes).
@@ -1673,7 +1820,10 @@ impl ServerKernel {
     }
 
     /// The restructure token of a restructure outcome (api-pane-lifecycle.md PAN-023).
-    pub fn last_restructure_token(&self, outcome: &ilium_plugin_api::generated::types::Outcome) -> u64 {
+    pub fn last_restructure_token(
+        &self,
+        outcome: &ilium_plugin_api::generated::types::Outcome,
+    ) -> u64 {
         match outcome {
             Outcome::OkEpoch(token) => *token,
             _ => self.lock().last_restructure_token,
@@ -1682,7 +1832,10 @@ impl ServerKernel {
 
     /// The revision counter of a node.
     pub fn node_revision(&self, node: NodeId) -> u64 {
-        self.lock().nodes.get(&node.0).map_or(0, |entry| entry.revision)
+        self.lock()
+            .nodes
+            .get(&node.0)
+            .map_or(0, |entry| entry.revision)
     }
 
     /// Sets a manual icon on a node, as the user would.
@@ -1696,7 +1849,11 @@ impl ServerKernel {
 
     /// The log lines of a plugin.
     pub fn plugin_log(&self, plugin: &str) -> Vec<String> {
-        self.lock().plugin_logs.get(plugin).cloned().unwrap_or_default()
+        self.lock()
+            .plugin_logs
+            .get(plugin)
+            .cloned()
+            .unwrap_or_default()
     }
 
     // ---- Panes (api-panes.md) ---------------------------------------------------------------
@@ -1714,7 +1871,10 @@ impl ServerKernel {
     /// The pane info a plugin sees for a node, if it is a pane.
     pub fn pane_info(&self, node: NodeId) -> Option<PaneInfo> {
         let state = self.lock();
-        let entry = state.nodes.get(&node.0).filter(|entry| entry.class == NodeClass::Pane)?;
+        let entry = state
+            .nodes
+            .get(&node.0)
+            .filter(|entry| entry.class == NodeClass::Pane)?;
         let content_kind = entry.content_kind.clone().unwrap_or_default();
         let primitive = match content_kind.as_str() {
             "ilium.editor" => PrimitiveKind::Editor,
@@ -1815,8 +1975,13 @@ impl ServerKernel {
                 if block_ms > 0 {
                     std::thread::sleep(std::time::Duration::from_millis(block_ms));
                 }
-                let name = std::thread::current().name().unwrap_or("detector-worker").to_owned();
-                let mut state = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let name = std::thread::current()
+                    .name()
+                    .unwrap_or("detector-worker")
+                    .to_owned();
+                let mut state = state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 state.detector_threads.push(name);
                 state.detector_calls.push(plugin_name);
             });

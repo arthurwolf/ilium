@@ -1282,6 +1282,18 @@
     ]
   },
   {
+    "id": "PLUGIN-01",
+    "title": "Plugin on or off",
+    "explanation": "“Turn one plugin on or off. The server remembers the choice and applies it at once: turning a plugin off stops it and removes what it added; turning it on starts it again. Core plugins stay on.”",
+    "specimen": "`<plugin name> … on` → `<plugin name> … off`, state line `disabled`.",
+    "states": "on and running, off, core and always on, failed.",
+    "motion": "static.",
+    "caveat": "a plugin that is off contributes no panes, commands or settings; never depict a core plugin as switchable.",
+    "frames": [
+      "`<plugin name> … on` → `<plugin name> … off`, state line `disabled`."
+    ]
+  },
+  {
     "id": "COST-01",
     "title": "Fixed bands",
     "explanation": "“Rate every agent against the same fixed dollar thresholds, so a given amount always reads the same.”",

@@ -1,7 +1,9 @@
 //! The client's plugin host: the only client module that touches `ilium-plugin-host`
 //! (test plan section 1.2). Client-side instances render views and handle input.
-//! Nothing calls it yet, so no existing code path changes behaviour.
+//! `host` is the real composition the event loop runs (foundation contract section 12);
+//! `ClientPluginHost` below and the two rigs are the earlier models the red tests drive.
 
+pub mod host;
 pub mod screens_rig;
 pub mod widget_rig;
 
@@ -73,7 +75,9 @@ impl ClientPluginHost {
             };
         }
         let mut report = LifecycleManager.shutdown(SHUTDOWN_BUDGET);
-        report.deactivated.retain(|plugin_id| own.contains(plugin_id));
+        report
+            .deactivated
+            .retain(|plugin_id| own.contains(plugin_id));
         report.forced.retain(|plugin_id| own.contains(plugin_id));
         report
     }

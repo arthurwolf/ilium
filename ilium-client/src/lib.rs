@@ -316,6 +316,9 @@ pub struct RunOptions {
     /// Timestamped path selected once when this detached server process began.
     /// Every attached client appends to the same session-lifetime stream.
     pub log_path: PathBuf,
+    /// The WebAssembly plugins to run in this client. `None` runs the client without a plugin
+    /// host, which is what `--no-plugins` and fixtures without a catalogue get.
+    pub plugins: Option<crate::plugin_host::host::ClientPluginStart>,
 }
 
 /// Naming-worker results are one-shot per worker (see `naming_workers.rs`),
@@ -844,6 +847,20 @@ async fn run_inner(
         crate::animation_plugins::preparation::CataloguePreparation::new(catalogue_client);
     let catalogue_notification = catalogue_preparation.notification();
     app.plugin_catalogue_preparation = Some(catalogue_preparation);
+    // The WebAssembly plugin host. Loading and activation run on the host's own thread, so
+    // this neither delays the first frame nor is awaited anywhere in the event loop.
+    app.wasm_plugins = options.plugins.clone().and_then(|start| {
+        crate::plugin_host::host::ClientPlugins::start(
+            start,
+            &options.session_name,
+            &options.session_cwd,
+        )
+    });
+    // Without a host the branch below waits on a notification nobody signals.
+    let wasm_plugin_notification = app.wasm_plugins.as_ref().map_or_else(
+        || std::sync::Arc::new(tokio::sync::Notify::new()),
+        crate::plugin_host::host::ClientPlugins::notification,
+    );
     let documents = crate::execution::retry_startup_busy(|| execution.documents())
         .await
         .map_err(|error| {
@@ -1214,6 +1231,11 @@ async fn run_inner(
         options.session_name.clone(),
         &execution,
         outbound_admission,
+        options
+            .plugins
+            .as_ref()
+            .map(crate::plugin_host::host::ClientPluginStart::hello)
+            .unwrap_or_default(),
     );
     tokio::pin!(connecting);
     let mut connecting_tick = tokio::time::interval(Duration::from_millis(100));
@@ -1634,6 +1656,7 @@ async fn run_inner(
             _ = text_trigger_preview_notification.notified() => { needs_redraw |= app.reconcile_text_trigger_preview(); }
             _ = sound_preview_notification.notified() => { needs_redraw |= app.reconcile_sound_studio_preview(); }
             _ = catalogue_notification.notified() => { needs_redraw |= app.collect_plugin_catalogue(); }
+            _ = wasm_plugin_notification.notified() => { needs_redraw |= app.collect_wasm_plugin_outputs(); }
             _ = statistics_notification.notified() => {
                 needs_redraw |= app.session_stats.drain_events();
                 needs_redraw |= app.tick_session_models(Instant::now());
@@ -2339,6 +2362,10 @@ async fn run_inner(
     // File publication is an accepted local side effect. Its warning deadline
     // must not be cancelled by the separate bounded network-request drain.
     // A pending debounced rules write joins the queue the drain below waits for.
+    // Plugins deactivate before the request drain; intents they submit now are cancelled.
+    if let Some(plugins) = app.wasm_plugins.take() {
+        plugins.stop().await;
+    }
     app.flush_custom_status_rules_save();
     app.drain_filesystem().await.map_err(ClientError::TerminalSetup)?;
     let request_drain = async {

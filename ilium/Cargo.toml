@@ -25,6 +25,8 @@ ilium-control = { version = "0.1.1", path = "../ilium-control" }
 ilium-ipc = { version = "0.1.1", path = "../ilium-ipc" }
 ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host" }
 ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
+# The embedded core plugins; this binary hands their client sides to the client's plugin host.
+ilium-plugin-bundle = { version = "0.1.1", path = "../ilium-plugin-bundle" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 ilium-transport = { version = "0.1.1", path = "../ilium-transport" }
 ilium-platform = { version = "0.1.1", path = "../ilium-platform" }

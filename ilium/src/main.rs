@@ -87,12 +87,28 @@ struct Cli {
     #[arg(long, global = true)]
     onboarding: bool,
 
+    /// Start without any WebAssembly plugin, in the client and in a server this
+    /// command starts. A server that is already running keeps its plugins.
+    #[arg(long, global = true)]
+    no_plugins: bool,
+
+    /// Start only the core plugins.
+    #[arg(long, global = true, conflicts_with = "no_plugins")]
+    safe_plugins: bool,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    /// Manage WebAssembly plugins: `ilium plugin list`, `enable <id>`, `disable <id>` and
+    /// the packaging and diagnostic commands. Output is JSON lines.
+    Plugin {
+        /// The plugin command and its arguments.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Coordinate exclusive shared GPU and USB-board reservations.
     #[command(alias = "ressource")]
     Resource(resource::ResourceArgs),
@@ -373,6 +389,14 @@ fn main() -> ExitCode {
     let matches = Cli::command().get_matches();
     let explicit_cwd = matches.value_source("cwd") == Some(clap::parser::ValueSource::CommandLine);
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
+    // Before any thread exists: the client reads the mode from the environment and a server
+    // this command spawns inherits it.
+    if cli.no_plugins {
+        std::env::set_var(ilium_plugin_host::wiring::NO_PLUGINS_ENV, "1");
+    }
+    if cli.safe_plugins {
+        std::env::set_var(ilium_plugin_host::wiring::SAFE_PLUGINS_ENV, "1");
+    }
     if matches!(&cli.command, Some(Command::ClipboardHelper)) {
         return match ilium_client::terminal_clipboard::run_helper() {
             Ok(()) => ExitCode::SUCCESS,
@@ -495,6 +519,22 @@ async fn dispatch(cli: Cli, explicit_cwd: bool) -> Result<(), CliError> {
         Some(Command::ClipboardHelper) => Err(CliError::ServerReportedError(
             "Clipboard helper must run before runtime startup".into(),
         )),
+        Some(Command::Plugin { args }) => {
+            // The plugin CLI is synchronous and blocks while a live server answers, so it
+            // runs on a blocking thread and reaches the server through this runtime.
+            let cwd = cli.cwd.clone();
+            let runtime = tokio::runtime::Handle::current();
+            let code = tokio::task::spawn_blocking(move || {
+                ilium::plugin_cmd::run_plugin_command_in(&args, &cwd, runtime)
+            })
+            .await
+            .map_err(|error| CliError::ServerReportedError(format!("plugin command: {error}")))?;
+            match u8::try_from(code) {
+                Ok(0) => Ok(()),
+                Ok(code) => Err(CliError::ExitStatus(code)),
+                Err(_) => Err(CliError::ExitStatus(1)),
+            }
+        }
         Some(Command::AntigravityModelStatusline) => Err(CliError::ServerReportedError(
             "Antigravity model capture must run before runtime startup".into(),
         )),
@@ -1513,6 +1553,7 @@ async fn attach_or_create(
         socket_path: project_session.socket_path.clone(),
         log_path,
         onboarding,
+        plugins: ilium::plugin_cmd::client_plugin_start(),
     })
     .await;
     let exit_reason = match run_result {

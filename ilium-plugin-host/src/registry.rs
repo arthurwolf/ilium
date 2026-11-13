@@ -593,6 +593,109 @@ fn validate_installed(value: &Value) -> Result<(), HostError> {
     Ok(())
 }
 
+/// The state name of a row the user disabled (`ilium plugin disable`, the Settings plugin list).
+pub const STATE_DISABLED_BY_USER: &str = "installed-disabled-by-user";
+/// The state name of an enabled row.
+pub const STATE_ENABLED: &str = "installed-enabled";
+
+/// The ids `installed.json` records as not startable: disabled by the user, untrusted, blocked
+/// or pending removal. A missing file means nothing is disabled. This is the one store of the
+/// enable state both the host start and the CLI read (foundation contract section 5).
+pub fn disabled_plugin_ids(
+    installed: &Path,
+) -> Result<std::collections::BTreeSet<String>, HostError> {
+    let registry = InstalledRegistry::open(installed)?;
+    let document = registry.read()?;
+    Ok(document["plugins"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|row| row["state"] != STATE_ENABLED)
+        .filter_map(|row| row["id"].as_str().map(str::to_owned))
+        .collect())
+}
+
+/// The recorded state name of every row, by plugin id.
+pub fn installed_states(
+    installed: &Path,
+) -> Result<std::collections::BTreeMap<String, String>, HostError> {
+    let registry = InstalledRegistry::open(installed)?;
+    let document = registry.read()?;
+    Ok(document["plugins"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            Some((
+                row["id"].as_str()?.to_owned(),
+                row["state"].as_str()?.to_owned(),
+            ))
+        })
+        .collect())
+}
+
+/// Persists the user's enable or disable choice in `installed.json`, under the registry lock.
+/// A bundled plugin that has no row yet gets one (`source: bundled`, no admission evidence).
+/// A row that is untrusted, blocked or pending removal is refused: enabling must never be a
+/// way around trust. Returns whether the stored state changed.
+pub fn set_plugin_enabled(
+    installed: &Path,
+    plugin: &str,
+    bundled_version: &str,
+    enabled: bool,
+) -> Result<bool, HostError> {
+    if let Some(parent) = installed.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| error("install.io", e.to_string()))?;
+    }
+    let registry = InstalledRegistry::open(installed)?;
+    let mut transaction = registry.transaction()?;
+    let wanted = if enabled {
+        STATE_ENABLED
+    } else {
+        STATE_DISABLED_BY_USER
+    };
+    let mut row = match transaction.record(plugin) {
+        Some(row) => row.clone(),
+        None => {
+            let no_hash = "0".repeat(64);
+            json!({
+                "id": plugin,
+                "active_version": bundled_version,
+                "previous_version": null,
+                "state": STATE_ENABLED,
+                "source": "bundled",
+                "source_url": null,
+                "channel": "stable",
+                "publisher_id": null,
+                "key_id": null,
+                "package_sha256": no_hash,
+                "manifest_sha256": no_hash,
+                "pinned": false,
+                "skip": [],
+                "declined": [],
+                "failure_stopped": [],
+                "installed_at": "1970-01-01T00:00:00Z",
+                "update": null,
+            })
+        }
+    };
+    let current = row["state"].as_str().unwrap_or_default().to_owned();
+    if current != STATE_ENABLED && current != STATE_DISABLED_BY_USER {
+        return Err(error(
+            "install.state-refused",
+            format!("{plugin} is {current}; its enable state cannot be changed"),
+        ));
+    }
+    if current == wanted && transaction.record(plugin).is_some() {
+        return Ok(false);
+    }
+    row["state"] = json!(wanted);
+    transaction.put_complete_record(row)?;
+    transaction.commit()?;
+    Ok(current != wanted)
+}
+
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};

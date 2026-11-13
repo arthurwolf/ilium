@@ -27,6 +27,9 @@ ilium-git = { version = "0.1.1", path = "../ilium-git" }
 ilium-ipc = { version = "0.1.1", path = "../ilium-ipc" }
 ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host" }
 ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
+# The server binary hands the embedded core plugins to the plugin host (the library takes a
+# catalogue and never names the bundle).
+ilium-plugin-bundle = { version = "0.1.1", path = "../ilium-plugin-bundle" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
 ilium-pty = { version = "0.1.1", path = "../ilium-pty" }

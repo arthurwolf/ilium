@@ -13,3 +13,5 @@ Format: crate, signature, requirement id, why. All tests of this directory run a
 - manual note: baseline setting names used from src/docs/settings.md: `ui.color_scheme`, `ui.use_stable_glyphs`, `ui.motion_level`, `ui.sidebar_density`, `[theme]` four colour keys, `[api] port` default 8872 - F-058, F-092.
 - ilium-server Cargo.toml: dev-dependencies already include `ilium-plugin-host` (testing), `tempfile`, `proptest`; the tests use `serde_json` and `toml` from the regular dependencies - no addition needed.
 - ilium-server: `ServerKernel::apply_setting` Err(String) must contain the error code in words (`invalid-argument`) for a value that fails the schema - capability-settings-write-kernel.md, F-001, F-058, COR-001; tests assert `error.contains("invalid-argument")`.
+
+Note (2026-11-13): the test-only model that this file calls `ilium_server::plugin_host` now lives in `ilium-server/tests/support/plugin_model.rs` and is reached as `crate::plugin_model` by each test binary; `ilium-server/src/plugin_host/` is the real host composition. The gaps listed here are gaps of that model.

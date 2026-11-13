@@ -11,7 +11,7 @@ use ilium_plugin_api::generated::types::{
 };
 use ilium_plugin_api::kernel::{KernelFacade, Origin, TreeNode};
 use ilium_plugin_host::lifecycle::StartMode;
-use ilium_server::plugin_host::ServerKernel;
+use crate::plugin_model::ServerKernel;
 
 /// The two builds every baseline scenario must agree on.
 pub const MODES: [StartMode; 2] = [StartMode::Normal, StartMode::NoPlugins];

@@ -9,3 +9,5 @@ Format: crate, signature, requirement id, why.
 - ilium-server: detector loop hooks `run_detection_tick`, `run_detection_tick_with_fixture_detector`, `set_detector_block_ms(_for)`, `detector_thread_names`, `detection_loop_thread_name`, `detector_calls_in_last_tick`, `wait_for_detector_call` - HST-450, 451, 455.
 - ilium-plugin-api: `grants::is_high_risk(&str) -> bool` - PAN-032 - high-risk lookup by grant name.
 - ilium-plugin-api: `Intent::CloseNode(NodeId)` assumed - PAN-008 - close a pane.
+
+Note (2026-11-13): the test-only model that this file calls `ilium_server::plugin_host` now lives in `ilium-server/tests/support/plugin_model.rs` and is reached as `crate::plugin_model` by each test binary; `ilium-server/src/plugin_host/` is the real host composition. The gaps listed here are gaps of that model.
