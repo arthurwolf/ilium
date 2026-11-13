@@ -13,6 +13,7 @@
 
 mod app_server;
 mod bounded_lines;
+mod claude_import_preparation;
 mod claude_to_codex;
 mod claude_writer;
 mod codex_rollout;

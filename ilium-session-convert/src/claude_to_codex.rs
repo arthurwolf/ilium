@@ -22,7 +22,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::app_server::{response_for, AppServer, AppServerLaunch, Flow};
-use crate::bounded_lines::{BoundedLine, BoundedLineReader};
+use crate::bounded_lines::{BoundedLine, BoundedLineReader, LineReadError};
 use crate::codex_rollout::ScanLimits;
 use crate::error::{single_line, ConvertError};
 use crate::lenient_json::{LenientObject, LenientSeq, LenientString};
@@ -104,6 +104,24 @@ pub(crate) fn convert(
     reporter.progress(0.10);
     reporter.check_cancel()?;
 
+    // Stage a stable, private input before the importer reads it. The guard
+    // keeps the staged file alive through import and removes it afterwards.
+    let prepared = match crate::claude_import_preparation::prepare(
+        &transcript.path,
+        &request.home_dir,
+        &request.source_session_id,
+        reporter,
+    ) {
+        Ok(prepared) => Some(prepared),
+        Err(ConvertError::TargetWrite { error, .. })
+            if error.kind() == std::io::ErrorKind::AlreadyExists =>
+        {
+            reporter.log("A prepared input already exists; using the original transcript without preprocessing");
+            None
+        }
+        Err(error) => return Err(error),
+    };
+
     // Step 3: start the private app-server and complete the handshake.
     reporter.step(3, "Start codex app-server", 0.10);
     if request.codex_home.is_some() {
@@ -124,7 +142,10 @@ pub(crate) fn convert(
         request,
         project: &project,
         codex_home: &codex_home,
-        transcript_path: &transcript.path,
+        transcript_path: prepared
+            .as_ref()
+            .map_or(transcript.path.as_path(), |prepared| prepared.path()),
+        original_path: &transcript.path,
         counts: &counts,
         timeouts,
     };
@@ -245,7 +266,20 @@ fn inspect_transcript(
     let mut counts = TranscriptCounts::default();
     let mut line_count = 0usize;
     loop {
-        let classified = match lines.next_line().map_err(unreadable)? {
+        let line = lines
+            .next_line_interruptible(&mut |bytes_read| {
+                let fraction = if length == 0 {
+                    0.0
+                } else {
+                    (bytes_read as f64 / length as f64) as f32
+                };
+                on_progress(fraction)
+            })
+            .map_err(|error| match error {
+                LineReadError::Io(error) => unreadable(error),
+                LineReadError::Cancelled => ConvertError::Cancelled,
+            })?;
+        let classified = match line {
             None => break,
             Some(BoundedLine::Oversized { .. }) => TranscriptLine::Oversized,
             Some(BoundedLine::Line { bytes, .. }) => classify_transcript_line(bytes),
@@ -294,6 +328,7 @@ struct ImportContext<'a> {
     project: &'a Path,
     codex_home: &'a Path,
     transcript_path: &'a Path,
+    original_path: &'a Path,
     counts: &'a TranscriptCounts,
     timeouts: &'a Timeouts,
 }
@@ -308,6 +343,7 @@ fn import_with_server(
         project,
         codex_home,
         transcript_path,
+        original_path,
         counts,
         timeouts,
     } = *context;
@@ -315,7 +351,14 @@ fn import_with_server(
 
     // Step 4: run the importer.
     reporter.step(4, "Import the session with Codex's importer", 0.30);
-    let imported = run_import(server, project, transcript_path, timeouts, reporter)?;
+    let mut imported = run_import(server, project, transcript_path, timeouts, reporter)?;
+    let mut imported_path = transcript_path;
+    if matches!(imported, ImportResult::NotDetected) {
+        reporter.log("Codex cannot discover the prepared copy; retrying with the original transcript without preprocessing");
+        reporter.check_cancel()?;
+        imported_path = original_path;
+        imported = run_import(server, project, original_path, timeouts, reporter)?;
+    }
     reporter.progress(0.85);
 
     let thread_id = match imported {
@@ -323,7 +366,12 @@ fn import_with_server(
             reporter.log(format!("Codex created thread {thread_id}"));
             thread_id
         }
-        ImportResult::Skipped => reuse_previous_import(codex_home, transcript_path, reporter)?,
+        ImportResult::Skipped => reuse_previous_import(codex_home, imported_path, reporter)?,
+        ImportResult::NotDetected => {
+            return Err(ConvertError::ImportFailed(
+                "Codex could not discover the original Claude transcript".into(),
+            ))
+        }
     };
 
     // Step 5: verify the rollout Codex wrote.
@@ -406,6 +454,7 @@ enum ImportResult {
     /// Completed with no success and no failure: the importer already holds
     /// this transcript at its current content.
     Skipped,
+    NotDetected,
 }
 
 fn run_import(
@@ -522,6 +571,23 @@ fn interpret_completion(
         .iter()
         .filter(|result| result.get("itemType").and_then(Value::as_str) == Some("SESSIONS"))
         .collect();
+    let failure_values: Vec<&Value> = sessions
+        .iter()
+        .flat_map(|result| {
+            result
+                .get("failures")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .collect();
+    if !failure_values.is_empty()
+        && failure_values.iter().all(|failure| {
+            failure.get("subErrorType").and_then(Value::as_str) == Some("session_not_detected")
+        })
+    {
+        return Ok(ImportResult::NotDetected);
+    }
     let failures: Vec<String> = sessions
         .iter()
         .flat_map(|result| {
@@ -734,6 +800,16 @@ mod tests {
     }
 
     #[test]
+    fn undiscoverable_staged_input_can_be_retried_with_the_original() {
+        let completed = json!({"itemTypeResults": [{"itemType":"SESSIONS", "successes":[],
+            "failures":[{"subErrorType":"session_not_detected", "failureStage":"session_missing"}]}]});
+        assert!(matches!(
+            interpret_completion(&completed, Path::new("/staged.jsonl")).unwrap(),
+            ImportResult::NotDetected
+        ));
+    }
+
+    #[test]
     fn completion_failures_become_an_import_error() {
         let completed = json!({"itemTypeResults": [{"itemType": "SESSIONS",
             "successes": [],
@@ -924,6 +1000,21 @@ mod tests {
                 oversized: 1
             }
         );
+    }
+
+    #[test]
+    fn inspection_cancels_during_an_oversized_line() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("transcript.jsonl");
+        let mut contents = transcript_body(&[]).into_bytes();
+        contents.extend(std::iter::repeat_n(b'x', 256 * 1024));
+        std::fs::write(&path, contents).unwrap();
+        let limits = ScanLimits {
+            source_bytes: 512 * 1024,
+            line_bytes: 1024,
+        };
+        let error = inspect_transcript(&path, limits, &mut |_| false).unwrap_err();
+        assert!(matches!(error, ConvertError::Cancelled));
     }
 
     #[test]

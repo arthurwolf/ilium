@@ -3,7 +3,12 @@
 //! make the conversion allocate it whole. Every line is reported with the
 //! byte offset of its first byte, which lets a later pass seek back to it.
 
-use std::io::{self, BufRead, Read, Seek, SeekFrom};
+use std::io::{self, BufRead, Seek, SeekFrom};
+
+pub(crate) enum LineReadError {
+    Io(io::Error),
+    Cancelled,
+}
 
 /// One line from [`BoundedLineReader::next_line`].
 #[derive(Debug, PartialEq, Eq)]
@@ -52,57 +57,77 @@ impl<R: BufRead> BoundedLineReader<R> {
     /// is skipped without being buffered beyond the cap and reported as
     /// [`BoundedLine::Oversized`].
     pub(crate) fn next_line(&mut self) -> io::Result<Option<BoundedLine<'_>>> {
+        self.next_line_interruptible(&mut |_| true)
+            .map_err(|error| match error {
+                LineReadError::Io(error) => error,
+                LineReadError::Cancelled => {
+                    io::Error::new(io::ErrorKind::Interrupted, "line read cancelled")
+                }
+            })
+    }
+
+    /// The callback is invoked at least once per 64 KiB of a long line,
+    /// including while discarding an oversized line. False aborts the read.
+    pub(crate) fn next_line_interruptible(
+        &mut self,
+        on_progress: &mut dyn FnMut(u64) -> bool,
+    ) -> Result<Option<BoundedLine<'_>>, LineReadError> {
         self.buffer.clear();
         let offset = self.next_offset;
-        // Reading at most cap + 1 bytes decides "over the cap" without ever
-        // holding more than that; `read_until` keeps std's fast newline scan.
-        let limit = self.max_line_bytes as u64 + 1;
-        let read = (&mut self.reader)
-            .take(limit)
-            .read_until(b'\n', &mut self.buffer)?;
-        if read == 0 {
-            return Ok(None);
-        }
-        let terminated = self.buffer.last() == Some(&b'\n');
-        if terminated || read <= self.max_line_bytes {
-            self.next_offset += read as u64;
-            if terminated {
-                self.buffer.pop();
-            }
-            return Ok(Some(BoundedLine::Line {
-                offset,
-                bytes: &self.buffer,
-            }));
-        }
-        // `cap + 1` bytes without a newline: discard what was buffered and
-        // skip to the end of the line chunk by chunk.
-        self.buffer.clear();
-        let mut consumed = read as u64;
-        let mut found_newline = false;
+        let mut consumed = 0u64;
+        let mut last_check = 0u64;
+        let mut oversized = false;
+        let mut terminated = false;
         loop {
-            let chunk = self.reader.fill_buf()?;
+            if consumed - last_check >= 64 * 1024 {
+                if !on_progress(offset.saturating_add(consumed)) {
+                    return Err(LineReadError::Cancelled);
+                }
+                last_check = consumed;
+            }
+            let chunk = self.reader.fill_buf().map_err(LineReadError::Io)?;
             if chunk.is_empty() {
                 break;
             }
-            match chunk.iter().position(|byte| *byte == b'\n') {
-                Some(index) => {
-                    consumed += index as u64 + 1;
-                    self.reader.consume(index + 1);
-                    found_newline = true;
-                    break;
-                }
-                None => {
-                    let length = chunk.len();
-                    consumed += length as u64;
-                    self.reader.consume(length);
+            let chunk = &chunk[..chunk.len().min(64 * 1024)];
+            let length =
+                chunk
+                    .iter()
+                    .position(|byte| *byte == b'\n')
+                    .map_or(chunk.len(), |index| {
+                        terminated = true;
+                        index + 1
+                    });
+            let content_length = length - usize::from(terminated);
+            if !oversized {
+                if content_length > self.max_line_bytes.saturating_sub(self.buffer.len()) {
+                    oversized = true;
+                    self.buffer.clear();
+                } else {
+                    self.buffer.extend_from_slice(&chunk[..content_length]);
                 }
             }
+            consumed += length as u64;
+            self.reader.consume(length);
+            if terminated {
+                break;
+            }
+        }
+        if consumed == 0 {
+            return Ok(None);
         }
         self.next_offset += consumed;
-        Ok(Some(BoundedLine::Oversized {
-            offset,
-            length: consumed - u64::from(found_newline),
-        }))
+        if oversized {
+            Ok(Some(BoundedLine::Oversized {
+                offset,
+                length: consumed - u64::from(terminated),
+            }))
+        } else {
+            Ok(Some(BoundedLine::Line {
+                offset,
+                bytes: &self.buffer,
+            }))
+        }
     }
 }
 
