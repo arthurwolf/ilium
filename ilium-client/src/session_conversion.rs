@@ -70,6 +70,7 @@ pub enum ConversionPhase {
     Converting,
     Starting,
     Failed(String),
+    Uncertain(String),
 }
 
 /// Everything the dialog displays plus what recovery needs.
@@ -84,6 +85,10 @@ pub struct ConversionDialogState {
     pub phase: ConversionPhase,
     /// True once the server confirmed the source agent process is gone.
     pub is_agent_stopped: bool,
+    replacement_request: Option<u64>,
+    replacement_started: Option<std::time::Instant>,
+    replacement_is_original: bool,
+    converted_session_id: Option<String>,
     pub progress: f32,
     /// Converter step titles, in order; index `i` is converter step `i + 1`.
     pub steps: Vec<String>,
@@ -111,6 +116,10 @@ impl ConversionDialogState {
             project_cwd,
             phase: ConversionPhase::StoppingAgent,
             is_agent_stopped: false,
+            replacement_request: None,
+            replacement_started: None,
+            replacement_is_original: false,
+            converted_session_id: None,
             progress: 0.0,
             steps: Vec::new(),
             total_steps: 0,
@@ -533,6 +542,9 @@ async fn wait_for_conversion_admission_for(
                 tokio::select! {
                     _ = &mut changed => {},
                     _ = cancel_wake.notified() => {},
+                    // Unlocking the accounting gate and dequeuing a job do
+                    // not necessarily release quota or send a notification.
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {},
                     _ = tokio::time::sleep_until(deadline) => {
                         return Err(format!("Timed out waiting for conversion capacity. {} {}", describe_admission_failure(failure), describe_reservation_owners(&client)));
                     }
@@ -570,7 +582,7 @@ fn admission_may_be_temporary(failure: AdmissionFailure) -> bool {
         Some(quota) => quota.requested <= quota.limit,
         None => matches!(
             failure.reason,
-            RejectReason::QueueFull | RejectReason::ServiceBankFull
+            RejectReason::Busy | RejectReason::QueueFull | RejectReason::ServiceBankFull
         ),
     }
 }
@@ -603,8 +615,8 @@ fn describe_admission_failure(failure: AdmissionFailure) -> String {
         return format!("Conversion needs {resource}, but {} of {} slots are in use ({} requested). Press Enter to resume the original session.", quota.used, quota.limit, quota.requested);
     }
     let explanation = match failure.reason {
-        RejectReason::Busy
-        | RejectReason::QueueFull
+        RejectReason::Busy => "Conversion resource accounting remained temporarily busy",
+        RejectReason::QueueFull
         | RejectReason::ServiceBankFull
         | RejectReason::JobLimit
         | RejectReason::ServiceLimit => "The conversion worker is busy",
@@ -683,12 +695,23 @@ fn phase_line(state: &ConversionDialogState) -> Line<'static> {
             Style::new().fg(Color::Cyan),
         )),
         ConversionPhase::Starting => Line::from(Span::styled(
-            format!("Starting {}…", state.target.label()),
+            format!(
+                "Starting {}…",
+                if state.replacement_is_original {
+                    state.source.label()
+                } else {
+                    state.target.label()
+                }
+            ),
             Style::new().fg(Color::Green),
         )),
         ConversionPhase::Failed(message) => Line::from(Span::styled(
             format!("Failed: {message}"),
             Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        ConversionPhase::Uncertain(message) => Line::from(Span::styled(
+            format!("Outcome unknown: {message}"),
+            Style::new().fg(Color::Yellow),
         )),
     }
 }
@@ -738,6 +761,7 @@ fn hint_text(state: &ConversionDialogState) -> &'static str {
             "Enter resume the original session   Esc close"
         }
         ConversionPhase::Failed(_) => "Esc close",
+        ConversionPhase::Uncertain(_) => "Esc close; inspect the pane tree before retrying",
         ConversionPhase::Converting => "Esc cancel",
         ConversionPhase::StoppingAgent | ConversionPhase::Starting => "",
     }
@@ -799,7 +823,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &ConversionDialogState) {
         .iter()
         .map(|line| Line::from(Span::styled(line.clone(), Style::new().fg(Color::Gray))))
         .collect();
-    if let ConversionPhase::Failed(message) = &state.phase {
+    if let ConversionPhase::Failed(message) | ConversionPhase::Uncertain(message) = &state.phase {
         frame.render_widget(
             Paragraph::new(message.as_str()).wrap(Wrap { trim: false }),
             log_area,
@@ -916,7 +940,8 @@ impl App {
     }
 
     /// Applies one worker message; a successful conversion asks the server to
-    /// swap the frozen pane for the converted session and closes the dialog.
+    /// swap the frozen pane for the converted session; the dialog stays open
+    /// until the server confirms the replacement.
     pub fn apply_conversion_worker_event(&mut self, event: ConversionWorkerEvent) {
         match event {
             ConversionWorkerEvent::Progress { pane_id, event } => {
@@ -934,25 +959,132 @@ impl App {
                             state.target,
                             &outcome.new_session_id,
                         );
-                        let label = state.target.label();
-                        state.phase = ConversionPhase::Starting;
+                        state.converted_session_id = Some(outcome.new_session_id);
                         state.progress = 1.0;
-                        state.push_log(format!("Starting: {command}"));
-                        self.remember_replacement_focus(pane_id);
-                        self.queue_request(ClientRequest::ReplacePaneWithCommand {
-                            pane_id,
-                            command_line: command,
-                        });
-                        self.conversion = None;
-                        if matches!(self.mode, Mode::ConvertSession) {
-                            self.mode = Mode::Normal;
-                        }
-                        self.status_message = Some(format!("Session converted; {label} started"));
+                        self.start_conversion_replacement(pane_id, command, false);
                     }
                     Err(message) => state.fail(message),
                 }
             }
         }
+    }
+
+    fn start_conversion_replacement(
+        &mut self,
+        pane_id: NodeId,
+        command_line: String,
+        original: bool,
+    ) {
+        let request_id = self.next_workspace_request_id();
+        if let Some(state) = self
+            .conversion
+            .as_mut()
+            .filter(|state| state.pane_id == pane_id)
+        {
+            state.phase = ConversionPhase::Starting;
+            state.replacement_request = Some(request_id);
+            state.replacement_started = Some(std::time::Instant::now());
+            state.replacement_is_original = original;
+            state.push_log(format!("Starting: {command_line}"));
+        } else {
+            return;
+        }
+        self.remember_replacement_focus(pane_id);
+        if !self.queue_request(ClientRequest::ReplacePaneWithCommandConfirmed {
+            request_id,
+            pane_id,
+            command_line,
+        }) {
+            self.pending_replacement_focus = None;
+            if let Some(state) = self.conversion.as_mut() {
+                state.replacement_request = None;
+                state.replacement_started = None;
+                state.fail("The replacement request could not be queued. Press Enter to resume the original session.".into());
+            }
+        }
+    }
+
+    pub(crate) fn receive_conversion_replacement(
+        &mut self,
+        request_id: u64,
+        result: Result<NodeId, String>,
+    ) -> bool {
+        let Some(state) = self
+            .conversion
+            .as_mut()
+            .filter(|state| state.replacement_request == Some(request_id))
+        else {
+            return false;
+        };
+        state.replacement_request = None;
+        state.replacement_started = None;
+        match result {
+            Ok(_) => {
+                let label = if state.replacement_is_original {
+                    state.source.label()
+                } else {
+                    state.target.label()
+                };
+                let message = if state.replacement_is_original {
+                    format!("Original {label} pane started")
+                } else {
+                    format!("Session converted; {label} pane started")
+                };
+                self.conversion = None;
+                if matches!(self.mode, Mode::ConvertSession) {
+                    self.mode = Mode::Normal;
+                }
+                self.status_message = Some(message);
+            }
+            Err(error) => {
+                self.pending_replacement_focus = None;
+                let recovery = state
+                    .converted_session_id
+                    .as_ref()
+                    .map(|id| {
+                        format!(
+                            " Converted session: {}.",
+                            ConversionDialogState::resume_command(state.target, id)
+                        )
+                    })
+                    .unwrap_or_default();
+                let message = format!("{error}.{recovery}");
+                if error.contains("uncertain")
+                    || error.contains("no such pane")
+                    || error.contains("was closed")
+                {
+                    state.phase = ConversionPhase::Uncertain(message);
+                } else {
+                    state.fail(message);
+                }
+            }
+        }
+        true
+    }
+
+    pub(crate) fn tick_conversion_replacement(&mut self, now: std::time::Instant) -> bool {
+        let Some(state) = self.conversion.as_mut() else {
+            return false;
+        };
+        if state.phase == ConversionPhase::Starting
+            && state.replacement_started.is_some_and(|started| {
+                now.saturating_duration_since(started) >= std::time::Duration::from_secs(120)
+            })
+        {
+            let command = state
+                .converted_session_id
+                .as_ref()
+                .map(|id| {
+                    format!(
+                        " Converted session: {}.",
+                        ConversionDialogState::resume_command(state.target, id)
+                    )
+                })
+                .unwrap_or_default();
+            state.phase = ConversionPhase::Uncertain(format!("No replacement confirmation arrived; inspect the pane tree before retrying.{command}"));
+            return true;
+        }
+        false
     }
 
     pub(crate) fn remember_replacement_focus(&mut self, pane_id: NodeId) {
@@ -1021,17 +1153,9 @@ impl App {
                 let command =
                     ConversionDialogState::resume_command(state.source, &state.source_session_id);
                 let pane_id = state.pane_id;
-                let label = state.source.label();
-                self.remember_replacement_focus(pane_id);
-                self.queue_request(ClientRequest::ReplacePaneWithCommand {
-                    pane_id,
-                    command_line: command,
-                });
-                self.conversion = None;
-                self.mode = Mode::Normal;
-                self.status_message = Some(format!("Resumed the original {label} session"));
+                self.start_conversion_replacement(pane_id, command, true);
             }
-            (ConversionPhase::Failed(_), KeyCode::Esc) => {
+            (ConversionPhase::Failed(_) | ConversionPhase::Uncertain(_), KeyCode::Esc) => {
                 let pane_id = state.pane_id;
                 self.frozen_panes.remove(&pane_id);
                 self.conversion = None;
@@ -1049,6 +1173,11 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transient_accounting_contention_is_retryable() {
+        assert!(admission_may_be_temporary(RejectReason::Busy.into()));
+    }
 
     #[test]
     fn conversion_memory_refusal_explains_capacity_and_recovery() {
@@ -1240,6 +1369,149 @@ mod tests {
             );
         }
         drop(result);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[tokio::test]
+    async fn conversion_retries_when_a_queue_slot_opens_without_quota_release() {
+        use ilium_execution::{
+            ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+            ShutdownMode,
+        };
+        use std::time::{Duration, Instant};
+
+        // No admission wake is installed: dequeuing alone does not release
+        // a retained job's quota and must still allow conversion to proceed.
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 3,
+            service_jobs: 0,
+            input_bytes: 32 * 1024 * 1024,
+            result_bytes: 4 * 1024 * 1024,
+            worker_threads: 1,
+            worker_bytes: 5 * 1024 * 1024,
+        });
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut execution = Execution::start(
+            quota,
+            ExecutionConfig {
+                cpu: disabled,
+                io: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: 4 * 1024 * 1024,
+                },
+                service: disabled,
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 3,
+                service_jobs: 0,
+                input_bytes: 32 * 1024 * 1024,
+                result_bytes: 4 * 1024 * 1024,
+            })
+            .unwrap();
+        let cost = JobCost {
+            input_bytes: 4096,
+            result_bytes: 4096,
+        };
+        let (first_started, first_running) = oneshot::channel();
+        let (first_release, first_wait) = std::sync::mpsc::channel::<()>();
+        let first = client
+            .try_submit(
+                Lane::Io,
+                cost,
+                move |_| -> Result<(), std::convert::Infallible> {
+                    let _ = first_started.send(());
+                    let _ = first_wait.recv();
+                    Ok(())
+                },
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), first_running)
+            .await
+            .unwrap()
+            .unwrap();
+        let (second_started, second_running) = oneshot::channel();
+        let (second_release, second_wait) = std::sync::mpsc::channel::<()>();
+        let second = client
+            .try_submit(
+                Lane::Io,
+                cost,
+                move |_| -> Result<(), std::convert::Infallible> {
+                    let _ = second_started.send(());
+                    let _ = second_wait.recv();
+                    Ok(())
+                },
+            )
+            .unwrap();
+        let (events, mut received) = mpsc::channel(UI_EVENT_CAPACITY);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let task = ConversionTask {
+            job: ConversionJob {
+                pane_id: NodeId(1),
+                source_transcript_path: PathBuf::from("/nonexistent/transcript"),
+                request: ConversionRequest {
+                    home_dir: PathBuf::from("/nonexistent"),
+                    project_cwd: PathBuf::from("/nonexistent"),
+                    source: BuiltinAgentProvider::Claude,
+                    target: BuiltinAgentProvider::Codex,
+                    source_session_id: "11111111-1111-4111-8111-111111111111".into(),
+                    codex_home: None,
+                    codex_executable: None,
+                },
+            },
+            source_transcript_bytes_at_admission: 0,
+            events,
+            cancel: Arc::clone(&cancel),
+            notification: Arc::new(Notify::new()),
+        };
+        let waiter = tokio::spawn(wait_for_conversion_admission_for(
+            client,
+            task,
+            JobCost {
+                input_bytes: 16 * 1024 * 1024,
+                result_bytes: CONVERSION_RESULT_BYTES,
+            },
+            cancel,
+            Arc::new(Notify::new()),
+            Duration::from_secs(3),
+        ));
+        tokio::time::timeout(Duration::from_secs(5), received.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        first_release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), second_running)
+            .await
+            .unwrap()
+            .unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(2), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            result.is_ok(),
+            "an opened queue slot must admit conversion without a quota wake"
+        );
+        second_release.send(()).unwrap();
+        drop(result);
+        drop(first);
+        drop(second);
         execution.request_shutdown(ShutdownMode::Cancel);
         assert!(
             execution
@@ -1625,13 +1897,26 @@ mod tests {
                 }),
             });
             let requests = app.take_outbound_requests();
+            let [ClientRequest::ReplacePaneWithCommandConfirmed {
+                request_id,
+                pane_id,
+                command_line,
+            }] = requests.as_slice()
+            else {
+                panic!("expected correlated replacement request");
+            };
+            assert_eq!(*pane_id, pane);
             assert_eq!(
-                requests,
-                vec![ClientRequest::ReplacePaneWithCommand {
-                    pane_id: pane,
-                    command_line: "codex resume 22222222-2222-4222-8222-222222222222".to_string(),
-                }]
+                command_line,
+                "codex resume 22222222-2222-4222-8222-222222222222"
             );
+            assert_eq!(
+                app.conversion.as_ref().unwrap().phase,
+                ConversionPhase::Starting
+            );
+            assert!(matches!(app.mode, Mode::ConvertSession));
+            assert!(!app.receive_conversion_replacement(request_id + 1, Ok(NodeId(99))));
+            assert!(app.receive_conversion_replacement(*request_id, Ok(NodeId(99))));
             assert!(app.conversion.is_none());
             assert!(matches!(app.mode, Mode::Normal));
         }
@@ -1653,14 +1938,74 @@ mod tests {
             assert!(app.conversion.as_ref().unwrap().is_failed());
             let _ = app.take_outbound_requests();
             app.handle_conversion_key(KeyCode::Enter);
+            let requests = app.take_outbound_requests();
+            let [ClientRequest::ReplacePaneWithCommandConfirmed {
+                request_id,
+                pane_id,
+                command_line,
+            }] = requests.as_slice()
+            else {
+                panic!("expected correlated recovery request");
+            };
+            assert_eq!(*pane_id, pane);
+            assert_eq!(command_line, &format!("codex resume {SESSION_ID}"));
             assert_eq!(
-                app.take_outbound_requests(),
-                vec![ClientRequest::ReplacePaneWithCommand {
-                    pane_id: pane,
-                    command_line: format!("codex resume {SESSION_ID}"),
-                }]
+                app.conversion.as_ref().unwrap().phase,
+                ConversionPhase::Starting
             );
-            assert!(app.conversion.is_none());
+            assert!(app.receive_conversion_replacement(*request_id, Err("spawn refused".into())));
+            assert!(app.conversion.as_ref().unwrap().is_failed());
+        }
+
+        #[test]
+        fn replacement_failure_and_lost_confirmation_preserve_recovery() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            begin(
+                &mut app,
+                pane,
+                BuiltinAgentProvider::Claude,
+                BuiltinAgentProvider::Codex,
+            );
+            app.apply_pane_process_terminated(pane, Ok(()));
+            let _ = app.take_outbound_requests();
+            app.apply_conversion_worker_event(ConversionWorkerEvent::Finished {
+                pane_id: pane,
+                result: Ok(ConversionOutcome {
+                    new_session_id: "22222222-2222-4222-8222-222222222222".into(),
+                    target_transcript_path: PathBuf::from("/tmp/x.jsonl"),
+                    converted_items: 2,
+                    dropped_items: 0,
+                }),
+            });
+            let request_id = app
+                .conversion
+                .as_ref()
+                .unwrap()
+                .replacement_request
+                .unwrap();
+            let started = app
+                .conversion
+                .as_ref()
+                .unwrap()
+                .replacement_started
+                .unwrap();
+            assert!(app.tick_conversion_replacement(started + std::time::Duration::from_secs(121)));
+            assert!(matches!(
+                app.conversion.as_ref().unwrap().phase,
+                ConversionPhase::Uncertain(_)
+            ));
+            app.handle_conversion_key(KeyCode::Enter);
+            assert_eq!(
+                app.conversion.as_ref().unwrap().replacement_request,
+                Some(request_id)
+            );
+            assert!(app.receive_conversion_replacement(request_id, Err("spawn refused".into())));
+            let state = app.conversion.as_ref().unwrap();
+            assert!(state.is_failed());
+            assert!(state
+                .log
+                .iter()
+                .any(|line| line.contains("codex resume 22222222-2222-4222-8222-222222222222")));
         }
 
         #[test]

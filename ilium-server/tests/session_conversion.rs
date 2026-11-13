@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use ilium_core::{NodeId, ROOT_ID};
-use ilium_ipc::{write_frame, ClientRequest, NewPaneKind, ServerEvent};
+use ilium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent};
 
 mod common;
 use common::{expect_event, read_initial_state, TestServer};
@@ -123,24 +123,43 @@ async fn terminate_keeps_the_pane_and_replace_swaps_it_in_place() {
     // Replacement: new pane takes the old one's parent and position.
     write_frame(
         &mut client,
-        &ClientRequest::ReplacePaneWithCommand {
+        &ClientRequest::ReplacePaneWithCommandConfirmed {
+            request_id: 912,
             pane_id: converted_pane,
             command_line: second,
         },
     )
     .await
     .expect("send ReplacePaneWithCommand");
-    let event = expect_event(&mut client, Duration::from_secs(10), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(converted_pane).is_none() && tree.panes().count() == 2
-        )
+    let (tree, confirmed_pane) = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut tree = None;
+        let mut confirmed = None;
+        loop {
+            let event: ServerEvent = read_frame(&mut client)
+                .await
+                .expect("read replacement event");
+            match event {
+                ServerEvent::TreeSnapshot(snapshot)
+                    if snapshot.get(converted_pane).is_none() && snapshot.panes().count() == 2 =>
+                {
+                    tree = Some(snapshot)
+                }
+                ServerEvent::PaneCreateFinished {
+                    request_id: 912,
+                    result,
+                } => {
+                    confirmed = Some(result.expect("replacement succeeds"));
+                }
+                _ => {}
+            }
+            if let (Some(snapshot), Some(pane)) = (&tree, confirmed) {
+                break (snapshot.clone(), pane);
+            }
+        }
     })
-    .await;
-    let ServerEvent::TreeSnapshot(tree) = event else {
-        unreachable!("predicate only accepts a tree snapshot")
-    };
+    .await
+    .expect("replacement tree and result arrive");
+    assert_eq!(pane_ids_in_order(&tree)[0], confirmed_pane);
     let order_after = pane_ids_in_order(&tree);
     assert_eq!(order_after.len(), 2);
     assert_eq!(order_after[1], sibling_pane, "sibling keeps its place");
@@ -158,6 +177,31 @@ async fn terminate_keeps_the_pane_and_replace_swaps_it_in_place() {
             title_source: ilium_core::PaneTitleSource::UserSpecified,
             ..
         }
+    ));
+
+    write_frame(
+        &mut client,
+        &ClientRequest::ReplacePaneWithCommandConfirmed {
+            request_id: 913,
+            pane_id: converted_pane,
+            command_line: "does-not-matter".into(),
+        },
+    )
+    .await
+    .expect("send replacement for missing pane");
+    let failure = expect_event(&mut client, Duration::from_secs(10), |event| {
+        matches!(
+            event,
+            ServerEvent::PaneCreateFinished {
+                request_id: 913,
+                ..
+            }
+        )
+    })
+    .await;
+    assert!(matches!(
+        failure,
+        ServerEvent::PaneCreateFinished { result: Err(_), .. }
     ));
 
     write_frame(&mut client, &ClientRequest::KillSession)

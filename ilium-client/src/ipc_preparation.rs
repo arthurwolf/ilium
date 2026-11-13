@@ -429,7 +429,8 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         R::CheckPaneProgressMonitor { command, .. } | R::SetPaneProgressMonitor { command, .. } => {
             count.string(command)
         }
-        R::ReplacePaneWithCommand { command_line, .. } => count.string(command_line),
+        R::ReplacePaneWithCommand { command_line, .. }
+        | R::ReplacePaneWithCommandConfirmed { command_line, .. } => count.string(command_line),
         R::SubmitVoiceText { sentences, .. } => {
             count.vector(sentences);
             for text in sentences {
