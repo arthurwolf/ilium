@@ -9,6 +9,9 @@ const RESULT: usize = 4;
 const THREADS: usize = 5;
 const WORKER_BYTES: usize = 6;
 const DIMENSIONS: usize = 7;
+/// Attempts at the admission gate before a contended ledger reports `Busy`. Each
+/// attempt yields the thread, so the bound is a short wait, never an unbounded one.
+const GATE_RETRY_ATTEMPTS: usize = 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RejectReason {
@@ -159,12 +162,23 @@ impl Ledger {
         }
     }
 
+    /// Takes the admission gate without ever blocking on it. The guarded section is a
+    /// few synchronous counter updates, so a miss usually means another thread is
+    /// mid-update for microseconds; a short bounded retry absorbs that instead of
+    /// refusing a fresh client at startup. A miss that persists still reports `Busy`.
     pub(crate) fn gate(&self) -> Result<MutexGuard<'_, ()>, RejectReason> {
-        match self.admission.try_lock() {
-            Ok(guard) => Ok(guard),
-            Err(TryLockError::WouldBlock) => Err(RejectReason::Busy),
-            Err(TryLockError::Poisoned(_)) => Err(RejectReason::AccountingPoisoned),
+        for attempt in 0..GATE_RETRY_ATTEMPTS {
+            match self.admission.try_lock() {
+                Ok(guard) => return Ok(guard),
+                Err(TryLockError::WouldBlock) => {
+                    if attempt + 1 < GATE_RETRY_ATTEMPTS {
+                        std::thread::yield_now();
+                    }
+                }
+                Err(TryLockError::Poisoned(_)) => return Err(RejectReason::AccountingPoisoned),
+            }
         }
+        Err(RejectReason::Busy)
     }
 
     fn check(&self, amount: &[usize; DIMENSIONS]) -> Result<(), RejectReason> {

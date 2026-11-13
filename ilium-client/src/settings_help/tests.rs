@@ -435,6 +435,45 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
 }
 
 #[test]
+fn multi_frame_illustration_title_is_fully_visible_at_common_widths() {
+    use crate::config::MotionLevel;
+    use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+    use std::time::Instant;
+
+    // AP-07 has two illustration frames, so its panel title carries the frame count.
+    let topic = catalog::by_id("AP-07").unwrap();
+    assert!(topic.frames.len() > 1, "fixture needs a multi-frame topic");
+    let title = format!("Illustration · frame 1/{}", topic.frames.len());
+    for (width, height) in [(120, 40), (80, 24)] {
+        let state = super::dialog::SettingsHelpState::new("AP-07", 1, MotionLevel::Off);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| {
+                super::dialog::render(
+                    frame,
+                    Rect::new(0, 0, width, height),
+                    topic,
+                    &state,
+                    MotionLevel::Off,
+                    Instant::now(),
+                )
+            })
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(
+            screen.contains(&title),
+            "illustration title `{title}` must be fully visible at {width}x{height}"
+        );
+    }
+}
+
+#[test]
 fn custom_icon_editor_help_names_every_condition_group() {
     use ilium_core::status_rule_expression::ConditionCategory;
 

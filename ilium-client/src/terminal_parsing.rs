@@ -2422,8 +2422,12 @@ mod tests {
                 if wanted(&result) {
                     return result;
                 }
-                if let ParseResult::Error { message, .. } = result {
-                    panic!("parser error: {message}");
+                // A dropped pane's queued command is cancelled by design; only a live pane's error is a failure.
+                if let ParseResult::Error { target, message } = result {
+                    assert!(
+                        !target.alive.load(Ordering::Acquire),
+                        "parser error: {message}"
+                    );
                 }
             }
             assert!(Instant::now() < deadline, "result did not arrive");

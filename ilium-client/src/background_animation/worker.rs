@@ -2499,6 +2499,22 @@ mod tests {
     fn controlled() -> Harness {
         controlled_in(None)
     }
+    /// `MAX_SERVICES` is process-wide, so parallel tests can hold every slot
+    /// briefly. Wait for a slot the same way `with_frame` does instead of failing.
+    fn reserve_in_when_services_free(quota: QuotaGroup) -> AnimationAdmission {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            match AnimationService::reserve_in(quota.clone()) {
+                Ok(admission) => return admission,
+                Err(error)
+                    if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("animation service admission failed: {error}"),
+            }
+        }
+    }
     fn controlled_in(quota: Option<QuotaGroup>) -> Harness {
         let (entered, observed) = mpsc::sync_channel(8);
         let (release, advance) = mpsc::sync_channel(8);
@@ -2516,7 +2532,7 @@ mod tests {
         };
         let service = match quota {
             Some(quota) => AnimationService::start_admitted(
-                AnimationService::reserve_in(quota).unwrap(),
+                reserve_in_when_services_free(quota),
                 Some(frame),
                 Arc::new(tokio::sync::Notify::new()),
                 ilium_ambient::resources::AmbientResources::new(crate::execution::test_client()),

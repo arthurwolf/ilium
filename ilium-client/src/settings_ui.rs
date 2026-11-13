@@ -2982,18 +2982,27 @@ fn render_icon_picker(frame: &mut Frame, area: Rect, picker: &crate::app::IconPi
         Block::default().style(icon_picker_canvas_style(picker.column_mode)),
         area,
     );
+    // The view switch shares the title row, so the title stops short of it
+    // instead of being overwritten by it.
+    let title_width = layout
+        .search_area
+        .width
+        .saturating_sub(ICON_PICKER_VIEW_SWITCH_WIDTH + 1);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!(
+                "Choose an icon for {} · {} official UTF-8 · {} Nerd Font · {} total",
+                picker.target.label(),
+                catalogue_icon_count_for(IconCatalogFamily::OfficialUtf8),
+                catalogue_icon_count_for(IconCatalogFamily::NerdFont),
+                catalogue_icon_count(),
+            ),
+            Style::new().add_modifier(Modifier::BOLD),
+        ))),
+        Rect::new(layout.search_area.x, layout.search_area.y, title_width, 1),
+    );
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from(Span::styled(
-                format!(
-                    "Choose an icon for {} · {} official UTF-8 · {} Nerd Font · {} total",
-                    picker.target.label(),
-                    catalogue_icon_count_for(IconCatalogFamily::OfficialUtf8),
-                    catalogue_icon_count_for(IconCatalogFamily::NerdFont),
-                    catalogue_icon_count(),
-                ),
-                Style::new().add_modifier(Modifier::BOLD),
-            )),
             Line::from(Span::styled(
                 "Official UTF-8 chapters first · Nerd Font chapters afterwards · / runs local CPU semantic search",
                 Style::new().add_modifier(Modifier::DIM),
@@ -3022,7 +3031,12 @@ fn render_icon_picker(frame: &mut Frame, area: Rect, picker: &crate::app::IconPi
                 Style::new().add_modifier(Modifier::DIM),
             )),
         ]),
-        layout.search_area,
+        Rect::new(
+            layout.search_area.x,
+            layout.search_area.y.saturating_add(1),
+            layout.search_area.width,
+            layout.search_area.height.saturating_sub(1),
+        ),
     );
     crate::value_icon::column_control(area, picker).render(
         frame,
