@@ -308,8 +308,8 @@ interface ui {
   record button-spec { label: string, icon: option<string>, enabled: bool, role: button-role }
   enum toggle-style { switch, checkbox, icon }
   record toggle-spec { label: string, value: bool, style: toggle-style, tri-state: bool, icon-on: option<string>, icon-off: option<string> }
-  enum choice-style { stepper, list, dialog }
-  enum view-mode { list, grid }
+  enum choice-style { stepper, %list, dialog }
+  enum view-mode { %list, grid }
   enum disabled-marker { reason, cross }
   record catalog-item {
     id: string, title: string,

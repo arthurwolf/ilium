@@ -27,10 +27,10 @@ enum stream-framing { raw, lines, server-sent-events, ndjson }
 record stream-request { request: http-request, framing: stream-framing, max-chunk-bytes: u32 }   // <= 64 KiB
 type stream-id = u64;
 open-stream: func(request: stream-request) -> result<stream-id, plugin-error>;
-close-stream: func(stream: stream-id);
+close-stream: func(%stream: stream-id);
 // @unstable(feature = websocket)
 open-websocket: func(url: string, protocols: list<string>) -> result<stream-id, plugin-error>;
-send-websocket: func(stream: stream-id, text: string) -> result<_, plugin-error>;
+send-websocket: func(%stream: stream-id, text: string) -> result<_, plugin-error>;
 ```
 
 Events (defined in the [WIT reference](/pages/reference-wit/#412-events)):

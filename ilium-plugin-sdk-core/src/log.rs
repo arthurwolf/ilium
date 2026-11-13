@@ -8,6 +8,10 @@ pub fn log(level: Level, message: &str) {
     while !message.is_char_boundary(end) {
         end -= 1;
     }
+    // In a component the line goes to the host; the buffer below is the native-mode stand-in.
+    #[cfg(target_arch = "wasm32")]
+    crate::wasm::imports::log::log(level, message[..end].to_string());
+    #[cfg(not(target_arch = "wasm32"))]
     LOGGED.with(|lines| {
         let mut lines = lines.borrow_mut();
         // Over the per-second budget the host drops lines; the native buffer keeps a bounded tail.
@@ -21,6 +25,7 @@ pub fn log(level: Level, message: &str) {
 /// Longest log line the host keeps: 16 KiB (limits manual).
 pub const MAX_LOG_MESSAGE_BYTES: usize = 16 * 1024;
 /// Most lines the native-mode buffer holds before the oldest are dropped.
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_BUFFERED_LINES: usize = 4096;
 
 thread_local! {

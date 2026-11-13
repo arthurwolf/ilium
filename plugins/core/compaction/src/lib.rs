@@ -10,8 +10,8 @@ use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::NodeId;
+use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, JobRunner, Lifecycle, Views};
 
 mod redact;
@@ -46,7 +46,9 @@ impl JobRunner for CompactionServer {
     fn run(&mut self, kind: String, input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
         match kind.as_str() {
             "compact" => runner::run_compact(&input, self.focused),
-            other => Err(PluginError::invalid_argument(format!("unknown job kind: {other}"))),
+            other => Err(PluginError::invalid_argument(format!(
+                "unknown job kind: {other}"
+            ))),
         }
     }
 }
@@ -156,7 +158,7 @@ mod spec_tests {
             json!([
                 "event:agent-activity-changed",
                 "service:compact",
-                "view:compaction.optimizer"
+                "view:ilium.core.compaction/compaction.optimizer"
             ])
         );
     }

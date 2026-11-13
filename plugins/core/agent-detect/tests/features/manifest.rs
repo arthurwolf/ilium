@@ -124,7 +124,7 @@ fn manifest_050_activates_at_startup_and_on_the_panel_view() {
     let manifest = manifest();
     assert_eq!(
         manifest["activation"],
-        json!(["startup", "view:agent-detect.panel"])
+        json!(["startup", "view:ilium.core.agent-detect/agent-detect.panel"])
     );
     assert_eq!(manifest["limits_tier"], "first-party");
 }

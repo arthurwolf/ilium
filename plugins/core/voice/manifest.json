@@ -28,7 +28,7 @@
     ]
   },
   "activation": [
-    "command:voice.toggle",
+    "command:ilium.core.voice/toggle",
     "cli:voice"
   ],
   "limits_tier": "first-party",

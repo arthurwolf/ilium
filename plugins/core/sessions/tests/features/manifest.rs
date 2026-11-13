@@ -98,7 +98,10 @@ fn manifest_050_fragment_grants_equal_the_complete_manifest_grants() {
     // extension-point grants after them (page "Manifest" and "Complete manifest").
     let fragment_grants = strings(&fragment["capabilities"]["server"]);
     let complete_grants = strings(&manifest_value()["capabilities"]["server"]);
-    assert_eq!(complete_grants[..fragment_grants.len()], fragment_grants[..]);
+    assert_eq!(
+        complete_grants[..fragment_grants.len()],
+        fragment_grants[..]
+    );
 }
 
 /// REQ: COR-050
@@ -107,7 +110,7 @@ fn manifest_050_activation_is_startup_and_the_list_view() {
     let manifest = manifest_value();
     assert_eq!(
         strings(&manifest["activation"]),
-        ["startup", "view:sessions.list"]
+        ["startup", "view:ilium.core.sessions/sessions.list"]
     );
 }
 

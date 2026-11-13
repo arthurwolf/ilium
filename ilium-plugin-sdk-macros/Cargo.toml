@@ -14,3 +14,5 @@ proc-macro = true
 syn = { version = "2.0.118", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
+# Reads the plugin manifest: its grants decide which host imports the component links.
+serde_json = "1.0.151"

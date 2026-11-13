@@ -40,7 +40,7 @@
   },
   "activation": [
     "startup",
-    "view:cost.panel"
+    "view:ilium.core.cost/cost.panel"
   ],
   "contributes": {
     "extension_points": [

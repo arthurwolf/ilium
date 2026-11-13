@@ -338,6 +338,8 @@ fn import_allowed(name: &str, requested: &[String]) -> Result<(), Diagnostic> {
         || base.starts_with("wasi:random/")
         || base.starts_with("wasi:io/")
         || base.starts_with("ilium:primitives/")
+        // Type-only interfaces: a component that names a contract type imports them.
+        || base.starts_with("ilium:types/")
         || base == "ilium:anim/surface"
         || base == "ilium:anim/fonts"
         || matches!(
@@ -531,6 +533,7 @@ pub struct EmbeddedArtifact {
     /// A trusted release-time precompile, never bytes from a plugin package or disk cache.
     pub cwasm: Vec<u8>,
 }
+pub use embedded::{install_bundled, BundledArtifact};
 pub fn embedded_artifacts() -> Vec<EmbeddedArtifact> {
     embedded::bundled_artifacts()
 }

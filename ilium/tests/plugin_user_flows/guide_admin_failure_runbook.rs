@@ -427,7 +427,7 @@ fn usr_233_failure_window_and_crash_loop_clearing_rule_are_stated() {
 fn usr_234_audit_search_ends_at_plugin_killed_event() {
     let runbook = manual_page(RUNBOOK);
     for phrase in [
-        "stop at `plugin.killed`",
+        "stop at `plugin-killed`",
         "The names are those used by the pages that define them.",
     ] {
         assert!(runbook.contains(phrase), "missing: {phrase}");

@@ -30,7 +30,7 @@
     ]
   },
   "activation": [
-    "command:new-agent",
+    "command:ilium.core.worktrees/new-agent",
     "service:create"
   ],
   "contributes": {

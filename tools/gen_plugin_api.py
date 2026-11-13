@@ -1548,6 +1548,12 @@ def build_outputs(root):
         data = outputs[f"{ROUNDTRIP_CRATE}/{relative}"].encode("utf-8")
         golden_lines.append(f"{hashlib.sha256(data).hexdigest()}  {relative}")
     outputs[f"{ROUNDTRIP_CRATE}/tests/abi/golden/generated.sha256"] = "\n".join(golden_lines) + "\n"
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    import gen_plugin_wasm_glue  # sibling module; imported late so it can use this module's helpers
+
+    glue_outputs = gen_plugin_wasm_glue.outputs(sys.modules[__name__], model, renderer, root, tree_sha256)
+    for path, text in glue_outputs.items():
+        outputs[path] = rustfmt(text, path)
     statistics = statistics_of(model)
     statistics["roundtrip_tests"] = roundtrip_tests
     statistics["duplicates"] = duplicates

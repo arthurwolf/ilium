@@ -9,10 +9,10 @@ use std::collections::HashMap;
 
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, Activation, Alignment, Area, BlockSpec, BlockTitle, BorderType,
-    Borders, CreatePaneSpec, CreateSplitSpec, ErrorCode, Event, Intent, MessageSpec,
-    MessageTarget, NodeFlags, Outcome, Padding, ParagraphSpec, PluginError, PluginId, PluginSide,
-    PointerKind, RequestRef, ResizePaneSpec, SplitDirection, Style, Span, Submission,
-    TitlePosition, UiNode, UiTree, ViewTarget, Widget, NodeId,
+    Borders, CreatePaneSpec, CreateSplitSpec, ErrorCode, Event, Intent, MessageSpec, MessageTarget,
+    NodeFlags, NodeId, Outcome, Padding, ParagraphSpec, PluginError, PluginId, PluginSide,
+    PointerKind, RequestRef, ResizePaneSpec, Span, SplitDirection, Style, Submission,
+    TitlePosition, UiNode, UiTree, ViewTarget, Widget,
 };
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
 
@@ -235,16 +235,22 @@ impl Handler for LayoutClient {
         let mut submissions = Vec::new();
         for event in batch {
             match event {
-                Event::CommandInvoked(invoked) if SPLIT_CHANNELS.contains(&invoked.command.as_str()) => {
+                Event::CommandInvoked(invoked)
+                    if SPLIT_CHANNELS.contains(&invoked.command.as_str()) =>
+                {
                     if let Some(pane) = invoked.context.pane {
-                        submissions
-                            .push(message_to_server(&invoked.command, pane.0.to_le_bytes().to_vec()));
+                        submissions.push(message_to_server(
+                            &invoked.command,
+                            pane.0.to_le_bytes().to_vec(),
+                        ));
                     }
                 }
                 Event::PaneResized(resized) => CLIENT.with(|cell| {
                     let mut state = cell.borrow_mut();
                     state.see(resized.node.0);
-                    state.sizes.insert(resized.node.0, (resized.columns, resized.rows));
+                    state
+                        .sizes
+                        .insert(resized.node.0, (resized.columns, resized.rows));
                 }),
                 Event::PaneCreated(info) => CLIENT.with(|cell| {
                     let mut state = cell.borrow_mut();
@@ -253,7 +259,9 @@ impl Handler for LayoutClient {
                     state.titles.insert(info.node.0, info.title);
                 }),
                 Event::PaneTitleChanged(changed) => CLIENT.with(|cell| {
-                    cell.borrow_mut().titles.insert(changed.node.0, changed.title);
+                    cell.borrow_mut()
+                        .titles
+                        .insert(changed.node.0, changed.title);
                 }),
                 Event::PaneFocused(focused) => CLIENT.with(|cell| {
                     let mut state = cell.borrow_mut();
@@ -353,7 +361,11 @@ fn preview_lines(state: &ClientState) -> Vec<String> {
     } else {
         (format!("{} ", fit(&top_left, 7)), fit("", 8))
     };
-    let rule = format!("{} \u{254b} {}", "\u{2500}".repeat(8), "\u{2500}".repeat(10));
+    let rule = format!(
+        "{} \u{254b} {}",
+        "\u{2500}".repeat(8),
+        "\u{2500}".repeat(10)
+    );
     let sizes: Vec<String> = state
         .order
         .iter()
@@ -563,7 +575,10 @@ mod spec_tests {
         let manifest = parsed_manifest();
         assert_eq!(
             string_array(&manifest["activation"]),
-            ["command:layout.preset", "view:layout.presets"]
+            [
+                "command:ilium.core.layout/layout.preset",
+                "view:ilium.core.layout/layout.presets"
+            ]
         );
     }
 

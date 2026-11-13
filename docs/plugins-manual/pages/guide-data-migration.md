@@ -43,7 +43,7 @@ You will need:
 ```wit
 // Excerpt of ilium:exports/migrator in reference-wit
 interface migrator {
-  migrate: func(from: u32, to: u32) -> result<_, plugin-error>;
+  migrate: func(%from: u32, to: u32) -> result<_, plugin-error>;
 }
 ```
 

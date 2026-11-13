@@ -43,7 +43,7 @@
   },
   "activation": [
     "settings:setup",
-    "command:refresh",
+    "command:ilium.core.agent-setup/refresh",
     "service:install"
   ],
   "replaceable": true,

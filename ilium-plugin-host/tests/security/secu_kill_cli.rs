@@ -83,8 +83,8 @@ fn secu_004_kill_stores_its_reason_in_the_plugin_killed_record_b() {
     let audit = audit_text(&env);
     let killed = audit
         .lines()
-        .find(|line| line.contains("plugin.killed"))
-        .expect("a plugin.killed record exists");
+        .find(|line| line.contains("plugin-killed"))
+        .expect("a plugin-killed record exists");
     assert!(killed.contains("exfiltrates tokens"), "record: {killed}");
 }
 
@@ -132,7 +132,7 @@ fn secu_010_second_kill_writes_one_more_plugin_killed_record_a() {
     plugin(&env, &["kill", PLUGIN, "--reason", "first reason"]);
     plugin(&env, &["kill", PLUGIN, "--reason", "second reason"]);
 
-    let records = audit_text(&env).matches("plugin.killed").count();
+    let records = audit_text(&env).matches("plugin-killed").count();
     assert_eq!(records, 2, "two kills must leave two records");
 }
 

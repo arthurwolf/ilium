@@ -135,7 +135,7 @@ fn manifest_050_activation_triggers_are_event_service_and_view() {
         json!([
             "event:agent-activity-changed",
             "service:compact",
-            "view:compaction.optimizer"
+            "view:ilium.core.compaction/compaction.optimizer"
         ])
     );
 }

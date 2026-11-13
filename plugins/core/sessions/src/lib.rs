@@ -175,7 +175,7 @@ mod spec_tests {
         assert!(array_contains(&manifest["activation"], "startup"));
         assert!(array_contains(
             &manifest["activation"],
-            "view:sessions.list"
+            "view:ilium.core.sessions/sessions.list"
         ));
     }
 

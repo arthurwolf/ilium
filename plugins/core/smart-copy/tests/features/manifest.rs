@@ -153,7 +153,10 @@ fn manifest_050_context_menu_contributes_one_terminal_entry_for_the_smart_copy_c
 #[test]
 fn manifest_050_activation_is_the_command_trigger_of_the_boot_table() {
     let manifest = manifest();
-    assert_eq!(manifest["activation"], json!(["command:smart-copy"]));
+    assert_eq!(
+        manifest["activation"],
+        json!(["command:ilium.core.smart-copy/smart-copy"])
+    );
     let boot = manual_page("reference-kernel-and-boot.md");
     let row = boot
         .lines()

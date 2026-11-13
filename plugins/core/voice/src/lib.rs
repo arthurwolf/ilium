@@ -143,7 +143,10 @@ mod spec_tests {
         let manifest = load_manifest();
         assert_eq!(
             string_list(&manifest["activation"]),
-            vec!["command:voice.toggle".to_string(), "cli:voice".to_string()]
+            vec![
+                "command:ilium.core.voice/toggle".to_string(),
+                "cli:voice".to_string()
+            ]
         );
     }
 

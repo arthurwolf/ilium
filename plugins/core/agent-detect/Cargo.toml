@@ -21,3 +21,10 @@ unicode-width = "0.2.2"
 ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk", features = ["testing"] }
 serde_json = "1.0.151"
 proptest = "1"
+
+[features]
+# Component builds (wasm32-wasip2): `#[ilium_plugin]` emits the component glue of one side.
+# The two sides of a plugin are two components, so exactly one feature is set per build.
+component-server = []
+component-client = []
+component-scene = []

@@ -209,7 +209,7 @@ fn manifest_050_activation_triggers_are_the_five_lazy_ones() {
             "cli:broadcast",
             "http:/create_agent",
             "service:broadcast",
-            "command:ask-for-update"
+            "command:ilium.core.fleet/ask-for-update"
         ]
     );
 }

@@ -61,18 +61,20 @@ impl JobRunner for SessionConvertServer {
             message: "transcript is not valid UTF-8".to_string(),
             retry_after_ms: None,
         })?;
-        let messages = transcript.lines().filter(|line| !line.trim().is_empty()).count();
+        let messages = transcript
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count();
         Ok(format!("{{\"messages\":{messages}}}").into_bytes())
     }
 }
 
 impl ServiceProvider for SessionConvertServer {
     fn handle(&mut self, call: ServiceCall) -> ServiceReply {
-        let target_ok = call.payload_json.contains("\"codex\"") || call.payload_json.contains("\"claude\"");
+        let target_ok =
+            call.payload_json.contains("\"codex\"") || call.payload_json.contains("\"claude\"");
         if call.method != "start" || !target_ok || call.payload_json.contains("antigravity") {
-            return ServiceReply::Done(
-                "{\"error\":\"invalid-argument\"}".to_string(),
-            );
+            return ServiceReply::Done("{\"error\":\"invalid-argument\"}".to_string());
         }
         ServiceReply::Deferred
     }
@@ -181,9 +183,9 @@ mod spec_tests {
         assert_eq!(
             string_list(&manifest_value["activation"]),
             vec![
-                "command:convert",
+                "command:ilium.core.session-convert/convert",
                 "service:convert",
-                "view:session-convert.progress"
+                "view:ilium.core.session-convert/session-convert.progress"
             ]
         );
         assert_eq!(
@@ -336,6 +338,6 @@ mod spec_tests {
         assert_eq!(panel["title"], "Convert session");
         assert_eq!(panel["modal"], true);
         assert!(string_list(&manifest_value["activation"])
-            .contains(&"view:session-convert.progress".to_string()));
+            .contains(&"view:ilium.core.session-convert/session-convert.progress".to_string()));
     }
 }

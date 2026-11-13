@@ -159,7 +159,10 @@ fn search_009_reads_terminal_screens_through_the_read_screen_grant() {
 fn search_009_activation_triggers_are_command_and_view() {
     assert_eq!(
         strings(&manifest_value()["activation"]),
-        ["command:ilium.core.search/open", "view:search"]
+        [
+            "command:ilium.core.search/open",
+            "view:ilium.core.search/search"
+        ]
     );
 }
 

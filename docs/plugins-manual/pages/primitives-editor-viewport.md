@@ -27,7 +27,7 @@ record minimap-mark { line: u32, color: color, lane: u8 }      // lane 0..2
 set-minimap-marks: func(buffer: buffer-id, layer: string, marks: list<minimap-mark>) -> result<_, plugin-error>;
 
 // export, with-tokens
-enum token-kind { keyword, string, number, comment, type-name, function, variable,
+enum token-kind { keyword, %string, number, comment, type-name, function, variable,
                   operator, punctuation, constant, tag, attribute, plain }
 record token { line: u32, start: u32, length: u32, kind: token-kind }
 tokens: func(buffer: buffer-id, first-line: u32, lines: list<string>, state-in: option<list<u8>>)

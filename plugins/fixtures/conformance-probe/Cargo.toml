@@ -13,3 +13,10 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk" }
+
+[features]
+# Component builds (wasm32-wasip2): `#[ilium_plugin]` emits the component glue of one side.
+# The two sides of a plugin are two components, so exactly one feature is set per build.
+component-server = []
+component-client = []
+component-scene = []

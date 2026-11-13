@@ -107,7 +107,7 @@ impl KillSwitch {
     }
 
     /// Stops the server side and every attached client side, sets the plugin to
-    /// `disabled-by-admin`, cancels its pending requests and writes `plugin.killed` (HST-516,
+    /// `disabled-by-admin`, cancels its pending requests and writes `plugin-killed` (HST-516,
     /// HST-517).
     pub fn kill(&mut self, plugin_id: &str, reason: &str, administrator: &str) -> KillReport {
         let stopped_client_ids = self.clients.get(plugin_id).cloned().unwrap_or_default();
@@ -123,7 +123,7 @@ impl KillSwitch {
         self.killed.insert(plugin_id.to_owned());
         self.persist();
         self.last_audit = Some(AuditEvent {
-            kind: "plugin.killed".to_owned(),
+            kind: "plugin-killed".to_owned(),
             administrator: administrator.to_owned(),
             reason: reason.to_owned(),
             unix_millis: SystemTime::now()

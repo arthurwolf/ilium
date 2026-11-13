@@ -107,7 +107,10 @@ fn cor_050_the_log_folder_grant_is_a_literal_path_not_a_scope_pattern() {
 fn cor_050_activation_triggers_are_startup_and_the_warnings_view() {
     assert_eq!(
         strings(&manifest_json()["activation"]),
-        ["startup", "view:diagnostics.warnings"]
+        [
+            "startup",
+            "view:ilium.core.diagnostics/diagnostics.warnings"
+        ]
     );
 }
 

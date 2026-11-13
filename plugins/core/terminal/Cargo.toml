@@ -22,3 +22,10 @@ serde_json = "1.0.151"
 proptest = "1"
 # Link patterns of the terminal feature tests (tests/features/links.rs, tests/port/terminal_links.rs).
 regex = "1.13.0"
+
+[features]
+# Component builds (wasm32-wasip2): `#[ilium_plugin]` emits the component glue of one side.
+# The two sides of a plugin are two components, so exactly one feature is set per build.
+component-server = []
+component-client = []
+component-scene = []

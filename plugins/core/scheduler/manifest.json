@@ -33,7 +33,7 @@
   },
   "activation": [
     "startup",
-    "view:scheduler.queue"
+    "view:ilium.core.scheduler/scheduler.queue"
   ],
   "limits_tier": "first-party"
 }

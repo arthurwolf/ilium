@@ -129,9 +129,15 @@ fn handle_call(method: &str, payload: &str) -> String {
             if !TARGETS.contains(&target.as_str()) {
                 return error_reply("invalid-argument", "unknown target");
             }
-            error_reply("unsupported", "agent files cannot be reached from the plugin yet")
+            error_reply(
+                "unsupported",
+                "agent files cannot be reached from the plugin yet",
+            )
         }
-        "status" => error_reply("unsupported", "agent files cannot be reached from the plugin yet"),
+        "status" => error_reply(
+            "unsupported",
+            "agent files cannot be reached from the plugin yet",
+        ),
         _ => error_reply("not-found", "unknown method"),
     }
 }
@@ -203,7 +209,11 @@ mod spec_tests {
     fn manifest_activation_lists_the_three_triggers() {
         assert_eq!(
             string_items(&manifest()["activation"]),
-            vec!["settings:setup", "command:refresh", "service:install"]
+            vec![
+                "settings:setup",
+                "command:ilium.core.agent-setup/refresh",
+                "service:install"
+            ]
         );
     }
 

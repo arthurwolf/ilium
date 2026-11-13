@@ -164,6 +164,10 @@ pub fn check_component(
             }
             continue;
         }
+        // Type-only interfaces carry no function; naming a contract type imports them.
+        if import.starts_with("ilium:types/") {
+            continue;
+        }
         let always = [
             "log",
             "clock",

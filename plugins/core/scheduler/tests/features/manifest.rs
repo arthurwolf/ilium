@@ -103,7 +103,7 @@ fn manifest_050_capabilities_have_exactly_the_two_sides() {
 fn manifest_050_activation_triggers_are_startup_and_the_queue_view() {
     assert_eq!(
         manifest()["activation"],
-        json!(["startup", "view:scheduler.queue"])
+        json!(["startup", "view:ilium.core.scheduler/scheduler.queue"])
     );
 }
 

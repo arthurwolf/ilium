@@ -34,7 +34,7 @@
   },
   "activation": [
     "command:ilium.core.search/open",
-    "view:search"
+    "view:ilium.core.search/search"
   ],
   "contributes": {
     "commands": [

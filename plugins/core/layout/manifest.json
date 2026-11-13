@@ -90,8 +90,8 @@
     ]
   },
   "activation": [
-    "command:layout.preset",
-    "view:layout.presets"
+    "command:ilium.core.layout/layout.preset",
+    "view:ilium.core.layout/layout.presets"
   ],
   "limits_tier": "first-party"
 }

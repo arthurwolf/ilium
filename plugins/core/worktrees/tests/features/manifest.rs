@@ -208,7 +208,7 @@ fn manifest_050_the_page_title_of_the_sample_names_ctrl_b_w() {
 fn manifest_050_activation_is_the_command_and_the_create_service() {
     assert_eq!(
         manifest_value()["activation"],
-        json!(["command:new-agent", "service:create"])
+        json!(["command:ilium.core.worktrees/new-agent", "service:create"])
     );
 }
 

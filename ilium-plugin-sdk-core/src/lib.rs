@@ -12,9 +12,12 @@ pub mod prelude;
 pub mod request;
 pub mod task;
 pub mod ui;
+/// Component mode: the wit-bindgen bindings and the glue `#[ilium_plugin]` expands on wasm32.
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
 
 pub use plugin::{
-    clear_host, host, no_host, set_host, HostHandle, Annotator, CatalogProvider, Detector, Handler, HookHandler, HostApi, HostCalls,
+    clear_host, host, no_host, set_host, DispatchToHandler, DispatchToNobody, HandlerProbe, HostHandle, Annotator, CatalogProvider, Detector, Handler, HookHandler, HostApi, HostCalls,
     InferenceProvider, JobRunner, Lifecycle, LifecycleState, MenuProvider, Migrator, NativeEntry,
     NativeRenderer, Plugin, Renderer, SceneRenderer, ServiceProvider, SettingsValidate,
     TokenProvider, Views, VirtualRowsProvider,

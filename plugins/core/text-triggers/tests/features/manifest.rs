@@ -118,7 +118,10 @@ fn manifest_030_holds_exactly_one_kernel_tab_grant_and_only_on_the_client() {
 fn manifest_050_activation_is_startup_and_the_rules_view() {
     assert_eq!(
         strings(&manifest()["activation"]),
-        ["startup", "view:text-triggers.rules"]
+        [
+            "startup",
+            "view:ilium.core.text-triggers/text-triggers.rules"
+        ]
     );
 }
 

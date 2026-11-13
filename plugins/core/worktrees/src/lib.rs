@@ -98,7 +98,9 @@ mod spec_tests {
     #[test]
     fn activation_triggers_include_new_agent_command_and_create_service() {
         let activation = string_list(&manifest()["activation"]);
-        assert!(activation.iter().any(|item| item == "command:new-agent"));
+        assert!(activation
+            .iter()
+            .any(|item| item == "command:ilium.core.worktrees/new-agent"));
         assert!(activation.iter().any(|item| item == "service:create"));
     }
 

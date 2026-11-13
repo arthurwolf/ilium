@@ -114,7 +114,10 @@ mod spec_tests {
         let manifest = manifest();
         assert_eq!(
             string_list(&manifest["activation"]),
-            vec!["startup", "view:text-triggers.rules"]
+            vec![
+                "startup",
+                "view:ilium.core.text-triggers/text-triggers.rules"
+            ]
         );
     }
 
@@ -193,6 +196,12 @@ mod spec_tests {
             .remove("activation");
         let activation = string_list(&broken["activation"]);
         assert!(activation.is_empty());
-        assert_ne!(activation, vec!["startup", "view:text-triggers.rules"]);
+        assert_ne!(
+            activation,
+            vec![
+                "startup",
+                "view:ilium.core.text-triggers/text-triggers.rules"
+            ]
+        );
     }
 }

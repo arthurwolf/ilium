@@ -1,5 +1,5 @@
-//! Release-embedded precompiled components only. The catalogue is empty until the
-//! release precompiler produces real component binaries and matching `.cwasm`.
+//! Release-embedded components only. The catalogue is the `&'static` table the release
+//! binary installs with `install_bundled`; it is empty until then.
 //!
 //! Never add filesystem or package bytes to this catalogue at runtime.
 
@@ -9,19 +9,33 @@ use wasmtime::Engine;
 use super::EmbeddedArtifact;
 use crate::error::HostError;
 
-struct BundledArtifact {
-    name: &'static str,
-    fingerprint: &'static str,
-    wasm: &'static [u8],
-    cwasm: &'static [u8],
+/// One component compiled into the release binary. `cwasm` is empty until the release
+/// precompiler produces a matching precompile; the engine then compiles `wasm` instead.
+#[derive(Debug, Clone, Copy)]
+pub struct BundledArtifact {
+    pub name: &'static str,
+    pub fingerprint: &'static str,
+    pub wasm: &'static [u8],
+    pub cwasm: &'static [u8],
 }
 
-// Release generation must replace this with 32 actual built artifacts. An empty
-// catalogue is honest and fail-closed; manufacturing placeholder cwasm is unsafe.
-const BUNDLED: &[BundledArtifact] = &[];
+// The host crate cannot depend on the crate that builds the components (that crate's build
+// compiles the plugins, which depend on the SDK), so the binary that links both installs the
+// catalogue once at start. Until then the catalogue is empty, which is fail-closed.
+static BUNDLED: std::sync::OnceLock<&'static [BundledArtifact]> = std::sync::OnceLock::new();
+
+/// Installs the static catalogue of the release binary. Only the first call takes effect;
+/// returns false when a catalogue was already installed.
+pub fn install_bundled(catalogue: &'static [BundledArtifact]) -> bool {
+    BUNDLED.set(catalogue).is_ok()
+}
+
+fn bundled() -> &'static [BundledArtifact] {
+    BUNDLED.get().copied().unwrap_or(&[])
+}
 
 pub(super) fn bundled_artifacts() -> Vec<EmbeddedArtifact> {
-    BUNDLED
+    bundled()
         .iter()
         .map(|item| EmbeddedArtifact {
             name: item.name.to_owned(),
@@ -33,7 +47,7 @@ pub(super) fn bundled_artifacts() -> Vec<EmbeddedArtifact> {
 }
 
 pub(super) fn is_bundled(artifact: &EmbeddedArtifact) -> bool {
-    BUNDLED.iter().any(|item| {
+    bundled().iter().any(|item| {
         item.name == artifact.name
             && item.fingerprint == artifact.fingerprint
             && item.wasm == artifact.wasm

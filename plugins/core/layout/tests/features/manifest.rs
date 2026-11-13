@@ -102,7 +102,10 @@ fn doc_cor_050_activation_triggers_are_command_and_view() {
     let manifest = manifest_value();
     assert_eq!(
         strings(&manifest["activation"]),
-        ["command:layout.preset", "view:layout.presets"]
+        [
+            "command:ilium.core.layout/layout.preset",
+            "view:ilium.core.layout/layout.presets"
+        ]
     );
 }
 

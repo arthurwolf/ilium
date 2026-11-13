@@ -203,7 +203,7 @@ fn cor_021_other_plugins_stay_inactive_until_their_trigger_fires() {
         run.side_state("ilium.core.recap", Side::Server).state,
         "active"
     );
-    run.fire_trigger("command:recap");
+    run.fire_trigger("command:ilium.core.recap/recap");
     assert_eq!(
         run.side_state("ilium.core.recap", Side::Server).state,
         "active"
@@ -354,7 +354,7 @@ fn cor_024_a_plugin_setting_change_is_seen_live() {
 fn cor_024_a_key_binding_change_sends_keymap_changed() {
     let mut run = full_core_run(ProcessKind::Server);
     let client = run.attach_client().expect("client");
-    run.change_key_binding("F8", "command:voice.toggle");
+    run.change_key_binding("F8", "command:ilium.core.voice/toggle");
     assert!(run
         .events_seen_by_client_plugins(client)
         .contains(&"keymap-changed".to_owned()));

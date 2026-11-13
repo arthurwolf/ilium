@@ -130,7 +130,7 @@ mod spec_tests {
                 "cli:broadcast",
                 "http:/create_agent",
                 "service:broadcast",
-                "command:ask-for-update",
+                "command:ilium.core.fleet/ask-for-update",
             ]
         );
     }

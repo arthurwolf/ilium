@@ -80,7 +80,7 @@
   },
   "activation": [
     "startup",
-    "view:sessions.list"
+    "view:ilium.core.sessions/sessions.list"
   ],
   "replaceable": false,
   "limits_tier": "first-party"

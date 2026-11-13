@@ -158,7 +158,7 @@ pub fn run(args: &[String], env: &CliEnv) -> CliOutput {
             offline::finish(vec![json!({"type":"registry","url":url,"action":"removed"})], 0)
         }
         other => offline::failure(
-            "usage.command-unknown",
+            "usage.unknown-command",
             format!("Unknown registry command: {other}"),
             2,
         ),

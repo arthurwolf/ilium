@@ -104,7 +104,7 @@ interface extensions {
   }
 
   // owner side (needs extensions.provide:<point>)
-  list: func(point: string) -> result<list<extension-entry>, extension-error>;
+  %list: func(point: string) -> result<list<extension-entry>, extension-error>;
   run-hook: func(point: string, payload-json: string) -> result<request-id, extension-error>;
   take-reply: func(request: request-id) -> option<string>;
 

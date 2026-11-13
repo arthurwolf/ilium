@@ -126,7 +126,7 @@ fn manifest_050_holds_the_kernel_write_grant_of_exactly_one_tab() {
 fn manifest_050_activation_is_the_toggle_command_and_the_cli_trigger_in_order() {
     assert_eq!(
         manifest()["activation"],
-        json!(["command:voice.toggle", "cli:voice"])
+        json!(["command:ilium.core.voice/toggle", "cli:voice"])
     );
 }
 

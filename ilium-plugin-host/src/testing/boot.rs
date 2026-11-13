@@ -52,10 +52,18 @@ const SAME_SIDE_KEY_SERVER: u8 = 0;
 /// Activation table of the manual (reference-kernel-and-boot.md, COR-021): short name, server
 /// triggers, client triggers. Core plugins all run in-process (tier T1).
 const CORE_ACTIVATION_TABLE: &[(&str, &[&str], &[&str])] = &[
-    ("agent-detect", &["startup"], &["view:agent-detect.panel"]),
+    (
+        "agent-detect",
+        &["startup"],
+        &["view:ilium.core.agent-detect/agent-detect.panel"],
+    ),
     (
         "agent-setup",
-        &["settings:setup", "command:refresh", "service:install"],
+        &[
+            "settings:setup",
+            "command:ilium.core.agent-setup/refresh",
+            "service:install",
+        ],
         &["settings:setup"],
     ),
     (
@@ -69,10 +77,14 @@ const CORE_ACTIVATION_TABLE: &[(&str, &[&str], &[&str])] = &[
     (
         "compaction",
         &["event:agent-activity-changed", "service:compact"],
-        &["view:compaction.optimizer"],
+        &["view:ilium.core.compaction/compaction.optimizer"],
     ),
-    ("cost", &["startup"], &["view:cost.panel"]),
-    ("diagnostics", &["startup"], &["view:diagnostics.warnings"]),
+    ("cost", &["startup"], &["view:ilium.core.cost/cost.panel"]),
+    (
+        "diagnostics",
+        &["startup"],
+        &["view:ilium.core.diagnostics/diagnostics.warnings"],
+    ),
     ("editor", &[], &["pane-kind:editor"]),
     (
         "fleet",
@@ -82,49 +94,80 @@ const CORE_ACTIVATION_TABLE: &[(&str, &[&str], &[&str])] = &[
             "http:/create_agent",
             "service:broadcast",
         ],
-        &["command:ask-for-update"],
+        &["command:ilium.core.fleet/ask-for-update"],
     ),
     ("inference", &["service:ilium:inference/provider"], &[]),
     ("kanban", &[], &["pane-kind:board"]),
     (
         "keys-and-help",
         &[],
-        &["command:keys-and-help.open", "settings:keyboard"],
+        &[
+            "command:ilium.core.keys-and-help/show-keys",
+            "command:ilium.core.keys-and-help/show-plugins",
+            "settings:keyboard",
+        ],
     ),
     (
         "layout",
-        &["command:layout.preset"],
-        &["view:layout.presets"],
+        &["command:ilium.core.layout/layout.preset"],
+        &["view:ilium.core.layout/layout.presets"],
     ),
     ("notifications", &["startup"], &[]),
     ("progress", &["startup"], &["startup"]),
-    ("recap", &["cli:recap", "command:recap"], &[]),
+    (
+        "recap",
+        &["cli:recap", "command:ilium.core.recap/recap"],
+        &[],
+    ),
     ("resources", &["startup"], &["startup"]),
     ("scenes", &[], &["scene:*"]),
-    ("scheduler", &["startup"], &["view:scheduler.queue"]),
+    (
+        "scheduler",
+        &["startup"],
+        &["view:ilium.core.scheduler/scheduler.queue"],
+    ),
     (
         "search",
-        &["command:search", "job:index"],
-        &["view:search.panel"],
+        &["command:ilium.core.search/open", "job:index"],
+        &["view:ilium.core.search/search"],
     ),
     (
         "session-convert",
-        &["command:convert", "service:convert"],
-        &["view:session-convert.progress"],
+        &[
+            "command:ilium.core.session-convert/convert",
+            "service:convert",
+        ],
+        &["view:ilium.core.session-convert/session-convert.progress"],
     ),
-    ("sessions", &["startup"], &["view:sessions.list"]),
+    (
+        "sessions",
+        &["startup"],
+        &["view:ilium.core.sessions/sessions.list"],
+    ),
     ("settings", &[], &["startup"]),
-    ("smart-copy", &[], &["command:smart-copy"]),
+    (
+        "smart-copy",
+        &[],
+        &["command:ilium.core.smart-copy/smart-copy"],
+    ),
     ("terminal", &["event:screen-changed"], &["startup"]),
-    ("text-triggers", &["startup"], &["view:text-triggers.rules"]),
+    (
+        "text-triggers",
+        &["startup"],
+        &["view:ilium.core.text-triggers/text-triggers.rules"],
+    ),
     ("titles", &["startup"], &[]),
     ("tree", &["startup"], &["startup"]),
     (
         "voice",
-        &["command:voice.toggle", "cli:voice"],
-        &["command:voice.toggle"],
+        &["command:ilium.core.voice/toggle", "cli:voice"],
+        &["command:ilium.core.voice/toggle"],
     ),
-    ("worktrees", &["command:new-agent", "service:create"], &[]),
+    (
+        "worktrees",
+        &["command:ilium.core.worktrees/new-agent", "service:create"],
+        &[],
+    ),
 ];
 
 /// A plugin the harness installs before boot.

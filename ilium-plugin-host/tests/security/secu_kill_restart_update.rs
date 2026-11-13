@@ -85,7 +85,7 @@ fn secu_009_plugin_killed_audit_records_survive_uninstall_b() {
     plugin(&env, &["uninstall", PLUGIN]);
 
     assert!(
-        audit_text(&env).contains("plugin.killed"),
-        "the earlier plugin.killed record must still be in the audit log"
+        audit_text(&env).contains("plugin-killed"),
+        "the earlier plugin-killed record must still be in the audit log"
     );
 }

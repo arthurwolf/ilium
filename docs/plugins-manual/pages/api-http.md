@@ -307,11 +307,11 @@ fetch: func(request: http-request) -> result<request-id, plugin-error>;
 take-response: func(request: request-id) -> option<http-response>;
 /// Delivers http-stream-data and http-stream-closed events. At most 4 streams per plugin by default, 64 per session.
 open-stream: func(request: stream-request) -> result<stream-id, plugin-error>;
-close-stream: func(stream: stream-id);
+close-stream: func(%stream: stream-id);
 // @unstable(feature = websocket)
 open-websocket: func(url: string, protocols: list<string>) -> result<stream-id, plugin-error>;
 // @unstable(feature = websocket)
-send-websocket: func(stream: stream-id, text: string) -> result<_, plugin-error>;
+send-websocket: func(%stream: stream-id, text: string) -> result<_, plugin-error>;
 ```
 
 ### See also

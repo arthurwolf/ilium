@@ -1,0 +1,22 @@
+[package]
+name = "ilium-plugin-bundle"
+description = "The core plugins of Ilium as WebAssembly components, built by this crate's build script and embedded as bytes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+build = "build.rs"
+
+# No runtime dependency on purpose: the catalogue is plain bytes and text. The plugin host must
+# not be a dependency (the plugins this crate builds depend on the SDK, never on the host), so
+# the binary that links both hands the catalogue to the host.
+
+[build-dependencies]
+# Reads the plugin manifests and cargo's artifact messages.
+serde_json = "1.0.151"
+
+[dev-dependencies]
+# The catalogue test reads the embedded manifests.
+serde_json = "1.0.151"

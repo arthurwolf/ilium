@@ -98,7 +98,7 @@ mod spec_tests {
         let manifest = manifest();
         assert_eq!(
             string_list(&manifest["activation"]),
-            vec!["command:smart-copy".to_string()]
+            vec!["command:ilium.core.smart-copy/smart-copy".to_string()]
         );
         let entries = manifest["contributes"]["context_menu"]
             .as_array()

@@ -63,6 +63,37 @@ pub use crate::generated::exports::ExportViews as Views;
 /// Page trait `VirtualRowsProvider` (rust-sdk.md "Traits").
 pub use crate::generated::exports::ExportVirtualRowsProvider as VirtualRowsProvider;
 
+/// Routes an event batch to the plugin's `Handler` when it has one. `#[ilium_plugin]` writes
+/// `(&mut HandlerProbe(plugin)).dispatch_events(batch)` with both traits below in scope: method
+/// lookup finds `DispatchToHandler` first (it needs no further reference) and falls back to
+/// `DispatchToNobody` only when the plugin type does not implement `Handler`.
+#[doc(hidden)]
+pub struct HandlerProbe<'a, T>(pub &'a mut T);
+
+/// The `Handler` arm of `HandlerProbe`.
+#[doc(hidden)]
+pub trait DispatchToHandler {
+    /// Forwards the batch to `Handler::on_events`.
+    fn dispatch_events(&mut self, batch: Vec<Event>) -> Vec<Submission>;
+}
+impl<T: Handler> DispatchToHandler for HandlerProbe<'_, T> {
+    fn dispatch_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        Handler::on_events(self.0, batch)
+    }
+}
+
+/// The fallback arm of `HandlerProbe`: the plugin handles no event.
+#[doc(hidden)]
+pub trait DispatchToNobody {
+    /// Drops the batch and submits nothing.
+    fn dispatch_events(&mut self, batch: Vec<Event>) -> Vec<Submission>;
+}
+impl<T> DispatchToNobody for &mut HandlerProbe<'_, T> {
+    fn dispatch_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+        Vec::new()
+    }
+}
+
 /// Every plugin struct implements `Default` and the lifecycle trait (rust-sdk.md "Plugin structure").
 pub trait Plugin: Default + Lifecycle {}
 impl<T: Default + Lifecycle> Plugin for T {}
@@ -133,6 +164,12 @@ pub struct HostHandle {
 }
 
 impl HostHandle {
+    /// A handle with no backend: every call answers as on a thread without a host. The wasm32
+    /// glue uses it for the host interfaces a component has no grant for.
+    pub fn detached() -> Self {
+        HostHandle { installed: None }
+    }
+
     /// True when a host was installed with `set_host` on this thread.
     pub fn is_installed(&self) -> bool {
         self.installed.is_some()

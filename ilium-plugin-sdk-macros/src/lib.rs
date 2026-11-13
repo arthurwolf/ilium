@@ -1,8 +1,12 @@
 //! `#[ilium_plugin(side = "...", exports = [...])]` (rust-sdk.md "The ilium_plugin macro").
 //!
 //! Server and client native entry points forward to SDK lifecycle and handler traits; unknown
-//! arguments are a compile error. Scene native callbacks and wasm32 glue remain separate,
-//! unfinished contracts.
+//! arguments are a compile error. On wasm32, with the crate feature `component-<side>`, the
+//! macro also emits the component glue of that side (module `component`). Scene native
+//! callbacks and the scene component glue remain separate, unfinished contracts.
+
+mod component;
+mod generated_glue;
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
@@ -103,15 +107,15 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote!(<Self as #krate::Lifecycle>::deactivate(self, _reason))
     };
-    // Only a plugin that declares the `handler` export implements `Handler`; others receive no events.
+    // Every server and client component exports the handler (rust-sdk.md "Exports"), whether
+    // or not `exports` names it: events go to the plugin's `Handler` implementation, and a
+    // plugin without one answers with no submission.
     let events = if is_scene {
         quote!(unimplemented!("rust-sdk.scene-native-handler"))
-    } else if exports.iter().any(|export| export == "handler") {
-        quote!(<Self as #krate::Handler>::on_events(self, _batch))
     } else {
         quote! {
-            let _ = _batch;
-            ::std::vec::Vec::new()
+            use #krate::{DispatchToHandler as _, DispatchToNobody as _};
+            (&mut #krate::HandlerProbe(self)).dispatch_events(_batch)
         }
     };
     let has = |name: &str| exports.iter().any(|export| export == name);
@@ -152,8 +156,11 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote! {}
     };
+    let component_glue = component::glue(side, exports, krate, name);
     quote! {
         #item_struct
+
+        #component_glue
 
         impl #krate::NativeEntry for #name {
             const SIDE: &'static str = #side;

@@ -81,7 +81,7 @@ fn hst_517_the_kill_writes_a_plugin_killed_audit_event_with_admin_and_reason() {
     let event = switch
         .last_audit_event()
         .expect("an audit event is written");
-    assert_eq!(event.kind, "plugin.killed");
+    assert_eq!(event.kind, "plugin-killed");
     assert_eq!(event.administrator, "admin");
     assert_eq!(event.reason, "bad build");
 }

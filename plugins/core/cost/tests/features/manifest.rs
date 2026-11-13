@@ -184,7 +184,7 @@ fn doc_cor_050_http_grants_name_exactly_the_two_status_hosts() {
 fn doc_cor_050_activation_is_startup_and_the_cost_panel_view() {
     assert_eq!(
         strings(&manifest_value()["activation"]),
-        ["startup", "view:cost.panel"]
+        ["startup", "view:ilium.core.cost/cost.panel"]
     );
 }
 

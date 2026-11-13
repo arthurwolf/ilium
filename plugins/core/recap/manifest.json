@@ -39,7 +39,7 @@
   },
   "activation": [
     "cli:recap",
-    "command:recap"
+    "command:ilium.core.recap/recap"
   ],
   "replaceable": true,
   "surface": [

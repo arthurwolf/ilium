@@ -11,7 +11,9 @@ use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::{Alignment, NodeFlags, ParagraphSpec, Span, Style, UiNode, UiTree, Widget};
+use ilium_plugin_sdk::types::{
+    Alignment, NodeFlags, ParagraphSpec, Span, Style, UiNode, UiTree, Widget,
+};
 use ilium_plugin_sdk::types::{ErrorCode, PluginError};
 use ilium_plugin_sdk::{ilium_plugin, Handler, JobRunner, Lifecycle, ServiceProvider, Views};
 
@@ -192,7 +194,10 @@ mod spec_tests {
         let document = manifest();
         assert_eq!(
             string_list(&document["activation"]),
-            vec!["command:ilium.core.search/open", "view:search"]
+            vec![
+                "command:ilium.core.search/open",
+                "view:ilium.core.search/search"
+            ]
         );
         let open_command_id = document["contributes"]["commands"][0]["id"]
             .as_str()

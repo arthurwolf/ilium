@@ -44,6 +44,8 @@ members = [
     "ilium-plugin-testkit",
     "ilium-plugin-conformance",
     "ilium-plugin-bench",
+    # Builds every core plugin to a WebAssembly component and embeds the results.
+    "ilium-plugin-bundle",
     "plugins/core/*",
     "plugins/fixtures/*",
 ]

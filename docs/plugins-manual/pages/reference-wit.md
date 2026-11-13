@@ -448,8 +448,8 @@ interface ui {
   record button-spec { label: string, icon: option<string>, enabled: bool, role: button-role }
   enum toggle-style { switch, checkbox, icon }
   record toggle-spec { label: string, value: bool, style: toggle-style, tri-state: bool, icon-on: option<string>, icon-off: option<string> }
-  enum choice-style { stepper, list, dialog }
-  enum view-mode { list, grid }
+  enum choice-style { stepper, %list, dialog }
+  enum view-mode { %list, grid }
   enum disabled-marker { reason, cross }
   record catalog-item {
     id: string, title: string,
@@ -1391,11 +1391,11 @@ interface http {
   take-response: func(request: request-id) -> option<http-response>;
   /// Delivers http-stream-data and http-stream-closed events. At most 4 streams per plugin by default, 64 per session.
   open-stream: func(request: stream-request) -> result<stream-id, plugin-error>;
-  close-stream: func(stream: stream-id);
+  close-stream: func(%stream: stream-id);
   // @unstable(feature = websocket)
   open-websocket: func(url: string, protocols: list<string>) -> result<stream-id, plugin-error>;
   // @unstable(feature = websocket)
-  send-websocket: func(stream: stream-id, text: string) -> result<_, plugin-error>;
+  send-websocket: func(%stream: stream-id, text: string) -> result<_, plugin-error>;
 }
 ```
 
@@ -1922,7 +1922,7 @@ interface extensions {
   /// A payload-less enum: the error model of this interface is the code only.
   enum extension-error { unknown-point, not-granted, schema-mismatch, cap-exceeded, reentrant, not-dynamic, not-found }
   // owner side
-  list: func(point: string) -> result<list<extension-entry>, extension-error>;
+  %list: func(point: string) -> result<list<extension-entry>, extension-error>;
   /// Async, take-reply.
   run-hook: func(point: string, payload-json: string) -> result<request-id, extension-error>;
   take-reply: func(request: request-id) -> option<string>;
@@ -2412,7 +2412,7 @@ interface virtual-rows-provider {
 ```text
 interface token-provider {
   use ilium:types/ids@0.1.0.{buffer-id};
-  enum token-kind { keyword, string, number, comment, type-name, function, variable, operator, punctuation, constant, tag, attribute, plain }
+  enum token-kind { keyword, %string, number, comment, type-name, function, variable, operator, punctuation, constant, tag, attribute, plain }
   record token { line: u32, start: u32, length: u32, kind: token-kind }
   tokens: func(buffer: buffer-id, first-line: u32, lines: list<string>, state-in: option<list<u8>>)
     -> tuple<list<token>, option<list<u8>>>;
@@ -2461,7 +2461,7 @@ interface migrator {
   use ilium:types/errors@0.1.0.{plugin-error};
   /// The host calls it once per side before activate when the manifest data_version rose.
   /// It MUST be idempotent: an interrupted run starts again from the same arguments.
-  migrate: func(from: u32, to: u32) -> result<_, plugin-error>;
+  migrate: func(%from: u32, to: u32) -> result<_, plugin-error>;
 }
 ```
 

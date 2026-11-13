@@ -223,6 +223,6 @@ mod spec_tests {
         assert!(!has_cli_activation(&manifest, "recap"));
         assert!(string_list(&manifest["activation"])
             .iter()
-            .any(|item| item == "command:recap"));
+            .any(|item| item == "command:ilium.core.recap/recap"));
     }
 }

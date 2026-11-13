@@ -160,7 +160,11 @@ fn manifest_050_only_this_plugin_holds_the_write_grant_of_the_setup_tab() {
 fn manifest_050_activation_triggers_are_the_tab_the_command_and_the_service() {
     assert_eq!(
         manifest()["activation"],
-        json!(["settings:setup", "command:refresh", "service:install"])
+        json!([
+            "settings:setup",
+            "command:ilium.core.agent-setup/refresh",
+            "service:install"
+        ])
     );
 }
 

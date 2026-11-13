@@ -28,7 +28,7 @@
     ]
   },
   "activation": [
-    "command:smart-copy"
+    "command:ilium.core.smart-copy/smart-copy"
   ],
   "contributes": {
     "context_menu": [

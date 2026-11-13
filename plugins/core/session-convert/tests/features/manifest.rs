@@ -126,9 +126,9 @@ fn manifest_050_activation_triggers_are_on_demand() {
     assert_eq!(
         strings(&manifest()["activation"]),
         [
-            "command:convert",
+            "command:ilium.core.session-convert/convert",
             "service:convert",
-            "view:session-convert.progress"
+            "view:ilium.core.session-convert/session-convert.progress"
         ]
     );
 }

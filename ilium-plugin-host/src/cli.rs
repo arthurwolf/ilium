@@ -379,7 +379,7 @@ fn run_inner(raw_args: &[String], env: &CliEnv) -> CliOutput {
             1,
         ),
         _ => offline::failure(
-            "usage.command-unknown",
+            "usage.unknown-command",
             format!("Unknown plugin command: {command}"),
             2,
         ),

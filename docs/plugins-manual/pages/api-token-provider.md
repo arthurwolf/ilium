@@ -33,7 +33,7 @@ The `token-provider` export teaches the editor a language the host does not know
 
 ```wit
 // Excerpt of ilium:exports/token-provider in reference-wit
-enum token-kind { keyword, string, number, comment, type-name, function, variable,
+enum token-kind { keyword, %string, number, comment, type-name, function, variable,
                   operator, punctuation, constant, tag, attribute, plain }
 record token { line: u32, start: u32, length: u32, kind: token-kind }
 

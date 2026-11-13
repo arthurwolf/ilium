@@ -99,7 +99,10 @@ mod spec_tests {
         let manifest = manifest();
         assert_eq!(
             string_list_at(&manifest, "/activation"),
-            vec!["startup".to_string(), "view:scheduler.queue".to_string()]
+            vec![
+                "startup".to_string(),
+                "view:ilium.core.scheduler/scheduler.queue".to_string()
+            ]
         );
     }
 
