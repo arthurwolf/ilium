@@ -451,6 +451,42 @@ pub(crate) struct PaintedTreeRows {
     _metadata: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
 }
 impl PaintedTreeRows {
+    /// A painted tree whose only facts are the rows it drew, one line-0 row per
+    /// id in order, so redraw tests can say which panes were on screen.
+    #[cfg(test)]
+    pub(crate) fn drawn_rows_for_test(node_ids: &[NodeId]) -> Self {
+        let rows: Vec<(TreeNodeHit, u16)> = node_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| {
+                let row = u16::try_from(index).unwrap_or(u16::MAX);
+                (
+                    TreeNodeHit {
+                        id: *id,
+                        row,
+                        line: 0,
+                    },
+                    2,
+                )
+            })
+            .collect();
+        let height = u16::try_from(node_ids.len().max(1)).unwrap_or(u16::MAX);
+        let area = Rect::new(0, 0, 80, height);
+        Self {
+            list: area,
+            area,
+            toolbar: false,
+            rows,
+            monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Custom,
+            layout_slots: None,
+            blocking_error_display: Default::default(),
+            values: Vec::new(),
+            cost_option: Default::default(),
+            selected_node: None,
+            action: None,
+            _metadata: None,
+        }
+    }
     #[cfg(test)]
     pub(crate) fn cost_row_for_test(
         id: NodeId,
@@ -998,7 +1034,7 @@ pub struct TreeRenderOptions<'a> {
     pub blocking_errors: Option<&'a crate::blocking_errors::BlockingErrorFacts>,
     /// The tree cursor and on-screen terminals for the custom status rules;
     /// `None` leaves `pane-selected` and `pane-visible` unknown.
-    pub pane_view: Option<crate::custom_status_live::PaneViewFacts>,
+    pub(crate) pane_view: Option<crate::custom_status_live::PaneViewFacts>,
 }
 
 /// One frame owns both composed spans and the geometry retained for hit testing.
@@ -3997,8 +4033,8 @@ fn draw_toolbar(
         let custom_profile = action
             .custom_profile_id(layout)
             .and_then(|id| custom.profiles.iter().find(|profile| profile.id == id));
-        let custom_selected = custom_profile
-            .is_some_and(|profile| custom.selected == Some(profile.id.as_str()));
+        let custom_selected =
+            custom_profile.is_some_and(|profile| custom.selected == Some(profile.id.as_str()));
         let style = if is_hovered
             || custom_selected
             || (filter_active && action == TreeToolbarAction::ActivityFilter)
@@ -4010,9 +4046,8 @@ fn draw_toolbar(
         } else {
             Style::new().fg(action.accent())
         };
-        let custom_pending = custom_profile.is_some_and(|profile| {
-            custom.pending.is_some_and(|ids| ids.contains(&profile.id))
-        });
+        let custom_pending = custom_profile
+            .is_some_and(|profile| custom.pending.is_some_and(|ids| ids.contains(&profile.id)));
         let glyph = if pending & action.pending_bit() != 0 || custom_pending {
             let frame_index =
                 (spinner_elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
@@ -4032,7 +4067,10 @@ fn draw_toolbar(
                 .profiles
                 .iter()
                 .find(|profile| profile.id == id)
-                .map_or_else(|| action.description().to_owned(), |profile| profile.name.clone()),
+                .map_or_else(
+                    || action.description().to_owned(),
+                    |profile| profile.name.clone(),
+                ),
             None => action.description().to_owned(),
         };
         let caption = Paragraph::new(Line::from(Span::styled(
@@ -4722,6 +4760,109 @@ mod tests {
                                 "{context}: {glyph:?}"
                             );
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Renders one custom slot line into a one-row buffer and applies the same
+    /// variation-selector pass the frame applies to the whole buffer.
+    fn render_custom_slot_with_vs16_handling(line: &Line<'static>) -> ratatui::buffer::Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(60, 1)).unwrap();
+        terminal
+            .draw(|frame| {
+                frame.render_widget(ratatui::widgets::Paragraph::new(line.clone()), frame.area());
+            })
+            .unwrap();
+        let mut buffer = terminal.backend().buffer().clone();
+        crate::ui::skip_vs16_continuation_cells(&mut buffer, Rect::new(0, 0, 60, 1));
+        buffer
+    }
+
+    #[test]
+    fn custom_user_glyphs_with_variation_selectors_keep_titles_aligned() {
+        use crate::config::MotionLevel;
+        use ilium_core::status_rule_expression::{
+            default_rules, demo_situations, AllOf, Condition, ConditionTerm, Rule, StatusRules,
+            StatusVisual, VisualKind, VisualStyle,
+        };
+
+        // Every frame is a symbol followed by U+FE0F that measures two cells.
+        // The slot must keep titles fixed and receive the VS16 cell handling.
+        let selector_kinds = [
+            VisualKind::Glyph("\u{26A0}\u{FE0F}".to_owned()),
+            VisualKind::FrameAnimation {
+                frames: vec![
+                    "\u{23F8}\u{FE0F}".to_owned(),
+                    "\u{1F5A5}\u{FE0F}".to_owned(),
+                    "\u{269B}\u{FE0F}".to_owned(),
+                ],
+                frames_per_second: 4,
+                ping_pong: true,
+            },
+            VisualKind::ProgressFrames {
+                frames: vec![
+                    "\u{23F8}\u{FE0F}".to_owned(),
+                    "\u{1F5C2}\u{FE0F}".to_owned(),
+                ],
+            },
+        ];
+        let defaults = default_rules();
+        let mut situations = vec![bare_situation(PaneStatus::Editor { dirty: true })];
+        situations.extend(demo_situations());
+        for kind in selector_kinds {
+            let visual = StatusVisual {
+                kind,
+                style: VisualStyle {
+                    bold: true,
+                    ..VisualStyle::default()
+                },
+            };
+            assert_eq!(
+                crate::status_rule_visual::validate_visual(&visual, 2),
+                Ok(()),
+                "{:?}",
+                visual.kind
+            );
+            let rules = StatusRules {
+                version: defaults.version,
+                defaults_version: defaults.defaults_version,
+                rules: vec![Rule {
+                    id: "always".to_owned(),
+                    name: "Always".to_owned(),
+                    enabled: true,
+                    any_of: vec![AllOf {
+                        all_of: vec![ConditionTerm {
+                            condition: Condition::Always,
+                            negated: false,
+                        }],
+                    }],
+                    then: visual,
+                }],
+                fallback: None,
+            };
+            for situation in &situations {
+                for motion in [MotionLevel::Full, MotionLevel::Off] {
+                    for elapsed_ms in [0_u128, 250, 500, 750] {
+                        let line = custom_pane_label(situation, &rules, elapsed_ms, motion);
+                        let context = format!(
+                            "{:?} in {} at {elapsed_ms} ms, {motion:?}",
+                            rules.rules[0].then.kind, situation.name
+                        );
+                        assert_custom_title_offset(&line, &context);
+                        let glyph = custom_slot_glyph(&line);
+                        assert_eq!(UnicodeWidthStr::width(glyph.as_str()), 2, "{context}");
+                        let slot_column = UnicodeWidthStr::width(line.spans[0].content.as_ref())
+                            + UnicodeWidthStr::width(line.spans[1].content.as_ref());
+                        let slot_column = u16::try_from(slot_column).unwrap();
+                        let buffer = render_custom_slot_with_vs16_handling(&line);
+                        assert_eq!(buffer[(slot_column, 0)].symbol(), glyph, "{context}");
+                        assert_eq!(
+                            buffer[(slot_column + 1, 0)].diff_option,
+                            ratatui::buffer::CellDiffOption::Skip,
+                            "{context}: the VS16 continuation cell is skipped"
+                        );
                     }
                 }
             }

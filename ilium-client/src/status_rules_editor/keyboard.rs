@@ -197,6 +197,7 @@ fn normalized(key: &KeyEvent) -> KeyCode {
 
 fn command_key(app: &mut App, editor: &mut EditorState, key: &KeyEvent, rules_height: u16) {
     let previous = editor.clone();
+    editor.notice = None;
     let mut rules = app.custom_status_rules.clone();
     let outcome = match key.code {
         KeyCode::Tab => {
@@ -521,6 +522,28 @@ mod tests {
         press(&mut app, KeyCode::Up, KeyModifiers::NONE);
         assert!(!editor(&app).fallback_selected);
         assert_eq!(editor(&app).selected_rule, Some(count - 1));
+    }
+
+    #[test]
+    fn deleting_a_rule_shows_an_undo_notice_until_the_next_key() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = editor_app(Some(directory.path()));
+        let count = app.custom_status_rules.rules.len();
+        press(&mut app, KeyCode::Char('x'), KeyModifiers::NONE);
+        assert_eq!(app.custom_status_rules.rules.len(), count - 1);
+        assert!(editor(&app)
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.starts_with("Deleted \"") && notice.contains("undoes")));
+        press(&mut app, KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(editor(&app).notice, None, "the next key clears the notice");
+        press(&mut app, KeyCode::Char('x'), KeyModifiers::NONE);
+        press(&mut app, KeyCode::Char('u'), KeyModifiers::NONE);
+        assert_eq!(
+            app.custom_status_rules.rules.len(),
+            count - 1,
+            "two deletes, one undo"
+        );
     }
 
     #[test]
