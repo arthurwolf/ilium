@@ -1139,6 +1139,12 @@ pub enum ClientRequest {
         consumer: String,
         cursor: String,
     },
+    /// Replace a pane and return a correlated PaneCreateFinished outcome.
+    ReplacePaneWithCommandConfirmed {
+        request_id: u64,
+        pane_id: NodeId,
+        command_line: String,
+    },
 }
 
 /// Which client path produced a stored recap.
@@ -1232,6 +1238,7 @@ impl ClientRequest {
             Self::UpdateAgentDetectionSettings { .. } => "update_agent_detection_settings",
             Self::TerminatePaneProcess { .. } => "terminate_pane_process",
             Self::ReplacePaneWithCommand { .. } => "replace_pane_with_command",
+            Self::ReplacePaneWithCommandConfirmed { .. } => "replace_pane_with_command_confirmed",
             Self::FreezePane { .. } => "freeze_pane",
             Self::UnfreezePane { .. } => "unfreeze_pane",
             Self::UpdateAntigravityStatusline { .. } => "update_antigravity_statusline",

@@ -148,7 +148,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             None
         }
         ServerEvent::PaneCreateFinished { request_id, result } => {
-            app.receive_pane_create_finished(request_id, result);
+            if !app.receive_conversion_replacement(request_id, result.clone()) {
+                app.receive_pane_create_finished(request_id, result);
+            }
             None
         }
         ServerEvent::AgentDetectionSettingsChanged { request_id, result } => {

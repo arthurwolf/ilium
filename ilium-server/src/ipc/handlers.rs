@@ -157,6 +157,7 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
         ClientRequest::QueryWorkspaceCloseOffer { pane_id, .. } => Some(*pane_id),
         ClientRequest::TerminatePaneProcess { pane_id, .. } => Some(*pane_id),
         ClientRequest::ReplacePaneWithCommand { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ReplacePaneWithCommandConfirmed { pane_id, .. } => Some(*pane_id),
         ClientRequest::FreezePane { pane_id, .. } => Some(*pane_id),
         ClientRequest::ApplyRecommendedProjectRestructurePlan { project_id, .. } => {
             Some(*project_id)
@@ -190,6 +191,7 @@ pub fn handle_request<'a>(
                 | ClientRequest::RemoveWorkspace { .. }
                 | ClientRequest::ClosePaneWithWorkspaceDisposition { .. }
                 | ClientRequest::ReplacePaneWithCommand { .. }
+                | ClientRequest::ReplacePaneWithCommandConfirmed { .. }
         ) {
             state.repo_discovery_cache.invalidate();
             state.repo_facts_cache.invalidate();
@@ -223,6 +225,7 @@ pub fn handle_request<'a>(
                 | "set_node_bookmarked"
                 | "set_node_expanded"
                 | "set_node_locked_closed"
+                | "replace_pane_with_command_confirmed"
         ) {
             scoped_tx.finish_synchronous_mutation();
         }
@@ -759,7 +762,39 @@ async fn handle_scoped_request(
             pane_id,
             command_line,
         } => {
-            handle_replace_pane_with_command(state, pane_id, command_line, direct_tx, None, None)
+            if let Err(message) = handle_replace_pane_with_command(
+                state,
+                pane_id,
+                command_line,
+                direct_tx,
+                None,
+                None,
+            )
+            .await
+            {
+                send_direct_error(direct_tx, message).await;
+            }
+            false
+        }
+        ClientRequest::ReplacePaneWithCommandConfirmed {
+            request_id,
+            pane_id,
+            command_line,
+        } => {
+            let result = handle_replace_pane_with_command(
+                state,
+                pane_id,
+                command_line,
+                direct_tx,
+                None,
+                None,
+            )
+            .await;
+            if let Err(message) = &result {
+                send_direct_error(direct_tx, message.clone()).await;
+            }
+            let _ = direct_tx
+                .send(ServerEvent::PaneCreateFinished { request_id, result })
                 .await;
             false
         }
@@ -5538,12 +5573,11 @@ async fn handle_terminate_pane_process(
     direct_tx: &DirectEventSender,
 ) {
     let outcome = terminate_pane_process_with_work(state, pane_id, |control| {
-        match control.terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT) {
-            Ok(_) => Ok(()),
-            Err(tree_error) => {
-                tracing::warn!(%tree_error, "pane process-tree proof unavailable; killing captured direct child");
-                control.kill_direct_child().map_err(std::io::Error::other)
-            }
+        if ilium_platform::process_control::supports_pty_tree_proof() {
+            control.terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT).map(|_| ())
+        } else {
+            tracing::warn!("PTY process-tree proof is unavailable on this platform; using direct-child termination");
+            control.kill_direct_child().map_err(std::io::Error::other)
         }
     }).await;
     let _ = crate::agent_debug::record(
@@ -5695,7 +5729,7 @@ async fn handle_unfreeze_pane(
             return;
         }
     };
-    handle_replace_pane_with_command(
+    if let Err(message) = handle_replace_pane_with_command(
         state,
         pane_id,
         resume_command,
@@ -5703,7 +5737,10 @@ async fn handle_unfreeze_pane(
         Some(reservation),
         None,
     )
-    .await;
+    .await
+    {
+        send_direct_error(direct_tx, message).await;
+    }
 }
 
 struct PaneReplacementReservation<'a> {
@@ -5818,16 +5855,13 @@ async fn handle_replace_pane_with_command(
     direct_tx: &DirectEventSender,
     reservation: Option<PaneReplacementReservation<'_>>,
     custody_ticket: Option<crate::workspace_custody::CustodyTicket>,
-) {
+) -> Result<NodeId, String> {
     let Some(_reservation) =
         reservation.or_else(|| PaneReplacementReservation::try_new(state, pane_id))
     else {
-        send_direct_error(
-            direct_tx,
-            format!("pane {pane_id:?} is already being replaced"),
-        )
-        .await;
-        return;
+        return Err(format!(
+            "pane {pane_id:?} is already being replaced; outcome is uncertain"
+        ));
     };
     let origin = {
         let panes = state.panes.read().await;
@@ -5888,8 +5922,7 @@ async fn handle_replace_pane_with_command(
     let Some(parent) = tree.parent_of(pane_id) else {
         drop(tree);
         drop(publish_guard);
-        send_direct_error(direct_tx, format!("no such pane {pane_id:?}")).await;
-        return;
+        return Err(format!("no such pane {pane_id:?}"));
     };
     let is_terminal = tree.get(pane_id).is_some_and(|node| {
         matches!(
@@ -5903,12 +5936,7 @@ async fn handle_replace_pane_with_command(
     if !is_terminal {
         drop(tree);
         drop(publish_guard);
-        send_direct_error(
-            direct_tx,
-            "only a terminal pane can be replaced".to_string(),
-        )
-        .await;
-        return;
+        return Err("only a terminal pane can be replaced".to_string());
     }
     let workspace = tree.pane_workspace(pane_id).cloned();
     let position = tree
@@ -5935,12 +5963,7 @@ async fn handle_replace_pane_with_command(
         Err(error) => {
             drop(tree);
             drop(publish_guard);
-            send_direct_error(
-                direct_tx,
-                format!("failed to create replacement pane: {error}"),
-            )
-            .await;
-            return;
+            return Err(format!("failed to create replacement pane: {error}"));
         }
     };
     let has_verified_continuity = {
@@ -5962,12 +5985,7 @@ async fn handle_replace_pane_with_command(
         let _ = tree.remove_node(new_pane_id);
         drop(tree);
         drop(publish_guard);
-        send_direct_error(
-            direct_tx,
-            format!("failed to place replacement pane: {error}"),
-        )
-        .await;
-        return;
+        return Err(format!("failed to place replacement pane: {error}"));
     }
     drop(tree);
     if let Some(mut preference) = close_preference {
@@ -5990,13 +6008,13 @@ async fn handle_replace_pane_with_command(
     .await
     {
         Ok(()) => {}
-        Err(RegisterPaneError::NodeRemoved(_)) | Err(RegisterPaneError::Admission(_)) => {
+        Err(error @ (RegisterPaneError::NodeRemoved(_) | RegisterPaneError::Admission(_))) => {
             state
                 .workspace_close_preferences
                 .write()
                 .await
                 .remove(&new_pane_id);
-            return;
+            return Err(format!("replacement pane was not started: {error}"));
         }
         Err(RegisterPaneError::Spawn(error)) => {
             let mut tree = state.tree.write().await;
@@ -6008,12 +6026,7 @@ async fn handle_replace_pane_with_command(
                 .await
                 .remove(&new_pane_id);
             broadcast_and_persist(state).await;
-            send_direct_error(
-                direct_tx,
-                format!("failed to spawn {command_line}: {error}"),
-            )
-            .await;
-            return;
+            return Err(format!("failed to spawn {command_line}: {error}"));
         }
     }
     let _ = crate::agent_debug::record(
@@ -6052,6 +6065,16 @@ async fn handle_replace_pane_with_command(
         new_pane_id
     };
     handle_close_pane_with_spawn_guard(state, completed_pane_id, direct_tx).await;
+    if !old_pane_is_live {
+        return Err("original pane was closed while replacement was starting".into());
+    }
+    let tree = state.tree.read().await;
+    if tree.get(pane_id).is_some() || tree.get(new_pane_id).is_none() {
+        return Err(
+            "replacement outcome is uncertain; inspect the pane tree before retrying".into(),
+        );
+    }
+    Ok(new_pane_id)
 }
 
 /// Creates one built-in coding agent inside the project represented by
@@ -11228,7 +11251,8 @@ mod tests {
             handle_replace_pane_with_command(&state, old, "exec cat".into(), &sender, None, None),
         )
         .await
-        .expect("replacement finishes");
+        .expect("replacement finishes")
+        .expect("replacement succeeds");
         while let Ok(reply) = replies.try_recv() {
             assert!(!matches!(reply, ServerEvent::Error { .. }), "{reply:?}");
         }

@@ -20,6 +20,16 @@ fn terminate_and_replace_requests_round_trip_with_stable_names() {
     };
     assert_eq!(round_trip(&replace), replace);
     assert_eq!(replace.diagnostic_name(), "replace_pane_with_command");
+    let confirmed = ClientRequest::ReplacePaneWithCommandConfirmed {
+        request_id: 17,
+        pane_id: NodeId(4),
+        command_line: "codex resume 11111111-1111-4111-8111-111111111111".to_string(),
+    };
+    assert_eq!(round_trip(&confirmed), confirmed);
+    assert_eq!(
+        confirmed.diagnostic_name(),
+        "replace_pane_with_command_confirmed"
+    );
 }
 
 #[test]
