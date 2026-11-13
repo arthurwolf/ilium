@@ -160,6 +160,14 @@ impl<W: Write> Write for TerminalOutput<W> {
             .store(self.bytes.len() as u64, Ordering::Relaxed);
         self.health.written_bytes.store(0, Ordering::Relaxed);
         self.health.phase(3);
+        // SCRATCH DIAGNOSTIC (never on the release branch): tee the client's
+        // own frame bytes so a replay can separate client output from ConPTY.
+        if let Some(dir) = std::env::var_os("ILIUM_CLIENT_TEE_DIR") {
+            let path = std::path::Path::new(&dir).join(format!("client-{}.bin", std::process::id()));
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = file.write_all(&self.bytes);
+            }
+        }
         let mut written = 0;
         let result = (|| {
             while written < self.bytes.len() {

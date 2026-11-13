@@ -30,7 +30,9 @@ def main():
         harness_arguments += ['--exact', arguments.exact]
     if harness_arguments:
         command += ['--'] + harness_arguments
-    environment = dict(os.environ, ILIUM_PTY_DUMP_DIR=str(arguments.logs / 'pty-dumps'))
+    (arguments.logs / 'client-tee').mkdir(parents=True, exist_ok=True)
+    environment = dict(os.environ, ILIUM_PTY_DUMP_DIR=str(arguments.logs / 'pty-dumps'),
+                       ILIUM_CLIENT_TEE_DIR=str(arguments.logs / 'client-tee'))
     results = arguments.logs / 'results.jsonl'
     for iteration in range(1, arguments.iterations + 1):
         processes = subprocess.run(['tasklist', '/FO', 'CSV', '/NH'], capture_output=True, text=True).stdout

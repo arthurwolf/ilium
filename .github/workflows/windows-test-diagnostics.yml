@@ -34,11 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - {lane: solo, replica: 1, iterations: 12, args: '--exact universal_settings_catalog_and_exact_number_survive_fresh_client_reload'}
-        - {lane: lock-default, replica: 1, iterations: 6, args: ''}
-        - {lane: lock-default, replica: 2, iterations: 6, args: ''}
-        - {lane: lock-one-thread, replica: 1, iterations: 6, args: '--threads 1'}
-        - {lane: lock-one-thread, replica: 2, iterations: 6, args: '--threads 1'}
+        - {lane: solo, replica: 1, iterations: 4, args: '--exact universal_settings_catalog_and_exact_number_survive_fresh_client_reload'}
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
