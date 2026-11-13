@@ -185,6 +185,23 @@ async fn create_and_project_binding_roundtrip_durable_authority() {
     assert!(settings.contains("resource synchronization"));
 }
 #[tokio::test]
+async fn monitoring_records_a_committed_resource_snapshot_once() {
+    let fixture = fixture(None).await;
+    let quota = fixture.state.execution.get().unwrap().client.quota_group();
+    assert!(fixture.state.events.initialize_journal(quota));
+    create(&fixture).await;
+    memory::publish(&fixture.state, snapshot(&fixture.state).await.unwrap()).unwrap();
+    memory::publish(&fixture.state, snapshot(&fixture.state).await.unwrap()).unwrap();
+    let log = fixture.state.events.monitoring.lock().unwrap();
+    let events = log.read_after(0).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].kind,
+        ilium_ipc::MonitoringEventKind::ResourceChanged
+    );
+}
+
+#[tokio::test]
 async fn independent_project_services_share_one_catalog_binding() {
     let first = fixture(None).await;
     create(&first).await;

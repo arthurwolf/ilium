@@ -283,18 +283,22 @@ pub(crate) fn tooltip(app: &App, node_id: NodeId) -> Option<TooltipContent> {
 }
 
 /// Time until the next frame of an animation that is actually on screen:
-/// only visuals matched by a pane in the tree count, so an idle tree under
-/// Custom mode schedules no redraws even when the rule set contains
-/// animations. `None` when nothing animates or motion is Off.
+/// only the status cells of rows the tree drew in the last frame count, so
+/// collapsed, scrolled-out or hidden-tree panes schedule no redraws, and an
+/// idle tree under Custom mode schedules none even when the rule set contains
+/// animations. `None` when nothing animates, motion is Off, or the tree was
+/// not drawn.
 pub(crate) fn animation_frame_delay(app: &App, elapsed_millis: u128) -> Option<u64> {
     let motion = app.ui_settings.motion_level;
     if motion == crate::config::MotionLevel::Off {
         return None;
     }
-    let visuals: Vec<(&StatusVisual, ProgressCue)> = app
-        .tree
-        .panes()
-        .filter_map(|node| winning_visual(app, node.id))
+    // `None` when the last frame did not paint the tree (hidden panel,
+    // full-screen view), so nothing on screen can be animating.
+    let drawn_rows = app.composed_tree_rows.as_deref()?;
+    let visuals: Vec<(&StatusVisual, ProgressCue)> = drawn_rows
+        .node_ids()
+        .filter_map(|node_id| winning_visual(app, node_id))
         .collect();
     next_frame_delay(visuals, motion, elapsed_millis)
 }
@@ -502,10 +506,7 @@ mod tests {
 
         app.select_node(pane_id);
         app.right_panel_target = crate::app::RightPanelTarget::Pane { pane_id };
-        assert_eq!(
-            observe(&app),
-            Some((Observation::True, Observation::True))
-        );
+        assert_eq!(observe(&app), Some((Observation::True, Observation::True)));
     }
 
     #[test]
@@ -533,7 +534,10 @@ mod tests {
                 )
             })
         };
-        assert_eq!(observe(&app), Some((Observation::False, Observation::False)));
+        assert_eq!(
+            observe(&app),
+            Some((Observation::False, Observation::False))
+        );
         // A session-level error is a session fact, never this pane's error.
         app.replace_blocking_errors(vec![ilium_ipc::BlockingError {
             node_id: None,
@@ -576,6 +580,7 @@ mod tests {
                 ),
             )
             .unwrap();
+        draw_rows(&mut app, &[pane_id]);
         assert_eq!(animation_frame_delay(&app, 0), Some(125));
         assert_eq!(animation_frame_delay(&app, 100), Some(25));
         app.ui_settings.motion_level = MotionLevel::Reduced;
@@ -584,13 +589,53 @@ mod tests {
         assert_eq!(animation_frame_delay(&app, 0), None);
     }
 
+    /// Records the rows the last frame drew, as the tree does after a paint.
+    fn draw_rows(app: &mut App, node_ids: &[NodeId]) {
+        app.record_composed_tree_rows(crate::tree_ui::PaintedTreeRows::drawn_rows_for_test(
+            node_ids,
+        ));
+    }
+
+    #[test]
+    fn hidden_tree_panel_schedules_no_redraw_for_an_animated_agent() {
+        let (mut app, _) = app_with_pane(PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Working,
+            Some(GoalState::Active),
+        ));
+        app.ui_settings.motion_level = MotionLevel::Full;
+        // A frame that did not paint the tree clears the drawn rows, so the
+        // working spinner on a hidden panel must not keep the clock running.
+        app.composed_tree_rows = None;
+        assert_eq!(animation_frame_delay(&app, 0), None);
+    }
+
+    #[test]
+    fn collapsed_group_animated_pane_schedules_no_redraw() {
+        let (mut app, pane_id) = app_with_pane(PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Working,
+            Some(GoalState::Active),
+        ));
+        app.ui_settings.motion_level = MotionLevel::Full;
+        let group_id = app.tree.parent_of(pane_id).expect("the pane has a group");
+        // Collapsed: only the group row is painted, so the working pane's
+        // spinner is off screen and schedules nothing.
+        draw_rows(&mut app, &[group_id]);
+        assert_eq!(animation_frame_delay(&app, 0), None);
+        // Expanded: the pane row is painted and the spinner's clock runs.
+        draw_rows(&mut app, &[group_id, pane_id]);
+        assert_eq!(animation_frame_delay(&app, 0), Some(125));
+    }
+
     #[test]
     fn a_matched_pulsing_rule_wakes_the_clock_at_the_pulse_rate() {
-        let (mut app, _) = app_with_pane(PaneStatus::from_activity(
+        let (mut app, pane_id) = app_with_pane(PaneStatus::from_activity(
             AgentClass::Codex,
             AgentActivity::WaitingApproval,
             None,
         ));
+        draw_rows(&mut app, &[pane_id]);
         // The shipped approval rule is a static built-in icon that pulses.
         app.ui_settings.motion_level = MotionLevel::Full;
         assert_eq!(animation_frame_delay(&app, 0), Some(500));

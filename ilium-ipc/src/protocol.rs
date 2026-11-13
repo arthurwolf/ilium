@@ -1121,6 +1121,24 @@ pub enum ClientRequest {
         revision: u64,
         watches: Vec<StatusScreenWatch>,
     },
+    /// Read a bounded page from the session monitoring journal.
+    MonitoringEvents {
+        request_id: u64,
+        query: crate::MonitoringQuery,
+    },
+    /// Advance one named consumer's acknowledged monitoring cursor.
+    /// Authorize and durably audit one local automation write before its ordinary IPC requests.
+    ControlWrite {
+        request_id: u64,
+        token: String,
+        caller_pane: Option<NodeId>,
+        operation: String,
+    },
+    MonitoringAck {
+        request_id: u64,
+        consumer: String,
+        cursor: String,
+    },
 }
 
 /// Which client path produced a stored recap.
@@ -1138,6 +1156,9 @@ impl ClientRequest {
     /// decision instead of silently disappearing from the major-action trail.
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
+            Self::MonitoringEvents { .. } => "monitoring_events",
+            Self::MonitoringAck { .. } => "monitoring_ack",
+            Self::ControlWrite { .. } => "control_write",
             Self::SetStatusScreenWatches { .. } => "set_status_screen_watches",
             Self::Resource { .. } => "resource",
             Self::Plugin(_) => "plugin",
@@ -1786,4 +1807,18 @@ pub enum ServerEvent {
     /// A `SetStatusScreenWatches` revision was refused as a whole; appended
     /// to preserve earlier event discriminants.
     StatusScreenWatchesRejected(StatusScreenWatchRejection),
+    /// A bounded monitoring page or a query validation error.
+    MonitoringEvents {
+        request_id: u64,
+        result: Result<String, String>,
+    },
+    /// The resulting acknowledged cursor, or a validation error.
+    ControlWrite {
+        request_id: u64,
+        result: Result<(), String>,
+    },
+    MonitoringAck {
+        request_id: u64,
+        result: Result<String, String>,
+    },
 }

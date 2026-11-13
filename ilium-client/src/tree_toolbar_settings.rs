@@ -23,7 +23,11 @@ fn profile_ids(app: &App) -> Vec<String> {
 
 /// Glyph and label for a layout entry; custom agents use their profile's
 /// own icon and name so they read like any other toolbar button.
-fn entry_label(app: &App, index: usize, entry: &crate::tree_toolbar_layout::TreeToolbarEntry) -> String {
+fn entry_label(
+    app: &App,
+    index: usize,
+    entry: &crate::tree_toolbar_layout::TreeToolbarEntry,
+) -> String {
     let action = crate::tree_ui::toolbar_action_for(index, entry);
     if let crate::tree_toolbar_layout::TreeToolbarEntry::CustomAgent(id) = entry {
         return match app.custom_agents.profiles.iter().find(|p| &p.id == id) {
@@ -456,7 +460,9 @@ mod tests {
             .iter()
             .position(|entry| *entry == TreeToolbarEntry::CustomAgent("mine".into()))
             .expect("custom agent is a layout entry");
-        assert!(layout.entries.ends_with(&TreeToolbarLayout::ANCHORED_SUFFIX));
+        assert!(layout
+            .entries
+            .ends_with(&TreeToolbarLayout::ANCHORED_SUFFIX));
         let strip = Rect::new(0, 0, 80, 2);
         let buttons = crate::tree_ui::configured_toolbar_rects_in_strip(strip, &layout);
         let (_, rect) = buttons
@@ -469,7 +475,11 @@ mod tests {
             selected_row: index,
             ..Default::default()
         };
-        handle_key(&mut app, &mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT));
+        handle_key(
+            &mut app,
+            &mut state,
+            KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT),
+        );
         assert_eq!(
             app.ui_settings.tree_toolbar_layout.entries[index - 1],
             TreeToolbarEntry::CustomAgent("mine".into())

@@ -20,7 +20,7 @@ use ilium_execution::{
 use ilium_ipc::ClientRequest;
 use ilium_session_convert::{
     convert_session_with_cancel, ConversionEvent, ConversionOutcome, ConversionRequest,
-    MAX_LINE_BYTES, MAX_SOURCE_TRANSCRIPT_BYTES,
+    MAX_SOURCE_TRANSCRIPT_BYTES,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -37,11 +37,9 @@ use crate::theme;
 /// Upper bound on retained log lines; a conversion emits tens of lines, this
 /// only guards against a runaway producer.
 const MAX_LOG_LINES: usize = 500;
-const CONVERSION_FIXED_WORKING_BYTES: usize = 64 * 1024 * 1024;
-/// Fixed reservation: the streaming converter holds one source line (at most
-/// `MAX_LINE_BYTES`) plus bounded bookkeeping, whatever the file size.
-pub(crate) const CONVERSION_WORKING_BYTES: usize =
-    CONVERSION_FIXED_WORKING_BYTES + MAX_LINE_BYTES as usize;
+/// Estimated peak, including the parsed representation of a bounded source
+/// line and serialization scratch. This is an admission reservation, not RSS.
+pub(crate) const CONVERSION_WORKING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 pub(crate) const CONVERSION_RESULT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_PROGRESS_TEXT_BYTES: usize = 4 * 1024;
 const UI_EVENT_CAPACITY: usize = 64;
@@ -472,8 +470,28 @@ async fn wait_for_conversion_admission(
     cancel: Arc<AtomicBool>,
     cancel_wake: Arc<Notify>,
 ) -> Result<Receipt<ConversionTask>, String> {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    wait_for_conversion_admission_for(
+        client,
+        task,
+        cost,
+        cancel,
+        cancel_wake,
+        std::time::Duration::from_secs(30),
+    )
+    .await
+}
+
+async fn wait_for_conversion_admission_for(
+    client: Client,
+    task: ConversionTask,
+    cost: JobCost,
+    cancel: Arc<AtomicBool>,
+    cancel_wake: Arc<Notify>,
+    timeout: std::time::Duration,
+) -> Result<Receipt<ConversionTask>, String> {
+    let deadline = tokio::time::Instant::now() + timeout;
     let mut announced = false;
+    let mut last_failure = None;
     loop {
         let capacity = crate::execution::admission_notification();
         let mut changed = Box::pin(capacity.notified());
@@ -482,7 +500,10 @@ async fn wait_for_conversion_admission(
             return Err("Conversion cancelled before it started. Press Enter to resume the original session.".into());
         }
         if tokio::time::Instant::now() >= deadline {
-            return Err("Conversion timed out waiting for available memory or worker capacity. Press Enter to resume the original session, then try again after other work finishes.".into());
+            return Err(match last_failure {
+                Some(failure) => format!("Timed out waiting for conversion capacity. {} {}", describe_admission_failure(failure), describe_reservation_owners(&client)),
+                None => "Conversion timed out waiting for available worker capacity. Press Enter to resume the original session.".into(),
+            });
         }
         match client.try_reserve_detailed(Lane::Io, cost) {
             Ok(reservation) => {
@@ -494,6 +515,7 @@ async fn wait_for_conversion_admission(
                     .map_err(|rejected| describe_admission_failure(rejected.reason.into()));
             }
             Err(failure) if admission_may_be_temporary(failure) => {
+                last_failure = Some(failure);
                 if !announced {
                     tracing::warn!(
                         ?failure,
@@ -512,16 +534,35 @@ async fn wait_for_conversion_admission(
                     _ = &mut changed => {},
                     _ = cancel_wake.notified() => {},
                     _ = tokio::time::sleep_until(deadline) => {
-                        return Err(format!("Timed out waiting for conversion capacity. {}", describe_admission_failure(failure)));
+                        return Err(format!("Timed out waiting for conversion capacity. {} {}", describe_admission_failure(failure), describe_reservation_owners(&client)));
                     }
                 }
             }
             Err(failure) => {
                 tracing::warn!(?failure, "session conversion admission cannot proceed");
-                return Err(describe_admission_failure(failure));
+                return Err(format!(
+                    "{} {}",
+                    describe_admission_failure(failure),
+                    describe_reservation_owners(&client)
+                ));
             }
         }
     }
+}
+
+fn describe_reservation_owners(client: &Client) -> String {
+    let owners = client.significant_reservations();
+    if owners.is_empty() {
+        return "No significant work in this execution bank could be attributed; other banks may also hold reservations.".into();
+    }
+    let owners = owners
+        .into_iter()
+        .map(|(name, input, result)| format!("{name}: {input} input and {result} result bytes"))
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!(
+        "Largest visible estimated reservations: {owners}. Other banks may also hold reservations."
+    )
 }
 
 fn admission_may_be_temporary(failure: AdmissionFailure) -> bool {
@@ -555,9 +596,9 @@ fn describe_admission_failure(failure: AdmissionFailure) -> String {
                 }
             };
             if quota.requested > quota.limit {
-                return format!("Conversion needs {} of {resource}, exceeding the {} limit. Waiting will not help. Press Enter to resume the original session.", size(quota.requested), size(quota.limit));
+                return format!("Conversion requests an estimated {} of {resource}, exceeding the {:?} budget limit of {}. These are reservations, not measured RAM. Waiting will not help. Press Enter to resume the original session.", size(quota.requested), quota.boundary, size(quota.limit));
             }
-            return format!("Conversion needs {} of {resource}; {} of the {} limit is in use. Press Enter to resume the original session; try again after other work finishes.", size(quota.requested), size(quota.used), size(quota.limit));
+            return format!("Conversion requests an estimated {} of {resource}; at the last admission attempt, {} was reserved against the {:?} budget of {}. Reservations are estimates, not measured RAM. Press Enter to resume the original session; try again after other work finishes.", size(quota.requested), size(quota.used), quota.boundary, size(quota.limit));
         }
         return format!("Conversion needs {resource}, but {} of {} slots are in use ({} requested). Press Enter to resume the original session.", quota.used, quota.limit, quota.requested);
     }
@@ -1035,7 +1076,7 @@ mod tests {
     #[test]
     fn maximum_supported_transcript_is_fully_charged() {
         let mebibyte = 1024 * 1024;
-        assert_eq!(CONVERSION_WORKING_BYTES, 320 * mebibyte as usize);
+        assert_eq!(CONVERSION_WORKING_BYTES, 2048 * mebibyte as usize);
         assert_eq!(
             conversion_working_bytes(MAX_SOURCE_TRANSCRIPT_BYTES),
             CONVERSION_WORKING_BYTES
@@ -1082,7 +1123,7 @@ mod tests {
         assert!(display.contains("Enter resume"));
     }
 
-    async fn exercise_saturated_admission(cancel_waiter: bool) {
+    async fn exercise_saturated_admission(cancel_waiter: bool, timeout_waiter: bool) {
         use ilium_execution::{
             ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
             ShutdownMode,
@@ -1157,7 +1198,7 @@ mod tests {
             cancel: Arc::clone(&cancel),
             notification: Arc::new(Notify::new()),
         };
-        let waiter = tokio::spawn(wait_for_conversion_admission(
+        let waiter = tokio::spawn(wait_for_conversion_admission_for(
             client,
             task,
             JobCost {
@@ -1166,6 +1207,11 @@ mod tests {
             },
             Arc::clone(&cancel),
             Arc::clone(&cancel_wake),
+            if timeout_waiter {
+                Duration::from_millis(100)
+            } else {
+                Duration::from_secs(30)
+            },
         ));
         tokio::time::timeout(Duration::from_secs(5), received.recv())
             .await
@@ -1174,7 +1220,7 @@ mod tests {
         if cancel_waiter {
             cancel.store(true, Ordering::Release);
             cancel_wake.notify_one();
-        } else {
+        } else if !timeout_waiter {
             drop(held);
         }
         let result = tokio::time::timeout(Duration::from_secs(5), waiter)
@@ -1183,6 +1229,10 @@ mod tests {
             .unwrap();
         if cancel_waiter {
             assert!(matches!(&result, Err(message) if message.contains("cancelled")));
+        } else if timeout_waiter {
+            assert!(
+                matches!(&result, Err(message) if message.contains("Timed out") && message.contains("reserved") && message.contains("original"))
+            );
         } else {
             assert!(
                 result.is_ok(),
@@ -1201,19 +1251,24 @@ mod tests {
 
     #[tokio::test]
     async fn conversion_waits_until_other_work_releases_capacity() {
-        exercise_saturated_admission(false).await;
+        exercise_saturated_admission(false, false).await;
     }
 
     #[tokio::test]
     async fn cancellation_wakes_conversion_waiting_for_capacity() {
-        exercise_saturated_admission(true).await;
+        exercise_saturated_admission(true, false).await;
+    }
+
+    #[tokio::test]
+    async fn conversion_timeout_explains_reservations_and_recovery() {
+        exercise_saturated_admission(false, true).await;
     }
 
     #[test]
     fn conversion_reservation_is_fixed_and_independent_of_file_size() {
         let mebibyte = 1024 * 1024;
-        assert_eq!(conversion_working_bytes(0), 320 * mebibyte);
-        assert_eq!(conversion_working_bytes(1024), 320 * mebibyte);
+        assert_eq!(conversion_working_bytes(0), 2048 * mebibyte);
+        assert_eq!(conversion_working_bytes(1024), 2048 * mebibyte);
         assert_eq!(
             conversion_working_bytes(3 * 1024 * 1024 * 1024),
             CONVERSION_WORKING_BYTES
@@ -1224,9 +1279,7 @@ mod tests {
         );
     }
 
-    // The client slice must stay within the 528 MiB general children share;
-    // checked at compile time because both sides are constants.
-    const _: () = assert!(CONVERSION_WORKING_BYTES <= 528 * 1024 * 1024);
+    const _: () = assert!(CONVERSION_WORKING_BYTES <= 4096 * 1024 * 1024);
 
     #[test]
     fn sparse_three_gib_source_passes_admission() {

@@ -494,8 +494,8 @@ mod tests {
         assert!(error.message.contains("Invalid screen watch 7"));
 
         let long_pattern = "a".repeat(super::MAX_PATTERN_CHARACTERS + 1);
-        let error = compile(&[spec(3, &long_pattern, false, ScreenRegion::All)])
-            .expect_err("too long");
+        let error =
+            compile(&[spec(3, &long_pattern, false, ScreenRegion::All)]).expect_err("too long");
         assert_eq!(error.watch_id, Some(3));
 
         let duplicate = spec(4, "ok", false, ScreenRegion::All);

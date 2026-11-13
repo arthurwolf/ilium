@@ -31,49 +31,81 @@ pub(crate) async fn observe_cache_wait(
 ) -> Option<(AgentClass, WaitObservation)> {
     let source = {
         let panes = state.panes.read().await;
-        let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else { return None };
+        let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
+            return None;
+        };
         runtime.cache_wait_source()?
     };
     let execution = state.execution.get()?.client.clone();
-    let result = execution.run(
-        Lane::Io,
-        JobCost { input_bytes: JOB_INPUT_BYTES, result_bytes: JOB_RESULT_BYTES },
-        move |context: ilium_execution::JobContext| {
-            if context.stop_requested()
-                || !ilium_platform::process_control::captured_process_is_current(&source.process_identity)?
-            {
-                return Ok::<_, std::io::Error>(ReadResult { source, evidence: None, process_current: false });
-            }
-            let mut cursor = WaitTranscriptCursor::new(
-                source.transcript_path.clone(), source.session_id.clone(),
-                source.process.class.clone(), source.generation,
-            );
-            let mut evidence = None;
-            for _ in 0..MAX_CHUNKS {
-                if context.stop_requested() { break }
-                match cursor.read_available(source.generation, &source.transcript_path) {
-                    Ok(Some(current)) => { evidence = Some(current); break }
-                    Ok(None) if cursor.caught_up() => break,
-                    Ok(None) => continue,
-                    Err(_) => break,
+    let result = execution
+        .run(
+            Lane::Io,
+            JobCost {
+                input_bytes: JOB_INPUT_BYTES,
+                result_bytes: JOB_RESULT_BYTES,
+            },
+            move |context: ilium_execution::JobContext| {
+                if context.stop_requested()
+                    || !ilium_platform::process_control::captured_process_is_current(
+                        &source.process_identity,
+                    )?
+                {
+                    return Ok::<_, std::io::Error>(ReadResult {
+                        source,
+                        evidence: None,
+                        process_current: false,
+                    });
                 }
-            }
-            let process_current = !context.stop_requested()
-                && ilium_platform::process_control::captured_process_is_current(&source.process_identity)?;
-            Ok::<_, std::io::Error>(ReadResult { source, evidence, process_current })
-        },
-    ).await.ok()?;
+                let mut cursor = WaitTranscriptCursor::new(
+                    source.transcript_path.clone(),
+                    source.session_id.clone(),
+                    source.process.class.clone(),
+                    source.generation,
+                );
+                let mut evidence = None;
+                for _ in 0..MAX_CHUNKS {
+                    if context.stop_requested() {
+                        break;
+                    }
+                    match cursor.read_available(source.generation, &source.transcript_path) {
+                        Ok(Some(current)) => {
+                            evidence = Some(current);
+                            break;
+                        }
+                        Ok(None) if cursor.caught_up() => break,
+                        Ok(None) => continue,
+                        Err(_) => break,
+                    }
+                }
+                let process_current = !context.stop_requested()
+                    && ilium_platform::process_control::captured_process_is_current(
+                        &source.process_identity,
+                    )?;
+                Ok::<_, std::io::Error>(ReadResult {
+                    source,
+                    evidence,
+                    process_current,
+                })
+            },
+        )
+        .await
+        .ok()?;
     let read = result.view();
     if !read.process_current {
         return None;
     }
     let panes = state.panes.read().await;
-    let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else { return None };
+    let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
+        return None;
+    };
     if !runtime.cache_wait_source_is_current(&read.source) {
         return None;
     }
     let current = runtime.cache_wait_source()?;
-    Some((current.process.class, wait_observation(current.monitor_running, read.evidence)))
+    Some((
+        current.process.class,
+        wait_observation(current.monitor_running, read.evidence),
+    ))
 }
 
 /// Monitor liveness comes from the pane, independently of transcript parsing.
@@ -98,9 +130,14 @@ mod tests {
         assert!(observation.monitor_running);
         assert!(!observation.command_waiting);
         assert!(!observation.subagent_waiting);
-        let observation = wait_observation(false, Some(WaitEvidence {
-            monitor: false, command: true, subagent: true,
-        }));
+        let observation = wait_observation(
+            false,
+            Some(WaitEvidence {
+                monitor: false,
+                command: true,
+                subagent: true,
+            }),
+        );
         assert!(!observation.monitor_running);
         assert!(observation.command_waiting);
         assert!(observation.subagent_waiting);

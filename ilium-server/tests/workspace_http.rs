@@ -132,7 +132,7 @@ impl IsolatedHttpServer {
         std::fs::set_permissions(&fake_codex, permissions).expect("fake Codex permissions");
 
         let socket = runtime.join("http.sock");
-        let snapshot = runtime.join("snapshot.json");
+        let snapshot = project.join(".ilium/sessions/workspace-http.json");
         let log = runtime.join("server.log");
         let search_path =
             std::env::join_paths([bin.as_path(), Path::new("/usr/bin"), Path::new("/bin")])
@@ -211,9 +211,14 @@ impl IsolatedHttpServer {
         let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", self.port))
             .await
             .expect("connect isolated loopback HTTP listener");
+        let tokens: ilium_control::access::Tokens = serde_json::from_slice(
+            &std::fs::read(self.socket.with_extension("ctl-tokens.json"))
+                .expect("isolated control tokens"),
+        )
+        .unwrap();
         let head = format!(
-            "POST /create_agent HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            self.port,
+            "POST /create_agent HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            self.port, tokens.act,
             body.len()
         );
         stream.write_all(head.as_bytes()).await.expect("HTTP head");
@@ -288,6 +293,62 @@ async fn wait_for_file(path: &Path) {
             path.display()
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn monitoring_events_http_returns_a_bounded_quiet_response() {
+    let server = IsolatedHttpServer::start().await;
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", server.port))
+        .await
+        .unwrap();
+    stream.write_all(format!("GET /v1/events?max-items=12&max-chars=80 HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n", server.port).as_bytes()).await.unwrap();
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), stream.read_to_end(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    let response = String::from_utf8(bytes).unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    assert!(body.starts_with("quiet cursor="), "{body}");
+    assert!(body.chars().count() <= 80);
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", server.port))
+        .await
+        .unwrap();
+    stream.write_all(format!("GET /v1/events?min-severity=unknown HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n", server.port).as_bytes()).await.unwrap();
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), stream.read_to_end(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    let response = String::from_utf8(bytes).unwrap();
+    assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+}
+
+#[tokio::test]
+async fn monitoring_digest_http_returns_bounded_compact_and_json_responses() {
+    let server = IsolatedHttpServer::start().await;
+    for (format, budget) in [("compact", 80), ("json", 180)] {
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", server.port))
+            .await
+            .unwrap();
+        stream.write_all(format!("GET /v1/digest?format={format}&max-chars={budget} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n", server.port).as_bytes()).await.unwrap();
+        let mut bytes = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), stream.read_to_end(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap();
+        let response = String::from_utf8(bytes).unwrap();
+        let (head, body) = response.split_once("\r\n\r\n").unwrap();
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert!(body.chars().count() <= budget);
+        if format == "json" {
+            let value: Value = serde_json::from_str(body).unwrap();
+            assert_eq!(value["quiet"], true);
+        } else {
+            assert!(body.starts_with("quiet cursor="), "{body}");
+        }
     }
 }
 
@@ -478,4 +539,182 @@ async fn disconnect_during_worktree_add_never_commits_a_pane() {
         !server.prompt_record.exists(),
         "prompt never reached provider"
     );
+}
+
+#[tokio::test]
+async fn monitoring_pane_brief_omits_full_metadata_and_labels_missing_message_evidence() {
+    let server = IsolatedHttpServer::start().await;
+    let (status, body) = server
+        .post(json!({"agent_type":"codex","project":server.project,"prompt":"fixture brief"}))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let created: Value = serde_json::from_str(&body).unwrap();
+    let pane = created["pane_id"].as_u64().unwrap();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", server.port))
+        .await
+        .unwrap();
+    stream.write_all(format!("GET /v1/panes/{pane}?brief=true HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n", server.port).as_bytes()).await.unwrap();
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), stream.read_to_end(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    let response = String::from_utf8(bytes).unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    assert!(head.starts_with("HTTP/1.1 200"), "{response}");
+    let brief: Value = serde_json::from_str(body).unwrap();
+    assert_eq!(brief["pane"], pane);
+    assert!(brief["state"].is_string());
+    assert!(brief.get("last_message").is_some_and(Value::is_null));
+    assert!(brief.get("state_age_seconds").is_some());
+    assert!(
+        brief.get("prompt_queue").is_none()
+            && brief.get("screen").is_none()
+            && brief.get("node").is_none()
+    );
+    assert!(body.chars().count() <= 1000);
+}
+
+async fn control_post(
+    server: &IsolatedHttpServer,
+    token: Option<&str>,
+    operation: Value,
+) -> (u16, String) {
+    let body = operation.to_string();
+    let authorization = token
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", server.port))
+        .await
+        .unwrap();
+    stream.write_all(format!("POST /v1/ops HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{authorization}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", server.port, body.len()).as_bytes()).await.unwrap();
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), stream.read_to_end(&mut bytes))
+        .await
+        .unwrap()
+        .unwrap();
+    let response = String::from_utf8(bytes).unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    (
+        head.split_whitespace().nth(1).unwrap().parse().unwrap(),
+        body.into(),
+    )
+}
+
+#[tokio::test]
+async fn monitoring_http_permissions_default_to_read_and_require_admin_for_termination() {
+    let server = IsolatedHttpServer::start().await;
+    let rename = json!({"op":"rename","node":999,"title":"fixture"});
+    let (status, body) = control_post(&server, None, rename.clone()).await;
+    assert_eq!(status, 403, "outside unauthenticated write: {body}");
+    let token_path = server.socket.with_extension("ctl-tokens.json");
+    let file = ilium_platform::secure_fs::open_regular_file(&token_path).unwrap();
+    ilium_platform::secure_fs::validate_private_open_file(&file).unwrap();
+    let tokens: Value = serde_json::from_reader(file).unwrap();
+    assert_eq!(
+        control_post(&server, Some("wrong-token"), rename.clone())
+            .await
+            .0,
+        401
+    );
+    for operation in [
+        json!({"op":"terminate","pane":999}),
+        json!({"op":"kill_session"}),
+    ] {
+        let (status, body) = control_post(&server, tokens["act"].as_str(), operation).await;
+        assert_eq!(status, 403, "act termination: {body}");
+    }
+    let (status, _) = control_post(&server, tokens["admin"].as_str(), rename).await;
+    assert_ne!(status, 401);
+    assert_ne!(status, 403);
+}
+
+#[tokio::test]
+async fn monitoring_control_write_audit_records_caller_operation_target_and_time() {
+    let server = IsolatedHttpServer::start().await;
+    // A missing target still records an authorized request, never a fake success.
+    let token_path = server.socket.with_extension("ctl-tokens.json");
+    let tokens: Value = serde_json::from_reader(
+        std::fs::File::open(&token_path).expect("automation token file created at startup"),
+    )
+    .unwrap();
+    let _ = control_post(
+        &server,
+        tokens["act"].as_str(),
+        json!({"op":"rename","node":999,"title":"fixture"}),
+    )
+    .await;
+    let path = server.project.join(".ilium/logs/workspace-http.ctl.jsonl");
+    let file = ilium_platform::secure_fs::open_regular_file(&path).expect("durable write audit");
+    ilium_platform::secure_fs::validate_private_open_file(&file).unwrap();
+    use std::io::BufRead;
+    let entries: Vec<Value> = std::io::BufReader::new(file)
+        .lines()
+        .map(|line| serde_json::from_str(&line.unwrap()).unwrap())
+        .collect();
+    let entry = entries
+        .iter()
+        .find(|entry| entry["operation"] == "rename")
+        .expect("rename audit record");
+    assert_eq!(entry["target"], 999);
+    assert!(entry["caller"]["token_id"].is_string());
+    assert!(entry["at_unix_millis"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn monitoring_audit_failure_refuses_an_authorized_mutation() {
+    let mut server = IsolatedHttpServer::start().await;
+    let tokens: ilium_control::access::Tokens = serde_json::from_slice(
+        &std::fs::read(server.socket.with_extension("ctl-tokens.json")).unwrap(),
+    )
+    .unwrap();
+    // A directory at the exact log filename makes append fail without changing
+    // unrelated logs or relying on platform-specific permission behavior.
+    std::fs::create_dir_all(server.project.join(".ilium/logs/workspace-http.ctl.jsonl")).unwrap();
+    let (status, body) = control_post(
+        &server,
+        Some(&tokens.act),
+        json!({"op":"new_group","parent":ilium_core::ROOT_ID.0,"name":"must not exist"}),
+    )
+    .await;
+    assert_eq!(status, 500, "audit refusal: {body}");
+    let tree = server.snapshot_and_stop().await;
+    assert!(!tree.all_ids().any(|id| tree
+        .get(id)
+        .is_some_and(|node| node.name == "must not exist")));
+}
+
+#[tokio::test]
+async fn review_fifo_audit_refuses_promptly_without_mutating() {
+    let mut server = IsolatedHttpServer::start().await;
+    let tokens: ilium_control::access::Tokens = serde_json::from_slice(
+        &std::fs::read(server.socket.with_extension("ctl-tokens.json")).unwrap(),
+    )
+    .unwrap();
+    let path = server.project.join(".ilium/logs/workspace-http.ctl.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    assert!(Command::new("mkfifo")
+        .args(["-m", "600"])
+        .arg(&path)
+        .status()
+        .unwrap()
+        .success());
+    let response = tokio::time::timeout(
+        Duration::from_secs(2),
+        control_post(
+            &server,
+            Some(&tokens.act),
+            json!({"op":"new_group","parent":ilium_core::ROOT_ID.0,"name":"must not exist"}),
+        ),
+    )
+    .await;
+    assert!(
+        response.is_ok(),
+        "audit FIFO must be rejected without waiting for a reader"
+    );
+    assert_eq!(response.unwrap().0, 500);
+    let tree = server.snapshot_and_stop().await;
+    assert!(!tree.all_ids().any(|id| tree
+        .get(id)
+        .is_some_and(|node| node.name == "must not exist")));
 }

@@ -924,7 +924,8 @@ mod tests {
         let pane_id = tree
             .add_pane(group_id, "pane", PaneContentKind::Terminal)
             .unwrap();
-        let with_pane = |tree: &Tree| SupplementaryFacts::default().with_node(tree.get(pane_id).unwrap());
+        let with_pane =
+            |tree: &Tree| SupplementaryFacts::default().with_node(tree.get(pane_id).unwrap());
         // Empty queue: known not to be held.
         assert_eq!(with_pane(&tree).prompt_queue_held, Some(false));
         assert_eq!(observe(with_pane(&tree)), Observation::False);
@@ -966,7 +967,11 @@ mod tests {
             Condition::PaneVisible,
             Condition::ContextAbovePercent(80),
         ] {
-            assert_eq!(condition.observe(&facts), Observation::Unknown, "{condition:?}");
+            assert_eq!(
+                condition.observe(&facts),
+                Observation::Unknown,
+                "{condition:?}"
+            );
         }
 
         facts.supplementary.selected = Some(true);
@@ -1086,8 +1091,14 @@ mod tests {
         assert_eq!(Condition::PaneFrozen.observe(&facts), Observation::True);
         assert_eq!(Condition::PaneFocused.observe(&facts), Observation::False);
         // Unobserved error facts stay Unknown rather than reading false.
-        assert_eq!(Condition::BlockingError.observe(&facts), Observation::Unknown);
-        assert_eq!(Condition::SessionError.observe(&facts), Observation::Unknown);
+        assert_eq!(
+            Condition::BlockingError.observe(&facts),
+            Observation::Unknown
+        );
+        assert_eq!(
+            Condition::SessionError.observe(&facts),
+            Observation::Unknown
+        );
         facts.supplementary.blocking_error = Some(true);
         facts.supplementary.session_error = Some(false);
         assert_eq!(Condition::BlockingError.observe(&facts), Observation::True);

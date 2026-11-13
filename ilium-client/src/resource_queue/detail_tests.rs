@@ -290,9 +290,7 @@ fn split_geometry_and_real_parents_survive_wait_attach_grouping_and_detach() {
     let before = app.pane_viewports();
     let tree = serde_json::to_vec(&app.tree).unwrap();
     assert_eq!(before.len(), 2);
-    // A waiting pane deliberately gains a wait footer while the progress monitor
-    // is on; this test pins that the grouping setting itself never moves geometry.
-    app.ui_settings.progress_monitor_enabled = false;
+    // A wait uses the already reserved footer; grouping never moves geometry.
     let before = app.pane_viewports();
     // The wait footer only exists while the monitor is on (`shows_progress_footer`).
     app.ui_settings.progress_monitor_enabled = true;
@@ -309,7 +307,7 @@ fn split_geometry_and_real_parents_survive_wait_attach_grouping_and_detach() {
     }
     // The native wait footer uses space inside its pane, never a sibling's split.
     assert!(waiting[0].progress_area.is_some());
-    assert!(waiting[0].content_area.height < before[0].content_area.height);
+    assert_eq!(waiting[0].content_area, before[0].content_area);
     assert_eq!(waiting[1], before[1]);
     app.ui_settings.resource_queue_grouping = true;
     assert_eq!(waiting, app.pane_viewports());

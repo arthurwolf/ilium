@@ -26,6 +26,7 @@ mod cache_wait_observation;
 mod chatroom_router;
 pub mod config;
 mod config_refresh;
+mod control_access;
 pub mod custom_agent_config;
 mod detection;
 mod detection_effects;
@@ -38,6 +39,10 @@ mod http_control;
 mod initial_prompt;
 mod ipc;
 mod lifecycle_log;
+mod monitoring_event_log;
+mod monitoring_query;
+mod monitoring_signals;
+mod monitoring_transcript;
 mod mouse;
 mod native_terminal_spawn;
 mod notifications;
@@ -236,6 +241,11 @@ pub async fn run_with_resources(
     // indicate a composition-root bug, rather than silently multiplying pools.
     if state.execution.set(execution).is_err() {
         return Err(std::io::Error::other("server execution was already started").into());
+    }
+    if let Err(error) = control_access::initialize(&state).await {
+        // Credential admission is optional for the ordinary server, but never
+        // optional for automation writes: authentication remains unavailable.
+        tracing::warn!(operation = "control_initialize", %error, "automation access unavailable; continuing ordinary server startup");
     }
     if let Some(path) = options.resource_catalog_path {
         let _ = state.resources.set(resources::ResourceService::new(path));
@@ -684,6 +694,7 @@ async fn restore_snapshot_data(
     {
         let mut tree = state.tree.write().await;
         *tree = snapshot.tree;
+        state.events.sync_monitoring_tree(&tree);
         let mut preferences = state.workspace_close_preferences.write().await;
         preferences.clear();
         for preference in persisted_close_preferences {
