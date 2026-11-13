@@ -312,7 +312,7 @@ class native_smoke_tests(unittest.TestCase):  # Native actions are represented e
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)  # Require the fixture itself to execute successfully.
             rows = (base / 'capture').read_text().splitlines()  # Inspect actual environment/argv expansion rather than source substrings.
             self.assertEqual(rows[:4], [str(base / 'private-install'), fixed['HOME'], fixed['XDG_DATA_HOME'], fixed['XDG_RUNTIME_DIR']])  # Pin launcher installation and session context.
-            self.assertEqual(rows[4:8], ['run', '--user', '--arch=x86_64', '--branch=' + smoke.packages.FLATPAK_BRANCH])  # Select the exact private native application variant.
+            self.assertEqual(rows[4:9], ['run', '--user', '--no-documents-portal', '--arch=x86_64', '--branch=' + smoke.packages.FLATPAK_BRANCH])  # Select the exact private native application variant.
             for key in keys:  # Every intended client state value must cross the sandbox boundary explicitly.
                 self.assertIn('--env=' + key + '=' + environment[key], rows)  # Preserve lifecycle values while fixing launcher-side environment.
             self.assertEqual(rows[-4:], [smoke.packages.APP_ID, '--cwd', '/fixture-project', 'ls'])  # Preserve the exact application and original command arguments.
@@ -341,9 +341,13 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
                 path.touch()  # No placeholder is executable or executed.
             state = SimpleNamespace(mode=mode, base=base, work=work, logs=logs, calls=[], created=False, started=False, stopped=False, clock=0.0)  # Track resource custody independently of returned evidence.
             sources = {name: container_fixture.sha(root / name) for name in container_fixture.source_files}  # Use real current implementation hashes.
-            stdout = 'ILIUM_ANIMATION_BEGIN\n{}\n{}\n{}\n{}\nILIUM_ANIMATION_END\n'  # Deliberately not animation qualification; this fixture tests the runtime layer only.
-            record = fixture_record('deb', 'ubuntu:22.04', 'x86_64', sources, stdout, 'fixture stderr\n')  # Supply complete synthetic guest evidence for the runtime positive case.
+            stdout = '' if mode == 'guest-rejected' else 'ILIUM_ANIMATION_BEGIN\n{}\n{}\n{}\n{}\nILIUM_ANIMATION_END\n'  # An early guest failure never fabricates application output.
+            stderr = '' if mode == 'guest-rejected' else 'fixture stderr\n'  # Keep unattempted transaction streams empty.
+            record = fixture_record('deb', 'ubuntu:22.04', 'x86_64', sources, stdout, stderr)  # Preserve the complete positive fixture in every existing mode.
             nonce, unit = record['nonce'], record['unit']  # Preserve exact fresh-name relationships.
+            if mode == 'guest-rejected':  # Model failure before namespace admission or user-manager startup.
+                record['guest'] = {'schema': 1, 'nonce': nonce, 'state': 'failed', 'case_exit_code': None, 'user_manager_retired': False, 'errors': ['cgroup namespace root is not a writable unified hierarchy'], 'case.stdout_sha256': hashlib.sha256(b'').hexdigest(), 'case.stderr_sha256': hashlib.sha256(b'').hexdigest(), 'namespace_diagnostics': {'synthetic_mount_row': '1 0 0:1 /foreign /sys/fs/cgroup rw - cgroup2 cgroup rw'}}  # Synthetic failed evidence cannot qualify a lane.
+            state.expected_guest = record['guest']  # Compare opaque recovered observations with the exact guest bytes supplied.
             group = route('/sys/fs/cgroup/system.slice/' + unit)  # Test the exact fallback used even after partial startup.
             identity = 'd' * 64  # Model a complete immutable Docker ID.
             def allocate(**options):  # Replace only the private-work allocator.
@@ -388,17 +392,18 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
                 elif argv[:2] == ['/usr/bin/systemctl', 'show']:  # Exercise the real structured unit_state parser.
                     values = dict.fromkeys(container_fixture.unit_keys, '')  # Include every required property exactly once.
                     missing = not state.started or mode == 'collected-live'  # A collected unit can still have a retained physical group.
-                    values.update(LoadState='not-found' if missing else 'loaded', ActiveState='inactive' if missing or state.stopped else 'active', SubState='exited' if mode == 'complete' else 'running', Description='foreign' if mode == 'foreign-unit' else 'Ilium distribution fixture ' + nonce, Transient='yes', Delegate='yes', ControlGroup='' if missing or state.stopped else '/system.slice/' + ('foreign.service' if mode == 'foreign-group' else unit), Result='success', ExecMainCode='1', ExecMainStatus='0')  # Model manager state separately from kernel presence.
+                    values.update(LoadState='not-found' if missing else 'loaded', ActiveState='inactive' if missing or state.stopped else 'active', SubState='exited' if mode in ('complete', 'guest-rejected') else 'running', Description='foreign' if mode == 'foreign-unit' else 'Ilium distribution fixture ' + nonce, Transient='yes', Delegate='yes', ControlGroup='' if missing or state.stopped else '/system.slice/' + ('foreign.service' if mode == 'foreign-group' else unit), Result='success', ExecMainCode='1', ExecMainStatus='0')  # Model manager state separately from kernel presence.
                     output = ''.join(key + '=' + values[key] + '\n' for key in container_fixture.unit_keys)  # Retain the actual property parsing boundary.
                     code = 4 if missing else 0  # Only explicit not-found evidence permits this nonzero result.
                 elif argv[0] == '/usr/bin/systemd-run':  # Model a partial or completed service start.
+                    state.launch_environment = dict(options.get('env', {}))  # Distinguish the client's sanitized environment from the transient service's explicit environment.
                     state.started = True  # Arm retained resource state before reporting the startup result.
                     group.mkdir(parents=True)  # No real cgroup is ever created.
                     (group / 'memory.max').write_text('3221225472')  # Keep outer budget readback active in the positive case.
                     (group / 'pids.max').write_text('1024')  # Never alter the untrusted leaf ceilings.
                     control = work / 'rootfs/var/lib/ilium-container-fixture'  # This directory was made by the real install_units function.
                     (control / 'case.stdout').write_text(stdout, encoding='utf-8')  # Retain actual diagnostic bytes through the production recovery path.
-                    (control / 'case.stderr').write_text('fixture stderr\n', encoding='utf-8')  # Keep stdout and stderr separate.
+                    (control / 'case.stderr').write_text(stderr, encoding='utf-8')  # Keep failed early-start streams empty and separate.
                     (control / 'result.json').write_text(json.dumps(record['guest']) + '\n', encoding='utf-8')  # A forged guest pass cannot erase host failure.
                     if mode == 'complete':  # Only the positive runtime fixture reaches host admission.
                         (control / 'ready.json').write_text(json.dumps(record['guest']) + '\n', encoding='utf-8')  # Preserve nonce and namespace fields.
@@ -430,9 +435,48 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
             stack.enter_context(patch.object(container_fixture.tempfile, 'mkdtemp', side_effect=allocate))  # Allocate only inside the test scope.
             stack.enter_context(patch.object(container_fixture.time, 'monotonic', side_effect=lambda: state.clock))  # Bound every loop with simulated time.
             stack.enter_context(patch.object(container_fixture.time, 'sleep', side_effect=pause))  # Never perform a blocking wait.
-            stack.enter_context(patch.object(container_fixture, 'admit_guest', return_value=record['host_admission']))  # Replace only kernel admission for this orchestration test; separate tests run that function.
+            state.admission = stack.enter_context(patch.object(container_fixture, 'admit_guest', return_value=record['host_admission']))  # Observe that rejected startup never requests host admission.
             state.result, state.record = container_fixture.run_fixture('ubuntu:22.04', 'deb', 'x86_64', base, inputs, logs, 'lane', 'false # synthetic transaction; never executed\n', 'fixture.deb', runner, sources)  # Run the real complete allocation, preparation, cleanup and evidence flow.
             yield state  # Assert custody before the outer test scope removes any retained failures.
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX bind-path fixture required; native boot acceptance remains mandatory')  # Keep the existing portable source-test boundary.
+    def test_unified_hierarchy_is_set_for_nspawn_service_without_reducing_isolation(self):  # Exercise the real launch builder through full host orchestration.
+        with patch.dict(os.environ, {'SYSTEMD_NSPAWN_UNIFIED_HIERARCHY': '0', 'SYSTEMD_NSPAWN_USE_CGNS': '0'}), self.host_fixture('complete') as state:  # Host shell overrides cannot select the fixture's topology.
+            self.assertEqual(state.result.returncode, 0, state.record)  # Require the complete synthetic custody flow to reach validation and cleanup.
+            launches = [call for call in state.calls if call[0] == '/usr/bin/systemd-run']  # Inspect actual adapter argv, not production source text.
+            self.assertEqual(len(launches), 1)  # One retained transient service owns this acceptance boot.
+            command = launches[0]  # Keep command positions available for the service-versus-guest boundary check.
+            boundary = command.index('/usr/bin/systemd-nspawn')  # systemd-run stops parsing its own options at the executable.
+            service_arguments, nspawn_arguments = command[1:boundary], command[boundary + 1:]  # Prevent the identically named nspawn option from satisfying this regression.
+            self.assertEqual([value for value in service_arguments if value.startswith('--setenv=')], ['--setenv=SYSTEMD_NSPAWN_UNIFIED_HIERARCHY=1'])  # Pin the selector exactly once on the service manager's side.
+            self.assertFalse(any('SYSTEMD_NSPAWN_' in value for value in nspawn_arguments))  # A guest environment variable cannot select nspawn's earlier mount construction.
+            self.assertEqual(state.launch_environment, {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C', 'LC_ALL': 'C'})  # Keep ambient nspawn overrides out of the client process too.
+            isolation = ('--private-users=pick', '--private-users-ownership=chown', '--private-network', '--register=no', '--settings=no', '--keep-unit', '--boot')  # These boundaries remain mandatory with an explicit hierarchy.
+            for option in isolation:  # Require every retained isolation argument once.
+                self.assertEqual(nspawn_arguments.count(option), 1, option)  # Do not silently omit or duplicate an authority-bearing option.
+            self.assertEqual([value for value in nspawn_arguments if value.startswith('--private-users')], ['--private-users=pick', '--private-users-ownership=chown'])  # A later identity-map override must fail this test.
+            self.assertFalse(any(value.startswith(('--network-', '--bind=', '--bind-user=', '--capability=', '--share-system')) for value in nspawn_arguments))  # The fix must not add a host network, writable host bind or broader privilege option.
+            self.assertEqual(nspawn_arguments[nspawn_arguments.index('--') + 1:], ['--unit=ilium-container.target'])  # Preserve the exact guest init arguments without a guest-only hierarchy workaround.
+            properties = ['Type=exec', 'Slice=system.slice', 'Delegate=yes', 'MemoryMax=3221225472', 'MemorySwapMax=0', 'TasksMax=1024', 'CPUQuota=200%', 'RuntimeMaxSec=1200', 'TimeoutStopSec=20', 'KillMode=control-group', 'RemainAfterExit=yes']  # Freeze the independently bounded owned service contract.
+            self.assertEqual([value.removeprefix('--property=') for value in service_arguments if value.startswith('--property=')], properties)  # Hierarchy selection cannot remove budget, deadline or retirement properties.
+            state.admission.assert_called_once()  # Explicit configuration never replaces independent host admission.
+            self.assertEqual(state.record['cleanup'], dict.fromkeys(('unit_retired', 'cgroup_absent', 'docker_removed', 'state_removed'), True))  # All original cleanup gates remain necessary.
+
+    def test_unified_request_cannot_make_bad_topology_or_incomplete_evidence_pass(self):  # Validate observations independently of the new launch setting.
+        sources = {name: container_fixture.sha(root / name) for name in container_fixture.source_files}  # Bind each synthetic receipt to the exact tested controllers.
+        stdout = 'ILIUM_ANIMATION_BEGIN\n{}\n{}\n{}\n{}\nILIUM_ANIMATION_END\n'  # This controller-only fixture is not installed-render qualification.
+        original = fixture_record('appimage', 'ubuntu:24.04', 'x86_64', sources, stdout)  # Use a lane that genuinely failed the native topology gate.
+        container_fixture.validate_record(original, 'appimage', 'ubuntu:24.04', 'x86_64', sources)  # Establish the complete positive schema before independent mutations.
+        mutations = [(('guest', 'namespace', 'cgroup_filesystem'), 'tmpfs'), (('guest', 'namespace', 'cgroup_writable'), False), (('guest', 'namespace', 'cgroup_mount_root'), '/foreign'), (('guest', 'namespace', 'uid_map'), [[0, 0, 65536]]), (('host_admission', 'visible_cgroup_inode'), 999), (('host_admission', 'host_namespaces', 'net'), original['guest']['namespace']['namespaces']['net']), (('source_files', container_fixture.source_files[0]), '0' * 64)]  # Each retained observation must independently reject a misleading passed state.
+        mutations += [(('cleanup', name), False) for name in ('unit_retired', 'cgroup_absent', 'docker_removed', 'state_removed')]  # Treat all four retirement gates as independent acceptance requirements.
+        for path, value in mutations:  # Keep every adverse receipt otherwise identical to the positive case.
+            changed = json.loads(json.dumps(original))  # Deep-copy nested test observations without altering the positive baseline.
+            selected = changed  # Walk only the explicitly selected receipt field.
+            for key in path[:-1]:  # Preserve all unrelated evidence.
+                selected = selected[key]  # The fixture schema is complete; missing parents must fail the test.
+            selected[path[-1]] = value  # Inject one independently discriminating observation.
+            with self.subTest(path=path), self.assertRaises(ValueError):  # No requested hierarchy flag may substitute for truthful runtime evidence.
+                container_fixture.validate_record(changed, 'appimage', 'ubuntu:24.04', 'x86_64', sources)  # Run the same validator used by independent release sealing.
 
     @unittest.skipUnless(os.name == 'posix', 'POSIX bind-path fixture required; all real Linux acceptance lanes remain mandatory')  # A Windows drive colon is intentionally invalid in the production Linux bind grammar.
     def test_host_runtime_success_and_each_failure_preserve_custody(self):  # Require failure-specific behavior, not source-string matching.
@@ -460,6 +504,24 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
                     self.assertIn(container_fixture.docker + ['rm', '--force', 'd' * 64], state.calls)  # Recover by complete ID despite no successful create response.
                 if mode == 'docker-foreign':  # Matching names cannot establish ownership.
                     self.assertFalse(any('rm' in call for call in state.calls))  # Preserve the foreign container rather than force-removing it.
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX bind-path fixture required; all real Linux acceptance lanes remain mandatory')  # Keep the existing source-runner boundary.
+    def test_rejected_guest_diagnostics_survive_successful_outer_cleanup(self):  # Poweroff success must retain the failed guest and its observations.
+        with self.host_fixture('guest-rejected') as state:  # Execute the real full host orchestration with synthetic native adapters.
+            self.assertEqual(state.result.returncode, 1)  # An unadmitted transaction cannot become accepted.
+            self.assertEqual(state.record['state'], 'failed')  # Keep outer failure independent of successful retirement.
+            self.assertEqual(state.record['guest'], state.expected_guest)  # Recover the exact diagnostic payload before deleting its private rootfs.
+            self.assertEqual(state.record['runtime'], {'Result': 'success', 'ExecMainCode': '1', 'ExecMainStatus': '0'})  # Reproduce a clean container poweroff after guest rejection.
+            self.assertEqual(state.record['cleanup'], dict.fromkeys(('unit_retired', 'cgroup_absent', 'docker_removed', 'state_removed'), True))  # Require every original cleanup gate independently.
+            self.assertFalse(state.work.exists())  # Retained diagnostics must not depend on leaking a disposable rootfs.
+            persisted = json.loads((state.logs / 'lane-fixture.json').read_text())  # Read the production record written after filesystem cleanup.
+            self.assertEqual(persisted['guest'], state.expected_guest)  # A returned Python object alone is insufficient durable recovery evidence.
+            self.assertFalse(persisted['guest']['user_manager_retired'])  # Do not invent retirement for a manager whose startup was never attempted.
+            self.assertIsNone(persisted['guest']['case_exit_code'])  # No installed package transaction ran.
+            for name in ('case.stdout', 'case.stderr'):  # Both original application-stream receipts remain empty.
+                self.assertEqual((state.logs / ('lane-' + name + '.log')).read_bytes(), b'')  # Diagnostic text cannot pollute animation output.
+            state.admission.assert_not_called()  # Failed capability validation cannot request host admission.
+            self.assertNotIn('host_admission', persisted)  # Do not retain a fabricated successful admission receipt.
 
     def test_structured_manager_errors_are_never_absence(self):  # Exercise actual property parsing instead of mocked state dictionaries.
         for stdout, status in (('', 1), ('LoadState=not-found\n', 4), (''.join(key + '=\n' for key in container_fixture.unit_keys), 1)):  # Include missing, partial and nonzero complete readbacks.
@@ -576,6 +638,7 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
                 pidfd.assert_called_once_with(1701, 0)  # Pin only the process discovered inside the owned tree.
                 close.assert_called_once_with(90)  # Both success and rejection release the retained handle.
 
+    @unittest.skipUnless(os.name == 'posix', 'the Linux container guest uses O_NOFOLLOW; real Linux acceptance lanes remain mandatory')
     def test_guest_missing_manager_and_partial_start_keep_failure_and_cleanup(self):  # Exercise the actual guest main flow before package execution.
         for mode in ('absent-bus', 'partial-start', 'retained-group', 'cleanup-error'):  # Isolate startup and retirement outcomes.
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:  # Own every redirected guest file.

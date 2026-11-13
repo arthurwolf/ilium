@@ -88,6 +88,24 @@ Describe 'Windows installer transaction contract' -Skip:([Environment]::OSVersio
         ($script:downloadTls -band ([Net.SecurityProtocolType]::Ssl3 -bor [Net.SecurityProtocolType]::Tls -bor [Net.SecurityProtocolType]::Tls11)) | Should -Be 0
         [Net.ServicePointManager]::SecurityProtocol | Should -Be $before
     }
+    It 'pins the recovery command to the resolved release after a download failure' {
+        Install-TestVersion '1.0.0'
+        $beforePath = $script:userPath
+        Mock Get-IliumLatestVersion { '2.0.0' }
+        Mock Save-IliumDownload { throw 'network failure' }
+        $previousError = [Console]::Error
+        $capturedError = New-Object IO.StringWriter
+        try {
+            [Console]::SetError($capturedError)
+            { Invoke-IliumInstall -Version 'latest' -InstallDir $script:root -BinDir $script:bin } | Should -Throw '*network failure*'
+        } finally {
+            [Console]::SetError($previousError)
+        }
+        $capturedError.ToString() | Should -Match "-Version '2\.0\.0'"
+        [IO.File]::ReadAllText((Join-Path $script:root 'current')) | Should -Be "1.0.0`n"
+        $script:userPath | Should -Be $beforePath
+        $capturedError.Dispose()
+    }
     It 'rejects unsafe <Mode> archive without selecting it' -TestCases @(@{Mode='traversal'}, @{Mode='absolute'}, @{Mode='duplicate'}, @{Mode='unexpected'}, @{Mode='partial'}, @{Mode='reparse'}, @{Mode='version'}, @{Mode='tampered-animation'}) {
         param($Mode)
         Install-TestVersion '1.0.0'
@@ -105,6 +123,35 @@ Describe 'Windows installer transaction contract' -Skip:([Environment]::OSVersio
             else { [IO.File]::Copy($script:fixtureArchive, $Destination) }
         }
         { Install-TestVersion '2.0.0' } | Should -Throw '*Archive checksum mismatch*'
+        [IO.File]::ReadAllText((Join-Path $script:root 'current')) | Should -Be "1.0.0`n"
+    }
+    It 'installs a declared partial release and rejects a changed checksum manifest' {
+        $script:fixtureArchive = New-TestRelease '1.0.0'
+        $script:badPartialChecksum = $false
+        Mock Save-IliumDownload {
+            param($Url, $Destination)
+            $hash = (Get-FileHash -LiteralPath $script:fixtureArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+            $sums = "$hash  ilium-linux-x86_64.tar.gz`n$hash  ilium-windows-x86_64.zip`n"
+            $bytes = [Text.Encoding]::ASCII.GetBytes($sums)
+            $algorithm = [Security.Cryptography.SHA256]::Create()
+            try { $digest = ([BitConverter]::ToString($algorithm.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() }
+            finally { $algorithm.Dispose() }
+            if ($Url.EndsWith('/SHA256SUMS')) {
+                if ($script:badPartialChecksum) { $sums = $sums.Replace($hash, ('0' * 64)) }
+                [IO.File]::WriteAllText($Destination, $sums, [Text.Encoding]::ASCII)
+            } elseif ($Url.EndsWith('/AVAILABILITY')) {
+                $rows = @('ilium-availability-v1', 'tag v1.0.0', ('commit ' + ('a' * 40)),
+                    ('selection-sha256 ' + ('b' * 64)), ('checksums-sha256 ' + $digest),
+                    'available ilium-linux-x86_64.tar.gz', 'omitted ilium-linux-aarch64.tar.gz',
+                    'available ilium-windows-x86_64.zip', 'omitted ilium-macos-aarch64.tar.gz',
+                    'omitted ilium-macos-x86_64.tar.gz')
+                [IO.File]::WriteAllText($Destination, (($rows -join "`n") + "`n"), [Text.Encoding]::ASCII)
+            } else { [IO.File]::Copy($script:fixtureArchive, $Destination) }
+        }
+        Invoke-IliumInstall -Version '1.0.0' -InstallDir $script:root -BinDir $script:bin
+        [IO.File]::ReadAllText((Join-Path $script:root 'current')) | Should -Be "1.0.0`n"
+        $script:badPartialChecksum = $true
+        { Invoke-IliumInstall -Version '1.0.0' -InstallDir $script:root -BinDir $script:bin } | Should -Throw
         [IO.File]::ReadAllText((Join-Path $script:root 'current')) | Should -Be "1.0.0`n"
     }
     It 'supports spaces and Unicode in owned directories' {

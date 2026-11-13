@@ -1698,7 +1698,7 @@ fn save_markdown_board_checked(
     if expected_revision.map_or(!current.is_empty(), |expected| current != expected) {
         return Err(BoardWriteFailure {
             message: format!(
-                "{} changed outside this board; press r to reload before editing",
+                "changed outside this board; press r to reload before editing: {}",
                 path.display()
             ),
             unchanged: true,

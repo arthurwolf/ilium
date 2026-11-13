@@ -62,6 +62,15 @@ impl Fixture {
             .agent_setup
             .never_ask_projects
             .push(project.clone());
+        // The launcher canonicalizes the project root (macOS reaches its temp
+        // dir through `/var` -> `/private/var`, Windows may hand out 8.3 short
+        // names), so the suppression list needs the canonical spelling too.
+        if let Ok(canonical_project) = ilium_platform::paths::canonicalize(&project) {
+            settings
+                .agent_setup
+                .never_ask_projects
+                .push(canonical_project);
+        }
         settings.onboarding.finish();
         settings.onboarding.ai_enabled = false;
         settings.triggers.startup_complete.clear();
@@ -99,7 +108,17 @@ impl Fixture {
                 ilium_client::AGENT_SETUP_HOME_ENV,
                 root.path().join("agent-home"),
             ),
+            // The animation preference is one global file below the
+            // `directories` configuration directory, which on macOS is
+            // `$HOME/Library/Application Support/ilium` and ignores both
+            // `XDG_CONFIG_HOME` and `ILIUM_CONFIG_DIR`. Without a private
+            // home, the second scope of a test run adopted the first scope's
+            // global animation (and a developer's real one) instead of its
+            // own project file. Appended last: `environment[3]` is the
+            // socket directory.
+            ("HOME", root.path().join("home")),
         ];
+        std::fs::create_dir_all(root.path().join("home")).unwrap();
         Self {
             _root: root,
             _runtime: runtime,
@@ -386,8 +405,28 @@ async fn apply_recommendations(
 }
 
 async fn open_animation_settings(tui: &PtySession) {
-    tui.write(b"\x02").unwrap();
-    screen_contains(tui, "LEADER (press a letter").await;
+    // The prefix key is a toggle, so it is re-sent only while the status bar
+    // still reports plain NORMAL mode after a full grace period. A key that
+    // reaches the client while it is still re-laying out after the resize is
+    // not guaranteed to be the one that opens the leader on a slow runner.
+    let leader_deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        tui.write(b"\x02").unwrap();
+        let grace = tokio::time::Instant::now() + Duration::from_secs(4);
+        while !tui.screen_text().contains("LEADER (press a letter")
+            && tokio::time::Instant::now() < grace
+        {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if tui.screen_text().contains("LEADER (press a letter") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < leader_deadline,
+            "leader never opened in real PTY:\n{}",
+            tui.screen_text()
+        );
+    }
     retain_screen(tui, "settings-leader");
     tui.write(b":").unwrap();
     screen_contains(tui, "⚙ Settings").await;

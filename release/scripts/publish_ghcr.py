@@ -69,6 +69,7 @@ def prepare(arguments, environment):
             receipt.get('commit') == metadata['commit'] and receipt.get('assets') == assets and
             isinstance(receipt.get('release_id'), int),
             'GHCR payload differs from the published immutable GitHub release')
+    pipeline.validate_qualified_publication(arguments.candidate, metadata, qualification)
     completed = release_tool.read_json(arguments.completed_qualification)
     require(completed.get('schema') == 1 and completed.get('state') == 'passed' and
             completed.get('publication_allowed') is True and
@@ -76,6 +77,7 @@ def prepare(arguments, environment):
             completed.get('tag') == tag and completed.get('commit') == metadata['commit'] and
             completed.get('archives') == metadata['archives'],
             'GHCR publication requires all five completed public installation receipts')
+    pipeline.validate_qualified_publication(arguments.candidate, metadata, completed)
     channel = release_tool.read_json(arguments.channel_readback)
     require(channel.get('schema') == 1 and channel.get('state') == 'passed' and
             channel.get('immutable') is True and channel.get('tag') == tag and
@@ -369,6 +371,7 @@ def main(argv=None):
     try:
         arguments = parser().parse_args(argv)
         plan = prepare(arguments, os.environ)
+        pipeline.require_remote_tag(plan['tag'], plan['commit'])
         with tempfile.TemporaryDirectory(prefix='ilium-ghcr-auth-') as scratch:
             client = OrasClient(arguments.oras, os.environ['GITHUB_ACTOR'],
                                 os.environ['GHCR_TOKEN'], scratch)

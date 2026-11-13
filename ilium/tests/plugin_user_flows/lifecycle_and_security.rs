@@ -335,6 +335,7 @@ fn usr_129_keygen_reports_the_private_key_path_with_mode_0600() {
     assert_eq!(result_exit_code(&output), 0);
     let private_key = out_dir.join("publisher.key");
     assert!(private_key.exists());
+    #[cfg(unix)]
     assert_eq!(file_mode(&private_key), 0o600);
     let text = serde_json::to_string(&output.stdout_jsonl).unwrap();
     assert!(

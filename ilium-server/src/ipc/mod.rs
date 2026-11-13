@@ -323,11 +323,17 @@ mod tests {
             .await
             .expect("Detach must drain final events and close the prior stream");
 
-            let first_reply: ServerEvent =
-                tokio::time::timeout(TEST_DEADLINE, read_frame(&mut queued))
-                    .await
-                    .expect("queued request was not admitted")
-                    .expect("read queued error reply");
+            let first_reply: ServerEvent = tokio::time::timeout(TEST_DEADLINE, async {
+                loop {
+                    match read_frame(&mut queued).await {
+                        Ok(ServerEvent::BlockingErrorsSnapshot { .. }) => {}
+                        other => return other,
+                    }
+                }
+            })
+            .await
+            .expect("queued request was not admitted")
+            .expect("read queued error reply");
             assert!(
                 matches!(first_reply, ServerEvent::Error { message } if message.contains(wrong_session.as_str())),
                 "cycle {cycle} lost or reordered its first request"

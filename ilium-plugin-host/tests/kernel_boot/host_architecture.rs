@@ -660,17 +660,20 @@ fn hst_023_a_second_writer_cannot_open_the_store_while_the_first_holds_it() {
 /// REQ: HST-023
 #[test]
 fn hst_023_the_store_file_is_replaced_atomically_and_owner_only() {
-    use std::os::unix::fs::PermissionsExt;
     let (_dir, path) = temp_grant_path();
     let mut store = GrantStore::open(&path).expect("open");
     let plugin = ilium_plugin_api::ids::PluginId("ilium.core.tree".to_owned());
     store.set_granted(&plugin, &some_grants(2)).expect("write");
-    let mode = std::fs::metadata(&path)
-        .expect("file exists")
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(mode, 0o600);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path)
+            .expect("file exists")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
     let parsed: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).expect("read"))
         .expect("valid json after a write");
     assert!(parsed.is_object() || parsed.is_array());

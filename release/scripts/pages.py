@@ -152,6 +152,20 @@ def validate_metadata(metadata, targets):
     require(all(isinstance(value, str) and re.fullmatch('[0-9a-f]{64}', value) for value in digests), 'invalid deployment digest')
 
 
+def verify_preview_pins(root, targets):
+    """When the source tree carries preview pins, install.sh must hold exactly the generated pin block."""
+    pins = root / 'release/linux-preview-pins.json'
+    if not pins.is_file():
+        return
+    pinned = release_tool.load_preview_pins(pins, targets)
+    text = text_content((root / 'release/install.sh').read_bytes())
+    expected = release_tool.preview_pins_block(pinned)
+    require(text.count(release_tool.PREVIEW_PINS_START) == 1 and text.count(release_tool.PREVIEW_PINS_END) == 1, 'installer needs exactly one preview pin block')
+    start = text.index(release_tool.PREVIEW_PINS_START)
+    end = text.index(release_tool.PREVIEW_PINS_END) + len(release_tool.PREVIEW_PINS_END)
+    require(text[start:end] == expected, 'installer preview pin block differs from linux-preview-pins.json')
+
+
 def verify_pages(output, release_sha256sums, *, source_root=None, manifest=None):
     """Recheck inventory, hashes, generated site and current canonical bytes."""
     root = Path(source_root) if source_root is not None else SOURCE_ROOT
@@ -170,6 +184,7 @@ def verify_pages(output, release_sha256sums, *, source_root=None, manifest=None)
     require(metadata['release_sha256sums_sha256'] == release_tool.digest(sums_content), 'deployment checksum source identity differs')
     require(metadata['release_sha256sums'] == sums, 'deployment archive checksums differ from candidate SHA256SUMS')
     expected = site_sources(root, targets, metadata['release_tag']) | installer_sources(root, targets)
+    verify_preview_pins(root, targets)
     for name, content in expected.items():
         require((output / name).read_bytes() == content, 'Pages resource differs from canonical source: ' + name)
         require(metadata['files'][name] == release_tool.digest(content), 'Pages manifest resource digest differs: ' + name)

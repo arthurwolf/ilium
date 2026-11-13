@@ -1,8 +1,10 @@
 """Parse the actual workflow graph and exercise release evidence gates offline."""
 from copy import deepcopy
+import fnmatch
 import hashlib
 import json
-from pathlib import Path, PureWindowsPath
+import os
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import sys
 import tempfile
@@ -19,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'release/scripts'))
 import release_tool
 import release_pipeline as pipeline
+import release_selection
 import pages
 import build_linux_packages as linux_packages
 import smoke_installed_animation as animation_gate
@@ -29,7 +32,8 @@ def synthetic_animation_receipt(target, pair_directory, source_inputs, *,
                                 client_hash='e' * 64, server_hash='f' * 64,
                                 helper_hash='0' * 64, audit_hash='c' * 64):
     """Create an inert but complete publication-validator fixture for one target."""
-    pair = PureWindowsPath(pair_directory) if target['os'] == 'windows' else Path(pair_directory)
+    # Linux container and host paths are POSIX even when the test runs on Windows.
+    pair = PureWindowsPath(pair_directory) if target['os'] == 'windows' else PurePosixPath(pair_directory)
     client, server, helper = target['executables']
     catalogue = {'type': 'artifact', 'gate': 'installed_catalogue',
                  'packages': ['beach', 'carpet'], 'client_path': str(pair / client),
@@ -244,6 +248,115 @@ class WorkflowTests(unittest.TestCase):
     def setUp(self):
         self.workflow = yaml.load((ROOT / '.github/workflows/release.yml').read_text(), Loader=yaml.BaseLoader)
 
+    def test_linux_preview_tag_cannot_trigger_full_release(self):
+        patterns = self.workflow['on']['push']['tags']
+
+        def matches(tag):
+            selected = False
+            for pattern in patterns:
+                negative = pattern.startswith('!')
+                if fnmatch.fnmatchcase(tag, pattern[1:] if negative else pattern):
+                    selected = not negative
+            return selected
+
+        self.assertTrue(matches('v0.1.1'))
+        self.assertFalse(matches('v0.1.1-linux.1'))
+        self.assertFalse(matches('v0.1.1-linux.2'))  # ARM64 is published by hand, not by the tag trigger
+
+    def test_linux_preview_test_scope_keeps_product_packages_and_rejects_other_targets(self):
+        full = pipeline.native_workspace_scope('full', 'x86_64-unknown-linux-gnu')
+        preview = pipeline.native_workspace_scope('linux-x86-preview', 'x86_64-unknown-linux-gnu')
+        self.assertEqual(full, ['--workspace'])
+        self.assertEqual(preview, ['--workspace', '--exclude', 'ilium-plugin-*'])
+        for command in (pipeline.native_clippy_command('linux-x86-preview', 'x86_64-unknown-linux-gnu'),
+                        pipeline.native_test_command('linux-x86-preview', 'x86_64-unknown-linux-gnu', ['--lib'])):
+            self.assertEqual(command[3:6], preview)
+            self.assertIn('--target', command)
+        for target in ('aarch64-unknown-linux-gnu', 'x86_64-pc-windows-msvc'):
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                pipeline.native_workspace_scope('linux-x86-preview', target)
+        with self.assertRaises(ValueError):
+            pipeline.native_workspace_scope('unknown', 'x86_64-unknown-linux-gnu')
+
+    def test_preview_integration_scope_retains_product_targets_in_mixed_packages(self):
+        # Package exclusion alone cannot remove preview suites inside product crates.
+        metadata = {'workspace_members': ['product', 'client', 'plugin'], 'packages': [
+            {'id': 'product', 'name': 'ilium', 'targets': [
+                {'name': 'ilium', 'kind': ['bin']},
+                {'name': 'pty_tui_smoke', 'kind': ['test']},
+                {'name': 'cli_compat', 'kind': ['test']},
+                {'name': 'plugin_cli', 'kind': ['test']}]},
+            {'id': 'client', 'name': 'ilium-client', 'targets': [
+                {'name': 'plugin_render', 'kind': ['test']},
+                {'name': 'settings_save', 'kind': ['test']}]},
+            {'id': 'plugin', 'name': 'ilium-plugin-host', 'targets': [
+                {'name': 'host_runtime', 'kind': ['test']}]}]}
+        arguments = pipeline.preview_integration_arguments(metadata)
+        separator = arguments.index('--')
+        self.assertEqual(arguments[:separator], [
+            '--test', 'cli_compat', '--test', 'pty_tui_smoke', '--test', 'settings_save'])
+        self.assertEqual(arguments[separator + 1:], [
+            '--skip', 'reference_cli_compatibility::',
+            '--skip', 'cli_reference::f_111_hidden_commands_work_with_no_plugins',
+            '--skip', 'animations::f_102_an_old_format_iliumanim_package_is_refused_with_package_old_format'])
+        # The animation probe, Save-button and PTY checks must never be filtered.
+        self.assertNotIn('animations::f_104', arguments)
+        self.assertNotIn('settings_save', arguments[separator + 1:])
+        self.assertNotIn('pty_tui_smoke', arguments[separator + 1:])
+        self.assertNotIn('host_runtime', arguments)
+
+    def test_arm64_preview_scope_is_explicit_and_target_bound(self):
+        profile = 'linux-arm64-preview'
+        target = 'aarch64-unknown-linux-gnu'
+        scope = pipeline.native_workspace_scope(profile, target)
+        self.assertEqual(scope, ['--workspace', '--exclude', 'ilium-plugin-*'])
+        for command in (pipeline.native_clippy_command(profile, target),
+                        pipeline.native_test_command(profile, target, ['--lib'])):
+            self.assertEqual(command[3:6], scope)
+            self.assertIn(target, command)
+        for other in ('x86_64-unknown-linux-gnu', 'aarch64-apple-darwin'):
+            with self.subTest(target=other), self.assertRaises(ValueError):
+                pipeline.native_workspace_scope(profile, other)
+        with self.assertRaises(ValueError):
+            pipeline.native_test_command(profile, target, ['--test', '*'])
+
+    def test_preview_integration_scope_fails_closed_on_empty_or_invalid_workspace(self):
+        for metadata in ({'workspace_members': [], 'packages': []},
+                         {'workspace_members': ['missing'], 'packages': []}):
+            with self.subTest(metadata=metadata), self.assertRaises(ValueError):
+                pipeline.preview_integration_arguments(metadata)
+        with self.assertRaises(ValueError):
+            pipeline.native_test_command('linux-x86-preview', 'x86_64-unknown-linux-gnu', ['--test', '*'])
+
+    def test_linux_preview_workflow_qualifies_without_publishing(self):
+        path = ROOT / '.github/workflows/linux-preview.yml'
+        workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(set(workflow['on']), {'workflow_call'})
+        self.assertEqual(workflow['permissions']['contents'], 'read')
+        caller = self.workflow['jobs']['linux-preview']
+        self.assertEqual(caller['uses'], './.github/workflows/linux-preview.yml')
+        self.assertEqual(caller['if'], "github.event_name == 'workflow_dispatch' && inputs.release_tag == 'v0.1.1-linux.3'")
+        self.assertEqual(self.workflow['jobs']['source']['if'], "github.event_name != 'workflow_dispatch' || (inputs.release_tag != 'v0.1.1-linux.3' && inputs.release_tag != 'v0.1.1-preview.4' && inputs.release_tag != 'v0.1.1-preview.5')")
+        macos = self.workflow['jobs']['macos-preview']
+        self.assertEqual(macos['uses'], './.github/workflows/macos-preview.yml')
+        self.assertEqual(macos['if'], "github.event_name == 'workflow_dispatch' && (inputs.release_tag == 'v0.1.1-preview.4' || inputs.release_tag == 'v0.1.1-preview.5')")
+        self.assertEqual(caller['permissions']['contents'], 'read')
+        jobs = workflow['jobs']
+        native = jobs['native']
+        packages = jobs['linux-packages']
+        self.assertIn('native', packages['needs'])
+        for job in jobs.values():
+            self.assertNotEqual(job.get('permissions', {}).get('contents'), 'write')
+        native_commands = '\n'.join(step.get('run', '') for step in native['steps'])
+        package_commands = '\n'.join(step.get('run', '') for step in packages['steps'])
+        self.assertIn('--qualification-profile linux-x86-preview', native_commands)
+        self.assertIn('x86_64-unknown-linux-gnu', native_commands)
+        for gate in ('build_linux_packages.py build', 'smoke_linux_packages.py inspect',
+                     'smoke_linux_packages.py containers', 'smoke_linux_packages.py host',
+                     'native_sandbox_runner.py', 'vm_smoke.py', 'validate_animation_smoke.py'):
+            with self.subTest(gate=gate):
+                self.assertIn(gate, package_commands)
+
     def test_workspace_cargo_config_does_not_install_host_specific_rustc_wrapper(self):
         config = tomllib.loads((ROOT / '.cargo/config.toml').read_text(encoding='utf-8'))
         self.assertNotIn(
@@ -265,7 +378,7 @@ class WorkflowTests(unittest.TestCase):
         for job_name, binary in expected_binaries.items():
             with self.subTest(job=job_name):
                 steps = ci['jobs'][job_name]['steps']
-                test_step = next(step for step in steps if step.get('name') == 'cargo test')
+                test_step = next(step for step in steps if step.get('name') == 'cargo test (integration tests, serialized)')
                 environment = test_step['env']
                 self.assertEqual(environment.get('RUST_TEST_THREADS'), '1')
                 self.assertEqual(environment.get('ILIUM_PTY_SMOKE_BINARY'), binary)
@@ -279,7 +392,7 @@ class WorkflowTests(unittest.TestCase):
     def test_linux_workspace_tests_run_in_an_owned_delegated_cgroup_unit(self):
         ci = yaml.load((ROOT / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)
         steps = ci['jobs']['test-linux']['steps']
-        test_step = next(step for step in steps if step.get('name') == 'cargo test')
+        test_step = next(step for step in steps if step.get('name') == 'cargo test (integration tests, serialized)')
         command = test_step['run']
 
         self.assertIn('systemd-run --user --wait --pipe --collect', command)
@@ -345,7 +458,7 @@ class WorkflowTests(unittest.TestCase):
             configured = pipeline.configure_rust_toolchain_environment(environment, work)
 
             rustup_home = work / 'rustup-home'
-            self.assertEqual(configured['RUSTUP_HOME'], str(rustup_home))
+            self.assertEqual(os.path.realpath(configured['RUSTUP_HOME']), os.path.realpath(str(rustup_home)))
             self.assertTrue(rustup_home.is_dir())
 
     def test_rustup_install_command_uses_the_workspace_pin_without_reinstalling_host_target(self):
@@ -407,6 +520,69 @@ class WorkflowTests(unittest.TestCase):
         steps = self.workflow['jobs']['source']['steps']
         self.assertTrue(any('release_pipeline.py source' in step.get('run', '') for step in steps))
 
+    def test_explicit_source_selection_filters_matrix_without_weakening_catalog(self):
+        manifest = ROOT / 'release/targets.toml'
+        workspace = ROOT / 'Cargo.toml'
+        commit = 'a' * 40
+        tag = 'v' + pipeline.workspace_version(workspace)
+        targets = release_tool.load_targets(manifest)
+        intent = release_selection.resolve_intent(manifest=manifest, expected_tag=tag, expected_commit=commit)
+        selected = [next(row['rust_target'] for row in targets if row['os'] == system)
+                    for system in ('linux', 'windows')]
+        intent.update(mode='partial', selected_targets=selected,
+                      omitted_targets={row['rust_target']: 'Native qualification unavailable.'
+                                       for row in targets if row['rust_target'] not in selected})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'intent.json'
+            path.write_bytes(release_selection.canonical_bytes(intent))
+            with patch.object(pipeline, 'git_identity', return_value=commit):
+                matrix, actual_tag = pipeline.source_matrix(manifest, workspace, tag, selection_path=path)
+                self.assertEqual(actual_tag, tag)
+                self.assertEqual(matrix['include'], [row for row in targets if row['rust_target'] in selected])
+                arguments = SimpleNamespace(manifest=manifest, workspace=workspace, tag=tag, selection_intent=path)
+                with patch.object(pipeline, 'gh_output') as output, patch.object(pipeline, 'emit'):
+                    pipeline.source(arguments)
+                declared = output.call_args.kwargs
+                canonical = release_selection.canonical_bytes(release_selection.validate_intent(
+                    intent, manifest=manifest, expected_tag=tag, expected_commit=commit))
+                self.assertEqual(json.loads(declared['selection']), json.loads(canonical))
+                self.assertEqual(declared['selection_sha256'], hashlib.sha256(canonical).hexdigest())
+                self.assertEqual(json.loads(declared['matrix']), matrix)
+                intent['commit'] = 'b' * 40
+                path.write_bytes(release_selection.canonical_bytes(intent))
+                with self.assertRaises(release_tool.ReleaseError):
+                    pipeline.source_matrix(manifest, workspace, tag, selection_path=path)
+            self.assertEqual(len(release_tool.load_targets(manifest)), 5)
+
+    def test_source_binds_reviewed_policy_to_checkout_identity(self):
+        manifest = ROOT / 'release/targets.toml'
+        workspace = ROOT / 'Cargo.toml'
+        tag = 'v' + pipeline.workspace_version(workspace)
+        commit = 'a' * 40
+        targets = release_tool.load_targets(manifest)
+        selected = [next(row['rust_target'] for row in targets if row['os'] == system)
+                    for system in ('linux', 'windows')]
+        intent = release_selection.resolve_intent(manifest=manifest, expected_tag=tag, expected_commit=commit)
+        intent.update(kind='target-selection-policy', mode='partial', selected_targets=selected,
+                      omitted_targets={row['rust_target']: 'Synthetic unavailable target.'
+                                       for row in targets if row['rust_target'] not in selected})
+        for field in ('tag', 'commit', 'target_manifest_sha256'):
+            del intent[field]
+        with tempfile.TemporaryDirectory() as directory:
+            policy = Path(directory) / 'policy.json'
+            policy.write_text(json.dumps(intent), encoding='utf-8')
+            with patch.object(pipeline, 'git_identity', return_value=commit), patch.object(release_selection, 'require_committed_policy', return_value=policy.read_bytes()):
+                matrix, actual_tag, resolved = pipeline.source_selection(manifest, workspace, tag, policy_path=policy)
+            self.assertEqual(actual_tag, tag)
+            self.assertEqual(resolved['commit'], commit)
+            self.assertEqual(matrix['include'], [row for row in targets if row['rust_target'] in selected])
+            self.assertFalse(resolved['publication_allowed'])
+            arguments = pipeline.parser().parse_args(['source', '--tag', tag, '--selection-policy', str(policy)])
+            with patch.object(pipeline, 'git_identity', return_value=commit), patch.object(release_selection, 'require_committed_policy', return_value=policy.read_bytes()), patch.object(pipeline, 'gh_output') as output, patch.object(pipeline, 'emit'):
+                pipeline.source(arguments)
+            self.assertEqual(json.loads(output.call_args.kwargs['matrix']), matrix)
+            self.assertEqual(json.loads(output.call_args.kwargs['selection']), resolved)
+
     def test_linux_package_job_follows_the_manifest_and_feeds_the_candidate(self):
         targets = [row for row in release_tool.load_targets(ROOT / 'release/targets.toml') if row['os'] == 'linux']
         job = self.workflow['jobs']['linux-packages']
@@ -437,7 +613,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('--packages linux-packages', vm['run'])
         self.assertIn('--native-directory native-linux', vm['run'])
         self.assertIn('--arch x86_64', vm['run'])
-        self.assertIn('--accelerator tcg', vm['run'])
+        self.assertIn('--accelerator "$accelerator"', vm['run'])
         self.assertIn('--audit-report native-linux/native-audit.json', vm['run'])
         self.assertIn('--workspace Cargo.toml', vm['run'])
         self.assertIn('--manifest release/targets.toml', vm['run'])
@@ -495,7 +671,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(download['with']['path'], 'macos-packages')
         self.assertEqual(download['with']['merge-multiple'], 'true')
         subjects = next(step['with']['subject-path'] for step in self.workflow['jobs']['attest']['steps'] if 'subject-path' in step.get('with', {}))
-        for pattern in ('candidate/*.zip', 'candidate/*.pkg', 'candidate/*.dmg', 'candidate/macos-packages-*.json', 'candidate/macos-smoke-*.json'):
+        for pattern in ('candidate/*.zip', 'candidate/*.pkg', 'candidate/*.dmg', 'candidate/macos-packages-*.json', 'candidate/macos-smoke-*.json', 'candidate/macos-evidence-*.json'):
             self.assertIn(pattern, subjects)
 
     def linux_smoke_commands(self) -> dict[str, list[str]]:  # Parse actual workflow commands instead of accepting loose format substrings.
@@ -574,8 +750,9 @@ class WorkflowTests(unittest.TestCase):
 
     def test_every_workflow_pipeline_invocation_matches_actual_parser(self):
         commands = set()
-        for job_name, job in self.workflow['jobs'].items():
-            for step in job['steps']:
+        preview = yaml.load((ROOT / '.github/workflows/linux-preview.yml').read_text(), Loader=yaml.BaseLoader)
+        for job_name, job in [*self.workflow['jobs'].items(), *preview['jobs'].items()]:
+            for step in job.get('steps', []):
                 for line in step.get('run', '').splitlines():
                     if line.startswith('python release/scripts/release_pipeline.py '):
                         with self.subTest(job=job_name, step=step.get('name')):
@@ -584,8 +761,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(commands, {'source', 'native', 'aggregate', 'qualify', 'draft', 'publish', 'latest', 'deploy', 'install', 'baseline', 'recovery-ready', 'readback', 'recover'})
 
     def test_all_actions_are_sha_pinned_and_checkout_cannot_push(self):
-        for job in self.workflow['jobs'].values():
-            for step in job['steps']:
+        previews = [yaml.load((ROOT / '.github/workflows' / name).read_text(), Loader=yaml.BaseLoader) for name in ('linux-preview.yml', 'macos-preview.yml')]
+        for job in [*self.workflow['jobs'].values(), *[job for preview in previews for job in preview['jobs'].values()]]:
+            if 'uses' in job:
+                self.assertIn(job['uses'], ('./.github/workflows/linux-preview.yml', './.github/workflows/macos-preview.yml'))
+                self.assertTrue((ROOT / job['uses']).is_file())
+            for step in job.get('steps', []):
                 if 'uses' in step:
                     self.assertRegex(step['uses'], r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}$')
                     if step['uses'].startswith('actions/checkout@'):
@@ -628,7 +809,7 @@ class WorkflowTests(unittest.TestCase):
             permissions = job.get('permissions', {'contents': 'read'})
             if name == 'attest':
                 self.assertEqual(permissions, {'contents': 'read', 'id-token': 'write', 'attestations': 'write'})
-            elif name in ('draft', 'publish', 'latest', 'recover'):
+            elif name in ('draft', 'publish', 'latest', 'recover', 'publish-linux-preview'):
                 self.assertEqual(permissions, {'contents': 'write'})
             elif name == 'ghcr-package':
                 self.assertEqual(permissions, {'contents': 'read', 'packages': 'write'})
@@ -643,10 +824,15 @@ class WorkflowTests(unittest.TestCase):
 
     def test_full_native_product_checks_and_literal_commands(self):
         code = (ROOT / 'release/scripts/release_pipeline.py').read_text()
-        self.assertIn("'test', '--locked', '--workspace', '--no-fail-fast'", code)
-        self.assertIn("'clippy', '--locked', '--workspace', '--all-targets'", code)
+        target = 'x86_64-unknown-linux-gnu'
+        test_command = pipeline.native_test_command('full', target, ['--lib', '--bins'])
+        clippy_command = pipeline.native_clippy_command('full', target)
+        self.assertEqual(test_command, ['cargo', 'test', '--locked', '--workspace',
+                                        '--no-fail-fast', '--target', target, '--lib', '--bins'])
+        self.assertEqual(clippy_command, ['cargo', 'clippy', '--locked', '--workspace',
+                                          '--all-targets', '--keep-going', '--target', target,
+                                          '--', '-D', 'warnings'])
         self.assertNotIn('--skip', code)
-        self.assertNotIn('--exclude', code)
         self.assertNotIn('cargo clean', code)
         self.assertIn(pipeline.POSIX_COMMAND, code)
         self.assertIn(pipeline.WINDOWS_COMMAND, code)
@@ -662,8 +848,227 @@ class PipelineTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.targets = release_tool.load_targets(ROOT / 'release/targets.toml')
 
+    def test_release_absence_fails_closed_on_listing_errors(self):
+        with patch.object(pipeline, 'github', side_effect=pipeline.HTTPFailure(404)):
+            with self.assertRaises(pipeline.HTTPFailure):
+                pipeline.require_release_absent('v0.1.1')
+        with patch.object(pipeline, 'github', return_value=[{'tag_name': 'v0.1.1'}]):
+            with self.assertRaises(release_tool.ReleaseError):
+                pipeline.require_release_absent('v0.1.1')
+
+    def test_release_absence_checks_all_authenticated_listing_pages_for_drafts(self):
+        first = [{'tag_name': f'v1.0.{index}'} for index in range(100)]
+        with patch.object(pipeline, 'github', side_effect=[first, []]) as github:
+            pipeline.require_release_absent('v0.1.1')
+            self.assertEqual(github.call_count, 2)
+        with patch.object(pipeline, 'github', side_effect=[first, [{'tag_name': 'v0.1.1', 'draft': True}]]):
+            with self.assertRaises(release_tool.ReleaseError):
+                pipeline.require_release_absent('v0.1.1')
+        with patch.object(pipeline, 'github', side_effect=pipeline.HTTPFailure(403)):
+            with self.assertRaises(pipeline.HTTPFailure):
+                pipeline.require_release_absent('v0.1.1')
+
+    def test_remote_tag_must_resolve_to_candidate_commit(self):
+        tag = 'v0.1.1'
+        commit = 'a' * 40
+        ref = 'refs/tags/' + tag
+        cases = [
+            (f'{commit}\t{ref}\n', True),
+            (f'{"b" * 40}\t{ref}\n{commit}\t{ref}^{{}}\n', True),
+            (f'{"b" * 40}\t{ref}\n', False),
+            (f'{commit}\trefs/tags/v0.1.2\n', False),
+            (f'{commit}\t{ref}\n{commit}\t{ref}\n', False),
+            (f'{commit}\t{ref}^{{}}\n', False),
+            ('', False),
+        ]
+        for output, valid in cases:
+            with self.subTest(output=output), patch.object(
+                    pipeline.subprocess, 'run', return_value=SimpleNamespace(returncode=0, stdout=output)):
+                if valid:
+                    pipeline.require_remote_tag(tag, commit)
+                else:
+                    with self.assertRaises(release_tool.ReleaseError):
+                        pipeline.require_remote_tag(tag, commit)
+        with patch.object(pipeline.subprocess, 'run', return_value=SimpleNamespace(returncode=2, stdout='')):
+            with self.assertRaises(release_tool.ReleaseError):
+                pipeline.require_remote_tag(tag, commit)
+        with patch.object(pipeline.subprocess, 'run') as run:
+            with self.assertRaises(release_tool.ReleaseError):
+                pipeline.require_remote_tag('v0.1.1/other', commit)
+            run.assert_not_called()
+    def test_candidate_rejects_version_file_different_from_workspace(self):
+        (self.root / 'candidate.json').write_text('{"tag":"v0.1.1"}')
+        (self.root / 'VERSION').write_bytes(b'0.1.0\n')
+        with patch.object(pipeline.release_tool, 'load_targets', return_value=self.targets), \
+             patch.object(pipeline.release_tool, 'workspace_version', return_value='0.1.1'):
+            with self.assertRaisesRegex(ValueError, 'candidate VERSION differs'):
+                pipeline.candidate_data(self.root, ROOT / 'release/targets.toml', ROOT / 'Cargo.toml')
+
+    def test_candidate_rejects_a_different_checkout_commit(self):
+        (self.root / 'candidate.json').write_text(json.dumps(
+            {'schema': 1, 'tag': 'v0.1.1', 'commit': 'a' * 40}))
+        (self.root / 'VERSION').write_bytes(b'0.1.1\n')
+        with (patch.object(pipeline.release_tool, 'load_targets', return_value=self.targets),
+              patch.object(pipeline.release_tool, 'workspace_version', return_value='0.1.1'),
+              patch.object(pipeline, 'git_identity', return_value='b' * 40)):
+            with self.assertRaisesRegex(ValueError, 'candidate commit differs'):
+                pipeline.candidate_data(self.root, ROOT / 'release/targets.toml', ROOT / 'Cargo.toml')
+
+    def test_publication_and_channel_changes_recheck_tag_before_mutation(self):
+        metadata = {'tag': 'v0.1.1', 'commit': 'a' * 40}
+        args = SimpleNamespace(candidate=self.root, manifest=self.root, workspace=self.root,
+                               receipts=self.root, receipt_prefix='install-')
+        with (patch.object(pipeline, 'candidate_data', return_value=(metadata, [])),
+              patch.object(pipeline.release_tool, 'read_json', return_value={}),
+              patch.object(pipeline, 'validate_qualified_publication'),
+              patch.object(pipeline, 'require_receipt_inventory'),
+              patch.object(pipeline, 'require_remote_tag', side_effect=release_tool.ReleaseError('tag changed')),
+              patch.object(pipeline, 'github') as github,
+              patch.object(pipeline, 'upload_pages') as upload):
+            for operation in (pipeline.publish, pipeline.latest, pipeline.deploy):
+                with self.subTest(operation=operation.__name__):
+                    with self.assertRaisesRegex(release_tool.ReleaseError, 'tag changed'):
+                        operation(args)
+            github.assert_not_called()
+            upload.assert_not_called()
+
+    def test_qualification_rejects_unexpected_receipt_directories(self):
+        receipts = self.root / 'receipts'
+        receipts.mkdir()
+        for target in self.targets:
+            directory = receipts / ('install-' + target['rust_target'])
+            directory.mkdir()
+            (directory / 'receipt.json').write_text('{}')
+        pipeline.require_receipt_inventory(receipts, 'install-', self.targets)
+        (receipts / 'unexpected').mkdir()
+        args = SimpleNamespace(candidate=self.root, manifest=ROOT / 'release/targets.toml',
+                               workspace=ROOT / 'Cargo.toml', receipts=receipts,
+                               receipt_prefix='install-', output=self.root / 'qualification.json',
+                               baseline=None, public=False, previous=False, literal=False,
+                               preview_tag=False, preview_receipt=None)
+        with (patch.object(pipeline, 'candidate_data', return_value=({}, self.targets)),
+              patch.object(pipeline, 'qualify_receipts', return_value={}),
+              patch.object(pipeline, 'validate_install_evidence'),
+              patch.object(pipeline, 'publication_files', return_value=[]),
+              patch.object(pipeline, 'github') as github):
+            for operation in (pipeline.qualify, pipeline.latest):
+                with self.subTest(operation=operation.__name__):
+                    with self.assertRaisesRegex(ValueError, 'receipt directory inventory differs'):
+                        operation(args)
+            github.assert_not_called()
+
+    def test_receipt_inventory_rejects_symlinked_root_and_entry(self):
+        receipts = self.root / 'receipts'
+        receipts.mkdir()
+        for target in self.targets:
+            (receipts / ('install-' + target['rust_target'])).mkdir()
+        alias = self.root / 'alias'
+        try:
+            alias.symlink_to(receipts, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f'directory symlinks unavailable: {error}')
+        with self.assertRaisesRegex(ValueError, 'receipt directory inventory differs'):
+            pipeline.require_receipt_inventory(alias, 'install-', self.targets)
+        entry = receipts / ('install-' + self.targets[0]['rust_target'])
+        entry.rmdir()
+        entry.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'receipt directory inventory differs'):
+            pipeline.require_receipt_inventory(receipts, 'install-', self.targets)
+
+    def test_qualification_binds_package_and_installer_metadata(self):
+        # This deliberately uses synthetic metadata and a stubbed receipt validator;
+        # it tests binding, not whether a native installation actually passed.
+        metadata = {'tag': 'v0.1.1', 'commit': 'a' * 40,
+                    'archives': {'archive': 'b' * 64},
+                    'linux_packages': {'ilium.deb': 'c' * 64},
+                    'windows_installers': {'ilium.exe': 'd' * 64},
+                    'installers': {'install.sh': 'e' * 64}}
+        targets = [{'rust_target': 'synthetic-target'}]
+        receipts = {'synthetic-target': {'synthetic': True}}
+        with patch.object(pipeline, 'validate_install_receipt'):
+            original = pipeline.qualify_receipts(metadata, receipts, targets, public=False)
+            for section in ('linux_packages', 'windows_installers', 'installers'):
+                changed = deepcopy(metadata)
+                name = next(iter(changed[section]))
+                changed[section][name] = '0' * 64
+                modified = pipeline.qualify_receipts(changed, receipts, targets, public=False)
+                self.assertNotEqual(original['candidate_metadata_sha256'],
+                                    modified['candidate_metadata_sha256'])
+
+    def test_publication_rejects_assets_changed_after_qualification(self):
+        candidate = self.root / 'candidate'
+        candidate.mkdir()
+        metadata = {'tag': 'v0.1.1', 'commit': 'a' * 40,
+                    'archives': {'archive': 'b' * 64},
+                    'windows_installers': {'ilium.exe': 'c' * 64},
+                    'linux_packages': {'ilium.deb': 'd' * 64}, 'macos_packages': {},
+                    'target_receipts': {'synthetic-target': {}}}
+        (candidate / 'candidate.json').write_text(json.dumps(metadata))
+        for name in ('archive', 'ilium.exe', 'ilium.deb', 'SHA256SUMS', 'VERSION',
+                     'install.sh', 'install.ps1'):
+            (candidate / name).write_text('original ' + name)
+        with patch.object(pipeline, 'validate_install_receipt'):
+            qualification = pipeline.qualify_receipts(
+                metadata, {'synthetic-target': {}}, [{'rust_target': 'synthetic-target'}],
+                public=False)
+        qualification['qualified_assets'] = pipeline.asset_hashes(
+            path for path in pipeline.publication_files(candidate)
+            if path.name != 'qualification.json')
+        pipeline.validate_qualified_publication(candidate, metadata, qualification)
+        invalid_records = [
+            dict(qualification, schema=True),
+            dict(qualification, schema=2),
+            dict(qualification, public_transport_verified='false'),
+            dict(qualification, installation_receipts={}),
+            dict(qualification, installation_receipts={'synthetic-target': 'bad'}),
+            dict(qualification, installation_receipts={'synthetic-target': '0' * 64, 'extra': '1' * 64}),
+            {key: value for key, value in qualification.items() if key != 'installation_receipts'},
+            dict(qualification, unexpected=True),
+        ]
+        for invalid in invalid_records:
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                pipeline.validate_qualified_publication(candidate, metadata, invalid)
+        for name in ('ilium.deb', 'ilium.exe', 'install.sh', 'SHA256SUMS', 'candidate.json'):
+            with self.subTest(asset=name):
+                path = candidate / name
+                original = path.read_bytes()
+                path.write_bytes(original + b' changed')
+                with self.assertRaises(ValueError):
+                    pipeline.validate_qualified_publication(candidate, metadata, qualification)
+                path.write_bytes(original)
+        changed_metadata = deepcopy(metadata)
+        changed_metadata['linux_packages']['ilium.deb'] = '0' * 64
+        (candidate / 'candidate.json').write_text(json.dumps(changed_metadata))
+        with self.assertRaises(ValueError):
+            pipeline.validate_qualified_publication(candidate, changed_metadata, qualification)
+
+    def test_partial_publication_qualifies_availability_file(self):
+        candidate = self.root / 'partial-candidate'
+        candidate.mkdir()
+        metadata = {'tag': 'v0.1.1', 'commit': 'a' * 40,
+                    'archives': {'archive': 'b' * 64}, 'windows_installers': {},
+                    'linux_packages': {}, 'macos_packages': {},
+                    'target_receipts': {'synthetic-target': {}},
+                    'selection': {'mode': 'partial'}}
+        (candidate / 'candidate.json').write_text(json.dumps(metadata))
+        for name in ('archive', 'SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'AVAILABILITY'):
+            (candidate / name).write_text('original ' + name)
+        with patch.object(pipeline, 'validate_install_receipt'):
+            qualification = pipeline.qualify_receipts(
+                metadata, {'synthetic-target': {}}, [{'rust_target': 'synthetic-target'}], public=False)
+        qualification['qualified_assets'] = pipeline.asset_hashes(
+            path for path in pipeline.publication_files(candidate) if path.name != 'qualification.json')
+        self.assertIn('AVAILABILITY', qualification['qualified_assets'])
+        pipeline.validate_qualified_publication(candidate, metadata, qualification)
+        (candidate / 'AVAILABILITY').write_text('tampered')
+        with self.assertRaises(ValueError):
+            pipeline.validate_qualified_publication(candidate, metadata, qualification)
+
     def create_native_fixture(self):
         # Synthetic binaries/notices and receipts never enter release outputs.
+        identity = patch.object(pipeline, 'git_identity', return_value='a' * 40)
+        identity.start()
+        self.addCleanup(identity.stop)
         source = self.root / 'source'; (source / 'release/tests').mkdir(parents=True)
         shutil.copytree(ROOT / 'release/site', source / 'release/site')
         for filename in ('targets.toml', 'embedding-model.json', 'ort-source.json', 'ort-runtime.json', 'licence-sources.json', 'install.sh', 'install.ps1'):
@@ -762,6 +1167,7 @@ class PipelineTests(unittest.TestCase):
             pipeline.write_json(directory / 'native-test-harness.json', harness)
             (directory / 'SHA256SUMS').write_text(pipeline.sha(archive) + '  ' + target['archive'] + '\n')
             bridge = {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'target': target['rust_target'], 'tag': 'v0.1.0', 'archive': {'sha256': pipeline.sha(archive)}, 'native_audit': {'sha256': pipeline.sha(directory / 'native-audit.json')}, 'files': hashes, 'official_packages': dict(release_tool.APPROVED_PACKAGES), 'build_outputs': {name: {'sha256': hashes[name]} for name in target['executables']}, 'workspace_sha256': pipeline.sha(source / 'Cargo.toml'), 'lock_sha256': pipeline.sha(source / 'Cargo.lock'), 'embedding_model_register_sha256': pipeline.sha(source / 'release/embedding-model.json'), 'embedding_wrapper_sha256': embedding_wrapper_sha, 'embedding_model_files': model_hashes}
+            bridge['qualification_profile'] = 'full'
             for key, filename in (('runtime_inventory', 'runtime-inventory.json'), ('dependency_inventory', 'dependency-inventory.json'), ('embedding_receipt', 'embedding-receipt.json')):
                 bridge[key] = {'sha256': pipeline.sha(directory / filename)}
             if windows_receipt is not None:
@@ -848,7 +1254,7 @@ class PipelineTests(unittest.TestCase):
 
         with patch.object(pipeline.platform, 'system', return_value='Darwin'), \
                 patch.object(pipeline.platform, 'machine', return_value='arm64'), \
-                patch.object(pipeline.os, 'nice'), \
+                patch.object(pipeline.os, 'nice', create=True), \
                 patch.object(pipeline, 'logged', side_effect=capture_rustup_install):
             with self.assertRaises(ReachedRustupInstall):
                 pipeline.native(arguments)
@@ -857,7 +1263,7 @@ class PipelineTests(unittest.TestCase):
         command, environment = rustup_installation[0]
         self.assertEqual(command, pipeline.rustup_install_command())
         self.assertNotIn('--target', command)
-        self.assertEqual(environment['RUSTUP_HOME'], str(work / 'rustup-home'))
+        self.assertEqual(os.path.realpath(environment['RUSTUP_HOME']), os.path.realpath(str(work / 'rustup-home')))
 
     def test_windows_pester_setup_accepts_pinned_module_publisher_transition(self):
         windows_target = next(target for target in self.targets if target['os'] == 'windows')
@@ -890,7 +1296,7 @@ class PipelineTests(unittest.TestCase):
 
         with patch.object(pipeline.platform, 'system', return_value='Windows'), \
                 patch.object(pipeline.platform, 'machine', return_value='AMD64'), \
-                patch.object(pipeline.os, 'nice'), \
+                patch.object(pipeline.os, 'nice', create=True), \
                 patch.object(pipeline, 'download', side_effect=lambda _url, path, _digest: Path(path).write_bytes(b'fixture')), \
                 patch.object(pipeline, 'logged', side_effect=capture_logged):
             with self.assertRaises(ReachedPesterSetup):
@@ -899,14 +1305,34 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         self.assertEqual(len(rustup_installations), 1)
         self.assertEqual(rustup_installations[0][0], pipeline.rustup_install_command())
-        self.assertEqual(rustup_installations[0][1]['RUSTUP_HOME'], str(arguments.work / 'rustup-home'))
-        self.assertEqual(helper_environments[0]['RUSTUP_HOME'], str(arguments.work / 'rustup-home'))
-        self.assertEqual(captured_environments[0]['RUSTUP_HOME'], str(arguments.work / 'rustup-home'))
+        self.assertEqual(os.path.realpath(rustup_installations[0][1]['RUSTUP_HOME']), os.path.realpath(str(arguments.work / 'rustup-home')))
+        self.assertEqual(os.path.realpath(helper_environments[0]['RUSTUP_HOME']), os.path.realpath(str(arguments.work / 'rustup-home')))
+        self.assertEqual(os.path.realpath(captured_environments[0]['RUSTUP_HOME']), os.path.realpath(str(arguments.work / 'rustup-home')))
         setup_command = captured[0]
         self.assertEqual(setup_command[:3], ['powershell.exe', '-NoProfile', '-NonInteractive'])
         setup_script = setup_command[setup_command.index('-Command') + 1]
         self.assertIn('Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force', setup_script)
         self.assertIn('-SkipPublisherCheck', setup_script)
+
+    def test_full_aggregate_rejects_linux_preview_native_receipt(self):
+        arguments = self.create_native_fixture()
+        path = arguments.artifacts / 'native-x86_64-unknown-linux-gnu' / 'native-candidate-receipt.json'
+        receipt = json.loads(path.read_text())
+        receipt['qualification_profile'] = 'linux-x86-preview'
+        path.write_text(json.dumps(receipt))
+        with patch.object(pipeline, 'emit'):
+            with self.assertRaises(ValueError):
+                pipeline.aggregate(arguments)
+
+    def test_full_aggregate_rejects_unlabelled_native_receipt(self):
+        arguments = self.create_native_fixture()
+        path = arguments.artifacts / 'native-x86_64-unknown-linux-gnu' / 'native-candidate-receipt.json'
+        receipt = json.loads(path.read_text())
+        del receipt['qualification_profile']
+        path.write_text(json.dumps(receipt))
+        with patch.object(pipeline, 'emit'):
+            with self.assertRaises(ValueError):
+                pipeline.aggregate(arguments)
 
     def test_aggregate_real_archive_parsing_and_source_tamper_gates(self):
         arguments = self.create_native_fixture()
@@ -924,6 +1350,19 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
 
+    def test_candidate_rejects_selection_bound_to_another_commit(self):
+        arguments = self.create_native_fixture()
+        with patch.object(pipeline, 'emit'):
+            pipeline.aggregate(arguments)
+        candidate_path = arguments.output / 'candidate.json'
+        metadata = json.loads(candidate_path.read_text())
+        self.assertIn('selection', metadata)
+        self.assertEqual(metadata['selection']['commit'], 'a' * 40)
+        metadata['selection']['commit'] = 'b' * 40
+        candidate_path.write_text(json.dumps(metadata))
+        with self.assertRaises(ValueError):
+            pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+
     def test_aggregate_publishes_bound_windows_installers_and_rejects_tamper(self):
         arguments = self.create_native_fixture()
         with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
@@ -934,7 +1373,9 @@ class PipelineTests(unittest.TestCase):
         (arguments.output / 'qualification.json').write_text('{}')
         published = {path.name for path in pipeline.publication_files(arguments.output)}
         self.assertTrue(names <= published)
-        self.assertEqual(len(published), 5 + 6 + 3 + 12 + 10)
+        # Five archives, six shared assets, three Windows, twelve Linux and
+        # eighteen macOS package/receipt/evidence assets must all be published.
+        self.assertEqual(len(published), 5 + 6 + 3 + 12 + 18)
         installer = arguments.output / pipeline.windows_installers.MSI_NAME
         installer.write_bytes(installer.read_bytes() + b'changed')
         with self.assertRaises(ValueError):
@@ -1082,6 +1523,9 @@ class PipelineTests(unittest.TestCase):
             lambda marker: marker['host_events'].insert(3, {'type': 'warning', 'message': 'unknown'}),
             lambda marker: marker['host_events'][1].__setitem__('format', 'snap'),
             lambda marker: marker['host_events'][0].__setitem__('sha256', 'f' * 64),
+            lambda marker: marker['host_events'][0].__setitem__('bytes', 0),  # Reject a journal length that differs from canonical proof bytes.
+            lambda marker: marker['host_events'][0].__setitem__('path', r'C:\synthetic\deb-host-installed-animation.json'),  # Reject Windows-drive evidence for a Linux target.
+            lambda marker: marker['host_events'][2].__setitem__('log', r'C:\synthetic\deb-host.log'),  # Keep the terminal log in the same strict target path domain.
             lambda marker: marker['host_events'][2].__setitem__('log', '/tmp/foreign/deb-host.log'),
         )
         for mutate in mutations:
@@ -1128,13 +1572,16 @@ class PipelineTests(unittest.TestCase):
                 marker_path = packages / marker_name
                 marker = release_tool.read_json(marker_path)
                 marker_path.unlink()
-                log = self.root / ('seal-log-' + target['os'])
+                # Darwin exposes temporary storage through /var and /private/var aliases.
+                # Canonicalize owned fixture storage, never the recorded foreign evidence names.
+                log = (self.root / ('seal-log-' + target['os'])).resolve()
                 log.mkdir()
                 inputs = dict(workspace=arguments.workspace, manifest=arguments.manifest,
                               audit=native / 'native-audit.json',
                               archive=native / target['archive'], packages=packages,
                               target=target_name, tag='v0.1.0',
                               windows_journal=None, container_log=None, host_log=None, native_sandbox_receipt=None)
+                retained_paths: dict[str, Path] = {}  # Map only exact synthetic Linux journal names to local retained paths.
                 if target['os'] == 'windows':
                     journal = log / 'smoke.jsonl'
                     journal.write_text(''.join(json.dumps(row) + '\n' for row in marker['journal']))
@@ -1142,19 +1589,18 @@ class PipelineTests(unittest.TestCase):
                 else:
                     container_log = log / 'container'; container_log.mkdir()
                     host_log = log / 'host'; host_log.mkdir()
-                    for offset, kind in enumerate(animation_smoke.HOST_FORMATS):
-                        marker['host_events'][3 * offset]['path'] = str(
-                            host_log / (kind + '-host-installed-animation.json'))
-                        marker['host_events'][3 * offset + 2]['log'] = str(
-                            host_log / (kind + '-host.log'))
+                    for kind in animation_smoke.HOST_FORMATS:  # Keep the original Linux journal metadata POSIX on every host.
+                        for suffix in ('-host-installed-animation.json', '-host.log'):  # Enumerate only the eight expected fixture aliases.
+                            retained_paths['/tmp/synthetic-host-logs/' + kind + suffix] = host_log / (kind + suffix)  # Adapt test storage without normalizing evidence.
                     for label, proof in marker['containers'].items():
                         (container_log / (label + '-installed-animation.json')).write_text(
                             json.dumps(proof) + '\n')
                     (container_log / 'containers-results.jsonl').write_text(
                         ''.join(json.dumps(row) + '\n' for row in marker['container_events']))
                     for kind, proof in marker['host'].items():
-                        (host_log / (kind + '-host-installed-animation.json')).write_text(
-                            json.dumps(proof, indent=2, sort_keys=True) + '\n')
+                        # Write exact LF bytes: the validator hashes them, and text mode would emit CRLF on Windows.
+                        (host_log / (kind + '-host-installed-animation.json')).write_bytes(
+                            (json.dumps(proof, indent=2, sort_keys=True) + '\n').encode('utf-8'))
                     (host_log / 'host-results.jsonl').write_text(
                         ''.join(json.dumps(row) + '\n' for row in marker['host_events']))
                     (host_log / 'appimage-host.log').write_text(
@@ -1163,23 +1609,36 @@ class PipelineTests(unittest.TestCase):
                     pipeline.write_json(sandbox_receipt, marker['native_sandbox'])
                     inputs['native_sandbox_receipt'] = sandbox_receipt
                     inputs['container_log'], inputs['host_log'] = container_log, host_log
-                with patch.object(animation_smoke.platform, 'system', return_value=
-                                  {'windows': 'Windows', 'linux': 'Linux'}[target['os']]), \
-                     patch.object(animation_smoke.platform, 'machine', return_value=target['arch']), \
-                     patch.object(release_tool, 'emit'):
-                    animation_smoke.seal(SimpleNamespace(**inputs))
+                def fixture_path(value: str | os.PathLike[str]) -> Path:  # Bridge synthetic target names to real test storage only.
+                    if isinstance(value, str) and value in retained_paths:  # Never resolve or normalize foreign or traversal spellings.
+                        return retained_paths[value]  # Return the exact local path assigned to this fixture record.
+                    return Path(value)  # Preserve every ordinary filesystem operation and every unrecognized path.
+                def seal_fixture() -> None:  # Run all production validators against inert test evidence.
+                    with (  # Scope path translation and existing identity simulation to this fixture call.
+                        patch.object(animation_smoke.platform, 'system', return_value={'windows': 'Windows', 'linux': 'Linux'}[target['os']]),  # Simulate the target identity without claiming native execution.
+                        patch.object(animation_smoke.platform, 'machine', return_value=target['arch']),  # Retain the selected fixture architecture.
+                        patch.object(animation_smoke, 'Path', side_effect=fixture_path),  # Map only the exact Linux journal aliases in this test.
+                        patch.object(release_tool, 'emit'),  # Keep synthetic receipts out of the user-facing release stream.
+                    ):  # Leave validation and byte/hash comparisons fully active.
+                        animation_smoke.seal(SimpleNamespace(**inputs))  # Exercise the unchanged production sealer.
+                seal_fixture()  # Require a complete valid fixture to seal before exercising mutations.
                 self.assertEqual(release_tool.read_json(marker_path), marker)
+                with (  # Confirm test-local identity simulation did not remove the native-only production boundary.
+                    patch.object(animation_smoke.platform, 'system', return_value='Darwin'),  # Both Linux and Windows package sealers must reject this foreign system.
+                    patch.object(animation_smoke.platform, 'machine', return_value=target['arch']),  # Keep architecture valid to isolate the platform rejection.
+                    self.assertRaisesRegex(ValueError, 'native package smoke seal ran on another platform'),  # Require the native custody gate itself to fail.
+                ):  # This call performs no target execution or publication.
+                    animation_smoke.seal(SimpleNamespace(**inputs))  # Fail before an existing output could mask the platform check.
                 if target['os'] == 'linux':
-                    foreign = deepcopy(marker['host_events'])
-                    foreign[0]['path'] = '/tmp/foreign/deb-host-installed-animation.json'
-                    foreign[2]['log'] = '/tmp/foreign/deb-host.log'
-                    (inputs['host_log'] / 'host-results.jsonl').write_text(
-                        ''.join(json.dumps(row) + '\n' for row in foreign))
-                    with patch.object(animation_smoke.platform, 'system', return_value='Linux'), \
-                         patch.object(animation_smoke.platform, 'machine', return_value=target['arch']), \
-                         patch.object(release_tool, 'emit'), \
-                         self.assertRaisesRegex(ValueError, 'another smoke log'):
-                        animation_smoke.seal(SimpleNamespace(**inputs))
+                    for foreign_root in ('/tmp/foreign', '/tmp/synthetic-host-logs/../synthetic-host-logs'):  # Reject both a foreign owner and an equivalent-looking traversal spelling.
+                        with self.subTest(foreign_root=foreign_root):  # Identify the exact custody rejection case.
+                            foreign = deepcopy(marker['host_events'])  # Leave the accepted fixture immutable.
+                            foreign[0]['path'] = foreign_root + '/deb-host-installed-animation.json'  # Keep the artifact and log coherent so custody must catch the change.
+                            foreign[2]['log'] = foreign_root + '/deb-host.log'  # Preserve the expected filename and sibling relationship.
+                            (inputs['host_log'] / 'host-results.jsonl').write_text(  # Replace only the retained synthetic journal.
+                                ''.join(json.dumps(row) + '\n' for row in foreign))  # Retain all proof bytes and digest fields.
+                            with self.assertRaisesRegex(ValueError, 'another smoke log'):  # Require the unchanged retained-directory ownership check.
+                                seal_fixture()  # Apply the exact same adapter used by the positive control.
                     (inputs['host_log'] / 'host-results.jsonl').write_text(
                         ''.join(json.dumps(row) + '\n' for row in marker['host_events']))
                 marker_path.unlink()
@@ -1187,31 +1646,68 @@ class PipelineTests(unittest.TestCase):
                     inputs['windows_journal'].write_text('{}\n')
                 else:
                     (inputs['host_log'] / 'flatpak-host-installed-animation.json').unlink()
-                with patch.object(animation_smoke.platform, 'system', return_value=
-                                  {'windows': 'Windows', 'linux': 'Linux'}[target['os']]), \
-                     patch.object(animation_smoke.platform, 'machine', return_value=target['arch']), \
-                     patch.object(release_tool, 'emit'), self.assertRaises((ValueError, OSError)):
-                    animation_smoke.seal(SimpleNamespace(**inputs))
+                with self.assertRaises((ValueError, OSError)):  # Keep malformed Windows and missing Linux retained-proof rejections.
+                    seal_fixture()  # Reuse the same production validation and fixture path boundary.
 
-    def test_aggregate_publishes_all_ten_bound_macos_assets_and_rejects_each_changed_file(self):
+    def test_aggregate_publishes_all_eighteen_bound_macos_assets_and_rejects_each_changed_file(self):
         packages = pipeline.macos_packages
-        names = {name for arch in ('x86_64', 'aarch64') for name in (*packages.package_names(arch), packages.receipt_name(arch), packages.smoke_receipt_name(arch))}
-        original_root = self.root
-        for index, name in enumerate(sorted(names)):
+        names = {name for arch in ('x86_64', 'aarch64') for name in (*packages.package_names(arch), packages.receipt_name(arch), packages.smoke_receipt_name(arch),
+                                                                                 *pipeline.macos_smoke.retained_evidence_names(arch))}
+        # All mutations use the same qualified candidate. Rebuilding and retaining
+        # eighteen identical native fixture trees exhausted small remote scratch.
+        arguments = self.create_native_fixture()
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            pipeline.aggregate(arguments)
+        metadata, _ = pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+        self.assertEqual(set(metadata['macos_packages']), names)
+        (arguments.output / 'qualification.json').write_text('{}')
+        self.assertTrue(names <= {path.name for path in pipeline.publication_files(arguments.output)})
+        for name in sorted(names):
             with self.subTest(asset=name):
-                self.root = original_root / str(index); self.root.mkdir()
-                arguments = self.create_native_fixture()
-                with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
-                    pipeline.aggregate(arguments)
-                metadata, _ = pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
-                self.assertEqual(set(metadata['macos_packages']), names)
-                (arguments.output / 'qualification.json').write_text('{}')
-                self.assertTrue(names <= {path.name for path in pipeline.publication_files(arguments.output)})
                 asset = arguments.output / name
-                asset.write_bytes(asset.read_bytes() + b'changed')
-                with self.assertRaises(ValueError):
-                    pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
-        self.root = original_root
+                original = asset.read_bytes()
+                try:
+                    asset.write_bytes(original + b'changed')
+                    with self.assertRaises(ValueError):
+                        pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+                finally:
+                    asset.write_bytes(original)
+                # Every mutation starts and ends with a valid independent state.
+                pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+
+
+    def test_aggregate_and_candidate_keep_macos_evidence_after_native_roots_disappear(self):
+        arguments = self.create_native_fixture()
+        packages = pipeline.macos_packages
+        original = {name: (arguments.macos_packages / name).read_bytes()
+                    for arch in ('x86_64', 'aarch64')
+                    for name in (packages.smoke_receipt_name(arch),
+                                 *pipeline.macos_smoke.retained_evidence_names(arch))}
+        for arch in ('x86_64', 'aarch64'):
+            shutil.rmtree(self.root / ('smoke-root-' + arch))
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            pipeline.aggregate(arguments)
+        # Validate the immutable aggregate with every producer artifact tree absent.
+        shutil.rmtree(arguments.artifacts)
+        shutil.rmtree(arguments.macos_packages)
+        metadata, _targets = pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+        for name, expected in original.items():
+            self.assertEqual((arguments.output / name).read_bytes(), expected)
+            self.assertEqual(metadata['macos_packages'][name], release_tool.digest(expected))
+        extra = arguments.output / 'macos-evidence-aarch64-unowned.json'
+        extra.write_bytes(b'{}\n')
+        with self.assertRaises(ValueError):
+            pipeline.candidate_data(arguments.output, arguments.manifest, arguments.workspace)
+
+    @unittest.skipIf(sys.platform == 'win32', 'Windows symlink creation requires an independently configured privilege')
+    def test_aggregate_rejects_a_symlink_macos_artifact_root(self):
+        arguments = self.create_native_fixture()
+        alias = self.root / 'macos-products-alias'
+        alias.symlink_to(arguments.macos_packages, target_is_directory=True)
+        arguments.macos_packages = alias
+        with patch.object(pipeline, 'git_identity', return_value='a' * 40), patch.object(pipeline, 'emit'):
+            with self.assertRaisesRegex(ValueError, 'macOS package artifact inventory differs'):
+                pipeline.aggregate(arguments)
 
     def test_aggregate_requires_complete_macos_assets_and_passed_installed_receipt(self):
         original_root = self.root
@@ -1318,13 +1814,13 @@ class PipelineTests(unittest.TestCase):
         native = arguments.artifacts / ('native-' + target['rust_target'])
         install_arguments = SimpleNamespace(candidate=arguments.output, manifest=arguments.manifest, workspace=arguments.workspace, native=native, target=target['rust_target'], mode='candidate', baseline=None, preview_receipt=None, output=self.root / 'receipt.json', log=self.root / 'install.log')
         with patch.object(pipeline, 'logged') as logged, patch.object(pipeline, 'validate_install_receipt'), patch.object(pipeline, 'validate_install_evidence'), patch.object(pipeline.release_tool, 'read_json', wraps=pipeline.release_tool.read_json) as read_json:
-            read_json.side_effect = lambda path: ({'schema': 2, 'state': 'passed'} if Path(path) == install_arguments.output else json.loads(Path(path).read_text()))
+            read_json.side_effect = lambda path: ({'schema': 2, 'state': 'passed'} if Path(path).resolve() == install_arguments.output.resolve() else json.loads(Path(path).read_text()))
             pipeline.install(install_arguments)
         command = list(map(str, logged.call_args.args[0]))
-        self.assertEqual(command[command.index('--embedding-wrapper') + 1], str(arguments.workspace.parent / 'release/tests/embedding_acceptance.py'))
-        self.assertEqual(command[command.index('--embedding-command') + 1], str(native / 'embedding-command.json'))
-        self.assertEqual(command[command.index('--embedding-model') + 1], str(native / 'evidence/model/model.onnx'))
-        self.assertEqual(command[command.index('--embedding-model-register') + 1], str(arguments.workspace.parent / 'release/embedding-model.json'))
+        self.assertEqual(command[command.index('--embedding-wrapper') + 1], str((arguments.workspace.parent / 'release/tests/embedding_acceptance.py').resolve()))
+        self.assertEqual(command[command.index('--embedding-command') + 1], str((native / 'embedding-command.json').resolve()))
+        self.assertEqual(command[command.index('--embedding-model') + 1], str((native / 'evidence/model/model.onnx').resolve()))
+        self.assertEqual(command[command.index('--embedding-model-register') + 1], str((arguments.workspace.parent / 'release/embedding-model.json').resolve()))
         self.assertEqual(json.loads(command[command.index('--expected-embedding-runtime-files') + 1]),
                          json.loads((native / 'native-test-harness.json').read_text())['runtime_files'])
 

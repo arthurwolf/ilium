@@ -1443,7 +1443,7 @@ async fn run_inner(
         }
         app.begin_editor_capture_turn();
         if let Err(failure) = app.retry_native_terminal_paste() {
-            input_failure = Some(failure);
+            input_failure = Some(*failure);
             break;
         }
         if advance_pending_key_paste(
@@ -1976,7 +1976,7 @@ async fn run_inner(
                 .expect("remote compaction owner is initialized before the event loop")
                 .spawn(job)
             {
-                app.apply_remote_compaction_worker_event(event);
+                app.apply_remote_compaction_worker_event(*event);
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
@@ -2827,6 +2827,7 @@ async fn finish_input_retirement(
     loop {
         if let Some(mut report) = retirement.try_complete() {
             report.complete_exit_click_release(exit_click_release);
+            report.complete_exit_resizes();
             return report
                 .into_result()
                 .map_err(crate::error::InputRetirementError::Failed);
@@ -3797,6 +3798,7 @@ async fn collect_normal_voice_retirement(
                     tracing::error!(
                         cancelled_commands = cancelled,
                         undelivered_stop_outputs = final_outputs,
+                        actor_exit = ?exit,
                         "Original voice actor stopped; consumed provider delivery may be uncertain"
                     );
                     app.status_message = Some(format!(
@@ -4632,7 +4634,7 @@ where
                     if let Some(pane_id) = destination {
                         if !crate::keys::intercept_event(app, event.view()) {
                             if let Err(error) = app.capture_native_terminal_paste(pane_id, event) {
-                                failure = Some(error);
+                                failure = Some(*error);
                             }
                         }
                         // Preserve App::handle_event's post-key layout sampling,
@@ -4822,7 +4824,10 @@ impl InputBatchItem
 
     fn coalesce_motion(self) -> Result<(), Self> {
         match self {
-            Ok(event) => event.coalesce_motion().map_err(Ok),
+            Ok(event) => match event.coalesce_motion() {
+                Err(original) => Err(Ok(original)),
+                Ok(()) => Ok(()),
+            },
             Err(error) => Err(Err(error)),
         }
     }

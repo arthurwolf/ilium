@@ -27,6 +27,7 @@ pub mod manifest;
 pub mod naming;
 pub mod platform;
 pub mod side;
+pub mod submission;
 pub mod tier;
 pub mod uitree;
 pub mod version;

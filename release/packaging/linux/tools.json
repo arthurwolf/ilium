@@ -15,7 +15,7 @@
   },
   "flatpak": {
     "runtime": "org.freedesktop.Platform",
-    "runtime_version": "24.08",
+    "runtime_version": "25.08",
     "runtime_repository": "https://dl.flathub.org/repo/flathub.flatpakrepo"
   },
   "snap": {

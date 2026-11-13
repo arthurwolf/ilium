@@ -19342,17 +19342,21 @@ impl App {
         &mut self,
         pane_id: NodeId,
         event: crate::terminal_input_owner::InputEvent,
-    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
+    ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
         if self.pending_native_paste.is_some() {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::QueueFull,
-                event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::QueueFull,
+                    event,
+                ),
             ));
         }
         let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::Closed,
-                event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::Closed,
+                    event,
+                ),
             ));
         };
         self.last_tree_click = None;
@@ -19369,9 +19373,9 @@ impl App {
     #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub(crate) fn retry_native_terminal_paste(
         &mut self,
-    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
+    ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
         if let Some(failure) = self.native_paste_failure.take() {
-            return Err(failure);
+            return Err(Box::new(failure));
         }
         let Some(pending) = self.pending_native_paste.take() else {
             return Ok(());
@@ -19403,16 +19407,20 @@ impl App {
         if bytes > crate::terminal_input::MAX_BYTES
             || wire_bytes > ilium_ipc::MAX_FRAME_LEN as usize
         {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::InputBytes,
-                pending.event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::InputBytes,
+                    pending.event,
+                ),
             ));
         }
         if self.terminal_parsing.is_none() {
             let Some(client) = &self.outbound_admission else {
-                return Err(crate::terminal_input_owner::InputFailure::refused(
-                    ilium_execution::RejectReason::Closed,
-                    pending.event,
+                return Err(Box::new(
+                    crate::terminal_input_owner::InputFailure::refused(
+                        ilium_execution::RejectReason::Closed,
+                        pending.event,
+                    ),
                 ));
             };
             let reservation = match crate::ipc_preparation::reserve_request(
@@ -19427,9 +19435,11 @@ impl App {
                             | ilium_execution::RejectReason::InvalidCost
                             | ilium_execution::RejectReason::AccountingPoisoned
                     ) {
-                        return Err(crate::terminal_input_owner::InputFailure::refused(
-                            reason,
-                            pending.event,
+                        return Err(Box::new(
+                            crate::terminal_input_owner::InputFailure::refused(
+                                reason,
+                                pending.event,
+                            ),
                         ));
                     }
                     self.pending_native_paste = Some(pending);
@@ -19439,9 +19449,11 @@ impl App {
             let placeholder = match reservation.retain(()) {
                 Ok(placeholder) => placeholder,
                 Err(_) => {
-                    return Err(crate::terminal_input_owner::InputFailure::refused(
-                        ilium_execution::RejectReason::InvalidCost,
-                        pending.event,
+                    return Err(Box::new(
+                        crate::terminal_input_owner::InputFailure::refused(
+                            ilium_execution::RejectReason::InvalidCost,
+                            pending.event,
+                        ),
                     ));
                 }
             };
@@ -21486,6 +21498,60 @@ impl App {
             ToolbarAction::SaveAs => self.action_start_save_as(id),
         }
     }
+}
+
+/// If `position` lands on a markdown task-list checkbox glyph in `editor`'s
+/// Source-mode content, returns the buffer row, the checkbox's `[` char
+/// column, and its current checked state -- ready for
+/// `EditorPane::toggle_checkbox`. `content_area` must be the exact rect the
+/// `TextArea` widget itself was rendered into (`editor_chrome::compute`'s
+/// `content_area`), since column/row math is anchored to it.
+///
+/// Column mapping assumes no horizontal scroll (`ratatui_textarea` exposes
+/// no public way to read its actual horizontal scroll offset). A checkbox
+/// on a line long enough to have scrolled horizontally (rare for a short
+/// "- [ ] ..." item) simply won't be found rather than risk mutating the
+/// wrong character.
+// Markdown checkbox click toggling was moved out of the app click path; this lookup has
+// no remaining caller but documents the column mapping, so it is kept for that work.
+#[cfg(test)]
+#[allow(dead_code)]
+fn checkbox_at(
+    editor: &EditorPane,
+    content_area: Rect,
+    position: Position,
+) -> Option<(usize, usize, bool)> {
+    if !editor.is_markdown() || !content_area.contains(position) {
+        return None;
+    }
+
+    let clicked_row_on_screen = position.y - content_area.y;
+    let visual_row = editor.source_visual_row_at(
+        content_area.width,
+        editor.source_scroll_row() as usize + clicked_row_on_screen as usize,
+    )?;
+    let row = visual_row.source_row;
+    let line = editor.textarea.lines().get(row)?;
+    let (bracket_col, checked) = crate::markdown::checkbox::find_checkbox(line)?;
+    let bracket_byte = line.char_indices().nth(bracket_col)?.0;
+    if !(visual_row.start_byte..visual_row.end_byte).contains(&bracket_byte) {
+        return None;
+    }
+
+    let gutter_width = if editor.show_line_numbers {
+        usize::from(crate::editor_highlight::line_number_gutter_width(
+            editor.textarea.lines().len(),
+        ))
+    } else {
+        0
+    };
+    let clicked_col_on_screen = (position.x - content_area.x) as usize;
+    let expected_col = gutter_width
+        + unicode_width::UnicodeWidthStr::width(&line[visual_row.start_byte..bracket_byte]);
+    let checkbox_span = expected_col..expected_col + 3; // "[ ]" / "[x]"
+    checkbox_span
+        .contains(&clicked_col_on_screen)
+        .then_some((row, bracket_col, checked))
 }
 
 fn is_press(key: &crossterm::event::KeyEvent) -> bool {
@@ -25755,7 +25821,8 @@ mod tests {
     #[test]
     fn agent_message_filesystem_folder_status_update_reaches_agents_within_folder_path() {
         let mut app = app();
-        let project_path = PathBuf::from("/tmp/ask-for-update-folder-scope");
+        // Absolute on every platform (`/tmp/...` is relative on Windows).
+        let project_path = std::env::temp_dir().join("ask-for-update-folder-scope");
         let project = app.tree.add_project(project_path.clone()).unwrap();
         let group = app.tree.add_group(project, "agents").unwrap();
         let folder_path = project_path.join("src");
@@ -26147,12 +26214,16 @@ mod tests {
         app.settle_filesystem_for_test();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
 
+        // The board adapter stores the file's canonical identity (macOS
+        // temp directories are `/var` -> `/private/var` symlinks; Windows
+        // may expand 8.3 short names), so compare against that form.
+        let canonical = ilium_platform::paths::canonicalize(&path).unwrap();
         assert_eq!(
             app.take_outbound_requests(),
             vec![ClientRequest::NewBoard {
                 parent_group: group,
                 name: "release-plan".to_string(),
-                storage: ilium_core::BoardStorage::MarkdownFile { path },
+                storage: ilium_core::BoardStorage::MarkdownFile { path: canonical },
             }]
         );
     }
@@ -26217,13 +26288,15 @@ mod tests {
         assert!(std::fs::read_to_string(&board_path)
             .unwrap()
             .contains("## To do"));
+        // The queued request carries the created file's canonical identity.
+        let canonical_board_path = ilium_platform::paths::canonicalize(&board_path).unwrap();
         assert!(matches!(
             app.take_outbound_requests().as_slice(),
             [ClientRequest::NewBoard {
                 name,
                 storage: ilium_core::BoardStorage::MarkdownFile { path },
                 ..
-            }] if name == "Sprint" && path == &board_path
+            }] if name == "Sprint" && path == &canonical_board_path
         ));
         let _ = std::fs::remove_dir_all(project_path);
     }
@@ -27715,8 +27788,12 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        // The toolbar, prompt and footer sections each add a rule row.
-        let expected_rows = 27 - 3 * u16::from(crate::theme::section_frames_enabled());
+        // These panes have no prompt or progress footer; only the toolbar is shown.
+        assert!(!app.shows_last_prompt_banner(first));
+        assert!(!app.shows_progress_footer(first));
+        assert!(!app.shows_last_prompt_banner(second));
+        assert!(!app.shows_progress_footer(second));
+        let expected_rows = 36 - u16::from(crate::theme::section_frames_enabled());
         assert_eq!(resize_requests.len(), 2);
         assert!(
             resize_requests
@@ -29655,17 +29732,18 @@ mod tests {
             },
             menu,
         );
-        assert_eq!(
+        assert!(matches!(
             app.take_outbound_requests()
                 .into_iter()
                 .find(|request| matches!(request, ClientRequest::NewPane { .. })),
             Some(ClientRequest::NewPane {
                 request_id: 1,
-                parent_group: group,
-                kind: ilium_ipc::NewPaneKind::Editor(resolved_path.clone()),
+                parent_group,
+                kind: ilium_ipc::NewPaneKind::Editor(path),
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
-            })
-        );
+                ..
+            }) if parent_group == group && path == resolved_path
+        ));
         assert_eq!(
             app.status_message.as_deref(),
             Some(format!("Opening {} in editor", resolved_path.display()).as_str())
@@ -32166,8 +32244,11 @@ mod board_handoff_tests {
         assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
         assert_eq!(app.pending_pane_focuses.len(), 1);
         assert_eq!(app.outbox.len(), 1);
+        // The board source reports the file's canonical identity (macOS
+        // `/var` -> `/private/var`, Windows 8.3 short names).
+        let canonical_path = ilium_platform::paths::canonicalize(&path).unwrap();
         assert!(
-            matches!(app.outbox[0].view(), ilium_ipc::ClientRequest::NewBoard { parent_group: actual, name, storage } if *actual == parent_group && name == "retained-board" && storage.path() == path)
+            matches!(app.outbox[0].view(), ilium_ipc::ClientRequest::NewBoard { parent_group: actual, name, storage } if *actual == parent_group && name == "retained-board" && storage.path() == canonical_path)
         );
         app.collect_board_files();
         assert_eq!(

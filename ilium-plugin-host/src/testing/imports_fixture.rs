@@ -5,6 +5,7 @@
 use super::fake_kernel::FakeKernel;
 use crate::imports::{
     basic::BasicImport,
+    codec::CodecImport,
     log::{LogClock, LogDiagnostics, LogFailure, LogImport, LogTime, PluginLogger},
     storage::{StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState},
 };
@@ -230,9 +231,13 @@ impl ImportsFixtureBuilder {
                 .and_then(|value| value.checked_mul(1024 * 1024))
                 .ok_or_else(|| "limit exceeds address space".into())
         };
+        // Storage rejects symlink ancestors. Resolve the temporary parent
+        // before allocating the fixture so later reopen paths stay canonical.
+        let temporary_parent = ilium_platform::paths::canonicalize(&std::env::temp_dir())
+            .map_err(|error| error.to_string())?;
         let root = tempfile::Builder::new()
             .prefix("ilium-imports-")
-            .tempdir()
+            .tempdir_in(temporary_parent)
             .map_err(|error| error.to_string())?;
         let project = match self.project {
             Some(project) => std::fs::canonicalize(project).map_err(|error| error.to_string())?,
@@ -334,6 +339,7 @@ impl ImportsFixtureBuilder {
             }
         }
         Ok(ImportsFixture {
+            codec_import: CodecImport,
             log_import,
             logger,
             budget,
@@ -479,6 +485,7 @@ impl JobInstance {
 /// One plugin instance with every host import bound to it (test plan lane imports-core).
 pub struct ImportsFixture {
     // Last: adapters drop before the owned directory is removed.
+    codec_import: CodecImport,
     log_import: LogImport,
     logger: Arc<Mutex<PluginLogger>>,
     budget: Arc<Mutex<PluginLogInstanceBudget>>,
@@ -671,7 +678,7 @@ impl ImportsFixture {
 
     /// The `codec` import.
     pub fn codec(&mut self) -> &mut dyn HostCodec {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::codec")
+        &mut self.codec_import
     }
 
     /// The `fs` import.

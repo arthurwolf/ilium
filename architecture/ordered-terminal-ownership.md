@@ -32,3 +32,4 @@ Queued prompts persist an attempt fence before body or Enter. An uncertain
 attempt retains authored text and blocks automatic replay; successful recurring
 entries rotate with a fresh unattempted state. Auto-answer permits at most one
 retry, only for proven zero delivery with the same process, dialog and settings.
+

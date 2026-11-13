@@ -87,9 +87,25 @@ fn native_authority() -> ServiceAuthority {
     } // Bind this no-effect test activation.
 } // Accepted-plan JSON supplies no authority.
 fn activated_engine(package: Arc<Package>, bootstrap: &str) -> Engine {
+    activated_engine_with_limits(package, bootstrap, EngineLimits::default())
+}
+/// Format round-trip cases need a per-phase budget that a loaded CI runner cannot
+/// exhaust on the first render of a fresh isolate. Latency is covered by the
+/// dedicated deadline tests, which keep the production default.
+fn round_trip_limits() -> EngineLimits {
+    EngineLimits {
+        evaluation_ms: 10_000,
+        ..EngineLimits::default()
+    }
+}
+fn activated_engine_with_limits(
+    package: Arc<Package>,
+    bootstrap: &str,
+    limits: EngineLimits,
+) -> Engine {
     // Bind native activation before create.
     let digest = package.digest().to_owned(); // Preserve actual package identity.
-    let mut engine = Engine::new(package, EngineLimits::default(), quota()).unwrap(); // Reuse the original finite root.
+    let mut engine = Engine::new(package, limits, quota()).unwrap(); // Reuse the original finite root.
     engine.install_bootstrap(bootstrap).unwrap(); // Seal hooks and optional absence.
     engine.load().unwrap(); // Module evaluation remains nonacquiring.
     engine
@@ -98,7 +114,10 @@ fn activated_engine(package: Arc<Package>, bootstrap: &str) -> Engine {
     engine // Return the actual native owner.
 } // No external effect or permission is fabricated.
 fn engine(package: Arc<Package>, settings: Value) -> Engine {
-    let mut engine = activated_engine(package, BOOTSTRAP); // Preserve original cases with explicit activation.
+    engine_with_limits(package, settings, EngineLimits::default())
+}
+fn engine_with_limits(package: Arc<Package>, settings: Value, limits: EngineLimits) -> Engine {
+    let mut engine = activated_engine_with_limits(package, BOOTSTRAP, limits); // Preserve original cases with explicit activation.
     let plan=engine.plan(&settings,AnimationMode::Live,&json!({"viewport":{"cell_width":2,"cell_height":2},"available":{"pointer":false,"audio":false,"gpu":false,"location":false}})).unwrap();
     assert_eq!(
         engine.start_create(&settings, &plan).unwrap(),
@@ -337,7 +356,7 @@ fn all_seven_formats_round_trip_the_real_bootstrap_and_detach_aliases() {
         Format::Rgb8,
         Format::Rgba8,
     ] {
-        let mut engine = engine(package(&script), json!({}));
+        let mut engine = engine_with_limits(package(&script), json!({}), round_trip_limits());
         let shape = shape(
             format,
             Update::Retain,

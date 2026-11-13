@@ -13,7 +13,7 @@ import copy
 import json
 import math
 import os
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import platform
 import re
 import shutil
@@ -32,6 +32,7 @@ import build_windows_installers as windows_installers
 import smoke_macos_packages as macos_smoke
 import pages
 import release_tool
+from native_test_scope import preview_integration_arguments
 
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = 'arthurwolf/ilium'
@@ -60,6 +61,9 @@ def sha(path):
         while block := source.read(1024 * 1024):
             value.update(block)
     return value.hexdigest()
+
+
+write_release_text = release_tool.write_release_text
 
 
 def retain_native_sandbox_artifact(cargo_log, output_directory):
@@ -157,7 +161,7 @@ def git_identity(root):
     return commit
 
 
-def source_matrix(manifest, workspace, tag):
+def source_selection(manifest, workspace, tag, *, selection_path=None, policy_path=None):
     # Consume the actual manifest CLI, including its strict five-target policy.
     response = subprocess.run([sys.executable, str(ROOT / 'release/scripts/release_tool.py'), 'targets', '--manifest', str(Path(manifest).resolve())], capture_output=True, text=True, check=True)
     records = [json.loads(line) for line in response.stdout.splitlines()]
@@ -166,15 +170,35 @@ def source_matrix(manifest, workspace, tag):
     require(targets == release_tool.load_targets(manifest), 'targets CLI differs from authoritative manifest')
     version_tag = 'v' + workspace_version(workspace)
     require(not tag or tag == version_tag, 'tag differs from workspace version')
-    git_identity(Path(workspace).resolve().parent)
-    return {'include': targets}, version_tag
+    commit = git_identity(Path(workspace).resolve().parent)
+    # One validated snapshot supplies both the matrix and its published identity.
+    import release_selection
+    policy_content = (release_selection.require_committed_policy(Path(workspace).resolve().parent, policy_path, commit)
+                      if policy_path is not None else None)
+    intent = release_selection.resolve_intent(manifest=manifest, expected_tag=version_tag,
+                                               expected_commit=commit, intent_path=selection_path,
+                                               policy_content=policy_content)
+    selected = set(intent['selected_targets'])
+    targets = [row for row in targets if row['rust_target'] in selected]
+    return {'include': targets}, version_tag, intent
+
+
+def source_matrix(manifest, workspace, tag, *, selection_path=None):
+    matrix, version_tag, _intent = source_selection(manifest, workspace, tag, selection_path=selection_path)
+    return matrix, version_tag
 
 
 def source(arguments):
-    matrix, tag = source_matrix(arguments.manifest, arguments.workspace, arguments.tag)
-    commit = git_identity(arguments.workspace.resolve().parent)
-    gh_output(matrix=json.dumps(matrix, separators=(',', ':')), tag=tag, commit=commit)
-    emit('result', command='source', matrix=matrix, tag=tag, commit=commit)
+    import release_selection
+    matrix, tag, intent = source_selection(arguments.manifest, arguments.workspace, arguments.tag,
+                                           selection_path=arguments.selection_intent,
+                                           policy_path=getattr(arguments, 'selection_policy', None))
+    content = release_selection.canonical_bytes(intent)
+    selection_sha256 = hashlib.sha256(content).hexdigest()
+    gh_output(matrix=json.dumps(matrix, separators=(',', ':')), tag=tag, commit=intent['commit'],
+              selection=content.decode('ascii').rstrip('\n'), selection_sha256=selection_sha256)
+    emit('result', command='source', matrix=matrix, tag=tag, commit=intent['commit'],
+         selection=intent, selection_sha256=selection_sha256)
 
 
 class HTTPSOnly(urllib.request.HTTPRedirectHandler):
@@ -223,8 +247,18 @@ def logged(command, root, log, environment=None, timeout=10_800):
             raise release_tool.ReleaseError('command exceeded %d seconds; inspect owned log %s' % (timeout, log))
     if result.returncode != 0:
         # Diagnostic artifacts can fail to upload; keep the decisive lines in the job log.
+        text = log.read_bytes().decode('utf-8', 'replace')
+        # The tail alone misses failures from early test binaries; also keep every failure marker.
+        lines = text.splitlines()
+        markers = []
+        for index, line in enumerate(lines):
+            line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+            if re.search(r'FAILED|panicked at|^\s*error(\[|:)|^failures:|^---- |^\s*--> ', line):
+                markers.append(line)
+                if 'panicked at' in line and index + 1 < len(lines):
+                    markers.append(lines[index + 1])  # the panic message itself
         emit('warning', operation=Path(str(command[0])).name, log=str(log), exit_code=result.returncode,
-             log_tail=log.read_bytes()[-6000:].decode('utf-8', 'replace'))
+             failure_lines=markers[:200], log_tail=text[-6000:])
     require(result.returncode == 0, 'command failed; inspect owned log ' + str(log))
     emit('result', operation=Path(str(command[0])).name, state='passed', log=str(log), log_sha256=sha(log))
 
@@ -232,7 +266,9 @@ def logged(command, root, log, environment=None, timeout=10_800):
 def configure_workspace_test_environment(environment, target, work, cargo_target):
     # Cargo owns the parallel job budget; nested native builders must not
     # multiply it or inherit a runner's unbounded host defaults.
-    environment.update(CARGO_BUILD_JOBS='16', CMAKE_BUILD_PARALLEL_LEVEL='1',
+    # Hosted runners have 2 to 4 cores; 16 parallel MSVC link steps exhaust
+    # memory there (LNK1102), so never exceed the host's CPU count.
+    environment.update(CARGO_BUILD_JOBS=str(min(16, os.cpu_count() or 2)), CMAKE_BUILD_PARALLEL_LEVEL='1',
                        NUM_JOBS='1', MAKEFLAGS='-j1', OMP_NUM_THREADS='1',
                        RAYON_NUM_THREADS='1', RUST_TEST_THREADS='1')
     executable = 'ilium.exe' if target['os'] == 'windows' else 'ilium'
@@ -269,10 +305,42 @@ def rustup_install_command():
     return command
 
 
+PREVIEW_TARGETS = {
+    'linux-x86-preview': 'x86_64-unknown-linux-gnu',
+    'linux-arm64-preview': 'aarch64-unknown-linux-gnu',
+    'macos-arm64-preview': 'aarch64-apple-darwin',
+}
+
+
+def native_workspace_scope(profile, target):
+    if profile == 'full':
+        return ['--workspace']
+    require(PREVIEW_TARGETS.get(profile) == target,
+            'unsupported native qualification profile or target')
+    return ['--workspace', '--exclude', 'ilium-plugin-*']
+
+
+def native_clippy_command(profile, target):
+    return (['cargo', 'clippy', '--locked'] + native_workspace_scope(profile, target) +
+            ['--all-targets', '--keep-going', '--target', target, '--', '-D', 'warnings'])
+
+
+def native_test_command(profile, target, cargo_arguments):
+    require(profile not in PREVIEW_TARGETS or cargo_arguments != ['--test', '*'],
+            'preview integration tests require explicit product target selection')
+    return (['cargo', 'test', '--locked'] + native_workspace_scope(profile, target) +
+            ['--no-fail-fast', '--target', target] + cargo_arguments)
+
+
 def native(arguments):
     target = release_tool.selected_target(arguments.manifest, arguments.target)
     root = arguments.workspace.resolve().parent
     version = release_tool.workspace_version(arguments.workspace, arguments.tag)
+    profile = getattr(arguments, 'qualification_profile', 'full')
+    native_workspace_scope(profile, arguments.target)
+    if profile in PREVIEW_TARGETS:
+        require(re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-' + ('preview' if profile.startswith('macos') else 'linux') + r'\.[0-9]+', arguments.tag),
+                'Preview profile requires a matching preview tag')
     expected_system = {'linux': 'Linux', 'windows': 'Windows', 'macos': 'Darwin'}[target['os']]
     expected_machines = {'x86_64': {'x86_64', 'AMD64'}, 'aarch64': {'aarch64', 'arm64', 'ARM64'}}[target['arch']]
     require(platform.system() == expected_system and platform.machine() in expected_machines, 'native runner does not match target')
@@ -364,9 +432,58 @@ def native(arguments):
                 environment['PATH'] = str(ort_library_directory) + os.pathsep + environment['PATH']
         logged(['cargo', 'build', '--locked', '--release', '--target', arguments.target, '--bin', 'ilium', '--bin', 'ilium-server', '--bin', 'ilium-animation-helper'], root, work / 'release-build.log', environment)
     logged(['cargo', 'fmt', '--all', '--check'], root, work / 'fmt.log', environment)
-    logged(['cargo', 'clippy', '--locked', '--workspace', '--all-targets', '--target', arguments.target, '--', '-D', 'warnings'], root, work / 'clippy.log', environment)
-    logged(['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target], root, work / 'workspace-tests.log', environment, timeout=3600)
-    # Product tests above run in full on every native OS. POSIX fixture tests
+    logged(native_clippy_command(profile, arguments.target), root, work / 'clippy.log', environment)
+    # Mirror the hosted CI split: unit tests run in parallel, integration tests are
+    # serialized because PTY-heavy tests contend for the runner. On Linux the animation
+    # sandbox needs a delegated cgroup-v2 ancestor, which a transient user scope provides.
+    # Two test threads: timing-sensitive unit tests (RAM body probe, animation
+    # settling) are starved by one-thread-per-core debug builds on 3-4 core runners.
+    parallel_environment = {key: value for key, value in environment.items() if key != 'RUST_TEST_THREADS'}
+    parallel_environment['RUST_TEST_THREADS'] = '2'
+
+    def test_command(cargo_arguments, test_environment):
+        command = native_test_command(profile, arguments.target, cargo_arguments)
+        if target['os'] != 'linux':
+            return command
+        # The animation sandbox needs an owned cgroup-v2 ancestor with the cpu,
+        # memory and pids controllers enabled. The user manager on the hosted
+        # Ubuntu 22.04 image lacks cpu, so use a system-manager scope owned by
+        # the runner and enable the controllers there: first move this shell
+        # into a child cgroup (a cgroup with processes cannot delegate), then
+        # enable the controllers on the scope itself and exec cargo from the leaf.
+        enable_controllers = (
+            'scope=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup) && mkdir "$scope/leaf" '
+            '&& echo 0 > "$scope/leaf/cgroup.procs" && echo "+cpu +memory +pids" > "$scope/cgroup.subtree_control" '
+            '&& exec "$@"'
+        )
+        scope = ['sudo', '-n', 'systemd-run', '--uid=%d' % os.getuid(), '--gid=%d' % os.getgid(), '--wait', '--pipe', '--collect', '--property=Delegate=yes', '--working-directory=' + str(root)]
+        scoped_environment = dict(test_environment)
+        scoped_environment.setdefault('HOME', os.environ.get('HOME', ''))
+        scoped_environment.setdefault('PATH', os.environ.get('PATH', ''))
+        scope += ['--setenv=%s=%s' % (key, value) for key, value in sorted(scoped_environment.items()) if '\n' not in str(value) and value != '']
+        return scope + ['/bin/bash', '-c', enable_controllers, 'bash', '/usr/bin/env', 'cargo'] + command[1:]
+
+    logged(test_command(['--lib', '--bins'], parallel_environment), root, work / 'workspace-unit-tests.log', parallel_environment, timeout=7200)
+    logged(test_command(['--doc'], parallel_environment), root, work / 'workspace-doc-tests.log', parallel_environment, timeout=3600)
+    integration_arguments = ['--test', '*']
+    if profile in PREVIEW_TARGETS:
+        # Package exclusions alone still run preview suites in product crates.
+        # Cargo metadata retains every product target instead of a fragile allowlist.
+        metadata_log = work / 'preview-workspace-metadata.log'
+        logged(['cargo', 'metadata', '--locked', '--no-deps', '--format-version', '1'],
+               root, metadata_log, environment)
+        records = [json.loads(line) for line in metadata_log.read_text(encoding='utf-8').splitlines()
+                   if line.startswith('{')]
+        require(len(records) == 1, 'missing unique Cargo workspace metadata record')
+        integration_arguments = preview_integration_arguments(records[0])
+        write_json(work / 'preview-test-scope.json', {
+            'qualification_profile': profile, 'arguments': integration_arguments,
+            'workspace_metadata_sha256': sha(metadata_log),
+        })
+    logged(test_command(integration_arguments, environment), root, work / 'workspace-tests.log', environment, timeout=7200)
+    # Full qualification runs every workspace target. The explicitly plugin-free
+    # preview retains every product target and records its exact test selection.
+    # POSIX fixture tests
     # require GNU/Linux tools; their Linux lanes run the complete fixture suite.
     # Portable archive/manifest/source/evidence contracts run on every lane.
     for test_module in sorted((root / 'release/tests').glob('test_*.py')):
@@ -402,6 +519,7 @@ def native(arguments):
                 '--package', 'ilium-platform', '--test', 'native_animation_sandbox',
                 '--no-run', '--message-format=json'], root, sandbox_log, environment)
     command = [sys.executable, root / 'release/scripts/native_candidate.py', '--manifest', arguments.manifest.resolve(), '--workspace', arguments.workspace.resolve(), '--tag', arguments.tag, '--target', arguments.target, '--runner-identity', arguments.runner_identity, '--build-directory', cargo_target / arguments.target / 'release', '--output-directory', arguments.output.resolve(), '--dependency-inventory', inventory, '--ort-source-archive', ort_archive, '--model-directory', model_directory]
+    command.extend(['--qualification-profile', profile])
     if target['ort_strategy'] == 'pinned-source-build':
         if target['os'] == 'macos':
             command.extend(['--intel-ort-report', work / 'intel-ort/receipt.json'])
@@ -420,6 +538,10 @@ def native(arguments):
         command.extend(['--dumpbin', tools[0]])
     logged(command, root, work / 'native-candidate.log', environment)
     output = arguments.output.resolve()
+    if profile in PREVIEW_TARGETS:
+        # Keep the exact selection auditable in the uploaded, hash-bound evidence.
+        for name in ('preview-test-scope.json', 'preview-workspace-metadata.log'):
+            shutil.copyfile(work / name, output / 'evidence' / name)
     if target['os'] in ('linux', 'macos') and target['ort_strategy'] != 'pinned-source-build':
         shutil.copyfile(shared_output / 'ort-runtime-receipt.json', output / 'evidence/ort-runtime-receipt.json')
     harness_name = 'native-test-binary.exe' if target['os'] == 'windows' else 'native-test-binary'
@@ -524,7 +646,8 @@ def macos_package_inventory(directory, target, audit, binding, source_root):
                     ('release/scripts/smoke_macos_packages.py', 'release/tests/test_macos_packages.py',
                      *animation_gate.SOURCE_FILES)}
     macos_smoke.validate_smoke_receipt(proof, build, target, audit, binding, sha(directory / build_name),
-                                     smoke_sources, release_tool.read_json(source_root / 'release/embedding-model.json'))
+                                     smoke_sources, release_tool.read_json(source_root / 'release/embedding-model.json'),
+                                     evidence_root=directory.absolute())
     for name in macos_packages.package_names(target['arch']):
         path = macos_packages.regular_file(directory / name)
         require(sha(path) == build['packages'][name] and path.stat().st_size == build['package_bytes'][name], 'macOS package bytes differ: ' + name)
@@ -539,7 +662,8 @@ def macos_package_inventory(directory, target, audit, binding, source_root):
     macos_smoke.validate_package_metadata(parts['Distribution'], parts['PackageInfo'], build['layout'], build['payload_tree'])
     # DMG traversal needs Darwin's native mount. Its exact container hash and the
     # source-detached installed lifecycle above bind that native observation.
-    return {**build['packages'], build_name: sha(directory / build_name), smoke_name: sha(directory / smoke_name)}
+    return {**build['packages'], build_name: sha(directory / build_name), smoke_name: sha(directory / smoke_name),
+            **{name: sha(directory / name) for name in macos_smoke.retained_evidence_names(target['arch'])}}
 
 
 def validate_macos_candidate_binding(binding, target, metadata, source_root):
@@ -556,10 +680,14 @@ def validate_macos_candidate_binding(binding, target, metadata, source_root):
 
 
 def aggregate(arguments):
+    import release_selection
     targets = release_tool.load_targets(arguments.manifest)
     root = arguments.workspace.resolve().parent
     version = release_tool.workspace_version(arguments.workspace, arguments.tag)
     commit = git_identity(root)
+    selection = release_selection.resolve_intent(manifest=arguments.manifest,
+                                                expected_tag=arguments.tag,
+                                                expected_commit=commit)
     artifacts = arguments.artifacts.resolve()
     require({path.name for path in artifacts.iterdir()} == {'native-' + row['rust_target'] for row in targets}, 'candidate artifacts must contain exactly five native target directories')
     output = arguments.output.resolve()
@@ -572,6 +700,7 @@ def aggregate(arguments):
         bridge_path = native / 'native-candidate-receipt.json'
         bridge = release_tool.read_json(bridge_path)
         require(bridge.get('schema') == 1 and bridge.get('state') == 'passed' and bridge.get('publication_allowed') is True and bridge.get('tag') == arguments.tag and bridge.get('target') == target['rust_target'], 'native candidate is unqualified or mismatched')
+        require(bridge.get('qualification_profile') == 'full', 'full release requires a full native qualification profile')
         require(native.is_dir() and not native.is_symlink(), 'native artifact directory must be regular')
         harness_name = 'native-test-binary.exe' if target['os'] == 'windows' else 'native-test-binary'
         expected_names = {'candidate', 'evidence', 'native-audit.json', 'runtime-inventory.json', 'dependency-inventory.json', 'embedding-command.json', 'embedding-receipt.json', target['archive'], 'SHA256SUMS', 'native-candidate-receipt.json', harness_name, 'native-test-harness.json'}
@@ -675,8 +804,9 @@ def aggregate(arguments):
     for name in sorted(linux_package_hashes):
         shutil.copyfile(packages_directory / name, output / name)
     macos_rows = [row for row in targets if row['os'] == 'macos']
-    macos_directory = arguments.macos_packages.resolve()
-    expected_macos = {name for row in macos_rows for name in (*macos_packages.package_names(row['arch']), macos_packages.receipt_name(row['arch']), macos_packages.smoke_receipt_name(row['arch']))}
+    macos_directory = arguments.macos_packages.absolute()
+    expected_macos = {name for row in macos_rows for name in (*macos_packages.package_names(row['arch']), macos_packages.receipt_name(row['arch']), macos_packages.smoke_receipt_name(row['arch']),
+                                                                          *macos_smoke.retained_evidence_names(row['arch']))}
     require(macos_directory.is_dir() and not macos_directory.is_symlink() and {path.name for path in macos_directory.iterdir()} == expected_macos, 'macOS package artifact inventory differs')
     macos_hashes, macos_bindings = {}, {}
     for row in macos_rows:
@@ -687,13 +817,13 @@ def aggregate(arguments):
         macos_bindings[row['rust_target']] = binding
     for name in sorted(macos_hashes):
         shutil.copyfile(macos_directory / name, output / name)
-    (output / 'SHA256SUMS').write_text(''.join(archives[name] + '  ' + name + '\n' for name in sorted(archives)), encoding='ascii')
-    (output / 'VERSION').write_text(version + '\n', encoding='ascii')
+    write_release_text(output / 'SHA256SUMS', ''.join(archives[name] + '  ' + name + '\n' for name in sorted(archives)))
+    write_release_text(output / 'VERSION', version + '\n')
     for name in ('install.sh', 'install.ps1'):
         shutil.copyfile(root / 'release' / name, output / name)
     import smoke_installed_animation as animation_gate
     source_inputs = {name: sha(root / name) for name in ('Cargo.toml', 'release/targets.toml', 'release/embedding-model.json', 'release/ort-source.json', 'release/ort-runtime.json', 'release/licence-sources.json', *animation_smoke.SOURCE_FILES)}
-    metadata = {'schema': 1, 'source_inputs': source_inputs, 'tag': arguments.tag, 'commit': commit, 'archives': archives, 'target_receipts': receipts, 'installers': {name: sha(output / name) for name in ('install.sh', 'install.ps1')}, 'windows_installers': windows_installer_hashes, 'linux_packages': linux_package_hashes, 'macos_packages': macos_hashes, 'macos_bindings': macos_bindings, 'package_animation_smoke': package_animation_smoke}
+    metadata = {'schema': 1, 'source_inputs': source_inputs, 'tag': arguments.tag, 'commit': commit, 'selection': selection, 'archives': archives, 'target_receipts': receipts, 'installers': {name: sha(output / name) for name in ('install.sh', 'install.ps1')}, 'windows_installers': windows_installer_hashes, 'linux_packages': linux_package_hashes, 'macos_packages': macos_hashes, 'macos_bindings': macos_bindings, 'package_animation_smoke': package_animation_smoke}
     write_json(output / 'candidate.json', metadata)
     pages.build_pages(arguments.manifest, output / 'site', arguments.tag, output / 'SHA256SUMS', source_root=root)
     gh_output(subjects=json.dumps([str(output / name) for name in sorted(archives) + sorted(windows_installer_hashes) + sorted(linux_package_hashes) + sorted(macos_hashes)]))
@@ -705,6 +835,20 @@ def candidate_data(directory, manifest, workspace):
     metadata = release_tool.read_json(directory / 'candidate.json')
     targets = release_tool.load_targets(manifest)
     version = release_tool.workspace_version(workspace, metadata['tag'])
+    version_file = directory / 'VERSION'
+    require(version_file.is_file() and not version_file.is_symlink() and
+            version_file.read_bytes() == (version + '\n').encode('ascii'),
+            'candidate VERSION differs from workspace and tag')
+    require(metadata.get('schema') == 1 and isinstance(metadata.get('commit'), str) and
+            re.fullmatch('[0-9a-f]{40}', metadata['commit']), 'candidate source identity is invalid')
+    require(git_identity(Path(workspace).resolve().parent) == metadata['commit'],
+            'candidate commit differs from current clean checkout')
+    import release_selection
+    selection = release_selection.validate_intent(metadata.get('selection'), manifest=manifest,
+                                                  expected_tag=metadata['tag'],
+                                                  expected_commit=metadata['commit'])
+    require(selection == metadata['selection'] and selection['mode'] == 'full',
+            'candidate selection is not canonical full inventory')
     import validate_animation_smoke as animation_smoke
     expected_inputs = {'Cargo.toml', 'release/targets.toml', 'release/embedding-model.json', 'release/ort-source.json', 'release/ort-runtime.json', 'release/licence-sources.json', *animation_smoke.SOURCE_FILES}
     require(set(metadata.get('source_inputs', {})) == expected_inputs, 'candidate source inventory differs')
@@ -713,7 +857,6 @@ def candidate_data(directory, manifest, workspace):
     expected_names = set(metadata['archives']) | {'audits', 'site', 'SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', *windows_installers.INSTALLER_NAMES, windows_installers.RECEIPT_NAME, *metadata.get('linux_packages', {}), *metadata.get('macos_packages', {})}
     actual_names = {path.name for path in directory.iterdir()}
     require(actual_names in (expected_names, expected_names | {'qualification.json'}), 'candidate aggregate file inventory differs')
-    require(metadata.get('schema') == 1 and re.fullmatch('[0-9a-f]{40}', metadata.get('commit', '')), 'candidate source identity is invalid')
     require(set(metadata['archives']) == {row['archive'] for row in targets} and set(metadata['target_receipts']) == {row['rust_target'] for row in targets}, 'candidate target/archive inventory differs')
     package_rows = [row for row in targets if row['os'] in ('linux', 'windows')]
     require(set(metadata.get('package_animation_smoke', {})) ==
@@ -796,7 +939,7 @@ def validate_install_receipt(metadata, proof, target, *, public):
             animation.get('source_files') == {name: metadata['source_inputs'][name] for name in animation_gate.SOURCE_FILES} and
             animation.get('installed_root') == proof.get('installed_pair_directory') and
             animation.get('executable_root') == proof.get('installed_pair_directory') and
-            animation.get('launcher_command') == [str((PureWindowsPath if target['os'] == 'windows' else Path)(proof['installed_pair_directory']) / target['executables'][0]), 'release-animation-probe'] and
+            animation.get('launcher_command') == [str((PureWindowsPath if target['os'] == 'windows' else PurePosixPath)(proof['installed_pair_directory']) / target['executables'][0]), 'release-animation-probe'] and
             animation.get('target') == target['rust_target'] and animation.get('tag') == metadata['tag'] and
             animation.get('format') == 'archive' and animation.get('native_identity', {}).get('system') == expected_system and
             animation.get('native_identity', {}).get('machine') in expected_machines and
@@ -808,8 +951,8 @@ def validate_install_receipt(metadata, proof, target, *, public):
     require(catalogue == animation.get('catalogue') and renders == animation.get('renders') and
             catalogue.get('client_sha256') == proof['installed_client_sha256'] and
             catalogue.get('helper_sha256') == proof['installed_helper_sha256'] and
-            catalogue.get('client_path') == str((PureWindowsPath if target['os'] == 'windows' else Path)(proof['installed_pair_directory']) / target['executables'][0]) and
-            catalogue.get('helper_path') == str((PureWindowsPath if target['os'] == 'windows' else Path)(proof['installed_pair_directory']) / target['executables'][2]) and
+            catalogue.get('client_path') == str((PureWindowsPath if target['os'] == 'windows' else PurePosixPath)(proof['installed_pair_directory']) / target['executables'][0]) and
+            catalogue.get('helper_path') == str((PureWindowsPath if target['os'] == 'windows' else PurePosixPath)(proof['installed_pair_directory']) / target['executables'][2]) and
             animation.get('stdout_sha256') == hashlib.sha256(animation['stdout'].encode('utf-8')).hexdigest() and
             animation.get('stderr_sha256') == hashlib.sha256(b'').hexdigest(),
             'installed animation process, frame, or helper receipt differs')
@@ -843,14 +986,14 @@ def validate_install_receipt(metadata, proof, target, *, public):
             embedding.get('dimension') == 384 and embedding.get('finite_nonzero') is True and
             embedding.get('state') == 'passed', 'installed embedding proof is missing or not aggregate-bound')
     pair_directory = proof.get('installed_pair_directory')
-    pair_path = PureWindowsPath(pair_directory) if target['os'] == 'windows' and isinstance(pair_directory, str) else Path(pair_directory) if isinstance(pair_directory, str) else None
+    pair_path = PureWindowsPath(pair_directory) if target['os'] == 'windows' and isinstance(pair_directory, str) else PurePosixPath(pair_directory) if isinstance(pair_directory, str) else None
     require(isinstance(pair_directory, str) and pair_path.is_absolute() and
             embedding.get('executable_path') == str(pair_path / ('ilium.exe' if target['os'] == 'windows' else 'ilium')) and
             type(embedding.get('process_id')) is int and embedding['process_id'] > 0,
             'installed embedding executable path or process identity differs')
     runtime = embedding.get('loaded_runtime')
     if runtime:
-        runtime_path = PureWindowsPath(runtime) if target['os'] == 'windows' else Path(runtime)
+        runtime_path = PureWindowsPath(runtime) if target['os'] == 'windows' else PurePosixPath(runtime)
         require(runtime_path.is_absolute() and runtime_path.parent == pair_path and
                 binding.get('runtime_files', {}).get(runtime_path.name) == embedding.get('runtime_sha256'),
                 'installed embedding runtime path/hash is not aggregate-bound')
@@ -1028,11 +1171,21 @@ def qualify_receipts(metadata, receipts, targets, *, public):
     require(set(receipts) == {row['rust_target'] for row in targets}, 'qualification requires all five native receipts')
     for target in targets:
         validate_install_receipt(metadata, receipts[target['rust_target']], target, public=public)
-    return {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'tag': metadata['tag'], 'commit': metadata['commit'], 'archives': metadata['archives'], 'installation_receipts': {target: release_tool.digest(json.dumps(proof, sort_keys=True).encode()) for target, proof in receipts.items()}, 'public_transport_verified': public}
+    return {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'tag': metadata['tag'], 'commit': metadata['commit'], 'archives': metadata['archives'], 'candidate_metadata_sha256': release_tool.digest(json.dumps(metadata, sort_keys=True).encode()), 'installation_receipts': {target: release_tool.digest(json.dumps(proof, sort_keys=True).encode()) for target, proof in receipts.items()}, 'public_transport_verified': public}
+
+
+def require_receipt_inventory(directory, prefix, targets):
+    expected = {prefix + row['rust_target'] for row in targets}
+    require(directory.is_dir() and not directory.is_symlink(), 'receipt directory inventory differs')
+    entries = list(directory.iterdir())
+    require({entry.name for entry in entries} == expected and
+            all(entry.is_dir() and not entry.is_symlink() for entry in entries),
+            'receipt directory inventory differs')
 
 
 def qualify(arguments):
     metadata, targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
+    require_receipt_inventory(arguments.receipts, arguments.receipt_prefix, targets)
     receipts = {row['rust_target']: release_tool.read_json(arguments.receipts / (arguments.receipt_prefix + row['rust_target']) / 'receipt.json') for row in targets}
     expected_metadata = copy.deepcopy(metadata)
     if arguments.previous:
@@ -1070,6 +1223,9 @@ def qualify(arguments):
             require(receipts[row['rust_target']].get('literal_public_command') == (WINDOWS_COMMAND if row['os'] == 'windows' else POSIX_COMMAND) and receipts[row['rust_target']].get('public_script_sha256') == metadata['installers']['install.ps1' if row['os'] == 'windows' else 'install.sh'], 'all-five final qualification requires literal public default commands and exact served script hashes')
     # This independent job reopens and audits all archives and all five native
     # receipts. No human approval or manually supplied success flag is accepted.
+    qualification['qualified_assets'] = asset_hashes(
+        path for path in publication_files(arguments.candidate)
+        if path.name != 'qualification.json')
     write_json(arguments.output, qualification)
     emit('result', command='qualify', state='passed', output=str(arguments.output.resolve()), public_transport_verified=arguments.public)
 
@@ -1092,7 +1248,37 @@ def github(path, *, method='GET', payload=None, binary=None):
 def publication_files(candidate):
     candidate = Path(candidate)
     metadata = release_tool.read_json(candidate / 'candidate.json')
-    return [candidate / name for name in sorted(metadata['archives'])] + [candidate / name for name in ('SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', 'qualification.json', *sorted(metadata['windows_installers']), *sorted(metadata['linux_packages']), *sorted(metadata['macos_packages']))]
+    availability = ('AVAILABILITY',) if metadata.get('selection', {}).get('mode') == 'partial' else ()
+    return [candidate / name for name in sorted(metadata['archives'])] + [candidate / name for name in ('SHA256SUMS', 'VERSION', 'install.sh', 'install.ps1', 'candidate.json', 'qualification.json', *availability, *sorted(metadata['windows_installers']), *sorted(metadata['linux_packages']), *sorted(metadata['macos_packages']))]
+
+
+def validate_qualified_publication(candidate, metadata, qualification):
+    # Reject incomplete envelopes before trusting their asset or receipt bindings.
+    expected_fields = {'schema', 'state', 'publication_allowed', 'tag', 'commit',
+                       'archives', 'candidate_metadata_sha256', 'installation_receipts',
+                       'public_transport_verified', 'qualified_assets'}
+    require(isinstance(qualification, dict) and set(qualification) == expected_fields and
+            type(qualification.get('schema')) is int and qualification['schema'] == 1 and
+            type(qualification.get('public_transport_verified')) is bool,
+            'publication qualification envelope differs')
+    receipts = qualification['installation_receipts']
+    targets = metadata.get('target_receipts')
+    require(isinstance(targets, dict) and bool(targets) and isinstance(receipts, dict) and
+            set(receipts) == set(targets) and
+            all(isinstance(value, str) and re.fullmatch('[0-9a-f]{64}', value)
+                for value in receipts.values()),
+            'publication installation receipt inventory differs')
+    require(qualification.get('state') == 'passed' and
+            qualification.get('publication_allowed') is True and
+            qualification.get('tag') == metadata['tag'] and
+            qualification.get('commit') == metadata['commit'] and
+            qualification.get('archives') == metadata['archives'] and
+            qualification.get('candidate_metadata_sha256') ==
+            release_tool.digest(json.dumps(metadata, sort_keys=True).encode()),
+            'publication requires unchanged automatic native qualification')
+    files = (path for path in publication_files(candidate) if path.name != 'qualification.json')
+    require(qualification.get('qualified_assets') == asset_hashes(files),
+            'publication assets differ from qualified bytes')
 
 
 def validate_release(release, tag, files, *, draft, immutable):
@@ -1109,18 +1295,68 @@ def validate_release(release, tag, files, *, draft, immutable):
     require(inventory == {name: 'sha256:' + digest for name, digest in files.items()}, 'GitHub release asset digest inventory differs')
 
 
+def require_release_absent(tag):
+    # The by-tag endpoint only promises published releases; authenticated
+    # listings also include drafts and must be exhausted before creation.
+    for page in range(1, 1001):
+        releases = github(f'releases?per_page=100&page={page}')
+        require(isinstance(releases, list) and len(releases) <= 100 and
+                all(isinstance(item, dict) and isinstance(item.get('tag_name'), str)
+                    for item in releases), 'release listing is malformed')
+        require(all(item['tag_name'] != tag for item in releases),
+                'release tag already exists; replacement is forbidden')
+        if len(releases) < 100:
+            return
+    raise release_tool.ReleaseError('release listing exceeded safe page bound')
+
+
+def require_remote_tag(tag, commit):
+    require(isinstance(tag, str) and re.fullmatch(pages.TAG_PATTERN, tag), 'invalid release tag')
+    require(isinstance(commit, str) and re.fullmatch('[0-9a-f]{40}', commit), 'invalid candidate commit')
+    ref = 'refs/tags/' + tag
+    try:
+        result = subprocess.run(
+            ['git', 'ls-remote', '--exit-code', '--tags',
+             'https://github.com/' + REPOSITORY + '.git', ref, ref + '^{}'],
+            capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise release_tool.ReleaseError('remote tag lookup could not complete') from error
+    require(result.returncode == 0 and len(result.stdout) <= 4096, 'remote tag lookup failed or tag is absent')
+    refs = {}
+    for line in result.stdout.splitlines():
+        parts = line.split('\t')
+        require(len(parts) == 2 and re.fullmatch('[0-9a-f]{40}', parts[0]) and
+                parts[1] in (ref, ref + '^{}') and parts[1] not in refs,
+                'remote tag lookup returned malformed or unexpected refs')
+        refs[parts[1]] = parts[0]
+    require(ref in refs and refs.get(ref + '^{}', refs[ref]) == commit,
+            'remote tag does not resolve to candidate commit')
+
+
+def release_notes(assets):
+    """Describe exactly the verified files attached to this release."""
+    require(isinstance(assets, dict) and bool(assets) and
+            all(isinstance(name, str) and re.fullmatch('[A-Za-z0-9][A-Za-z0-9._-]*', name)
+                for name in assets), 'invalid release notes asset inventory')
+    return ('Native five-target release. Checksums, source-bound qualification and build '
+            'attestations accompany these assets. See candidate.json and qualification.json '
+            'for exact identities.\n\n## Release assets\n\n' +
+            ''.join('- `' + name + '`\n' for name in sorted(assets)))
+
+
 def draft(arguments):
     metadata, _targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
     qualification = release_tool.read_json(arguments.candidate / 'qualification.json')
-    require(qualification.get('state') == 'passed' and qualification.get('commit') == metadata['commit'] and qualification.get('archives') == metadata['archives'], 'draft is not bound to native candidate qualification')
-    # There is no overwrite/retry-by-replacement path. A pre-existing tag is
-    # evidence requiring an explicit operator reconciliation outside this CLI.
-    releases = github('releases?per_page=100')
-    require(all(item.get('tag_name') != metadata['tag'] for item in releases), 'release tag already exists; replacement is forbidden')
+    validate_qualified_publication(arguments.candidate, metadata, qualification)
+    # An existing release requires reconciliation; never overwrite it here.
+    # This release lookup does not establish the source tag's identity.
+    require_release_absent(metadata['tag'])
+    require_remote_tag(metadata['tag'], metadata['commit'])
     repository = github('immutable-releases')
     require(repository.get('enabled') is True, 'repository release immutability is not enabled')
-    write_json(arguments.output.with_suffix('.intent.json'), {'schema': 1, 'operation': 'create-draft', 'commit': metadata['commit'], 'tag': metadata['tag'], 'owner_run_id': os.environ.get('GITHUB_RUN_ID'), 'assets': asset_hashes(publication_files(arguments.candidate))})
-    release = github('releases', method='POST', payload={'tag_name': metadata['tag'], 'target_commitish': metadata['commit'], 'name': 'Ilium ' + metadata['tag'], 'body': 'Native five-target release; checksums, source-bound qualification and build attestations accompany these assets. See candidate.json and qualification.json for exact identities.', 'draft': True, 'prerelease': True, 'make_latest': 'false'})
+    assets = asset_hashes(publication_files(arguments.candidate))
+    write_json(arguments.output.with_suffix('.intent.json'), {'schema': 1, 'operation': 'create-draft', 'commit': metadata['commit'], 'tag': metadata['tag'], 'owner_run_id': os.environ.get('GITHUB_RUN_ID'), 'assets': assets})
+    release = github('releases', method='POST', payload={'tag_name': metadata['tag'], 'target_commitish': metadata['commit'], 'name': 'Ilium ' + metadata['tag'], 'body': release_notes(assets), 'draft': True, 'prerelease': True, 'make_latest': 'false'})
     write_json(arguments.output.with_suffix('.owned.json'), {'schema': 1, 'owned_release_id': release['id'], 'commit': metadata['commit'], 'tag': metadata['tag'], 'owner_run_id': os.environ.get('GITHUB_RUN_ID')})
     upload = release['upload_url'].split('{', 1)[0]
     for file in publication_files(arguments.candidate):
@@ -1136,7 +1372,8 @@ def draft(arguments):
 def publish(arguments):
     metadata, _targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
     qualification = release_tool.read_json(arguments.candidate / 'qualification.json')
-    require(qualification.get('state') == 'passed' and qualification.get('publication_allowed') is True and qualification.get('commit') == metadata['commit'] and qualification.get('archives') == metadata['archives'], 'publication requires unchanged automatic native qualification')
+    validate_qualified_publication(arguments.candidate, metadata, qualification)
+    require_remote_tag(metadata['tag'], metadata['commit'])
     baseline = load_baseline(arguments.baseline, metadata)
     assert_latest(baseline); assert_production(baseline)
     draft_receipt = release_tool.read_json(arguments.draft_receipt)
@@ -1157,6 +1394,8 @@ def publish(arguments):
 
 def latest(arguments):
     metadata, targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
+    require_receipt_inventory(arguments.receipts, arguments.receipt_prefix, targets)
+    require_remote_tag(metadata['tag'], metadata['commit'])
     receipts = {row['rust_target']: release_tool.read_json(arguments.receipts / (arguments.receipt_prefix + row['rust_target']) / 'receipt.json') for row in targets}
     qualify_receipts(metadata, receipts, targets, public=True)
     for row in targets:
@@ -1219,6 +1458,7 @@ def cloudflare(path, *, method='GET'):
 
 def deploy(arguments):
     metadata, _targets = candidate_data(arguments.candidate, arguments.manifest, arguments.workspace)
+    require_remote_tag(metadata['tag'], metadata['commit'])
     baseline = load_baseline(arguments.baseline, metadata)
     assert_production(baseline)
     publication = release_tool.read_json(arguments.publication_receipt)
@@ -1731,6 +1971,9 @@ def parser():
         command.add_argument('--workspace', type=Path, default=ROOT / 'Cargo.toml')
         if name in {'source', 'native', 'aggregate'}:
             command.add_argument('--tag', required=name != 'source')
+        if name == 'source':
+            command.add_argument('--selection-intent', type=Path)
+            command.add_argument('--selection-policy', type=Path)
         if name == 'baseline':
             command.add_argument('--output', type=Path, required=True)
         if name in {'publish', 'latest', 'deploy', 'install', 'qualify', 'recovery-ready', 'recover'}:
@@ -1748,6 +1991,7 @@ def parser():
         if name == 'native':
             command.add_argument('--target', required=True)
             command.add_argument('--runner-identity', required=True)
+            command.add_argument('--qualification-profile', choices=('full', *PREVIEW_TARGETS), default='full')
             command.add_argument('--work', type=Path, required=True)
             command.add_argument('--output', type=Path, required=True)
         if name == 'aggregate':

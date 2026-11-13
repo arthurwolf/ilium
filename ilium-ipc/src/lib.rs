@@ -1514,11 +1514,6 @@ mod tests {
 
     #[test]
     fn workspace_variants_preserve_close_pane_wire_layout() {
-        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
-            let bytes = bincode::serialize(value).expect("serializable");
-            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
-        }
-
         assert_eq!(
             bincode::serialize(&ClientRequest::ClosePane { pane_id: NodeId(2) })
                 .expect("serializable"),

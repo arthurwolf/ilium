@@ -23,3 +23,4 @@ Client/server, like Zellij and tmux itself — this is what makes detach/reattac
                   │ terminal)               │
                   └─────────────────────────┘
 ```
+

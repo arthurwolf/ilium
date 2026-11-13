@@ -153,14 +153,30 @@ impl ProjectionRetention {
             PaneProgressChanged { pane_id, .. } => (Slot::Progress, Some(*pane_id)),
             ResourceObservationFailed { .. } => (Slot::ResourceObservation, None),
             ResourceSnapshot { catalog, .. } => {
-                if app.resources.catalog.as_ref().is_some_and(|old|old.revision>catalog.revision){return update;}
-                (Slot::Resources,None)
+                if app
+                    .resources
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|old| old.revision > catalog.revision)
+                {
+                    return update;
+                }
+                (Slot::Resources, None)
             }
-            ResourceResult { result:Ok(reply), .. } => {
-                if app.resources.catalog.as_ref().is_some_and(|old|old.revision>reply.catalog.revision){return update;}
-                (Slot::Resources,None)
+            ResourceResult {
+                result: Ok(reply), ..
+            } => {
+                if app
+                    .resources
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|old| old.revision > reply.catalog.revision)
+                {
+                    return update;
+                }
+                (Slot::Resources, None)
             }
-            ResourceResult { result:Err(_), .. } => (Slot::ResourceObservation,None),
+            ResourceResult { result: Err(_), .. } => (Slot::ResourceObservation, None),
             ResourceWaitChanged { pane_id, .. } => (Slot::ResourceWait, Some(*pane_id)),
             PaneGitStatusChanged { pane_id, .. } => (Slot::Git, Some(*pane_id)),
             PaneDebugLogSnapshot {
@@ -217,11 +233,11 @@ impl ProjectionRetention {
             | AntigravityStatuslineCompleted { .. }
             | Error { .. }
             | PaneResizeRejected { .. }
-            | WorkspaceRemovalBlocked { .. }
+            | BlockingErrorsSnapshot { .. }
+            | PaneCreateFinished { .. }
+            | WorkspaceRemovalBlocked { .. } => return update,
             // Plugin-platform events are projected by the plugin client layer, not here (skeleton).
-            | Plugin(_)
-            | Contributions(_)
-            | Rejected(_) => return update,
+            Plugin(_) | Contributions(_) | Rejected(_) => return update,
             AgentDetectionSettingsChanged { result, .. } => match result {
                 Ok(_) => {
                     update.clear_detection_error = true;
@@ -232,8 +248,6 @@ impl ProjectionRetention {
             TextTriggersChanged { .. }
             | PaneProcessTerminated { .. }
             | PaneFrozen { .. }
-            | BlockingErrorsSnapshot { .. }
-            | PaneCreateFinished { .. }
             | SoundPreviewCompleted { .. } => (global, None),
         };
         update.keys.push(Key { slot, scope });
@@ -263,7 +277,31 @@ impl ProjectionRetention {
         app: &mut App,
         owner: Option<&EventRetention>,
     ) -> Result<ProjectionUpdate, ProjectionAdmissionError> {
+        let update = Self::prepare(event, app);
+        Self::prepare_update(event, app, owner, update)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prepare_owned_with_test_key(
+        event: &ServerEvent,
+        app: &mut App,
+        owner: Option<&EventRetention>,
+    ) -> Result<ProjectionUpdate, ProjectionAdmissionError> {
+        // Exercise a future event that both derives data and retains a key.
         let mut update = Self::prepare(event, app);
+        update.keys.push(Key {
+            slot: Slot::Global(std::mem::discriminant(event)),
+            scope: None,
+        });
+        Self::prepare_update(event, app, owner, update)
+    }
+
+    fn prepare_update(
+        event: &ServerEvent,
+        app: &mut App,
+        owner: Option<&EventRetention>,
+        mut update: ProjectionUpdate,
+    ) -> Result<ProjectionUpdate, ProjectionAdmissionError> {
         let derivation_bytes = app.incoming_derivation_bytes(event);
         let registry = &mut app.incoming_projection;
         let target = registry

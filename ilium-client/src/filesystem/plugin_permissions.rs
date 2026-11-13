@@ -457,6 +457,8 @@ impl Job for PermissionLedgerWrite {
     }
 }
 #[cfg(test)]
+// The fault-injection tests that construct these variants are Linux-only.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 enum TestFault {
     InvalidateBeforePublish,
     FailAfterPublish,
@@ -754,7 +756,6 @@ impl PluginPermissionFiles {
     pub(crate) fn is_pending(&self) -> bool {
         self.pending.is_some()
     }
-    #[cfg(test)]
     pub(crate) fn notification(&self) -> Arc<Notify> {
         self.writer.notification()
     }

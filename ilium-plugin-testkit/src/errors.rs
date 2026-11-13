@@ -2,7 +2,17 @@
 
 /// Dotted codes of the harness, fixtures, replay, toolchain and test warnings.
 pub mod codes {
-    /// Builder call after activation.
+    /// Invalid setup name or environment value.
+    pub const CONFIG_INVALID: &str = "harness.config-invalid";
+    /// Manifest file could not be read.
+    pub const MANIFEST_READ: &str = "harness.manifest-read";
+    /// A grant change succeeded but the new activation returned a plugin error.
+    pub const ACTIVATION_FAILED: &str = "harness.activation-failed";
+    /// The requested native instance type differs from the stored plugin type.
+    pub const INSTANCE_TYPE: &str = "harness.instance-type";
+    /// No further distinct u64 activation number is available.
+    pub const INSTANCE_EXHAUSTED: &str = "harness.instance-exhausted";
+    /// Builder call after build or activation.
     pub const SETUP_CLOSED: &str = "harness.setup-closed";
     /// Grant not in the manifest.
     pub const GRANT_NOT_DECLARED: &str = "harness.grant-not-declared";
@@ -12,6 +22,8 @@ pub mod codes {
     pub const BATCH_TOO_LARGE: &str = "harness.batch-too-large";
     /// Queue not empty after 100 rounds.
     pub const SETTLE_LIMIT: &str = "harness.settle-limit";
+    /// complete named no unfinished request occurrence.
+    pub const REQUEST_NOT_PENDING: &str = "harness.request-not-pending";
     /// `cell` outside the screen.
     pub const CELL_OUT_OF_RANGE: &str = "harness.cell-out-of-range";
     /// Render size outside 10 to 500 by 1 to 200.
@@ -80,7 +92,7 @@ pub mod codes {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{code}: {message}")]
 pub struct HarnessError {
-    /// Dotted code, one of [`codes`].
+    /// Dotted code from [`codes`] or the canonical manifest parser.
     pub code: String,
     /// Human-readable detail.
     pub message: String,

@@ -1039,7 +1039,9 @@ mod tests {
             &|| false,
         )
         .expect_err("a failed configured-root scan must not look like empty history");
-        assert!(error.contains(".claude/projects"), "{error}");
+        // The root appears in the message with the platform's separators.
+        let root = home.path().join(".claude").join("projects");
+        assert!(error.contains(&root.display().to_string()), "{error}");
     }
 
     fn quota_line(used: f64, resets_at: i64) -> String {

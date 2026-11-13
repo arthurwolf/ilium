@@ -144,9 +144,13 @@ async fn connect(socket_path: &Path) -> SessionStream {
 
 async fn wait_for_snapshot_containing(snapshot_path: &Path, needle: &str) {
     let deadline = Instant::now() + EVENT_TIMEOUT;
+    // The snapshot is JSON, so a Windows path appears there with escaped
+    // backslashes; search for the escaped spelling of the needle.
+    let escaped_needle = serde_json::to_string(needle).expect("encode needle as a JSON string");
+    let escaped_needle = &escaped_needle[1..escaped_needle.len() - 1];
     loop {
         let saved = std::fs::read_to_string(snapshot_path).unwrap_or_default();
-        if saved.contains(needle) {
+        if saved.contains(escaped_needle) {
             return;
         }
         assert!(
@@ -218,10 +222,7 @@ async fn monitor_survives_server_restart_and_keeps_observing() {
     .expect("write probe report");
     let probe = write_probe_script(fixtures.path(), &probe_report);
 
-    let socket_dir = tempfile::Builder::new()
-        .prefix("ir")
-        .tempdir_in("/tmp")
-        .expect("create short socket directory");
+    let socket_dir = common::short_socket_dir();
     let socket_path = socket_dir.path().join("restart.sock");
     let snapshot_path = fixtures.path().join("restart.snapshot.json");
     let session_name = "restart-recovery";

@@ -122,7 +122,7 @@ impl ParserMemoryGovernor {
             }
         };
         Ok(ParserStorageLease {
-            root,
+            _root: root,
             bytes,
             normal_bytes: normal.then(|| self.normal_bytes.clone()),
         })
@@ -141,19 +141,21 @@ impl ParserMemoryGovernor {
 
 #[derive(Debug)]
 pub(crate) struct ParserStorageLease {
-    root: StorageAdmission,
+    /// Held only for its drop effect: releasing the admission returns the bytes to the app-wide ledger.
+    _root: StorageAdmission,
     bytes: usize,
     normal_bytes: Option<Arc<AtomicUsize>>,
 }
 
 impl ParserStorageLease {
+    #[cfg(test)]
     pub(crate) fn resident_bytes(&self) -> usize {
-        self.root.resident_bytes()
+        self._root.resident_bytes()
     }
 
     #[cfg(test)]
     pub(crate) fn shares_root(&self, governor: &ParserMemoryGovernor) -> bool {
-        self.root.shares_root(&governor.quota)
+        self._root.shares_root(&governor.quota)
     }
 }
 
@@ -294,10 +296,15 @@ impl Drop for ProgressPreview {
         }
     }
 }
-struct EngineClaim(Arc<AtomicUsize>, ParserStorageLease); // The engine envelope remains owned through retirement and retained targets.
+struct EngineClaim(Arc<AtomicUsize>, Option<ParserStorageLease>); // The engine envelope remains owned through retirement and retained targets.
 impl Drop for EngineClaim {
     fn drop(&mut self) {
-        let _storage_bytes = self.1.resident_bytes(); // Keep the declared envelope visible until this claim actually retires.
+        // Release the storage lease before the claim count falls, so an observer
+        // that sees zero claims can rely on the envelope being returned. Field
+        // drop order would otherwise decrement the count first, leaving a window
+        // (visible on slower schedulers) where a new admission still sees the
+        // retired engine's debit.
+        drop(self.1.take());
         self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
@@ -1015,11 +1022,13 @@ impl TerminalParsing {
     pub(crate) fn purge_released_commands(&self) {
         let mut purged: Vec<Command> = Vec::new();
         {
-            let mut queue = self
-                .shared
-                .queue
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
+            // The client must never block its event loop behind the parser.
+            // Retiring claims remain charged, so a later collection can retry.
+            let mut queue = match self.shared.queue.try_lock() {
+                Ok(queue) => queue,
+                Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => return,
+            };
             let mut index = 0;
             while index < queue.commands.len() {
                 if queue.commands[index].target.alive.load(Ordering::Acquire) {
@@ -1059,7 +1068,10 @@ impl TerminalParsing {
         view.admission_pressure = None;
         view.admission_error = None;
         self.shared.engine_claims.fetch_add(1, Ordering::AcqRel);
-        let claim = Arc::new(EngineClaim(self.shared.engine_claims.clone(), storage)); // Keep its envelope through the last retiring target owner.
+        let claim = Arc::new(EngineClaim(
+            self.shared.engine_claims.clone(),
+            Some(storage),
+        )); // Keep its envelope through the last retiring target owner.
         let target = PaneTarget {
             pane_id,
             identity: view.identity.clone(),
@@ -2389,6 +2401,24 @@ mod tests {
         // owner may already report snapshot pressure: this fixture's normal
         // storage allowance is occupied by the admitted engine itself.
         assert_eq!(waiting.admission_pressure, None);
+        // The recovered engine's envelope occupies the whole ordinary budget of
+        // this two-engine ceiling, so a hidden pane cannot publish its first
+        // snapshot: only displayed panes may draw on the replacement headroom.
+        // The owner therefore reports ProcessStorage for a non-displayed pane
+        // for as long as it waits, by design. Display the pane, as the app does
+        // for a visible one, and require the owner's verdict to clear once the
+        // registration snapshot is admitted.
+        waiting
+            .frontend
+            .as_ref()
+            .expect("recovered pane parser is attached")
+            .set_displayed(true);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while waiting.parser_pressure().is_some() && Instant::now() < deadline {
+            drop(parsing.collect());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(waiting.parser_pressure(), None);
     }
 
     fn attach(parsing: &TerminalParsing, id: NodeId, view: &mut TerminalView) {
@@ -2792,11 +2822,31 @@ mod tests {
             unreachable!()
         };
         assert!(!second.is_confirmed_removed());
-        let audit = result(
-            &parsing,
-            |result| matches!(result, ParseResult::Error { target, message } if target.pane_id == first_id && message.contains("ordinal") && message.contains("bytes")),
-        );
-        assert!(matches!(audit, ParseResult::Error { .. }));
+        // Confirming the removal also cancels the pane's queued commands, which
+        // reports a "cancelled" error ahead of the ordinal audit error; the
+        // order of the two is not part of the contract under test.
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut audited = false;
+        let mut seen_errors = Vec::new();
+        while !audited {
+            for result in parsing.collect() {
+                if let ParseResult::Error { target, message } = result {
+                    seen_errors.push(format!("{:?}: {message}", target.pane_id));
+                    // Whether the worker still holds the command in its queue (the
+                    // ordinal audit) or is already publishing it (the cancelled
+                    // publication) depends on thread timing; both release it.
+                    audited |= target.pane_id == first_id
+                        && ((message.contains("ordinal") && message.contains("bytes"))
+                            || message.contains("cancelled before acknowledgement")
+                            || message.contains("cancelled by pane closure"));
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "ordinal audit did not arrive; errors seen: {seen_errors:?}"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
     #[test]
     fn search_navigation_checks_history_origin_after_previously_admitted_replay() {

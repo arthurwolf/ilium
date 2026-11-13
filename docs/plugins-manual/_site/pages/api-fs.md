@@ -372,7 +372,7 @@ The diagram shows how a path is checked. The grant is tested first, and the esca
 |---|---|
 | `not-permitted` | The grant is missing, declined or revoked, the path escapes the root, or the call writes to a read-only scope. |
 | `not-found` | The entry, or the parent folder of a new entry, does not exist. |
-| `invalid-argument` | A bad path or glob, `max_entries` over 4,096 for `list_dir` or over 65,536 for `scan`, `max_bytes` over 1 MiB, a write over `fs_write_mib`, or `rename` across two scopes. |
+| `invalid-argument` | A bad path or glob, `max_entries` over 4,096 for `list_dir` or over 100,000 for `scan`, `max_bytes` over 1 MiB, a write over `fs_write_mib`, or `rename` across two scopes. |
 | `conflict` | `create-new` finds a file, a held lock blocks a zero-timeout request, a rename target is a non-empty folder, or a `write_atomic` revision is stale. |
 | `timed-out` | A lock is still held when its timeout ends. |
 | `quota-exceeded` | A file is larger than the `read_all` limit, a `scan` finds more matches than `max_entries`, or the `data` and `cache` disk limit is full. |

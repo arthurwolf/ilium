@@ -184,9 +184,9 @@ pub fn sync_parent_directory_if_supported(path: &Path) -> io::Result<DirectorySy
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 thread_local! {static RESOURCE_TEST_DIRECTORY_SYNC_FAILURE:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 pub(crate) fn fail_next_replacement_directory_sync_for_test() {
     RESOURCE_TEST_DIRECTORY_SYNC_FAILURE.with(|failure| failure.set(true));
 }
@@ -1194,7 +1194,10 @@ mod tests {
         let source = directory.path().join("pending");
         std::fs::write(&destination, b"previous").expect("previous file");
         std::fs::write(&source, b"replacement").expect("pending file");
-        std::fs::File::open(&source)
+        // Write access: Windows FlushFileBuffers rejects a read-only handle.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&source)
             .expect("pending handle")
             .sync_all()
             .expect("flush contents");

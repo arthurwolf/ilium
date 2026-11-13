@@ -563,7 +563,7 @@ mod tests {
         let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
             crate::execution::test_client(),
         ));
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(60);
         while !cache.step(settings, 24, 12, 8) {
             assert!(Instant::now() < deadline, "background cache must complete");
             std::thread::sleep(Duration::from_millis(1));

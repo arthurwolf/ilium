@@ -102,7 +102,7 @@ fn codec_inflate_output_exactly_at_max_output_is_returned() {
 
 /// REQ: WIT:ilium:host/codec.inflate
 #[test]
-fn codec_inflate_output_one_byte_over_max_output_invalid_argument() {
+fn codec_inflate_output_one_byte_over_max_output_quota_exceeded() {
     let mut fixture = fixture_t2(&[]);
     let packed = expect_ok(
         fixture
@@ -111,7 +111,7 @@ fn codec_inflate_output_one_byte_over_max_output_invalid_argument() {
     );
     assert_eq!(
         expect_code(fixture.codec().inflate(Compression::Zlib, packed, 1000)),
-        ErrorCode::InvalidArgument
+        ErrorCode::QuotaExceeded
     );
 }
 
@@ -141,6 +141,76 @@ fn codec_inflate_truncated_stream_invalid_argument() {
     packed.truncate(packed.len() / 2);
     assert_eq!(
         expect_code(fixture.codec().inflate(Compression::Gzip, packed, 100_000)),
+        ErrorCode::InvalidArgument
+    );
+}
+
+/// REQ: WIT:ilium:host/codec.inflate
+#[test]
+fn codec_inflate_rejects_every_truncated_stream_and_trailing_bytes() {
+    let mut fixture = fixture_t2(&[]);
+    for format in ALL {
+        let packed = expect_ok(
+            fixture
+                .codec()
+                .deflate(format, b"bounded stream".to_vec(), 6),
+        );
+        for end in 0..packed.len() {
+            assert_eq!(
+                expect_code(fixture.codec().inflate(format, packed[..end].to_vec(), 14)),
+                ErrorCode::InvalidArgument,
+                "{format:?} truncated at {end}"
+            );
+        }
+        let mut trailing = packed;
+        trailing.push(0);
+        assert_eq!(
+            expect_code(fixture.codec().inflate(format, trailing, 14)),
+            ErrorCode::InvalidArgument,
+            "{format:?} trailing byte"
+        );
+    }
+}
+
+/// REQ: WIT:ilium:host/codec.inflate
+#[test]
+fn codec_inflate_zero_limit_accepts_empty_stream_and_rejects_output() {
+    let mut fixture = fixture_t2(&[]);
+    for format in ALL {
+        let empty = expect_ok(fixture.codec().deflate(format, Vec::new(), 6));
+        assert!(expect_ok(fixture.codec().inflate(format, empty, 0)).is_empty());
+        let nonempty = expect_ok(fixture.codec().deflate(format, vec![1], 6));
+        assert_eq!(
+            expect_code(fixture.codec().inflate(format, nonempty, 0)),
+            ErrorCode::QuotaExceeded
+        );
+    }
+}
+
+/// REQ: WIT:ilium:host/codec.inflate
+#[test]
+fn codec_inflate_validates_checksums_even_at_the_output_limit() {
+    let mut fixture = fixture_t2(&[]);
+    for format in [Compression::Zlib, Compression::Gzip] {
+        let mut packed = expect_ok(fixture.codec().deflate(format, vec![42; 8192], 6));
+        let last = packed.len() - 1;
+        packed[last] ^= 1;
+        assert_eq!(
+            expect_code(fixture.codec().inflate(format, packed, 8192)),
+            ErrorCode::InvalidArgument,
+            "{format:?} corrupt trailer"
+        );
+    }
+}
+
+/// REQ: WIT:ilium:host/codec.inflate
+#[test]
+fn codec_inflate_rejects_a_nonfinal_empty_deflate_block() {
+    let mut fixture = fixture_t2(&[]);
+    // A complete empty stored block with BFINAL clear requires a following block.
+    let raw = vec![0x00, 0x00, 0x00, 0xff, 0xff];
+    assert_eq!(
+        expect_code(fixture.codec().inflate(Compression::DeflateRaw, raw, 0)),
         ErrorCode::InvalidArgument
     );
 }
@@ -270,6 +340,81 @@ fn codec_image_info_reports_width_height_and_one_frame_for_a_bmp() {
     assert_eq!((info.width, info.height, info.frames), (3, 2, 1));
 }
 
+/// REQ: WIT:ilium:host/codec.image-info and decode-image
+#[test]
+fn codec_animated_gif_reports_and_decodes_each_frame() {
+    // Two identical 1x1 frames, with a global black/white palette.
+    let header = [
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0xff, 0xff, 0xff,
+    ];
+    let frame = [
+        0x21, 0xf9, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+        0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00,
+    ];
+    let mut data = header.to_vec();
+    data.extend_from_slice(&frame);
+    data.extend_from_slice(&frame);
+    data.push(0x3b);
+    let mut fixture = fixture_t2(&[]);
+    let info = expect_ok(fixture.codec().image_info(data.clone()));
+    assert_eq!((info.width, info.height, info.frames), (1, 1, 2));
+    for index in 0..2 {
+        let image = expect_ok(fixture.codec().decode_image(data.clone(), index, 1));
+        assert_eq!((image.width, image.height, image.rgba.len()), (1, 1, 4));
+    }
+    assert_eq!(
+        expect_code(fixture.codec().decode_image(data, 2, 1)),
+        ErrorCode::InvalidArgument
+    );
+}
+
+/// Supported still-image formats must round-trip their dimensions and RGBA shape.
+#[test]
+fn codec_common_still_formats_decode_to_rgba() {
+    for format in [
+        image::ImageFormat::Png,
+        image::ImageFormat::Jpeg,
+        image::ImageFormat::WebP,
+    ] {
+        let source = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            3,
+            2,
+            image::Rgb([40, 80, 120]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        source
+            .write_to(&mut encoded, format)
+            .expect("encode test image");
+        let bytes = encoded.into_inner();
+        let mut fixture = fixture_t2(&[]);
+        let metadata = expect_ok(fixture.codec().image_info(bytes.clone()));
+        assert_eq!(
+            (metadata.width, metadata.height, metadata.frames),
+            (3, 2, 1)
+        );
+        let decoded = expect_ok(fixture.codec().decode_image(bytes, 0, 6));
+        assert_eq!(
+            (decoded.width, decoded.height, decoded.rgba.len()),
+            (3, 2, 24)
+        );
+    }
+}
+
+/// A GIF frame cannot allocate beyond the declared logical canvas.
+#[test]
+fn codec_gif_frame_larger_than_canvas_is_rejected() {
+    let data = vec![
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255, 0x2c,
+        0, 0, 0, 0, 2, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x3b,
+    ];
+    let mut fixture = fixture_t2(&[]);
+    assert_eq!(
+        expect_code(fixture.codec().decode_image(data, 0, 1)),
+        ErrorCode::InvalidArgument
+    );
+}
+
 /// REQ: WIT:ilium:host/codec.image-info
 #[test]
 fn codec_image_info_unknown_format_unsupported() {
@@ -344,11 +489,11 @@ fn codec_decode_image_frame_one_of_a_single_frame_image_invalid_argument() {
 
 /// REQ: WIT:ilium:host/codec.decode-image
 #[test]
-fn codec_decode_image_more_pixels_than_max_pixels_invalid_argument() {
+fn codec_decode_image_more_pixels_than_max_pixels_quota_exceeded() {
     let mut fixture = fixture_t2(&[]);
     assert_eq!(
         expect_code(fixture.codec().decode_image(bmp(4, 4, 0, 0, 0), 0, 15)),
-        ErrorCode::InvalidArgument
+        ErrorCode::QuotaExceeded
     );
 }
 
@@ -436,6 +581,40 @@ proptest! {
 }
 
 // ---- rasterize-text --------------------------------------------------------------------------
+
+/// Text must contain visible white ink, not just a correctly sized empty buffer.
+#[test]
+fn codec_rasterize_text_draws_white_ink() {
+    let mut fixture = fixture_t2(&[]);
+    let image = expect_ok(fixture.codec().rasterize_text(raster("Hello", 24, 400)));
+    let ink: Vec<_> = image
+        .rgba
+        .chunks_exact(4)
+        .filter(|pixel| pixel[3] != 0)
+        .collect();
+    assert!(!ink.is_empty());
+    assert!(ink.iter().all(|pixel| pixel[..3] == [255, 255, 255]));
+}
+
+/// Empty input still has a valid transparent raster.
+#[test]
+fn codec_rasterize_empty_text_is_transparent() {
+    let mut fixture = fixture_t2(&[]);
+    let image = expect_ok(fixture.codec().rasterize_text(raster("", 16, 400)));
+    assert!(image.width > 0 && image.height > 0);
+    assert!(image.rgba.chunks_exact(4).all(|pixel| pixel[3] == 0));
+}
+
+/// A request whose raster exceeds the session memory ceiling is refused before allocation.
+#[test]
+fn codec_rasterize_text_rejects_oversized_output() {
+    let mut fixture = fixture_t2(&[]);
+    let text = "W".repeat(4096);
+    assert_eq!(
+        expect_code(fixture.codec().rasterize_text(raster(&text, 512, 16_384))),
+        ErrorCode::QuotaExceeded
+    );
+}
 
 /// REQ: WIT:ilium:host/codec.rasterize-text
 #[test]

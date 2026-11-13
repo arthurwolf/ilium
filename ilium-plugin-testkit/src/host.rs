@@ -17,7 +17,18 @@ use ilium_plugin_sdk_core::types::{
 use ilium_plugin_sdk_core::NativeEntry;
 use serde_json::Value;
 
-use crate::errors::HarnessError;
+use crate::errors::{codes, HarnessError};
+
+fn activation_failure(error: PluginError) -> HarnessError {
+    HarnessError::new(
+        codes::ACTIVATION_FAILED,
+        format!("{}: {}", error.code.as_str(), error.message),
+    )
+}
+
+mod delivery;
+mod native;
+mod setup;
 use crate::fakes::cli::FakeCli;
 use crate::fakes::clock::FakeClock;
 use crate::fakes::fs::FakeFs;
@@ -175,7 +186,7 @@ pub struct HostSnapshot {
     pub state: InstanceState,
     /// Every bucket with its keys and values.
     pub storage: BTreeMap<String, BTreeMap<String, Vec<u8>>>,
-    /// The bytes the previous deactivate returned.
+    /// The restored bytes supplied to the current or most recent activation.
     pub restored: Option<Vec<u8>>,
 }
 
@@ -185,137 +196,283 @@ pub type FakeHostBuilder = FakeHost;
 /// One plugin on one side with deterministic fakes.
 #[derive(Debug)]
 pub struct FakeHost {
-    mode: Mode,
-    seed: u64,
+    setup: setup::Setup,
+    native: native::NativeState,
+    delivery: delivery::DeliveryState,
+    clock: FakeClock,
+    storage: FakeStorage,
 }
 
 impl FakeHost {
     /// An empty host: no grants, tier T1, side server, empty tree. Seed 1 unless `ILIUM_PLUGIN_TEST_SEED` is set (DEV-413).
     pub fn new() -> FakeHost {
+        Self::from_setup(setup::Setup::new())
+    }
+
+    fn from_setup(setup: setup::Setup) -> FakeHost {
         FakeHost {
-            mode: Mode::Native,
-            seed: 1,
+            setup,
+            native: native::NativeState::default(),
+            delivery: delivery::DeliveryState::default(),
+            clock: FakeClock::at(1_893_456_000_000),
+            storage: FakeStorage::default(),
         }
     }
 
-    /// Takes id, side, grants and tier from a manifest (DEV-411).
-    pub fn for_manifest(_path: impl AsRef<Path>) -> Result<FakeHost, HarnessError> {
-        unimplemented!("DEV-411")
+    /// Takes id and declared side grants from a canonical manifest; trust tier stays T1 unless overridden (DEV-411).
+    pub fn for_manifest(path: impl AsRef<Path>) -> Result<FakeHost, HarnessError> {
+        setup::Setup::for_manifest(path.as_ref()).map(Self::from_setup)
     }
 
     /// Grants one capability; fails with `harness.grant-unknown` or `harness.grant-not-declared` (DEV-411, DEV-412).
-    pub fn grant(self, _name: &str) -> FakeHost {
-        unimplemented!("DEV-411")
+    pub fn grant(mut self, name: &str) -> FakeHost {
+        self.setup.add_grants(&[name]);
+        self
     }
 
     /// Grants several capabilities.
-    pub fn grants(self, _names: &[&str]) -> FakeHost {
-        unimplemented!("DEV-411")
+    pub fn grants(mut self, names: &[&str]) -> FakeHost {
+        self.setup.add_grants(names);
+        self
     }
 
     /// Sets the plugin tier, for example "T1".
-    pub fn tier(self, _tier: &str) -> FakeHost {
-        unimplemented!("DEV-410")
+    pub fn tier(mut self, tier: &str) -> FakeHost {
+        self.setup.set_tier(tier);
+        self
     }
 
     /// Sets the side: "server", "client" or "scene".
-    pub fn side(self, _side: &str) -> FakeHost {
-        unimplemented!("DEV-410")
+    pub fn side(mut self, side: &str) -> FakeHost {
+        self.setup.set_side(side);
+        self
     }
 
     /// Sets the platform name.
-    pub fn platform(self, _platform: &str) -> FakeHost {
-        unimplemented!("DEV-410")
+    pub fn platform(mut self, platform: &str) -> FakeHost {
+        self.setup.set_platform(platform);
+        self
     }
 
     /// Loads a fixture file into the fakes.
     pub fn with_fixture(self, _path: impl AsRef<Path>) -> FakeHost {
+        self.setup.ensure_open();
         unimplemented!("DEV-423")
     }
 
     /// Sets the seed; an explicit call wins over the environment (DEV-413).
-    pub fn seed(self, _seed: u64) -> FakeHost {
-        unimplemented!("DEV-413")
+    pub fn seed(mut self, seed: u64) -> FakeHost {
+        self.setup.set_seed(seed);
+        self
     }
 
     /// Ends the setup without activating.
-    pub fn build(self) -> FakeHost {
-        unimplemented!("DEV-410")
+    pub fn build(mut self) -> FakeHost {
+        self.setup.ensure_open();
+        self.setup.close();
+        self
     }
 
     /// Loads a storage snapshot file; unknown shapes fail with `harness.snapshot-invalid` (DEV-497).
     pub fn with_storage_snapshot(self, _path: impl AsRef<Path>) -> FakeHost {
+        self.setup.ensure_open();
         unimplemented!("DEV-497")
     }
 
     /// Sets the stored data version for migration tests (DEV-497).
     pub fn with_data_version(self, _version: u32) -> FakeHost {
+        self.setup.ensure_open();
         unimplemented!("DEV-497")
     }
 
     /// Selects native or component mode.
-    pub fn mode(self, _mode: Mode) -> FakeHost {
-        unimplemented!("DEV-400")
+    pub fn mode(mut self, mode: Mode) -> FakeHost {
+        self.setup.set_mode(mode);
+        self
     }
 
     /// The mode this host runs in.
     pub fn current_mode(&self) -> Mode {
-        self.mode
+        self.setup.mode()
     }
 
     /// The seed in effect.
     pub fn current_seed(&self) -> u64 {
-        self.seed
+        self.setup.seed()
     }
 
-    /// Activates the plugin type; panics with the harness code on failure.
-    pub fn activate<P: NativeEntry + Default>(&mut self) -> PluginHandle {
-        unimplemented!("DEV-420")
+    /// Activates and retains an owned native plugin; panics with the plugin error code and message on failure.
+    pub fn activate<P: NativeEntry + Default + 'static>(&mut self) -> PluginHandle {
+        self.try_activate::<P>()
+            .unwrap_or_else(|error| panic!("{}: {}", error.code.as_str(), error.message))
     }
 
     /// Activates the plugin type and returns the activation error instead of panicking.
-    pub fn try_activate<P: NativeEntry + Default>(&mut self) -> Result<PluginHandle, PluginError> {
-        unimplemented!("DEV-420")
+    pub fn try_activate<P: NativeEntry + Default + 'static>(
+        &mut self,
+    ) -> Result<PluginHandle, PluginError> {
+        if self.native.is_active() {
+            panic!(
+                "{}",
+                HarnessError::new(codes::ALREADY_ACTIVE, "a plugin is already active")
+            );
+        }
+        self.delivery.retire_instance();
+        self.setup.close();
+        if self.current_mode() == Mode::Component {
+            return Err(PluginError::new(
+                ilium_plugin_sdk_core::types::ErrorCode::Unsupported,
+                "component execution is not implemented by the native lifecycle kernel",
+            ));
+        }
+        let activation = self.setup.activation(self.native.next_instance(), None);
+        self.native
+            .activate(native::factory::<P>, activation, self.clock.now())
     }
 
     /// Deactivates with a reason and returns the saved state bytes; `crash-restart` is reserved (`harness.reason-reserved`).
-    pub fn deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
-        unimplemented!("DEV-421")
+    pub fn deactivate(&mut self, reason: DeactivationReason) -> Option<Vec<u8>> {
+        if reason == DeactivationReason::CrashRestart {
+            panic!(
+                "{}",
+                HarnessError::new(
+                    codes::REASON_RESERVED,
+                    "crash-restart is never delivered to a stopped instance"
+                )
+            );
+        }
+        self.delivery.retire_instance();
+        self.native.deactivate(reason)
     }
 
-    /// Delivers up to 256 events and returns the submissions of the batch (DEV-430).
-    pub fn deliver(&mut self, _events: Vec<Event>) -> Vec<Submission> {
-        unimplemented!("DEV-430")
+    fn reactivate(
+        &mut self,
+        reason: DeactivationReason,
+        restored: Option<Vec<u8>>,
+        preserve_before: Option<usize>,
+    ) -> Result<PluginHandle, PluginError> {
+        let factory = self.native.saved_factory();
+        // Clean grant changes preserve authorized in-flight occurrences under their old
+        // instance identity. Explicit stop/restart cancels them. Both drop the real plugin;
+        // only restart_with supplies restored bytes, never deactivate's returned bytes.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Some(admitted_before) = preserve_before {
+                self.delivery.retire_grant_change(admitted_before);
+                self.native.deactivate(reason);
+            } else {
+                self.deactivate(reason);
+            }
+            let activation = self.setup.activation(self.native.next_instance(), restored);
+            self.native.activate(factory, activation, self.clock.now())
+        }));
+        match result {
+            Ok(result) => {
+                if result.is_err() {
+                    self.delivery.retire_instance();
+                }
+                result
+            }
+            Err(payload) => {
+                // An unwinding lifecycle callback cannot leave a lease for stopped work.
+                self.delivery.retire_instance();
+                std::panic::resume_unwind(payload)
+            }
+        }
+    }
+
+    fn delivery_failure(&mut self, error: HarnessError) -> ! {
+        if self.native.is_active() {
+            self.native.trap(&error.code, self.clock.now());
+        }
+        self.delivery.retire_instance();
+        panic!("{error}")
+    }
+
+    /// Delivers up to 256 events in the exact order supplied and records the callback result.
+    /// This direct test-driver boundary does not synthesize timers or run effect adapters.
+    pub fn deliver(&mut self, events: Vec<Event>) -> Vec<Submission> {
+        if events.len() > ilium_plugin_api::abi::MAX_EVENTS_PER_BATCH {
+            panic!(
+                "{}",
+                HarnessError::new(codes::BATCH_TOO_LARGE, "deliver accepts at most 256 events")
+            );
+        }
+        let submissions = match self.native.on_events(events, self.clock.now()) {
+            Ok(submissions) => submissions,
+            Err(error) => self.delivery_failure(error),
+        };
+        let result = self.delivery.admit(
+            submissions.clone(),
+            delivery::Context {
+                instance: self.native.instance,
+                plugin: &self.setup.plugin,
+                granted: &self.setup.granted,
+                now: self.clock.now(),
+            },
+        );
+        if let Err(error) = result {
+            self.delivery_failure(error);
+        }
+        submissions
     }
 
     /// Delivers one event.
-    pub fn deliver_one(&mut self, _event: Event) -> Vec<Submission> {
-        unimplemented!("DEV-430")
+    pub fn deliver_one(&mut self, event: Event) -> Vec<Submission> {
+        self.deliver(vec![event])
     }
 
-    /// Runs queued deliveries and completions until idle; fails with `harness.settle-limit` after 100 rounds.
+    /// Completes fake work and delivers completion batches until idle, at most 100 rounds.
     pub fn settle(&mut self) {
-        unimplemented!("DEV-431")
+        for _ in 0..100 {
+            if !self.delivery.has_work() {
+                return;
+            }
+            self.delivery.settle_pending();
+            let events = self.delivery.take_events(
+                self.native.instance,
+                ilium_plugin_api::abi::MAX_EVENTS_PER_BATCH,
+            );
+            if !events.is_empty() {
+                self.deliver(events);
+            }
+        }
+        if self.delivery.has_work() {
+            panic!(
+                "{}",
+                HarnessError::new(
+                    codes::SETTLE_LIMIT,
+                    "native request queue is not idle after 100 rounds"
+                )
+            );
+        }
     }
 
-    /// Outcomes completed so far, in order.
+    /// Outcomes completed so far, in submission order.
     pub fn outcomes(&self) -> Vec<Outcome> {
-        unimplemented!("DEV-432")
+        self.delivery.outcomes()
     }
 
-    /// Every submission the plugin made, in order.
+    /// Every admitted callback submission, including refused and duplicate submissions, in order.
     pub fn submitted(&self) -> Vec<Submission> {
-        unimplemented!("DEV-432")
+        self.delivery.submitted()
     }
 
-    /// Requests the plugin made that the test has not completed.
+    /// Unfinished request occurrences, in order; correlation numbers may repeat.
     pub fn pending_requests(&self) -> Vec<RequestRef> {
-        unimplemented!("DEV-433")
+        self.delivery.pending_requests()
     }
 
-    /// Completes a pending request with an outcome.
-    pub fn complete(&mut self, _request: RequestRef, _outcome: Outcome) {
-        unimplemented!("DEV-433")
+    /// Completes the oldest unfinished matching occurrence, then queues its completion event.
+    /// Unknown/already-completed references fail with `harness.request-not-pending`.
+    pub fn complete(&mut self, request: RequestRef, outcome: Outcome) {
+        self.delivery
+            .complete(request, outcome)
+            .unwrap_or_else(|error| panic!("{error}"));
+    }
+
+    /// Sounds applied to the deterministic native sound fake; this never plays host audio.
+    pub fn played_sounds(&self) -> Vec<String> {
+        self.delivery.played_sounds()
     }
 
     /// Renders a view at `columns` by `rows` (10 to 500 by 1 to 200, else `harness.render-size`).
@@ -346,32 +503,102 @@ impl FakeHost {
 
     /// The fake clock.
     pub fn clock(&self) -> FakeClock {
-        unimplemented!("DEV-450")
+        self.clock
     }
 
-    /// Moves time forward and fires due timers in order (DEV-450).
-    pub fn advance_clock(&mut self, _ms: u64) {
-        unimplemented!("DEV-450")
+    /// Moves fake time forward. Due-timer delivery remains unimplemented (DEV-450).
+    pub fn advance_clock(&mut self, ms: u64) {
+        let instant = self.clock.now().checked_add(ms).unwrap_or_else(|| {
+            panic!(
+                "{}",
+                HarnessError::new(codes::CLOCK_ARGUMENT, "clock addition exceeds u64")
+            )
+        });
+        self.clock = FakeClock::at(instant);
+        // Timer imports and due-event delivery remain unimplemented (DEV-450).
     }
 
     /// Sets time; moving back fails with `harness.clock-backwards`.
-    pub fn set_clock(&mut self, _instant_ms: u64) {
-        unimplemented!("DEV-451")
+    pub fn set_clock(&mut self, instant_ms: u64) {
+        if instant_ms < self.clock.now() {
+            panic!(
+                "{}",
+                HarnessError::new(codes::CLOCK_BACKWARDS, "fake clock cannot move backwards")
+            );
+        }
+        self.clock = FakeClock::at(instant_ms);
     }
 
-    /// Grants a capability while the plugin runs and delivers `grants-changed`.
-    pub fn grant_now(&mut self, _name: &str) -> Result<(), HarnessError> {
-        unimplemented!("DEV-414")
+    fn reactivate_grants(&mut self, reason: DeactivationReason) -> Result<(), HarnessError> {
+        if !self.native.is_active() {
+            return Ok(());
+        }
+        let admitted_before = self.delivery.admitted_count();
+        if reason == DeactivationReason::Revoked {
+            let revoked = self.delivery.revoke_pending(delivery::Context {
+                instance: self.native.instance,
+                plugin: &self.setup.plugin,
+                granted: &self.setup.granted,
+                now: self.clock.now(),
+            })?;
+            if revoked > 0 {
+                // Snapshot the old completion queue. Callback replies are admitted under the
+                // new grant list, then cancelled/retired at deactivation; no feedback loop or
+                // completion can migrate into the new owned instance.
+                let mut remaining = self.delivery.completion_count();
+                while remaining > 0 {
+                    let events = self.delivery.take_events(
+                        self.native.instance,
+                        remaining.min(ilium_plugin_api::abi::MAX_EVENTS_PER_BATCH),
+                    );
+                    if events.is_empty() {
+                        break;
+                    }
+                    remaining -= events.len();
+                    self.deliver(events);
+                }
+            }
+        }
+        self.reactivate(reason, None, Some(admitted_before))
+            .map_err(activation_failure)?;
+        Ok(())
     }
 
-    /// Revokes a capability while the plugin runs.
-    pub fn revoke(&mut self, _name: &str) {
-        unimplemented!("DEV-416")
+    /// Grants a capability and reactivates through deactivate(granted), without a synthetic event.
+    pub fn grant_now(&mut self, name: &str) -> Result<(), HarnessError> {
+        let names = self.setup.validate_grants(&[name])?;
+        self.setup.granted.extend(names);
+        self.reactivate_grants(DeactivationReason::Granted)
     }
 
-    /// Delivers a `grants-changed` event for these capabilities.
-    pub fn grants_changed(&mut self, _names: &[&str]) {
-        unimplemented!("DEV-414")
+    /// Revokes a capability; affected requests finish as failed(revoked) on the old instance.
+    pub fn revoke(&mut self, name: &str) {
+        let names = self
+            .setup
+            .validate_grants(&[name])
+            .unwrap_or_else(|error| panic!("{error}"));
+        for name in names {
+            self.setup.granted.remove(&name);
+        }
+        self.reactivate_grants(DeactivationReason::Revoked)
+            .unwrap_or_else(|error| panic!("{error}"));
+    }
+
+    /// Atomically replaces grants and delivers affected request failures before reactivation.
+    pub fn grants_changed(&mut self, names: &[&str]) {
+        let names = self
+            .setup
+            .validate_grants(names)
+            .unwrap_or_else(|error| panic!("{error}"));
+        let revoked = !self.setup.granted.is_subset(&names);
+        self.setup.granted = names;
+        let reason = if revoked {
+            DeactivationReason::Revoked
+        } else {
+            DeactivationReason::Granted
+        };
+        self.reactivate_grants(reason)
+            .unwrap_or_else(|error| panic!("{error}"));
     }
 
     /// Applies the scheduling-table effect of a deadline breach in this export (DEV-565).
@@ -401,7 +628,7 @@ impl FakeHost {
 
     /// The fake storage.
     pub fn storage(&self) -> &FakeStorage {
-        unimplemented!("DEV-465")
+        &self.storage
     }
 
     /// The fake settings.
@@ -455,8 +682,9 @@ impl FakeHost {
     }
 
     /// Restarts the instance with these saved state bytes.
-    pub fn restart_with(&mut self, _bytes: Vec<u8>) {
-        unimplemented!("DEV-492")
+    pub fn restart_with(&mut self, bytes: Vec<u8>) {
+        self.reactivate(DeactivationReason::Upgrade, Some(bytes), None)
+            .unwrap_or_else(|error| panic!("{}: {}", error.code.as_str(), error.message));
     }
 
     /// Traps after the next journal append is durable (DEV-496).
@@ -466,17 +694,17 @@ impl FakeHost {
 
     /// Failures of the last 10 minutes of fake time, oldest first (DEV-498).
     pub fn failures(&self) -> Vec<FailureRecord> {
-        unimplemented!("DEV-498")
+        self.native.failures(self.clock.now())
     }
 
-    /// Current lifecycle state, `stopped-by-failure` after the third failure in the window.
+    /// Current native state. Automatic failure restart/disable remains unimplemented (DEV-490, DEV-498).
     pub fn lifecycle_state(&self) -> InstanceState {
-        unimplemented!("DEV-498")
+        self.native.state()
     }
 
     /// The bytes restored at the last activation.
     pub fn restored(&self) -> Option<Vec<u8>> {
-        unimplemented!("DEV-492")
+        self.native.restored()
     }
 
     /// Log lines the plugin wrote.
@@ -491,7 +719,12 @@ impl FakeHost {
 
     /// State record for restore tests.
     pub fn snapshot(&self) -> HostSnapshot {
-        unimplemented!("DEV-500")
+        HostSnapshot {
+            instance: self.native.instance,
+            state: self.native.state(),
+            storage: self.storage.snapshot(),
+            restored: self.native.restored(),
+        }
     }
 
     /// Runs a fixture file against this host.
@@ -539,11 +772,13 @@ impl FakeHost {
 
     /// Sets the project root the plugin sees (reference-test-harness.md "Builder").
     pub fn with_project_root(self, _root: PathBuf) -> FakeHost {
+        self.setup.ensure_open();
         unimplemented!("harness.builder-project-root")
     }
 
     /// Seeds the plugin's own settings before activation (reference-test-harness.md "Builder").
     pub fn with_settings(self, _settings: Value) -> FakeHost {
+        self.setup.ensure_open();
         unimplemented!("harness.builder-settings")
     }
 
@@ -600,7 +835,7 @@ impl FakeHost {
 
     /// Direct access to the activated native plugin instance (reference-test-harness.md "Modes").
     pub fn instance_mut<T: NativeEntry + 'static>(&mut self) -> &mut T {
-        unimplemented!("harness.instance-mut")
+        self.native.instance_mut::<T>()
     }
 
     // ---- extension points ----
@@ -871,7 +1106,7 @@ impl FakeHost {
 
     /// Mutable access to the storage fake (reference-test-harness.md "Fakes").
     pub fn storage_mut(&mut self) -> &mut FakeStorage {
-        unimplemented!("harness.storage-mut")
+        &mut self.storage
     }
 
     /// The keymap fake (reference-test-harness.md "Fakes").
@@ -937,8 +1172,8 @@ impl FakeHost {
     }
 
     /// Makes every later submission complete with `outcome` (reference-test-harness.md "Submissions").
-    pub fn auto_outcome(&mut self, _outcome: Outcome) {
-        unimplemented!("harness.auto-outcome")
+    pub fn auto_outcome(&mut self, outcome: Outcome) {
+        self.delivery.auto_outcome(outcome);
     }
 
     /// The order in which host calls and submissions happened (reference-test-harness.md "Submissions").

@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import posixpath
 import re
 import subprocess
 import uuid
@@ -68,14 +69,14 @@ def kernel_retirement(output, unit, manager_group, root=Path('/sys/fs/cgroup')):
 
 
 def test_command(binary, case, unit):
-    if case not in CASES or not Path(binary).is_absolute():
+    if case not in CASES or not posixpath.isabs(str(binary).replace('\\', '/')):
         raise ValueError('native sandbox test case or executable is invalid')
     if not re.fullmatch(r'ilium-native-test-[a-z0-9-]+', unit):
         raise ValueError('native sandbox service identity is invalid')
     return ['systemd-run', '--user', '--wait', '--pipe', '--collect',
             '--unit=' + unit, '--property=Delegate=no',
             '--property=RuntimeMaxSec=120', '/usr/bin/python3', '-c',
-            CGROUP_WRAPPER, str(binary), case,
+            CGROUP_WRAPPER, str(binary).replace('\\', '/'), case,
             '--exact', '--ignored', '--test-threads=1', '--nocapture']
 
 
@@ -126,6 +127,10 @@ def main(argv=None):
         if (sha(binary) != artifact.get('sha256') or sha(helper) != artifact.get('helper_sha256')
                 or sha(source) != artifact.get('source_sha256')):
             raise ValueError('native sandbox executable, helper or test source checksum differs')
+        # Artifact download drops the execute bit; the checksums above already
+        # prove these are the compiled files, so restore it before the check.
+        for executable in (binary, helper):
+            executable.chmod(executable.stat().st_mode | 0o111)
         if not os.access(binary, os.X_OK) or not os.access(helper, os.X_OK):
             raise ValueError('native sandbox input is not executable')
         receipt.update(target=artifact['target'], tag=artifact['tag'],

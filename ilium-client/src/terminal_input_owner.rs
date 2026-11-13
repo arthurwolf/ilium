@@ -446,9 +446,10 @@ impl fmt::Display for InputFailure {
             ),
             InputFailureKind::Shutdown(report) => write!(
                 formatter,
-                "terminal input {:?}; {} undispatched originals, reader failure={}, retained native input={} remain in custody",
+                "terminal input {:?}; {} undispatched originals (first: {:?}), reader failure={}, retained native input={} remain in custody",
                 report.exit,
                 report.pending.len(),
+                report.pending.front().map(InputEvent::view),
                 report.failure.is_some(),
                 report
                     .native_custody()
@@ -695,9 +696,9 @@ impl InputReservation {
                         Ok(input) => input,
                         Err(source) => {
                             if let Some((sender, _)) = probe_sender {
-                                let _ = sender.send(Err(io::Error::other(
-                                    "native input source construction failed",
-                                )));
+                                let _ = sender.send(Err(io::Error::other(format!(
+                                    "native input source construction failed: {source}"
+                                ))));
                             }
                             body.fail(InputFailure {
                                 kind: InputFailureKind::Read {
@@ -906,6 +907,32 @@ struct InputDriver {
     shared: Arc<Shared>,
     reader: InputReader,
 }
+/// Opens the platform input source. Its first storage reservation can be
+/// refused as `Busy` while another client worker briefly holds the shared
+/// byte budget; that is transient, so retry for a bounded time instead of
+/// failing client startup.
+fn open_native_reader(
+    storage: &Arc<RootNativeStorage>,
+    stop: &StopToken,
+) -> io::Result<NativeInputReader> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match NativeInputReader::new(storage.clone()) {
+            Err(error)
+                if Instant::now() < deadline
+                    && !stop.is_stopped()
+                    && error
+                        .get_ref()
+                        .and_then(|inner| inner.downcast_ref::<NativeStorageRefusal>())
+                        .is_some_and(|refusal| refusal.kind == NativeRefusalKind::Busy) =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            result => return result,
+        }
+    }
+}
+
 impl InputDriver {
     fn new(shared: Arc<Shared>, factory: InputReaderFactory) -> io::Result<Self> {
         let reader = match factory {
@@ -930,7 +957,7 @@ impl InputDriver {
                     stop: shared.stop.clone(),
                 });
                 InputReader::Native(Some(NativeInputCustody {
-                    reader: NativeInputReader::new(storage.clone())?,
+                    reader: open_native_reader(&storage, &shared.stop)?,
                     admission: storage,
                     _storage: Arc::clone(&shared.storage),
                     _claim: claim,
@@ -997,6 +1024,10 @@ impl InputDriver {
                         return Ok(None);
                     }
                 }
+                // Shutdown cancels a blocking console read after requesting stop.
+                // That cancellation is the planned end of this reader, not user
+                // input lost, so it must not replace a restart or quit with an error.
+                Err(_) if self.shared.stop.is_stopped() => return Ok(None),
                 Err(source) => {
                     let failure = match &mut self.reader {
                         InputReader::Native(custody) => InputFailure { kind: InputFailureKind::NativeRead {
@@ -1541,6 +1572,20 @@ impl InputShutdownReport {
             }
         }
     }
+    /// A terminal resize that arrives while the client is already exiting has
+    /// no screen left to lay out. Consume it through its normal dispatch path
+    /// so only real user input (keys, gestures, pastes) remains an error.
+    pub(crate) fn complete_exit_resizes(&mut self) {
+        let mut kept = VecDeque::with_capacity(self.pending.len());
+        while let Some(event) = self.pending.pop_front() {
+            if matches!(event.view(), Event::Resize(..)) {
+                event.dispatch(|_| ());
+            } else {
+                kept.push_back(event);
+            }
+        }
+        self.pending = kept;
+    }
     pub fn native_custody(&self) -> Option<&NativeInputCustody> {
         self.native.as_ref().or_else(|| {
             self.failure
@@ -1993,8 +2038,10 @@ mod tests {
         assert_eq!(allowed.snapshot().worker_bytes, 0);
     }
 
+    // The std mutex serialises tests that share the process-wide input quota; the
+    // single-threaded runtime never contends it across the awaits.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
-    #[allow(clippy::await_holding_lock)] // Serial test guard only; the current-thread runtime never contends it.
     async fn full_queue_preserves_every_paste_and_its_original_allocation() {
         let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();
@@ -2115,6 +2162,42 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn read_error_after_planned_stop_is_not_an_input_failure() {
+        let _serial = INPUT_TEST_LOCK.lock().await;
+        let quota = quota();
+        let reservation = InputReservation::prepare(&quota).expect("input admission");
+        let session = reservation.session_claim();
+        let (read_started, started) = mpsc::channel();
+        let (release_read, read_released) = mpsc::channel::<()>();
+        let (owner, _receiver) = reservation
+            .start_with_reader(move |_| {
+                let _ = read_started.send(());
+                read_released.recv().map_err(io::Error::other)?;
+                // Windows reports a console read cancelled by shutdown as
+                // ERROR_OPERATION_ABORTED (995).
+                Err(io::Error::from_raw_os_error(995))
+            })
+            .expect("reader");
+        started
+            .recv_timeout(Duration::from_secs(5))
+            .expect("read blocked");
+        let ticket = owner.worker.ticket();
+        let mut retirement = owner.stop();
+        release_read.send(()).expect("release the cancelled read");
+        assert_eq!(
+            ticket.join_until(Instant::now() + Duration::from_secs(5)),
+            Ok(WorkerExit::Joined)
+        );
+        let report = retirement.try_complete().expect("actual reader retirement");
+        assert!(
+            report.failure().is_none(),
+            "a read cancelled by a requested stop must not become an input failure: {:?}",
+            report.failure().map(ToString::to_string)
+        );
+        drop(session);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn blocked_read_and_receiver_closure_retain_the_original_for_retirement() {
         let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();
@@ -2180,8 +2263,10 @@ mod tests {
         );
     }
 
+    // The std mutex serialises tests that share the process-wide input quota; the
+    // single-threaded runtime never contends it across the awaits.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
-    #[allow(clippy::await_holding_lock)] // Serial test guard only; the current-thread runtime never contends it.
     async fn read_failure_is_delivered_once_and_does_not_become_normal_end_of_stream() {
         let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();

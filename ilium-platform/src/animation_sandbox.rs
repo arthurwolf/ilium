@@ -426,12 +426,17 @@ impl LinuxCgroup {
     fn delegated_parent() -> io::Result<PathBuf> {
         let mount = Path::new("/sys/fs/cgroup");
         let current = Self::current_cgroup()?;
+        let mut inspected = String::new();
         for candidate in current
             .ancestors()
             .take_while(|path| path.starts_with(mount))
         {
             let Ok(enabled) = std::fs::read_to_string(candidate.join("cgroup.subtree_control"))
             else {
+                inspected.push_str(&format!(
+                    " [{}: subtree_control unreadable]",
+                    candidate.display()
+                ));
                 continue;
             };
             if !["memory", "pids", "cpu"].iter().all(|name| {
@@ -439,6 +444,11 @@ impl LinuxCgroup {
                     .split_whitespace()
                     .any(|controller| controller == *name)
             }) {
+                inspected.push_str(&format!(
+                    " [{}: controllers {:?}]",
+                    candidate.display(),
+                    enabled.trim()
+                ));
                 continue;
             }
             // Migrating a child from our present leaf to a sibling requires
@@ -450,10 +460,17 @@ impl LinuxCgroup {
             {
                 return Ok(candidate.to_path_buf());
             }
+            inspected.push_str(&format!(
+                " [{}: cgroup.procs not writable]",
+                candidate.display()
+            ));
         }
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "animation sandbox needs an owned delegated cgroup-v2 ancestor with memory, pids and cpu enabled",
+            format!(
+                "animation sandbox needs an owned delegated cgroup-v2 ancestor with memory, pids and cpu enabled; inspected from {}:{inspected}",
+                current.display()
+            ),
         ))
     }
 

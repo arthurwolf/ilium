@@ -568,7 +568,27 @@ impl TerminalPaneRuntime {
         identity: &ilium_detect::AgentIdentity,
     ) -> Result<bool, &'static str> {
         let key = agent_process_key(identity);
-        if self.agent_process_key.as_ref() == Some(&key) {
+        if self
+            .agent_process_key
+            .as_ref()
+            .is_some_and(|current| is_same_agent_process(current, &key))
+        {
+            return Ok(false);
+        }
+        // A launcher and the agent it starts share a class and a start second;
+        // detection can report either one. Moving between them is a hand-off of
+        // the same invocation, not a replacement, so the session quarantine and
+        // the session's owning PID follow it.
+        if let Some(previous_process_id) = self
+            .agent_process_key
+            .as_ref()
+            .filter(|current| is_launcher_handoff(current, &key))
+            .map(|current| current.process_id)
+        {
+            if self.session_process_id == Some(previous_process_id) {
+                self.session_process_id = Some(key.process_id);
+            }
+            self.agent_process_key = Some(key);
             return Ok(false);
         }
         let next = self
@@ -966,6 +986,8 @@ impl TerminalPaneRuntime {
     }
 
     #[cfg(test)]
+    // Its callers are Unix-only tests.
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub fn cancel_progress_delivery_task(&mut self, monitor_id: u64) {
         if let Some(task) = self
             .progress_slot_mut(monitor_id)
@@ -1318,6 +1340,27 @@ pub struct PromptTranscriptEpoch {
     pub generation: u64,
     pub process: AgentProcessKey,
     pub session_id: String,
+}
+
+/// Start times are derived from a boot time that the kernel can report one
+/// second apart across reads, so a one-second difference is the same process.
+/// A replacement differs in class, PID or by more than one second.
+fn is_same_agent_process(current: &AgentProcessKey, next: &AgentProcessKey) -> bool {
+    current.class == next.class
+        && current.process_id == next.process_id
+        && current
+            .started_at_unix_seconds
+            .abs_diff(next.started_at_unix_seconds)
+            <= 1
+}
+
+fn is_launcher_handoff(current: &AgentProcessKey, next: &AgentProcessKey) -> bool {
+    current.class == next.class
+        && current.process_id != next.process_id
+        && current
+            .started_at_unix_seconds
+            .abs_diff(next.started_at_unix_seconds)
+            <= 1
 }
 
 pub(crate) fn agent_process_key(identity: &ilium_detect::AgentIdentity) -> AgentProcessKey {
@@ -1751,6 +1794,85 @@ mod tests {
         assert!(runtime
             .automated_agent_input_rejection(&status, None)
             .is_some());
+        runtime.session.kill().expect("close fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_start_time_that_drifts_by_one_second_keeps_the_same_agent_process() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let session = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("fixture PTY");
+        let mut runtime = TerminalPaneRuntime::new(
+            session,
+            TerminalOrigin::PlainShell,
+            None,
+            Duration::from_secs(1),
+        );
+        let mut identity = ilium_detect::AgentIdentity {
+            class: AgentClass::Claude,
+            pid: 123,
+            started_at_unix_seconds: 456,
+            process_name: "claude".to_owned(),
+            matched_signature: "claude".to_owned(),
+            process_tree_depth: 1,
+        };
+        assert_eq!(runtime.adopt_agent_process(&identity), Ok(false));
+        runtime.is_session_identity_invalidated = true;
+        runtime.invalidated_session_id = Some("old".to_owned());
+        // The boot time the process table derives start times from can move
+        // by a second between reads; that is the same process, not a new one.
+        identity.started_at_unix_seconds += 1;
+        assert_eq!(runtime.adopt_agent_process(&identity), Ok(false));
+        assert!(runtime.is_session_identity_invalidated);
+        assert_eq!(runtime.invalidated_session_id.as_deref(), Some("old"));
+        identity.started_at_unix_seconds += 5;
+        assert_eq!(runtime.adopt_agent_process(&identity), Ok(true));
+        assert!(!runtime.is_session_identity_invalidated);
+        runtime.session.kill().expect("close fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_launcher_handing_off_to_its_agent_keeps_the_session_quarantine() {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let session = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("fixture PTY");
+        let mut runtime = TerminalPaneRuntime::new(
+            session,
+            TerminalOrigin::PlainShell,
+            None,
+            Duration::from_secs(1),
+        );
+        let mut identity = ilium_detect::AgentIdentity {
+            class: AgentClass::Claude,
+            pid: 123,
+            started_at_unix_seconds: 456,
+            process_name: "claude".to_owned(),
+            matched_signature: "claude".to_owned(),
+            process_tree_depth: 1,
+        };
+        assert_eq!(runtime.adopt_agent_process(&identity), Ok(false));
+        runtime.session_process_id = Some(123);
+        runtime.is_session_identity_invalidated = true;
+        runtime.invalidated_session_id = Some("old".to_owned());
+        identity.pid = 124;
+        assert_eq!(runtime.adopt_agent_process(&identity), Ok(false));
+        assert!(runtime.is_session_identity_invalidated);
+        assert_eq!(runtime.invalidated_session_id.as_deref(), Some("old"));
+        assert_eq!(runtime.session_process_id, Some(124));
+        identity.started_at_unix_seconds += 5;
+        identity.pid = 125;
+        assert_eq!(runtime.adopt_agent_process(&identity), Ok(true));
+        assert!(!runtime.is_session_identity_invalidated);
         runtime.session.kill().expect("close fixture");
     }
 

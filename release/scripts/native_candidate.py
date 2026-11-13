@@ -19,7 +19,8 @@ from audit_native import (audit, generate_notices, licence_bytes, native_identit
                           parse_dependencies, parse_macos_load_commands, run,
                           reject_windows_dynamic_crt, system_dependency, windows_version)
 from release_tool import (APPROVED_PACKAGES, JsonArgumentParser, ReleaseError, digest, emit, package,
-                          read_json, safe_member_name, selected_target, workspace_version)
+                          read_json, safe_member_name, selected_target, workspace_version,
+                          write_release_text)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -206,6 +207,15 @@ def build(arguments):
     target = selected_target(arguments.manifest, arguments.target)
     identity = native_identity(target, arguments.runner_identity)
     version = workspace_version(arguments.workspace, arguments.tag)
+    profile = getattr(arguments, 'qualification_profile', 'full')
+    preview_targets = {'linux-x86-preview': 'x86_64-unknown-linux-gnu',
+                       'linux-arm64-preview': 'aarch64-unknown-linux-gnu',
+                       'macos-arm64-preview': 'aarch64-apple-darwin'}
+    require(profile == 'full' or profile in preview_targets, 'Unknown native qualification profile')
+    if profile in preview_targets:
+        require(arguments.target == preview_targets[profile] and
+                re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-' + ('preview' if profile.startswith('macos') else 'linux') + r'\.[0-9]+', arguments.tag),
+                'Preview profile requires its matching target and preview tag')
     require(arguments.output_directory.is_absolute() and not arguments.output_directory.exists(), 'Output must be a new absolute owned directory')
     require(arguments.build_directory.is_absolute() and arguments.build_directory.is_dir() and not arguments.build_directory.is_symlink(), 'Explicit native build directory required')
     require(arguments.output_directory.resolve() not in [arguments.workspace.parent.resolve(), arguments.build_directory.resolve()], 'Output collides with build/workspace')
@@ -242,7 +252,7 @@ def build(arguments):
         require(sha(source) == APPROVED_PACKAGES[name], 'Official animation package differs from compiled release identity: ' + name)
         shutil.copyfile(source, candidate / name)
         require(sha(candidate / name) == APPROVED_PACKAGES[name], 'Copied animation package changed: ' + name)
-    (candidate / 'VERSION').write_text(version + '\n', encoding='utf-8')
+    write_release_text(candidate / 'VERSION', version + '\n')
     licence, ort_evidence = extract_ort_notices(arguments.ort_source_archive, ROOT / 'release/ort-source.json', evidence_directory)
     inventory, loader = discovery(arguments, target, candidate, licence)
     runtime_path = output / 'runtime-inventory.json'; write_json(runtime_path, inventory)
@@ -274,9 +284,9 @@ def build(arguments):
     embedding_path = output / 'embedding-receipt.json'; write_json(embedding_path, records[0])
     archive = output / target['archive']
     package(SimpleNamespace(manifest=arguments.manifest, workspace=arguments.workspace, target=arguments.target, tag=arguments.tag, audit_report=audit_path, directory=candidate, output=archive))
-    (output / 'SHA256SUMS').write_text(sha(archive) + '  ' + archive.name + '\n', encoding='utf-8')
+    write_release_text(output / 'SHA256SUMS', sha(archive) + '  ' + archive.name + '\n')
     audit_receipt = read_json(audit_path)
-    receipt = {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'target': arguments.target, 'tag': arguments.tag, 'native_identity': identity, 'archive': {'path': str(archive), 'sha256': sha(archive)}, 'native_audit': {'path': str(audit_path), 'sha256': sha(audit_path)}, 'runtime_inventory': {'path': str(runtime_path), 'sha256': sha(runtime_path)}, 'dependency_inventory': {'path': str(dependencies_path), 'sha256': sha(dependencies_path)}, 'embedding_receipt': {'path': str(embedding_path), 'sha256': sha(embedding_path)}, 'build_outputs': binaries, 'official_packages': {name: APPROVED_PACKAGES[name] for name in target['packages']}, 'workspace_sha256': sha(arguments.workspace), 'lock_sha256': sha(arguments.workspace.parent / 'Cargo.lock'), 'embedding_model_register_sha256': sha(ROOT / 'release/embedding-model.json'), 'ort_source_notices': ort_evidence, 'pre_relocation_loader': loader, 'files': audit_receipt['files']}
+    receipt = {'schema': 1, 'state': 'passed', 'publication_allowed': True, 'qualification_profile': profile, 'target': arguments.target, 'tag': arguments.tag, 'native_identity': identity, 'archive': {'path': str(archive), 'sha256': sha(archive)}, 'native_audit': {'path': str(audit_path), 'sha256': sha(audit_path)}, 'runtime_inventory': {'path': str(runtime_path), 'sha256': sha(runtime_path)}, 'dependency_inventory': {'path': str(dependencies_path), 'sha256': sha(dependencies_path)}, 'embedding_receipt': {'path': str(embedding_path), 'sha256': sha(embedding_path)}, 'build_outputs': binaries, 'official_packages': {name: APPROVED_PACKAGES[name] for name in target['packages']}, 'workspace_sha256': sha(arguments.workspace), 'lock_sha256': sha(arguments.workspace.parent / 'Cargo.lock'), 'embedding_model_register_sha256': sha(ROOT / 'release/embedding-model.json'), 'ort_source_notices': ort_evidence, 'pre_relocation_loader': loader, 'files': audit_receipt['files']}
     if windows_ort_binding is not None:
         receipt['windows_ort_build_receipt'] = windows_ort_binding
         receipt['windows_ort_cmake_cache'] = windows_cmake_binding
@@ -288,6 +298,7 @@ def build(arguments):
 
 def parser():
     result = JsonArgumentParser(description=__doc__, allow_abbrev=False)
+    result.add_argument('--qualification-profile', choices=('full', 'linux-x86-preview', 'linux-arm64-preview', 'macos-arm64-preview'), default='full')
     for name in ('manifest', 'workspace', 'build-directory', 'output-directory', 'dependency-inventory', 'ort-source-archive', 'model-directory'):
         result.add_argument('--' + name, type=Path, required=True)
     for name in ('tag', 'target', 'runner-identity'):

@@ -3,6 +3,21 @@ use ilium_core::animation_recommendation::{
     AnimationRecommendation, PlanAnimationEntry, RecommendedRestructurePlan, ResourcePolicy,
 };
 
+/// The pane's node with its activity revision rebased onto `baseline`'s. A
+/// pane's own terminal output (for example ConPTY start-up sequences) advances
+/// the activity revision at an arbitrary moment, independently of any title
+/// path under test; every other field must still match `baseline` exactly.
+async fn title_node_ignoring_output_activity(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    baseline: &ilium_core::Node,
+) -> ilium_core::Node {
+    let mut current = state.tree.read().await.get(pane_id).unwrap().clone();
+    assert!(current.activity_revision >= baseline.activity_revision);
+    current.activity_revision = baseline.activity_revision;
+    current
+}
+
 #[tokio::test]
 async fn all_inference_apply_lanes_preserve_an_unasked_agent_bundle() {
     // Synthetic identity on a fixture-owned real PTY. No real agent is driven.
@@ -302,6 +317,9 @@ async fn empty_history_repair_requires_proof_and_preserves_delivered_tasks_and_m
         runtime.authored_title_receipt = None;
     }
     reconcile_empty_agent_titles(&state, &[pane_id]).await;
-    assert_eq!(state.tree.read().await.get(pane_id).unwrap(), &fixed);
+    assert_eq!(
+        title_node_ignoring_output_activity(&state, pane_id, &fixed).await,
+        fixed
+    );
     teardown_state_panes(&state);
 }

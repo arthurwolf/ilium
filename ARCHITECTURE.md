@@ -211,6 +211,10 @@ Custom tree status icons use ordered client-side rules over shared pane facts an
 
 [Detailed design](architecture/embedded-application-prompts.md).
 
+### Input latency and freeze containment
+
+See [Embedded application prompts](architecture/embedded-application-prompts.md).
+
 ## Shared resource queues
 
 `ilium-core::resource_queue` owns the pure, exclusive FIFO state machine, retry receipts, invocation fences, ownership generations and queue estimates. `ilium-server::resources` coordinates it through one user-wide catalog; project settings and managed instructions are projections, never competing authorities. `ilium-platform::resource_fs` owns durable local-filesystem locks, replacement, clocks and process birth proofs. Stable project identities travel with structured project metadata; explicit revision-bound rebinding reconciles directory moves. Bounded durable lifecycle events support detail history. Catalog paths are supplied explicitly by the server composition root so isolated tests cannot use real user data. Projection reconciliation also processes open or restored project paths with an empty authoritative binding set, so final-unlink cleanup retries after failure and restart. Failed cleanup keeps the observer active even without clients or reservations; closed, unreferenced paths are reconciled when reopened.

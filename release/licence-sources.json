@@ -400,6 +400,132 @@
       "source": "https://raw.githubusercontent.com/denoland/rusty_v8/2768994f664e8a6e3aba27503606c58339136e2a/LICENSE; https://raw.githubusercontent.com/denoland/v8/c4ca1eccb90c5464d826b7713dc27178a53b0cfe/LICENSE; https://raw.githubusercontent.com/denoland/v8/c4ca1eccb90c5464d826b7713dc27178a53b0cfe/LICENSE.fdlibm; https://raw.githubusercontent.com/denoland/v8/c4ca1eccb90c5464d826b7713dc27178a53b0cfe/LICENSE.strongtalk; https://raw.githubusercontent.com/denoland/v8/c4ca1eccb90c5464d826b7713dc27178a53b0cfe/LICENSE.v8; https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp/+/d16e32215c3ab90ba57c2e904a5344d85c7353e4/LICENSE?format=TEXT; https://chromium.googlesource.com/chromium/deps/icu/+/d578f2e8b7bd5938e21cfb6bf15c079e0aa5b738/LICENSE?format=TEXT; https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx/+/b16984ce99c702355a5b2b4c52574e82cec41fb9/LICENSE.TXT?format=TEXT; https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi/+/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda/LICENSE.TXT?format=TEXT; https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind/+/1fd455816c724182cf8736811182bf0c37b03035/LICENSE.TXT?format=TEXT; https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc/+/75ae50cd48c8a9d70f552ccff040029968778da9/LICENSE.TXT?format=TEXT; https://chromium.googlesource.com/chromium/src/third_party/simdutf/+/f7356eed293f8208c40b3c1b344a50bd70971983/LICENSE?format=TEXT; https://chromium.googlesource.com/external/github.com/google/highway/+/2607d3b5b0113992fe84d3848859eae13b3b52c1/LICENSE?format=TEXT; https://chromium.googlesource.com/external/github.com/fastfloat/fast_float/+/34164f547b7df3f5d794ff67e9f885c36819ebfc/LICENSE-APACHE?format=TEXT; https://chromium.googlesource.com/external/github.com/fastfloat/fast_float/+/34164f547b7df3f5d794ff67e9f885c36819ebfc/LICENSE-BOOST?format=TEXT; https://chromium.googlesource.com/external/github.com/fastfloat/fast_float/+/34164f547b7df3f5d794ff67e9f885c36819ebfc/LICENSE-MIT?format=TEXT; https://raw.githubusercontent.com/Maratyszcza/FP16/782eea126dc5c755827be751a099eb01826175cf/LICENSE; https://raw.githubusercontent.com/jk-jeon/dragonbox/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE-Apache2-LLVM; https://raw.githubusercontent.com/jk-jeon/dragonbox/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE-Boost; https://chromium.googlesource.com/chromium/src/+/e2ee5821963baed92f29e830f05d257fbfdc6bdd/LICENSE?format=TEXT; https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator/+/ff3b8b885b8374cbd3902642d94dc737bda93d5d/src/partition_alloc/partition_alloc.h?format=TEXT",
       "source_commit": "2768994f664e8a6e3aba27503606c58339136e2a",
       "reviewed_by": "publisher VCS identity (dirty=true), exact engine/dependency gitlinks and PartitionAlloc GitOrigin-RevId; packaged MIT declaration retained; deployed native binary component closure separately required"
+    },
+    "cranelift-assembler-x64@0.136.4": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/2c2970205fe05d6bbf15b9bff6f1e67874b2db5c/LICENSE",
+      "source_commit": "2c2970205fe05d6bbf15b9bff6f1e67874b2db5c",
+      "crate_sha256": "c9c587da2696fbaa58e7a2fa2e5bfdd365d0928219f36992304ac1f15e5bc254",
+      "path_in_vcs": "cranelift/assembler-x64",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "cranelift-assembler-x64-meta@0.136.4": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/2c2970205fe05d6bbf15b9bff6f1e67874b2db5c/LICENSE",
+      "source_commit": "2c2970205fe05d6bbf15b9bff6f1e67874b2db5c",
+      "crate_sha256": "f28a60027b7556b680b051651291053ec381edf4ffbc01784997ae51a64269bb",
+      "path_in_vcs": "cranelift/assembler-x64/meta",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "cranelift-bitset@0.136.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "3a1e4c34abe94193ada09f821f474be87ac8a1fbbacd87058571ef04c1bf4009",
+      "path_in_vcs": "cranelift/bitset",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "cranelift-isle@0.136.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "2a2f30ea3fd5a11f7d3473976d3b62b5b3f2b62fa943c85e0331d88bf505082c",
+      "path_in_vcs": "cranelift/isle/isle",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "cranelift-srcgen@0.136.4": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/2c2970205fe05d6bbf15b9bff6f1e67874b2db5c/LICENSE",
+      "source_commit": "2c2970205fe05d6bbf15b9bff6f1e67874b2db5c",
+      "crate_sha256": "b533db1679b4b728568bd490da6533cf50974c48a4d7534e78f1e0e02bc39769",
+      "path_in_vcs": "cranelift/srcgen",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "pulley-interpreter@49.0.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "1b66b7448cb92d709f2924de98b5ba5b5ce4ea08e6d6b9c3b403fcd88d122ca2",
+      "path_in_vcs": "pulley",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "pulley-macros@49.0.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "185b9b4cd91f85110f48f8c0314757dfb2bb48c40f5d91055ea666cbbcbf317b",
+      "path_in_vcs": "pulley/macros",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "wasmtime-internal-component-macro@49.0.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "f47c428b868b59d51a9f77e24bff02cc321f8ec0faeba5c40f7e4c1cddd43a64",
+      "path_in_vcs": "crates/component-macro",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "wasmtime-internal-component-util@49.0.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "97fe14bd5ea6444a09f6baa3865559c93c91158930e7fe6d127429a9372f6165",
+      "path_in_vcs": "crates/component-util",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "wasmtime-internal-core@49.0.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "2053fd1d90080e502ca4ea39d86c3528587a40220b9572a874c8b742c219a00c",
+      "path_in_vcs": "crates/core",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "wasmtime-internal-jit-debug@49.0.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "0356a1a09dee1239904e09e962456d9f6edfa5da61c5e3e1b0e4669710f48fba",
+      "path_in_vcs": "crates/jit-debug",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "wasmtime-internal-jit-icache-coherence@49.0.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "5dead9a2d7b5d835698a2e1a32006e7d0b5711f4697b24bab1564bb2488e3d7a",
+      "path_in_vcs": "crates/jit-icache-coherence",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "wasmtime-internal-versioned-export-macros@49.0.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "9a20f0dcb6c6a006363d3f85b5c633675730487b0dc23726b2d40495872407fb",
+      "path_in_vcs": "crates/versioned-export-macros",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
+    },
+    "wasmtime-internal-wit-bindgen@49.0.2": {
+      "file": "licences/268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "source": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/3c8a3e79aa3188a1a12b3aebbaa097abccceac92/LICENSE",
+      "source_commit": "3c8a3e79aa3188a1a12b3aebbaa097abccceac92",
+      "crate_sha256": "80758f73f5f5daacd8a6d1a8513336a4f9a58d26c4f1c73eb80502cb143e2626",
+      "path_in_vcs": "crates/wit-bindgen",
+      "reviewed_by": "Cargo.lock-authenticated publisher VCS identity; matching upstream/package declarations and complete Apache-2.0 WITH LLVM-exception text retained"
     }
   }
 }

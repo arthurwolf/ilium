@@ -28,8 +28,7 @@ pub const CREATE_GROUP_MAX_VISIBLE: usize = 7;
 pub const CREATE_SPLIT_MEMBER_MAX_VISIBLE: usize = 9;
 
 pub fn create_split_orientation_dialog_area(screen_area: Rect) -> Rect {
-    // 61 cells of key hints, two borders and one padding cell on each side.
-    centered_fixed_rect(66, 9, screen_area)
+    centered_fixed_rect(64, 9, screen_area)
 }
 
 pub fn create_split_members_dialog_area(screen_area: Rect, choice_count: usize) -> Rect {

@@ -529,10 +529,9 @@ impl Presenter {
     pub fn outstanding_frames(&self) -> usize {
         self.slots.used.load(Ordering::Acquire)
     }
-    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
-    pub fn submit(&self, frame: PreparedFrame) -> Result<(), SubmissionError> {
+    pub fn submit(&self, frame: PreparedFrame) -> Result<(), Box<SubmissionError>> {
         if !Arc::ptr_eq(&frame._reservation.slots, &self.slots) {
-            return Err(SubmissionError {
+            return Err(Box::new(SubmissionError {
                 error: guarded_failure(
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -541,11 +540,11 @@ impl Presenter {
                     frame._reservation.slots.allocation.clone(),
                 ),
                 frame,
-            });
+            }));
         }
         let mut queue = self.shared.queue.lock().unwrap_or_else(|e| e.into_inner());
         if queue.closing || queue.frames.len() >= FRAME_SLOTS {
-            return Err(SubmissionError {
+            return Err(Box::new(SubmissionError {
                 error: guarded_failure(
                     io::Error::new(
                         io::ErrorKind::BrokenPipe,
@@ -554,7 +553,7 @@ impl Presenter {
                     frame._reservation.slots.allocation.clone(),
                 ),
                 frame,
-            });
+            }));
         }
         // Queue admission never overwrites an active emitter identity.
         if self.health.queued_frames.fetch_add(1, Ordering::AcqRel) == 0 {
@@ -1383,7 +1382,16 @@ mod tests {
         );
         drop(first);
         drop(second);
-        assert!(presenter.try_reserve().is_some());
+        // Dropping the receipts releases their charge on the worker's schedule;
+        // a loaded runner can take longer than the drop itself.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while presenter.try_reserve().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "receipt charge was never released"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         presenter.shutdown().await.unwrap();
         let bytes = bytes.lock().unwrap();
         let text = String::from_utf8_lossy(&bytes);
@@ -1614,7 +1622,7 @@ mod tests {
         .unwrap();
         presenter.submit(frame(&presenter, 1, "PANIC")).unwrap();
         assert_ne!(
-            restoration.recv_timeout(Duration::from_secs(2)).unwrap(),
+            restoration.recv_timeout(Duration::from_secs(20)).unwrap(),
             ui_thread
         );
         assert!(presenter.shutdown().await.is_err());

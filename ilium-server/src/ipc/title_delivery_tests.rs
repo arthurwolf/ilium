@@ -2,6 +2,21 @@ use super::*;
 
 const DELIVERY_SESSION: &str = "44444444-4444-4444-8444-444444444444";
 
+/// The pane's node with its activity revision rebased onto `baseline`'s. A
+/// pane's own terminal output (for example ConPTY start-up sequences) advances
+/// the activity revision at an arbitrary moment, independently of any title
+/// path under test; every other field must still match `baseline` exactly.
+async fn title_node_ignoring_output_activity(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    baseline: &ilium_core::Node,
+) -> ilium_core::Node {
+    let mut current = state.tree.read().await.get(pane_id).unwrap().clone();
+    assert!(current.activity_revision >= baseline.activity_revision);
+    current.activity_revision = baseline.activity_revision;
+    current
+}
+
 /// Synthetic Codex ownership on the fixture's isolated cat PTY. These tests
 /// exercise server admission/receipt policy, not real Codex process detection.
 async fn title_delivery_identity(state: &Arc<ServerState>, pane_id: NodeId) {
@@ -104,7 +119,10 @@ async fn launch_intent_before_detection_cannot_use_the_plain_shell_title_bypass(
         Some("lock".into()),
     )
     .await;
-    assert_eq!(state.tree.read().await.get(pane_id).unwrap(), &before);
+    assert_eq!(
+        title_node_ignoring_output_activity(&state, pane_id, &before).await,
+        before
+    );
     let observation = title_delivery_observation(&state, pane_id).await;
     let evidence = collect_observed_title_evidence(&state, &[observation]).await;
     {
@@ -397,7 +415,10 @@ async fn automatic_and_explicit_session_titles_require_eligibility_and_preserve_
         stale[2].session_id = Some("55555555-5555-4555-8555-555555555555".into());
         for mismatched in stale {
             title_delivery_apply(&state, &mismatched, source, "Wrong identity").await;
-            assert_eq!(state.tree.read().await.get(pane_id).unwrap(), &original);
+            assert_eq!(
+                title_node_ignoring_output_activity(&state, pane_id, &original).await,
+                original
+            );
         }
         title_delivery_apply(&state, &observation, source, "Authentication").await;
         let accepted = state.tree.read().await.get(pane_id).unwrap().clone();
@@ -414,7 +435,10 @@ async fn automatic_and_explicit_session_titles_require_eligibility_and_preserve_
             }
         ));
         title_delivery_apply(&state, &observation, source, "Stale old inference").await;
-        assert_eq!(state.tree.read().await.get(pane_id).unwrap(), &accepted);
+        assert_eq!(
+            title_node_ignoring_output_activity(&state, pane_id, &accepted).await,
+            accepted
+        );
         let before_manual = title_delivery_observation(&state, pane_id).await;
         state
             .tree
@@ -431,7 +455,10 @@ async fn automatic_and_explicit_session_titles_require_eligibility_and_preserve_
         title_delivery_apply(&state, &before_manual, source, "Stale manual overwrite").await;
         let after_manual = title_delivery_observation(&state, pane_id).await;
         title_delivery_apply(&state, &after_manual, source, "Fresh manual overwrite").await;
-        assert_eq!(state.tree.read().await.get(pane_id).unwrap(), &manual);
+        assert_eq!(
+            title_node_ignoring_output_activity(&state, pane_id, &manual).await,
+            manual
+        );
         teardown_state_panes(&state);
     }
 }

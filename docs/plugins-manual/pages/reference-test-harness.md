@@ -44,12 +44,12 @@ Terms:
 
 ## Setup: the builder
 
-A host is built in steps, then activated. Setup is complete at `activate`. Grants and tier cannot change the builder after that, except through the runtime calls below.
+A host is built in steps, then activated. Setup is complete at `build` or `activate`. Grants and tier cannot change the builder after that, except through the runtime calls below.
 
 | Rust | TypeScript | Effect |
 |---|---|---|
 | `FakeHost::new()` | `createFakeHost()` | Empty host: no grants, tier T1, side server, empty tree |
-| `FakeHost::for_manifest(path)` | `createFakeHost().forManifest(path)` | Takes id, side, grants and tier from a manifest. Returns `Result` in Rust. |
+| `FakeHost::for_manifest(path)` | `createFakeHost().forManifest(path)` | Takes id and side grants from a manifest. Trust tier defaults to T1 until explicitly set. Returns `Result` in Rust. |
 | `.grant(name)` | `.grant(name)` | Adds one grant |
 | `.grants(&[names])` | `.grants([names])` | Adds several grants |
 | `.tier(Tier::T2)` | `.tier('T2')` | Sets the tier |
@@ -59,11 +59,19 @@ A host is built in steps, then activated. Setup is complete at `activate`. Grant
 | `.seed(u64)` | `.seed(bigint)` | Sets the random seed |
 | `.build()` | `.build()` | Optional. Ends the setup without activating. |
 
-- **[DEV-410]** Every builder method MUST return the builder, so calls chain. Calling a builder method after `activate` MUST fail with `harness.setup-closed`.
+- **[DEV-410]** Every builder method MUST return the builder, so calls chain. Calling a builder method after `build` or `activate` MUST fail with `harness.setup-closed`.
 - **[DEV-411]** A host built with `for_manifest` MUST take its grants from the `capabilities` object of the manifest for the chosen side. A grant not in the manifest MUST be refused by `.grant` and by `host.grant_now` with `harness.grant-not-declared`, because a plugin can never hold a grant its manifest does not request. `FakeHost::new()` has no manifest and accepts any grant name that exists in the grant catalogue.
 - **[DEV-412]** An unknown grant name MUST fail with `harness.grant-unknown`.
 - **[DEV-413]** The default seed MUST be 1. `ILIUM_PLUGIN_TEST_SEED` overrides the default. An explicit `.seed` call wins.
 - **[DEV-414]** The default clock MUST be the fake clock at `2030-01-01 00:00:00` UTC. Wall time never leaks into a test.
+
+`build()` closes the builder but leaves the host inactive; `activate` remains valid afterwards. Activation closes setup even when it returns an error. `for_manifest` initially selects the first declared component in server, client, scene order; `.side` selects a declared component and replaces the initial grants with that side's list. A manifest has no package trust-tier field: `limits_tier` is a resource class, so it does not override T1. The platform defaults to the running system's supported platform name; explicit tier, side and platform names are case-sensitive and validated.
+
+The environment seed is unsigned decimal text within `u64`, and mode is exactly `native` or `component`. Invalid, empty or non-UTF-8 values fail with `harness.config-invalid` when read, built or activated. An explicit `.seed` or `.mode` before setup closes replaces its environment value, including an invalid value. These are harness diagnostics, not plugin errors. Grant lists are validated before mutation, deduplicated and sorted. A manifest-backed host accepts only exact grant strings requested by the selected side.
+
+Manifest reads fail with `harness.manifest-read`. Invalid UTF-8 is `manifest.json-invalid`; strict parser/schema errors retain the first canonical diagnostic code and include all returned codes, JSON pointers and messages. This is source-manifest parsing, without install-only file inventory, signatures or trust checks.
+
+Implementation status of the first Rust native kernel: component mode is selectable and reported faithfully, but activation returns `PluginError{code: unsupported}` and never calls native code in that mode. The native lifecycle and SDK macros forward callbacks, and the native harness delivers events and tracks pending submissions. Host imports, fixture execution, general effect fakes, timer delivery and automatic failure recovery still require implementation. An activation error is returned and recorded and leaves the native host inactive; it does not yet schedule the recovery required by DEV-490.
 
 ### Grants
 
@@ -573,7 +581,13 @@ Every dotted code named on this page and on the conformance page is in this tabl
 
 | Code | Meaning |
 |---|---|
-| `harness.setup-closed` | Builder call after activation |
+| `harness.setup-closed` | Builder call after build or activation |
+| `harness.config-invalid` | Invalid setup name or environment value |
+| `harness.manifest-read` | Manifest file could not be read |
+| `manifest.*` | Source-manifest parser/schema code, preserved with all returned diagnostics |
+| `harness.activation-failed` | Grant change committed but the new activation returned a plugin error; message includes its enum code and message |
+| `harness.instance-type` | `instance_mut` requested a different type from the stored native plugin |
+| `harness.instance-exhausted` | Activation instance counter cannot increment beyond `u64::MAX` |
 | `harness.grant-not-declared` | Grant not in the manifest |
 | `harness.grant-unknown` | Grant name not in the catalogue |
 | `harness.batch-too-large` | More than 256 events in one `deliver` |

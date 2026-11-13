@@ -1,12 +1,12 @@
 //! `#[ilium_plugin(side = "...", exports = [...])]` (rust-sdk.md "The ilium_plugin macro").
 //!
-//! Skeleton: arguments are parsed and unknown ones are a compile error. The expansion is an
-//! `impl NativeEntry` whose methods are `unimplemented!`. The wasm32 glue (wit-bindgen exports)
-//! comes with the implementation phase.
+//! Server and client native entry points forward to SDK lifecycle and handler traits.
+//! Scene native callbacks and wasm32 glue remain separate, unfinished contracts.
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
+use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::{Expr, ExprArray, ExprLit, Ident, ItemStruct, Lit, LitStr, Token};
 
@@ -24,7 +24,8 @@ impl Parse for PluginArgs {
         let mut exports = Vec::new();
         let mut krate: syn::Path = syn::parse_quote!(::ilium_plugin_sdk);
         while !input.is_empty() {
-            let name: Ident = input.parse()?;
+            // `crate = "..."` is a supported argument even though crate is a Rust keyword.
+            let name = input.call(Ident::parse_any)?;
             input.parse::<Token![=]>()?;
             match name.to_string().as_str() {
                 "side" => {
@@ -89,6 +90,20 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
     let side = &args.side;
     let exports = &args.exports;
     let krate = &args.krate;
+    // Scene worlds have a different lifecycle; never impose server/client traits on them.
+    let (activate, deactivate, events) = if side == "scene" {
+        (
+            quote!(unimplemented!("rust-sdk.scene-native-lifecycle")),
+            quote!(unimplemented!("rust-sdk.scene-native-lifecycle")),
+            quote!(unimplemented!("rust-sdk.scene-native-handler")),
+        )
+    } else {
+        (
+            quote!(#krate::Lifecycle::activate(self, _context)),
+            quote!(#krate::Lifecycle::deactivate(self, _reason)),
+            quote!(#krate::Handler::on_events(self, _batch)),
+        )
+    };
     quote! {
         #item_struct
 
@@ -100,21 +115,21 @@ pub fn ilium_plugin(args: TokenStream, item: TokenStream) -> TokenStream {
                 &mut self,
                 _context: #krate::types::Activation,
             ) -> ::core::result::Result<(), #krate::types::PluginError> {
-                unimplemented!("rust-sdk.macro-dispatch")
+                #activate
             }
 
             fn native_deactivate(
                 &mut self,
                 _reason: #krate::types::DeactivationReason,
             ) -> ::core::option::Option<::std::vec::Vec<u8>> {
-                unimplemented!("rust-sdk.macro-dispatch")
+                #deactivate
             }
 
             fn native_on_events(
                 &mut self,
                 _batch: ::std::vec::Vec<#krate::types::Event>,
             ) -> ::std::vec::Vec<#krate::types::Submission> {
-                unimplemented!("rust-sdk.macro-dispatch")
+                #events
             }
         }
     }
