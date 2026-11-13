@@ -127,6 +127,22 @@ const PROJECT_NAME: &str = "Smoketest";
 /// Sends `keys`, and re-sends them when `condition` stays false for 10 s,
 /// because a loaded Windows/macOS runner can refuse input during a repaint.
 /// Only for keys whose repeat is harmless once the first send was missed.
+/// On Windows, run the TUI tests of this binary one at a time. Several
+/// ConPTY-hosted TUIs at once on a small runner starve ConPTY and drop or
+/// shift cells; each test still runs every step and assertion.
+async fn windows_pty_serial_guard() -> Option<tokio::sync::MutexGuard<'static, ()>> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    if cfg!(windows) {
+        Some(
+            LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+                .lock()
+                .await,
+        )
+    } else {
+        None
+    }
+}
+
 async fn write_until(tui: &PtySession, keys: &[u8], mut condition: impl FnMut() -> bool) -> bool {
     for _ in 0..4 {
         tui.write(keys).expect("send keys");
@@ -137,45 +153,29 @@ async fn write_until(tui: &PtySession, keys: &[u8], mut condition: impl FnMut() 
     false
 }
 
-/// ConPTY can leave its screen out of step with what the client drew (wide
-/// emoji repaints, last-column wraps); the client then paints only changed
-/// cells and never repairs the stale ones. A width nudge makes it clear and
-/// repaint every cell, so the next capture reflects the real frame. The
-/// assertions that follow still check the same content. Only used on Windows.
-/// Whether the full-screen Settings view is showing. ConPTY can drop the start
-/// of the title row when it repaints the wide gear emoji; the rest of the
-/// Settings frame is still exact, so Windows also accepts that frame.
+/// Whether the full-screen Settings view is showing.
 fn settings_open(screen: &str) -> bool {
     screen.contains("\u{2699} Settings")
-        || (cfg!(windows)
-            && screen.contains("Esc or q to close")
-            && screen.contains("· Navigation"))
 }
 
-async fn conpty_full_repaint(tui: &PtySession) {
-    let (rows, columns) = tui.with_screen(|screen| screen.size());
-    let _ = tui.resize(rows, columns.saturating_sub(1));
-    tokio::time::sleep(Duration::from_millis(400)).await;
-    let _ = tui.resize(rows, columns);
-    tokio::time::sleep(Duration::from_millis(400)).await;
-}
-
-/// `wait_until` for a single TUI's screen. On Windows a miss is retried once
-/// after a forced full repaint: ConPTY can garble or drop rows around wide
-/// emoji, and only a fresh full frame shows what the client actually drew.
+/// `wait_until` for a single TUI's screen.
 async fn wait_screen(
-    tui: &PtySession,
-    mut condition: impl FnMut() -> bool,
+    _tui: &PtySession,
+    condition: impl FnMut() -> bool,
     timeout: Duration,
 ) -> bool {
-    if wait_until(&mut condition, timeout).await {
-        return true;
+    wait_until(condition, timeout).await
+}
+
+/// Types `keys` one key at a time with a short gap, as a person would. A
+/// burst of keys written at once into ConPTY occasionally lost one on the
+/// Windows runner. Each key is still delivered and checked.
+async fn write_keys_paced(tui: &PtySession, keys: &[&[u8]], what: &str) {
+    for key in keys {
+        tui.write(key)
+            .unwrap_or_else(|error| panic!("{what}: {error}"));
+        tokio::time::sleep(Duration::from_millis(60)).await;
     }
-    if !cfg!(windows) {
-        return false;
-    }
-    conpty_full_repaint(tui).await;
-    wait_until(&mut condition, timeout).await
 }
 
 async fn wait_until(condition: impl FnMut() -> bool, timeout: Duration) -> bool {
@@ -1212,6 +1212,7 @@ fn install_raw_codex_stage_recorder(directory: &Path, transcript_path: &Path) ->
 #[cfg(unix)]
 #[tokio::test]
 async fn completed_progress_footer_expires_during_continuous_pty_output() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create expiry tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("isolate expiry runtime");
     let project_dir = temp_root.path().join("progress-expiry");
@@ -1469,6 +1470,7 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
 
 #[tokio::test]
 async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_help_keystroke() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_keyboard_config(&xdg);
@@ -1618,17 +1620,36 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // the historical close happened on the next periodic maintenance tick,
     // when the workspace-search poll replaced every non-search mode with
     // Normal while merely checking whether a debounced scan was due.
-    let (_, settings_row) = tui
-        .with_screen(|screen| first_cell_containing(screen, "🎚"))
-        .expect("rendered settings toolbar icon should have a concrete row");
+    // Both cells come from the one capture that satisfied the wait: a
+    // separate later capture can land while the host is mid-way through
+    // rewriting a row.
+    let mut toolbar_cells = None;
+    wait_until(
+        || {
+            toolbar_cells = tui.with_screen(|screen| {
+                Some((
+                    first_cell_containing(screen, "🎚")?,
+                    first_cell_containing(screen, "┬")?,
+                ))
+            });
+            toolbar_cells.is_some()
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    let ((_, settings_row), _) = toolbar_cells.unwrap_or_else(|| {
+        panic!(
+            "rendered settings toolbar icon should have a concrete row: {:?}",
+            tui.screen_text()
+        )
+    });
     // The emoji's vt100 payload can occupy a different cell than ratatui's
     // Unicode-width calculation under load. The Settings hit box is anchored
     // to the tree's right edge, so click its stable interior cell two columns
     // left of the rendered tree/pane divider instead of deriving x from the
     // grapheme-storage cell.
-    let (tree_divider_column, _) = tui
-        .with_screen(|screen| first_cell_containing(screen, "┬"))
-        .expect("tree/pane divider should have a concrete cell");
+    let (_, (tree_divider_column, _)) =
+        toolbar_cells.expect("tree/pane divider should have a concrete cell");
     let settings_column = tree_divider_column.saturating_sub(2);
     tui.write(&sgr_mouse_down(0, settings_column, settings_row))
         .expect("pressing the settings toolbar icon");
@@ -1652,9 +1673,6 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // differently: it is present on the plain frame (asserted above), so if it
     // is still here with Settings open, only the tab navigated to below can
     // have displaced it.
-    if cfg!(windows) && !tui.screen_text().contains("VOICE") {
-        conpty_full_repaint(&tui).await;
-    }
     assert!(
         wait_screen(&tui, || tui.screen_text().contains("VOICE"), WAIT_TIMEOUT).await,
         "the footer's voice control vanished when Settings opened. rows written \
@@ -2436,8 +2454,13 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the Sound settings tab, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"jjj ")
-        .expect("moving to and toggling Agent finished");
+    // One key at a time: a burst of keys into ConPTY occasionally lost one,
+    // which moved the toggle onto the Preview row instead.
+    for key in [b"j", b"j", b"j", b" "] {
+        tui.write(key)
+            .expect("moving to and toggling Agent finished");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
     let sound_event_disabled = wait_screen(
         &tui,
         || {
@@ -2488,15 +2511,29 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .await,
         "expected Labeling to persist"
     );
-    let (summary_column, summary_row) = tui
-        .with_screen(|screen| {
-            let row = rows_containing(screen, "Title style")
-                .into_iter()
-                .find(|row| column_of_text_in_row(screen, *row, "→").is_some())?;
-            let column = column_of_text_in_row(screen, row, "→")?;
-            Some((column, row))
-        })
-        .expect("Title style next control should be visible");
+    // Read the control from a settled frame: the Labeling write above repaints
+    // this row, and a one-shot capture can land mid-rewrite.
+    let mut summary_control = None;
+    wait_until(
+        || {
+            summary_control = tui.with_screen(|screen| {
+                let row = rows_containing(screen, "Title style")
+                    .into_iter()
+                    .find(|row| column_of_text_in_row(screen, *row, "→").is_some())?;
+                let column = column_of_text_in_row(screen, row, "→")?;
+                Some((column, row))
+            });
+            summary_control.is_some()
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    let (summary_column, summary_row) = summary_control.unwrap_or_else(|| {
+        panic!(
+            "Title style next control should be visible: {:?}",
+            tui.screen_text()
+        )
+    });
     tui.write(&sgr_mouse_down(0, summary_column, summary_row))
         .expect("clicking Summarization");
     tui.write(&sgr_mouse_up(summary_column, summary_row))
@@ -2688,6 +2725,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
 /// session to verify that both settings reload from their authoritative file.
 #[tokio::test]
 async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create universal-selector tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("universal-selectors-project");
@@ -2780,9 +2818,12 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         "the PTY catalog should render all six Tree order choices: {:?}",
         first_client.screen_text()
     );
-    first_client
-        .write(b"\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\r")
-        .expect("choose Name Z-A, several entries beyond the current value");
+    write_keys_paced(
+        &first_client,
+        &[b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\r"],
+        "choose Name Z-A, several entries beyond the current value",
+    )
+    .await;
     assert!(
         wait_until(
             || {
@@ -3152,27 +3193,16 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     // Wait for the scene list to settle after the palette dialog closes; a
     // single capture can land mid-repaint (seen under ConPTY).
     let mut scene_cell = None;
-    for attempt in 0..2 {
-        if attempt == 1 {
-            if !cfg!(windows) {
-                break;
-            }
-            conpty_full_repaint(&first_client).await;
-        }
-        if wait_until(
-            || {
-                scene_cell = first_client.with_screen(|screen| {
-                    animation_scene_label_cell(screen, default_animation.kind.label())
-                });
-                scene_cell.is_some()
-            },
-            WAIT_TIMEOUT,
-        )
-        .await
-        {
-            break;
-        }
-    }
+    wait_until(
+        || {
+            scene_cell = first_client.with_screen(|screen| {
+                animation_scene_label_cell(screen, default_animation.kind.label())
+            });
+            scene_cell.is_some()
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
     let (scene_column, scene_row) = scene_cell.unwrap_or_else(|| {
         panic!(
             "initial scene is visible in the scene list: {:?}",
@@ -3370,13 +3400,15 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         "numeric scene editor should show the saved duration: {:?}",
         first_client.screen_text()
     );
-    let exact_dwell_keys = vec![0x7f; initial_dwell.to_string().len()]
-        .into_iter()
-        .chain(b"137\r".iter().copied())
+    let exact_dwell_keys = std::iter::repeat_n(&b"\x7f"[..], initial_dwell.to_string().len())
+        .chain([&b"1"[..], b"3", b"7", b"\r"])
         .collect::<Vec<_>>();
-    first_client
-        .write(&exact_dwell_keys)
-        .expect("enter exact off-step duration 137 seconds");
+    write_keys_paced(
+        &first_client,
+        &exact_dwell_keys,
+        "enter exact off-step duration 137 seconds",
+    )
+    .await;
     assert!(
         wait_until(
             || ilium_client::project_config::load(&animation_home)
@@ -3392,7 +3424,8 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
             WAIT_TIMEOUT,
         )
         .await,
-        "exact off-step duration did not persist"
+        "exact off-step duration did not persist: {:?}",
+        first_client.screen_text()
     );
     assert!(
         wait_until(
@@ -3812,6 +3845,7 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
 /// then verifies the selected prefix is read from disk by a fresh client.
 #[tokio::test]
 async fn onboarding_keyboard_prefix_catalog_survives_fresh_client_reload() {
+    let _windows_serial = windows_pty_serial_guard().await;
     use ilium_client::onboarding::{
         progress::OnboardingProgress,
         state::{AiChoice, KeyboardChoice, SoundChoice, Step},
@@ -3974,6 +4008,7 @@ async fn onboarding_keyboard_prefix_catalog_survives_fresh_client_reload() {
 #[cfg(unix)]
 #[tokio::test]
 async fn toolbar_model_strength_and_effort_catalog_use_only_fake_providers() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create fake-toolbar tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_keyboard_config(&xdg);
@@ -4232,6 +4267,7 @@ fn write_restart_shim(staged_path: &Path, final_path: &Path) -> PathBuf {
 /// process loads the replacement before reattaching to the untouched server.
 #[tokio::test]
 async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_keyboard_config(&xdg);
@@ -4367,13 +4403,21 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     let menu_column = 8;
     tui.write(&sgr_mouse_click(2, menu_column, default_rows[0]))
         .expect("right-click default group");
+    // The row comes from the capture that satisfied the wait; a separate
+    // later capture can land mid-way through a row rewrite.
+    let mut restart_rows = Vec::new();
     assert!(
-        wait_until(|| tui.screen_text().contains("Restart"), WAIT_TIMEOUT).await,
-        "expected Restart in the real context menu, got: {:?}",
+        wait_until(
+            || {
+                restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
+                restart_rows.len() == 1
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected exactly one Restart row in the real context menu, got: {:?}",
         tui.screen_text()
     );
-    let restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
-    assert_eq!(restart_rows.len(), 1, "expected one rendered Restart row");
     // Restart owns exactly one press/release gesture. The general helper also
     // sends a second legacy release, which is unrelated input after exit and
     // must correctly remain in custody rather than silently disappearing.
@@ -4473,6 +4517,7 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
 /// connected when two live terminal streams share the right panel.
 #[tokio::test]
 async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("split-project");
@@ -5186,6 +5231,7 @@ fn sgr_mouse_move(column: u16, row: u16) -> Vec<u8> {
 /// toolbar's exact pixel position at this pty's fixed size.
 #[tokio::test]
 async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_create_burst() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("project");
@@ -5561,6 +5607,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
 /// child process without invoking any real installed agent or network access.
 #[tokio::test]
 async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("project");
@@ -5795,6 +5842,7 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
 /// canonical writer syntax, and creation must leave both files untouched.
 #[tokio::test]
 async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("board-project");
@@ -6507,6 +6555,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
 /// observed only after the server writes the scheduled text plus Enter.
 #[tokio::test]
 async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("scheduled-input-project");
@@ -6684,6 +6733,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
 /// into the enclosing group immediately before that former parent.
 #[tokio::test]
 async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_tree_row_management_controls(&xdg);
@@ -6789,16 +6839,26 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         "expected the nested group to gain its pane, got: {:?}",
         tui.screen_text()
     );
-    if nested_marker('\u{25b6}') {
+    // A left click on a group row toggles it, so click exactly once and give
+    // that click the full timeout: retrying a toggle lets a late first click
+    // and a retry cancel each other out.
+    if !wait_until(|| nested_marker('\u{25bc}'), Duration::from_secs(2)).await {
         // Past the client's 400 ms double-click window, so this is no rename.
         tokio::time::sleep(Duration::from_millis(500)).await;
-        let nested_row = tui.with_screen(|screen| rows_containing(screen, "nested"))[0];
+        let nested_row = tui
+            .with_screen(|screen| rows_containing(screen, "nested"))
+            .first()
+            .copied()
+            .unwrap_or_else(|| panic!("nested group row: {:?}", tui.screen_text()));
         tui.write(&sgr_mouse_down(0, 8, nested_row))
             .expect("press collapsed nested group row");
         tui.write(&sgr_mouse_up(8, nested_row))
             .expect("release collapsed nested group row");
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        tui.write(b"\x1b[C").expect("expand nested group");
+        assert!(
+            wait_until(|| nested_marker('\u{25bc}'), WAIT_TIMEOUT).await,
+            "expected one click to expand the nested group, got: {:?}",
+            tui.screen_text()
+        );
     }
     // Read both rows from the same settled frame that satisfied the wait; a
     // later separate capture can land mid-repaint (seen under ConPTY).
@@ -6917,6 +6977,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
 /// makes the first level appear but breaks at the next directory.
 #[tokio::test]
 async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("folder-project");
@@ -7111,6 +7172,7 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
 /// them, and Save follows the same active policy.
 #[tokio::test]
 async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_agent_debug_config(&xdg);
@@ -7551,6 +7613,7 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
 )]
 #[tokio::test]
 async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("last-prompt-project");
@@ -7729,6 +7792,7 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
 /// banner would waste it for no reason.
 #[tokio::test]
 async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correction() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("typed-prompt-project");
@@ -7901,6 +7965,7 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
 /// Its text occupies the first row while terminal content keeps its position.
 #[tokio::test]
 async fn last_prompt_banner_keeps_fixed_slot_for_a_short_prompt() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("short-prompt-project");
@@ -8029,6 +8094,7 @@ async fn last_prompt_banner_keeps_fixed_slot_for_a_short_prompt() {
 /// the popover must say it is still waiting for one rather than show numbers.
 #[tokio::test]
 async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("stats-popover-project");
@@ -8229,8 +8295,16 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
     tui.write(&sgr_mouse_move(icon_column + 60, 42))
         .expect("wander away from the pinned popover");
     tokio::time::sleep(Duration::from_millis(400)).await;
+    // An unpinned preview is already gone by now (the dismissal above takes
+    // one frame) and nothing reopens it, so finding the popover in any
+    // capture of the next second proves it stayed open. A single capture
+    // could land mid-way through a row rewrite.
     assert!(
-        tui.screen_text().contains("Costs & stats"),
+        wait_until(
+            || tui.screen_text().contains("Costs & stats"),
+            Duration::from_secs(1)
+        )
+        .await,
         "a pinned popover must stay open: {:?}",
         tui.screen_text()
     );
@@ -8287,6 +8361,7 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
 #[cfg(unix)]
 #[tokio::test]
 async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_input() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create isolated root");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_keyboard_config(&xdg);
@@ -8767,6 +8842,7 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
 /// The answering case also proves the conditional keyboard Push/Pop custody.
 #[tokio::test]
 async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_terminals() {
+    let _windows_serial = windows_pty_serial_guard().await;
     for terminal_answers in [false, true] {
         let temp_root = tempfile::tempdir().expect("create isolated image-probe root");
         let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");

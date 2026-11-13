@@ -11,8 +11,9 @@ use std::{
     io,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex, Once,
     },
+    thread::ThreadId,
 };
 
 use crossterm::event::{
@@ -78,6 +79,9 @@ impl TerminalGuard {
             return Err(ClientError::TerminalSetup(source));
         }
 
+        route_panics_off_the_screen();
+        set_screen_owner(Some(std::thread::current().id()));
+
         // The admitted input worker performs all response-reading queries,
         // including the conditional keyboard enhancement probe. This guard
         // retains restoration custody even if that worker reports an error.
@@ -108,7 +112,80 @@ impl Drop for TerminalGuard {
             LeaveAlternateScreen
         );
         let _ = disable_raw_mode();
+        set_screen_owner(None);
+        // A panic on the thread that owned the screen is unwinding through
+        // here; show it now that the normal screen is back.
+        if let Some(report) = take_deferred_panic() {
+            eprintln!("{report}");
+        }
     }
+}
+
+/// The thread whose `TerminalGuard` owns the screen, while one does.
+static SCREEN_OWNER: Mutex<Option<ThreadId>> = Mutex::new(None);
+/// The owner thread's panic report, printed once the screen is restored.
+static DEFERRED_PANIC: Mutex<Option<String>> = Mutex::new(None);
+static PANIC_ROUTING: Once = Once::new();
+
+fn set_screen_owner(owner: Option<ThreadId>) {
+    *SCREEN_OWNER
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = owner;
+}
+
+fn take_deferred_panic() -> Option<String> {
+    DEFERRED_PANIC
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take()
+}
+
+/// Keeps panic reports out of the full-screen UI.
+///
+/// The standard hook writes every panic to stderr, which is the terminal the
+/// UI is drawing on. A panic that a worker catches and survives (an animation
+/// scene, a naming worker) then scribbles its message and backtrace over the
+/// frame, and the differential renderer never repaints the damaged cells.
+/// While a guard owns the screen, panics are logged instead; the owner
+/// thread's own panic is also printed after the guard restores the screen.
+/// Without a guard the previous hook runs unchanged.
+fn route_panics_off_the_screen() {
+    PANIC_ROUTING.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let owner = *SCREEN_OWNER
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let Some(owner) = owner else {
+                previous(info);
+                return;
+            };
+            let current = std::thread::current();
+            let thread = current.name().unwrap_or("unnamed").to_owned();
+            let location = info
+                .location()
+                .map(|location| location.to_string())
+                .unwrap_or_else(|| "unknown location".to_owned());
+            let message = info
+                .payload()
+                .downcast_ref::<&str>()
+                .map(|message| (*message).to_owned())
+                .or_else(|| info.payload().downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "non-text panic payload".to_owned());
+            let backtrace = std::backtrace::Backtrace::capture();
+            tracing::error!(
+                %thread, %location, %message, %backtrace,
+                "panic while the terminal UI is active"
+            );
+            if current.id() == owner {
+                *DEFERRED_PANIC
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(format!(
+                    "thread '{thread}' panicked at {location}:\n{message}\n{backtrace}"
+                ));
+            }
+        }));
+    });
 }
 
 /// Keeps the frame's bottom-right cell out of the cell diff when `enabled`.

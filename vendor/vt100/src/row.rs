@@ -488,7 +488,7 @@ mod ilium_regression_tests {
         let mut row = Row::new(1);
         row.get_mut(0)
             .expect("one-column row should contain its first cell")
-            .set('中', attrs);
+            .set('中', attrs, true);
 
         row.erase(0, attrs);
 
