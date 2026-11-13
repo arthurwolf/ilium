@@ -1,5 +1,3 @@
-use unicode_width::UnicodeWidthChar as _;
-
 // chosen to make the size of the cell struct 32 bytes
 const CONTENT_BYTES: usize = 22;
 
@@ -42,13 +40,12 @@ impl Cell {
         usize::from(self.len & LEN_BITS)
     }
 
-    pub(crate) fn set(&mut self, c: char, a: crate::attrs::Attrs) {
+    /// `wide` comes from the screen's [`crate::WidthPolicy`], so the wide flag
+    /// and the cursor advance always use the same width.
+    pub(crate) fn set(&mut self, c: char, a: crate::attrs::Attrs, wide: bool) {
         self.len = 0;
         self.append_char(0, c);
-        // strings in this context should always be an arbitrary character
-        // followed by zero or more zero-width characters, so we should only
-        // have to look at the first character
-        self.set_wide(c.width().unwrap_or(1) > 1);
+        self.set_wide(wide);
         self.attrs = a;
     }
 
@@ -110,7 +107,7 @@ impl Cell {
         self.len & IS_WIDE_CONTINUATION != 0
     }
 
-    fn set_wide(&mut self, wide: bool) {
+    pub(crate) fn set_wide(&mut self, wide: bool) {
         if wide {
             self.len |= IS_WIDE;
         } else {

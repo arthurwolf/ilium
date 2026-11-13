@@ -17,7 +17,6 @@ env:
   RUST_BACKTRACE: '1'
 jobs:
   clippy:
-    if: false
     runs-on: windows-2025
     timeout-minutes: 120
     steps:
@@ -29,14 +28,17 @@ jobs:
     - name: Clippy (warnings as errors, Windows target)
       run: cargo clippy --locked --workspace --exclude 'ilium-plugin-*' --all-targets --keep-going --target x86_64-pc-windows-msvc -- -D warnings
   flake-meter:
-    if: false
     runs-on: windows-2025
     timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
         include:
-        - {lane: solo, replica: 1, iterations: 4, args: '--exact universal_settings_catalog_and_exact_number_survive_fresh_client_reload'}
+        - {lane: solo, replica: 1, iterations: 12, args: '--exact universal_settings_catalog_and_exact_number_survive_fresh_client_reload'}
+        - {lane: lock-default, replica: 1, iterations: 6, args: ''}
+        - {lane: lock-default, replica: 2, iterations: 6, args: ''}
+        - {lane: lock-one-thread, replica: 1, iterations: 6, args: '--threads 1'}
+        - {lane: lock-one-thread, replica: 2, iterations: 6, args: '--threads 1'}
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
@@ -75,3 +77,16 @@ jobs:
       with:
         name: width-census
         path: ${{ runner.temp }}/census
+  linux-format-and-vt100:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: 'false'
+    - name: Toolchain
+      run: rustup show active-toolchain || rustup toolchain install
+    - name: Format check
+      run: cargo fmt --all --check && cargo fmt --manifest-path vendor/vt100/Cargo.toml --check
+    - name: Vendored vt100 unit tests
+      run: cargo test --locked --manifest-path vendor/vt100/Cargo.toml --lib
