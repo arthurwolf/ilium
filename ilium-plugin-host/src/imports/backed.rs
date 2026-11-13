@@ -27,6 +27,10 @@ use ilium_plugin_api::generated::primitives::terminal::{
     CellRegion, CellRows, ForegroundProcess, HistoryMatch, HostTerminal, OutputFilter, Screen,
     ScreenPart, Selection, TerminalMode,
 };
+use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+use ilium_plugin_api::generated::types::ids::{NodeId, PluginId, RequestId};
+use ilium_plugin_api::generated::types::intents::Submission;
+use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef, RequestResult};
 use ilium_plugin_api::generated::types::tree::{AgentModel, AgentView};
 use ilium_plugin_api::generated::types::tree::{
     NodeClass, NodeQuery, NodeView, PaneInfo, PrimitiveKind,
