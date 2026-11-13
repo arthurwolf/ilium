@@ -55,7 +55,7 @@ The grant is a normal-risk capability. Screen contents can still hold secrets, s
 |---|---|---|
 | `terminal.read-cells` | function | `read-cells(pane, part, first-row, count) -> option<cell-rows>`. `part` is a `screen-part`. `count` is at most 1,000. |
 | `terminal.modes` | function | Returns the `terminal-mode` flags: alternate screen, mouse reporting, bracketed paste, application cursor, focus reporting, synchronized output. |
-| `terminal.foreground-process` | function | Returns `foreground-process { name, command-line, cwd }`. The `cwd` is for display only. |
+| `terminal.get-foreground-process` | function | Returns `foreground-process { name, command-line, cwd }`. The `cwd` is for display only. |
 | `terminal.freeze-snapshot` | function | Returns a snapshot id: a stable copy of screen and scrollback. Read it with `read-snapshot-cells`, release it with `drop-snapshot`. |
 | `screen-changed` | event | `{ pane, first-row, last-row, revision }`, coalesced to at most 10 per second per pane. |
 

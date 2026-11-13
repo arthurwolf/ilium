@@ -31,7 +31,7 @@ inflate: func(format: compression, data: list<u8>, max-output: u32)
     -> result<list<u8>, plugin-error>;
 deflate: func(format: compression, data: list<u8>, level: u8)
     -> result<list<u8>, plugin-error>;
-image-info: func(data: list<u8>) -> result<image-info, plugin-error>;
+get-image-info: func(data: list<u8>) -> result<image-info, plugin-error>;
 decode-image: func(data: list<u8>, frame: u32, max-pixels: u32)
     -> result<decoded-image, plugin-error>;
 sha256: func(data: list<u8>) -> list<u8>;
@@ -48,7 +48,7 @@ Names follow the SDK naming rules. In Rust the functions are snake_case and the 
 |---|---|---|---|
 | `inflate` | `format`, `data`, `max-output: u32` | bytes | Decompresses one complete zlib, gzip or raw deflate stream. Trailing bytes, including additional gzip members, are refused. Refused if the output is longer than `max-output`, which may be at most 64 MiB. |
 | `deflate` | `format`, `data`, `level: u8` | bytes | Compresses data. `level` runs from 0 to 9. Higher levels are slower and produce smaller output. |
-| `image-info` | `data` | `image-info` | Reads the width, height and frame count from the header. It does not decode any pixels. |
+| `get-image-info` | `data` | `image-info` | Reads the width, height and frame count from the header. It does not decode any pixels. |
 | `decode-image` | `data`, `frame: u32`, `max-pixels: u32` | `decoded-image` | Decodes one frame, counted from 0, to 8-bit RGBA. Refused if the image has more pixels than `max-pixels`. |
 | `sha256` | `data` | 32 bytes | Returns the SHA-256 digest. It cannot fail, so it has no error channel. |
 | `hmac-sha256` | `key`, `data` | 32 bytes | Returns the HMAC-SHA256 message authentication code of `data` under `key`. The key may be 0 to 4 KiB. Refused with `invalid-argument` above that. |
@@ -278,10 +278,10 @@ Illustrative, not generated. The numbers follow the 640 by 480 example above.
 | `invalid-argument` | `inflate` | `max-output` over 64 MiB, or corrupt data. |
 | `quota-exceeded` | `inflate` | Output longer than `max-output`. |
 | `invalid-argument` | `deflate` | `level` over 9. |
-| `invalid-argument` | `image-info`, `decode-image` | Corrupt data, `frame` out of range, or `max-pixels` over 67,108,864. |
+| `invalid-argument` | `get-image-info`, `decode-image` | Corrupt data, `frame` out of range, or `max-pixels` over 67,108,864. |
 | `quota-exceeded` | `decode-image` | Width times height is more than `max-pixels`. |
 | `invalid-argument` | `rasterize-text` | Text over 64 KiB, `size-px` of 0 or over 512, or `max-width-px` of 0 or over 16,384. |
-| `unsupported` | `image-info`, `decode-image` | The format is not PNG, JPEG, GIF, WebP or BMP. |
+| `unsupported` | `get-image-info`, `decode-image` | The format is not PNG, JPEG, GIF, WebP or BMP. |
 
 Corrupt compressed or image data is always `invalid-argument`. The code `io` never comes from `codec`, because `io` is reserved for operating system I/O. `sha256` has no codec-specific error.
 
@@ -322,7 +322,7 @@ The plugin supplies bytes and receives pixels. Every step between those two poin
 
 ### Edge cases
 
-- **Animated formats.** `image-info` reports every frame. `decode-image` decodes one frame at a time, so a plugin that plays an animation calls it once per frame and never asks for all frames in one call.
+- **Animated formats.** `get-image-info` reports every frame. `decode-image` decodes one frame at a time, so a plugin that plays an animation calls it once per frame and never asks for all frames in one call.
 - **Frame index.** Frames are counted from 0. A `frame` at or above `frames` returns `invalid-argument`.
 - **Pixel budget.** `max-pixels` is an upper bound that the plugin chooses. The host never allows more than 67,108,864 pixels, whatever value the plugin passes.
 - **Size of the output.** A decoded picture is `width × height × 4` bytes. Check the product before you write it to a surface, because `ui.write-surface` accepts at most 16 MiB per call.

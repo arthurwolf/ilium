@@ -596,6 +596,12 @@ def wit_tree_sha256(wit_directory):
     return digest.hexdigest()
 
 
+# Sections of the WIT reference are numbered one per interface, except here: `telemetry` is
+# declared in the section of `log` (5.1), and section 5.40 "Take rules" declares no interface,
+# so `self-limits` is two sections after `extensions`.
+SECTION_STEP = {("host", "telemetry"): 0, ("host", "self-limits"): 2}
+
+
 def load_model(wit_directory):
     model = Model()
     section_counters = {directory: 0 for directory in PACKAGE_ORDER}
@@ -622,7 +628,7 @@ def load_model(wit_directory):
                     raise GenerateError(f"{path}: worlds belong in wit/worlds/")
         ordered = order_by_page(wit_directory, directory, parsed_files)
         for path, item in ordered:
-            section_counters[directory] += 1
+            section_counters[directory] += SECTION_STEP.get((directory, item["name"]), 1)
             section = f"{SECTION_OF_PACKAGE[directory]}.{section_counters[directory]}"
             model.add(Interface(directory, package, item, path, section))
     for world_package in WORLD_PACKAGES:
@@ -682,11 +688,12 @@ def page_interface_order(wit_directory):
 # reference fails loudly until it is added here in its page position.
 INTERFACE_ORDER = {
     "ilium:host": (
-        "log", "clock", "timers", "journal", "tree", "panes", "intents-host", "storage", "settings",
+        "log", "telemetry", "clock", "timers", "journal", "tree", "panes", "intents-host", "storage", "settings",
         "codec", "fs", "http", "jobs", "process", "inference", "vector", "sounds", "topics",
         "commands", "services", "ui-host", "keys", "cli", "http-api", "workspace", "clipboard",
         "audio", "media", "location", "help", "plugins", "catalogs", "geocode", "sessions",
-        "kernel-settings", "keymap", "gpu", "client-requests", "extensions",
+        "kernel-settings", "keymap", "gpu", "client-requests", "extensions", "self-limits",
+        "self-describe",
     ),
     "ilium:primitives": ("terminal", "agent", "editor", "basic"),
     "ilium:anim": ("surface", "fonts", "renderer-types"),

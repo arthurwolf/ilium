@@ -3,8 +3,8 @@
 
 The WIT reference page (docs/plugins-manual/pages/reference-wit.md) is the only
 canonical definition of the plugin contract (ABI-001). This tool copies every
-```wit fenced block of that page, byte for byte, into the layout of the test
-plan:
+WIT block of that page (fenced as ```wit, or as ```text with a package,
+interface or world line), byte for byte, into the layout of the test plan:
 
     wit/types/ilium-types.wit          package ilium:types@0.1.0 (all interfaces)
     wit/host/<interface>.wit           package ilium:host@0.1.0, one file per interface
@@ -30,8 +30,8 @@ import re
 import sys
 
 PAGE_RELATIVE = "docs/plugins-manual/pages/reference-wit.md"
-EXPECTED_BLOCKS = 83
-EXPECTED_INTERFACES = 76
+EXPECTED_BLOCKS = 86
+EXPECTED_INTERFACES = 79
 EXPECTED_WORLD_FILES = 3
 PACKAGE_DIRECTORIES = {
     "ilium:types": "types",
@@ -60,22 +60,33 @@ class ExtractError(Exception):
 
 
 def read_blocks(page_text):
-    """Return the list of (start_line, text) of every ```wit block, text without fences."""
+    """Return the list of (start_line, text) of every WIT block, text without fences.
+
+    A WIT block is fenced as ```wit, or as ```text (the fence the manual site renders) when it
+    holds a package, interface or world line. Other ```text blocks are prose samples.
+    """
     blocks = []
     lines = page_text.split("\n")
     inside = False
+    is_text_fence = False
     start_line = 0
     current = []
     for line_number, line in enumerate(lines, start=1):
         if not inside:
-            if line.strip() == "```wit":
+            if line.strip() in ("```wit", "```text"):
                 inside = True
+                is_text_fence = line.strip() == "```text"
                 start_line = line_number + 1
                 current = []
             continue
         if line.strip() == "```":
             inside = False
-            blocks.append((start_line, "\n".join(current)))
+            is_wit = not is_text_fence or any(
+                PACKAGE_LINE.match(item) or INTERFACE_LINE.match(item) or WORLD_LINE.match(item)
+                for item in current
+            )
+            if is_wit:
+                blocks.append((start_line, "\n".join(current)))
             continue
         current.append(line)
     if inside:

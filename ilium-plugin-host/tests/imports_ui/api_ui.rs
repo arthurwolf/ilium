@@ -302,7 +302,7 @@ fn wit_ui_host_invalidate_unknown_view_never_fails() {
     assert!(rig.host.failures().is_empty());
 }
 
-/// REQ: WIT:ilium:host/ui-host.widget-state
+/// REQ: WIT:ilium:host/ui-host.get-widget-state
 #[test]
 fn wit_ui_host_widget_state_reads_the_host_owned_state() {
     let rig = seeded(&[]);
@@ -311,31 +311,31 @@ fn wit_ui_host_widget_state_reads_the_host_owned_state() {
     assert_eq!(
         rig.host
             .ui_host()
-            .widget_state(panel_view(), "title".to_owned()),
+            .get_widget_state(panel_view(), "title".to_owned()),
         Some(WidgetState::Text("abc".to_owned()))
     );
 }
 
-/// REQ: WIT:ilium:host/ui-host.widget-state
+/// REQ: WIT:ilium:host/ui-host.get-widget-state
 #[test]
 fn wit_ui_host_widget_state_unknown_key_is_none() {
     let rig = seeded(&[]);
     assert_eq!(
         rig.host
             .ui_host()
-            .widget_state(panel_view(), "ghost".to_owned()),
+            .get_widget_state(panel_view(), "ghost".to_owned()),
         None
     );
 }
 
-/// REQ: WIT:ilium:host/ui-host.widget-state
+/// REQ: WIT:ilium:host/ui-host.get-widget-state
 #[test]
 fn wit_ui_host_widget_state_unknown_view_is_none() {
     let rig = seeded(&[]);
     assert_eq!(
         rig.host
             .ui_host()
-            .widget_state(ViewTarget::Panel("ghost".to_owned()), "title".to_owned()),
+            .get_widget_state(ViewTarget::Panel("ghost".to_owned()), "title".to_owned()),
         None
     );
 }
@@ -355,7 +355,7 @@ fn wit_ui_host_set_widget_state_selects_a_list_row() {
     assert_eq!(
         rig.host
             .ui_host()
-            .widget_state(panel_view(), "notes-list".to_owned()),
+            .get_widget_state(panel_view(), "notes-list".to_owned()),
         Some(WidgetState::Selected(Some(0)))
     );
 }
@@ -449,23 +449,23 @@ fn wit_ui_host_theme_stable_glyphs_follow_the_icon_mode() {
     assert!(!rig.host.ui_host().theme().stable_glyphs);
 }
 
-/// REQ: WIT:ilium:host/ui-host.theme-extras
+/// REQ: WIT:ilium:host/ui-host.get-theme-extras
 #[test]
 fn wit_ui_host_theme_extras_reports_density_and_reduced_motion() {
     let rig = seeded(&[]);
     rig.kernel.set_density(Density::Compact);
     rig.kernel.set_reduced_motion(true);
-    let extras = rig.host.ui_host().theme_extras();
+    let extras = rig.host.ui_host().get_theme_extras();
     assert_eq!(extras.density, Density::Compact);
     assert!(extras.reduced_motion);
 }
 
-/// REQ: WIT:ilium:host/ui-host.theme-extras
+/// REQ: WIT:ilium:host/ui-host.get-theme-extras
 #[test]
 fn wit_ui_host_theme_extras_icon_mode_is_normal_by_default() {
     let rig = seeded(&[]);
     assert_eq!(
-        rig.host.ui_host().theme_extras().icon_mode,
+        rig.host.ui_host().get_theme_extras().icon_mode,
         IconMode::Normal
     );
 }

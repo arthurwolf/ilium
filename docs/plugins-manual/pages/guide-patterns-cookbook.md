@@ -341,7 +341,7 @@ function split(bytes: Uint8Array): { at: bigint; body: Uint8Array } {
 
 **Problem.** You have thousands of rows, such as search hits, log lines or files. A tree is limited to 4,096 nodes and 1,024 KiB, and a render must finish in 10 ms.
 
-**Constraints.** The `%list` and `table` widgets keep `selected` and `offset` as host-owned state, which the plugin reads through `ui.widget-state`. There is no view-level virtual list. Virtual-row providers exist only for sidebar rows of the tree, with cursors and a Load more row. The caps `check-list` (256 items) and `list-editor` (64 items) are enforced at render time: a larger one traps with `ui.invalid-tree`.
+**Constraints.** The `%list` and `table` widgets keep `selected` and `offset` as host-owned state, which the plugin reads through `ui.get-widget-state`. There is no view-level virtual list. Virtual-row providers exist only for sidebar rows of the tree, with cursors and a Load more row. The caps `check-list` (256 items) and `list-editor` (64 items) are enforced at render time: a larger one traps with `ui.invalid-tree`.
 
 **Rule.** A view MUST render only the rows in the visible window plus a small margin, and MUST NOT put all rows into the tree. The ceiling is 4,096 nodes and 1,024 KiB for the whole tree. [AUT-011]
 

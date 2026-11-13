@@ -48,13 +48,13 @@ Colour tokens are packed `0x00RRGGBB` numbers. `background` is not a role. The h
 
 ## Theme extras
 
-`theme-tokens` holds the seven base colours. The contract also defines `theme-extras`, a second record read with `theme-extras()`. It carries the three colours that the roles `info`, `selection` and `border` use, and three settings that change how a view should behave.
+`theme-tokens` holds the seven base colours. The contract also defines `theme-extras`, a second record read with `get-theme-extras()`. It carries the three colours that the roles `info`, `selection` and `border` use, and three settings that change how a view should behave.
 
 ```text
 record theme-extras { reduced-motion: bool, density: density, info: u32, selection: u32, border: u32, icon-mode: icon-mode }
 enum density { compact, normal, comfortable }
 enum icon-mode { normal, stable }   // stable only when the user opted in
-theme-extras: func() -> theme-extras;   // in host::ui
+get-theme-extras: func() -> theme-extras;   // in host::ui
 ```
 
 | Field | Meaning | What a plugin does with it |
@@ -158,7 +158,7 @@ An empty style inherits the theme. A colour given as `rgb` or `indexed` is paint
 |---|---|---|
 | `theme()` | function in `host::ui` | Returns the current `theme-tokens`. It never fails. Read it again after `theme-changed`. |
 | `display-width(text)` | function in `host::ui` | Returns the cell width the host uses for the text, as `u16`. Call it before you cut text yourself. |
-| `theme-extras()` | function in `host::ui` | Returns reduced motion, density, icon mode and the `info`, `selection` and `border` tokens. Rust `ui::theme_extras()`, TypeScript `themeExtras()`. |
+| `get-theme-extras()` | function in `host::ui` | Returns reduced motion, density, icon mode and the `info`, `selection` and `border` tokens. Rust `ui::theme_extras()`, TypeScript `themeExtras()`. |
 | `invalidate(view)` | function in `host::ui` | Draws the view again with the current tokens. |
 | `theme-changed` | client event, no payload | Sent once for a burst of theme changes. Always delivered on the client. |
 | `color-role` | enum | The nine roles of the enum above (seven text roles, plus `selection` and `border`). |
@@ -402,7 +402,7 @@ record theme-extras { reduced-motion: bool, density: density, info: u32, selecti
 | Rule | Behaviour |
 |---|---|
 | Source | `contrast` is `high` exactly when `[ui] contrast = "high"` (USR-302). Any other value of the key, or a missing key, gives `normal`. |
-| Change | A flip in either direction delivers `theme-changed`, in the same coalesced burst as any other theme change. The event carries no payload, so the plugin calls `theme-extras()` again. |
+| Change | A flip in either direction delivers `theme-changed`, in the same coalesced burst as any other theme change. The event carries no payload, so the plugin calls `get-theme-extras()` again. |
 | Host widgets | When `high`, every role is already raised to at least 7:1 and `muted` is drawn in the foreground colour. `info`, `selection` and `border` in `theme-extras` hold the raised values. |
 | Plugin that uses roles only | Needs no code. It satisfies AUT-504 and stays inside USR-302. |
 | Plugin that draws its own colour (`rgb`, `indexed`) | When `contrast` is `high` it MUST either switch to roles, or use a foreground and background pair of at least 7:1 on resolved RGB, and MUST NOT use a pair under 7:1 for text. A plugin that ignores the field still renders without error (USR-302) and fails the review of AUT-504. |

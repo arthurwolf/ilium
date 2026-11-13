@@ -2,7 +2,7 @@
 //! "Requestable limits" `ui_tree_nodes`, `ui_tree_kib`; reference-wit.md section 4.10).
 
 use crate::error::Code;
-use crate::generated::types::{SpinnerFrames, UiTree, Widget};
+use crate::generated::types::{CheckItem, SpinnerFrames, UiTree, Widget};
 use crate::tier::Tier;
 use std::collections::BTreeSet;
 use std::io::{self, Write};
@@ -89,7 +89,9 @@ pub fn check_ui_tree_encoded(
         }
         let invalid_widget = match &node.widget {
             Widget::Layout(spec) => spec.constraints.len() != node.children.len(),
-            Widget::CheckList(spec) => spec.items.len() > 256,
+            Widget::CheckList(spec) => {
+                spec.items.len() > 256 || !check_items_form_a_forest(&spec.items)
+            }
             Widget::ListEditor(spec) => spec.items.len() > if tier == Tier::T1 { 1024 } else { 64 },
             Widget::Meter(spec) => spec.segments.len() > 8,
             Widget::Minimap(spec) => spec.marks.len() > 4096,
@@ -110,6 +112,42 @@ pub fn check_ui_tree_encoded(
         }
     }
     Ok(())
+}
+
+/// True when the flat items of a check list form a forest: ids are unique, every name in
+/// `children` is the id of another item of the list, no item has two parents and no item is its
+/// own ancestor (reference-wit.md `check-item`).
+fn check_items_form_a_forest(items: &[CheckItem]) -> bool {
+    let mut index_of_id = std::collections::BTreeMap::new();
+    for (index, item) in items.iter().enumerate() {
+        if index_of_id.insert(item.id.as_str(), index).is_some() {
+            return false;
+        }
+    }
+    let mut parent_of: Vec<Option<usize>> = vec![None; items.len()];
+    for (index, item) in items.iter().enumerate() {
+        for child in &item.children {
+            let Some(&child_index) = index_of_id.get(child.as_str()) else {
+                return false;
+            };
+            if child_index == index || parent_of[child_index].replace(index).is_some() {
+                return false;
+            }
+        }
+    }
+    // Every item has at most one parent, so a cycle is a parent chain that never reaches a root.
+    (0..items.len()).all(|start| {
+        let mut current = start;
+        let mut steps = 0;
+        while let Some(parent) = parent_of[current] {
+            steps += 1;
+            if steps > items.len() {
+                return false;
+            }
+            current = parent;
+        }
+        true
+    })
 }
 
 fn detail(code: &'static str) -> Code {
@@ -487,5 +525,43 @@ mod tests {
             refusal_of(&chain_tree(33), DEFAULT_CAPS),
             Code::from_static("ui.too-deep")
         );
+    }
+
+    fn check_item(id: &str, children: &[&str]) -> CheckItem {
+        CheckItem {
+            id: id.to_string(),
+            label: Vec::new(),
+            state: crate::generated::types::TriState::Off,
+            disabled_reason: None,
+            children: children.iter().map(|child| child.to_string()).collect(),
+        }
+    }
+
+    /// reference-wit.md `check-item`: `children` names items of the same flat list.
+    #[test]
+    fn check_items_must_form_a_forest() {
+        let forest = [
+            check_item("all", &["a", "b"]),
+            check_item("a", &[]),
+            check_item("b", &["c"]),
+            check_item("c", &[]),
+        ];
+        assert!(check_items_form_a_forest(&forest));
+        assert!(check_items_form_a_forest(&[]));
+
+        let duplicate_id = [check_item("a", &[]), check_item("a", &[])];
+        assert!(!check_items_form_a_forest(&duplicate_id));
+        let unknown_child = [check_item("a", &["ghost"])];
+        assert!(!check_items_form_a_forest(&unknown_child));
+        let own_child = [check_item("a", &["a"])];
+        assert!(!check_items_form_a_forest(&own_child));
+        let two_parents = [
+            check_item("a", &["c"]),
+            check_item("b", &["c"]),
+            check_item("c", &[]),
+        ];
+        assert!(!check_items_form_a_forest(&two_parents));
+        let cycle = [check_item("a", &["b"]), check_item("b", &["a"])];
+        assert!(!check_items_form_a_forest(&cycle));
     }
 }

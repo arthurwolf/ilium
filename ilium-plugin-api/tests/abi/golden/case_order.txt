@@ -56,12 +56,14 @@ host/log.wit log enum level: trace,debug,info,warn,error
 host/media.wit media record video-info: width,height,frames-per-second,duration-millis
 host/plugins.wit plugins enum package-state: not-installed,installed-enabled,installed-disabled-by-user,disabled-untrusted,disabled-blocked,disabled-by-policy,refused-at-load,update-staged,uninstall-pending
 host/plugins.wit plugins enum instance-state: inactive,activating,waiting-dependency,active,deactivating,restart-scheduled,stopped-by-failure,stopped
-host/plugins.wit plugins enum health-state: healthy,degraded,restarting,failed,disabled,dormant,refused
+host/plugins.wit plugins enum health-state: healthy,degraded,restarting,failed,disabled,dormant,refused,needs-setup
 host/plugins.wit plugins record side-state: side,scope,state,failures-in-window,last-error-code,restart-at-unix-ms
-host/plugins.wit plugins record plugin-info: id,name,version,tier,enabled,failed,state,side-states,scope,disabled-reason,health,publisher,publisher-key,source,channel,pinned,update-available,deprecated,yanked
+host/plugins.wit plugins record plugin-info: id,name,version,tier,enabled,failed,state,side-states,scope,disabled-reason,health,publisher,publisher-key,source,channel,pinned,update-available,deprecated,yanked,held-until
 host/process.wit process record process-spec: program,arguments,cwd,stdin,environment,timeout-millis
 host/process.wit process record process-exit: status,signal,stdout,stderr
 host/process.wit process record spawn-spec: process,stdin-open,line-mode
+host/self-describe.wit self-describe record self-description: plugin-id,version,api,host-version,grants
+host/self-limits.wit self-limits record budget: id,unit,effective,remaining,resets-at-ms
 host/sessions.wit sessions record live-session: name,project,socket-id,panes,attached-clients,is-self
 host/sessions.wit sessions record cross-request: session,command,arguments-json
 host/settings.wit settings record choice-option: value,title

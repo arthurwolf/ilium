@@ -625,7 +625,7 @@ What reduce motion changes, by surface, when the setting is on:
 | Activity icon of a working agent in the tree | The working icon stays on its first frame. The idle still icon does not change. See [agent detection](/pages/core-plugin-agent-detect/#activity-icons-in-the-tree). | Same as the spinner |
 | Hover and scroll animation of host widgets | None drawn. | [accessibility and theming](/pages/accessibility-and-theming/) |
 | Host-run decorative animations | Stopped. | [USR-307] |
-| Plugin that animates | Reads `reduced-motion` from `theme-extras()` and draws one static frame. It stops its own animating timers. | [AUT-502], [UI API](/pages/api-ui/) |
+| Plugin that animates | Reads `reduced-motion` from `get-theme-extras()` and draws one static frame. It stops its own animating timers. | [AUT-502], [UI API](/pages/api-ui/) |
 | Full-view redraws of a plugin that animates | At most one per second. A plugin timer under 1000 ms that only redraws logs `ui.motion-ignored` once per session. | [USR-307] |
 | Toast | No animation. | [notify toast](/pages/capability-notify-toast/) |
 | Animated scene in the background | One still frame; see Decisions for the three open points under reduce motion below. | [USR-307] |

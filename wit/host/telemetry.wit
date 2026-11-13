@@ -1,0 +1,8 @@
+package ilium:host@0.1.0;
+
+interface telemetry {
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Adds `delta` to a plugin-defined counter. At most 16 distinct names per plugin side (HST-638);
+  /// names match `^[a-z][a-z0-9_]{0,31}$`. Counters stay in the process and the local log; nothing is sent over the network.
+  count: func(name: string, delta: s64) -> result<_, plugin-error>;
+}

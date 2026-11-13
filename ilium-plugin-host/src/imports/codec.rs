@@ -9,6 +9,7 @@ use ilium_plugin_api::generated::host::codec::{
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
+use subtle::ConstantTimeEq;
 
 /// Host side of the `codec` interface.
 #[derive(Debug)]
@@ -16,6 +17,28 @@ pub struct CodecImport;
 
 const MAX_INPUT: usize = 16 * 1024 * 1024;
 const MAX_OUTPUT: usize = 64 * 1024 * 1024;
+
+/// Longest key `hmac-sha256` accepts (api-codec.md limits).
+const MAX_HMAC_KEY: usize = 4 * 1024;
+/// Block size of SHA-256 in bytes (RFC 2104 `B`).
+const SHA256_BLOCK: usize = 64;
+
+/// HMAC-SHA256 of `data` under `key` (RFC 2104): a key longer than one block is hashed first.
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    let mut block = [0u8; SHA256_BLOCK];
+    if key.len() > SHA256_BLOCK {
+        block[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        block[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(block.map(|byte| byte ^ 0x36));
+    inner.update(data);
+    let mut outer = Sha256::new();
+    outer.update(block.map(|byte| byte ^ 0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().into()
+}
 
 fn invalid_stream() -> PluginError {
     PluginError::new(
@@ -141,7 +164,7 @@ impl HostCodec for CodecImport {
         result.map_err(|_| PluginError::new(ErrorCode::Internal, "compression failed"))
     }
 
-    fn image_info(&mut self, data: Vec<u8>) -> Result<ImageInfo, PluginError> {
+    fn get_image_info(&mut self, data: Vec<u8>) -> Result<ImageInfo, PluginError> {
         super::codec_image::info(&data)
     }
 
@@ -156,6 +179,27 @@ impl HostCodec for CodecImport {
 
     fn sha256(&mut self, data: Vec<u8>) -> Vec<u8> {
         Sha256::digest(data).to_vec()
+    }
+
+    fn hmac_sha256(&mut self, key: Vec<u8>, data: Vec<u8>) -> Result<Vec<u8>, PluginError> {
+        if key.len() > MAX_HMAC_KEY {
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "hmac key exceeds 4 KiB",
+            ));
+        }
+        if data.len() > MAX_INPUT {
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "hmac input exceeds 16 MiB",
+            ));
+        }
+        Ok(hmac_sha256(&key, &data).to_vec())
+    }
+
+    fn constant_time_equal(&mut self, a: Vec<u8>, b: Vec<u8>) -> bool {
+        // `ct_eq` answers false at once for different lengths and is constant-time otherwise.
+        a.as_slice().ct_eq(b.as_slice()).into()
     }
 
     fn rasterize_text(&mut self, request: RasterText) -> Result<DecodedImage, PluginError> {
@@ -460,12 +504,45 @@ mod tests {
         assert_eq!(digest, SHA256_HELLO.to_vec());
     }
 
+    /// RFC 4231 test case 2: key "Jefe", data "what do ya want for nothing?".
+    #[test]
+    fn hmac_sha256_matches_rfc_4231_case_2() {
+        let mut codec = CodecImport;
+        let mac = codec
+            .hmac_sha256(b"Jefe".to_vec(), b"what do ya want for nothing?".to_vec())
+            .expect("a short key is accepted");
+        let hex: String = mac.iter().map(|byte| format!("{byte:02x}")).collect();
+        assert_eq!(
+            hex,
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+
+    /// api-codec.md limits: a key over 4 KiB is refused, a key of exactly 4 KiB is hashed first.
+    #[test]
+    fn hmac_sha256_key_limit_is_4_kib() {
+        let mut codec = CodecImport;
+        assert!(codec.hmac_sha256(vec![1u8; 4096], Vec::new()).is_ok());
+        let refused = codec.hmac_sha256(vec![1u8; 4097], Vec::new());
+        assert_error_code(refused, ErrorCode::InvalidArgument);
+    }
+
+    /// api-codec.md, constant-time-equal: equal bytes only; different lengths are unequal.
+    #[test]
+    fn constant_time_equal_compares_bytes_and_lengths() {
+        let mut codec = CodecImport;
+        assert!(codec.constant_time_equal(b"abc".to_vec(), b"abc".to_vec()));
+        assert!(!codec.constant_time_equal(b"abc".to_vec(), b"abd".to_vec()));
+        assert!(!codec.constant_time_equal(b"abc".to_vec(), b"abcd".to_vec()));
+        assert!(codec.constant_time_equal(Vec::new(), Vec::new()));
+    }
+
     /// api-codec.md, image-info: a PNG header gives width, height and one frame.
     #[test]
     fn image_info_png_reports_size_and_one_frame() {
         let mut codec = CodecImport;
         let info = codec
-            .image_info(PNG_1X1.to_vec())
+            .get_image_info(PNG_1X1.to_vec())
             .expect("a valid PNG header must be read");
         assert_eq!(
             info,
@@ -481,7 +558,7 @@ mod tests {
     #[test]
     fn image_info_unknown_format_is_unsupported() {
         let mut codec = CodecImport;
-        let result = codec.image_info(b"not an image at all".to_vec());
+        let result = codec.get_image_info(b"not an image at all".to_vec());
         assert_error_code(result, ErrorCode::Unsupported);
     }
 
@@ -489,7 +566,7 @@ mod tests {
     #[test]
     fn image_info_truncated_png_is_invalid_argument() {
         let mut codec = CodecImport;
-        let result = codec.image_info(PNG_SIGNATURE.to_vec());
+        let result = codec.get_image_info(PNG_SIGNATURE.to_vec());
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
@@ -497,7 +574,7 @@ mod tests {
     #[test]
     fn image_info_input_over_16_mib_is_invalid_argument() {
         let mut codec = CodecImport;
-        let result = codec.image_info(png_padded_to(MAX_CODEC_INPUT_BYTES + 1));
+        let result = codec.get_image_info(png_padded_to(MAX_CODEC_INPUT_BYTES + 1));
         assert_error_code(result, ErrorCode::InvalidArgument);
     }
 
@@ -777,7 +854,7 @@ mod tests {
         ];
         for input in hostile_inputs {
             let inflate_result = codec.inflate(Compression::Zlib, input.clone(), 1024);
-            let info_result = codec.image_info(input.clone());
+            let info_result = codec.get_image_info(input.clone());
             let decode_result = codec.decode_image(input.clone(), 0, MAX_DECODE_PIXELS);
             for (operation, code) in [
                 ("inflate", inflate_result.err().map(|error| error.code)),

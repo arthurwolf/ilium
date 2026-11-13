@@ -177,7 +177,7 @@ impl HostUiHost for UiHostImport {
         self.open_popups.remove(&popup);
     }
 
-    fn widget_state(&mut self, view: ViewTarget, key: String) -> Option<WidgetState> {
+    fn get_widget_state(&mut self, view: ViewTarget, key: String) -> Option<WidgetState> {
         self.widget_states.get(&(view_key(&view), key)).cloned()
     }
 
@@ -209,7 +209,7 @@ impl HostUiHost for UiHostImport {
         self.theme_tokens.clone()
     }
 
-    fn theme_extras(&mut self) -> ThemeExtras {
+    fn get_theme_extras(&mut self) -> ThemeExtras {
         ThemeExtras {
             reduced_motion: false,
             density: Density::Normal,
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn widget_state_unknown_key_returns_none() {
         let mut host = UiHostImport::default();
-        let state = host.widget_state(ViewTarget::Panel("notes".into()), "no-such-key".into());
+        let state = host.get_widget_state(ViewTarget::Panel("notes".into()), "no-such-key".into());
         assert_eq!(state, None);
     }
 

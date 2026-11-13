@@ -37,7 +37,7 @@ fn doc_abi_001_wit_tree_was_extracted_from_the_current_reference_wit() {
         Some(sha256_hex(page.as_bytes()).as_str()),
         "wit/ is stale: rerun python3 tools/extract_wit.py"
     );
-    assert_eq!(recorded.get("blocks").map(String::as_str), Some("83"));
+    assert_eq!(recorded.get("blocks").map(String::as_str), Some("86"));
 }
 
 /// REQ: ABI-001
@@ -73,7 +73,7 @@ fn doc_abi_001_wit_tree_has_the_expected_files() {
             .count()
     };
     assert_eq!(count("types/"), 1);
-    assert_eq!(count("host/"), 39);
+    assert_eq!(count("host/"), 42);
     assert_eq!(count("primitives/"), 4);
     assert_eq!(count("anim/"), 3);
     assert_eq!(count("exports/"), 16);
@@ -287,11 +287,17 @@ fn doc_abi_016_json_fields_and_parameters_are_typed_string() {
             }
             found += 1;
             if !after.starts_with("string") {
-                wrong.push(format!("{relative}: {}", after.lines().next().unwrap_or_default()));
+                wrong.push(format!(
+                    "{relative}: {}",
+                    after.lines().next().unwrap_or_default()
+                ));
             }
         }
     }
-    assert!(found > 0, "no -json field or parameter found in the wit tree");
+    assert!(
+        found > 0,
+        "no -json field or parameter found in the wit tree"
+    );
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 

@@ -25,7 +25,7 @@ Collections draw many items and let the user pick, toggle or edit them. The fami
 
 ### Host-owned state
 
-| Widget | State the host keeps | Read with `widget-state` | Set with `set-widget-state` |
+| Widget | State the host keeps | Read with `get-widget-state` | Set with `set-widget-state` |
 |---|---|---|---|
 | `%list` | selected index, scroll offset, filter text, multi-selection | `selected`, `offset`, `text`, `ids` | `selected`, `offset`, `text`, `ids` |
 | `table` | selected row, scroll offset, sort, multi-selection | `selected`, `offset`, `ids` | `selected`, `offset`, `ids` |
@@ -327,7 +327,7 @@ const fileMenu = menu([
 
 | Prop | Type | Default | Meaning |
 |---|---|---|---|
-| `items` | `list<check-item>` | required | `id`, `label`, `state` (`on`, `off`, `mixed`), `disabled-reason`, `children`. At most 256 items. |
+| `items` | `list<check-item>` | required | `id`, `label`, `state` (`on`, `off`, `mixed`), `disabled-reason`, `children`. The list is flat: `children` is a `list<string>` with the ids of the items of the same list that sit under this one. An id that names no item, an item named by two parents, or a cycle is `invalid-argument`. At most 256 items. |
 | `all-toggle` | `bool` | `false` | The `a` key toggles all items. |
 | `max-height` | `u16` | none | Rows shown before the list scrolls. |
 

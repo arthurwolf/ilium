@@ -40,7 +40,7 @@ The table uses these side letters: `S` is the server side, `C` the client side a
 | `timers` | S C | `set(after-millis, repeat-millis?) -> result<timer-id, plugin-error>`, `cancel(timer)` | Timers that fire as the `timer-fired` event. |
 | `storage` | S C A | `get`, `put`, `remove`, `keys` and `write-batch` on `bucket`: `global`, `project`, `session`, `shared`; `lease` takes a key and a TTL, with no bucket | Key-value entries that only this plugin can see. |
 | `settings` | S C | `get-json() -> string`, `set-json(patch)` | Read and write the plugin's own setting values. |
-| `codec` | S C A | `inflate`, `deflate`, `image-info`, `decode-image`, `sha256`, `rasterize-text` | Compression, images, hashes and text as pixels. |
+| `codec` | S C A | `inflate`, `deflate`, `get-image-info`, `decode-image`, `sha256`, `hmac-sha256`, `constant-time-equal`, `rasterize-text` | Compression, images, hashes and text as pixels. |
 | `fs.read:package` | S C A | The read functions of `fs` (`read`, `read-all`, `list-dir`, `metadata`) | Read only, on the package's `assets/` directory. |
 | `fs.read:data`, `fs.write:data` | S C A | The read functions and the write functions (`write`, `remove`, `rename`, `create_dir`) | The plugin's private data directory. |
 | `fs.read:cache`, `fs.write:cache` | S C A | The same functions as `data` | The plugin's evictable cache directory. |

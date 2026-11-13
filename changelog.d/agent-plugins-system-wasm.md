@@ -8,6 +8,8 @@
 - Settings has a Plugins tab that lists every plugin with its version and state and an on/off switch.
 
 ### Changed
+- Plugin contract: a check list is flat (`check-item.children` holds item ids), and five host functions whose names collided with a type are now `get-image-info`, `get-widget-state`, `get-theme-extras`, `get-selection` and `get-foreground-process`.
+- Plugin contract: `wit/` again matches the manual, which adds the `telemetry`, `self-limits` and `self-describe` interfaces, `codec.hmac-sha256` and `codec.constant-time-equal`.
 - Plugin SDK: events now reach a plugin's `Handler` implementation whether or not `exports` names `handler`, as the manual states; before, such a plugin silently received no events.
 - Core plugin manifests declare command and view activation triggers in the global form `command:<plugin-id>/<local-id>` and `view:<plugin-id>/<local-id>`.
 

@@ -91,7 +91,7 @@ An author looks the code in an install error up in the error table above and cha
 | `unsupported` | The host or the target does not offer it | Check before use and degrade |
 | Memory trap | Over `memory_mib` (32 MiB by default) | Free large buffers. Raise the limit in `limits` only inside the tier ceiling |
 | Widget loses its selection on every render | Missing or changing `key` | Give a stable `key` |
-| A list shows all rows after scroll | Reading `selected` and `offset` as your own state | These are host-owned. Read with `ui.widget-state` |
+| A list shows all rows after scroll | Reading `selected` and `offset` as your own state | These are host-owned. Read with `ui.get-widget-state` |
 | Timer never fires in a test | The fake host does not run timers by itself | Call `advance_clock(ms)`, then `settle()` |
 | State gone after a crash | State was only in memory | Write restore bytes or storage |
 | Text misaligned for wide characters | Width counted in characters | Use `display-width`. See [Internationalisation](/pages/guide-internationalisation/) |

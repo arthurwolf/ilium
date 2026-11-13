@@ -44,7 +44,10 @@ EXPORTS_WITHOUT_GLUE = ("renderer",)
 # Side name of the macro -> world package in wit/worlds/.
 WORLD_OF_SIDE = (("server", "server"), ("client", "client"), ("scene", "anim"))
 # Imports the host links without any grant (ilium-plugin-host/src/engine.rs import_allowed).
-ALWAYS_ALLOWED = ("log", "clock", "timers", "storage", "settings", "codec", "messages")
+ALWAYS_ALLOWED = (
+    "log", "telemetry", "self-limits", "self-describe", "clock", "timers", "storage", "settings",
+    "codec", "messages",
+)
 
 SDK_CORE = "ilium-plugin-sdk-core"
 SDK_MACROS = "ilium-plugin-sdk-macros"

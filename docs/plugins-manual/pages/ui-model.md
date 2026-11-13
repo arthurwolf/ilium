@@ -163,7 +163,7 @@ The host keeps each widget's state under its key. A key must stay the same acros
 | `number` (also the slider) | the value | `number(f64)` |
 | `split` | the divider position in per mille | `split(u16)` |
 
-Read the state with `ui.widget-state(view, key)` when `render` needs it, and change it with `ui.set-widget-state(view, key, state)`. Setting state for an unknown key returns `not-found`. A state kind that does not fit the widget returns `invalid-argument`.
+Read the state with `ui.get-widget-state(view, key)` when `render` needs it, and change it with `ui.set-widget-state(view, key, state)`. Setting state for an unknown key returns `not-found`. A state kind that does not fit the widget returns `invalid-argument`.
 
 **Rust**
 
@@ -553,7 +553,7 @@ These trap the instance in a settings page with `ui.widget-not-allowed`, and the
 
 ## Theme extras
 
-`ui.theme-extras()` returns the motion, density and icon settings that a view should respect, next to the colours of `ui.theme()`.
+`ui.get-theme-extras()` returns the motion, density and icon settings that a view should respect, next to the colours of `ui.theme()`.
 
 | Field | Meaning |
 |---|---|

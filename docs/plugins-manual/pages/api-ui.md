@@ -466,7 +466,7 @@ depends on are these.
   The user can raise every role to at least 7:1 with `[ui] contrast = "high"`. [USR-301] [USR-302]
   A plugin uses the colour roles, not `rgb` or `indexed` colours, because only a role follows the theme and its
   contrast. A plugin that picks its own colour owns the contrast of that colour. [AUT-504]
-- **Reduced motion.** `theme-extras().reduced-motion` is always present, so the plugin reads it and does not
+- **Reduced motion.** `get-theme-extras().reduced-motion` is always present, so the plugin reads it and does not
   assume a value. When it is true, the plugin draws one static frame and stops its own animating timers. [AUT-502]
   When it is false, the plugin may animate, but the view must still say the same thing as text when the animation
   is not running.
@@ -499,7 +499,7 @@ The UI tree has optional fields and flags.
 | `ui-action` kinds `hover-enter`, `hover-leave`, `pointer`, `drag-over`, `resized`, `filter-changed` | actions | [pointer](/pages/api-pointer/) |
 | Settings views may embed display widgets | settings pages | below |
 
-**Theme extras.** `theme-extras()` returns `{ reduced-motion, density, info, selection, border, icon-mode }`. Honour `reduced-motion` by drawing one static frame; `icon-mode` is `stable` only when the user opted in, and normal icons stay the default. `theme().stable-glyphs` is a derived convenience field: it always equals `icon-mode == stable`, and widgets follow `icon-mode`.
+**Theme extras.** `get-theme-extras()` returns `{ reduced-motion, density, info, selection, border, icon-mode }`. Honour `reduced-motion` by drawing one static frame; `icon-mode` is `stable` only when the user opted in, and normal icons stay the default. `theme().stable-glyphs` is a derived convenience field: it always equals `icon-mode == stable`, and widgets follow `icon-mode`.
 
 **Rust**
 
@@ -535,13 +535,13 @@ close-panel: func(panel: string);
 open-popup: func(popup: string, anchor: popup-anchor) -> result<_, plugin-error>;
 open-popup-with: func(popup: string, anchor: popup-anchor, options: popup-options) -> result<_, plugin-error>;
 close-popup: func(popup: string);
-widget-state: func(view: view-target, key: string) -> option<widget-state>;
+get-widget-state: func(view: view-target, key: string) -> option<widget-state>;
 /// Errors: not-found for an unknown key, invalid-argument when the case does not fit the widget.
 set-widget-state: func(view: view-target, key: string, state: widget-state) -> result<_, plugin-error>;
 /// Width in cells by the cell width rule of the UI model page.
 display-width: func(text: string) -> u16;
 theme: func() -> theme-tokens;
-theme-extras: func() -> theme-extras;
+get-theme-extras: func() -> theme-extras;
 /// Rows are top to bottom. Rows that fall at or past the surface height are ignored.
 /// Errors: not-found for a key with no surface, invalid-argument for a bad length.
 write-surface: func(view: view-target, key: string, first-row: u32, format: pixel-format, data: list<u8>) -> result<_, plugin-error>;

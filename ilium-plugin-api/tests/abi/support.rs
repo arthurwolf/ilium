@@ -237,19 +237,38 @@ pub fn definitions(text: &str) -> Vec<Definition> {
 /// Every fenced ```wit block of a Markdown page.
 pub fn wit_blocks(page: &str) -> Vec<String> {
     let mut blocks = Vec::new();
-    let mut current: Option<Vec<&str>> = None;
+    // The open block and whether its fence was ```text.
+    let mut current: Option<(Vec<&str>, bool)> = None;
     for line in page.lines() {
         match current.as_mut() {
-            None if line.trim_start() == "```wit" => current = Some(Vec::new()),
+            None if line.trim_start() == "```wit" => current = Some((Vec::new(), false)),
+            None if line.trim_start() == "```text" => current = Some((Vec::new(), true)),
             None => {}
-            Some(lines) if line.trim_start().starts_with("```") => {
-                blocks.push(lines.join("\n"));
+            Some((lines, is_text_fence)) if line.trim_start().starts_with("```") => {
+                if !*is_text_fence || lines.iter().any(|line| opens_wit_item(line)) {
+                    blocks.push(lines.join("\n"));
+                }
                 current = None;
             }
-            Some(lines) => lines.push(line),
+            Some((lines, _)) => lines.push(line),
         }
     }
     blocks
+}
+
+/// True for a line that makes a ```text block of the manual a WIT block: a package line, the
+/// first line of an interface or a world (the rule of tools/extract_wit.py), or the first line of
+/// a record, enum, variant or flags definition (the excerpts on the other pages).
+fn opens_wit_item(line: &str) -> bool {
+    let is_package = line.starts_with("package ilium:") && line.trim_end().ends_with(';');
+    let opens_block = (line.starts_with("interface ") || line.starts_with("world "))
+        && line.trim_end().ends_with('{');
+    let trimmed = line.trim_start();
+    let defines_type = ["record ", "enum ", "variant ", "flags "]
+        .iter()
+        .any(|keyword| trimmed.starts_with(keyword))
+        && trimmed.contains('{');
+    is_package || opens_block || defines_type
 }
 
 /// The minimal valid manifest of the ABI tests (server side only).

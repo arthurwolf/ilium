@@ -167,7 +167,7 @@ The host calls the `views` export when a view first opens, after the plugin call
 ## Shared rules
 
 - **Keys are action ids.** A widget's `key` is a string that is stable across renders and unique across the whole view. The `ui-action` event carries the key twice, as `key` and as `action-id` (always a copy of `key` in 0.1.0), so the plugin matches on either. A widget without a key sends nothing and loses its host-owned state on every render. A duplicate key traps the plugin with `ui.duplicate-key`.
-- **Host-owned state.** Selection, scroll offsets, the tab index, text contents and cursors belong to the host. The plugin reads them with `widget-state` and changes them with `set-widget-state`.
+- **Host-owned state.** Selection, scroll offsets, the tab index, text contents and cursors belong to the host. The plugin reads them with `get-widget-state` and changes them with `set-widget-state`.
 - **Text and width.** Labels are `styled-text`, a list of spans. Colours come from theme roles, so one plugin works in dark and light themes. Use `display-width` when a label holds icons or wide glyphs.
 - **Common node props.** Any node can carry `tooltip`, `tab-index` and `disabled-reason`, and the flags `focusable`, `draggable`, `drop-target`, `hidden`, `hover-events` and `pointer-events`.
 - **Disabled widgets** use the `muted` role, and `disabled-reason` shows as a tooltip.
@@ -202,7 +202,7 @@ Writing `selected(some(7))` on a list of three items clamps the selection to the
 | `close-panel(panel)` | `ui::close_panel` | `closePanel` | none |
 | `open-popup(popup, anchor)` | `ui::open_popup` | `openPopup` | `not-found` when no `popup` with that id is in the last tree; `quota-exceeded` over 4 popups |
 | `close-popup(popup)` | `ui::close_popup` | `closePopup` | none |
-| `widget-state(view, key)` | `ui::widget_state` | `widgetState` | none |
+| `get-widget-state(view, key)` | `ui::widget_state` | `widgetState` | none |
 | `set-widget-state(view, key, state)` | `ui::set_widget_state` | `setWidgetState` | `not-found`; `invalid-argument` when the state kind does not fit |
 | `display-width(text)` | `ui::display_width` | `displayWidth` | none |
 | `theme()` | `ui::theme` | `theme` | none |

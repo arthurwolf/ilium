@@ -89,7 +89,7 @@ impl HostTerminal for TerminalImport {
         None
     }
 
-    fn selection(&mut self, _pane: NodeId) -> Option<Selection> {
+    fn get_selection(&mut self, _pane: NodeId) -> Option<Selection> {
         None
     }
 
@@ -188,7 +188,7 @@ impl HostTerminal for TerminalImport {
         None
     }
 
-    fn foreground_process(&mut self, _pane: NodeId) -> Option<ForegroundProcess> {
+    fn get_foreground_process(&mut self, _pane: NodeId) -> Option<ForegroundProcess> {
         None
     }
 
@@ -333,7 +333,7 @@ mod tests {
     #[test]
     fn selection_of_unknown_pane_returns_none() {
         let mut terminal = TerminalImport;
-        assert!(terminal.selection(missing_pane()).is_none());
+        assert!(terminal.get_selection(missing_pane()).is_none());
     }
 
     /// REQ: PRI-001
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn foreground_process_of_unknown_pane_returns_none() {
         let mut terminal = TerminalImport;
-        assert!(terminal.foreground_process(missing_pane()).is_none());
+        assert!(terminal.get_foreground_process(missing_pane()).is_none());
     }
 
     /// REQ: API-061

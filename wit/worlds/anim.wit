@@ -2,6 +2,7 @@ package ilium:anim@0.1.0;
 
 world base {
   import ilium:host/log@0.1.0;
+  import ilium:host/telemetry@0.1.0;
   import ilium:host/clock@0.1.0;
   import ilium:host/storage@0.1.0;
   import ilium:host/codec@0.1.0;

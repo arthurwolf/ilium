@@ -10,10 +10,14 @@ interface codec {
   inflate: func(format: compression, data: list<u8>, max-output: u32) -> result<list<u8>, plugin-error>;
   /// level 0 to 9.
   deflate: func(format: compression, data: list<u8>, level: u8) -> result<list<u8>, plugin-error>;
-  image-info: func(data: list<u8>) -> result<image-info, plugin-error>;
+  get-image-info: func(data: list<u8>) -> result<image-info, plugin-error>;
   /// Errors: quota-exceeded when width times height passes max-pixels.
   decode-image: func(data: list<u8>, frame: u32, max-pixels: u32) -> result<decoded-image, plugin-error>;
   sha256: func(data: list<u8>) -> list<u8>;
+  /// Errors: invalid-argument when the key is over 4 KiB or the input is over 16 MiB.
+  hmac-sha256: func(key: list<u8>, data: list<u8>) -> result<list<u8>, plugin-error>;
+  /// False at once when the lengths differ. Cannot fail.
+  constant-time-equal: func(a: list<u8>, b: list<u8>) -> bool;
   /// Gray in the alpha channel.
   rasterize-text: func(request: raster-text) -> result<decoded-image, plugin-error>;
 }

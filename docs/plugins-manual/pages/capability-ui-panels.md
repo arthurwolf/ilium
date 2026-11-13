@@ -68,7 +68,7 @@ All functions are in the `ui` interface. Each one needs `ui.panels` or the `pane
 | `open-popup(popup, anchor)` | `ui::open_popup` | `openPopup` | `result` | Shows a `popup` widget of the last rendered tree. |
 | `close-popup(popup)` | `ui::close_popup` | `closePopup` | none | Hides a popup. |
 | `invalidate(view)` | `ui::invalidate` | `invalidate` | none | Asks the host to call `render` again. |
-| `widget-state(view, key)` | `ui::widget_state` | `widgetState` | `option` | Reads the host-owned state of a keyed widget. |
+| `get-widget-state(view, key)` | `ui::widget_state` | `widgetState` | `option` | Reads the host-owned state of a keyed widget. |
 | `set-widget-state(view, key, state)` | `ui::set_widget_state` | `setWidgetState` | `result` | Changes that state, for example the selected row. |
 | `write-surface(view, key, first-row, format, data)` | `ui::write_surface` | `writeSurface` | `result` | Writes whole rows of pixels into a `surface`. |
 | `display-width(text)` | `ui::display_width` | `displayWidth` | `u16` | Width of a string in cells, with the host's rules for icons and wide glyphs. |

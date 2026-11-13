@@ -1,4 +1,4 @@
-// @generated from wit/ sha256=67e47c3c62f518c4aa16bed39503752d59e41389b1677e184fdc751730da1443
+// @generated from wit/ sha256=5e7a91fa80dc136ef3f92463f7e511d28d25b4c673d6abcc0ffb0af6ffc2d369
 // output: ilium-plugin-sdk-core/src/wasm/glue.rs
 //! wasm32 guest glue: wit-bindgen bindings of every import interface, the conversions to
 //! and from the mirror types, the import wrappers and the macros `#[ilium_plugin]` expands.
@@ -43,6 +43,7 @@ world imports {
     import ilium:types/events@0.1.0;
     import ilium:types/lifecycle@0.1.0;
     import ilium:host/log@0.1.0;
+    import ilium:host/telemetry@0.1.0;
     import ilium:host/clock@0.1.0;
     import ilium:host/timers@0.1.0;
     import ilium:host/journal@0.1.0;
@@ -81,6 +82,8 @@ world imports {
     import ilium:host/gpu@0.1.0;
     import ilium:host/client-requests@0.1.0;
     import ilium:host/extensions@0.1.0;
+    import ilium:host/self-limits@0.1.0;
+    import ilium:host/self-describe@0.1.0;
     import ilium:primitives/terminal@0.1.0;
     import ilium:primitives/agent@0.1.0;
     import ilium:primitives/editor@0.1.0;
@@ -8442,6 +8445,9 @@ impl IntoWit<b::ilium::host::plugins::HealthState> for m::host::plugins::HealthS
             }
             m::host::plugins::HealthState::Dormant => b::ilium::host::plugins::HealthState::Dormant,
             m::host::plugins::HealthState::Refused => b::ilium::host::plugins::HealthState::Refused,
+            m::host::plugins::HealthState::NeedsSetup => {
+                b::ilium::host::plugins::HealthState::NeedsSetup
+            }
         }
     }
 }
@@ -8461,6 +8467,9 @@ impl IntoMirror<m::host::plugins::HealthState> for b::ilium::host::plugins::Heal
             }
             b::ilium::host::plugins::HealthState::Dormant => m::host::plugins::HealthState::Dormant,
             b::ilium::host::plugins::HealthState::Refused => m::host::plugins::HealthState::Refused,
+            b::ilium::host::plugins::HealthState::NeedsSetup => {
+                m::host::plugins::HealthState::NeedsSetup
+            }
         }
     }
 }
@@ -8510,6 +8519,7 @@ impl IntoWit<b::ilium::host::plugins::PluginInfo> for m::host::plugins::PluginIn
             update_available: IntoWit::into_wit(self.update_available),
             deprecated: IntoWit::into_wit(self.deprecated),
             yanked: IntoWit::into_wit(self.yanked),
+            held_until: IntoWit::into_wit(self.held_until),
         }
     }
 }
@@ -8535,6 +8545,7 @@ impl IntoMirror<m::host::plugins::PluginInfo> for b::ilium::host::plugins::Plugi
             update_available: IntoMirror::into_mirror(self.update_available),
             deprecated: IntoMirror::into_mirror(self.deprecated),
             yanked: IntoMirror::into_mirror(self.yanked),
+            held_until: IntoMirror::into_mirror(self.held_until),
         }
     }
 }
@@ -8767,6 +8778,58 @@ impl IntoMirror<m::host::extensions::ExtensionError>
             b::ilium::host::extensions::ExtensionError::NotFound => {
                 m::host::extensions::ExtensionError::NotFound
             }
+        }
+    }
+}
+
+// ilium:host/self-limits
+impl IntoWit<b::ilium::host::self_limits::Budget> for m::host::self_limits::Budget {
+    fn into_wit(self) -> b::ilium::host::self_limits::Budget {
+        b::ilium::host::self_limits::Budget {
+            id: IntoWit::into_wit(self.id),
+            unit: IntoWit::into_wit(self.unit),
+            effective: IntoWit::into_wit(self.effective),
+            remaining: IntoWit::into_wit(self.remaining),
+            resets_at_ms: IntoWit::into_wit(self.resets_at_ms),
+        }
+    }
+}
+impl IntoMirror<m::host::self_limits::Budget> for b::ilium::host::self_limits::Budget {
+    fn into_mirror(self) -> m::host::self_limits::Budget {
+        m::host::self_limits::Budget {
+            id: IntoMirror::into_mirror(self.id),
+            unit: IntoMirror::into_mirror(self.unit),
+            effective: IntoMirror::into_mirror(self.effective),
+            remaining: IntoMirror::into_mirror(self.remaining),
+            resets_at_ms: IntoMirror::into_mirror(self.resets_at_ms),
+        }
+    }
+}
+
+// ilium:host/self-describe
+impl IntoWit<b::ilium::host::self_describe::SelfDescription>
+    for m::host::self_describe::SelfDescription
+{
+    fn into_wit(self) -> b::ilium::host::self_describe::SelfDescription {
+        b::ilium::host::self_describe::SelfDescription {
+            plugin_id: IntoWit::into_wit(self.plugin_id),
+            version: IntoWit::into_wit(self.version),
+            api: IntoWit::into_wit(self.api),
+            host_version: IntoWit::into_wit(self.host_version),
+            grants: IntoWit::into_wit(self.grants),
+        }
+    }
+}
+impl IntoMirror<m::host::self_describe::SelfDescription>
+    for b::ilium::host::self_describe::SelfDescription
+{
+    fn into_mirror(self) -> m::host::self_describe::SelfDescription {
+        m::host::self_describe::SelfDescription {
+            plugin_id: IntoMirror::into_mirror(self.plugin_id),
+            version: IntoMirror::into_mirror(self.version),
+            api: IntoMirror::into_mirror(self.api),
+            host_version: IntoMirror::into_mirror(self.host_version),
+            grants: IntoMirror::into_mirror(self.grants),
         }
     }
 }

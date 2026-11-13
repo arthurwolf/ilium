@@ -61,8 +61,8 @@ fn cases(names: &[&str]) -> BTreeSet<String> {
 
 /// REQ: ABI-030
 #[test]
-fn doc_abi_030_import_matrix_has_45_rows() {
-    assert_eq!(matrix("2. Import matrix").len(), 45);
+fn doc_abi_030_import_matrix_has_48_rows() {
+    assert_eq!(matrix("2. Import matrix").len(), 48);
 }
 
 /// REQ: ABI-030
@@ -73,7 +73,7 @@ fn doc_abi_030_import_matrix_names_every_host_and_primitive_interface() {
     let anim = interfaces("anim");
     let mut expected = interfaces("host");
     expected.extend(interfaces("primitives"));
-    assert_eq!(interfaces("host").len(), 39);
+    assert_eq!(interfaces("host").len(), 42);
     assert_eq!(interfaces("primitives").len(), 4);
     let missing: Vec<_> = expected.difference(&listed).collect();
     assert!(missing.is_empty(), "imports without a row: {missing:?}");

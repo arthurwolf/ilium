@@ -2,6 +2,10 @@ package ilium:server@0.1.0;
 
 world base {
   import ilium:host/log@0.1.0;
+  import ilium:host/telemetry@0.1.0;
+  import ilium:host/self-limits@0.1.0;
+  import ilium:host/self-describe@0.1.0;
+  import ilium:host/geocode@0.1.0;
   import ilium:host/clock@0.1.0;
   import ilium:host/timers@0.1.0;
   import ilium:host/journal@0.1.0;

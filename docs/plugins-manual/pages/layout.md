@@ -245,7 +245,7 @@ Two children with `fill(1)` each, a margin of 2 cells at the left and right and 
 | `area` in `render` | `columns` and `rows` of the view | Choosing a direction or a segment count. |
 | `basic.size` | Columns and rows of a basic pane | Sizing an own character grid. |
 | `ui.display-width(text)` | Cell width of a string, with icon widths | Measuring a label before choosing `length`. |
-| `ui.theme-extras().density` | `compact`, `normal` or `comfortable` | Choosing spacing and margins. |
+| `ui.get-theme-extras().density` | `compact`, `normal` or `comfortable` | Choosing spacing and margins. |
 
 Do not guess a width from the character count of a string that holds icons or wide glyphs; use `display-width`. Do not tune a layout to one terminal size. Express the ratios with `fill`, `percentage` and `ratio`, and use `length` only for things with a fixed size such as a button or a gutter.
 

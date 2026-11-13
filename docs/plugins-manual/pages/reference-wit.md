@@ -390,7 +390,9 @@ interface ui {
     disabled-reason: option<string>,
     tooltip: option<tooltip>, danger: bool,
   }
-  record check-item { id: string, label: styled-text, state: tri-state, disabled-reason: option<string>, children: list<check-item> }
+  /// One row of a check list. The list is flat: `children` holds the ids of the items of the same
+  /// list that sit under this one, so no type is recursive. An item named by no other item is a root.
+  record check-item { id: string, label: styled-text, state: tri-state, disabled-reason: option<string>, children: list<string> }
   record check-list-spec { items: list<check-item>, all-toggle: bool, max-height: option<u16> }
   enum item-format { glob, url, host, path, regex, chord }
   record list-field { id: string, title: string, kind: string, width: u16 }
@@ -1086,8 +1088,13 @@ interface log {
   /// 1,000 for bundled plugins). Lines over the budget are dropped and counted.
   log: func(level: level, message: string);
 }
+```
 
+`telemetry` has no grant either. API page: [Telemetry](/pages/api-telemetry/).
+
+```text
 interface telemetry {
+  use ilium:types/errors@0.1.0.{plugin-error};
   /// Adds `delta` to a plugin-defined counter. At most 16 distinct names per plugin side (HST-638);
   /// names match `^[a-z][a-z0-9_]{0,31}$`. Counters stay in the process and the local log; nothing is sent over the network.
   count: func(name: string, delta: s64) -> result<_, plugin-error>;
@@ -1285,7 +1292,7 @@ interface codec {
   inflate: func(format: compression, data: list<u8>, max-output: u32) -> result<list<u8>, plugin-error>;
   /// level 0 to 9.
   deflate: func(format: compression, data: list<u8>, level: u8) -> result<list<u8>, plugin-error>;
-  image-info: func(data: list<u8>) -> result<image-info, plugin-error>;
+  get-image-info: func(data: list<u8>) -> result<image-info, plugin-error>;
   /// Errors: quota-exceeded when width times height passes max-pixels.
   decode-image: func(data: list<u8>, frame: u32, max-pixels: u32) -> result<decoded-image, plugin-error>;
   sha256: func(data: list<u8>) -> list<u8>;
@@ -1577,13 +1584,13 @@ interface ui-host {
   open-popup-with: func(popup: string, anchor: popup-anchor, options: popup-options) -> result<_, plugin-error>;
   /// An id that is not open is a no-op.
   close-popup: func(popup: string);
-  widget-state: func(view: view-target, key: string) -> option<widget-state>;
+  get-widget-state: func(view: view-target, key: string) -> option<widget-state>;
   /// Errors: not-found for an unknown key, invalid-argument when the case does not fit the widget.
   set-widget-state: func(view: view-target, key: string, state: widget-state) -> result<_, plugin-error>;
   /// Width in cells by the cell width rule of the UI model page (grapheme clusters, UAX #29).
   display-width: func(text: string) -> u16;
   theme: func() -> theme-tokens;
-  theme-extras: func() -> theme-extras;
+  get-theme-extras: func() -> theme-extras;
   /// Rows are top to bottom. Rows that fall at or past the surface height are ignored.
   /// Rows are top to bottom. first-row plus the rows written must be within the surface height.
   /// Errors: not-found for a key with no surface, invalid-argument for a bad length.
@@ -2022,7 +2029,7 @@ interface terminal {
 
   /// terminal.read-screen. Sync. max-rows is clamped to 10,000.
   read-screen: func(pane: node-id, part: screen-part, max-rows: u32) -> option<screen>;
-  selection: func(pane: node-id) -> option<selection>;
+  get-selection: func(pane: node-id) -> option<selection>;
   /// terminal.output-filter. regex is a bounded RE2-style expression. At most 32 filters per plugin, 128 for bundled plugins.
   add-output-filter: func(pane: node-id, filter: output-filter) -> result<_, plugin-error>;
   remove-output-filter: func(pane: node-id, filter-id: string);
@@ -2036,7 +2043,7 @@ interface terminal {
   /// terminal.read-cells. count at most 1,000.
   read-cells: func(pane: node-id, part: screen-part, first-row: u32, count: u32) -> option<cell-rows>;
   modes: func(pane: node-id) -> option<terminal-mode>;
-  foreground-process: func(pane: node-id) -> option<foreground-process>;
+  get-foreground-process: func(pane: node-id) -> option<foreground-process>;
   /// A stable copy of screen and scrollback. At most 4 snapshots per plugin.
   freeze-snapshot: func(pane: node-id) -> result<u64, plugin-error>;
   read-snapshot-cells: func(snapshot: u64, first-row: u32, count: u32) -> option<cell-rows>;

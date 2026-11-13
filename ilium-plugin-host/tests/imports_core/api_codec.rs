@@ -1,4 +1,4 @@
-//! api-codec.md: `inflate`, `deflate`, `image-info`, `decode-image`, `sha256`, `rasterize-text`.
+//! api-codec.md: `inflate`, `deflate`, `get-image-info`, `decode-image`, `sha256`, `rasterize-text`.
 
 use ilium_plugin_api::generated::host::{Compression, RasterText};
 use ilium_plugin_api::generated::types::ErrorCode;
@@ -332,15 +332,15 @@ proptest! {
 
 // ---- images ----------------------------------------------------------------------------------
 
-/// REQ: WIT:ilium:host/codec.image-info
+/// REQ: WIT:ilium:host/codec.get-image-info
 #[test]
 fn codec_image_info_reports_width_height_and_one_frame_for_a_bmp() {
     let mut fixture = fixture_t2(&[]);
-    let info = expect_ok(fixture.codec().image_info(bmp(3, 2, 0, 0, 255)));
+    let info = expect_ok(fixture.codec().get_image_info(bmp(3, 2, 0, 0, 255)));
     assert_eq!((info.width, info.height, info.frames), (3, 2, 1));
 }
 
-/// REQ: WIT:ilium:host/codec.image-info
+/// REQ: WIT:ilium:host/codec.get-image-info
 /// REQ: WIT:ilium:host/codec.decode-image
 #[test]
 fn codec_animated_gif_reports_and_decodes_each_frame() {
@@ -358,7 +358,7 @@ fn codec_animated_gif_reports_and_decodes_each_frame() {
     data.extend_from_slice(&frame);
     data.push(0x3b);
     let mut fixture = fixture_t2(&[]);
-    let info = expect_ok(fixture.codec().image_info(data.clone()));
+    let info = expect_ok(fixture.codec().get_image_info(data.clone()));
     assert_eq!((info.width, info.height, info.frames), (1, 1, 2));
     for index in 0..2 {
         let image = expect_ok(fixture.codec().decode_image(data.clone(), index, 1));
@@ -389,7 +389,7 @@ fn codec_common_still_formats_decode_to_rgba() {
             .expect("encode test image");
         let bytes = encoded.into_inner();
         let mut fixture = fixture_t2(&[]);
-        let metadata = expect_ok(fixture.codec().image_info(bytes.clone()));
+        let metadata = expect_ok(fixture.codec().get_image_info(bytes.clone()));
         assert_eq!(
             (metadata.width, metadata.height, metadata.frames),
             (3, 2, 1)
@@ -416,35 +416,35 @@ fn codec_gif_frame_larger_than_canvas_is_rejected() {
     );
 }
 
-/// REQ: WIT:ilium:host/codec.image-info
+/// REQ: WIT:ilium:host/codec.get-image-info
 #[test]
 fn codec_image_info_unknown_format_unsupported() {
     let mut fixture = fixture_t2(&[]);
     let tiff = vec![b'I', b'I', 42, 0, 8, 0, 0, 0, 0, 0];
     assert_eq!(
-        expect_code(fixture.codec().image_info(tiff)),
+        expect_code(fixture.codec().get_image_info(tiff)),
         ErrorCode::Unsupported
     );
 }
 
-/// REQ: WIT:ilium:host/codec.image-info
+/// REQ: WIT:ilium:host/codec.get-image-info
 #[test]
 fn codec_image_info_corrupt_bmp_invalid_argument() {
     let mut fixture = fixture_t2(&[]);
     let mut data = bmp(4, 4, 1, 2, 3);
     data.truncate(20);
     assert_eq!(
-        expect_code(fixture.codec().image_info(data)),
+        expect_code(fixture.codec().get_image_info(data)),
         ErrorCode::InvalidArgument
     );
 }
 
-/// REQ: WIT:ilium:host/codec.image-info
+/// REQ: WIT:ilium:host/codec.get-image-info
 #[test]
 fn codec_image_info_input_over_16_mib_invalid_argument() {
     let mut fixture = fixture_t2(&[]);
     assert_eq!(
-        expect_code(fixture.codec().image_info(vec![0u8; MAX_INPUT + 1])),
+        expect_code(fixture.codec().get_image_info(vec![0u8; MAX_INPUT + 1])),
         ErrorCode::InvalidArgument
     );
 }

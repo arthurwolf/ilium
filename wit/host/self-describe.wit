@@ -1,0 +1,15 @@
+package ilium:host@0.1.0;
+
+interface self-describe {
+  use ilium:types/ids@0.1.0.{plugin-id};
+  /// Grants lists only the grants that are granted now. A refused grant is never listed.
+  record self-description {
+    plugin-id: plugin-id,
+    version: string,
+    api: string,
+    host-version: string,
+    grants: list<string>,
+  }
+  /// Read-only. Named describe, because self is a reserved word in WIT. Cannot fail.
+  describe: func() -> self-description;
+}

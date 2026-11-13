@@ -12,7 +12,7 @@ This page is the checklist for a host implementation, and for a test that wants 
 
 - **The WIT reference.** Row names are the names in the [WIT reference](/pages/reference-wit/).
 - **A host or a fake host.** The tests below run against the real host or against the test harness described in [Testing](/pages/testing/).
-- **The counts.** 45 import rows (39 host interfaces, 4 primitives, 2 scene interfaces), 16 export rows, 56 event rows, 42 intent rows and 51 widget rows. A matrix with another count is out of date.
+- **The counts.** 48 import rows (42 host interfaces, 4 primitives, 2 scene interfaces), 16 export rows, 56 event rows, 42 intent rows and 51 widget rows. A matrix with another count is out of date.
 
 ## 1. How to use the matrices
 
@@ -76,6 +76,9 @@ Every grant name is in the [capability index](/pages/capabilities/). A slow call
 | 43 | `basic` (primitive) | no | yes | no | `panes.provide-kind` | none |
 | 44 | `surface` (anim) | no | no | yes | none | none |
 | 45 | `fonts` (anim) | no | no | yes | none | none |
+| 46 | `telemetry` | yes | yes | yes | none | none |
+| 47 | `self-limits` | yes | yes | no | none | none |
+| 48 | `self-describe` | yes | yes | no | none | none |
 
 **Notes.**
 
@@ -225,7 +228,7 @@ An intent leaves a plugin in a submission. The numbers are the case positions in
 
 ## 6. Widget matrix
 
-A plugin sends widgets inside a `ui-tree`. The numbers are the case positions in the `widget` variant. The column `widget-state` names the case that `ui.widget-state` returns for the widget. The last column lists the action kinds the widget usually sends. The family pages give the exact list.
+A plugin sends widgets inside a `ui-tree`. The numbers are the case positions in the `widget` variant. The column `widget-state` names the case that `ui.get-widget-state` returns for the widget. The last column lists the action kinds the widget usually sends. The family pages give the exact list.
 
 | No. | Widget | Family | Spec | `widget-state` case | Typical `ui-action` kinds |
 |---|---|---|---|---|---|

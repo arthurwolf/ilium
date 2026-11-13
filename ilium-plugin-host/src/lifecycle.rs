@@ -8,9 +8,9 @@ use std::time::Duration;
 use ilium_plugin_api::generated::host::plugins::{
     HealthState, InstanceState, PackageState, PluginInfo, SideState,
 };
-use ilium_plugin_api::{Code, Diagnostic};
 use ilium_plugin_api::ids::PluginId;
 use ilium_plugin_api::Side;
+use ilium_plugin_api::{Code, Diagnostic};
 
 use crate::error::HostError;
 
@@ -207,6 +207,7 @@ impl LifecycleManager {
             update_available: None,
             deprecated: false,
             yanked: false,
+            held_until: None,
         })
     }
 }

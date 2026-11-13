@@ -35,7 +35,7 @@ interface terminal {
   modes: func(pane: node-id) -> option<terminal-mode>;
 
   record foreground-process { name: string, command-line: list<string>, cwd: option<string> }
-  foreground-process: func(pane: node-id) -> option<foreground-process>;
+  get-foreground-process: func(pane: node-id) -> option<foreground-process>;
 
   freeze-snapshot: func(pane: node-id) -> result<u64, plugin-error>;
   read-snapshot-cells: func(snapshot: u64, first-row: u32, count: u32) -> option<cell-rows>;

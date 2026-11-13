@@ -264,7 +264,7 @@ Focus belongs to the client ([HST-271](#views)). The default Tab order is the ru
 
 The user turns on reduce motion in Settings (the `[ui]` key `motion_level`, see [configuration](/pages/reference-config-and-data-migration/)). The client passes the setting to plugins as `reduced-motion` in theme extras, and a change arrives as `theme-changed` ([Accessibility and theming](/pages/accessibility-and-theming/#theming-and-readable-output)). The rules below apply to every animation a plugin can show: decorations, views and scenes.
 
-1. **A plugin reads the setting and stops its own animation.** It reads `reduced-motion` from `theme-extras()` when it activates and on every `theme-changed`, and it stops any timer that only animates.
+1. **A plugin reads the setting and stops its own animation.** It reads `reduced-motion` from `get-theme-extras()` when it activates and on every `theme-changed`, and it stops any timer that only animates.
    Test: with reduced motion on, a plugin animation timer fires no further redraws after the `theme-changed` that carries the setting.
 2. **Host-run animation shows one static frame.** The spinner, the busy state of a progress row and the frames of `set-decoration` show their first frame only ([events and intents](/pages/reference-events-and-intents/) and [intents API](/pages/api-intents/)). The host draws no hover or scroll animation.
    Test: a `set-decoration` with four frames shows frame 1 and no later frame for one second.

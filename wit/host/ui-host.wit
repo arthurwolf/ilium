@@ -14,13 +14,13 @@ interface ui-host {
   open-popup-with: func(popup: string, anchor: popup-anchor, options: popup-options) -> result<_, plugin-error>;
   /// An id that is not open is a no-op.
   close-popup: func(popup: string);
-  widget-state: func(view: view-target, key: string) -> option<widget-state>;
+  get-widget-state: func(view: view-target, key: string) -> option<widget-state>;
   /// Errors: not-found for an unknown key, invalid-argument when the case does not fit the widget.
   set-widget-state: func(view: view-target, key: string, state: widget-state) -> result<_, plugin-error>;
   /// Width in cells by the cell width rule of the UI model page (grapheme clusters, UAX #29).
   display-width: func(text: string) -> u16;
   theme: func() -> theme-tokens;
-  theme-extras: func() -> theme-extras;
+  get-theme-extras: func() -> theme-extras;
   /// Rows are top to bottom. Rows that fall at or past the surface height are ignored.
   /// Rows are top to bottom. first-row plus the rows written must be within the surface height.
   /// Errors: not-found for a key with no surface, invalid-argument for a bad length.

@@ -1,0 +1,15 @@
+package ilium:host@0.1.0;
+
+interface self-limits {
+  /// One budget of the calling side. remaining is never more than effective.
+  /// resets-at-ms is Unix time in milliseconds, or none when the budget never refills.
+  record budget {
+    id: string,
+    unit: string,
+    effective: u64,
+    remaining: u64,
+    resets-at-ms: option<u64>,
+  }
+  /// Read-only. Returns the budgets of the calling side only. Cannot fail.
+  limits: func() -> list<budget>;
+}

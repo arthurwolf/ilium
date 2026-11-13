@@ -345,6 +345,9 @@ fn import_allowed(name: &str, requested: &[String]) -> Result<(), Diagnostic> {
         || matches!(
             base,
             "ilium:host/log"
+                | "ilium:host/telemetry"
+                | "ilium:host/self-limits"
+                | "ilium:host/self-describe"
                 | "ilium:host/clock"
                 | "ilium:host/timers"
                 | "ilium:host/storage"

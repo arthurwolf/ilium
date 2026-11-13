@@ -250,7 +250,9 @@ interface ui {
     disabled-reason: option<string>,
     tooltip: option<tooltip>, danger: bool,
   }
-  record check-item { id: string, label: styled-text, state: tri-state, disabled-reason: option<string>, children: list<check-item> }
+  /// One row of a check list. The list is flat: `children` holds the ids of the items of the same
+  /// list that sit under this one, so no type is recursive. An item named by no other item is a root.
+  record check-item { id: string, label: styled-text, state: tri-state, disabled-reason: option<string>, children: list<string> }
   record check-list-spec { items: list<check-item>, all-toggle: bool, max-height: option<u16> }
   enum item-format { glob, url, host, path, regex, chord }
   record list-field { id: string, title: string, kind: string, width: u16 }

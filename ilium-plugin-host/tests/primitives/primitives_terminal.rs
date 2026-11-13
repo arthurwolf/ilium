@@ -907,7 +907,7 @@ fn wit_terminal_read_screen_missing_pane_returns_none() {
         .is_none());
 }
 
-/// REQ: WIT:ilium:primitives/terminal.selection
+/// REQ: WIT:ilium:primitives/terminal.get-selection
 #[test]
 fn wit_terminal_selection_returns_the_selected_text() {
     let rig = rig(READ_SCREEN);
@@ -922,24 +922,24 @@ fn wit_terminal_selection_returns_the_selected_text() {
         }),
     );
     assert_eq!(
-        rig.host.terminal().selection(PANE).map(|s| s.text),
+        rig.host.terminal().get_selection(PANE).map(|s| s.text),
         Some("row-1".to_owned())
     );
 }
 
-/// REQ: WIT:ilium:primitives/terminal.selection
+/// REQ: WIT:ilium:primitives/terminal.get-selection
 #[test]
 fn wit_terminal_selection_without_selection_returns_none() {
     let rig = rig(READ_SCREEN);
-    assert!(rig.host.terminal().selection(PANE).is_none());
+    assert!(rig.host.terminal().get_selection(PANE).is_none());
 }
 
-/// REQ: WIT:ilium:primitives/terminal.selection
+/// REQ: WIT:ilium:primitives/terminal.get-selection
 #[test]
 fn wit_terminal_selection_without_grant_returns_none() {
     let rig = rig(&[]);
     rig.kernel.set_selection(PANE, Some(Selection::default()));
-    assert!(rig.host.terminal().selection(PANE).is_none());
+    assert!(rig.host.terminal().get_selection(PANE).is_none());
 }
 
 fn region(first: u32, last: u32) -> CellRegion {
@@ -1159,7 +1159,7 @@ fn wit_terminal_modes_missing_pane_returns_none() {
     assert!(rig.host.terminal().modes(MISSING_PANE).is_none());
 }
 
-/// REQ: WIT:ilium:primitives/terminal.foreground-process
+/// REQ: WIT:ilium:primitives/terminal.get-foreground-process
 #[test]
 fn wit_terminal_foreground_process_reports_name_and_command_line() {
     let rig = rig(READ_SCREEN);
@@ -1167,7 +1167,7 @@ fn wit_terminal_foreground_process_reports_name_and_command_line() {
     let process = rig
         .host
         .terminal()
-        .foreground_process(PANE)
+        .get_foreground_process(PANE)
         .expect("process");
     assert_eq!(process.name, "vim");
     assert_eq!(
@@ -1176,14 +1176,14 @@ fn wit_terminal_foreground_process_reports_name_and_command_line() {
     );
 }
 
-/// REQ: WIT:ilium:primitives/terminal.foreground-process
+/// REQ: WIT:ilium:primitives/terminal.get-foreground-process
 #[test]
 fn wit_terminal_foreground_process_restored_pane_returns_none() {
     let rig = rig(READ_SCREEN);
     assert!(rig
         .host
         .terminal()
-        .foreground_process(RESTORED_PANE)
+        .get_foreground_process(RESTORED_PANE)
         .is_none());
 }
 
