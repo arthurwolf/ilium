@@ -649,6 +649,8 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             app.handle_chatroom_mouse(mouse, position);
         } else if matches!(app.right_panel_target, RightPanelTarget::Attention) {
             app.handle_attention_mouse(mouse, position);
+        } else if matches!(app.right_panel_target, RightPanelTarget::PluginView { .. }) {
+            app.handle_plugin_view_mouse(mouse, position);
         } else {
             app.handle_pane_mouse(mouse, position);
         }

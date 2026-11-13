@@ -30,6 +30,7 @@ impl App {
                 RightPanelTarget::Chatroom { .. }
                     | RightPanelTarget::Resource { .. }
                     | RightPanelTarget::Attention
+                    | RightPanelTarget::PluginView { .. }
             )
     }
 

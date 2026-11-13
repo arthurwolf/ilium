@@ -23,6 +23,9 @@
 - Plugins: a key binding a plugin declares with `mode: "prefix"` now works: pressing its key after the leader runs the plugin's command, unless a built-in or remapped binding already uses that key.
 - Plugin API: timers a plugin sets now fire (`timer-fired`, `durable-timer-fired`), and a published topic message reaches the plugins on the same side that subscribe to it.
 - Plugin test kit: `FakeHost::render` shows a plugin's view as plain text, `click` and `send_action` deliver the widget action, and `last_tree` returns the rendered tree.
+- Plugin API: a client plugin holding `help.read` can read the built-in help topics as `ilium/<id>`.
+- Plugins: a panel, settings page or onboarding step a client plugin opens is drawn in the right-hand area and takes keys and clicks; status segments a client plugin sets appear in the status bar.
+- Plugin API: `keymap.bindings` lists the user's real leader key bindings; `services.call` reaches a service another plugin on the same side provides, starts that plugin when needed, and supports deferred replies; `sessions.list-live` describes the calling session.
 
 ### Fixed
 - `ilium plugin kill` writes the audit event `plugin-killed` and an unknown plugin subcommand reports `usage.unknown-command`, the names the manual documents.

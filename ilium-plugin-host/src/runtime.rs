@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use ilium_plugin_api::generated::exports::service_provider::{ServiceCall, ServiceReply};
 use ilium_plugin_api::generated::host::log::Level;
 use ilium_plugin_api::generated::types::events::{
     CommandContext, CommandInvokedEvent, CommandOrigin, Event, TopicPublishedEvent,
@@ -40,12 +41,14 @@ use crate::contributions::{ContributionOp, ContributionRegistry, Entry};
 use crate::engine::{CompiledComponent, PluginEngine};
 use crate::error::HostError;
 use crate::imports::backed::{
-    command_result, CommandQueue, KernelAgent, KernelIntents, KernelPanes, KernelTerminal,
-    KernelTree, LogSink, RegistryCommands, ResultQueue, SinkLog,
+    command_result, CommandQueue, KernelAgent, KernelHelp, KernelIntents, KernelKeymap,
+    KernelPanes, KernelSessions, KernelSettingsTables, KernelTerminal, KernelTree, LogSink,
+    RegistryCommands, ResultQueue, SinkLog,
 };
 use crate::imports::clock::ClockImport;
 use crate::imports::extensions::ExtensionsImport;
 use crate::imports::generated_dispatch::{ImportSet, IMPORT_INTERFACES};
+use crate::imports::services::{BrokeredServices, ServiceBroker};
 use crate::imports::settings::SettingsImport;
 use crate::imports::timers::{self, TimerBook, TimersImport};
 use crate::imports::topics::{self, PluginTopics, TopicOutbox};
@@ -240,6 +243,8 @@ pub struct HostRuntime {
     timer_books: Mutex<BTreeMap<String, TimerBook>>,
     /// Topic messages plugins published since the last pump.
     topic_outbox: TopicOutbox,
+    /// Service calls between the plugins of this runtime.
+    services: ServiceBroker,
     next_instance: u64,
     job_panics: u64,
     next_activation: u64,
@@ -272,6 +277,7 @@ impl HostRuntime {
             commands: CommandQueue::default(),
             timer_books: Mutex::new(BTreeMap::new()),
             topic_outbox: TopicOutbox::default(),
+            services: ServiceBroker::default(),
             next_instance: 1,
             job_panics: 0,
             next_activation: 1,
@@ -403,6 +409,8 @@ impl HostRuntime {
         // A new instance starts without timers: the book of the previous one is replaced.
         let timer_book = TimerBook::default();
         lock(&self.timer_books).insert(plugin.to_owned(), Arc::clone(&timer_book));
+        // A new instance starts without the replies and deferred calls of the last one.
+        lock(&self.services).forget_plugin(plugin);
         let mut set = ImportSet {
             timers: Some(Box::new(TimersImport::with_book(timer_book))),
             topics: Some(Box::new(PluginTopics::new(
@@ -424,6 +432,27 @@ impl HostRuntime {
                 &record.granted,
             ))),
             panes: Some(Box::new(KernelPanes::new(Arc::clone(&self.kernel)))),
+            help: Some(Box::new(KernelHelp::new(
+                Arc::clone(&self.kernel),
+                &record.granted,
+            ))),
+            services: Some(Box::new(BrokeredServices::new(
+                Arc::clone(&self.services),
+                plugin,
+                &record.granted,
+            ))),
+            keymap: Some(Box::new(KernelKeymap::new(
+                Arc::clone(&self.kernel),
+                &record.granted,
+            ))),
+            kernel_settings: Some(Box::new(KernelSettingsTables::new(
+                Arc::clone(&self.kernel),
+                &record.granted,
+            ))),
+            sessions: Some(Box::new(KernelSessions::new(
+                Arc::clone(&self.kernel),
+                &record.granted,
+            ))),
             agent: Some(Box::new(KernelAgent::new(
                 Arc::clone(&self.kernel),
                 &record.granted,
@@ -594,6 +623,7 @@ impl HostRuntime {
             record.instance = None;
             record.state = PluginState::Failed(trap.code.0.to_string());
         }
+        lock(&self.services).forget_plugin(plugin);
         RuntimeError::Trapped {
             plugin: plugin.to_owned(),
             code: trap.code.0.to_string(),
@@ -793,6 +823,79 @@ impl HostRuntime {
             .collect()
     }
 
+    /// Delivers the queued service calls to their providers and moves every call that ended
+    /// to the result queue. The provider is the plugin of this runtime whose manifest lists
+    /// the service under `contributes.services.provides`. Calls do not cross to the other
+    /// side's runtime here.
+    fn route_services(&mut self) -> Vec<RuntimeError> {
+        let mut failures = Vec::new();
+        let pending = lock(&self.services).take_pending();
+        for call in pending {
+            let provider = self
+                .plugins
+                .iter()
+                .find(|(_, record)| {
+                    crate::imports::services::provided_services(&record.manifest)
+                        .iter()
+                        .any(|name| *name == call.service)
+                })
+                .map(|(plugin, _)| plugin.clone());
+            let Some(provider) = provider else {
+                lock(&self.services).fail(
+                    &call,
+                    PluginError::new(ErrorCode::NotFound, "no plugin provides that service"),
+                );
+                continue;
+            };
+            // A provider that is installed but not running starts with the service trigger.
+            if self.state(&provider) == Some(PluginState::Loaded) {
+                let local = call.service.rsplit('/').next().unwrap_or(&call.service);
+                failures.extend(self.trigger(&format!("service:{}", call.service)));
+                failures.extend(self.trigger(&format!("service:{local}")));
+            }
+            if self.state(&provider) != Some(PluginState::Active) {
+                lock(&self.services).fail(
+                    &call,
+                    PluginError::new(ErrorCode::Busy, "the service provider is not running"),
+                );
+                continue;
+            }
+            let export = ExportCall::ServiceHandle(ServiceCall {
+                call: call.call,
+                service: call.service.clone(),
+                method: call.method.clone(),
+                payload_json: call.payload_json.clone(),
+                caller: PluginId(call.caller.clone()),
+            });
+            match self.call_export(&provider, export) {
+                Ok(ExportReply::ServiceReply(ServiceReply::Done(reply))) => {
+                    lock(&self.services).complete(&call, reply);
+                }
+                Ok(ExportReply::ServiceReply(ServiceReply::Deferred)) => {
+                    lock(&self.services).defer(&call, &provider);
+                }
+                Ok(_) => lock(&self.services).fail(
+                    &call,
+                    PluginError::new(ErrorCode::Internal, "the provider gave no service reply"),
+                ),
+                Err(error) => {
+                    lock(&self.services).fail(
+                        &call,
+                        PluginError::new(ErrorCode::Internal, "the service provider failed"),
+                    );
+                    failures.push(error);
+                }
+            }
+        }
+        let finished = lock(&self.services).take_finished();
+        let mut results = lock(&self.results);
+        for end in finished {
+            let outcome = end.error.map_or(Outcome::Ok, Outcome::Failed);
+            results.push_back((end.caller, command_result(end.request, outcome)));
+        }
+        failures
+    }
+
     /// Fires due timers, routes published topic messages, then delivers the commands plugins
     /// asked for and the queued request results. Returns the failures; a failed plugin is
     /// stopped and the others continue.
@@ -803,6 +906,7 @@ impl HostRuntime {
             // outbox is routed in every round.
             let had_topics = !lock(&self.topic_outbox).is_empty();
             failures.extend(self.route_topics());
+            failures.extend(self.route_services());
             let commands: Vec<_> = lock(&self.commands).drain(..).collect();
             let results: VecDeque<_> = std::mem::take(&mut *lock(&self.results));
             if commands.is_empty() && results.is_empty() && !had_topics {

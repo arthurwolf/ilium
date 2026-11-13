@@ -12,9 +12,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ilium_plugin_api::generated::host::commands::HostCommands;
+use ilium_plugin_api::generated::host::help::HostHelp;
 use ilium_plugin_api::generated::host::intents_host::HostIntentsHost;
+use ilium_plugin_api::generated::host::kernel_settings::HostKernelSettings;
+use ilium_plugin_api::generated::host::keymap::{Binding, HostKeymap};
 use ilium_plugin_api::generated::host::log::{HostLog, Level};
 use ilium_plugin_api::generated::host::panes::HostPanes;
+use ilium_plugin_api::generated::host::sessions::{CrossRequest, HostSessions, LiveSession};
 use ilium_plugin_api::generated::host::tree::HostTree;
 use ilium_plugin_api::generated::primitives::agent::{
     AgentPane, HostAgent, SessionRef, SignatureSpec, TranscriptQuery, TranscriptTurn,
@@ -249,6 +253,240 @@ impl HostTree for KernelTree {
         store
             .set_metadata(&self.plugin, node, bytes)
             .map_err(|error| PluginError::new(error.code, error.message))
+    }
+}
+
+/// `ilium:host/help` over the kernel's help catalogue.
+pub struct KernelHelp {
+    kernel: Arc<dyn KernelFacade>,
+    reads: bool,
+}
+
+impl KernelHelp {
+    /// A help import reading the given kernel. `granted` is what the instance holds: the
+    /// interface links with any capability of its family, so `help.read` is checked here.
+    pub fn new(kernel: Arc<dyn KernelFacade>, granted: &[String]) -> Self {
+        Self {
+            kernel,
+            reads: holds(granted, "help.read"),
+        }
+    }
+}
+
+impl HostHelp for KernelHelp {
+    /// Unknown, malformed or local ids give `None`, never a failure; so does a missing grant
+    /// and a kernel without a help catalogue.
+    fn topic(&mut self, id: String) -> Option<String> {
+        let global = matches!(
+            id.split_once('/'),
+            Some((prefix, local)) if !prefix.is_empty() && !local.is_empty()
+        );
+        if !self.reads || !global {
+            return None;
+        }
+        self.kernel.help()?.topic(&id)
+    }
+}
+
+/// `ilium:host/keymap` over the kernel's resolved key map (contract section 19.3).
+pub struct KernelKeymap {
+    kernel: Arc<dyn KernelFacade>,
+    reads: bool,
+}
+
+impl KernelKeymap {
+    /// A keymap import reading the given kernel. `granted` is what the instance holds.
+    pub fn new(kernel: Arc<dyn KernelFacade>, granted: &[String]) -> Self {
+        Self {
+            kernel,
+            reads: holds(granted, "keymap.read"),
+        }
+    }
+}
+
+impl HostKeymap for KernelKeymap {
+    /// Without the grant, and in a process that has no key map, the list is empty.
+    fn bindings(&mut self) -> Vec<Binding> {
+        if !self.reads {
+            return Vec::new();
+        }
+        self.kernel
+            .keymap()
+            .map(|keymap| keymap.bindings())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|binding| Binding {
+                command: binding.command,
+                chords: binding.chords,
+                context: binding.context,
+                is_default: binding.is_default,
+            })
+            .collect()
+    }
+
+    fn chord_label(&mut self, chord: String) -> String {
+        // The label is a pure text rule; the plain import owns it.
+        super::keymap::KeymapImport.chord_label(chord)
+    }
+}
+
+/// Whether a settings key names a secret, whose value plugins never read.
+fn is_secret_setting(key: &str) -> bool {
+    ["key", "token", "secret", "password"]
+        .iter()
+        .any(|marker| key.contains(marker))
+}
+
+/// `ilium:host/kernel-settings` over the kernel's settings tables (contract section 19.3).
+/// A tab is one key of `KernelSettings`; a tab key is `<tab>.<key>`.
+pub struct KernelSettingsTables {
+    kernel: Arc<dyn KernelFacade>,
+    granted: Vec<String>,
+}
+
+impl KernelSettingsTables {
+    /// A kernel-settings import of one instance. Each call checks the grant of its tab.
+    pub fn new(kernel: Arc<dyn KernelFacade>, granted: &[String]) -> Self {
+        Self {
+            kernel,
+            granted: granted.to_vec(),
+        }
+    }
+
+    fn settings(
+        &self,
+        grant: &str,
+        tab: &str,
+    ) -> Result<&dyn ilium_plugin_api::kernel::KernelSettings, PluginError> {
+        if !holds(&self.granted, &format!("{grant}:{tab}")) {
+            return Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                format!("{grant}:{tab} is not granted"),
+            ));
+        }
+        self.kernel.settings().ok_or_else(|| {
+            PluginError::new(
+                ErrorCode::Unsupported,
+                "this process has no kernel settings tables",
+            )
+        })
+    }
+}
+
+impl HostKernelSettings for KernelSettingsTables {
+    fn read(&mut self, tab: String) -> Result<String, PluginError> {
+        let settings = self.settings("settings.read-kernel", &tab)?;
+        let text = settings
+            .get(&tab)
+            .ok_or_else(|| PluginError::new(ErrorCode::NotFound, format!("unknown tab {tab:?}")))?;
+        let serde_json::Value::Object(values) = serde_json::from_str(&text).map_err(|error| {
+            PluginError::new(
+                ErrorCode::Internal,
+                format!("the tab does not parse: {error}"),
+            )
+        })?
+        else {
+            return Err(PluginError::new(
+                ErrorCode::Internal,
+                "the tab is not a JSON object",
+            ));
+        };
+        let redacted: serde_json::Map<String, serde_json::Value> = values
+            .into_iter()
+            .map(|(key, value)| {
+                if is_secret_setting(&key) {
+                    (key, serde_json::Value::String("<redacted>".to_owned()))
+                } else {
+                    (key, value)
+                }
+            })
+            .collect();
+        Ok(serde_json::Value::Object(redacted).to_string())
+    }
+
+    fn write(&mut self, tab: String, key: String, value: String) -> Result<(), PluginError> {
+        let settings = self.settings("settings.write-kernel", &tab)?;
+        if serde_json::from_str::<serde_json::Value>(&value).is_err() {
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "value is not JSON",
+            ));
+        }
+        settings
+            .set(&format!("{tab}.{key}"), &value)
+            .map_err(|error| PluginError::new(error.code, error.message))
+    }
+}
+
+/// `ilium:host/sessions` over the kernel (contract section 19.3): the calling session is
+/// listed with its real name, project and pane count. Requests to other sessions are refused
+/// until the cross-session transport exists; nothing is queued that would never be answered.
+pub struct KernelSessions {
+    kernel: Arc<dyn KernelFacade>,
+    crosses: bool,
+}
+
+impl KernelSessions {
+    /// A sessions import of one instance.
+    pub fn new(kernel: Arc<dyn KernelFacade>, granted: &[String]) -> Self {
+        Self {
+            kernel,
+            crosses: holds(granted, "sessions.cross"),
+        }
+    }
+}
+
+impl HostSessions for KernelSessions {
+    fn list_live(&mut self) -> Vec<LiveSession> {
+        let workspace = self.kernel.workspace();
+        let name = workspace
+            .and_then(|workspace| workspace.session_name())
+            .unwrap_or_else(|| "default".to_owned());
+        let project = workspace
+            .and_then(|workspace| workspace.project_dir())
+            .unwrap_or_default();
+        let panes = self
+            .kernel
+            .tree()
+            .nodes()
+            .iter()
+            .filter(|node| node.class == NodeClass::Pane)
+            .count();
+        vec![LiveSession {
+            socket_id: format!("{project}#{name}"),
+            name,
+            project,
+            panes: u32::try_from(panes).unwrap_or(u32::MAX),
+            attached_clients: 0,
+            is_self: true,
+        }]
+    }
+
+    fn send(&mut self, request: CrossRequest) -> Result<RequestId, PluginError> {
+        if !self.crosses {
+            return Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                "sessions.cross is not granted",
+            ));
+        }
+        if !self
+            .list_live()
+            .iter()
+            .any(|session| session.name == request.session)
+        {
+            return Err(PluginError::new(
+                ErrorCode::NotFound,
+                "no live session has that name",
+            ));
+        }
+        Err(PluginError::new(
+            ErrorCode::Unsupported,
+            "requests between sessions are not delivered yet",
+        ))
+    }
+
+    fn take_reply(&mut self, _request: RequestId) -> Option<String> {
+        None
     }
 }
 

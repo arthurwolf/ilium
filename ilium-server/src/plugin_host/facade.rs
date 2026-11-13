@@ -31,8 +31,8 @@ use ilium_plugin_api::generated::types::{
     PluginSide, SplitDirection,
 };
 use ilium_plugin_api::kernel::{
-    Cell, FacadeError, IntentResult, KernelFacade, Origin, PaneRead, TreeAnnotations, TreeNode,
-    TreeRead, WorkspaceAccess,
+    Cell, FacadeError, IntentResult, KernelFacade, Origin, PaneRead, SessionAccess, TerminalAccess,
+    TreeAnnotations, TreeNode, TreeRead, WorkspaceAccess,
 };
 use ilium_plugin_api::platform::ProcessKind;
 use ilium_plugin_api::side::Side;
@@ -760,6 +760,14 @@ impl KernelFacade for ServerFacade {
     fn workspace(&self) -> Option<&dyn WorkspaceAccess> {
         Some(self)
     }
+
+    fn terminal(&self) -> Option<&dyn TerminalAccess> {
+        Some(self)
+    }
+
+    fn sessions(&self) -> Option<&dyn SessionAccess> {
+        Some(self)
+    }
 }
 
 impl TreeRead for ServerFacade {
@@ -817,6 +825,111 @@ impl PaneRead for ServerFacade {
             let (rows, columns) = screen.size();
             (columns, rows)
         })
+    }
+}
+
+impl ServerFacade {
+    /// Runs a request for a facade call that reports a `FacadeError`.
+    fn checked(&self, request: ClientRequest) -> Result<(), FacadeError> {
+        match self.request(request, None) {
+            RequestEnd::Done | RequestEnd::Created(_) => Ok(()),
+            RequestEnd::Failed(message) => Err(FacadeError::new(ErrorCode::Internal, message)),
+            RequestEnd::TimedOut => Err(FacadeError::new(
+                ErrorCode::TimedOut,
+                "the server did not finish the request in time",
+            )),
+        }
+    }
+
+    /// The directory of this project's session snapshots.
+    fn sessions_dir(&self) -> PathBuf {
+        self.project_dir.join(".ilium").join("sessions")
+    }
+}
+
+/// Terminal input and control (contract section 19.3). The PTY stays with its owner: every
+/// call goes through the ordinary request handler, exactly as a client's would.
+impl TerminalAccess for ServerFacade {
+    fn write_input(&self, pane: NodeId, bytes: &[u8]) -> Result<(), FacadeError> {
+        self.checked(ClientRequest::KeyInput {
+            pane_id: to_core(pane),
+            bytes: bytes.to_vec(),
+            submission: None,
+        })
+    }
+
+    fn resize(&self, pane: NodeId, columns: u16, rows: u16) -> Result<(), FacadeError> {
+        self.checked(ClientRequest::ResizePane {
+            pane_id: to_core(pane),
+            rows,
+            cols: columns,
+            cause: PaneResizeCause::HostTerminal,
+        })
+    }
+
+    /// A signal is sent as the control byte the terminal line discipline turns into it, so
+    /// it reaches the foreground process the way a key press would. Other signals need
+    /// process control the facade does not have.
+    fn signal(&self, pane: NodeId, signal: &str) -> Result<(), FacadeError> {
+        let byte = match signal {
+            "interrupt" => 0x03,
+            "end-of-file" => 0x04,
+            "quit" => 0x1c,
+            "suspend" => 0x1a,
+            other => {
+                return Err(FacadeError::new(
+                    ErrorCode::Unsupported,
+                    format!("signal {other} cannot be sent to a pane"),
+                ));
+            }
+        };
+        self.write_input(pane, &[byte])
+    }
+}
+
+/// Session snapshots of this project (contract section 19.3).
+impl SessionAccess for ServerFacade {
+    fn names(&self) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(self.sessions_dir()) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .filter_map(|path| {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(str::to_owned)
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn snapshot_json(&self, name: &str) -> Option<String> {
+        // A session name is one file name; anything that could leave the directory is refused.
+        let plain = !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+            && !name.starts_with('.');
+        if !plain {
+            return None;
+        }
+        std::fs::read_to_string(self.sessions_dir().join(format!("{name}.json"))).ok()
+    }
+
+    /// The server writes its snapshot on its own schedule; there is no request that forces
+    /// one, so this is refused instead of pretending.
+    fn save(&self) -> Result<(), FacadeError> {
+        Err(FacadeError::new(
+            ErrorCode::Unsupported,
+            "the server saves the session snapshot itself",
+        ))
     }
 }
 

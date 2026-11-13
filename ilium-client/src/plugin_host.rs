@@ -8,6 +8,8 @@ pub mod host;
 pub mod keybindings;
 pub mod popup;
 pub mod screens_rig;
+pub mod view;
+pub mod views;
 pub mod widget_rig;
 
 use std::sync::Mutex;

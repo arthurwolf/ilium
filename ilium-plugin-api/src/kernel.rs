@@ -200,8 +200,26 @@ pub trait UiSink: Send + Sync {
     fn invalidate(&self, plugin: &PluginId, view: &str);
 }
 
+/// One resolved binding of the key map: a command with every chord that runs it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyBinding {
+    /// The command id.
+    pub command: String,
+    /// The chords bound to it, in the chord syntax of the manual.
+    pub chords: Vec<String>,
+    /// Where the binding applies (`global`, `leader`, ...).
+    pub context: String,
+    /// Whether this is the binding the kernel ships, not one the user changed.
+    pub is_default: bool,
+}
+
 /// The resolved key map (`ilium:host/keymap`).
 pub trait KeymapRead: Send + Sync {
+    /// Every resolved binding. A kernel that cannot list its key map gives none.
+    fn bindings(&self) -> Vec<KeyBinding> {
+        Vec::new()
+    }
+
     /// The chords bound to a command id, in display form.
     fn chords_of(&self, command: &str) -> Vec<String>;
     /// The command id bound to a chord.

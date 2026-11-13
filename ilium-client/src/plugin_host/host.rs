@@ -33,11 +33,11 @@ use ilium_plugin_api::generated::types::tree::{
 };
 use ilium_plugin_api::generated::types::{
     ActionKind, Area, CommandContext, CommandOrigin, ErrorCode, Event, Intent, NodeId,
-    OpenViewSpec, Outcome, PluginError, PluginId, PluginSide, UiAction, UiTree, ViewTarget,
+    OpenViewSpec, Outcome, PluginError, PluginId, PluginSide, Tone, UiAction, UiTree, ViewTarget,
 };
 use ilium_plugin_api::kernel::{
-    Cell, FacadeError, IntentResult, KernelFacade, Origin, PaneRead, TreeNode, TreeRead, UiSink,
-    WorkspaceAccess,
+    Cell, FacadeError, HelpCatalog, IntentResult, KernelFacade, KeyBinding, KeymapRead, Origin,
+    PaneRead, TreeNode, TreeRead, UiSink, WorkspaceAccess,
 };
 use ilium_plugin_api::platform::ProcessKind;
 use ilium_plugin_api::side::Side;
@@ -107,6 +107,122 @@ pub(crate) enum Output {
     PopupOpened { plugin: String, popup: String },
     /// The open popup of a plugin went away (the plugin closed it or its view failed).
     PopupClosed { plugin: String, popup: String },
+    /// A plugin opened a panel, a settings page or an onboarding step; `focus` asks for the
+    /// keyboard. The event loop decides where the view is shown.
+    ViewOpened {
+        plugin: String,
+        view: ViewTarget,
+        focus: bool,
+    },
+    /// A view of a plugin went away (closed by the plugin, failed to render, or the plugin
+    /// was disabled).
+    ViewClosed { plugin: String, view: ViewTarget },
+}
+
+/// A panel, settings page or onboarding step a plugin has open, with the tree the plugin last
+/// rendered for it and the cells the client gives it.
+#[derive(Debug, Clone)]
+struct ViewSlot {
+    plugin: String,
+    view: ViewTarget,
+    tree: Option<UiTree>,
+    area: (u16, u16),
+}
+
+/// One status-bar segment a plugin set (contract section 19.1). Text is not sanitized here;
+/// the drawing code does that.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StatusSegment {
+    pub plugin: String,
+    pub segment: String,
+    pub text: String,
+    pub tone: Option<Tone>,
+}
+
+/// One decoration a plugin set on a tree node (contract section 19.1).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TreeDecoration {
+    pub plugin: String,
+    pub node: NodeId,
+    pub slot: String,
+    pub text: String,
+    pub icon: Option<String>,
+    pub sort_key: i64,
+}
+
+/// One entry of the static chrome a manifest contributes: a toolbar button, a menu entry, a
+/// row action, a panel, a settings page or an onboarding step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChromeItem {
+    pub plugin: String,
+    /// The id inside the plugin.
+    pub id: String,
+    /// The label or title; the id when the manifest gives none.
+    pub title: String,
+    pub icon: Option<String>,
+    /// The full command id (`<plugin>/<command>`), for entries that run one.
+    pub command: Option<String>,
+    /// What the entry applies to (`target` or `applies_to` of a menu entry), if stated.
+    pub target: Option<String>,
+    /// The `order` of an onboarding step; 0 when the manifest gives none.
+    pub order: i64,
+}
+
+/// The entries of one contribution kind in a manifest. A manifest that does not parse, or an
+/// entry without an id, contributes nothing.
+pub(crate) fn chrome_items(plugin: &str, manifest: &str, kind: &str) -> Vec<ChromeItem> {
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(manifest) else {
+        return Vec::new();
+    };
+    let text = |entry: &serde_json::Value, field: &str| {
+        entry
+            .get(field)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    manifest
+        .get("contributes")
+        .and_then(|contributes| contributes.get(kind))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let id = text(entry, "id")?;
+            Some(ChromeItem {
+                plugin: plugin.to_owned(),
+                title: text(entry, "title")
+                    .or_else(|| text(entry, "label"))
+                    .unwrap_or_else(|| id.clone()),
+                icon: text(entry, "icon"),
+                // A command of the same plugin may be written without the plugin prefix.
+                command: text(entry, "command").map(|command| {
+                    if command.contains('/') {
+                        command
+                    } else {
+                        format!("{plugin}/{command}")
+                    }
+                }),
+                target: text(entry, "target").or_else(|| {
+                    // `applies_to` is a list of node kinds; it is kept as `a,b`.
+                    entry
+                        .get("applies_to")
+                        .and_then(serde_json::Value::as_array)
+                        .map(|kinds| {
+                            kinds
+                                .iter()
+                                .filter_map(serde_json::Value::as_str)
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        })
+                }),
+                order: entry
+                    .get("order")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0),
+                id,
+            })
+        })
+        .collect()
 }
 
 /// The one popup a plugin has open, with the view the plugin last rendered for it.
@@ -131,6 +247,14 @@ struct Shared {
     panels: Mutex<BTreeMap<(String, String), String>>,
     /// The open plugin popup, if any. One at a time: the kernel has one modal layer.
     popup: Mutex<Option<PopupSlot>>,
+    /// The panels, settings pages and onboarding steps plugins have open.
+    views: Mutex<Vec<ViewSlot>>,
+    /// Status-bar segments, in the order plugins first set them.
+    segments: Mutex<Vec<StatusSegment>>,
+    /// Tree decorations of client-side plugins.
+    decorations: Mutex<Vec<TreeDecoration>>,
+    /// The resolved key map, as the event loop last mirrored it.
+    keymap: Mutex<Vec<KeyBinding>>,
     /// Columns and rows of the screen, as the event loop last reported them.
     screen: Mutex<(u16, u16)>,
     runtime: Mutex<Option<RuntimeThread>>,
@@ -201,6 +325,118 @@ impl Shared {
             });
         }
         was_open
+    }
+
+    /// Records a view a plugin opened (or the kernel opened for it) and tells the event loop.
+    /// Opening a view that is already open keeps its tree.
+    fn open_view(&self, plugin: &str, view: ViewTarget, focus: bool) {
+        if let Ok(mut views) = self.views.lock() {
+            if !views
+                .iter()
+                .any(|open| open.plugin == plugin && open.view == view)
+            {
+                views.push(ViewSlot {
+                    plugin: plugin.to_owned(),
+                    view: view.clone(),
+                    tree: None,
+                    area: (0, 0),
+                });
+            }
+        }
+        self.push(Output::ViewOpened {
+            plugin: plugin.to_owned(),
+            view,
+            focus,
+        });
+    }
+
+    /// Forgets a view if it is open. Returns whether it was.
+    fn close_view(&self, plugin: &str, view: &ViewTarget) -> bool {
+        let was_open = self.views.lock().is_ok_and(|mut views| {
+            let before = views.len();
+            views.retain(|open| !(open.plugin == plugin && &open.view == view));
+            views.len() != before
+        });
+        if was_open {
+            self.push(Output::ViewClosed {
+                plugin: plugin.to_owned(),
+                view: view.clone(),
+            });
+        }
+        was_open
+    }
+
+    /// Asks the owning plugins for the current trees of every open view that has cells. Runs
+    /// on the host thread, never from inside a plugin call. A view that fails to render is
+    /// closed, so a broken plugin never leaves a stale picture (COR-218).
+    fn refresh_views(&self, runtime: &mut HostRuntime) {
+        let open: Vec<(String, ViewTarget, (u16, u16))> = self
+            .views
+            .lock()
+            .map(|views| {
+                views
+                    .iter()
+                    .filter(|slot| slot.area.0 > 0 && slot.area.1 > 0)
+                    .map(|slot| (slot.plugin.clone(), slot.view.clone(), slot.area))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if open.is_empty() {
+            return;
+        }
+        for (plugin, view, (columns, rows)) in open {
+            match runtime.render(&plugin, view.clone(), Area { columns, rows }) {
+                Ok(tree) => {
+                    if let Ok(mut views) = self.views.lock() {
+                        if let Some(slot) = views
+                            .iter_mut()
+                            .find(|slot| slot.plugin == plugin && slot.view == view)
+                        {
+                            slot.tree = Some(tree);
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!("view {view:?} of {plugin} did not render: {error}");
+                    self.close_view(&plugin, &view);
+                }
+            }
+        }
+        self.push(Output::Redraw);
+    }
+
+    /// Drops everything a plugin shows: its views, popup, status segments and decorations.
+    /// Called when the plugin is disabled, so nothing of it stays on screen.
+    fn forget_plugin(&self, plugin: &str) {
+        let views: Vec<ViewTarget> = self
+            .views
+            .lock()
+            .map(|views| {
+                views
+                    .iter()
+                    .filter(|slot| slot.plugin == plugin)
+                    .map(|slot| slot.view.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for view in views {
+            self.close_view(plugin, &view);
+        }
+        let popup = self.popup.lock().ok().and_then(|slot| {
+            slot.as_ref()
+                .filter(|open| open.plugin == plugin)
+                .map(|open| open.popup.clone())
+        });
+        if let Some(popup) = popup {
+            self.close_popup(plugin, &popup);
+        }
+        if let Ok(mut segments) = self.segments.lock() {
+            segments.retain(|segment| segment.plugin != plugin);
+        }
+        if let Ok(mut decorations) = self.decorations.lock() {
+            decorations.retain(|decoration| decoration.plugin != plugin);
+        }
+        self.push(Output::Redraw);
     }
 
     fn set_screen(&self, screen: (u16, u16)) {
@@ -369,6 +605,88 @@ impl KernelFacade for ClientFacade {
                 self.shared.close_popup(&plugin.0, &popup);
                 Outcome::Ok
             }
+            // Panels, settings pages and onboarding steps of a client side are client-local
+            // too (contract section 19.1). A pane view belongs to the tree, so the server
+            // decides.
+            Intent::OpenView(OpenViewSpec {
+                view:
+                    view @ (ViewTarget::Panel(_)
+                    | ViewTarget::SettingsPage(_)
+                    | ViewTarget::OnboardingStep(_)),
+                focus,
+            }) => {
+                self.shared.open_view(&plugin.0, view, focus);
+                Outcome::Ok
+            }
+            Intent::CloseView(
+                view @ (ViewTarget::Panel(_)
+                | ViewTarget::SettingsPage(_)
+                | ViewTarget::OnboardingStep(_)),
+            ) => {
+                self.shared.close_view(&plugin.0, &view);
+                Outcome::Ok
+            }
+            Intent::SetStatusSegment(spec) => {
+                let text: String = spec.content.iter().map(|span| span.text.as_str()).collect();
+                if let Ok(mut segments) = self.shared.segments.lock() {
+                    match segments.iter_mut().find(|segment| {
+                        segment.plugin == plugin.0 && segment.segment == spec.segment
+                    }) {
+                        Some(segment) => {
+                            segment.text = text;
+                            segment.tone = spec.tone;
+                        }
+                        None => segments.push(StatusSegment {
+                            plugin: plugin.0.clone(),
+                            segment: spec.segment,
+                            text,
+                            tone: spec.tone,
+                        }),
+                    }
+                }
+                self.shared.push(Output::Redraw);
+                Outcome::Ok
+            }
+            Intent::ClearStatusSegment(name) => {
+                if let Ok(mut segments) = self.shared.segments.lock() {
+                    segments
+                        .retain(|segment| !(segment.plugin == plugin.0 && segment.segment == name));
+                }
+                self.shared.push(Output::Redraw);
+                Outcome::Ok
+            }
+            Intent::SetDecoration(spec) => {
+                let decoration = TreeDecoration {
+                    plugin: plugin.0.clone(),
+                    node: spec.node,
+                    slot: spec.slot,
+                    text: spec.content.iter().map(|span| span.text.as_str()).collect(),
+                    icon: spec.icon,
+                    sort_key: spec.sort_key.unwrap_or(0),
+                };
+                if let Ok(mut decorations) = self.shared.decorations.lock() {
+                    decorations.retain(|known| {
+                        !(known.plugin == decoration.plugin
+                            && known.node == decoration.node
+                            && known.slot == decoration.slot)
+                    });
+                    decorations.push(decoration);
+                    decorations.sort_by_key(|known| known.sort_key);
+                }
+                self.shared.push(Output::Redraw);
+                Outcome::Ok
+            }
+            Intent::ClearDecoration(key) => {
+                if let Ok(mut decorations) = self.shared.decorations.lock() {
+                    decorations.retain(|known| {
+                        !(known.plugin == plugin.0
+                            && known.node == key.node
+                            && known.slot == key.slot)
+                    });
+                }
+                self.shared.push(Output::Redraw);
+                Outcome::Ok
+            }
             other => self.submit(&plugin.0, &other),
         }
     }
@@ -393,8 +711,64 @@ impl KernelFacade for ClientFacade {
         Some(self)
     }
 
+    fn keymap(&self) -> Option<&dyn KeymapRead> {
+        Some(self)
+    }
+
+    fn help(&self) -> Option<&dyn HelpCatalog> {
+        Some(self)
+    }
+
     fn focused_pane(&self) -> Option<NodeId> {
         self.shared.focused.lock().ok().and_then(|focused| *focused)
+    }
+}
+
+/// The prefix of the kernel's own help topics (api-help-and-plugins.md "Help topics").
+const KERNEL_HELP_PREFIX: &str = "ilium/";
+
+/// The kernel's bundled help topics. Topics that plugins contribute are not served yet: the
+/// client holds a plugin's manifest but not the Markdown files of its package.
+impl KeymapRead for ClientFacade {
+    fn bindings(&self) -> Vec<KeyBinding> {
+        self.shared
+            .keymap
+            .lock()
+            .map(|keymap| keymap.clone())
+            .unwrap_or_default()
+    }
+
+    fn chords_of(&self, command: &str) -> Vec<String> {
+        self.bindings()
+            .into_iter()
+            .filter(|binding| binding.command == command)
+            .flat_map(|binding| binding.chords)
+            .collect()
+    }
+
+    fn command_of(&self, chord: &str) -> Option<String> {
+        self.bindings()
+            .into_iter()
+            .find(|binding| binding.chords.iter().any(|known| known == chord))
+            .map(|binding| binding.command)
+    }
+}
+
+impl HelpCatalog for ClientFacade {
+    fn topic(&self, id: &str) -> Option<String> {
+        let topic = crate::settings_help::catalog::by_id(id.strip_prefix(KERNEL_HELP_PREFIX)?)?;
+        let mut markdown = format!("# {}\n\n{}\n", topic.title, topic.explanation);
+        if !topic.caveat.is_empty() {
+            markdown.push_str(&format!("\n{}\n", topic.caveat));
+        }
+        Some(markdown)
+    }
+
+    fn topic_ids(&self) -> Vec<String> {
+        crate::settings_help::catalog::all()
+            .iter()
+            .map(|topic| format!("{KERNEL_HELP_PREFIX}{}", topic.id))
+            .collect()
     }
 }
 
@@ -735,6 +1109,10 @@ impl ClientPlugins {
             stopping: AtomicBool::new(false),
             panels: Mutex::new(BTreeMap::new()),
             popup: Mutex::new(None),
+            views: Mutex::new(Vec::new()),
+            segments: Mutex::new(Vec::new()),
+            decorations: Mutex::new(Vec::new()),
+            keymap: Mutex::new(Vec::new()),
             screen: Mutex::new((0, 0)),
             runtime: Mutex::new(None),
             project_dir: session_cwd.to_string_lossy().into_owned(),
@@ -841,9 +1219,11 @@ impl ClientPlugins {
         self.shared.epoch.fetch_add(1, Ordering::Relaxed);
         let batch = tree_delta(&self.known, &current);
         self.known = current;
+        let shared = Arc::clone(&self.shared);
         self.shared.post(move |runtime| {
             log_errors("event delivery", runtime.broadcast(&batch));
             log_errors("pump", runtime.pump());
+            shared.refresh_views(runtime);
         });
     }
 
@@ -898,11 +1278,13 @@ impl ClientPlugins {
                     channel: message.topic,
                     payload: message.payload,
                 });
+                let shared = Arc::clone(&self.shared);
                 self.shared.post(move |runtime| {
                     if let Err(error) = runtime.deliver(&plugin, vec![event]) {
                         tracing::debug!("server plugin message not delivered: {error}");
                     }
                     log_errors("pump", runtime.pump());
+                    shared.refresh_views(runtime);
                 });
                 false
             }
@@ -922,6 +1304,10 @@ impl ClientPlugins {
                     .is_none_or(|previous| !wiring::is_disabled_state(previous));
                 self.server_states.insert(target.clone(), state);
                 if enabled != was_enabled {
+                    if !enabled {
+                        // Nothing of a disabled plugin stays on screen (COR-218).
+                        self.shared.forget_plugin(&target);
+                    }
                     // The client side of a plugin follows its server side.
                     self.shared.post(move |runtime| {
                         if let Err(error) = runtime.set_enabled(&target, enabled) {
@@ -997,6 +1383,7 @@ impl ClientPlugins {
             }
             log_errors("pump", runtime.pump());
             shared.refresh_popup(runtime);
+            shared.refresh_views(runtime);
         })
     }
 
@@ -1043,6 +1430,165 @@ impl ClientPlugins {
             }
             log_errors("pump", runtime.pump());
         });
+    }
+
+    /// Replaces the key map plugins read. Cheap when nothing changed.
+    pub(crate) fn sync_keymap(&self, bindings: Vec<KeyBinding>) {
+        if let Ok(mut keymap) = self.shared.keymap.lock() {
+            if *keymap != bindings {
+                *keymap = bindings;
+            }
+        }
+    }
+
+    /// Opens a view on the kernel's own authority (the user picked a contributed panel, a
+    /// settings page or an onboarding step).
+    /// The first frame that draws the view reports its cells with `set_view_area`.
+    pub(crate) fn show_view(&self, plugin: &str, view: ViewTarget) {
+        self.shared.open_view(plugin, view, true);
+    }
+
+    /// Tells the host how many cells a view has. A change asks the plugin for a new tree.
+    pub(crate) fn set_view_area(&self, plugin: &str, view: &ViewTarget, area: (u16, u16)) {
+        let changed = self.shared.views.lock().is_ok_and(|mut views| {
+            views
+                .iter_mut()
+                .find(|slot| slot.plugin == plugin && &slot.view == view)
+                .is_some_and(|slot| {
+                    let changed = slot.area != area;
+                    slot.area = area;
+                    changed
+                })
+        });
+        if changed {
+            let shared = Arc::clone(&self.shared);
+            self.shared
+                .post(move |runtime| shared.refresh_views(runtime));
+        }
+    }
+
+    /// The tree the plugin last rendered for an open view; `None` before the first one or
+    /// when the view is not open.
+    pub(crate) fn view_tree(&self, plugin: &str, view: &ViewTarget) -> Option<UiTree> {
+        self.shared.views.lock().ok().and_then(|views| {
+            views
+                .iter()
+                .find(|slot| slot.plugin == plugin && &slot.view == view)
+                .and_then(|slot| slot.tree.clone())
+        })
+    }
+
+    /// Every open view that was given cells at least once, as plugin and target. A view the
+    /// event loop has not placed yet is left out, so it is never closed before it is shown.
+    pub(crate) fn placed_views(&self) -> Vec<(String, ViewTarget)> {
+        self.shared
+            .views
+            .lock()
+            .map(|views| {
+                views
+                    .iter()
+                    .filter(|slot| slot.area != (0, 0))
+                    .map(|slot| (slot.plugin.clone(), slot.view.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Whether a view is open.
+    pub(crate) fn view_is_open(&self, plugin: &str, view: &ViewTarget) -> bool {
+        self.shared.views.lock().is_ok_and(|views| {
+            views
+                .iter()
+                .any(|slot| slot.plugin == plugin && &slot.view == view)
+        })
+    }
+
+    /// Delivers one action of a view to its plugin and refreshes the open views.
+    pub(crate) fn view_action(&self, plugin: &str, action: UiAction) {
+        let shared = Arc::clone(&self.shared);
+        let plugin = plugin.to_owned();
+        self.shared.post(move |runtime| {
+            if let Err(error) = runtime.deliver(&plugin, vec![Event::UiAction(action)]) {
+                tracing::debug!("view action not delivered to {plugin}: {error}");
+            }
+            log_errors("pump", runtime.pump());
+            shared.refresh_popup(runtime);
+            shared.refresh_views(runtime);
+        });
+    }
+
+    /// Closes a view on the kernel's own authority and tells the plugin with a `closed`
+    /// action.
+    pub(crate) fn dismiss_view(&self, plugin: &str, view: &ViewTarget) {
+        if !self.shared.close_view(plugin, view) {
+            return;
+        }
+        let closed = UiAction {
+            view: view.clone(),
+            key: String::new(),
+            action_id: String::new(),
+            kind: ActionKind::Closed,
+            value: None,
+        };
+        let plugin = plugin.to_owned();
+        self.shared.post(move |runtime| {
+            if let Err(error) = runtime.deliver(&plugin, vec![Event::UiAction(closed)]) {
+                tracing::debug!("view close not delivered to {plugin}: {error}");
+            }
+            log_errors("pump", runtime.pump());
+        });
+    }
+
+    /// The status-bar segments plugins set, in the order they were first set.
+    pub(crate) fn status_segments(&self) -> Vec<StatusSegment> {
+        self.shared
+            .segments
+            .lock()
+            .map(|segments| segments.clone())
+            .unwrap_or_default()
+    }
+
+    /// The decorations client-side plugins set on one tree node, by sort key.
+    pub(crate) fn decorations_of(&self, node: ilium_core::NodeId) -> Vec<TreeDecoration> {
+        let node = to_plugin(node);
+        self.shared
+            .decorations
+            .lock()
+            .map(|decorations| {
+                decorations
+                    .iter()
+                    .filter(|decoration| decoration.node == node)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Whether any plugin decorates the tree, so the tree drawing can skip the lookup.
+    pub(crate) fn has_decorations(&self) -> bool {
+        self.shared
+            .decorations
+            .lock()
+            .is_ok_and(|decorations| !decorations.is_empty())
+    }
+
+    /// The entries enabled plugins contribute of one manifest kind (`tree_toolbar`,
+    /// `context_menu`, `row_actions`, `panels`, `settings`, `onboarding_steps`), in catalogue
+    /// order. Onboarding steps are ordered by their `order`.
+    pub(crate) fn contributed(&self, kind: &str) -> Vec<ChromeItem> {
+        let mut items: Vec<ChromeItem> = self
+            .catalogue
+            .iter()
+            .filter(|plugin| {
+                !self
+                    .server_states
+                    .get(&plugin.id)
+                    .is_some_and(|state| wiring::is_disabled_state(state))
+            })
+            .flat_map(|plugin| chrome_items(&plugin.id, &plugin.manifest, kind))
+            .collect();
+        items.sort_by_key(|item| item.order);
+        items
     }
 
     /// The rows of the Settings plugin list.
@@ -1124,6 +1670,24 @@ impl ClientPlugins {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_chrome_of_a_manifest_is_read_with_full_command_ids() {
+        let manifest = r#"{"contributes": {"tree_toolbar": [
+            {"id": "new", "icon": "plus", "label": "New note", "command": "new-note"},
+            {"id": "other", "command": "ilium.other/run"},
+            {"label": "no id"}
+        ]}}"#;
+        let items = chrome_items("ilium.notes", manifest, "tree_toolbar");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].title, "New note");
+        assert_eq!(items[0].icon.as_deref(), Some("plus"));
+        assert_eq!(items[0].command.as_deref(), Some("ilium.notes/new-note"));
+        assert_eq!(items[1].title, "other");
+        assert_eq!(items[1].command.as_deref(), Some("ilium.other/run"));
+        assert!(chrome_items("ilium.notes", manifest, "panels").is_empty());
+        assert!(chrome_items("ilium.notes", "not json", "panels").is_empty());
+    }
 
     #[test]
     fn a_tree_node_is_mirrored_with_its_class_and_parent() {

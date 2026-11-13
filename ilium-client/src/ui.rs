@@ -2656,6 +2656,11 @@ fn draw_pane_sources(
         );
         return Vec::new();
     }
+    crate::plugin_host::views::release_hidden(app);
+    if matches!(app.right_panel_target, RightPanelTarget::PluginView { .. }) {
+        crate::plugin_host::views::draw(frame, area, app);
+        return Vec::new();
+    }
     let viewports = app.pane_viewports();
     if viewports.is_empty() {
         let (title, message) = match app.right_panel_target {
@@ -3706,6 +3711,10 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     if let Some(notice) = app.request_refusal_notice(std::time::Instant::now()) {
         spans.push(Span::raw("  —  "));
         spans.push(Span::styled(notice, bar_style.add_modifier(Modifier::BOLD)));
+    }
+    if let Some(segments) = app.plugin_status_text() {
+        spans.push(Span::raw("  —  "));
+        spans.push(Span::raw(segments));
     }
     if let Some(message) = &app.status_message {
         spans.push(Span::raw("  —  "));

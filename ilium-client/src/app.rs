@@ -311,6 +311,13 @@ pub enum RightPanelTarget {
     /// the order the "Next: needs you" button visits them. Like the chatroom
     /// it owns no PTY, snapshot or split-view slot.
     Attention,
+    /// A panel, a settings page or an onboarding step a plugin contributes (foundation
+    /// contract section 19.1). The plugin renders its tree; the client only places it.
+    PluginView {
+        plugin: String,
+        kind: crate::plugin_host::views::PluginViewKind,
+        name: String,
+    },
     Pane {
         pane_id: NodeId,
     },
@@ -327,6 +334,7 @@ impl RightPanelTarget {
             | Self::Chatroom { .. }
             | Self::Resource { .. }
             | Self::Attention
+            | Self::PluginView { .. }
             | Self::SplitView {
                 active_pane_id: None,
                 ..
@@ -2348,6 +2356,8 @@ pub struct App {
     /// The WebAssembly plugin host of this client, when plugins are on. Named apart from the
     /// animation plugin fields around it, which are a different, older mechanism.
     pub(crate) wasm_plugins: Option<crate::plugin_host::host::ClientPlugins>,
+    /// The keyboard cursor inside the plugin view the right-hand area shows.
+    pub(crate) plugin_view_cursor: crate::plugin_host::view::ViewCursor,
     semantic_presentation: semantic_presentation::SemanticPresentation,
     // These leases outlive all App-owned animation snapshots and presentation
     // caches. Each version is separately charged before its first deep copy.
@@ -3122,6 +3132,7 @@ impl App {
             plugin_catalogue_preparation: None,
             plugin_catalogue: None,
             wasm_plugins: None,
+            plugin_view_cursor: Default::default(),
             animation_frame: Default::default(),
             plugin_permission_session: None,
             semantic_presentation: semantic_presentation::SemanticPresentation::new(
@@ -4740,7 +4751,8 @@ impl App {
             RightPanelTarget::Empty
             | RightPanelTarget::Chatroom { .. }
             | RightPanelTarget::Resource { .. }
-            | RightPanelTarget::Attention => [None; 4],
+            | RightPanelTarget::Attention
+            | RightPanelTarget::PluginView { .. } => [None; 4],
             RightPanelTarget::Pane { pane_id } => [Some(pane_id), None, None, None],
             RightPanelTarget::SplitView { split_id, .. } => {
                 let mut pane_slots = [None; 4];
@@ -4797,7 +4809,8 @@ impl App {
             RightPanelTarget::Empty
             | RightPanelTarget::Chatroom { .. }
             | RightPanelTarget::Resource { .. }
-            | RightPanelTarget::Attention => false,
+            | RightPanelTarget::Attention
+            | RightPanelTarget::PluginView { .. } => false,
         }
     }
 
@@ -4954,7 +4967,8 @@ impl App {
             RightPanelTarget::Empty
             | RightPanelTarget::Chatroom { .. }
             | RightPanelTarget::Resource { .. }
-            | RightPanelTarget::Attention => Vec::new(),
+            | RightPanelTarget::Attention
+            | RightPanelTarget::PluginView { .. } => Vec::new(),
             RightPanelTarget::Pane { pane_id } => split_layout::allocate_viewports(
                 self.layout.pane_area,
                 SplitOrientation::Vertical,
@@ -5866,6 +5880,15 @@ impl App {
             }
             // Turning the feature off closes its panel.
             RightPanelTarget::Attention if self.attention_enabled() => RightPanelTarget::Attention,
+            // The view goes away with its plugin: the host reports that as `ViewClosed`.
+            RightPanelTarget::PluginView { plugin, kind, name }
+                if self
+                    .wasm_plugins
+                    .as_ref()
+                    .is_some_and(|plugins| plugins.view_is_open(&plugin, &kind.target(&name))) =>
+            {
+                RightPanelTarget::PluginView { plugin, kind, name }
+            }
             RightPanelTarget::Chatroom { project_id }
                 if self.tree.get(project_id).is_some_and(Node::is_project)
                     && self
@@ -10001,6 +10024,18 @@ impl App {
                     }
                     needs_redraw = true;
                 }
+                crate::plugin_host::host::Output::ViewOpened {
+                    plugin,
+                    view,
+                    focus,
+                } => {
+                    self.plugin_view_opened(&plugin, &view, focus);
+                    needs_redraw = true;
+                }
+                crate::plugin_host::host::Output::ViewClosed { plugin, view } => {
+                    self.plugin_view_closed(&plugin, &view);
+                    needs_redraw = true;
+                }
             }
         }
         needs_redraw
@@ -10046,6 +10081,9 @@ impl App {
         if let Some(plugins) = self.wasm_plugins.as_mut() {
             plugins.sync_tree(&self.tree, focused);
         }
+        // The key map changes rarely; mirroring it here keeps it current without a hook at
+        // every place that edits a binding.
+        self.mirror_plugin_keymap();
     }
 
     pub(crate) fn collect_plugin_catalogue(&mut self) -> bool {
@@ -18943,6 +18981,10 @@ impl App {
         }
         if matches!(self.right_panel_target, RightPanelTarget::Attention) {
             self.handle_attention_key(key);
+            return;
+        }
+        if matches!(self.right_panel_target, RightPanelTarget::PluginView { .. }) {
+            self.handle_plugin_view_key(key);
             return;
         }
         let Some(id) = self.active_pane_id() else {

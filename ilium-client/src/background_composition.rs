@@ -304,6 +304,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             RightPanelTarget::Chatroom { .. }
                 | RightPanelTarget::Resource { .. }
                 | RightPanelTarget::Attention
+                | RightPanelTarget::PluginView { .. }
         )
     {
         finish_field(app, presentation, painted_bits);
@@ -427,6 +428,7 @@ fn screen_occupancy(
                 RightPanelTarget::Chatroom { .. }
                     | RightPanelTarget::Resource { .. }
                     | RightPanelTarget::Attention
+                    | RightPanelTarget::PluginView { .. }
             )
         {
             let viewports = app.pane_viewports();
