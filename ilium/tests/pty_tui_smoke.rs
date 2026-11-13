@@ -206,6 +206,17 @@ async fn wait_screen(
     wait_until(condition, timeout).await
 }
 
+/// Types `keys` one key at a time with a short gap, as a person would. A
+/// burst of keys written at once into ConPTY occasionally lost one on the
+/// Windows runner. Each key is still delivered and checked.
+async fn write_keys_paced(tui: &PtySession, keys: &[&[u8]], what: &str) {
+    for key in keys {
+        tui.write(key)
+            .unwrap_or_else(|error| panic!("{what}: {error}"));
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    }
+}
+
 async fn wait_until(condition: impl FnMut() -> bool, timeout: Duration) -> bool {
     wait_until_polling(condition, timeout, Duration::from_millis(20)).await
 }
@@ -2832,9 +2843,12 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         "the PTY catalog should render all six Tree order choices: {:?}",
         first_client.screen_text()
     );
-    first_client
-        .write(b"\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\r")
-        .expect("choose Name Z-A, several entries beyond the current value");
+    write_keys_paced(
+        &first_client,
+        &[b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\r"],
+        "choose Name Z-A, several entries beyond the current value",
+    )
+    .await;
     assert!(
         wait_until(
             || {
@@ -3417,13 +3431,15 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         "numeric scene editor should show the saved duration: {:?}",
         first_client.screen_text()
     );
-    let exact_dwell_keys = vec![0x7f; initial_dwell.to_string().len()]
-        .into_iter()
-        .chain(b"137\r".iter().copied())
+    let exact_dwell_keys = std::iter::repeat_n(&b"\x7f"[..], initial_dwell.to_string().len())
+        .chain([&b"1"[..], b"3", b"7", b"\r"])
         .collect::<Vec<_>>();
-    first_client
-        .write(&exact_dwell_keys)
-        .expect("enter exact off-step duration 137 seconds");
+    write_keys_paced(
+        &first_client,
+        &exact_dwell_keys,
+        "enter exact off-step duration 137 seconds",
+    )
+    .await;
     assert!(
         wait_until(
             || ilium_client::project_config::load(&animation_home)
@@ -3439,7 +3455,8 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
             WAIT_TIMEOUT,
         )
         .await,
-        "exact off-step duration did not persist"
+        "exact off-step duration did not persist: {:?}",
+        first_client.screen_text()
     );
     assert!(
         wait_until(
