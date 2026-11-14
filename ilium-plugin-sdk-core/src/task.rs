@@ -12,7 +12,11 @@ where
 {
     let mut task: Task = Box::pin(future);
     // A task runs until its first await; it is kept only while it still waits on a completion.
-    if task.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending() {
+    if task
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+        .is_pending()
+    {
         TASKS.with(|tasks| tasks.borrow_mut().push(task));
     }
 }

@@ -10,7 +10,8 @@
     "entry": "server.wasm",
     "world": "ilium:server/base@0.1.0",
     "exports": [
-      "detector"
+      "detector",
+      "service-provider"
     ]
   },
   "client": {
@@ -29,7 +30,8 @@
       "terminal.write",
       "settings.write-kernel:agent-monitoring",
       "extensions.provide:ilium.core.agent-detect/activity-rules",
-      "extensions.provide:ilium.core.agent-detect/classify"
+      "extensions.provide:ilium.core.agent-detect/classify",
+      "services.provide:ilium.core.agent-detect/screen-verdicts"
     ],
     "client": [
       "agent.read",
@@ -128,6 +130,15 @@
         "version": "0.1.0"
       }
     ],
+    "services": {
+      "provides": [
+        {
+          "name": "ilium.core.agent-detect/screen-verdicts",
+          "version": "0.1.0",
+          "schema": "schemas/screen-verdicts.json"
+        }
+      ]
+    },
     "signatures": [
       {
         "id": "example-agent",
@@ -136,6 +147,20 @@
         ],
         "aliases": [
           "example"
+        ],
+        "icon": "robot"
+      },
+      {
+        "id": "opencode",
+        "process_names": [
+          "opencode"
+        ],
+        "icon": "robot"
+      },
+      {
+        "id": "aider",
+        "process_names": [
+          "aider"
         ],
         "icon": "robot"
       }

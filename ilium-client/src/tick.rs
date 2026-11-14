@@ -44,8 +44,8 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         | app.tick_inference_number_autosave(now)
         | app.tick_custom_status_rules_save(now);
     let integration_changed = app.tick_integration_maintenance(now);
-    // Focus and `config.toml` changes reach the plugins (gap G2); a reloaded `[padding]` or
-    // `[animations]` table redraws.
+    // Focus and `config.toml` changes reach the plugins (gap G2); a reloaded `[animations]`
+    // table redraws.
     let config_reloaded = app.tick_wasm_plugin_feed();
     let session_stats_changed = app.tick_session_stats(now);
     let session_models_changed = app.tick_session_models(now);
@@ -490,7 +490,6 @@ pub fn apply_naming_worker_event(
                 result.map_err(|error| error.to_string()),
             );
         }
-        NamingWorkerEvent::Recap(outcome) => app.finish_recap_worker(outcome),
         NamingWorkerEvent::Restructure(outcome) => {
             let crate::naming_workers::RestructureWorkerResult {
                 project_id,
@@ -498,8 +497,6 @@ pub fn apply_naming_worker_event(
                 title_observations,
                 automatic_ai_decision,
                 result,
-                recaps,
-                recap_stamps,
             } = outcome;
             workers.restructure_worker_finished(project_id);
             if app.onboarding.is_some()
@@ -520,16 +517,12 @@ pub fn apply_naming_worker_event(
             if let Err(error) = &result {
                 tracing::debug!(?project_id, error = %error, error_debug = ?error, "project restructure inference failure details");
             }
-            let is_plan_ready = result.is_ok();
             app.finish_project_restructure(
                 project_id,
                 &inference_activity_revisions,
                 &title_observations,
                 result,
             );
-            if is_plan_ready {
-                app.apply_batch_recaps(recaps, &recap_stamps);
-            }
         }
         NamingWorkerEvent::ExactPrepared {
             result,

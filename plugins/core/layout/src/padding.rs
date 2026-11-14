@@ -1,10 +1,11 @@
 //! Panel padding: the empty cells between a panel's border and its content.
 //!
-//! Port of `ilium-client/src/padding.rs`: the pure domain of the `padding` settings, that is the
-//! three activation modes, the per-panel side values (0 to [`MAX_PADDING`]) and the resolution of
-//! "how many cells, on which side, for which panel, at this terminal width". It does no I/O and no
-//! drawing. The kernel keeps the process-wide cell the tree geometry reads (frame drawing is
-//! synchronous, so that file is port-keep until the plugin can answer a frame call).
+//! The pure domain of the `padding` settings: the three activation modes, the per-panel side
+//! values (0 to [`MAX_PADDING`]) and the resolution of "how many cells, on which side, for which
+//! panel, at this terminal width". It does no I/O and no drawing. The plugin owns and validates
+//! the values and sends the whole table to the kernel as `kernel.set-padding`; the kernel keeps
+//! a mirror of these types (`ilium-client/src/padding.rs`) and applies the result to the
+//! geometry of every frame.
 
 use serde::{Deserialize, Serialize};
 

@@ -178,13 +178,9 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             None
         }
+        // The Sessions plugin asks the question; the kernel carries out the answer.
         ServerEvent::SessionRecoveryAvailable { pane_count } => {
-            let recovery = crate::app::Mode::ConfirmSessionRecovery { pane_count };
-            if matches!(app.mode, crate::app::Mode::Normal) {
-                app.mode = recovery;
-            } else {
-                app.push_modal(recovery);
-            }
+            app.begin_session_recovery(pane_count);
             None
         }
         // The outcome answers the plugin host's own request; nothing in the client waits for it.
@@ -792,26 +788,6 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         }
         // One-shot recap consumers own this direct reply; it is not UI state.
         ServerEvent::PaneRecapScreen { .. } => None,
-        ServerEvent::RecapUpdated {
-            pane_id,
-            session_id,
-            recap_generation,
-            trigger,
-            short,
-            long,
-        } => {
-            app.recap.observe_update(
-                pane_id,
-                crate::recap_state::StoredRecap {
-                    session_id,
-                    recap_generation,
-                    trigger,
-                    short,
-                    long,
-                },
-            );
-            None
-        }
         // Plugin traffic belongs to the client plugin host, not to the render cache. A changed
         // plugin list redraws Settings when it is open.
         event @ (ServerEvent::Plugin(_)

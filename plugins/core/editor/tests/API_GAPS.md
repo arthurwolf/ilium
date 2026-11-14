@@ -44,3 +44,9 @@ Tests are in tests/features/. Items the skeleton or harness does not offer yet:
 ## Move blockers (re-verified 2026-11-14, second pass)
 
 The per-file reasons and the blocker keys B1 to B10 (each with its evidence in the source) are in `docs/tasks/02-cuts/editor.md`. The earlier K1 (no `intent_routing.rs`), K3 (no popup text input) and K6 (no terminal menu entries) of this section are closed by the consumer streams; the rest were re-read against the current tree.
+
+## Create agent from line (moved 2026-11-14)
+
+- Moved: the kernel dialog (agent choice, task text, Create) is `src/agent_dialog.rs`; the kernel line menu runs `ilium.core.editor/create-agent-from-line` with `{ "path", "line", "text", "parent" }` (`ilium-client/src/plugin_host/commands.rs`). Tests: `src/agent_dialog.rs`, `tests/port/agent_from_line.rs`.
+- Unverified: `ilium/tests/pty_tui_smoke.rs::editor_line_context_menu_creates_selected_agent_and_submits_the_prompt` now clicks the host-drawn "Codex" option and "Create agent" button by their rendered text; it has not been run.
+- Not moved (still kernel, blocked): the editor pane itself. The host `view.rs` has no CodeView, Minimap or rendered-Markdown widgets, a plugin pane has no text-editing key and cursor surface, `PaneContentKind::Editor` snapshots have no migration to a plugin pane, and the kernel editor is tied to the `ilium_execution` CPU banks and the ordered writers (`filesystem/ordered.rs`).

@@ -18,6 +18,7 @@ pub(crate) mod onboarding_steps;
 pub(crate) mod plugin_panes;
 pub(crate) mod plugin_scenes;
 pub(crate) mod scene_controls;
+pub(crate) mod session_recovery;
 pub mod popup;
 pub(crate) mod remote;
 pub mod screens_rig;

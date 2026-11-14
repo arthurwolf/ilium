@@ -1024,7 +1024,16 @@ impl AnimationFrame {
         bytes = bytes.checked_add(self.host.receipt_bytes())?;
         for y in 0..self.height {
             for x in 0..self.width {
-                let symbol = self.article_symbol(x, y);
+                // Styled text a hosted plugin scene draws (`Scene::text_cell`) rides the same
+                // snapshot fields as the built-in article text; an empty symbol marks the cell
+                // a two-column grapheme covers.
+                let plugin_text = self.host.text_cell(x, y);
+                let symbol = self.article_symbol(x, y).or_else(|| {
+                    plugin_text
+                        .as_ref()
+                        .map(|text| text.symbol.as_str())
+                        .filter(|symbol| !symbol.is_empty())
+                });
                 if bytes.checked_add(symbol.map_or(0, str::len))? > MAX_FRAME_BYTES {
                     return None;
                 }
@@ -1038,14 +1047,16 @@ impl AnimationFrame {
                 let color = if request.settings.appearance.is_neutral() {
                     scene_color
                 } else {
-                    let coverage = if self.is_wikipedia || native_glyph.is_some() {
-                        1.0
-                    } else {
-                        f32::from(
-                            self.cells[usize::from(y) * usize::from(self.width) + usize::from(x)]
+                    let coverage =
+                        if self.is_wikipedia || native_glyph.is_some() || plugin_text.is_some() {
+                            1.0
+                        } else {
+                            f32::from(
+                                self.cells
+                                    [usize::from(y) * usize::from(self.width) + usize::from(x)]
                                 .count_ones() as u8,
-                        ) / 8.0
-                    };
+                            ) / 8.0
+                        };
                     let fraction = |coordinate: u16, extent: u16| {
                         if extent <= 1 {
                             0.5
@@ -1073,8 +1084,14 @@ impl AnimationFrame {
                         [usize::from(y) * usize::from(self.width) + usize::from(x)],
                     color,
                     article_symbol,
-                    article_is_continuation: self.article_is_continuation(x, y),
-                    article_style: self.article_style(x, y),
+                    article_is_continuation: self.article_is_continuation(x, y)
+                        || plugin_text
+                            .as_ref()
+                            .is_some_and(|text| text.symbol.is_empty()),
+                    article_style: plugin_text
+                        .as_ref()
+                        .filter(|text| !text.symbol.is_empty())
+                        .map_or_else(|| self.article_style(x, y), |text| (text.bold, text.italic)),
                     article_background: None,
                     image_background: image_background(
                         color,
@@ -1382,7 +1399,7 @@ mod tests {
         RenderRequest {
             revision,
             settings: AnimationSettings {
-                kind: AnimationKind::NightLights,
+                kind: AnimationKind::Images,
                 ..Default::default()
             },
             width: 2,
@@ -1873,7 +1890,7 @@ mod tests {
         let old = snapshot(&service);
         let lease = presentation(&old);
         let mut next = request(2, 1);
-        next.settings.kind = AnimationKind::Clouds;
+        next.settings.kind = AnimationKind::Video;
         assert_eq!(
             service.try_request(next.clone()).unwrap_err().reason,
             AdmissionError::RevisionNeedsBarrier

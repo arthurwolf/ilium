@@ -2376,34 +2376,6 @@ impl Tree {
         pane_ids
     }
 
-    /// Whether `pane_id` is a detected agent pane currently `Idle` or `Done`
-    /// -- i.e. not mid-turn, not blocked on background work, and not waiting
-    /// on an approval prompt where injected text could land inside the
-    /// pending prompt instead of a fresh turn. Backs `ilium-client`'s "ask
-    /// for update" tree action, shared so its eligibility check cannot drift
-    /// between the context menu and the tree row's shortcut button.
-    pub fn is_agent_pane_idle_for_update(&self, pane_id: NodeId) -> bool {
-        self.get(pane_id).is_some_and(|node| {
-            matches!(
-                &node.kind,
-                NodeKind::Pane {
-                    content: PaneContentKind::Terminal,
-                    status: PaneStatus::Agent(agent),
-                    ..
-                } if agent.turn == AgentTurn::Idle
-            )
-        })
-    }
-
-    /// All panes under `root` (inclusive) eligible for "ask for update" --
-    /// see [`Self::is_agent_pane_idle_for_update`].
-    pub fn panes_eligible_for_update(&self, root: NodeId) -> Vec<NodeId> {
-        self.pane_ids_in_subtree(root)
-            .into_iter()
-            .filter(|&pane_id| self.is_agent_pane_idle_for_update(pane_id))
-            .collect()
-    }
-
     /// Finds the container that directly owns `node_id` as an ordinary
     /// entry -- a normal `Group` or the `Project` itself. Split views are a
     /// presentation container rather than a folder boundary, so a pane
@@ -7643,104 +7615,6 @@ mod tests {
             tree.validate(),
             Err(TreeError::InvalidStructure(_))
         ));
-    }
-
-    #[test]
-    fn ask_for_update_eligibility_covers_only_idle_or_done_agent_panes() {
-        let mut tree = Tree::new();
-        let project = tree.add_project(PathBuf::from("/tmp/project")).unwrap();
-        let working = tree
-            .add_pane(project, "working", PaneContentKind::Terminal)
-            .unwrap();
-        tree.set_pane_status(
-            working,
-            PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
-        )
-        .unwrap();
-        let waiting_approval = tree
-            .add_pane(project, "waiting-approval", PaneContentKind::Terminal)
-            .unwrap();
-        tree.set_pane_status(
-            waiting_approval,
-            PaneStatus::from_activity(AgentClass::Claude, AgentActivity::WaitingApproval, None),
-        )
-        .unwrap();
-        let idle = tree
-            .add_pane(project, "idle", PaneContentKind::Terminal)
-            .unwrap();
-        tree.set_pane_status(
-            idle,
-            PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
-        )
-        .unwrap();
-        let done = tree
-            .add_pane(project, "done", PaneContentKind::Terminal)
-            .unwrap();
-        tree.set_pane_status(
-            done,
-            PaneStatus::from_activity(
-                AgentClass::Codex,
-                AgentActivity::Done,
-                Some(GoalState::Active),
-            ),
-        )
-        .unwrap();
-        let plain_shell = tree
-            .add_pane(project, "shell", PaneContentKind::Terminal)
-            .unwrap();
-
-        assert!(!tree.is_agent_pane_idle_for_update(working));
-        assert!(!tree.is_agent_pane_idle_for_update(waiting_approval));
-        assert!(tree.is_agent_pane_idle_for_update(idle));
-        assert!(tree.is_agent_pane_idle_for_update(done));
-        assert!(!tree.is_agent_pane_idle_for_update(plain_shell));
-
-        assert_eq!(
-            tree.panes_eligible_for_update(project),
-            vec![idle, done],
-            "only the idle/done agent panes are eligible, in tree order"
-        );
-    }
-
-    #[test]
-    fn panes_eligible_for_update_scopes_to_the_requested_subtree() {
-        let mut tree = Tree::new();
-        let first_project = tree.add_project(PathBuf::from("/tmp/first")).unwrap();
-        let nested_group = tree.add_group(first_project, "nested").unwrap();
-        let first_idle_pane = tree
-            .add_pane(nested_group, "idle-1", PaneContentKind::Terminal)
-            .unwrap();
-        tree.set_pane_status(
-            first_idle_pane,
-            PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
-        )
-        .unwrap();
-
-        let second_project = tree.add_project(PathBuf::from("/tmp/second")).unwrap();
-        let second_idle_pane = tree
-            .add_pane(second_project, "idle-2", PaneContentKind::Terminal)
-            .unwrap();
-        tree.set_pane_status(
-            second_idle_pane,
-            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
-        )
-        .unwrap();
-
-        // Scoped to one project: only that project's eligible pane comes back.
-        assert_eq!(
-            tree.panes_eligible_for_update(first_project),
-            vec![first_idle_pane]
-        );
-        // Scoped to the whole tree: both projects' eligible panes come back.
-        assert_eq!(
-            tree.panes_eligible_for_update(ROOT_ID),
-            vec![first_idle_pane, second_idle_pane]
-        );
-        // Scoped directly to a pane: itself, if eligible.
-        assert_eq!(
-            tree.panes_eligible_for_update(first_idle_pane),
-            vec![first_idle_pane]
-        );
     }
 }
 

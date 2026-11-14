@@ -151,6 +151,26 @@ fn port_026_completed_goal_ignores_a_historical_background_agent() {
     );
 }
 
+/// REQ: PORT:ilium-detect/src/lib.rs::claude_code_waiting_on_dynamic_workflow_is_waiting_subagents
+#[test]
+fn port_026_claude_waiting_on_a_dynamic_workflow_is_not_at_rest() {
+    let screen = fixture("claude_code_waiting_dynamic_workflow.txt");
+    let reported = activity("claude", &screen);
+    assert!(is_busy(&reported), "{reported:?}");
+    assert_ne!(reported, AgentActivity::AwaitingApproval);
+}
+
+/// REQ: PORT:ilium-detect/src/lib.rs::workflow_mentioned_in_prose_is_not_a_wait
+#[test]
+fn port_026_workflow_mentioned_in_prose_is_idle() {
+    for screen in [
+        "I will start a dynamic workflow soon.\n❯",
+        "Waiting for the workflow design review.\n❯",
+    ] {
+        assert_eq!(activity("claude", screen), AgentActivity::Idle, "{screen}");
+    }
+}
+
 /// REQ: PORT:ilium-detect/src/lib.rs::background_wait_in_explanatory_prose_is_not_live_status
 #[test]
 fn port_026_background_wait_in_prose_is_idle() {
@@ -330,7 +350,10 @@ fn port_026_alt_shell_still_running_without_done_clock_is_not_at_rest() {
 #[test]
 fn port_026_alt_truncated_custom_footer_is_idle() {
     assert_eq!(
-        activity("claude", &fixture("claude_idle_truncated_custom_footer.txt")),
+        activity(
+            "claude",
+            &fixture("claude_idle_truncated_custom_footer.txt")
+        ),
         AgentActivity::Idle
     );
 }
@@ -358,10 +381,7 @@ fn port_026_alt_claude_folder_trust_fixture_reports_no_goal() {
 /// REQ: PORT:ilium-detect/src/lib.rs::codex_activity_word_embedded_in_a_longer_word_is_not_working
 #[test]
 fn port_026_alt_regenerating_word_reports_no_goal() {
-    assert_eq!(
-        goal("codex", "Regenerating… (5m) is not a status"),
-        None
-    );
+    assert_eq!(goal("codex", "Regenerating… (5m) is not a status"), None);
 }
 
 /// REQ: PORT:ilium-detect/src/lib.rs::codex_awaiting_approval_is_waiting_approval

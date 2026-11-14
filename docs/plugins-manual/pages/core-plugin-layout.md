@@ -186,63 +186,364 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "kind": "tab",
         "id": "padding",
         "title": "Padding",
-        "scope": "client",
-        "rows": [
+        "sections": [
           {
-            "type": "choice",
-            "key": "mode",
-            "title": "Padding",
-            "default": "disabled",
-            "options": [
+            "id": "padding-mode",
+            "title": "When padding applies",
+            "scope": "client",
+            "rows": [
               {
-                "value": "disabled",
-                "title": "Disabled"
+                "type": "choice",
+                "key": "mode",
+                "title": "Padding",
+                "default": "disabled",
+                "options": [
+                  {
+                    "value": "disabled",
+                    "title": "Disabled"
+                  },
+                  {
+                    "value": "width_dependent",
+                    "title": "Size dependent"
+                  },
+                  {
+                    "value": "enabled",
+                    "title": "Enabled"
+                  }
+                ]
               },
               {
-                "value": "width_dependent",
-                "title": "Size dependent"
+                "type": "number",
+                "key": "width_threshold",
+                "title": "Minimum terminal width",
+                "minimum": 11,
+                "maximum": 1000,
+                "step": 1,
+                "unit": "columns",
+                "default": 200
               },
               {
-                "value": "enabled",
-                "title": "Enabled"
+                "type": "toggle",
+                "key": "right_panels_shared",
+                "title": "Same padding for every right-hand panel",
+                "default": true
               }
             ]
           },
           {
-            "type": "number",
-            "key": "width_threshold",
-            "title": "Minimum terminal width",
-            "minimum": 11,
-            "maximum": 1000,
-            "step": 1,
-            "unit": "columns",
-            "default": 200
+            "id": "padding-tree",
+            "title": "Tree",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "toggle",
+                "key": "tree_linked",
+                "title": "Same padding on every side",
+                "default": true
+              },
+              {
+                "type": "number",
+                "key": "tree_all",
+                "title": "Padding on every side",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "tree_left",
+                "title": "Left padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "tree_right",
+                "title": "Right padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "tree_top",
+                "title": "Top padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "tree_bottom",
+                "title": "Bottom padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              }
+            ]
           },
           {
-            "type": "toggle",
-            "key": "right_panels_shared",
-            "title": "Same padding for every right-hand panel",
-            "default": true
+            "id": "padding-right-shared",
+            "title": "Right-hand panels (shared)",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "toggle",
+                "key": "right_shared_linked",
+                "title": "Same padding on every side",
+                "default": true
+              },
+              {
+                "type": "number",
+                "key": "right_shared_all",
+                "title": "Padding on every side",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "right_shared_left",
+                "title": "Left padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "right_shared_right",
+                "title": "Right padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "right_shared_top",
+                "title": "Top padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "right_shared_bottom",
+                "title": "Bottom padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              }
+            ]
           },
           {
-            "type": "number",
-            "key": "tree_all",
-            "title": "Tree padding",
-            "minimum": 0,
-            "maximum": 3,
-            "step": 1,
-            "unit": "cells",
-            "default": 1
+            "id": "padding-terminal",
+            "title": "Terminals and agents",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "toggle",
+                "key": "terminal_linked",
+                "title": "Same padding on every side",
+                "default": true
+              },
+              {
+                "type": "number",
+                "key": "terminal_all",
+                "title": "Padding on every side",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "terminal_left",
+                "title": "Left padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "terminal_right",
+                "title": "Right padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "terminal_top",
+                "title": "Top padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "terminal_bottom",
+                "title": "Bottom padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              }
+            ]
           },
           {
-            "type": "number",
-            "key": "right_shared_all",
-            "title": "Right-hand panels padding",
-            "minimum": 0,
-            "maximum": 3,
-            "step": 1,
-            "unit": "cells",
-            "default": 1
+            "id": "padding-editor",
+            "title": "Editors",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "toggle",
+                "key": "editor_linked",
+                "title": "Same padding on every side",
+                "default": true
+              },
+              {
+                "type": "number",
+                "key": "editor_all",
+                "title": "Padding on every side",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "editor_left",
+                "title": "Left padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "editor_right",
+                "title": "Right padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "editor_top",
+                "title": "Top padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "editor_bottom",
+                "title": "Bottom padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              }
+            ]
+          },
+          {
+            "id": "padding-board",
+            "title": "Kanban boards",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "toggle",
+                "key": "board_linked",
+                "title": "Same padding on every side",
+                "default": true
+              },
+              {
+                "type": "number",
+                "key": "board_all",
+                "title": "Padding on every side",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "board_left",
+                "title": "Left padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "board_right",
+                "title": "Right padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "board_top",
+                "title": "Top padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              },
+              {
+                "type": "number",
+                "key": "board_bottom",
+                "title": "Bottom padding",
+                "minimum": 0,
+                "maximum": 3,
+                "step": 1,
+                "unit": "cells",
+                "default": 1
+              }
+            ]
           }
         ]
       },
@@ -672,7 +973,7 @@ In every state the data is not deleted ([COR-022]). A user who finds the presets
 
 ### Padding and tree row settings
 
-Layout declares two groups of settings rows (see the complete manifest). The **Padding** tab sets the empty cells between a panel border and its content: `mode` (`disabled`, `width_dependent` or `enabled`), `width_threshold` (11 to 1000 columns, default 200, used only by `width_dependent`), `right_panels_shared`, `tree_all` and `right_shared_all` (0 to 3 cells, default 1). A value outside its range is refused and the stored value stays. A terminal narrower than the padding keeps its full extent on that axis, so padding never removes the last cell of a panel. The **Tree rows** section of the user interface tab chooses the preset `tree_row_preset` (`default`, `all_right` or `mixed`) of the order of the identity, objective, activity and title slots of a tree row; the title cannot be hidden.
+Layout declares two groups of settings rows (see the complete manifest). The **Padding** tab sets the empty cells between a panel border and its content. The first section holds `mode` (`disabled`, `width_dependent` or `enabled`), `width_threshold` (11 to 1000 columns, default 200, used only by `width_dependent`) and `right_panels_shared`. One further section per panel (the tree, the shared right-hand panels, terminals and agents, editors and Kanban boards) holds `<panel>_linked` (one value for every side, default on), `<panel>_all` and the four sides `<panel>_left`, `<panel>_right`, `<panel>_top` and `<panel>_bottom` (0 to 3 cells, default 1), where `<panel>` is `tree`, `right_shared`, `terminal`, `editor` or `board`. The plugin keeps these values in its own settings and sends the whole table to the kernel with `kernel.set-padding` when it starts and after every edit; the kernel applies it to the geometry of every frame and stores nothing. A value outside its range is refused and the stored value stays. A terminal narrower than the padding keeps its full extent on that axis, so padding never removes the last cell of a panel. The **Tree rows** section of the user interface tab chooses the preset `tree_row_preset` (`default`, `all_right` or `mixed`) of the order of the identity, objective, activity and title slots of a tree row; the title cannot be hidden.
 
 #### Tree row layout dialog
 

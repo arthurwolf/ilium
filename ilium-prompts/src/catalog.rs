@@ -2,12 +2,8 @@
 
 #[path = "agent.rs"]
 pub mod agent;
-#[path = "conversion.rs"]
-pub mod conversion;
 #[path = "naming.rs"]
 pub mod naming;
-#[path = "recap.rs"]
-pub mod recap;
 #[path = "voice.rs"]
 pub mod voice;
 
@@ -16,6 +12,4 @@ pub fn catalog() -> impl Iterator<Item = &'static (&'static str, &'static str)> 
         .iter()
         .chain(voice::TEMPLATES)
         .chain(agent::TEMPLATES)
-        .chain(conversion::TEMPLATES)
-        .chain(recap::TEMPLATES)
 }

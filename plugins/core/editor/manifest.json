@@ -29,6 +29,9 @@
       "fs.read:project",
       "panes.create",
       "panes.create-command:claude",
+      "panes.create-command:codex",
+      "panes.create-command:agy",
+      "notify.toast",
       "terminal.write",
       "ui.panels",
       "services.use:ilium.core.editor/set-setting",
@@ -42,12 +45,20 @@
     ]
   },
   "activation": [
-    "pane-kind:editor"
+    "pane-kind:editor",
+    "command:ilium.core.editor/create-agent-from-line"
   ],
   "unstable": [
     "plugin-services"
   ],
   "contributes": {
+    "commands": [
+      {
+        "id": "create-agent-from-line",
+        "title": "Create agent from line",
+        "category": "Editor"
+      }
+    ],
     "extension_points": [
       {
         "id": "before-save",

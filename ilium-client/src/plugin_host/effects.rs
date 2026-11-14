@@ -66,6 +66,14 @@ pub(crate) enum ClientEffect {
     FreezeAgent(ilium_core::NodeId),
     /// Set the order and visibility of the tree row slots (`kernel.set-tree-row-layout`).
     SetTreeRowLayout(crate::tree_row_layout::TreeRowLayout),
+    /// Set the panel padding (`kernel.set-padding`).
+    SetPadding(crate::padding::PaddingSettings),
+    /// Set the buttons of the tree toolbar and the inactivity threshold
+    /// (`kernel.set-tree-toolbar`).
+    SetTreeToolbar {
+        entries: Vec<crate::tree_toolbar_layout::TreeToolbarEntry>,
+        minutes: u16,
+    },
 }
 
 /// The kernel command that sets the tree row layout: `{"order": [...], "hidden": [...]}` with
@@ -86,6 +94,52 @@ pub(crate) fn tree_row_layout_argument(
     serde_json::from_value::<crate::tree_row_layout::TreeRowLayout>(value)
         .map(crate::tree_row_layout::TreeRowLayout::normalized)
         .map_err(|error| format!("{USAGE}: {error}"))
+}
+
+/// The kernel command that sets the tree toolbar: `{"entries": ["search", ...], "minutes": 15}`
+/// with the persisted entry keys (`custom:<profile id>` for a custom agent) in toolbar order. The
+/// Tree plugin draws the editor; the kernel only saves the result and redraws the tree.
+pub(crate) const SET_TREE_TOOLBAR_COMMAND: &str = "kernel.set-tree-toolbar";
+
+/// The buttons and the inactivity minutes (1 to 1440) of a `kernel.set-tree-toolbar` invocation,
+/// or why it is refused. Repeated buttons are kept once.
+pub(crate) fn tree_toolbar_argument(
+    arguments_json: &str,
+) -> Result<(Vec<crate::tree_toolbar_layout::TreeToolbarEntry>, u16), String> {
+    const USAGE: &str =
+        "kernel.set-tree-toolbar takes {\"entries\": [<button key>, ...], \"minutes\": <1 to 1440>}";
+    let value: serde_json::Value =
+        serde_json::from_str(arguments_json).map_err(|error| format!("{USAGE}: {error}"))?;
+    let entries = value
+        .get("entries")
+        .cloned()
+        .ok_or_else(|| USAGE.to_owned())?;
+    let entries: Vec<crate::tree_toolbar_layout::TreeToolbarEntry> =
+        serde_json::from_value(entries).map_err(|error| format!("{USAGE}: {error}"))?;
+    let minutes = value
+        .get("minutes")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| USAGE.to_owned())?;
+    let layout = crate::tree_toolbar_layout::TreeToolbarLayout {
+        entries,
+        ..Default::default()
+    }
+    .normalized();
+    Ok((layout.entries, minutes.clamp(1, 1440) as u16))
+}
+
+/// The kernel command that sets the panel padding: the whole padding table as JSON (`mode`,
+/// `width_threshold`, `right_panels_shared` and one `{linked, all, sides}` object per panel kind).
+/// The Layout plugin owns the stored values and the settings page; the kernel only applies them
+/// to the geometry it draws with.
+pub(crate) const SET_PADDING_COMMAND: &str = "kernel.set-padding";
+
+/// The padding of a `kernel.set-padding` invocation, or why it is refused.
+pub(crate) fn padding_argument(
+    arguments_json: &str,
+) -> Result<crate::padding::PaddingSettings, String> {
+    crate::padding::PaddingSettings::from_json(arguments_json)
+        .map_err(|reason| format!("kernel.set-padding: {reason}"))
 }
 
 /// The kernel command that sets an option of an editor pane:
@@ -228,6 +282,16 @@ fn kernel_command(spec: &InvokeCommandSpec) -> Classified {
         },
         SET_TREE_ROW_LAYOUT_COMMAND => match tree_row_layout_argument(&spec.arguments_json) {
             Ok(layout) => Classified::Effect(ClientEffect::SetTreeRowLayout(layout)),
+            Err(reason) => refused(ErrorCode::InvalidArgument, reason),
+        },
+        SET_TREE_TOOLBAR_COMMAND => match tree_toolbar_argument(&spec.arguments_json) {
+            Ok((entries, minutes)) => {
+                Classified::Effect(ClientEffect::SetTreeToolbar { entries, minutes })
+            }
+            Err(reason) => refused(ErrorCode::InvalidArgument, reason),
+        },
+        SET_PADDING_COMMAND => match padding_argument(&spec.arguments_json) {
+            Ok(settings) => Classified::Effect(ClientEffect::SetPadding(settings)),
             Err(reason) => refused(ErrorCode::InvalidArgument, reason),
         },
         other => refused(
@@ -445,6 +509,69 @@ mod tests {
             Classified::Refused(_)
         ));
         assert!(matches!(set("[]"), Classified::Refused(_)));
+    }
+
+    #[test]
+    fn set_padding_takes_a_whole_checked_padding_table() {
+        use crate::padding::{PaddingMode, PaddingSettings};
+        let set = |arguments_json: &str| {
+            classify_here(Intent::InvokeCommand(InvokeCommandSpec {
+                command: SET_PADDING_COMMAND.to_owned(),
+                arguments_json: arguments_json.to_owned(),
+            }))
+        };
+        let Classified::Effect(ClientEffect::SetPadding(settings)) =
+            set(r#"{"mode": "width_dependent", "width_threshold": 150}"#)
+        else {
+            panic!("a valid padding table is an effect");
+        };
+        assert_eq!(settings.mode, PaddingMode::WidthDependent);
+        assert_eq!(settings.width_threshold, 150);
+        assert_eq!(settings.tree, PaddingSettings::default().tree);
+        assert!(matches!(
+            set(r#"{"width_threshold": 5}"#),
+            Classified::Refused(_)
+        ));
+        assert!(matches!(set(r#"{"mode": 3}"#), Classified::Refused(_)));
+        assert!(matches!(set("[]"), Classified::Refused(_)));
+    }
+
+    #[test]
+    fn set_tree_toolbar_takes_button_keys_and_checked_minutes() {
+        use crate::tree_toolbar_layout::TreeToolbarEntry;
+        let set = |arguments_json: &str| {
+            classify_here(Intent::InvokeCommand(InvokeCommandSpec {
+                command: SET_TREE_TOOLBAR_COMMAND.to_owned(),
+                arguments_json: arguments_json.to_owned(),
+            }))
+        };
+        let Classified::Effect(ClientEffect::SetTreeToolbar { entries, minutes }) = set(
+            r#"{"entries": ["settings", "custom:mine", "settings", "search"], "minutes": 5000}"#,
+        ) else {
+            panic!("a valid toolbar is an effect");
+        };
+        assert_eq!(
+            entries,
+            vec![
+                TreeToolbarEntry::Settings,
+                TreeToolbarEntry::CustomAgent("mine".into()),
+                TreeToolbarEntry::Search,
+            ]
+        );
+        assert_eq!(minutes, 1440);
+        assert!(matches!(
+            set(r#"{"entries": [], "minutes": 0}"#),
+            Classified::Effect(ClientEffect::SetTreeToolbar { minutes: 1, .. })
+        ));
+        for bad in [
+            r#"{"entries": ["nope"], "minutes": 5}"#,
+            r#"{"entries": ["search"]}"#,
+            r#"{"minutes": 5}"#,
+            "[]",
+            "",
+        ] {
+            assert!(matches!(set(bad), Classified::Refused(_)), "{bad}");
+        }
     }
 
     fn set_editor_option(arguments_json: &str) -> Classified {

@@ -26,6 +26,7 @@
       "agent.read",
       "messages.peer:ilium.core.notifications",
       "services.use:ilium.core.cost/usage",
+      "settings.read-kernel:inference",
       "settings.write-kernel:api",
       "extensions.provide:ilium.core.fleet/selectors",
       "extensions.provide:ilium.core.fleet/before-broadcast",

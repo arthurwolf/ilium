@@ -17,10 +17,11 @@ pub mod ui;
 pub mod wasm;
 
 pub use plugin::{
-    clear_host, host, no_host, set_host, DispatchToHandler, DispatchToNobody, HandlerProbe, HostHandle, Annotator, CatalogProvider, Detector, Handler, HookHandler, HostApi, HostCalls,
+    clear_host, host, no_host, set_host, Annotator, CatalogProvider, Detector, DispatchToHandler,
+    DispatchToNobody, Handler, HandlerProbe, HookHandler, HostApi, HostCalls, HostHandle,
     InferenceProvider, JobRunner, Lifecycle, LifecycleState, MenuProvider, Migrator, NativeEntry,
-    NativeRenderer, Plugin, Renderer, SceneField, SceneProgram, SceneRenderer, ServiceProvider, SettingsValidate,
-    TokenProvider, Views, VirtualRowsProvider,
+    NativeRenderer, Plugin, Renderer, SceneField, SceneProgram, SceneRenderer, ServiceProvider,
+    SettingsValidate, TextGlyph, TokenProvider, Views, VirtualRowsProvider,
 };
 
 /// Types of `ilium:types`, one module per WIT interface (rust-sdk.md "Module map").

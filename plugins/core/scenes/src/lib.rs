@@ -13,6 +13,7 @@ pub mod atlantic_dusk;
 pub mod box_machine;
 pub mod carpet;
 pub mod classic;
+pub mod clouds;
 pub mod cube_clock;
 pub mod dither_water;
 pub mod dithered_waves;
@@ -25,6 +26,7 @@ pub mod kit;
 pub mod live_chess;
 pub mod live_data;
 pub mod machine_screen;
+pub mod night_lights;
 pub mod pi_digits;
 pub mod pipes;
 pub mod quiet;
@@ -233,6 +235,9 @@ impl ScenesScene {
             for column in 0..columns {
                 if let Some(character) = scene.native_glyph(column, row) {
                     field.put_glyph(column, row, character);
+                }
+                if let Some(text) = scene.text_cell(column, row) {
+                    field.put_text(column, row, &text.symbol, text.bold, text.italic);
                 }
             }
         }
@@ -496,6 +501,10 @@ mod spec_tests {
             "http:meri.digitraffic.fi",
             "http:opensky-network.org",
             "http:api.openseafeed.com",
+            // Earth at night: NASA GIBS imagery tiles.
+            "http:gibs.earthdata.nasa.gov",
+            // Satellite clouds: EUMETSAT EUMETView WMS maps.
+            "http:view.eumetsat.int",
         ] {
             assert!(grants.contains(&json!(needed)), "{needed}");
         }
@@ -509,10 +518,7 @@ mod spec_tests {
             let properties = scene["settings_schema"]["properties"]
                 .as_object()
                 .expect("settings_schema.properties is an object");
-            let is_skeleton = matches!(
-                scene["id"].as_str(),
-                Some("waves" | "clock")
-            );
+            let is_skeleton = matches!(scene["id"].as_str(), Some("waves" | "clock"));
             if !is_skeleton {
                 assert!(
                     !properties.is_empty(),

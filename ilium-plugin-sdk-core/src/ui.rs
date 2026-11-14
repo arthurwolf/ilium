@@ -311,7 +311,9 @@ pub mod build {
                 nodes: self.nodes,
                 root,
             };
-            let encoded_bytes = serde_json::to_vec(&tree).map(|bytes| bytes.len()).unwrap_or(0);
+            let encoded_bytes = serde_json::to_vec(&tree)
+                .map(|bytes| bytes.len())
+                .unwrap_or(0);
             if encoded_bytes > MAX_TREE_KIB * 1024 {
                 return Err(invalid("ui.too-large", "the tree is over 1,024 KiB"));
             }
@@ -352,7 +354,10 @@ pub mod build {
                         return Err(invalid("ui.bad-key", "a key has 1 to 64 characters"));
                     }
                     if !keys.insert(key.as_str()) {
-                        return Err(invalid("ui.duplicate-key", "a key is used twice in one view"));
+                        return Err(invalid(
+                            "ui.duplicate-key",
+                            "a key is used twice in one view",
+                        ));
                     }
                 }
                 if let Some(reason) = &node.disabled_reason {

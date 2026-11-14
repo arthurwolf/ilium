@@ -11,6 +11,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use ilium_plugin_sdk::generated::host::kernel_settings::HostKernelSettings;
 use ilium_plugin_sdk::generated::host::tree::HostTree;
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, AgentActivity, ButtonRole, Constraint, ContainerKind, Delivery,
@@ -39,6 +40,37 @@ pub const SEND_ID: &str = "update-send";
 pub const CANCEL_ID: &str = "update-cancel";
 /// The fixed status request.
 pub const STATUS_REQUEST: &str = "please remind me, in a very compact way, what you were doing, what I asked you to do, how it went, etc, remind me what's going on";
+/// The fixed request with the user's "Ask for update instructions" appended in the
+/// `<custom-instructions>` block the old built-in template used. The instructions are read from
+/// the kernel `inference` tab (`instructions.ask_for_update`) and pasted literally; a missing,
+/// unreadable or blank value leaves the plain request.
+pub fn status_request(api: &mut dyn HostApi) -> String {
+    let instructions = HostKernelSettings::read(api, "inference".to_owned())
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| {
+            value
+                .get("instructions")
+                .and_then(|instructions| instructions.get("ask_for_update"))
+                .and_then(Value::as_str)
+                .map(|text| text.trim().to_owned())
+        })
+        .unwrap_or_default();
+    with_custom_instructions(&instructions)
+}
+
+/// [`STATUS_REQUEST`] followed by the custom-instructions block, or alone when `instructions` is
+/// blank.
+fn with_custom_instructions(instructions: &str) -> String {
+    let instructions = instructions.trim();
+    if instructions.is_empty() {
+        return STATUS_REQUEST.to_owned();
+    }
+    format!(
+        "{STATUS_REQUEST}\n<custom-instructions purpose=\"ask-for-update\">\n{instructions}\n</custom-instructions>"
+    )
+}
+
 /// Shown when nobody idle is in scope.
 pub const NO_IDLE_NOTICE: &str = "No idle agent to ask for an update";
 /// Shown when a scope holds no agent at all.
@@ -421,7 +453,11 @@ pub fn handle_text(api: &mut dyn HostApi, payload: &[u8]) -> Vec<Submission> {
     if text.trim().is_empty() {
         return Vec::new();
     }
-    let delivery = if text.contains('\n') {
+    // The command `ask-for-update-status` sends the fixed request verbatim; the instructions
+    // belong to it and to nothing the user typed.
+    let fixed = (text == STATUS_REQUEST).then(|| status_request(api));
+    let text = fixed.as_deref().unwrap_or(text);
+    let delivery = if fixed.is_none() && text.contains('\n') {
         Delivery::Pasted
     } else {
         Delivery::Submitted
@@ -467,10 +503,14 @@ pub fn handle_scoped(api: &mut dyn HostApi, payload: &[u8]) -> Vec<Submission> {
             Scope::Filesystem { .. } | Scope::Structural { explicit: true, .. }
         );
     let found = recipients(api, &scope);
+    let request = match text {
+        Some(text) => text.to_owned(),
+        None => status_request(api),
+    };
     let mut out: Vec<Submission> = found
         .iter()
         .filter(|(_, activity)| everyone || *activity == AgentActivity::Idle)
-        .map(|(pane, _)| input(*pane, text.unwrap_or(STATUS_REQUEST), Delivery::Submitted))
+        .map(|(pane, _)| input(*pane, &request, Delivery::Submitted))
         .collect();
     if out.is_empty() {
         let message = if found.is_empty() && matches!(scope, Scope::Filesystem { .. }) {
@@ -494,6 +534,17 @@ pub fn handle_scoped(api: &mut dyn HostApi, payload: &[u8]) -> Vec<Submission> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_instructions_are_appended_trimmed_and_blank_ones_are_dropped() {
+        assert_eq!(with_custom_instructions(" \n\t"), STATUS_REQUEST);
+        assert_eq!(
+            with_custom_instructions("  Be brief {{x}}\n"),
+            format!(
+                "{STATUS_REQUEST}\n<custom-instructions purpose=\"ask-for-update\">\nBe brief {{{{x}}}}\n</custom-instructions>"
+            )
+        );
+    }
 
     #[test]
     fn node_argument_reads_the_row_and_nothing_else() {

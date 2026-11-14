@@ -24,6 +24,10 @@ fn port_actual_public_video_http_without_original_network_right_is_denied_before
         "http:meri.digitraffic.fi",
         "http:opensky-network.org",
         "http:api.openseafeed.com",
+        // The map-imagery scenes: NASA GIBS tiles (Earth at night, Satellite clouds) and the
+        // EUMETSAT view service (Satellite clouds).
+        "http:gibs.earthdata.nasa.gov",
+        "http:view.eumetsat.int",
     ];
     let mut hosts = hosts;
     expected.sort_unstable();

@@ -269,6 +269,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "palette": false,
         "side": "client",
         "category": "Tree"
+      },
+      {
+        "id": "tree-toolbar",
+        "title": "Tree toolbar",
+        "palette": false,
+        "side": "client",
+        "category": "Tree"
       }
     ],
     "services": {
@@ -769,6 +776,18 @@ The client side holds `ui.panels` for the popup and `tree.read` for the destinat
 | 5 | server side | Submits `rename-node` for that node. A payload that is not that object is ignored. |
 
 The client side holds `notify.toast` for the worktree refusal.
+
+**Command `tree-toolbar`** (client side, category Tree): the tree toolbar editor. The Settings "Toolbar" page runs `ilium.core.tree/tree-toolbar` with `{"entries": [{"key", "label", "glyph"}], "catalogue": [...], "defaults": ["key", ...], "minutes": n}`: the buttons of the bottom row in order, every button that exists (the built-ins and one per custom agent), the keys of the default layout and the inactivity threshold in minutes.
+
+| Step | Who | What |
+| --- | --- | --- |
+| 1 | kernel | Runs `tree-toolbar` with the arguments above. Arguments that miss one of the four fields open nothing. |
+| 2 | client side | Opens the popup `tree-toolbar` through `open-view`. |
+| 3 | kernel | Draws the popup: the list of buttons in use, the list of buttons to add, a preview row of the glyphs and the inactivity minutes, with the buttons Done, Cancel, Up, Down, Remove, Add, Shorter, Longer and Default. |
+| 4 | client side | Applies each press to its copy of the toolbar and submits `invoke-command` `kernel.set-tree-toolbar` with `{"entries": ["key", ...], "minutes": n}` at once, so the tree shows the change behind the dialog. Up and Down move the selected button, Add appends the chosen one, Default restores the default buttons, Shorter and Longer change the minutes by one within 1 to 1440. Done and Esc keep what is shown. Cancel sends the toolbar back that was in use when the dialog opened. |
+| 5 | kernel | Saves the buttons and the minutes. Removing the activity filter button also switches the filter off. |
+
+With Tree off the Settings page reports that Tree is not running; the toolbar keeps the buttons it had.
 
 Decoration slots, row actions and display modes of every plugin are drawn by the tree.
 

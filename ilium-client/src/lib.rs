@@ -106,9 +106,6 @@ pub mod onboarding;
 pub mod open_target;
 pub mod outbound_requests;
 pub mod padding;
-pub mod padding_app;
-pub mod padding_dialog;
-pub mod padding_ui;
 mod paste_cursor;
 pub mod paths;
 pub mod plugin_host;
@@ -124,9 +121,6 @@ pub mod project_naming;
 mod provider_admission; // Bounded IO preflight retains original request ownership.
 mod proxy_database;
 pub mod recap;
-pub mod recap_state;
-pub mod recap_ui;
-pub mod recap_worker;
 mod redraw_schedule;
 pub mod release_embedding;
 pub mod render_cache;
@@ -189,7 +183,6 @@ pub mod transcript_context;
 mod tree_activity_projection;
 pub mod tree_ordering;
 pub mod tree_toolbar_layout;
-mod tree_toolbar_settings;
 pub mod tree_transitions;
 pub mod tree_ui;
 pub mod trigger_execution_lease;
@@ -1052,8 +1045,6 @@ async fn run_inner(
     }
     app.keyboard_settings = config.keyboard;
     app.keybindings = config.keybindings;
-    app.padding_settings = config.padding;
-    app.sync_padding();
     app.apply_sound_settings(config.sound);
     app.apply_notification_settings(config.notifications);
     app.apply_inference_settings(config.inference);
@@ -1419,12 +1410,6 @@ async fn run_inner(
         if let Some(delay) = app.sound_studio_preview_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if crate::onboarding::integration::is_animating(&app) || last_onboarding_animation_active {
             tick_delay = tick_delay.min(Duration::from_millis(33));
-        }
-        // A running recap advances its phase bar from worker-side state, which posts no
-        // event, so redraw on a bounded tick until the worker finishes.
-        if app.recap_is_running() {
-            needs_redraw = true;
-            tick_delay = tick_delay.min(Duration::from_millis(250));
         }
         if needs_redraw && presenter.outstanding_frames() == 0 {
             tick_delay = tick_delay.min(redraw_schedule.delay(needs_immediate_redraw, now));
@@ -4672,10 +4657,6 @@ fn reject_naming_original(
         NamingKind::Restructure(request, _) => {
             app.fail_project_restructure(request.project_id, anyhow::anyhow!(message.clone()))
         }
-        NamingKind::Recap(request) => {
-            app.recap.finish_manual(request.pane_id);
-            app.recap_failed(request.pane_id, message.clone());
-        }
         #[cfg(test)]
         NamingKind::LastPrompt(_) => {}
     }
@@ -4856,20 +4837,6 @@ fn dispatch_pending_app_work(
                 );
             }
         }
-    }
-
-    for mut request in app.take_pending_recap_requests() {
-        let pane_id = request.pane_id;
-        let Some(home_dir) = home_dir else {
-            app.recap_failed(pane_id, "home directory unavailable".to_string());
-            continue;
-        };
-        if app.onboarding.is_some() || !app.onboarding_progress.automatic_ai_allowed() {
-            app.recap_failed(pane_id, "AI is not allowed yet".to_string());
-            continue;
-        }
-        request.home = home_dir.to_path_buf();
-        handle_naming_admission(naming_workers.spawn_recap_worker(request), app);
     }
 
     for request in app.take_pending_restructure_requests() {
@@ -6015,6 +5982,5 @@ mod responsiveness_tests {
         assert_eq!(app.status_message.as_deref(), Some("Voice (typed): second"));
     }
 }
-
 
 pub mod tree_row_layout;

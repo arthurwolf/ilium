@@ -5,6 +5,7 @@
 //! Normal and Attention display modes. Plugin structs stay unit structs (tests build them as
 //! literals), so per-instance state lives in thread-local cells.
 
+pub mod batch;
 pub mod identify;
 pub mod screen;
 
@@ -14,6 +15,7 @@ use std::collections::BTreeMap;
 use ilium_plugin_sdk::generated::exports::detector::Classification;
 use ilium_plugin_sdk::generated::exports::detector::DetectorProcess;
 use ilium_plugin_sdk::generated::exports::detector::DetectorScreen;
+use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::generated::host::log::Level;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::{
@@ -27,7 +29,7 @@ use ilium_plugin_sdk::generated::types::ui::{
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{NodeId, Span, Style};
-use ilium_plugin_sdk::{ilium_plugin, Detector, Handler, Lifecycle, Views};
+use ilium_plugin_sdk::{ilium_plugin, Detector, Handler, Lifecycle, ServiceProvider, Views};
 
 /// The ten braille frames of the working spinner.
 const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -45,19 +47,42 @@ struct SignatureEntry {
 
 /// Registry in match priority order. A new agent CLI is a new entry here, not a new branch.
 const SIGNATURES: &[SignatureEntry] = &[
-    SignatureEntry { id: "claude", needles: &["claude"] },
-    SignatureEntry { id: "codex", needles: &["codex"] },
-    SignatureEntry { id: "antigravity", needles: &["antigravity", "antimatter", "agy"] },
-    SignatureEntry { id: "opencode", needles: &["opencode"] },
-    SignatureEntry { id: "aider", needles: &["aider"] },
-    SignatureEntry { id: "example-agent", needles: &["example-agent", "example"] },
+    SignatureEntry {
+        id: "claude",
+        needles: &["claude"],
+    },
+    SignatureEntry {
+        id: "codex",
+        needles: &["codex"],
+    },
+    SignatureEntry {
+        id: "antigravity",
+        needles: &["antigravity", "antimatter", "agy"],
+    },
+    SignatureEntry {
+        id: "opencode",
+        needles: &["opencode"],
+    },
+    SignatureEntry {
+        id: "aider",
+        needles: &["aider"],
+    },
+    SignatureEntry {
+        id: "example-agent",
+        needles: &["example-agent", "example"],
+    },
 ];
 
 /// The registry signature a lowercase name matches, if any.
 fn signature_of_name(candidate: &str) -> Option<&'static str> {
     SIGNATURES
         .iter()
-        .find(|entry| entry.needles.iter().any(|needle| candidate.contains(needle)))
+        .find(|entry| {
+            entry
+                .needles
+                .iter()
+                .any(|needle| candidate.contains(needle))
+        })
         .map(|entry| entry.id)
 }
 
@@ -154,7 +179,10 @@ fn screen_goal(signature: &str, screen_text: &str) -> Option<String> {
 }
 
 fn plain_text(content: &str) -> Vec<Span> {
-    vec![Span { text: content.to_string(), style: Style::default() }]
+    vec![Span {
+        text: content.to_string(),
+        style: Style::default(),
+    }]
 }
 
 fn activity_submission(node: NodeId, current: AgentActivity) -> Option<Submission> {
@@ -168,7 +196,10 @@ fn activity_submission(node: NodeId, current: AgentActivity) -> Option<Submissio
             node,
             ACTIVITY_SLOT,
             SPINNER_FRAMES[0],
-            SPINNER_FRAMES.iter().map(|frame| plain_text(frame)).collect(),
+            SPINNER_FRAMES
+                .iter()
+                .map(|frame| plain_text(frame))
+                .collect(),
         )),
         AgentActivity::AwaitingApproval => {
             Intent::SetDecoration(decoration_spec(node, ACTIVITY_SLOT, "?", Vec::new()))
@@ -192,7 +223,11 @@ fn decoration_spec(
     icon: &str,
     frames: Vec<Vec<Span>>,
 ) -> SetDecorationSpec {
-    let frame_ms = if frames.is_empty() { 0 } else { SPINNER_FRAME_MS };
+    let frame_ms = if frames.is_empty() {
+        0
+    } else {
+        SPINNER_FRAME_MS
+    };
     SetDecorationSpec {
         node,
         slot: slot.to_string(),
@@ -221,7 +256,10 @@ fn goal_submission(node: NodeId, goal: Option<String>) -> Submission {
             Submission::keyed(Intent::SetDecoration(spec), key)
         }
         None => Submission::keyed(
-            Intent::ClearDecoration(DecorationKey { node, slot: GOAL_SLOT.to_string() }),
+            Intent::ClearDecoration(DecorationKey {
+                node,
+                slot: GOAL_SLOT.to_string(),
+            }),
             key,
         ),
     }
@@ -235,7 +273,7 @@ fn signal_submission(node: NodeId, signal: &str, value: &str) -> Submission {
 }
 
 /// The server side of `ilium.core.agent-detect` (core-plugin-agent-detect.md, world `ilium:server/base@0.1.0`).
-#[ilium_plugin(side = "server", exports = ["detector"])]
+#[ilium_plugin(side = "server", exports = ["detector", "service-provider"])]
 #[derive(Default)]
 pub struct AgentDetectServer;
 
@@ -263,12 +301,24 @@ impl Handler for AgentDetectServer {
                     );
                 }
                 Event::SignalChanged(signal) => {
-                    submissions.push(signal_submission(signal.pane, &signal.signal, &signal.value));
+                    submissions.push(signal_submission(
+                        signal.pane,
+                        &signal.signal,
+                        &signal.value,
+                    ));
                 }
                 _ => {}
             }
         }
         submissions
+    }
+}
+
+/// `ilium.core.agent-detect/screen-verdicts`: the batched screen verdicts the kernel detection loop caches
+/// (see `batch`), so the loop never waits on a per-pane detector call.
+impl ServiceProvider for AgentDetectServer {
+    fn handle(&mut self, call: ServiceCall) -> ServiceReply {
+        ServiceReply::Done(batch::handle(&call.method, &call.payload_json))
     }
 }
 
@@ -326,7 +376,8 @@ pub struct AgentDetectClient;
 
 impl Lifecycle for AgentDetectClient {
     fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
-        let settings: serde_json_free::Settings = serde_json_free::Settings::from(&context.settings_json);
+        let settings: serde_json_free::Settings =
+            serde_json_free::Settings::from(&context.settings_json);
         PANEL.with(|cell| {
             let mut state = cell.borrow_mut();
             state.agents.clear();
@@ -375,7 +426,10 @@ impl Handler for AgentDetectClient {
                     Event::PaneTitleChanged(change) => {
                         agent_entry(&mut state, change.node).title = change.title;
                     }
-                    Event::NodeRemoved(node) | Event::PaneExited(ilium_plugin_sdk::types::PaneExitedEvent { node, .. }) => {
+                    Event::NodeRemoved(node)
+                    | Event::PaneExited(ilium_plugin_sdk::types::PaneExitedEvent {
+                        node, ..
+                    }) => {
                         state.agents.remove(&node.0);
                     }
                     _ => {}
@@ -405,7 +459,10 @@ fn activity_label(activity: AgentActivity) -> &'static str {
 }
 
 fn needs_attention(activity: AgentActivity) -> bool {
-    matches!(activity, AgentActivity::AwaitingApproval | AgentActivity::Done)
+    matches!(
+        activity,
+        AgentActivity::AwaitingApproval | AgentActivity::Done
+    )
 }
 
 fn clip(text: &str, width: usize) -> String {

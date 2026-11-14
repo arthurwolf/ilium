@@ -26,9 +26,7 @@ use ratatui::layout::{Position, Rect};
 use tui_tree_widget::TreeState;
 
 use crate::agent_feature_setup::{AgentFeature, FeatureSetupStatus};
-use crate::agent_from_line::{
-    CreateAgentFromLineState, EditorLineContextAction, EditorLineContextMenu, EditorSourceLine,
-};
+use crate::agent_from_line::{EditorLineContextAction, EditorLineContextMenu, EditorSourceLine};
 use crate::agent_toolbar::{AgentToolbarAction, EffortLevel};
 use crate::config::{
     AgentSetupSettings, ApiSettings, DebugSettings, EditorSettings, GitSettings, KeyboardSettings,
@@ -351,8 +349,6 @@ pub enum Mode {
     LastPromptDialog(crate::last_prompt_toolbar::LastPromptDialogState),
     /// A mouse-anchored action menu for one physical editor source line.
     EditorLineContextMenu(EditorLineContextMenu),
-    /// Agent selector and editable task prompt opened from an editor line.
-    CreateAgentFromLine(Box<CreateAgentFromLineState>),
     /// Prompt-first worktree creation form, retained until correlated result.
     CreateAgentWorkspace(Box<WorktreeDialogState>),
     WorktreeManager(Box<WorktreeManagerState>),
@@ -367,10 +363,6 @@ pub enum Mode {
     ConfirmClose(NodeId),
     /// A separate confirmation before removing an Ilium-owned worktree.
     ConfirmRemoveWorkspace(NodeId),
-    /// The server found a persisted session and is awaiting a restore/discard choice.
-    ConfirmSessionRecovery {
-        pane_count: usize,
-    },
     /// The full-screen settings view is open, replacing the entire screen
     /// (see `crate::settings_ui`'s module doc comment for the UI/UX brief).
     /// Reached via `Action::Settings`, the tree footer's settings button, or
@@ -458,8 +450,6 @@ pub enum SettingsTab {
     Icons,
     Toolbar,
     Appearance,
-    /// Panel padding modes and fine-tuning.
-    Padding,
     Animations,
     Terminal,
     Editor,
@@ -633,9 +623,8 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 23] = [
+    pub const ALL: [SettingsTab; 22] = [
         Self::Appearance,
-        Self::Padding,
         Self::Icons,
         Self::Toolbar,
         Self::AgentMonitoring,
@@ -670,7 +659,6 @@ impl SettingsTab {
             Self::Icons => "Icons",
             Self::Toolbar => "Toolbar",
             Self::Appearance => "User Interface",
-            Self::Padding => "Padding",
             Self::Animations => "Animations",
             Self::Terminal => "Terminal",
             Self::Editor => "Editor",
@@ -1095,15 +1083,12 @@ pub struct SettingsState {
     /// Whether the Icons preview renders the current session tree or the
     /// complete dummy specimen tree.
     pub icons_preview_real: bool,
-    pub toolbar_picker: Option<usize>,
     /// Full-screen catalogue picker layered over the Icons tab.
     pub icon_picker: Option<IconPickerState>,
     /// The action whose key is being chosen in the collision-safe visual
     /// keyboard. It is separate from `selected_row`: a picker may be opened
     /// from a scrolled table row without changing table navigation.
     pub keyboard_picker: Option<Action>,
-    /// Hover, threshold editing and the fine-tuning dialog of the Padding tab.
-    pub padding: crate::padding_ui::PaddingUiState,
     /// The Agent Monitoring display-mode card under the pointer.
     pub agent_monitoring_hover: Option<crate::agent_monitoring::AgentMonitoringMode>,
     /// Horizontal chip cursor in the selected Triggers event. Zero is None;
@@ -1232,10 +1217,8 @@ impl SettingsState {
             animation_detail_show_help: false,
             animation_detail_scroll: 0,
             icons_preview_real: false,
-            toolbar_picker: None,
             icon_picker: None,
             keyboard_picker: None,
-            padding: crate::padding_ui::PaddingUiState::default(),
             agent_monitoring_hover: None,
             trigger_action_cursor: 0,
         }
@@ -1753,9 +1736,6 @@ pub struct PendingRestructureRequest {
     /// The worker returns it unchanged so the server can preserve anything
     /// that arrived after inference began as dirty for the next pass.
     pub inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
-    /// Session and generation stamped for every agent pane at request time,
-    /// so the batch recaps the reply carries are fenced against later work.
-    pub recap_stamps: HashMap<NodeId, (String, u64)>,
 }
 
 /// Distinguishes an explicit user action from a passive lifecycle trigger.
@@ -1955,6 +1935,11 @@ pub struct App {
     /// The Settings screen set aside while a plugin popup that a settings page asked for is open.
     /// The popup replaces the whole screen, so closing it brings the page back where it was.
     pub(crate) settings_suspended_for_popup: Option<Box<SettingsState>>,
+    /// The restore-or-discard decision the server waits for after it found a stored snapshot
+    /// (policy "Ask before restoring"). The Sessions plugin asks the question; see
+    /// `plugin_host::commands`.
+    pub(crate) session_recovery_pending:
+        Option<crate::plugin_host::session_recovery::PendingSessionRecovery>,
     pub(crate) external_open: Option<crate::external_open::ExternalOpenService>,
     pub(crate) external_open_status_storage: Option<ilium_execution::Retention>,
     /// Clipboard ownership must outlive the copy action on Linux, where the
@@ -2419,14 +2404,6 @@ pub struct App {
     pub agent_session_ids: HashMap<NodeId, String>,
     /// Non-secret profile identity for custom-agent panes.
     pub custom_agent_panes: HashMap<NodeId, ilium_core::custom_agent::CustomAgentIdentity>,
-    /// Recap fence, in-flight dedupe and the recaps the server last reported.
-    pub recap: crate::recap_state::RecapState,
-    pub(crate) pending_recap_requests: Vec<crate::recap_worker::RecapWorkerRequest>,
-    pub(crate) recap_progress: HashMap<NodeId, crate::recap_ui::RecapProgress>,
-    pub(crate) recap_errors: HashMap<NodeId, String>,
-    pub recap_popover: Option<crate::recap_ui::RecapPopover>,
-    /// Tree refresh icon under the pointer, with the cell to anchor its tooltip.
-    pub hovered_recap_refresh: Option<(NodeId, ratatui::layout::Position)>,
     /// Server-verified transcript path for each pane's `agent_session_ids`
     /// entry. A hint only: lookups re-verify it before trusting it and fall
     /// back to a bounded scan, so a stale or foreign path cannot be shown.
@@ -2663,6 +2640,7 @@ impl App {
             status_message: None,
             plugin_toast: None,
             settings_suspended_for_popup: None,
+            session_recovery_pending: None,
             external_open: None,
             external_open_status_storage: None,
             terminal_clipboard: None,
@@ -2993,12 +2971,6 @@ impl App {
             has_applied_first_snapshot: false,
             agent_session_ids: HashMap::new(),
             custom_agent_panes: HashMap::new(),
-            recap: crate::recap_state::RecapState::default(),
-            pending_recap_requests: Vec::new(),
-            recap_progress: HashMap::new(),
-            recap_errors: HashMap::new(),
-            recap_popover: None,
-            hovered_recap_refresh: None,
             agent_transcript_paths: HashMap::new(),
             frozen_panes: HashSet::new(),
             frozen_screens: HashMap::new(),
@@ -3121,9 +3093,6 @@ impl App {
                         }
                         Some(Mode::WorktreeManager(parent)) => {
                             host.apply_prune_branch_choice(parent, &id)
-                        }
-                        Some(Mode::CreateAgentFromLine(parent)) => {
-                            host.apply_agent_from_line_provider(parent, &id)
                         }
                         Some(Mode::CreateAgentWorkspace(parent)) => {
                             host.apply_workspace_choice(parent, &id)
@@ -8226,6 +8195,7 @@ impl App {
                     } else if let Some(plugins) = self.wasm_plugins.as_ref() {
                         // Another modal has the screen: the popup never shows.
                         plugins.dismiss_popup(&plugin, &popup);
+                        self.session_recovery_popup_gone(&plugin, &popup);
                     }
                     needs_redraw = true;
                 }
@@ -13941,14 +13911,7 @@ impl App {
             }
             EditorLineContextAction::OpenExternally(target) => self.open_target_externally(target),
             EditorLineContextAction::CreateAgentFromLine => {
-                let parent_group = self
-                    .tree
-                    .parent_of(source.pane_id)
-                    .unwrap_or_else(|| self.group_for_new_node());
-                self.mode = Mode::CreateAgentFromLine(Box::new(CreateAgentFromLineState::new(
-                    source,
-                    parent_group,
-                )));
+                self.action_create_agent_from_line(&source)
             }
         }
     }
@@ -14059,117 +14022,6 @@ impl App {
             }
         };
         self.copy_terminal_text_to_clipboard(text, message);
-    }
-
-    /// Validates and queues the dialog's selected agent plus edited prompt.
-    pub fn commit_create_agent_from_line(&mut self, state: Box<CreateAgentFromLineState>) {
-        if let Err(error) = self.try_admit_create_agent_from_line(&state) {
-            self.status_message = Some(error);
-            self.mode = Mode::CreateAgentFromLine(state);
-            return;
-        }
-        self.status_message = Some(format!(
-            "Creating {} agent from {}:{}",
-            state.agent_type.label(),
-            state.source.path.display(),
-            state.source.line_number
-        ));
-        self.mode = Mode::Normal;
-    }
-
-    /// Borrow the draft until admission succeeds. Refusal never creates a
-    /// second full prompt or changes the captured parent/focus intent.
-    fn try_admit_create_agent_from_line(
-        &mut self,
-        state: &CreateAgentFromLineState,
-    ) -> Result<(), String> {
-        if state
-            .prompt
-            .lines()
-            .iter()
-            .all(|line| line.trim().is_empty())
-        {
-            return Err("Agent task cannot be empty".into());
-        }
-        if !self
-            .tree
-            .get(state.parent_group)
-            .is_some_and(ilium_core::Node::accepts_normal_children)
-        {
-            return Err("Agent destination is no longer available; draft remains editable".into());
-        }
-        if self.pending_pane_creations.len() >= 16 {
-            self.record_local_blocking_error(
-                state.parent_group,
-                "Create pane",
-                "Too many unconfirmed creation requests; check the project before retrying.",
-            );
-            return Err("Too many unconfirmed creation requests; draft remains editable".into());
-        }
-        let command = state.agent_type.command_line();
-        let prompt_bytes = state
-            .prompt
-            .lines()
-            .iter()
-            .try_fold(0_usize, |bytes, line| bytes.checked_add(line.len()))
-            .and_then(|bytes| bytes.checked_add(state.prompt.lines().len().saturating_sub(1)))
-            .ok_or_else(|| "Agent prompt size overflow; draft remains editable".to_string())?;
-        // Include the pending-focus title derivative while it is constructed.
-        // Like existing request accounting, this declares owned capacities,
-        // not an allocator/RSS guarantee.
-        let bytes = std::mem::size_of::<ClientRequest>()
-            .checked_add(prompt_bytes)
-            .and_then(|bytes| bytes.checked_add(command.len()))
-            .and_then(|bytes| bytes.checked_add(command.len()))
-            .ok_or_else(|| "Agent request size overflow; draft remains editable".to_string())?;
-        let client = self.outbound_admission.as_ref().ok_or_else(|| {
-            "Agent request admission is unavailable; draft remains editable".to_string()
-        })?;
-        let reservation =
-            crate::ipc_preparation::reserve_request(client, bytes).map_err(|reason| {
-                format!("Agent request not admitted: {reason:?}; draft remains editable")
-            })?;
-        // All owned prompt/command copies start after the finite reservation.
-        let request_id = self.next_workspace_request_id();
-        let request = ClientRequest::NewPane {
-            request_id,
-            parent_group: state.parent_group,
-            kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
-                command_line: command.to_owned(),
-                initial_input: state.prompt_text(),
-            },
-            working_directory: self.new_pane_working_directory(),
-        };
-        let pending_title = command.to_owned();
-        let actual_bytes = crate::ipc_preparation::request_retained_bytes(&request)
-            .checked_add(pending_title.capacity())
-            .ok_or_else(|| "Agent request capacity overflow; draft remains editable".to_string())?;
-        if actual_bytes > bytes {
-            return Err("Agent request capacity exceeded admission; draft remains editable".into());
-        }
-        let admitted = reservation.retain(request).map_err(|rejected| {
-            format!(
-                "Agent request not admitted: {:?}; draft remains editable",
-                rejected.reason
-            )
-        })?;
-        self.queue_terminal_request_after_barrier(admitted);
-        self.pending_pane_creations.insert(
-            request_id,
-            crate::blocking_errors::PendingPaneCreation {
-                custom_profile_id: None,
-                parent_group: state.parent_group,
-                action: Self::toolbar_action_for_command(command),
-                started: Instant::now(),
-                uncertainty_reported: false,
-            },
-        );
-        self.record_pending_pane_focus(
-            state.parent_group,
-            PaneContentKind::Terminal,
-            pending_title,
-        );
-        Ok(())
     }
 
     /// Inserts the expand/collapse and lock/unlock actions appropriate to
@@ -15112,7 +14964,6 @@ impl App {
         self.hovered_tree_node = hit;
         if hit.is_none() {
             self.hovered_status_slot = None;
-            self.hovered_recap_refresh = None;
         }
     }
 
@@ -16253,7 +16104,6 @@ impl App {
             },
         );
         let title_observations = self.capture_title_observations(&contexts);
-        let recap_stamps = self.stamp_batch_recaps(&contexts);
         self.pending_restructure_requests
             .push(PendingRestructureRequest {
                 project_id,
@@ -16265,7 +16115,6 @@ impl App {
                 current_structure,
                 recommendation_snapshot,
                 inference_activity_revisions,
-                recap_stamps,
             });
         self.refresh_structure_loading();
         true
@@ -16312,43 +16161,6 @@ impl App {
     }
 
     /// Drains every queued project request for worker startup.
-    /// Stamps one recap generation per agent pane that has a known session.
-    fn stamp_batch_recaps(&mut self, contexts: &[LeafContext]) -> HashMap<NodeId, (String, u64)> {
-        let mut stamps = HashMap::new();
-        for context in contexts {
-            if let Some(session_id) = self.agent_session_ids.get(&context.id).cloned() {
-                let generation = self.recap.next_generation(context.id);
-                stamps.insert(context.id, (session_id, generation));
-            }
-        }
-        stamps
-    }
-
-    /// Sends the batch short recaps of a finished restructure to the server.
-    /// A recap is dropped when its pane changed session since the request.
-    pub fn apply_batch_recaps(
-        &mut self,
-        recaps: Vec<crate::restructure::BatchRecap>,
-        stamps: &HashMap<NodeId, (String, u64)>,
-    ) {
-        for recap in recaps {
-            let Some((session_id, recap_generation)) = stamps.get(&recap.pane_id) else {
-                continue;
-            };
-            if self.agent_session_ids.get(&recap.pane_id) != Some(session_id) {
-                continue;
-            }
-            self.queue_request(ClientRequest::ApplyRecap {
-                pane_id: recap.pane_id,
-                session_id: session_id.clone(),
-                recap_generation: *recap_generation,
-                trigger: ilium_ipc::RecapTrigger::Batch,
-                short: recap.short,
-                long: None,
-            });
-        }
-    }
-
     pub fn take_pending_restructure_requests(&mut self) -> Vec<PendingRestructureRequest> {
         for request in &self.pending_restructure_requests {
             if let Some(job) = self.project_restructure_jobs.get_mut(&request.project_id) {
@@ -17164,10 +16976,6 @@ impl App {
         } else {
             self.copy_terminal_text_to_clipboard(link.display(), "Link copied to clipboard");
         }
-    }
-
-    pub fn resolve_session_recovery(&mut self, restore: bool) {
-        self.queue_request(ClientRequest::ResolveSessionRecovery { restore });
     }
 
     fn handle_editor_pane_mouse(
@@ -18054,153 +17862,6 @@ mod tests {
             .is_some_and(|message| message.contains("saved settings remain intact")));
     }
 
-    mod create_agent_line_admission_tests {
-        use super::*;
-
-        fn draft(app: &mut App) -> Box<CreateAgentFromLineState> {
-            let group = app.tree.add_group(ROOT_ID, "captured parent").unwrap();
-            let source = EditorSourceLine {
-                pane_id: group,
-                path: PathBuf::from("/fixture/original.rs"),
-                line_number: 7,
-                text: "original source".into(),
-            };
-            let mut state = CreateAgentFromLineState::new(source, group);
-            state.agent_type = crate::agent_from_line::AgentLaunchType::Codex;
-            state.prompt = ratatui_textarea::TextArea::from(["exact edited task", "second line"]);
-            Box::new(state)
-        }
-
-        #[test]
-        fn create_agent_line_refusal_retains_exact_draft_then_retry_accepts_once() {
-            let (mut execution, client) = native_paste_bank();
-            let mut app = app();
-            app.outbound_admission = Some(client.clone());
-            let state = draft(&mut app);
-            let parent = state.parent_group;
-            let original_box = (&*state) as *const CreateAgentFromLineState;
-            let original_line = state.prompt.lines()[0].as_ptr();
-            let mut holds = Vec::new();
-            for _ in 0..32 {
-                holds.push(crate::ipc_preparation::reserve_request(&client, 4096).unwrap());
-            }
-            app.commit_create_agent_from_line(state);
-            let Mode::CreateAgentFromLine(state) = std::mem::replace(&mut app.mode, Mode::Normal)
-            else {
-                panic!("refusal must keep original draft");
-            };
-            assert_eq!((&*state) as *const CreateAgentFromLineState, original_box);
-            assert_eq!(state.prompt.lines()[0].as_ptr(), original_line);
-            assert_eq!(state.prompt_text(), "exact edited task\nsecond line");
-            assert_eq!(state.parent_group, parent);
-            assert!(app.outbox.is_empty());
-            assert!(app.pending_pane_focuses.is_empty());
-            assert!(app
-                .status_message
-                .as_deref()
-                .unwrap()
-                .contains("not admitted"));
-            drop(holds);
-            app.commit_create_agent_from_line(state);
-            assert!(matches!(app.mode, Mode::Normal));
-            assert_eq!(app.pending_pane_focuses.len(), 1);
-            assert_eq!(app.pending_pane_focuses[0].parent_group, Some(parent));
-            assert_eq!(
-                app.take_outbound_requests(),
-                vec![ClientRequest::NewPane {
-                    request_id: 1,
-                    parent_group: parent,
-                    kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
-                        command_line: "codex".into(),
-                        initial_input: "exact edited task\nsecond line".into(),
-                    },
-                    working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
-                }]
-            );
-            execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
-            let report = execution
-                .join_until_background(Instant::now() + Duration::from_secs(5))
-                .unwrap();
-            assert!(report.shutdown_complete);
-        }
-
-        #[test]
-        fn create_agent_line_removed_parent_keeps_draft_without_retargeting() {
-            let (mut execution, client) = native_paste_bank();
-            let mut app = app();
-            app.outbound_admission = Some(client);
-            let state = draft(&mut app);
-            let parent = state.parent_group;
-            let original = (&*state) as *const CreateAgentFromLineState;
-            app.tree.remove_node(parent).unwrap();
-            app.tree
-                .add_group(ROOT_ID, "different live parent")
-                .unwrap();
-            app.commit_create_agent_from_line(state);
-            let Mode::CreateAgentFromLine(state) = &app.mode else {
-                panic!("preserve draft");
-            };
-            assert_eq!((&**state) as *const CreateAgentFromLineState, original);
-            assert_eq!(state.parent_group, parent);
-            assert!(app.outbox.is_empty());
-            assert!(app.pending_pane_focuses.is_empty());
-            assert!(app
-                .status_message
-                .as_deref()
-                .unwrap()
-                .contains("destination"));
-            execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
-            let report = execution
-                .join_until_background(Instant::now() + Duration::from_secs(5))
-                .unwrap();
-            assert!(report.shutdown_complete);
-        }
-
-        #[test]
-        fn create_agent_line_closed_admission_preserves_draft_and_parent_modal() {
-            let (mut execution, client) = native_paste_bank();
-            let mut app = app();
-            app.outbound_admission = Some(client);
-            app.modal_stack.push(Mode::Move);
-            let state = draft(&mut app);
-            let original = (&*state) as *const CreateAgentFromLineState;
-            execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
-            app.commit_create_agent_from_line(state);
-            let Mode::CreateAgentFromLine(state) = &app.mode else {
-                panic!("preserve draft");
-            };
-            assert_eq!((&**state) as *const CreateAgentFromLineState, original);
-            assert!(matches!(app.modal_stack.as_slice(), [Mode::Move]));
-            assert!(app.status_message.as_deref().unwrap().contains("Closed"));
-            assert!(app.outbox.is_empty());
-            assert!(app.pending_pane_focuses.is_empty());
-            let report = execution
-                .join_until_background(Instant::now() + Duration::from_secs(5))
-                .unwrap();
-            assert!(report.shutdown_complete);
-        }
-
-        #[test]
-        fn create_agent_line_empty_prompt_preserves_exact_draft_without_admission() {
-            let mut app = app();
-            app.outbound_admission = None;
-            let mut state = draft(&mut app);
-            state.prompt = ratatui_textarea::TextArea::from([" ", "\t"]);
-            let original = (&*state) as *const CreateAgentFromLineState;
-            app.commit_create_agent_from_line(state);
-            let Mode::CreateAgentFromLine(state) = &app.mode else {
-                panic!("preserve draft");
-            };
-            assert_eq!((&**state) as *const CreateAgentFromLineState, original);
-            assert_eq!(
-                app.status_message.as_deref(),
-                Some("Agent task cannot be empty")
-            );
-            assert!(app.outbox.is_empty());
-            assert!(app.pending_pane_focuses.is_empty());
-        }
-    }
-
     fn native_paste_bank() -> (ilium_execution::Execution, ilium_execution::Client) {
         use ilium_execution::{Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits};
         let empty = LaneConfig {
@@ -18964,7 +18625,7 @@ mod tests {
                 let project = tempfile::tempdir().unwrap();
                 let mut app = App::new("status-test".into(), project.path().to_path_buf());
                 app.set_screen_area(Rect::new(0, 0, width, height));
-                app.animation_settings.kind = crate::background_animation::AnimationKind::Clouds;
+                app.animation_settings.kind = crate::background_animation::AnimationKind::Images;
                 let settings_before = app.animation_settings.clone();
                 let probe = FakeProbe::new();
                 let report = format!(
@@ -19054,7 +18715,7 @@ mod tests {
             Some("fix time unknown; received 123; error: offline"),
         ] {
             let mut app = app();
-            app.animation_settings.kind = crate::background_animation::AnimationKind::Clouds;
+            app.animation_settings.kind = crate::background_animation::AnimationKind::Images;
             let probe = FakeProbe::new();
             *probe.status.lock().unwrap() = report.map(str::to_owned);
             *app.animation_frame.host_mut() = fake_host(&probe);
@@ -19417,7 +19078,7 @@ mod tests {
         use ilium_core::animation_recommendation::*;
         let project = AnimationRecommendation {
             version: 1,
-            kind: "night_lights".into(),
+            kind: "images".into(),
             resources: ResourcePolicy::Catalog,
             parameters: vec![],
         };
@@ -24688,7 +24349,7 @@ mod tests {
     }
 
     #[test]
-    fn create_agent_dialog_queues_selected_command_prompt_and_submission() {
+    fn create_agent_from_line_is_the_editor_plugins_command_and_creates_nothing_without_it() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let editor_id = app
@@ -24705,36 +24366,20 @@ mod tests {
             EditorLineContextAction::CreateAgentFromLine,
             source,
         );
-        let Mode::CreateAgentFromLine(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("line action should open the create-agent dialog");
-        };
-        assert!(state.prompt_text().contains("repair_authentication();"));
-        assert!(state.prompt_text().contains("/work/src/main.rs at line 7"));
-        state.agent_type = crate::agent_from_line::AgentLaunchType::Codex;
-        state.prompt = ratatui_textarea::TextArea::from(["/goal custom task"]);
-
-        app.commit_create_agent_from_line(state);
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::NewPane {
-                request_id: 1,
-                parent_group: group,
-                kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
-                    command_line: "codex".to_string(),
-                    initial_input: "/goal custom task".to_string(),
-                },
-                working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
-            }]
+        assert!(
+            matches!(app.mode, Mode::Normal),
+            "the kernel opens no dialog"
         );
-        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("ilium.core.editor is not running, so this action is unavailable")
+        );
+        assert!(app.take_outbound_requests().is_empty());
     }
 
     #[test]
     fn settings_tabs_cycle_through_inference_and_every_existing_tab() {
-        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Padding);
-        assert_eq!(SettingsTab::Padding.next(), SettingsTab::Icons);
+        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::Toolbar);
         assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Cost);

@@ -8,7 +8,7 @@ use ilium_core::{NodeId, NodeKind, Tree, TreeMoveDirection, ROOT_ID};
 #[cfg(test)]
 use ilium_ipc::ClientRequest;
 
-use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
+use crate::agent_from_line::EditorLineContextMenu;
 use crate::app::{
     AgentToolbarModelSubmenuState, App, AppearanceRow, ClientExitReason, FocusTarget, Mode,
     ProjectFolderSelection, SettingsState, SettingsTab, SoundRow,
@@ -200,7 +200,6 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         Mode::AgentToolbarModelSubmenu(state) => {
             handle_agent_toolbar_model_submenu_event(app, state, &event)
         }
-        Mode::CreateAgentFromLine(state) => handle_create_agent_from_line_event(app, state, &event),
         Mode::CreateAgentWorkspace(state) => {
             handle_create_agent_workspace_event(app, state, &event)
         }
@@ -255,9 +254,6 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
                 KeyCode::Char('n' | 'N') | KeyCode::Esc => app.mode = Mode::Normal,
                 _ => app.mode = Mode::ConfirmRemoveWorkspace(target),
             }
-        }
-        Mode::ConfirmSessionRecovery { pane_count } => {
-            handle_session_recovery_event(app, pane_count, &event)
         }
         Mode::Settings(state) => handle_settings_event(app, *state, &event),
         Mode::SettingsHelp(state) => handle_settings_help_event(app, state, &event),
@@ -497,28 +493,6 @@ fn replay_pasted_text_as_keys(app: &mut App, pasted: &str) {
     let mut cursor = crate::paste_cursor::PasteCursor::default();
     while let Some(key) = cursor.next_key(pasted) {
         handle_event(app, Event::Key(key));
-    }
-}
-
-fn handle_session_recovery_event(app: &mut App, pane_count: usize, event: &Event) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::ConfirmSessionRecovery { pane_count };
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::ConfirmSessionRecovery { pane_count };
-        return;
-    }
-    match key.code {
-        KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
-            app.resolve_session_recovery(true);
-            app.pop_modal();
-        }
-        KeyCode::Char('n' | 'N') | KeyCode::Esc => {
-            app.resolve_session_recovery(false);
-            app.pop_modal();
-        }
-        _ => app.mode = Mode::ConfirmSessionRecovery { pane_count },
     }
 }
 
@@ -1585,67 +1559,6 @@ fn handle_agent_toolbar_model_submenu_event(
     }
 }
 
-/// Edits the multi-line prompt, changes the selected agent, or commits the
-/// creation dialog. Enter remains a real textarea newline; Ctrl+Enter and the
-/// focused Create button are the explicit keyboard submission paths.
-fn handle_create_agent_from_line_event(
-    app: &mut App,
-    mut state: Box<CreateAgentFromLineState>,
-    event: &Event,
-) {
-    use crossterm::event::KeyModifiers;
-
-    let Event::Key(key) = event else {
-        app.mode = Mode::CreateAgentFromLine(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::CreateAgentFromLine(state);
-        return;
-    }
-    if key.code == KeyCode::Esc {
-        app.mode = Mode::Normal;
-        return;
-    }
-    if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
-        app.commit_create_agent_from_line(state);
-        return;
-    }
-
-    match key.code {
-        KeyCode::Tab => state.focus = state.focus.next(),
-        KeyCode::BackTab => state.focus = state.focus.previous(),
-        KeyCode::Left | KeyCode::Char('h') if state.focus == CreateAgentFocus::AgentType => {
-            state.agent_type = state.agent_type.stepped(-1)
-        }
-        KeyCode::Right | KeyCode::Char('l') if state.focus == CreateAgentFocus::AgentType => {
-            state.agent_type = state.agent_type.stepped(1)
-        }
-        KeyCode::Char('c') if state.focus == CreateAgentFocus::AgentType => {
-            state.agent_type = crate::agent_from_line::AgentLaunchType::Claude
-        }
-        KeyCode::Char('x') if state.focus == CreateAgentFocus::AgentType => {
-            state.agent_type = crate::agent_from_line::AgentLaunchType::Codex
-        }
-        KeyCode::Char('a') if state.focus == CreateAgentFocus::AgentType => {
-            state.agent_type = crate::agent_from_line::AgentLaunchType::Antigravity
-        }
-        KeyCode::Enter | KeyCode::Char('+') if state.focus == CreateAgentFocus::AgentType => {
-            app.begin_agent_from_line_provider_dialog(state);
-            return;
-        }
-        KeyCode::Enter if state.focus == CreateAgentFocus::CreateButton => {
-            app.commit_create_agent_from_line(state);
-            return;
-        }
-        _ if state.focus == CreateAgentFocus::Prompt => {
-            state.prompt.input(event.clone());
-        }
-        _ => {}
-    }
-    app.mode = Mode::CreateAgentFromLine(state);
-}
-
 fn handle_worktree_manager_event(
     app: &mut App,
     mut state: Box<crate::worktree_manager::WorktreeManagerState>,
@@ -1968,10 +1881,11 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         crate::onboarding::integration::open(app, true);
         return;
     }
-    if state.tab == SettingsTab::Toolbar
-        && crate::tree_toolbar_settings::handle_key(app, &mut state, *key)
-    {
+    if state.tab == SettingsTab::Toolbar && key.code == KeyCode::Enter {
+        // The Tree plugin draws the toolbar editor over the settings screen; closing it brings
+        // this page back.
         app.mode = Mode::Settings(Box::new(state));
+        app.action_tree_toolbar(ilium_plugin_api::generated::types::CommandOrigin::Menu);
         return;
     }
     if state.tab == SettingsTab::Icons && key.code == KeyCode::Char('L') {
@@ -1983,43 +1897,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     }
     state.animation_slider_drag = None;
     app.clear_animation_hover();
-
-    // The fine-tuning dialog owns every key while open.
-    if state.padding.dialog.is_some() {
-        if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
-            state.padding.dialog = None;
-        }
-        app.mode = Mode::Settings(Box::new(state));
-        return;
-    }
-    if state.tab == SettingsTab::Padding && state.selected_row == crate::padding_ui::ROW_THRESHOLD {
-        match key.code {
-            KeyCode::Char('h' | 'l') => {
-                app.step_settings_number(
-                    crate::value_settings::SettingsNumber::PaddingThreshold,
-                    if key.code == KeyCode::Char('h') {
-                        -1
-                    } else {
-                        1
-                    },
-                );
-                app.mode = Mode::Settings(Box::new(state));
-                return;
-            }
-            KeyCode::Char(' ') => {
-                app.mode = Mode::Settings(Box::new(state));
-                app.begin_settings_number_dialog(
-                    crate::value_settings::SettingsNumber::PaddingThreshold,
-                );
-                return;
-            }
-            _ => {}
-        }
-    }
-    if state.tab == SettingsTab::Padding && crate::padding_ui::handle_key(app, &mut state, *key) {
-        app.mode = Mode::Settings(Box::new(state));
-        return;
-    }
 
     // The full-screen animation preview hides every control: any key returns.
     if state.tab == SettingsTab::Animations && state.animation_fullscreen {
@@ -3688,7 +3565,7 @@ mod indent_outdent_tests {
             crate::voice_settings::VoiceSettingField::ApiKey,
             TextPromptState::new(""),
         ));
-        app.push_modal(Mode::ConfirmSessionRecovery { pane_count: 2 });
+        app.push_modal(Mode::ConfirmClose(ilium_core::ROOT_ID));
 
         assert_eq!(app.modal_stack.len(), 2);
         app.pop_modal();

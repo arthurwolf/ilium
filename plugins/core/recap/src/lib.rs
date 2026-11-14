@@ -2,7 +2,9 @@
 //!
 //! A recap is a few factual sentences about what one pane is doing, written once short and once
 //! long. The server side owns the `recap` command line, the `recap` service and the `recap-pane`
-//! job; the client side answers the `onboarding-state` client request.
+//! job. The client side answers the `onboarding-state` client request and shows the in-pane
+//! recap line: a footer row of an agent pane with the short recap (hover shows the long one,
+//! a click writes a fresh one), fed by the `recap` command and the pane context menu (`dot`).
 //!
 //! Pipeline per pane: a goal-aware, redacted evidence digest (`evidence`, `transcript`), a prompt
 //! (`pipeline`), one model call for both lengths (`job`), then parsing with word limits
@@ -11,6 +13,7 @@
 pub mod client;
 pub mod comparison;
 pub mod custody;
+pub mod dot;
 pub mod evidence;
 pub mod fence;
 pub mod job;
@@ -32,6 +35,9 @@ use ilium_plugin_sdk::{host, ilium_plugin, Handler, JobRunner, Lifecycle, Servic
 use serde_json::json;
 
 use crate::server::ServiceAnswer;
+
+/// The id of this plugin, the address of its own messages between the two sides.
+pub const PLUGIN_ID: &str = "ilium.core.recap";
 
 /// The server side of `ilium.core.recap` (core-plugin-recap.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["job-runner", "service-provider"])]
@@ -56,12 +62,17 @@ impl Handler for RecapServer {
                 Event::CliCancelled(invocation) => server::on_cancelled(api, invocation),
                 Event::RequestCompleted(result) => server::on_completed(api, &result),
                 Event::TimerFired(timer) => server::on_timer(api, timer),
-                Event::ClientAttached(client) => server::on_client_attached(client),
+                Event::ClientAttached(client) => server::on_client_attached(api, client),
                 Event::ClientDetached(client) => server::on_client_detached(client),
+                Event::Message(message) if message.channel == dot::REQUEST_CHANNEL => {
+                    if let Some(pane) = dot::parse_pane(&message.payload) {
+                        server::start_dot(api, pane);
+                    }
+                }
                 _ => {}
             }
         }
-        Vec::new()
+        server::take_outbox()
     }
 }
 
@@ -105,14 +116,24 @@ impl Lifecycle for RecapClient {
 
 impl Handler for RecapClient {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
-        let mut handle = host();
-        let api: &mut dyn ilium_plugin_sdk::HostApi = &mut *handle;
+        let mut out = Vec::new();
         for event in batch {
-            if let Event::ClientRequest(request) = event {
-                client::answer(api, request.call, &request.kind);
+            match event {
+                Event::ClientRequest(request) => {
+                    let mut handle = host();
+                    let api: &mut dyn ilium_plugin_sdk::HostApi = &mut *handle;
+                    client::answer(api, request.call, &request.kind);
+                }
+                Event::CommandInvoked(invoked) if invoked.command == dot::COMMAND => {
+                    client::on_command(&invoked, &mut out);
+                }
+                Event::Message(message) if message.channel == dot::RESULT_CHANNEL => {
+                    client::on_result(&message.payload, &mut out);
+                }
+                _ => {}
             }
         }
-        Vec::new()
+        out
     }
 }
 

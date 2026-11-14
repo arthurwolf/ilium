@@ -29,16 +29,13 @@ pub use control::{Control, ControlKind, ControlValue, SceneSettings};
 pub use location::GeoLocation;
 pub use raster::{DitherMode, Raster};
 pub use registry::{AmbientKind, AmbientSettings};
-pub use scene::{Frame, MessageScene, OccupancyMask, Scene, SceneEnv};
+pub use scene::{Frame, MessageScene, OccupancyMask, Scene, SceneEnv, SceneText};
 pub use scenes::spectrum::{
     native_pipewire_audio_command, native_pulse_audio_command, AudioFft, NativeAudioCommand,
     NativeAudioPcmDecoder, NativeAudioTarget,
 };
 
-pub use scenes::{
-    clouds::CloudsSettings, images::ImagesSettings, night_lights::NightLightsSettings,
-    spectrum::SpectrumSettings, video::VideoSettings,
-};
+pub use scenes::{images::ImagesSettings, spectrum::SpectrumSettings, video::VideoSettings};
 
 // Pure world/renderer contracts support offline capture and acceptance probes.
 pub use scenes::voxel_landscape;

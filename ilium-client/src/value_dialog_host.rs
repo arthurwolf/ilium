@@ -40,10 +40,6 @@ pub enum ValueTarget {
         project_id: NodeId,
         parent_group: NodeId,
     },
-    AgentFromLineProvider {
-        source: crate::agent_from_line::EditorSourceLine,
-        parent_group: NodeId,
-    },
     SoundStudio {
         control: crate::onboarding::studio::SoundControl,
         identity: std::sync::Arc<()>,
@@ -292,55 +288,6 @@ impl ValueDialogHost {
         field.apply(parent, id)
     }
 
-    pub fn agent_from_line_provider(
-        parent: &crate::agent_from_line::CreateAgentFromLineState,
-    ) -> Result<Self, String> {
-        let options = crate::agent_from_line::AgentLaunchType::ALL
-            .into_iter()
-            .map(|value| ChoiceOption {
-                id: format!("{value:?}"),
-                label: value.label().into(),
-                disabled_reason: None,
-            })
-            .collect();
-        Ok(Self {
-            target: ValueTarget::AgentFromLineProvider {
-                source: parent.source.clone(),
-                parent_group: parent.parent_group,
-            },
-            dialog: ValueDialogState::Choice(ChoiceDialogState::new(
-                "Agent provider",
-                options,
-                Some(format!("{:?}", parent.agent_type)),
-            )?),
-            pending_save: None,
-        })
-    }
-
-    pub fn apply_agent_from_line_provider(
-        &self,
-        parent: &mut crate::agent_from_line::CreateAgentFromLineState,
-        id: &str,
-    ) -> Result<(), String> {
-        let ValueTarget::AgentFromLineProvider {
-            source,
-            parent_group,
-        } = &self.target
-        else {
-            return Err("This catalog belongs to a different form".into());
-        };
-        if parent.parent_group != *parent_group || parent.source != *source {
-            return Err(
-                "The source line or destination changed; reopen its provider catalog".into(),
-            );
-        }
-        parent.agent_type = crate::agent_from_line::AgentLaunchType::ALL
-            .into_iter()
-            .find(|value| format!("{value:?}") == id)
-            .ok_or("This agent provider is no longer available")?;
-        Ok(())
-    }
-
     pub fn studio_number(
         control: crate::onboarding::studio::SoundControl,
         studio: &crate::onboarding::studio::SoundStudio,
@@ -533,70 +480,10 @@ impl ValueDialogHost {
     }
 }
 
-impl crate::app::App {
-    pub(crate) fn begin_agent_from_line_provider_dialog(
-        &mut self,
-        parent: Box<crate::agent_from_line::CreateAgentFromLineState>,
-    ) {
-        match ValueDialogHost::agent_from_line_provider(&parent) {
-            Ok(host) => self.push_modal_over(
-                crate::app::Mode::CreateAgentFromLine(parent),
-                crate::app::Mode::ValueDialog(Box::new(host)),
-            ),
-            Err(error) => {
-                self.status_message = Some(error);
-                self.mode = crate::app::Mode::CreateAgentFromLine(parent);
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::text_prompt::TextPromptState;
-    #[test]
-    fn agent_from_line_catalog_preserves_authored_prompt_source_and_destination() {
-        use crate::agent_from_line::{
-            AgentLaunchType, CreateAgentFocus, CreateAgentFromLineState, EditorSourceLine,
-        };
-        let source = EditorSourceLine {
-            pane_id: NodeId(8),
-            path: "/tmp/authored λ.rs".into(),
-            line_number: 17,
-            text: "original source".into(),
-        };
-        let mut parent = CreateAgentFromLineState::new(source.clone(), NodeId(9));
-        parent.prompt =
-            ratatui_textarea::TextArea::from(["authored first line", "authored second line"]);
-        parent.focus = CreateAgentFocus::AgentType;
-        let before = parent.prompt_text();
-        let host = ValueDialogHost::agent_from_line_provider(&parent).unwrap();
-        let ValueDialogState::Choice(choice) = &host.dialog else {
-            panic!("catalog");
-        };
-        assert_eq!(choice.options().len(), AgentLaunchType::ALL.len());
-        assert_eq!(
-            choice.selected_id.as_deref(),
-            Some(format!("{:?}", parent.agent_type).as_str())
-        );
-        host.apply_agent_from_line_provider(&mut parent, "Codex")
-            .unwrap();
-        assert_eq!(parent.agent_type, AgentLaunchType::Codex);
-        assert_eq!(parent.prompt_text(), before);
-        assert_eq!(parent.source, source);
-        assert_eq!(parent.parent_group, NodeId(9));
-        assert_eq!(parent.focus, CreateAgentFocus::AgentType);
-        assert!(host
-            .apply_agent_from_line_provider(&mut parent, "invented")
-            .is_err());
-        parent.source.line_number += 1;
-        assert!(host
-            .apply_agent_from_line_provider(&mut parent, "Claude")
-            .is_err());
-        assert_eq!(parent.agent_type, AgentLaunchType::Codex);
-    }
-
     #[test]
     fn only_matching_receipt_releases_pending_exact_draft_for_retry() {
         let target = crate::value_animation::AnimationControlTarget::new(

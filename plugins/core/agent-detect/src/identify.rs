@@ -50,10 +50,7 @@ pub fn interpreted_program_name(arguments: &[String]) -> Option<String> {
             program = options.next();
             break;
         }
-        if matches!(
-            text,
-            "-c" | "-e" | "--eval" | "--print" | "-p" | "-m"
-        ) {
+        if matches!(text, "-c" | "-e" | "--eval" | "--print" | "-p" | "-m") {
             return None;
         }
     }

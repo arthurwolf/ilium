@@ -23,6 +23,10 @@ pub(crate) const BOARD_PANE_KIND: &str = "ilium.core.kanban.board";
 /// The Kanban plugin's agent-control command: `{ "pane", "action", ... }` applied to a board.
 pub(crate) const BOARD_CONTROL_COMMAND: &str = "ilium.core.kanban/control";
 
+/// The Editor plugin's "Create agent from line" command: `{ "path", "line", "text", "parent" }`
+/// (the line counts from one). The plugin opens its own dialog and creates the agent pane.
+pub(crate) const CREATE_AGENT_FROM_LINE_COMMAND: &str = "ilium.core.editor/create-agent-from-line";
+
 /// The Search plugin's "Search the workspace" command; it opens the search panel.
 pub(crate) const SEARCH_COMMAND: &str = "ilium.core.search/open";
 
@@ -45,6 +49,10 @@ pub(crate) const EDITOR_LINE_DISPLAY_COMMAND: &str = "ilium.core.settings/editor
 /// The Layout plugin's tree row layout editor; the kernel passes the current layout and the
 /// glyphs of the specimen rows.
 pub(crate) const TREE_LAYOUT_COMMAND: &str = "ilium.core.layout/tree-layout";
+
+/// The Tree plugin's toolbar editor; the kernel passes the buttons in use, every button that
+/// exists, the default buttons and the inactivity threshold.
+pub(crate) const TREE_TOOLBAR_COMMAND: &str = "ilium.core.tree/tree-toolbar";
 
 impl App {
     /// Runs a plugin command. Tells the user when no plugin host is running; a command that
@@ -108,6 +116,72 @@ impl App {
         self.invoke_plugin_command(TREE_LAYOUT_COMMAND, arguments, origin);
     }
 
+    /// The tree toolbar editor (the Settings "Toolbar" page). The Tree plugin draws the dialog and
+    /// sets the toolbar through `kernel.set-tree-toolbar`; the kernel passes what only it knows:
+    /// the buttons in use, the full catalogue (built-ins, then one per custom agent profile), the
+    /// default buttons and the glyph and name each button shows.
+    pub(crate) fn action_tree_toolbar(&mut self, origin: CommandOrigin) {
+        let arguments = self.tree_toolbar_arguments();
+        self.invoke_plugin_command(TREE_TOOLBAR_COMMAND, arguments, origin);
+    }
+
+    fn tree_toolbar_arguments(&self) -> String {
+        use crate::tree_toolbar_layout::{TreeToolbarEntry, TreeToolbarLayout};
+        let profile_ids: Vec<String> = self
+            .custom_agents
+            .profiles
+            .iter()
+            .map(|profile| profile.id.clone())
+            .collect();
+        let describe = |index: usize, entry: &TreeToolbarEntry| {
+            let action = crate::tree_ui::toolbar_action_for(index, entry);
+            let (glyph, name) = match entry {
+                TreeToolbarEntry::CustomAgent(id) => {
+                    match self.custom_agents.profiles.iter().find(|p| &p.id == id) {
+                        Some(profile) => (profile.icon.clone(), profile.name.clone()),
+                        None => ("?".to_owned(), format!("{id} (missing profile)")),
+                    }
+                }
+                _ => (
+                    action.glyph(&self.ui_settings.icons).to_owned(),
+                    action.description().to_owned(),
+                ),
+            };
+            serde_json::json!({
+                "key": entry.key(),
+                "label": format!("{glyph}  {name}"),
+                "glyph": glyph,
+            })
+        };
+        let layout = &self.ui_settings.tree_toolbar_layout;
+        let catalogue: Vec<TreeToolbarEntry> = TreeToolbarEntry::ALL
+            .into_iter()
+            .chain(
+                profile_ids
+                    .iter()
+                    .cloned()
+                    .map(TreeToolbarEntry::CustomAgent),
+            )
+            .collect();
+        let mut defaults = TreeToolbarLayout::default();
+        defaults.reconcile_custom_agents(&profile_ids);
+        serde_json::json!({
+            "entries": layout
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| describe(index, entry))
+                .collect::<Vec<_>>(),
+            "catalogue": catalogue
+                .iter()
+                .map(|entry| describe(0, entry))
+                .collect::<Vec<_>>(),
+            "defaults": defaults.entries.iter().map(TreeToolbarEntry::key).collect::<Vec<_>>(),
+            "minutes": self.ui_settings.tree_inactivity_minutes,
+        })
+        .to_string()
+    }
+
     fn tree_layout_arguments(&self) -> String {
         use crate::icon_settings::IconTarget;
         let icons = &self.ui_settings.icons;
@@ -145,6 +219,30 @@ impl App {
             .map_or_else(|| "agent".to_string(), |node| node.name.clone());
         let arguments = debug_log_arguments(pane_id, &pane_name, dropped_entry_count, entries);
         self.invoke_plugin_command(DEBUG_LOG_COMMAND, arguments, CommandOrigin::Menu);
+    }
+
+    /// "Create agent from line" on the editor line menu: the Editor plugin opens its own dialog
+    /// and creates the agent pane beside the editor. The kernel only names the line and the group.
+    pub(crate) fn action_create_agent_from_line(
+        &mut self,
+        source: &crate::agent_from_line::EditorSourceLine,
+    ) {
+        let parent_group = self
+            .tree
+            .parent_of(source.pane_id)
+            .unwrap_or_else(|| self.group_for_new_node());
+        self.invoke_plugin_command(
+            CREATE_AGENT_FROM_LINE_COMMAND,
+            serde_json::json!({
+                "pane": source.pane_id.0,
+                "path": source.path.display().to_string(),
+                "line": source.line_number,
+                "text": source.text,
+                "parent": parent_group.0,
+            })
+            .to_string(),
+            CommandOrigin::Menu,
+        );
     }
 
     /// "Search the workspace" from the key binding, the tree toolbar or the context menu.
@@ -431,5 +529,50 @@ mod tree_layout_argument_tests {
         ] {
             assert!(value["glyphs"][key].is_string(), "missing glyph {key}");
         }
+    }
+
+    #[test]
+    fn the_toolbar_arguments_carry_the_buttons_the_catalogue_and_the_defaults() {
+        use ilium_core::custom_agent::CustomAgentProfile;
+        let mut app = App::new("tree toolbar arguments".to_owned(), std::env::temp_dir());
+        app.custom_agents.profiles.push(CustomAgentProfile {
+            id: "mine".into(),
+            name: "My agent".into(),
+            icon: "✦".into(),
+            base_provider: ilium_core::BuiltinAgentProvider::Claude,
+            command: String::new(),
+            arguments: String::new(),
+            environment: Vec::new(),
+        });
+        app.reconcile_toolbar_custom_agents();
+        let value: serde_json::Value =
+            serde_json::from_str(&app.tree_toolbar_arguments()).expect("arguments are JSON");
+        let keys = |name: &str| -> Vec<String> {
+            value[name]
+                .as_array()
+                .expect("a list")
+                .iter()
+                .map(|entry| entry["key"].as_str().expect("a key").to_owned())
+                .collect()
+        };
+        assert_eq!(keys("entries").first().map(String::as_str), Some("search"));
+        assert!(keys("entries").contains(&"custom:mine".to_owned()));
+        assert_eq!(keys("catalogue").len(), 15);
+        assert!(value["entries"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .all(|entry| entry["label"].is_string() && entry["glyph"].is_string()));
+        let custom = value["catalogue"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .find(|entry| entry["key"] == "custom:mine")
+            .expect("the custom agent is in the catalogue");
+        assert_eq!(custom["label"], "✦  My agent");
+        let defaults = value["defaults"].as_array().expect("a list");
+        assert!(defaults.contains(&serde_json::json!("custom:mine")));
+        assert_eq!(defaults.last(), Some(&serde_json::json!("settings")));
+        assert_eq!(value["minutes"], 15);
     }
 }

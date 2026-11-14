@@ -354,6 +354,13 @@ impl AmbientHost {
             .and_then(|hosted| hosted.scene.native_glyph(x, y))
     }
 
+    /// Styled terminal text supplied by the current hosted scene.
+    pub fn text_cell(&self, x: u16, y: u16) -> Option<ilium_ambient::SceneText> {
+        self.scene
+            .as_ref()
+            .and_then(|hosted| hosted.scene.text_cell(x, y))
+    }
+
     pub fn status(&self) -> Option<String> {
         self.scene.as_ref().and_then(|hosted| hosted.scene.status())
     }
@@ -385,9 +392,9 @@ mod saved_runtime_tests {
             Box::new(MessageScene("synthetic saved host scene".into()))
         }));
         let settings = AmbientSettings::default();
-        host.sync(AmbientKind::NightLights, &settings, Duration::ZERO);
+        host.sync(AmbientKind::Images, &settings, Duration::ZERO);
         host.release();
-        host.sync(AmbientKind::NightLights, &settings, Duration::from_secs(1));
+        host.sync(AmbientKind::Images, &settings, Duration::from_secs(1));
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 2);
         assert!(Arc::ptr_eq(&seen[0], &seen[1]));

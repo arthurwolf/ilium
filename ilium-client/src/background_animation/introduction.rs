@@ -8,8 +8,6 @@ impl AnimationKind {
     /// What this animation is and what it is about, in two sentences.
     pub fn introduction(self) -> &'static str {
         match self {
-            Self::NightLights => "City lights seen from orbit are drawn on a borderless map of the dark Earth. The glowing clusters show where people live on the night side of the planet.",
-            Self::Clouds => "Live weather-satellite imagery shows clouds across the globe or over your location. It keeps the sky on screen in step with the real one.",
             Self::Video => "Plays video files, folders or URLs as dithered Braille. It turns any moving picture into a text-mode image on your screen.",
             Self::Spectrum => "A spectrum analyzer draws whatever your system is playing as bars of frequency. It shows the sound of your music or audio in real time.",
             Self::Images => "Colored Braille images come from files, folders or URLs, with a slow pan and zoom. It turns a photo collection into a gentle, moving slideshow.",

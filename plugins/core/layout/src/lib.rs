@@ -14,6 +14,7 @@ pub mod tree_layout_rows;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use ilium_plugin_sdk::generated::host::settings::HostSettings;
 use ilium_plugin_sdk::generated::host::tree::HostTree;
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, Activation, Alignment, Area, BlockSpec, BlockTitle, BorderType,
@@ -221,6 +222,9 @@ struct ClientState {
     dialog: Option<new_split::Dialog>,
     /// The open tree row layout editor.
     tree_layout: Option<tree_layout_dialog::Dialog>,
+    /// The padding table still to hand to the kernel: set when the plugin starts, sent with the
+    /// first batch of events.
+    pending_padding: Option<padding::PaddingSettings>,
 }
 
 impl ClientState {
@@ -239,9 +243,29 @@ pub struct LayoutClient;
 impl Lifecycle for LayoutClient {
     fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
         validate_settings(&context.settings_json)?;
-        CLIENT.with(|cell| *cell.borrow_mut() = ClientState::default());
+        CLIENT.with(|cell| {
+            *cell.borrow_mut() = ClientState {
+                // The padding the kernel gets at the first batch: the stored values.
+                pending_padding: Some(padding_rows::settings_from_json(&context.settings_json)),
+                ..ClientState::default()
+            }
+        });
         Ok(())
     }
+}
+
+/// The submission that hands the kernel the whole padding table.
+fn set_padding(settings: &padding::PaddingSettings) -> Submission {
+    Submission::new(Intent::InvokeCommand(InvokeCommandSpec {
+        command: padding_rows::SET_PADDING_COMMAND.to_owned(),
+        arguments_json: padding_rows::set_padding_arguments(settings),
+    }))
+}
+
+/// The padding the plugin's stored settings describe right now.
+fn stored_padding() -> padding::PaddingSettings {
+    let mut api = host();
+    padding_rows::settings_from_json(&HostSettings::get_json(&mut *api))
 }
 
 /// Most nodes the dialog reads from the tree; a larger tree offers its first panes only.
@@ -276,8 +300,12 @@ fn new_split_dialog(parent: u64) -> new_split::Dialog {
 impl Handler for LayoutClient {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
         let mut submissions = Vec::new();
+        if let Some(settings) = CLIENT.with(|cell| cell.borrow_mut().pending_padding.take()) {
+            submissions.push(set_padding(&settings));
+        }
         for event in batch {
             match event {
+                Event::SettingsChanged(_) => submissions.push(set_padding(&stored_padding())),
                 Event::CommandInvoked(invoked)
                     if SPLIT_CHANNELS.contains(&invoked.command.as_str()) =>
                 {

@@ -42,18 +42,16 @@ pub use wikipedia::WikipediaSettings;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnimationKind {
-    NightLights,
-    Clouds,
     Video,
     Spectrum,
     Images,
     /// A scene a plugin supplies (the Scene row picks which). A saved selection of a scene
     /// that moved into the Scenes plugin (`shoreline`, `moonlit_water`, `sleeping_ridge`,
     /// `windy_hillside`, `tea_steam`, `kelp`, `stone_caustics`, `cloudlets`, `two_ripples`,
-    /// `quiet_pond` (once `breathing_mountain`), `dithered_waves`, `pipes`, `atlantic_dusk`,
+    /// `quiet_pond` (once `breathing_mountain`), `dithered_waves`, `clouds` (Satellite clouds), `pipes`, `atlantic_dusk`,
     /// `machine_screen`, `hex_expedition`, and the quiet scenes such as `aurora`, `pollen` and
     /// `wallpaper`, and `cube_clock`, `dither_water`, `fbm_clouds`, `carpet` and `chess`, and the live data scenes `graph`,
-    /// `earthquakes`, `aircraft` and `boats`) loads as this kind.
+    /// `earthquakes`, `aircraft` and `boats`, and `night_lights` (Earth at night)) loads as this kind.
     #[default]
     #[serde(
         alias = "shoreline",
@@ -68,6 +66,7 @@ pub enum AnimationKind {
         alias = "quiet_pond",
         alias = "breathing_mountain",
         alias = "dithered_waves",
+        alias = "clouds",
         alias = "pi",
         alias = "pipes",
         alias = "atlantic_dusk",
@@ -105,6 +104,7 @@ pub enum AnimationKind {
         alias = "topographic_maps",
         alias = "voxel_landscape",
         alias = "stars",
+        alias = "night_lights",
         alias = "graph",
         alias = "earthquakes",
         alias = "aircraft",
@@ -117,9 +117,7 @@ pub enum AnimationKind {
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 9] = [
-        Self::NightLights,
-        Self::Clouds,
+    pub const ALL: [Self; 7] = [
         Self::Video,
         Self::Spectrum,
         Self::Images,
@@ -134,8 +132,6 @@ impl AnimationKind {
     pub const fn ambient(self) -> Option<AmbientKind> {
         match self {
             Self::OpenStreetMap => Some(AmbientKind::OpenStreetMap),
-            Self::NightLights => Some(AmbientKind::NightLights),
-            Self::Clouds => Some(AmbientKind::Clouds),
             Self::Video => Some(AmbientKind::Video),
             Self::Spectrum => Some(AmbientKind::Spectrum),
             Self::Images => Some(AmbientKind::Images),

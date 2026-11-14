@@ -6,6 +6,7 @@
 //! which the SDK lane has not implemented yet.
 
 pub mod recovery;
+pub mod session_recovery;
 
 use std::collections::BTreeSet;
 
@@ -13,10 +14,13 @@ use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::{
     FreezePaneSpec, Intent, Submission, UnfreezePaneSpec,
 };
-use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::types::{NodeId, PaneLifecycleState};
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
+use ilium_plugin_sdk::generated::types::layout::Area;
+use ilium_plugin_sdk::generated::types::ui::{UiTree, ViewTarget};
+use ilium_plugin_sdk::types::{
+    ActionKind, Activation, InvokeCommandSpec, NodeId, OpenViewSpec, PaneLifecycleState,
+    PluginError,
+};
+use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
 
 /// Restored panes that were frozen and the ones that still have to report `running`.
 #[derive(Debug, Default)]
@@ -94,10 +98,15 @@ impl Handler for SessionsServer {
 }
 
 /// The client side of `ilium.core.sessions` (core-plugin-sessions.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+///
+/// It asks the user the crash-recovery question when the server holds the attach for an answer
+/// (the "Ask before restoring" policy), and tells the kernel what the user chose.
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
 pub struct SessionsClient {
     activated: bool,
+    /// The open "Restore previous session?" dialog, if any.
+    recovery: Option<session_recovery::Dialog>,
 }
 
 impl Lifecycle for SessionsClient {
@@ -109,8 +118,61 @@ impl Lifecycle for SessionsClient {
 }
 
 impl Handler for SessionsClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut submissions = Vec::new();
+        for event in batch {
+            match event {
+                Event::CommandInvoked(invoked) if invoked.command == session_recovery::COMMAND => {
+                    // Arguments that do not name a pane count open nothing.
+                    if let Some(request) =
+                        session_recovery::Request::from_arguments(&invoked.arguments_json)
+                    {
+                        self.recovery = Some(session_recovery::Dialog::new(request));
+                        submissions.push(Submission::new(Intent::OpenView(OpenViewSpec {
+                            view: session_recovery::view(),
+                            focus: true,
+                        })));
+                    }
+                }
+                Event::UiAction(action) if action.view == session_recovery::view() => {
+                    submissions.extend(self.recovery_action(&action.action_id, action.kind));
+                }
+                _ => {}
+            }
+        }
+        submissions
+    }
+}
+
+impl SessionsClient {
+    /// Applies one action of the recovery dialog. When a button answers it, returns the kernel
+    /// command that tells the server and the intent that closes the popup.
+    fn recovery_action(&mut self, action_id: &str, kind: ActionKind) -> Vec<Submission> {
+        let Some(dialog) = self.recovery.as_mut() else {
+            return Vec::new();
+        };
+        match dialog.act(action_id, kind) {
+            session_recovery::Step::Stay => Vec::new(),
+            session_recovery::Step::Resolve { restore } => {
+                self.recovery = None;
+                vec![
+                    Submission::new(Intent::InvokeCommand(InvokeCommandSpec {
+                        command: session_recovery::RESOLVE_COMMAND.to_owned(),
+                        arguments_json: session_recovery::resolve_arguments(restore),
+                    })),
+                    Submission::new(Intent::CloseView(session_recovery::view())),
+                ]
+            }
+        }
+    }
+}
+
+impl Views for SessionsClient {
+    fn render(&mut self, view: ViewTarget, _area: Area) -> UiTree {
+        match &self.recovery {
+            Some(dialog) if view == session_recovery::view() => dialog.render(),
+            _ => UiTree::default(),
+        }
     }
 }
 

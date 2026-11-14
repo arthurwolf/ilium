@@ -90,7 +90,7 @@ fn foreground_fixture(area: Rect, selected: &str) -> Buffer {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let resources = ambient_fixture::ResourcesFixture::new()?;
     let (mut width, mut height, mut frames, mut selected) =
-        (160_u16, 50_u16, 300_u32, String::from("night_lights"));
+        (160_u16, 50_u16, 300_u32, String::from("images"));
     let mut density = 60_u16;
     let mut foreground = String::from("empty");
     let mut args = std::env::args().skip(1);

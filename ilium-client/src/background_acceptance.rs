@@ -40,7 +40,7 @@ fn ambient_decoration_preserves_source_and_colored_spaces_but_fills_plain_backgr
     // A fake hosted scene keeps the test offline.
     let probe = crate::background_animation::test_support::FakeProbe::new();
     *app.animation_frame.host_mut() = crate::background_animation::test_support::fake_host(&probe);
-    app.animation_settings.kind = AnimationKind::NightLights;
+    app.animation_settings.kind = AnimationKind::Images;
     app.animation_settings.density_percent = 100;
     let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
     draw_ready(&mut terminal, &mut app);
@@ -173,7 +173,7 @@ fn colour_controls_survive_scene_switch_and_project_reload() {
     assert_eq!(value["lightness_percent"], 35);
     assert_eq!(value["hue_degrees"], 275);
     assert_eq!(value["saturation_percent"], 40);
-    assert_eq!(saved.kind, AnimationKind::Clouds);
+    assert_eq!(saved.kind, AnimationKind::Video);
     assert_eq!(
         crate::project_config::load(tempfile::tempdir().unwrap().path())
             .unwrap()

@@ -3,8 +3,10 @@
 //! `identify_agent` walks an already-populated `sysinfo::System` process
 //! tree to answer "which agent CLI (if any) is running below this pane's
 //! shell" -- the *identity* signal, driven by the first-party
-//! `BuiltinAgentProvider::ALL` table plus this crate's own
-//! [`GENERIC_AGENT_SIGNATURES`] registry. `classify_activity` scans the
+//! `BuiltinAgentProvider::ALL` table plus the signatures the caller passes
+//! in (user configuration and the enabled plugins' `contributes.signatures`,
+//! which is where generic CLIs such as opencode and aider are declared, by
+//! the agent-detect plugin). `classify_activity` scans the
 //! pane's rendered
 //! plain-text screen contents to answer "is that agent working, blocked on
 //! a confirmation, or idle" -- the *activity* signal.
@@ -54,8 +56,8 @@ pub fn configure_process_refresh() {
 /// rather than that config surface needing a parallel matching code path.
 ///
 /// `name_substring` is `Cow<'static, str>` rather than plain `&'static
-/// str` so the same type serves both the compile-time [`GENERIC_AGENT_SIGNATURES`]
-/// table (`Cow::Borrowed`) and signatures built at runtime from an owned
+/// str` so the same type serves both compile-time tables
+/// (`Cow::Borrowed`) and signatures built at runtime from an owned
 /// `String` read out of a config file (`Cow::Owned`), with no separate
 /// "config signature" type needed. `class_of` stays a plain `fn` pointer
 /// (not a boxed closure) since every signature -- built-in or
@@ -80,20 +82,11 @@ pub struct AgentSignature {
     pub class_of: fn(matched_name: &str) -> AgentClass,
 }
 
-/// Built-in generic signatures that do not expose a launch/resume/session
-/// contract. First-party providers live in `BuiltinAgentProvider::ALL`, so a
-/// new supported CLI is registered exactly once in `ilium-core` rather than
-/// being copied into detection, launch, and persistence tables.
-const GENERIC_AGENT_SIGNATURES: &[AgentSignature] = &[
-    AgentSignature {
-        name_substring: Cow::Borrowed("opencode"),
-        class_of: |matched_name| AgentClass::Other(matched_name.to_string()),
-    },
-    AgentSignature {
-        name_substring: Cow::Borrowed("aider"),
-        class_of: |matched_name| AgentClass::Other(matched_name.to_string()),
-    },
-];
+// Generic agent CLIs without a launch/resume/session contract (opencode,
+// aider) are not a kernel table: the agent-detect plugin declares them in its
+// manifest's `contributes.signatures`, and the server passes the enabled
+// plugins' signatures in as `extra_signatures`. First-party providers live in
+// `BuiltinAgentProvider::ALL` because launch and persistence need them too.
 
 /// The agent CLI identity found below a pane's shell, and the OS pid of
 /// the matched process. Session/thread-ID discovery is deliberately not
@@ -505,7 +498,7 @@ pub fn is_agent_prompt_ready_at_cursor(
 /// because dialogs like this appear once, only at session (re)start, before
 /// any turn exists to classify. A new known dialog is a new entry in
 /// `INTERSTITIAL_PROMPTS`, not a new branch in an if/else chain -- same
-/// registry shape as `GENERIC_AGENT_SIGNATURES`.
+/// registry shape as `AgentSignature`.
 struct InterstitialPrompt {
     class: AgentClass,
     /// Every one of these substrings must appear in the bottom
@@ -1709,7 +1702,7 @@ impl ProcessChildrenIndex {
 /// Given the OS pid of a pane's directly-spawned child (typically the
 /// user's shell), walks the process tree looking for a descendant process
 /// whose name matches a known agent CLI signature (see
-/// `BuiltinAgentProvider::ALL` and [`GENERIC_AGENT_SIGNATURES`]), and
+/// `BuiltinAgentProvider::ALL`), and
 /// returns the best-ranked match: the shallowest one, preferring a process
 /// recognized by its own kernel name over one recognized only through an
 /// interpreter's argv, and breaking a remaining tie by lowest pid. See
@@ -1736,8 +1729,7 @@ pub fn identify_agent(system: &System, shell_pid: Pid) -> Option<AgentIdentity> 
 
 /// Same as [`identify_agent`], but also checks `extra_signatures` (e.g.
 /// user-configured `[[detection.custom_signatures]]` entries) alongside
-/// the built-in `BuiltinAgentProvider::ALL` and [`GENERIC_AGENT_SIGNATURES`]
-/// tables -- the registry-driven
+/// the built-in `BuiltinAgentProvider::ALL` table -- the registry-driven
 /// extension point `CLAUDE.md`'s layering rule calls for, rather than a
 /// second, parallel matching code path for config-provided signatures.
 ///
@@ -2248,7 +2240,7 @@ fn is_interpreter_name(name: &str) -> bool {
 }
 
 /// Classifies a single (already-lowercased) process name against the shared
-/// first-party provider registry, generic built-ins, then `extra_signatures`.
+/// first-party provider registry, then `extra_signatures`.
 /// That order lets configuration add coverage without silently shadowing an
 /// agent whose launch/resume semantics ilium already knows.
 #[cfg(test)]
@@ -2260,7 +2252,7 @@ fn classify_process_name_with_extra(
 }
 
 /// Matches one process while retaining which registry signature justified the
-/// class. Built-ins keep priority over generic/custom entries so configuration
+/// class. Built-ins keep priority over custom and plugin entries so configuration
 /// cannot shadow first-party provider behavior.
 fn match_process_name_with_extra(
     lowercase_name: &str,
@@ -2281,9 +2273,8 @@ fn match_process_name_with_extra(
         });
     }
 
-    GENERIC_AGENT_SIGNATURES
+    extra_signatures
         .iter()
-        .chain(extra_signatures)
         .find(|signature| lowercase_name.contains(signature.name_substring.as_ref()))
         .map(|signature| AgentProcessMatch {
             class: (signature.class_of)(lowercase_name),
@@ -3579,13 +3570,16 @@ Goal achieved (3m)
             classify_process_name_with_extra("antimatter", &[]),
             Some(AgentClass::Antigravity)
         );
+        // Generic CLIs come from the agent-detect plugin's manifest, not this crate.
+        assert_eq!(classify_process_name_with_extra("opencode", &[]), None);
+        assert_eq!(classify_process_name_with_extra("aider", &[]), None);
+        let plugin_signatures = [AgentSignature {
+            name_substring: Cow::Borrowed("opencode"),
+            class_of: |matched_name| AgentClass::Other(matched_name.to_string()),
+        }];
         assert_eq!(
-            classify_process_name_with_extra("opencode", &[]),
+            classify_process_name_with_extra("opencode", &plugin_signatures),
             Some(AgentClass::Other("opencode".to_string()))
-        );
-        assert_eq!(
-            classify_process_name_with_extra("aider", &[]),
-            Some(AgentClass::Other("aider".to_string()))
         );
         assert_eq!(classify_process_name_with_extra("bash", &[]), None);
     }

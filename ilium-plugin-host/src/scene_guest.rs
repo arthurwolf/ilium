@@ -93,6 +93,20 @@ pub struct PresentedFrame {
     /// The glyph plane: one `(column, row, character)` per cell the scene wrote text into
     /// (`write-glyphs`); the host draws the character in place of the Braille dots of the cell.
     pub glyphs: Vec<(u16, u16, char)>,
+    /// The styled text plane: terminal graphemes the scene wrote with a style or more than one
+    /// scalar (`write-glyphs`); the host draws them in place of the Braille dots of the cell.
+    pub text_glyphs: Vec<PresentedText>,
+}
+
+/// One styled terminal grapheme of the text plane of a presented frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresentedText {
+    pub column: u16,
+    pub row: u16,
+    /// One terminal grapheme.
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 /// The frame buffer behind `ilium:anim/surface`: one open frame at a time, lent to the guest
@@ -112,6 +126,8 @@ pub struct SceneSurface {
     colors_written: bool,
     /// Glyph plane of the open frame, in write order.
     glyphs: Vec<(u16, u16, char)>,
+    /// Styled text plane of the open frame, in write order.
+    text_glyphs: Vec<PresentedText>,
     presented: Option<PresentedFrame>,
     /// Frames that ended without `present` since the last presented one.
     dropped: u32,
@@ -145,6 +161,7 @@ impl SceneSurface {
             .resize(columns as usize * rows as usize, 0x00ff_ffff);
         self.colors_written = false;
         self.glyphs.clear();
+        self.text_glyphs.clear();
         self.presented = None;
         Some(self.handle)
     }
@@ -341,6 +358,7 @@ impl HostSurface for SceneSurface {
             pixels: self.pixels.clone(),
             cell_colors: self.colors_written.then(|| self.colors.clone()),
             glyphs: self.glyphs.clone(),
+            text_glyphs: self.text_glyphs.clone(),
         });
         self.receipt = Some(FrameReceipt {
             frame: self.frame,
@@ -357,7 +375,9 @@ impl HostSurface for SceneSurface {
         cells: Vec<GlyphCell>,
     ) -> Result<(), PluginError> {
         self.stale(handle)?;
-        if cells.len() > MAX_GLYPH_CELLS || self.glyphs.len() + cells.len() > MAX_GLYPH_CELLS {
+        if cells.len() > MAX_GLYPH_CELLS
+            || self.glyphs.len() + self.text_glyphs.len() + cells.len() > MAX_GLYPH_CELLS
+        {
             return Err(error(
                 ErrorCode::InvalidArgument,
                 "more than 131,072 glyph cells in one frame",
@@ -372,7 +392,22 @@ impl HostSurface for SceneSurface {
             if u32::from(cell.column) >= self.columns || u32::from(cell.row) >= self.rows {
                 continue;
             }
-            self.glyphs.push((cell.column, cell.row, character));
+            // Bold (bit 0) or italic (bit 2) text goes to the styled plane with its whole text
+            // (one grapheme, possibly several scalars); plain cells keep the first character in
+            // the character plane.
+            let bold = cell.add.0 & 1 != 0;
+            let italic = cell.add.0 & (1 << 2) != 0;
+            if bold || italic {
+                self.text_glyphs.push(PresentedText {
+                    column: cell.column,
+                    row: cell.row,
+                    text: cell.text,
+                    bold,
+                    italic,
+                });
+            } else {
+                self.glyphs.push((cell.column, cell.row, character));
+            }
         }
         Ok(())
     }
@@ -380,6 +415,7 @@ impl HostSurface for SceneSurface {
     fn frame_surface_clear_glyphs(&mut self, handle: FrameSurfaceHandle) {
         if self.lent(handle) {
             self.glyphs.clear();
+            self.text_glyphs.clear();
         }
     }
 
@@ -1189,6 +1225,35 @@ mod tests {
         surface.frame_surface_clear_glyphs(next);
         surface.frame_surface_present(next);
         assert!(surface.finish().expect("presented").glyphs.is_empty());
+    }
+
+    #[test]
+    fn styled_glyph_cells_reach_the_text_plane_with_their_whole_text() {
+        let (mut surface, handle) = opened(3, 1);
+        let styled = |column: u16, text: &str, add: u32| GlyphCell {
+            column,
+            row: 0,
+            text: text.to_owned(),
+            add: ilium_plugin_api::generated::types::text::Modifiers(add),
+            ..GlyphCell::default()
+        };
+        surface
+            .frame_surface_write_glyphs(
+                handle,
+                vec![
+                    styled(0, "A", 1),
+                    styled(1, "e\u{301}", 1 << 2),
+                    styled(2, "z", 0),
+                ],
+            )
+            .expect("glyphs are accepted");
+        surface.frame_surface_present(handle);
+        let presented = surface.finish().expect("presented");
+        assert_eq!(presented.glyphs, vec![(2, 0, 'z')]);
+        assert_eq!(presented.text_glyphs.len(), 2);
+        assert!(presented.text_glyphs[0].bold && !presented.text_glyphs[0].italic);
+        assert_eq!(presented.text_glyphs[1].text, "e\u{301}");
+        assert!(presented.text_glyphs[1].italic);
     }
 
     #[test]

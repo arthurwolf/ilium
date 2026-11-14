@@ -44,7 +44,6 @@ pub enum GoalState {
     Reached,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityEvidence {
     InterruptMarker,
@@ -230,7 +229,10 @@ pub fn classify_screen_activity(
 /// elapsed-time token) on screen, so the generic shape would turn every
 /// finished Codex pane back into `Working`. Providers with no recognized live
 /// status line fall through to the shared marker families instead of guessing.
-pub fn live_status_evidence(class: Option<&AgentClass>, screen_text: &str) -> Option<ActivityEvidence> {
+pub fn live_status_evidence(
+    class: Option<&AgentClass>,
+    screen_text: &str,
+) -> Option<ActivityEvidence> {
     match class {
         None => {
             looks_like_live_status_line(screen_text).then_some(ActivityEvidence::GenericLiveStatus)
@@ -429,7 +431,7 @@ pub fn is_agent_prompt_ready_at_cursor(
 /// because dialogs like this appear once, only at session (re)start, before
 /// any turn exists to classify. A new known dialog is a new entry in
 /// `INTERSTITIAL_PROMPTS`, not a new branch in an if/else chain -- same
-/// registry shape as `GENERIC_AGENT_SIGNATURES`.
+/// registry shape as the agent signature table.
 pub struct InterstitialPrompt {
     class: AgentClass,
     /// Every one of these substrings must appear in the bottom
@@ -1178,9 +1180,19 @@ pub fn looks_like_background_wait_line(screen_text: &str) -> bool {
 pub fn is_background_wait_line(line: &str) -> bool {
     // Use to_ascii_lowercase() for ASCII terminal output (faster than to_lowercase() for typical case)
     let lower = line.to_ascii_lowercase();
-    normalize_goal_status_line(line).starts_with("waiting for ")
-        && lower.contains("background")
-        && (lower.contains("agent") || lower.contains("task"))
+    if !normalize_goal_status_line(line).starts_with("waiting for ") {
+        return false;
+    }
+    // Claude Code words the same blocked-on-dispatched-work state two ways:
+    // "Waiting for 2 background agents to finish" and, for a dynamic workflow
+    // script, "Waiting for 1 dynamic workflow to finish" (no "background"
+    // or "agent"). Both are an actively blocked turn, so both qualify; the
+    // workflow form additionally requires the "to finish" tail so prose that
+    // merely mentions a workflow does not match.
+    let names_background_work =
+        lower.contains("background") && (lower.contains("agent") || lower.contains("task"));
+    let names_workflow = lower.contains("workflow") && lower.contains("to finish");
+    names_background_work || names_workflow
 }
 
 /// The `WORKING_MARKER` rule as a per-line predicate, so evidence recovery

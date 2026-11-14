@@ -559,15 +559,6 @@
     "sha256": "f3135ebf34a13489276d626f657e9eab510b15c62c2087d06f1071c1c85729b5"
   },
   {
-    "name": "agent/goal-from-line",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
-      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
-      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "5749f771885b2a49866af62d8ae092e131f155e66269c505fa07e1bf0c503b48"
-  },
-  {
     "name": "agent/progress-done",
     "context": {
       "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
@@ -606,20 +597,6 @@
       "v3": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
     },
     "sha256": "4ae39eb7ee0a125e930709d4cb7fb3784e033cafc63cef075e46995f99605348"
-  },
-  {
-    "name": "conversion/truncated-result",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "7cbcb60d4be728008b9a0099a64147648962e5ac0b802b6322fbe93cee34d06c"
-  },
-  {
-    "name": "conversion/bash-description-workdir",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "d2f8aada80fa2fdc1142ab55f31a634d058169254e14f2f4821fd7b03681fdcc"
   },
   {
     "name": "naming/close-container",

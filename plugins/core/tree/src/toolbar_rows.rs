@@ -1,8 +1,8 @@
-//! Row rules of the tree toolbar editor (pure part of `ilium-client/src/tree_toolbar_settings.rs`).
+//! Row rules of the tree toolbar editor (`toolbar_dialog`).
 //!
 //! The editor lists one row per toolbar button, then an "Add button" row, then the "Inactive
-//! after" row. This module holds the selection, scrolling, stepping and column rules; drawing and
-//! the live `App` state stay in the kernel until settings rows can be edited by plugins.
+//! after" row. This module holds the selection, stepping and column rules the dialog uses; the
+//! dialog itself is `toolbar_dialog`.
 
 /// Smallest and largest inactivity threshold, in minutes.
 pub const MINIMUM_INACTIVITY_MINUTES: u32 = 1;

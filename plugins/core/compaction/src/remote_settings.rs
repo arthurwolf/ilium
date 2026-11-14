@@ -646,6 +646,32 @@ mod tests {
         }
     }
 
+    /// REQ: COR-025
+    #[test]
+    fn threshold_percent_accepts_both_range_ends() {
+        for accepted in [30_u8, 88] {
+            let settings = RemoteCompactionSettings {
+                threshold_percent: accepted,
+                ..Default::default()
+            }
+            .sanitized();
+            assert_eq!(settings.threshold_percent, accepted);
+        }
+    }
+
+    /// REQ: COR-025
+    #[test]
+    fn threshold_percent_outside_the_range_is_pulled_back_to_its_end() {
+        for (refused, kept) in [(29_u8, 30_u8), (89, 88)] {
+            let settings = RemoteCompactionSettings {
+                threshold_percent: refused,
+                ..Default::default()
+            }
+            .sanitized();
+            assert_eq!(settings.threshold_percent, kept);
+        }
+    }
+
     #[test]
     fn threshold_steps_by_one_and_stops_at_its_limits() {
         let mut settings = RemoteCompactionSettings::default();

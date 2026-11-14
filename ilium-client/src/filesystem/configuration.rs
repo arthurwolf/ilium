@@ -30,7 +30,6 @@ pub enum ConfigurationChange {
     Editor(crate::config::EditorSettings),
     Onboarding(crate::onboarding::progress::OnboardingProgress),
     Keyboard(crate::config::KeyboardSettings),
-    Padding(crate::padding::PaddingSettings),
     Sound(ilium_sound::SoundSettings),
     Notifications(ilium_sound::NotificationSettings),
     Inference(Box<ilium_inference::InferenceSettings>),
@@ -113,8 +112,6 @@ impl Job for ConfigurationWrite {
             Onboarding(value) => crate::config::save_onboarding_progress(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Keyboard(value) => crate::config::save_keyboard_settings(directory, &value)
-                .map(|()| ConfigurationSaved::Plain),
-            Padding(value) => crate::config::save_padding_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Sound(value) => crate::config::save_sound_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
@@ -263,7 +260,6 @@ impl ConfigurationChange {
                     + value.icons.agent_toolbar_exit.capacity()
                     + value.icons.agent_toolbar_fast.capacity()
                     + value.icons.agent_toolbar_selection.capacity()
-                    + value.icons.chrome_recap.capacity()
                     + value.icons.task_progress_frames.capacity() * std::mem::size_of::<String>()
                     + value
                         .icons
@@ -279,7 +275,7 @@ impl ConfigurationChange {
                 serialized_bound(value)?
                     + std::mem::size_of::<crate::background_animation::AnimationSettings>()
             }
-            Terminal(_) | Editor(_) | Keyboard(_) | Padding(_) | Separators(_) | NumberRead(_) => 0,
+            Terminal(_) | Editor(_) | Keyboard(_) | Separators(_) | NumberRead(_) => 0,
             ProjectName {
                 proposal: value, ..
             } => {

@@ -1725,7 +1725,7 @@ fn render_condition_column(
                 "Panes that no enabled rule matches show this icon. Hidden shows none.".to_owned()
             }
         };
-        for text in crate::padding_ui::wrap(&explanation, inner_width.max(8))
+        for text in crate::selectable_cards::wrap(&explanation, inner_width.max(8))
             .into_iter()
             .take(3)
         {
@@ -1877,7 +1877,7 @@ fn render_preview_column(
                 for text in explanation
                     .lines
                     .iter()
-                    .flat_map(|line| crate::padding_ui::wrap(line, width))
+                    .flat_map(|line| crate::selectable_cards::wrap(line, width))
                     .take(usize::from(WHY_BOX_HEIGHT - 3))
                 {
                     lines.push(Line::from(text));

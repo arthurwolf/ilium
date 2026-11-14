@@ -36,7 +36,7 @@ use ilium_ambient::control::{Control, ControlValue};
 use ilium_ambient::external::{external_scenes, ExternalSceneFactory, ExternalScenes, SceneValues};
 use ilium_ambient::scene::SceneReadiness;
 use ilium_ambient::style::ScenePalette;
-use ilium_ambient::{Frame, GeoLocation, OccupancyMask, Scene, SceneEnv};
+use ilium_ambient::{Frame, GeoLocation, OccupancyMask, Scene, SceneEnv, SceneText};
 use ilium_plugin_api::generated::anim::surface::{OccupancyGrid, ScenePointer};
 use ilium_plugin_api::generated::anim::Readiness;
 use ilium_plugin_host::calls::ResolvedLimits;
@@ -344,6 +344,9 @@ pub(crate) struct PluginScene {
     last: Option<PresentedFrame>,
     /// The glyph plane of `last`, by (column, row).
     glyphs: HashMap<(u16, u16), char>,
+    /// The styled text plane of `last`, by (column, row); the cell right of a two-column
+    /// grapheme holds an empty symbol (its continuation).
+    texts: HashMap<(u16, u16), SceneText>,
     status: Option<String>,
     frames_since_status: u32,
     pointer: Option<[f32; 2]>,
@@ -377,6 +380,7 @@ impl PluginScene {
             palette_rgb,
             last: None,
             glyphs: HashMap::new(),
+            texts: HashMap::new(),
             status: None,
             frames_since_status: 0,
             pointer: None,
@@ -482,6 +486,28 @@ impl Scene for PluginScene {
                         .iter()
                         .map(|(column, row, character)| ((*column, *row), *character))
                         .collect();
+                    self.texts.clear();
+                    for text in &presented.text_glyphs {
+                        let width = unicode_width::UnicodeWidthStr::width(text.text.as_str());
+                        self.texts.insert(
+                            (text.column, text.row),
+                            SceneText {
+                                symbol: text.text.clone(),
+                                bold: text.bold,
+                                italic: text.italic,
+                            },
+                        );
+                        if width == 2 {
+                            self.texts.insert(
+                                (text.column.saturating_add(1), text.row),
+                                SceneText {
+                                    symbol: String::new(),
+                                    bold: false,
+                                    italic: false,
+                                },
+                            );
+                        }
+                    }
                     self.last = Some(presented);
                 }
                 // No present: the previous frame stays.
@@ -568,6 +594,10 @@ impl Scene for PluginScene {
 
     fn native_glyph(&self, x: u16, y: u16) -> Option<char> {
         self.glyphs.get(&(x, y)).copied()
+    }
+
+    fn text_cell(&self, x: u16, y: u16) -> Option<SceneText> {
+        self.texts.get(&(x, y)).cloned()
     }
 
     fn frames_per_second(&self) -> u32 {

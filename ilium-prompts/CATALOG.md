@@ -16,9 +16,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/agent_feature_setup.rs:24 PROGRESS_INSTRUCTION` | [agent/progress-instructions](templates/agent/progress-instructions.hbs) | `PROGRESS_INSTRUCTIONS` |
 | `ilium-server/src/workspace.rs worktree agent initial prompt` | [agent/worktree-wrap-up](templates/agent/worktree-wrap-up.hbs) | `WORKTREE_WRAP_UP_INSTRUCTIONS` |
 | `ilium-client/src/app.rs:9785 ASK_FOR_UPDATE_PROMPT` | [agent/ask-for-update](templates/agent/ask-for-update.hbs) | `ASK_FOR_UPDATE` |
-| `ilium-remote-compaction/src/write_claude.rs:162 MISSING_RESULT` | [conversion/missing-result](templates/conversion/missing-result.hbs) | `MISSING_RESULT` |
-| `ilium-remote-compaction/src/write_claude.rs:163 EMPTY_RESULT` | [conversion/empty-result](templates/conversion/empty-result.hbs) | `EMPTY_RESULT` |
-| `plugins/core/session-convert/src/prompts.rs:6 SYNTHETIC_FIRST_PROMPT` | [conversion/synthetic-first-prompt](templates/conversion/synthetic-first-prompt.hbs) | `SYNTHETIC_FIRST_PROMPT` |
 | `ilium-client/src/session_naming.rs:279` | [naming/session-label-example](templates/naming/session-label-example.hbs) | `SESSION_LABEL_EXAMPLE` |
 | `ilium-client/src/session_naming.rs:280` | [naming/session-summary-example](templates/naming/session-summary-example.hbs) | `SESSION_SUMMARY_EXAMPLE` |
 | `ilium-client/src/session_naming.rs:300` | [naming/unavailable-process](templates/naming/unavailable-process.hbs) | `UNAVAILABLE_PROCESS` |
@@ -310,16 +307,12 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/control/settings.rs:894` | [voice/settings/voice-input-mode-must-be-semantic-vad](templates/voice/settings/voice-input-mode-must-be-semantic-vad.hbs) | `VOICE_SETTINGS_VOICE_INPUT_MODE_MUST_BE_SEMANTIC_VAD` |
 | `ilium-client/src/control/settings.rs:903` | [voice/settings/vad-eagerness-must-be-auto-low-medium](templates/voice/settings/vad-eagerness-must-be-auto-low-medium.hbs) | `VOICE_SETTINGS_VAD_EAGERNESS_MUST_BE_AUTO_LOW_MEDIUM` |
 | `ilium-client/src/agent_feature_setup.rs:184` | [agent/managed-block](templates/agent/managed-block.hbs) | `MANAGED_BLOCK` |
-| `ilium-client/src/agent_from_line.rs:162` | [agent/goal-from-line](templates/agent/goal-from-line.hbs) | `GOAL_FROM_LINE` |
 | `ilium-server/src/agent_delivery.rs:137` | [agent/progress-done](templates/agent/progress-done.hbs) | `PROGRESS_DONE` |
 | `ilium-server/src/agent_delivery.rs:143` | [agent/progress-error](templates/agent/progress-error.hbs) | `PROGRESS_ERROR` |
 | `ilium-server/src/agent_delivery.rs:148` | [agent/progress-unspecified-error](templates/agent/progress-unspecified-error.hbs) | `PROGRESS_UNSPECIFIED_ERROR` |
 | `ilium-server/src/agent_delivery.rs:151` | [agent/progress-unknown](templates/agent/progress-unknown.hbs) | `PROGRESS_UNKNOWN` |
 | `ilium-server/src/agent_delivery.rs:162` | [agent/progress-monitor-failure](templates/agent/progress-monitor-failure.hbs) | `PROGRESS_MONITOR_FAILURE` |
 | `ilium-server/src/agent_delivery.rs:399` | [agent/progress-empty-status](templates/agent/progress-empty-status.hbs) | `PROGRESS_EMPTY_STATUS` |
-| `plugins/core/session-convert/src/prompts.rs:8 TRUNCATED_RESULT` | [conversion/truncated-result](templates/conversion/truncated-result.hbs) | `TRUNCATED_RESULT` |
-| `plugins/core/session-convert/src/prompts.rs:7 BASH_DESCRIPTION_WORKDIR` | [conversion/bash-description-workdir](templates/conversion/bash-description-workdir.hbs) | `BASH_DESCRIPTION_WORKDIR` |
-| `plugins/core/session-convert/src/prompts.rs:3 BASH_DESCRIPTION` | [conversion/bash-description](templates/conversion/bash-description.hbs) | `BASH_DESCRIPTION` |
 | `ilium-client/src/app.rs close_confirmation_message` | [naming/close-container](templates/naming/close-container.hbs) | `render by name` |
 | `ilium-client/src/app.rs close_confirmation_message` | [naming/close-dirty-editor](templates/naming/close-dirty-editor.hbs) | `render by name` |
 | `ilium-server/src/ipc/handlers.rs` | [naming/progress-restoration-failure](templates/naming/progress-restoration-failure.hbs) | `render by name` |

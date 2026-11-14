@@ -482,9 +482,6 @@ fn rows_with_scene_controls(
             .map(|control| AnimationRow::SceneControl(control.id)),
     );
     if kind == AnimationKind::OpenStreetMap
-        || kind
-            .ambient()
-            .is_some_and(|ambient| ambient.uses_location())
         || (kind == AnimationKind::PluginScene && settings.ambient.plugin_scene.uses_location())
     {
         rows.push(AnimationRow::Location);
@@ -713,9 +710,8 @@ impl AnimationRow {
             Self::Scene(AnimationKind::OpenStreetMap) => "AN-55".to_owned(),
             Self::Scene(AnimationKind::Semantic) => "AN-64".to_owned(),
             // The scenes after the ones that moved into the Scenes plugin (3D pipes, Atlantic
-            // dusk, Machine screen, Hex expedition) keep the topic numbers they had.
-            Self::Scene(AnimationKind::NightLights) => "AN-13".to_owned(),
-            Self::Scene(AnimationKind::Clouds) => "AN-14".to_owned(),
+            // dusk, Machine screen, Hex expedition, Stars overhead, Earth at night) keep the
+            // topic numbers they had.
             Self::Scene(AnimationKind::Video) => "AN-15".to_owned(),
             Self::Scene(AnimationKind::Spectrum) => "AN-16".to_owned(),
             Self::Scene(AnimationKind::Images) => "AN-17".to_owned(),

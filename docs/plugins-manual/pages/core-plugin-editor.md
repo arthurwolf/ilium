@@ -19,6 +19,7 @@ The Editor plugin (`ilium.core.editor`, client part plus a small server part for
 - Markdown source and rendered views (Editors and boards, Editor panes).
 - The file explorer and file picker (Editors and boards, Editor panes).
 - Creating an agent from an editor line (Automation, Create an agent from an editor line).
+  The line menu entry "Create agent from line" runs the command `ilium.core.editor/create-agent-from-line` with `{ "path", "line", "text", "parent" }`; the plugin opens its own dialog (agent choice, task text prefilled with the line) and creates the agent pane. Without the plugin the entry reports that it is not running.
 
 ### See it
 
@@ -113,6 +114,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "fs.read:project",
       "panes.create",
       "panes.create-command:claude",
+      "panes.create-command:codex",
+      "panes.create-command:agy",
+      "notify.toast",
       "terminal.write",
       "ui.panels",
       "services.use:ilium.core.editor/set-setting",
@@ -126,10 +130,18 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "activation": [
-    "pane-kind:editor"
+    "pane-kind:editor",
+    "command:ilium.core.editor/create-agent-from-line"
   ],
   "unstable": ["plugin-services"],
   "contributes": {
+    "commands": [
+      {
+        "id": "create-agent-from-line",
+        "title": "Create agent from line",
+        "category": "Editor"
+      }
+    ],
     "extension_points": [
       {
         "id": "before-save",

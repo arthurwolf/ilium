@@ -60,8 +60,6 @@ pub struct ClientConfig {
     /// User-global desktop-notification switches. The client persists
     /// changes; running servers pick them up through their config watcher.
     pub notifications: NotificationSettings,
-    /// Panel padding shown in the Padding tab.
-    pub padding: crate::padding::PaddingSettings,
     /// Provider selection and credentials used only by client-owned naming workers.
     pub inference: InferenceSettings,
     /// Automatic event-to-LLM-action mappings shown in the Triggers tab.
@@ -97,7 +95,6 @@ impl Default for ClientConfig {
             ui: UiSettings::default(),
             sound: SoundSettings::default(),
             notifications: NotificationSettings::default(),
-            padding: crate::padding::PaddingSettings::default(),
             inference: InferenceSettings::default(),
             triggers: TriggerSettings::default(),
             agent_setup: AgentSetupSettings::default(),
@@ -1192,8 +1189,6 @@ struct RawClientConfig {
     #[serde(default)]
     notifications: NotificationSettings,
     #[serde(default)]
-    padding: crate::padding::PaddingSettings,
-    #[serde(default)]
     inference: InferenceSettings,
     #[serde(default)]
     triggers: TriggerSettings,
@@ -1426,9 +1421,6 @@ pub enum ConfigLoadError {
     InvalidNewPaneDirectory(String),
     #[error("editor.line_display = {0:?} must be \"clip\" or \"wrap\"")]
     InvalidEditorLineDisplay(String),
-    /// A `[padding]` value is outside its supported range.
-    #[error("{0}")]
-    InvalidPadding(String),
     /// `ui.last_prompt_max_lines` is outside the supported range.
     #[error(
         "ui.last_prompt_max_lines = {0} must be between {MIN_LAST_PROMPT_MAX_LINES} and {MAX_LAST_PROMPT_MAX_LINES}"
@@ -1548,12 +1540,6 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         path: path.clone(),
         source,
     })?;
-    raw.padding
-        .validate()
-        .map_err(|message| ClientError::ConfigLoad {
-            path: path.clone(),
-            source: ConfigLoadError::InvalidPadding(message),
-        })?;
     let terminal = merge_terminal(raw.terminal).map_err(|source| ClientError::ConfigLoad {
         path: path.clone(),
         source,
@@ -1587,7 +1573,6 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         ui,
         sound: raw.sound,
         notifications: raw.notifications.normalized(),
-        padding: raw.padding,
         inference: raw.inference,
         triggers: raw.triggers.normalized(),
         agent_setup: raw.agent_setup,
@@ -2358,24 +2343,6 @@ pub fn save_keymap_settings(
         );
     }
     table.insert("keybindings".to_string(), toml::Value::Table(keybindings));
-    write_toml_document(&path, &document)
-}
-
-/// Persists `[padding]` while preserving every unrelated config table.
-pub fn save_padding_settings(
-    config_dir: &Path,
-    padding: &crate::padding::PaddingSettings,
-) -> Result<(), ClientError> {
-    let path = config_dir.join("config.toml");
-    let mut document = read_toml_document(&path)?;
-    let table = document
-        .as_table_mut()
-        .expect("a TOML document's root is always a table");
-    let value = toml::Value::try_from(padding).map_err(|source| ClientError::ConfigSave {
-        path: path.clone(),
-        source: Box::new(ConfigSaveError::Serialize(source)),
-    })?;
-    table.insert("padding".to_string(), value);
     write_toml_document(&path, &document)
 }
 

@@ -112,7 +112,7 @@ async fn all_inference_apply_lanes_preserve_an_unasked_agent_bundle() {
                         expected_animation_generation: animation_generation,
                         project: AnimationRecommendation {
                             version: 1,
-                            kind: "night_lights".into(),
+                            kind: "images".into(),
                             resources: ResourcePolicy::Catalog,
                             parameters: vec![],
                         },
@@ -122,7 +122,7 @@ async fn all_inference_apply_lanes_preserve_an_unasked_agent_bundle() {
                                 path,
                                 recommendation: AnimationRecommendation {
                                     version: 1,
-                                    kind: "night_lights".into(),
+                                    kind: "images".into(),
                                     resources: ResourcePolicy::Catalog,
                                     parameters: vec![],
                                 },

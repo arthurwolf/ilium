@@ -376,33 +376,6 @@ fn req_cor_019_editor_accepts_file_of_exactly_262144_lines_b() {
     );
 }
 
-/// REQ: COR-025
-#[test]
-fn req_cor_025_compaction_threshold_accepts_range_ends_a() {
-    let kernel = world(StartMode::Normal);
-    for accepted in ["30", "88"] {
-        assert_eq!(
-            kernel.apply_setting("remote_compaction", "threshold_percent", accepted),
-            Ok(()),
-            "COR-025: threshold_percent {accepted} is inside 30 to 88 and was refused"
-        );
-    }
-}
-
-/// REQ: COR-025
-#[test]
-fn req_cor_025_compaction_threshold_refuses_values_outside_range_b() {
-    let kernel = world(StartMode::Normal);
-    for refused in ["29", "89"] {
-        assert!(
-            kernel
-                .apply_setting("remote_compaction", "threshold_percent", refused)
-                .is_err(),
-            "COR-025: threshold_percent {refused} is outside 30 to 88 and was accepted"
-        );
-    }
-}
-
 /// REQ: COR-026
 #[test]
 fn req_cor_026_last_item_close_removes_empty_group_and_ancestors_a() {

@@ -1848,7 +1848,7 @@ mod tests {
         };
         decorate(children);
         if value.get("animations").is_none() {
-            value["animations"] = serde_json::json!({"definitions":[{"key":"calm","recommendation":{"kind":"night_lights","resources":"catalog","parameters":[]}}],"project":"calm"});
+            value["animations"] = serde_json::json!({"definitions":[{"key":"calm","recommendation":{"kind":"images","resources":"catalog","parameters":[]}}],"project":"calm"});
         }
         format!("{}{}{}", &response[..start], value, &response[end + 1..])
     }

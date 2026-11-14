@@ -161,11 +161,57 @@ fn port_009_a_single_line_message_is_delivered_without_a_trailing_newline() {
     assert_eq!(texts, vec!["hello".to_string(), "hello".to_string()]);
 }
 
+const FIXED_REQUEST: &str =
+    "please remind me, in a very compact way, what you were doing, what I asked you to do, how it went, etc, remind me what's going on";
+
 /// REQ: PORT:ilium-client/src/app.rs::ask_for_update_includes_literal_custom_instructions
 #[test]
-fn port_011_custom_instructions_are_delivered_literally() {
+fn port_011_custom_instructions_follow_the_fixed_request_literally() {
     let mut host = server_host();
     add_agent(&mut host, "idle agent", "claude", AgentActivity::Idle);
+    host.kernel_settings().set_tab(
+        "inference",
+        json!({"instructions": {"ask_for_update": "Brief French update {{literal}} & \u{1f980}"}}),
+    );
+    ask(&mut host, FIXED_REQUEST);
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(
+        texts,
+        vec![format!(
+            "{FIXED_REQUEST}\n<custom-instructions purpose=\"ask-for-update\">\nBrief French update {{{{literal}}}} & \u{1f980}\n</custom-instructions>"
+        )]
+    );
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::ask_for_update_includes_literal_custom_instructions
+#[test]
+fn port_011c_blank_custom_instructions_leave_the_plain_fixed_request() {
+    let mut host = server_host();
+    add_agent(&mut host, "idle agent", "claude", AgentActivity::Idle);
+    host.kernel_settings().set_tab(
+        "inference",
+        json!({"instructions": {"ask_for_update": " \n\t"}}),
+    );
+    ask(&mut host, FIXED_REQUEST);
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(texts, vec![FIXED_REQUEST.to_string()]);
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::ask_for_update_includes_literal_custom_instructions
+#[test]
+fn port_011d_typed_text_never_gets_the_custom_instructions() {
+    let mut host = server_host();
+    add_agent(&mut host, "idle agent", "claude", AgentActivity::Idle);
+    host.kernel_settings().set_tab(
+        "inference",
+        json!({"instructions": {"ask_for_update": "Be brief"}}),
+    );
     ask(&mut host, "Be brief: {x} $HOME `ls`");
     let texts: Vec<String> = sent_inputs(&host)
         .into_iter()

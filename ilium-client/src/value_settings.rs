@@ -18,7 +18,6 @@ pub enum SettingsNumber {
     InferenceTokenBudget,
     WorkingPollSeconds,
     IdlePollSeconds,
-    PaddingThreshold,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +41,6 @@ impl UiNumber {
 // Numeric bindings project either live runtime values or a read-only persisted
 // snapshot. Reading a dialog value never applies a whole configuration to App.
 struct NumberSettingsValues<'a> {
-    padding: &'a crate::padding::PaddingSettings,
     inference: &'a ilium_inference::InferenceSettings,
     voice: &'a crate::config::VoiceSettings,
     notification: &'a ilium_sound::NotificationSettings,
@@ -137,9 +135,6 @@ impl SettingsNumber {
                 Some(Self::EditorAutosaveDelay)
             }
             SettingsTab::Api if row == 0 => Some(Self::ApiPort),
-            SettingsTab::Padding if row == crate::padding_ui::ROW_THRESHOLD => {
-                Some(Self::PaddingThreshold)
-            }
             _ => None,
         }
     }
@@ -165,13 +160,11 @@ impl SettingsNumber {
             Self::TerminalEngineMemory => "Parser pool budget (MiB; 0 = Off)",
             Self::EditorAutosaveDelay => "Autosave delay (ms)",
             Self::ApiPort => "HTTP API port",
-            Self::PaddingThreshold => "Terminal columns",
         }
     }
 
     pub fn snapshot(self, app: &App) -> (NumberSpec, String) {
         self.snapshot_values(NumberSettingsValues {
-            padding: &app.padding_settings,
             inference: &app.inference_settings,
             voice: &app.voice_settings,
             notification: &app.notification_settings,
@@ -185,7 +178,6 @@ impl SettingsNumber {
 
     pub(crate) fn persisted_snapshot(self, config: &crate::config::ClientConfig) -> String {
         self.snapshot_values(NumberSettingsValues {
-            padding: &config.padding,
             inference: &config.inference,
             voice: &config.voice,
             notification: &config.notifications,
@@ -200,14 +192,6 @@ impl SettingsNumber {
 
     fn snapshot_values(self, values: NumberSettingsValues<'_>) -> (NumberSpec, String) {
         match self {
-            Self::PaddingThreshold => (
-                NumberSpec::Integer {
-                    minimum: i128::from(crate::padding::MIN_WIDTH_THRESHOLD),
-                    maximum: i128::from(crate::padding::MAX_WIDTH_THRESHOLD),
-                },
-                values.padding.width_threshold.to_string(),
-            ),
-
             Self::WorkingPollSeconds => (
                 ScalarNumber::WorkingPollSeconds.spec(),
                 values
@@ -291,7 +275,6 @@ impl SettingsNumber {
                 .to_string());
         }
         let step = match self {
-            Self::PaddingThreshold => 1,
             Self::VoiceVolume => 5,
             Self::NotificationCoalesce => {
                 i128::from(ilium_sound::NotificationSettings::TASK_COALESCE_STEP_SECONDS)
@@ -654,40 +637,12 @@ impl App {
     pub(crate) fn step_settings_number(&mut self, field: SettingsNumber, direction: i32) {
         let result = (|| {
             let text = field.stepped(self, direction)?;
-            if field == SettingsNumber::PaddingThreshold && text == field.snapshot(self).1 {
-                return Ok(());
-            }
             let directory = self
                 .config_dir
                 .clone()
                 .ok_or_else(|| "The configuration directory is unavailable".to_owned())?;
             self.save_settings_number(field, &text, directory, None)
         })();
-        if let Err(error) = result {
-            self.status_message = Some(error);
-        }
-    }
-
-    pub(crate) fn step_padding_threshold_by(&mut self, delta: i32) {
-        let next = (i32::from(self.padding_settings.width_threshold) + delta).clamp(
-            i32::from(crate::padding::MIN_WIDTH_THRESHOLD),
-            i32::from(crate::padding::MAX_WIDTH_THRESHOLD),
-        );
-        if next as u16 == self.padding_settings.width_threshold {
-            return;
-        }
-        let result = self
-            .config_dir
-            .clone()
-            .ok_or_else(|| "The configuration directory is unavailable".to_owned())
-            .and_then(|directory| {
-                self.save_settings_number(
-                    SettingsNumber::PaddingThreshold,
-                    &next.to_string(),
-                    directory,
-                    None,
-                )
-            });
         if let Err(error) = result {
             self.status_message = Some(error);
         }
@@ -798,16 +753,6 @@ impl App {
                     .map_err(|_| "API port exceeds its storage range".to_owned())?;
                 ConfigurationChange::Api(settings)
             }
-            SettingsNumber::PaddingThreshold => {
-                let NumberValue::Integer(value) = field.snapshot(self).0.parse(text)? else {
-                    return Err("Enter a whole number of columns".into());
-                };
-                let mut settings = self.padding_settings;
-                settings.mode = crate::padding::PaddingMode::WidthDependent;
-                settings.width_threshold =
-                    u16::try_from(value).map_err(|_| "Terminal width exceeds storage range")?;
-                ConfigurationChange::Padding(settings)
-            }
         };
         let intent = match token {
             Some(token) => ConfigurationIntent::ValueDialog { token },
@@ -870,14 +815,6 @@ impl App {
             ConfigurationChange::Api(settings) => {
                 self.enqueue_configuration(directory, ConfigurationChange::Api(settings), intent)?;
                 self.api_settings = settings;
-            }
-            ConfigurationChange::Padding(settings) => {
-                self.enqueue_configuration(
-                    directory,
-                    ConfigurationChange::Padding(settings),
-                    intent,
-                )?;
-                self.apply_padding_settings(settings);
             }
             _ => return Err("Unsupported numeric settings destination".into()),
         }
@@ -1131,32 +1068,32 @@ mod tests {
     fn universal_review_failed_numeric_save_cancel_reopens_last_accepted_value() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
-        std::fs::write(&path, "[padding]\nwidth_threshold = 200\n").unwrap();
+        std::fs::write(&path, "[editor]\nautosave_delay_ms = 2000\n").unwrap();
         let mut app = App::new("numeric-cancel-reopen".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
         app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Padding,
-            selected_row: crate::padding_ui::ROW_THRESHOLD,
+            tab: SettingsTab::Editor,
+            selected_row: 4,
             ..SettingsState::default()
         }));
-        app.begin_settings_number_dialog(SettingsNumber::PaddingThreshold);
+        app.begin_settings_number_dialog(SettingsNumber::EditorAutosaveDelay);
         app.settle_filesystem_for_test();
-        std::fs::write(&path, "[padding\n").unwrap();
+        std::fs::write(&path, "[editor\n").unwrap();
         let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("number editor")
         };
-        app.finish_value_dialog(host, DialogOutcome::CommitNumber("153".into()));
+        app.finish_value_dialog(host, DialogOutcome::CommitNumber("1530".into()));
         app.settle_filesystem_for_test();
         assert_eq!(
-            app.padding_settings.width_threshold, 153,
+            app.editor_settings.autosave_delay_ms, 1530,
             "admitted runtime preview remains optimistic"
         );
-        std::fs::write(&path, "[padding]\nwidth_threshold = 207\n").unwrap();
+        std::fs::write(&path, "[editor]\nautosave_delay_ms = 2070\n").unwrap();
         let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("failed write must keep draft")
         };
         app.finish_value_dialog(host, DialogOutcome::Cancel);
-        app.begin_settings_number_dialog(SettingsNumber::PaddingThreshold);
+        app.begin_settings_number_dialog(SettingsNumber::EditorAutosaveDelay);
         app.settle_filesystem_for_test();
         let Mode::ValueDialog(host) = &app.mode else {
             panic!("reopened number editor")
@@ -1165,19 +1102,19 @@ mod tests {
             panic!("number dialog")
         };
         assert_eq!(
-            number.draft.buf, "207",
+            number.draft.buf, "2070",
             "reopen must observe the actual saved field, including external changes"
         );
         assert_eq!(
-            app.padding_settings.width_threshold, 153,
+            app.editor_settings.autosave_delay_ms, 1530,
             "readback must not roll back runtime or unrelated pending fields"
         );
         assert_eq!(
             crate::config::load(directory.path())
                 .unwrap()
-                .padding
-                .width_threshold,
-            207
+                .editor
+                .autosave_delay_ms,
+            2070
         );
     }
 
@@ -1225,66 +1162,6 @@ mod tests {
         assert!(matches!(app.mode, Mode::Settings(_)));
         let config = crate::config::load(directory.path()).unwrap();
         assert_eq!(config.editor.autosave_delay_ms, 1101);
-        assert_eq!(config.api.port, 8873);
-    }
-
-    #[test]
-    fn padding_threshold_dialog_preserves_draft_after_failure_and_retries_atomically() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("config.toml");
-        std::fs::write(&path, "[padding]\n").unwrap();
-        let mut app = App::new("padding-number-test".into(), directory.path().into());
-        app.config_dir = Some(directory.path().into());
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Padding,
-            selected_row: crate::padding_ui::ROW_THRESHOLD,
-            ..SettingsState::default()
-        }));
-        app.begin_settings_number_dialog(SettingsNumber::PaddingThreshold);
-        app.settle_filesystem_for_test();
-        std::fs::write(&path, "[padding\n").unwrap();
-        let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("padding number editor");
-        };
-        let ValueDialogState::Number(number) = &mut host.dialog else {
-            panic!("number dialog");
-        };
-        number.draft = crate::text_prompt::TextPromptState::new("0153");
-        app.finish_value_dialog(host, DialogOutcome::CommitNumber("0153".into()));
-        app.settle_filesystem_for_test();
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("failed write must keep the dialog open");
-        };
-        assert!(!host.is_saving());
-        let ValueDialogState::Number(number) = &host.dialog else {
-            panic!("number dialog");
-        };
-        assert_eq!(number.draft.buf, "0153");
-        assert!(number.error.is_some());
-        assert_eq!(
-            app.padding_settings.width_threshold, 153,
-            "the accepted write is applied locally even when durable storage later fails"
-        );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[padding\n");
-
-        std::fs::write(
-            &path,
-            "[api]\nport = 8873\n[padding]\nright_panels_shared = true\n",
-        )
-        .unwrap();
-        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("retry");
-        };
-        app.finish_value_dialog(host, DialogOutcome::CommitNumber("0153".into()));
-        app.settle_filesystem_for_test();
-        assert!(matches!(app.mode, Mode::Settings(_)));
-        let config = crate::config::load(directory.path()).unwrap();
-        assert_eq!(config.padding.width_threshold, 153);
-        assert_eq!(
-            config.padding.mode,
-            crate::padding::PaddingMode::WidthDependent
-        );
-        assert!(config.padding.right_panels_shared);
         assert_eq!(config.api.port, 8873);
     }
 

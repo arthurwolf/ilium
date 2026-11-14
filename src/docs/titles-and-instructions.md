@@ -86,14 +86,12 @@ Manual requests follow the same task checks as automatic ones.
 
 ## Pane recaps
 
-Each agent pane shows a small recap dot in its header. Hover it for a short factual recap of what the agent is doing. Click it to pin the longer recap in a popover.
+Pane recaps are the Recap plugin. Turn the plugin off in Settings -> Plugins and the footer line, the menu entry and the `ilium recap` command are gone.
 
-- **Short recap** (up to 40 words) appears on hover. Ilium writes it during a restructure, in the same AI call that plans the tree, so it costs no extra request.
-- **Long recap** (up to 250 words) appears when the popover is pinned. It is written only by a manual refresh.
-- **Refresh icon** on an agent row reruns the title and the long recap. A progress bar shows the current phase. Shell panes have no transcript, so they are not recapped this way.
-- Recaps are stored per agent session and kept across Ilium restarts. A recap from an earlier session is hidden once the pane runs a different session. The server stores recap text only; it never calls an AI provider.
-
-The dot and refresh icon are configurable under Settings -> Icons (`chrome_recap`).
+- **Footer line**: an agent pane shows its short recap (up to 40 words) in a row under the terminal. Hover it for the long recap (up to 250 words). Click it to write a fresh one.
+- **Ask for a recap** with the "Recap this pane" entry of the pane context menu or the `recap` command. A line "Recap: working..." shows until the answer arrives, or the reason there is none (for example automatic AI is off).
+- Recaps are kept with the pane across Ilium restarts. A recap from an earlier session is hidden once the pane runs a different session. The server stores recap text only; the Recap plugin's server side calls the AI provider, and only while automatic AI is on and first-run setup is finished.
+- Shell panes have no transcript and show no footer line.
 
 ## Custom instructions
 

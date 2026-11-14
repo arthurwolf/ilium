@@ -31,10 +31,6 @@ pub const MANAGED_BLOCK: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/agent/managed-block.hbs"
 ));
-pub const GOAL_FROM_LINE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/goal-from-line.hbs"
-));
 pub const PROGRESS_DONE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/agent/progress-done.hbs"
@@ -83,7 +79,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     ("agent/worktree-wrap-up", WORKTREE_WRAP_UP_INSTRUCTIONS),
     ("agent/ask-for-update", ASK_FOR_UPDATE),
     ("agent/managed-block", MANAGED_BLOCK),
-    ("agent/goal-from-line", GOAL_FROM_LINE),
     ("agent/progress-done", PROGRESS_DONE),
     ("agent/progress-error", PROGRESS_ERROR),
     (

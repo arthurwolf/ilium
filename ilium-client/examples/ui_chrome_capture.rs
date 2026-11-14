@@ -109,20 +109,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ),
             ("context-menu", ilium_client::app::Mode::Normal),
             (
-                "create-agent-from-line",
-                ilium_client::app::Mode::CreateAgentFromLine(Box::new(
-                    ilium_client::agent_from_line::CreateAgentFromLineState::new(
-                        ilium_client::agent_from_line::EditorSourceLine {
-                            pane_id: ilium_core::ROOT_ID,
-                            path: output.join("synthetic-workspace/Synthetic notes.md"),
-                            line_number: 7,
-                            text: "Synthetic source line for contextual agent creation".into(),
-                        },
-                        ilium_core::ROOT_ID,
-                    ),
-                )),
-            ),
-            (
                 "editor-line-context-menu",
                 ilium_client::app::Mode::EditorLineContextMenu(
                     ilium_client::agent_from_line::EditorLineContextMenu {
@@ -294,10 +280,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                         1,
                     ),
                 )),
-            ),
-            (
-                "session-recovery",
-                ilium_client::app::Mode::ConfirmSessionRecovery { pane_count: 12 },
             ),
         ] {
             // Each dialog owns a fresh synthetic flow, so retained parents cannot

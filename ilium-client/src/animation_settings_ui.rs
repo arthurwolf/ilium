@@ -1563,13 +1563,6 @@ mod tests {
             }
         }
         let expected: &[&str] = match kind {
-            AnimationKind::Clouds => &[
-                "land_underlay_percent",
-                "playback_fps",
-                "projection",
-                "rotation_deg_per_min",
-                "smoothing_percent",
-            ],
             AnimationKind::Images => &[
                 "builtin_image",
                 "display_seconds",
@@ -1579,11 +1572,6 @@ mod tests {
                 "shuffle_seed",
                 "source_kind",
                 "transition_seconds",
-            ],
-            AnimationKind::NightLights => &[
-                "coastline_strength_percent",
-                "rotation_deg_per_min",
-                "terminator_strength_percent",
             ],
             AnimationKind::OpenStreetMap => {
                 &["destination", "dwell_seconds", "place", "selection", "tour"]
@@ -3068,9 +3056,6 @@ mod tests {
             assert_eq!(
                 list.contains(&AnimationRow::Location),
                 kind == AnimationKind::OpenStreetMap
-                    || kind
-                        .ambient()
-                        .is_some_and(|ambient| ambient.uses_location())
                     || (kind == AnimationKind::PluginScene
                         && settings.ambient.plugin_scene.uses_location()),
                 "{kind:?}"
@@ -3103,11 +3088,11 @@ mod tests {
         assert!(list.contains(&AnimationRow::Common("look_grey_tint")));
         assert!(list.contains(&AnimationRow::Common("speed")));
         // Location only for observer-aware scenes.
-        let night_lights = AnimationSettings {
-            kind: AnimationKind::NightLights,
+        let map = AnimationSettings {
+            kind: AnimationKind::OpenStreetMap,
             ..Default::default()
         };
-        assert!(rows(&night_lights, &context).contains(&AnimationRow::Location));
+        assert!(rows(&map, &context).contains(&AnimationRow::Location));
         let video = AnimationSettings {
             kind: AnimationKind::Video,
             ..Default::default()
@@ -3282,7 +3267,7 @@ mod tests {
             "the global settings need their own scrolling at 80x24"
         );
         // A shared slider persists through the same path.
-        app.settings_adjust_animation_row(4, 1);
+        app.settings_adjust_animation_row(3, 1);
         assert_eq!(app.animation_settings.kind, AnimationKind::Images);
         let before = app.animation_settings.speed_percent;
         let speed = row_index(&app, &AnimationRow::Common("speed"));
@@ -3302,14 +3287,14 @@ mod tests {
     fn keyboard_and_mouse_select_the_same_persisted_scene() {
         let (mut app, _probe, project) = settings_app(140, 40);
         key(&mut app, KeyCode::Down);
-        assert_eq!(app.animation_settings.kind, AnimationKind::Clouds);
+        assert_eq!(app.animation_settings.kind, AnimationKind::Video);
         let area = content_area(&app);
         let model = app.animation_row_model();
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
             area.x,
-            row_y(area, &model, 4, Scrolls::default()).unwrap(),
+            row_y(area, &model, 3, Scrolls::default()).unwrap(),
         );
         assert_eq!(app.animation_settings.kind, AnimationKind::Images);
         assert_eq!(
@@ -3616,7 +3601,7 @@ mod tests {
     fn actual_keyboard_changes_keep_palette_and_named_values_after_scene_switches() {
         let (mut app, _probe, project) = settings_app(80, 24);
         app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
-        for _ in 0..4 {
+        for _ in 0..3 {
             key(&mut app, KeyCode::Down);
         }
         assert_eq!(app.animation_settings.kind, AnimationKind::Images);
@@ -3646,8 +3631,8 @@ mod tests {
             (61, 211, 1)
         );
         press_until_row(&mut app, 1);
-        assert_eq!(app.animation_settings.kind, AnimationKind::Clouds);
-        press_until_row(&mut app, 4);
+        assert_eq!(app.animation_settings.kind, AnimationKind::Video);
+        press_until_row(&mut app, 3);
         assert_eq!(app.animation_settings.kind, AnimationKind::Images);
         assert_eq!(app.animation_settings.ambient, edited_images);
         let reloaded = crate::project_config::load(project.path())
@@ -3830,13 +3815,10 @@ mod tests {
     #[test]
     fn inspired_scenes_credit_their_source_in_the_demo() {
         let (mut app, _probe, _project) = settings_app(160, 36);
-        for (kind, url) in [
-            (
-                AnimationKind::OpenStreetMap,
-                "https://www.openstreetmap.org/copyright",
-            ),
-            (AnimationKind::Clouds, "https://earthdata.nasa.gov/gibs"),
-        ] {
+        for (kind, url) in [(
+            AnimationKind::OpenStreetMap,
+            "https://www.openstreetmap.org/copyright",
+        )] {
             app.animation_settings.kind = kind;
             let drawn = draw(&mut app, 160, 36);
             let credit = credit_row(&drawn, 160, 36).unwrap_or_else(|| {

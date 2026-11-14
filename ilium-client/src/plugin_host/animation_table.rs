@@ -16,7 +16,7 @@ const DEFAULT_SCENE: &str = "stars";
 /// The scene the `[animations]` table asks for, or `None` when it asks for no change.
 ///
 /// - `semantic = true` selects the semantic animation, whatever `scene` says.
-/// - Otherwise `scene` names the scene by its kernel id (`stars`, `clouds`, ...). An unknown
+/// - Otherwise `scene` names the scene by its kernel id (`stars`, `video`, ...). An unknown
 ///   name asks for nothing.
 /// - `semantic = false` while the semantic animation is current falls back to `scene`, or to
 ///   the manifest default when the table holds none.
@@ -54,15 +54,15 @@ mod tests {
     #[test]
     fn a_scene_name_selects_that_scene() {
         assert_eq!(
-            requested_kind(&table("scene = \"clouds\""), AnimationKind::Images),
-            Some(AnimationKind::Clouds)
+            requested_kind(&table("scene = \"video\""), AnimationKind::Images),
+            Some(AnimationKind::Video)
         );
     }
 
     #[test]
     fn the_current_scene_asks_for_no_change() {
         assert_eq!(
-            requested_kind(&table("scene = \"clouds\""), AnimationKind::Clouds),
+            requested_kind(&table("scene = \"video\""), AnimationKind::Video),
             None
         );
     }
@@ -83,7 +83,7 @@ mod tests {
     fn semantic_on_selects_the_semantic_animation_over_the_scene() {
         assert_eq!(
             requested_kind(
-                &table("scene = \"clouds\"\nsemantic = true"),
+                &table("scene = \"video\"\nsemantic = true"),
                 AnimationKind::Images
             ),
             Some(AnimationKind::Semantic)
@@ -94,10 +94,10 @@ mod tests {
     fn semantic_off_returns_to_the_stored_scene() {
         assert_eq!(
             requested_kind(
-                &table("scene = \"clouds\"\nsemantic = false"),
+                &table("scene = \"video\"\nsemantic = false"),
                 AnimationKind::Semantic
             ),
-            Some(AnimationKind::Clouds)
+            Some(AnimationKind::Video)
         );
     }
 
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn semantic_off_leaves_any_other_scene_alone() {
         assert_eq!(
-            requested_kind(&table("semantic = false"), AnimationKind::Clouds),
+            requested_kind(&table("semantic = false"), AnimationKind::Video),
             None
         );
     }

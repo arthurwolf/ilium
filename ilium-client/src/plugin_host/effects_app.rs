@@ -73,7 +73,53 @@ impl App {
                 }
                 true
             }
+            ClientEffect::SetTreeToolbar { entries, minutes } => {
+                self.plugin_set_tree_toolbar(entries, minutes);
+                true
+            }
+            ClientEffect::SetPadding(settings) => {
+                // Not persisted here: the Layout plugin keeps the values and sends them again
+                // whenever it starts or the user edits a row.
+                if self.padding_settings == settings {
+                    return false;
+                }
+                self.apply_padding_settings(settings);
+                true
+            }
         }
+    }
+
+    /// Saves the buttons of the tree toolbar and the inactivity threshold the Tree plugin's
+    /// editor chose. Removing the activity filter button also switches the filter off, so the
+    /// tree is not left hiding panes with no button to show them again. A custom agent that the
+    /// editor kept or added is registered as known, so it is not offered again as new.
+    fn plugin_set_tree_toolbar(
+        &mut self,
+        entries: Vec<crate::tree_toolbar_layout::TreeToolbarEntry>,
+        minutes: u16,
+    ) {
+        use crate::tree_toolbar_layout::TreeToolbarEntry;
+        let layout = &self.ui_settings.tree_toolbar_layout;
+        if layout.entries == entries && self.ui_settings.tree_inactivity_minutes == minutes {
+            return;
+        }
+        let filter_removed = layout.entries.contains(&TreeToolbarEntry::ActivityFilter)
+            && !entries.contains(&TreeToolbarEntry::ActivityFilter);
+        let mut ui = self.ui_settings.clone();
+        ui.tree_toolbar_layout.entries = entries;
+        ui.tree_inactivity_minutes = minutes;
+        let profile_ids: Vec<String> = self
+            .custom_agents
+            .profiles
+            .iter()
+            .map(|profile| profile.id.clone())
+            .collect();
+        ui.tree_toolbar_layout.reconcile_custom_agents(&profile_ids);
+        if filter_removed && self.hide_inactive_tree {
+            self.hide_inactive_tree = false;
+            self.tick_tree_activity_projection(std::time::Instant::now());
+        }
+        self.apply_and_persist_ui_settings(ui);
     }
 
     /// Sets one option of an editor pane through the editor toolbar's own action, so the
@@ -163,9 +209,8 @@ impl App {
     }
 
     /// Lets the plugin host report focus and `config.toml` changes (gap G2); every tick. A
-    /// plugin's write to the `animations` kernel tab is applied to the live animation here,
-    /// and a changed `[padding]` table reaches the padding the next frame draws with. Returns
-    /// whether live state changed, so the tick redraws.
+    /// plugin's write to the `animations` kernel tab is applied to the live animation here.
+    /// Returns whether live state changed, so the tick redraws.
     pub(crate) fn tick_wasm_plugin_feed(&mut self) -> bool {
         let focused = self.focused_pane_id();
         let Some(reload) = self
@@ -180,27 +225,7 @@ impl App {
             self.apply_plugin_animation_table(&table);
             changed = true;
         }
-        if let Some(table) = reload.padding {
-            changed |= self.reload_padding_table(&table);
-        }
         changed
-    }
-
-    /// Applies a `[padding]` table read back from `config.toml` (another client, a hand edit,
-    /// or a plugin). A table that does not parse or is out of range changes nothing, the same
-    /// rule the start-up load uses. Returns whether the padding changed.
-    pub(crate) fn reload_padding_table(&mut self, table: &toml::Table) -> bool {
-        match crate::padding::PaddingSettings::from_table(table) {
-            Ok(settings) if settings != self.padding_settings => {
-                self.apply_padding_settings(settings);
-                true
-            }
-            Ok(_) => false,
-            Err(reason) => {
-                tracing::warn!("config.toml [padding] ignored: {reason}");
-                false
-            }
-        }
     }
 
     /// Applies the `[animations]` table a plugin wrote through `kernel-settings` (the ambient
@@ -287,22 +312,19 @@ mod tests {
     }
 
     #[test]
-    fn a_padding_table_read_back_from_the_file_is_applied_once() {
+    fn a_plugin_sets_the_padding_once_and_a_repeat_changes_nothing() {
+        use crate::padding::{PaddingMode, PaddingSettings};
         let directory = tempfile::tempdir().expect("temporary directory");
-        let mut app = App::new("plugin-padding-reload".into(), directory.path().into());
+        let mut app = App::new("plugin-padding".into(), directory.path().into());
         // Size dependent with a threshold wider than the unsized test screen: the tree padding
         // stays zero, so the process-wide published value other tests read is untouched.
-        let table: toml::Table =
-            toml::from_str("mode = \"width_dependent\"\nwidth_threshold = 150\n").expect("toml");
-        assert!(app.reload_padding_table(&table));
-        assert_eq!(
-            app.padding_settings.mode,
-            crate::padding::PaddingMode::WidthDependent
-        );
-        assert_eq!(app.padding_settings.width_threshold, 150);
-        assert!(!app.reload_padding_table(&table));
-        let invalid: toml::Table = toml::from_str("width_threshold = 3\n").expect("toml");
-        assert!(!app.reload_padding_table(&invalid));
-        assert_eq!(app.padding_settings.width_threshold, 150);
+        let settings = PaddingSettings {
+            mode: PaddingMode::WidthDependent,
+            width_threshold: 150,
+            ..PaddingSettings::default()
+        };
+        assert!(app.apply_plugin_effect("ilium.core.layout", ClientEffect::SetPadding(settings)));
+        assert_eq!(app.padding_settings, settings);
+        assert!(!app.apply_plugin_effect("ilium.core.layout", ClientEffect::SetPadding(settings)));
     }
 }

@@ -35,14 +35,17 @@
       "fs.read:agent-sessions:claude",
       "fs.read:agent-sessions:codex",
       "fs.read:project",
-      "settings.read-kernel:setup"
+      "settings.read-kernel:setup",
+      "tree.metadata"
     ],
     "client": [
+      "ui.chrome",
       "help.read",
       "settings.read-kernel:setup"
     ]
   },
   "activation": [
+    "startup",
     "cli:recap",
     "command:ilium.core.recap/recap"
   ],
@@ -165,6 +168,21 @@
       {
         "id": "recap",
         "title": "Recap"
+      }
+    ],
+    "context_menu": [
+      {
+        "id": "recap",
+        "title": "Recap this pane",
+        "command": "recap",
+        "target": "terminal"
+      }
+    ],
+    "pane_frame_slots": [
+      {
+        "id": "recap",
+        "placement": "footer-row",
+        "applies_to": "agents"
       }
     ]
   },

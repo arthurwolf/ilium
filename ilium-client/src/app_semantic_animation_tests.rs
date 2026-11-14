@@ -48,24 +48,21 @@ fn contrast_for(index: usize) -> i32 {
     let mut settings = ilium_ambient::AmbientSettings::default();
     settings
         .set_control(
-            ilium_ambient::AmbientKind::Clouds,
-            "contrast_percent",
+            ilium_ambient::AmbientKind::Spectrum,
+            "sensitivity",
             ControlValue::Number(contrast_value(index)),
         )
         .unwrap();
-    settings.clouds.contrast_percent
+    i32::try_from(settings.spectrum.sensitivity).unwrap_or(0)
 }
 fn contrast_value(index: usize) -> i32 {
     100 + 10 * i32::try_from(index).unwrap_or(0)
 }
-/// A distinct Clouds recommendation per `mode`, standing in for a scene with several looks.
+/// A distinct Audio spectrum recommendation per `mode`, standing in for a scene with several looks.
 fn carpet(mode: usize) -> AnimationRecommendation {
     recommendation(
-        AnimationKind::Clouds,
-        vec![(
-            "contrast_percent",
-            ControlValue::Number(contrast_value(mode)),
-        )],
+        AnimationKind::Spectrum,
+        vec![("sensitivity", ControlValue::Number(contrast_value(mode)))],
     )
 }
 fn snapshot_recommendation(
@@ -203,8 +200,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .clouds
-            .contrast_percent,
+            .spectrum
+            .sensitivity as i32,
         contrast_for(1)
     );
     fixture.app.select_node(fixture.group);
@@ -214,8 +211,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .clouds
-            .contrast_percent,
+            .spectrum
+            .sensitivity as i32,
         contrast_for(0)
     );
     let mut virtual_path = fixture.app.path_to(fixture.group);
@@ -227,8 +224,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .clouds
-            .contrast_percent,
+            .spectrum
+            .sensitivity as i32,
         contrast_for(0)
     );
     fixture.app.tree_state.select(Vec::new());
@@ -241,8 +238,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .clouds
-            .contrast_percent,
+            .spectrum
+            .sensitivity as i32,
         contrast_for(5)
     );
     assert!(fixture.app.take_pending_restructure_requests().is_empty());
@@ -280,8 +277,8 @@ fn semantic_cache_revalidates_snapshots_without_rebuilding_equivalent_hosts() {
             .last()
             .unwrap()
             .1
-            .clouds
-            .contrast_percent,
+            .spectrum
+            .sensitivity as i32,
         contrast_for(2)
     );
 }
@@ -457,8 +454,8 @@ fn semantic_undo_restores_effective_choice_and_stale_apply_preserves_it() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .clouds
-            .contrast_percent,
+            .spectrum
+            .sensitivity as i32,
         contrast_for(4)
     );
     let accepted = server_tree.clone();

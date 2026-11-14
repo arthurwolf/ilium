@@ -16,5 +16,6 @@ mod new_group_dialog;
 mod node_commands;
 mod ordering;
 mod rename_dialog;
+mod toolbar_dialog;
 mod topics_services;
 mod tree_orderings;

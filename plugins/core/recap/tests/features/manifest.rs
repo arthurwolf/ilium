@@ -91,19 +91,19 @@ fn doc_cor_050_server_capabilities_are_the_eleven_listed_grants_in_order() {
 
 /// REQ: COR-050, F-112
 #[test]
-fn doc_cor_050_client_capability_is_help_read_only() {
+fn doc_cor_050_client_capabilities_cover_chrome_help_and_setup() {
     assert_eq!(
         strings(&manifest_value()["capabilities"]["client"]),
-        ["help.read"]
+        ["ui.chrome", "help.read", "settings.read-kernel:setup"]
     );
 }
 
 /// REQ: COR-050, F-112
 #[test]
-fn doc_cor_050_activation_triggers_are_cli_recap_and_command_recap() {
+fn doc_cor_050_activation_triggers_are_startup_cli_recap_and_command_recap() {
     assert_eq!(
         strings(&manifest_value()["activation"]),
-        ["cli:recap", "command:ilium.core.recap/recap"]
+        ["startup", "cli:recap", "command:ilium.core.recap/recap"]
     );
 }
 

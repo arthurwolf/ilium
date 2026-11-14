@@ -7,6 +7,8 @@
 pub mod control;
 pub mod debug;
 pub mod dither;
+pub mod geo_projection;
+pub mod geo_tiles;
 pub mod raster;
 pub mod scene;
 pub mod settings;

@@ -308,4 +308,77 @@ mod tests {
             .entries
             .contains(&TreeToolbarEntry::CustomAgent("mine".into())));
     }
+
+    #[test]
+    fn default_toolbar_keeps_eye_and_settings_in_a_narrow_strip() {
+        use crate::tree_ui::TreeToolbarAction;
+        let strip = ratatui::layout::Rect::new(0, 0, 20, 1);
+        let buttons =
+            crate::tree_ui::configured_toolbar_rects_in_strip(strip, &TreeToolbarLayout::default());
+        assert!(buttons
+            .iter()
+            .any(|(action, _)| *action == TreeToolbarAction::ActivityFilter));
+        assert!(buttons
+            .iter()
+            .any(|(action, _)| *action == TreeToolbarAction::Settings));
+        for pair in buttons.windows(2) {
+            assert!(pair[0].1.right() <= pair[1].1.x);
+        }
+    }
+
+    #[test]
+    fn preview_uses_the_same_positions_as_the_tree_toolbar() {
+        use crate::tree_ui::TreeToolbarAction;
+        let layout = TreeToolbarLayout {
+            entries: vec![TreeToolbarEntry::Settings, TreeToolbarEntry::ActivityFilter],
+            ..Default::default()
+        };
+        let strip = ratatui::layout::Rect::new(3, 4, 20, 1);
+        let buttons = crate::tree_ui::configured_toolbar_rects_in_strip(strip, &layout);
+        assert_eq!(buttons.len(), 2);
+        assert_eq!(buttons[0].0, TreeToolbarAction::Settings);
+        assert_eq!(buttons[1].0, TreeToolbarAction::ActivityFilter);
+        assert!(buttons[0].1.right() <= buttons[1].1.x);
+    }
+
+    #[test]
+    fn custom_agents_are_orderable_toolbar_entries_in_the_single_button_row() {
+        use crate::app::App;
+        use crate::tree_ui::TreeToolbarAction;
+        use ilium_core::custom_agent::CustomAgentProfile;
+        let mut app = App::new("toolbar layout test".to_owned(), std::env::temp_dir());
+        app.custom_agents.profiles.push(CustomAgentProfile {
+            id: "mine".into(),
+            name: "My agent".into(),
+            icon: "✦".into(),
+            base_provider: ilium_core::BuiltinAgentProvider::Claude,
+            command: String::new(),
+            arguments: String::new(),
+            environment: Vec::new(),
+        });
+        app.reconcile_toolbar_custom_agents();
+        let layout = app.ui_settings.tree_toolbar_layout.clone();
+        let index = layout
+            .entries
+            .iter()
+            .position(|entry| *entry == TreeToolbarEntry::CustomAgent("mine".into()))
+            .expect("custom agent is a layout entry");
+        assert!(layout
+            .entries
+            .ends_with(&TreeToolbarLayout::ANCHORED_SUFFIX));
+        let strip = ratatui::layout::Rect::new(0, 0, 80, 2);
+        let buttons = crate::tree_ui::configured_toolbar_rects_in_strip(strip, &layout);
+        let (_, rect) = buttons
+            .iter()
+            .find(|(action, _)| *action == TreeToolbarAction::CustomAgent(index))
+            .expect("custom agent button is laid out");
+        assert_eq!(rect.y, 0, "custom agent sits on the one icon row");
+        // It reorders like any other entry.
+        let mut moved = layout;
+        assert!(moved.move_entry(index, index - 1));
+        assert_eq!(
+            moved.entries[index - 1],
+            TreeToolbarEntry::CustomAgent("mine".into())
+        );
+    }
 }

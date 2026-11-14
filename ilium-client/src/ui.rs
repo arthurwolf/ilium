@@ -16,7 +16,7 @@ use ratatui::Frame;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
+use crate::agent_from_line::EditorLineContextMenu;
 use crate::app::{
     AgentToolbarModelSubmenuState, App, ContextMenu, FocusTarget, Mode, PaneRuntime,
     RightPanelTarget, SubmenuItemAction, FROZEN_DIALOG_BUTTON_LABEL,
@@ -89,8 +89,6 @@ pub(crate) fn draw_at_with_cursor(
             || app.hovered_tree_node.is_some()
             || app.stats_popover.is_some()
             || app.goal_popover.is_some()
-            || app.recap_popover.is_some()
-            || app.hovered_recap_refresh.is_some()
             || popover_visible
         {
             // These late overlays own arbitrary blank pixels inside computed
@@ -103,7 +101,6 @@ pub(crate) fn draw_at_with_cursor(
         draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
         app.draw_goal_popover(frame);
-        draw_recap_tooltips(frame, app);
         if popover_visible {
             if let Some(popover) = &app.agent_popover {
                 if let Some(geometry) = crate::popover::layout(app.layout.tree_area, popover) {
@@ -662,47 +659,6 @@ fn draw_stats_popover(frame: &mut Frame, app: &mut App) {
     app.stats_popover = Some(popover);
 }
 
-/// Draws the recap popover and the refresh-icon tooltip. Both show cached
-/// text and the phase bar of a running recap.
-fn draw_recap_tooltips(frame: &mut Frame, app: &App) {
-    for (anchor, content) in [app.recap_popover_tooltip(), app.recap_refresh_tooltip()]
-        .into_iter()
-        .flatten()
-    {
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
-    }
-}
-
-/// Styles the third header dot of an agent pane as the recap handle: accent
-/// while a recap is cached or running, filled while its popover is open.
-fn draw_recap_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
-    if viewport.outer_area.width < 12 || !app.is_known_agent_pane(viewport.pane_id) {
-        return;
-    }
-    let is_open = app
-        .recap_popover
-        .as_ref()
-        .is_some_and(|popover| popover.pane_id == viewport.pane_id);
-    let style = if is_open {
-        theme::selected_style().add_modifier(Modifier::BOLD)
-    } else {
-        Style::new()
-            .fg(theme::accent_bg())
-            .add_modifier(Modifier::BOLD)
-    };
-    let cell = theme::chrome_recap_cell(viewport.outer_area);
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            app.ui_settings
-                .icons
-                .glyph(IconTarget::ChromeRecap)
-                .to_string(),
-            style,
-        )),
-        Rect::new(cell.x, cell.y, 1, 1),
-    );
-}
-
 /// Styles the second header icon of an agent pane as the popover's handle:
 /// accent-coloured when idle, filled while its popover is open.
 fn draw_stats_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
@@ -1083,7 +1039,6 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         Mode::EditorLineContextMenu(menu) => {
             draw_editor_line_context_menu(frame, menu, &app.ui_settings)
         }
-        Mode::CreateAgentFromLine(state) => draw_create_agent_from_line(frame, area, state),
         Mode::CreateAgentWorkspace(state) => {
             crate::worktree_dialog::draw_dialog(frame, area, state);
         }
@@ -1250,20 +1205,6 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                 ),
             );
         }
-        Mode::ConfirmSessionRecovery { pane_count } => modal::render_confirm(
-            frame,
-            area,
-            "Restore previous session?",
-            &format!(
-                "A stored snapshot contains {pane_count} pane(s). Restore it, or discard it and start fresh?"
-            ),
-            modal::DialogActions::confirmation(
-                "Discard",
-                modal::DialogButtonTone::Danger,
-                "Restore",
-                modal::DialogButtonTone::Primary,
-            ),
-        ),
         Mode::Normal
         | Mode::LeaderPending
         | Mode::NavigationLeaderPending
@@ -1590,68 +1531,6 @@ fn context_menu_icon(ui: &crate::config::UiSettings, target: IconTarget) -> Stri
     }
 }
 
-/// Draws the agent selector, editable multi-line prompt, and explicit submit
-/// button using geometry shared with `crate::mouse`.
-fn draw_create_agent_from_line(
-    frame: &mut Frame,
-    screen_area: Rect,
-    state: &CreateAgentFromLineState,
-) {
-    let layout = crate::agent_from_line::dialog_layout(screen_area);
-    frame.render_widget(Clear, layout.popup);
-    frame.render_widget(
-        theme::block(true).title(theme::chrome_title("Create agent from line")),
-        layout.popup,
-    );
-
-    let selector_style = if state.focus == CreateAgentFocus::AgentType {
-        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-    } else {
-        Style::new()
-    };
-    crate::agent_from_line::provider_control(screen_area, state).render(
-        frame,
-        crate::value_control::ControlStyles {
-            background: Style::new(),
-            label: selector_style,
-            value: selector_style,
-            button: selector_style,
-            disabled: Style::new().add_modifier(Modifier::DIM),
-        },
-    );
-
-    let prompt_border_style = if state.focus == CreateAgentFocus::Prompt {
-        Style::new().fg(Color::Cyan)
-    } else {
-        Style::new().add_modifier(Modifier::DIM)
-    };
-    let prompt_block = theme::block(state.focus == CreateAgentFocus::Prompt)
-        .title(theme::chrome_title("Task prompt"))
-        .border_style(prompt_border_style);
-    let prompt_inner = prompt_block.inner(layout.prompt_area);
-    frame.render_widget(prompt_block, layout.prompt_area);
-    frame.render_widget(&state.prompt, prompt_inner);
-
-    let button_style = if state.focus == CreateAgentFocus::CreateButton {
-        Style::new()
-            .fg(Color::Black)
-            .bg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-    };
-    frame.render_widget(
-        Paragraph::new(Span::styled("[ Create agent ]", button_style)).alignment(Alignment::Center),
-        layout.create_button,
-    );
-    frame.render_widget(
-        Paragraph::new("Tab field · Enter newline · Ctrl+Enter create · Esc cancel")
-            .style(Style::new().add_modifier(Modifier::DIM))
-            .alignment(Alignment::Center),
-        layout.hint_row,
-    );
-}
-
 /// Uses the target identifier only as context; the menu labels make the
 /// command's effect clear without duplicating potentially long tree names.
 fn app_menu_title(_menu: &ContextMenu) -> &'static str {
@@ -1962,7 +1841,6 @@ fn draw_pane_runtime(
     }
 
     draw_stats_icon(frame, app, viewport);
-    draw_recap_icon(frame, app, viewport);
 
     if let Some(toolbar_area) = viewport.toolbar_area {
         if matches!(runtime, PaneRuntime::Terminal(_)) {
@@ -2477,7 +2355,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::LastPromptDialog(..) => "LAST PROMPT",
         Mode::ValueDialog(..) => "VALUE OPTIONS",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
-        Mode::CreateAgentFromLine(..) => "CREATE AGENT",
         Mode::CreateAgentWorkspace(..) => "CREATE AGENT WORKTREE",
         Mode::WorktreeManager(..) => "WORKTREES",
         Mode::WaitingWorkspaceCloseOffer { .. } => "CHECKING WORKTREE",
@@ -2485,7 +2362,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::PluginPopup(_) => "PLUGIN DIALOG",
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
-        Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
         // Unreachable in practice -- `draw` returns before this ever runs
         // while `Mode::Settings` is active (the settings view replaces the
         // whole screen, status bar included). Kept as a real arm rather
@@ -3350,52 +3226,6 @@ mod tests {
             (0..4).all(|row| buffer[(11, row)].symbol() == " "),
             "fitting source should not render a scrollbar"
         );
-    }
-
-    #[test]
-    fn create_agent_dialog_renders_selector_editable_prompt_and_button() {
-        let mut state = CreateAgentFromLineState::new(
-            crate::agent_from_line::EditorSourceLine {
-                pane_id: NodeId(2),
-                path: PathBuf::from("/work/main.rs"),
-                line_number: 9,
-                text: "finish_feature();".to_string(),
-            },
-            NodeId(1),
-        );
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-
-        for provider in crate::agent_from_line::AgentLaunchType::ALL {
-            state.agent_type = provider;
-            terminal
-                .draw(|frame| draw_create_agent_from_line(frame, frame.area(), &state))
-                .unwrap();
-            let rendered = terminal
-                .backend()
-                .buffer()
-                .content()
-                .iter()
-                .map(|cell| cell.symbol())
-                .collect::<String>();
-
-            assert!(rendered.contains("Create agent from line"));
-            assert!(rendered.contains(provider.label()));
-            assert!(rendered.contains("/goal please do the following task"));
-            assert!(rendered.contains("[ Create agent ]"));
-            let controls =
-                crate::agent_from_line::provider_control(Rect::new(0, 0, 100, 30), &state)
-                    .geometry();
-            for (rect, glyph) in [
-                (controls.previous, "←"),
-                (controls.open, "+"),
-                (controls.next, "→"),
-            ] {
-                assert_eq!(
-                    terminal.backend().buffer()[(rect.x, rect.y)].symbol(),
-                    glyph
-                );
-            }
-        }
     }
 
     #[test]

@@ -10,6 +10,8 @@ A session is one project's tree of groups and panes together with the processes 
 
 The snapshot files, the rolling backups, the ordered event journal and the `ilium`, `new-session`, `ls` and `kill-session` commands are kernel-native: the kernel writes and reads them in its own process before any plugin runs. The plugin drives the parts a plugin can reach through the contract: it relaunches verified agent sessions, freezes panes during a restore, stops processes gracefully, follows client attach and detach events, and creates a project entry.
 
+With the recovery policy "Ask before restoring" the server holds the attach until a client answers. The client side of the plugin draws the question "Restore previous session?" (command `session-recovery`, with the stored pane count) as a popup with Discard and Restore, and answers the server through the kernel command `kernel.resolve-session-recovery`, which needs no grant. Closing the popup without a button answers nothing: the kernel asks again. With the plugin disabled the kernel restores the snapshot without asking.
+
 ### What it covers
 
 - JSON snapshots and rolling snapshot backups, described in the user documentation page `session-recovery.md` ("Session recovery" in the Ilium user docs, `src/docs/session-recovery.md`).
@@ -83,7 +85,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "client": {
     "entry": "client.wasm",
-    "world": "ilium:client/base@0.1.0"
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
   },
   "capabilities": {
     "server": [
@@ -152,6 +157,12 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       {
         "id": "list",
         "title": "Sessions"
+      }
+    ],
+    "commands": [
+      {
+        "id": "session-recovery",
+        "title": "Restore previous session"
       }
     ],
     "settings": [

@@ -1,7 +1,7 @@
 //! Shared geometry, chrome and density rules for mutually exclusive settings
-//! cards: the Agent Monitoring display-mode cards, the Left panel sizing
-//! cards and the Padding mode cards all draw through this module so a card
-//! looks and clicks the same on every screen.
+//! cards: the Agent Monitoring display-mode cards and the Left panel sizing
+//! cards draw through this module so a card looks and clicks the same on
+//! every screen.
 //!
 //! The module stays presentation-only: it knows nothing about the setting a
 //! card changes. Screens hand it the card count, the chrome state (selected,
@@ -14,6 +14,31 @@ use ratatui::widgets::BorderType;
 use unicode_width::UnicodeWidthStr;
 
 use crate::theme;
+
+/// Wraps `text` into lines of at most `width` cells, breaking only between words; a word wider
+/// than the line stays whole on a line of its own.
+pub fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let needed = if current.is_empty() {
+            word.width()
+        } else {
+            current.width() + 1 + word.width()
+        };
+        if needed > width && !current.is_empty() {
+            lines.push(std::mem::take(&mut current));
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
 
 /// Divide a row into cards of exactly equal width, as the user asked for
 /// ("3 separate columns of equal width"). Cells that do not divide evenly are
@@ -281,6 +306,13 @@ mod tests {
 
     fn text(spans: &[ratatui::text::Span<'static>]) -> String {
         spans.iter().map(|span| span.content.to_string()).collect()
+    }
+
+    #[test]
+    fn wrap_breaks_between_words_and_keeps_a_long_word_whole() {
+        assert_eq!(super::wrap("aa bb cc", 5), ["aa bb", "cc"]);
+        assert_eq!(super::wrap("abcdefgh ij", 4), ["abcdefgh", "ij"]);
+        assert!(super::wrap("   ", 4).is_empty());
     }
 
     #[test]

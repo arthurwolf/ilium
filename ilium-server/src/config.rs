@@ -235,7 +235,7 @@ struct RawCustomSignature {
     /// `"antimatter"` is accepted as an alias for `"antigravity"`.
     /// `"other"` resolves to
     /// `AgentClass::Other(<the process name that actually matched>)`,
-    /// mirroring how the built-in `opencode`/`aider` signatures behave --
+    /// mirroring how the agent-detect plugin's `opencode`/`aider` signatures behave --
     /// there is no separate "fixed label" field, since `class_of` is a
     /// plain non-capturing `fn` pointer (see `AgentSignature`'s doc
     /// comment) and a fixed label would require a closure that captures

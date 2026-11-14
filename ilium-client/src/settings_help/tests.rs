@@ -128,12 +128,10 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "TERM", 1, 3);
     add_range(&mut ids, "ED", 1, 6);
     add_range(&mut ids, "GIT", 1, 7);
-    add_range(&mut ids, "PAD", 1, 3);
     add_range(&mut ids, "SND", 1, 9);
     add_range(&mut ids, "VOICE", 1, 14);
     add_range(&mut ids, "COST", 1, 23);
     add_range(&mut ids, "RCOMP", 1, 17);
-    add_range(&mut ids, "OPT", 1, 14);
     add_range(&mut ids, "SETUP", 1, 2);
     ids.insert("DEBUG-01".to_owned());
     ids.insert("API-01".to_owned());
@@ -175,10 +173,6 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-55".to_owned()
         } else if kind == AnimationKind::Semantic {
             "AN-64".to_owned()
-        } else if kind == AnimationKind::NightLights {
-            "AN-13".to_owned()
-        } else if kind == AnimationKind::Clouds {
-            "AN-14".to_owned()
         } else if kind == AnimationKind::Video {
             "AN-15".to_owned()
         } else if kind == AnimationKind::Spectrum {
@@ -301,7 +295,7 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("status-help-fixture".into(), project.path().to_path_buf());
         app.set_screen_area(Rect::new(0, 0, width, height));
-        app.animation_settings.kind = crate::background_animation::AnimationKind::Clouds;
+        app.animation_settings.kind = crate::background_animation::AnimationKind::Images;
         let supplied = report.clone();
         *app.animation_frame.host_mut() = AmbientHost::with_factory(Box::new(move |_, _, _| {
             Box::new(ReportScene(supplied.clone()))

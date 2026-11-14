@@ -66,7 +66,11 @@ fn manifest_050_client_side_world_and_entry() {
     let manifest = manifest_value();
     assert_eq!(
         manifest["client"],
-        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+        json!({
+            "entry": "client.wasm",
+            "world": "ilium:client/base@0.1.0",
+            "exports": ["views"]
+        })
     );
 }
 

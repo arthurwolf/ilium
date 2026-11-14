@@ -1,0 +1,50 @@
+{
+  "classify-batch": {
+    "params": {
+      "type": "object",
+      "required": [
+        "screens"
+      ],
+      "properties": {
+        "screens": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": [
+              "pane",
+              "generation",
+              "signature",
+              "text"
+            ],
+            "properties": {
+              "pane": {
+                "type": "integer"
+              },
+              "generation": {
+                "type": "integer"
+              },
+              "signature": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "verdicts": {
+          "type": "array"
+        },
+        "error": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

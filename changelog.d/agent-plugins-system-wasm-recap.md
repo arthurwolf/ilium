@@ -1,6 +1,6 @@
 ### Changed
-- `ilium recap` is now provided by the `ilium.core.recap` WebAssembly plugin: the plugin reads the evidence of each pane in a `recap-pane` job, calls the configured model once for both lengths, validates pointers and writes the same JSONL or Markdown records. It also answers the `ilium.core.recap/recap` service and the `onboarding-state` client request, and honours `--timeout-seconds`, `--max-concurrency` and `--max-panes`.
+- Pane recaps in the terminal now belong to the Recap plugin: an agent pane shows its short recap in a footer line (hover shows the long recap, a click writes a fresh one), started from the pane context menu or the `recap` command. Turning the plugin off removes the line and the request.
+- The tree "Refresh title and recap" icon now only refreshes the title.
 
 ### Removed
-- The built-in `ilium recap` command and its isolated end-to-end test. Disabling the Recap plugin removes the command.
-- The recap Markdown/JSONL renderer, the attach-time final fence and the all-denied batch helper of the built-in client (`ilium-client/src/recap/render.rs`, `apply_final_fence`, `permission_denied`). Only the `ilium recap` command used them; the Recap plugin carries the same rules.
+- The recap dot in the pane header, its hover popover and its configurable icon (`chrome_recap`), and the recaps that a project restructure stored on panes.

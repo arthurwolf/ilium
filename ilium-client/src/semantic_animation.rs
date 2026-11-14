@@ -76,8 +76,6 @@ fn axes(kind: AnimationKind) -> &'static [&'static str] {
         AnimationKind::Images => &["mode", "source_kind", "order", "motion", "display_seconds"],
         AnimationKind::Video => &["mode", "shuffle"],
         AnimationKind::Spectrum => &["style", "floor_db"],
-        AnimationKind::Clouds => &["coverage", "projection", "history_hours", "land_underlay"],
-        AnimationKind::NightLights => &["projection", "terminator", "coastline"],
         _ => &[],
     }
 }
@@ -92,7 +90,7 @@ fn exposable(row: &Control) -> bool {
             row.id,
             "input" | "device_name" | "render_backend" | "backend" | "poll" | "recursive"
                 | "world_source" | "renderer" | "compute_backend" | "gpu"
-                | "refresh_minutes" | "refresh_hours"
+                | "refresh_minutes"
                 | "saved_maps_folder"
         )
 }
@@ -127,12 +125,6 @@ fn same_protected_inputs(before: &AnimationSettings, after: &AnimationSettings) 
                 && left.location_label == right.location_label
                 && left.place_list == right.place_list
                 && left.destination_id == right.destination_id
-        }
-        AnimationKind::Clouds => {
-            before.ambient.clouds.refresh_minutes == after.ambient.clouds.refresh_minutes
-        }
-        AnimationKind::NightLights => {
-            before.ambient.night_lights.refresh_hours == after.ambient.night_lights.refresh_hours
         }
         AnimationKind::Spectrum => {
             before.ambient.spectrum.input == after.ambient.spectrum.input
@@ -656,12 +648,6 @@ fn inventory(kind: AnimationKind) -> Result<BTreeMap<&'static str, Control>, Str
 
 fn notes(kind: AnimationKind) -> &'static str {
     match kind {
-        AnimationKind::Clouds => {
-            "Coverage precedes projection; rotation requires global globe projection. history_hours greater than zero exposes playback_fps and smoothing. land_underlay exposes underlay_brightness. refresh_minutes is authored provider cadence, not rendering FPS."
-        }
-        AnimationKind::NightLights => {
-            "Projection precedes rotation; terminator and coastline expose their dependent visual controls. refresh_hours is authored provider cadence."
-        }
         AnimationKind::OpenStreetMap => {
             "Require source, place and tour. source=0 only. Paris uses place=0,tour=0. Local/custom map inputs are never selected."
         }

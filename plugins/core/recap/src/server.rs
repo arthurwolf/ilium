@@ -9,14 +9,16 @@ use std::path::{Path, PathBuf};
 use ilium_plugin_sdk::host::{
     HostCli, HostClientRequests, HostJobs, HostKernelSettings, HostServices, HostTimers, HostTree,
 };
+use ilium_plugin_sdk::primitives::HostAgent;
 use ilium_plugin_sdk::types::{
-    ClientId, ErrorCode, NodeClass, NodeId, Outcome, PluginError, RequestId, RequestRef,
-    RequestResult, TimerId,
+    ClientId, ErrorCode, Intent, MessageSpec, MessageTarget, NodeClass, NodeId, Outcome,
+    PluginError, PluginId, PluginSide, RequestId, RequestRef, RequestResult, Submission, TimerId,
 };
 use ilium_plugin_sdk::HostApi;
 use serde_json::{json, Value};
 
 use crate::custody::redact_secrets;
+use crate::dot::{self, DotRecap};
 use crate::model::{RecapLength, RecapPaneState};
 use crate::pane_filter::{
     parse_arguments, AgentStateName, OptionSpec, PaneFacts, PaneFilterArgs, PaneKind,
@@ -237,8 +239,18 @@ fn blocked_record(pane: NodeId, name: &str, state: RecapPaneState, reason: &str)
 
 /// Who waits for the answer of a run.
 enum Waiter {
-    Cli { invocation: u64, options: Options },
-    Service { call: u64 },
+    Cli {
+        invocation: u64,
+        options: Options,
+    },
+    Service {
+        call: u64,
+    },
+    /// The in-pane recap line of one pane, with the agent session the run started under.
+    Dot {
+        pane: NodeId,
+        session: Option<String>,
+    },
 }
 
 struct Run {
@@ -261,7 +273,7 @@ impl Run {
     fn max_concurrency(&self) -> usize {
         match &self.waiter {
             Waiter::Cli { options, .. } => options.max_concurrency,
-            Waiter::Service { .. } => DEFAULT_MAX_CONCURRENCY,
+            Waiter::Service { .. } | Waiter::Dot { .. } => DEFAULT_MAX_CONCURRENCY,
         }
     }
 
@@ -282,9 +294,19 @@ thread_local! {
     static CLIENT: RefCell<Option<ClientId>> = const { RefCell::new(None) };
 }
 
-/// A client attached.
-pub fn on_client_attached(client: ClientId) {
+/// A client attached: it becomes the one that answers `onboarding-state`, and it is sent the
+/// recaps kept on panes that still hold their session.
+pub fn on_client_attached(api: &mut dyn HostApi, client: ClientId) {
     CLIENT.with(|slot| *slot.borrow_mut() = Some(client));
+    for pane in all_panes(api) {
+        let Some(stored) = HostTree::metadata(api, pane).and_then(|b| DotRecap::from_payload(&b))
+        else {
+            continue;
+        };
+        if stored.has_text() && stored.is_current(session_of(api, pane).as_deref()) {
+            queue_result(Some(client), &stored);
+        }
+    }
 }
 
 /// A client detached.
@@ -295,6 +317,71 @@ pub fn on_client_detached(client: ClientId) {
             *slot = None;
         }
     });
+}
+
+thread_local! {
+    /// Messages to clients produced while an event was handled; the handler returns them.
+    static OUTBOX: RefCell<Vec<Submission>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Takes the messages queued since the last call.
+pub fn take_outbox() -> Vec<Submission> {
+    OUTBOX.with(|outbox| std::mem::take(&mut *outbox.borrow_mut()))
+}
+
+/// Queues one in-pane recap result for `client`, or for every client when `None`.
+fn queue_result(client: Option<ClientId>, recap: &DotRecap) {
+    let message = Submission::new(Intent::Message(MessageSpec {
+        to: MessageTarget {
+            plugin: PluginId(crate::PLUGIN_ID.to_string()),
+            side: PluginSide::Client,
+            client,
+        },
+        channel: dot::RESULT_CHANNEL.to_string(),
+        payload: recap.to_payload(),
+    }));
+    OUTBOX.with(|outbox| outbox.borrow_mut().push(message));
+}
+
+/// The agent session id a pane holds now; `None` for a shell or an unverified session.
+fn session_of(api: &mut dyn HostApi, pane: NodeId) -> Option<String> {
+    HostAgent::session(api, pane).map(|session| session.session_id)
+}
+
+/// Starts the in-pane recap of one pane. A pane that cannot be recapped is answered at once so
+/// the client does not keep showing that it is working.
+pub fn start_dot(api: &mut dyn HostApi, pane: u64) {
+    let pane = NodeId(pane);
+    let running = RUNS.with(|runs| {
+        runs.borrow()
+            .runs
+            .values()
+            .any(|run| matches!(&run.waiter, Waiter::Dot { pane: owner, .. } if *owner == pane))
+    });
+    if running {
+        return;
+    }
+    let Some(name) = terminal_name(api, pane) else {
+        queue_result(
+            None,
+            &DotRecap::failed(pane.0, "unavailable", "the pane is not a terminal"),
+        );
+        return;
+    };
+    let session = session_of(api, pane);
+    let lengths = lengths_for("both").unwrap_or_default();
+    let waiter = Waiter::Dot { pane, session };
+    let timeout = Some(DEFAULT_TIMEOUT_SECONDS);
+    if let Some(run) = begin(
+        api,
+        waiter,
+        lengths,
+        vec![(pane, name)],
+        Vec::new(),
+        timeout,
+    ) {
+        finish(api, run);
+    }
 }
 
 fn emit(api: &mut dyn HostApi, invocation: u64, record: &Value) {
@@ -673,7 +760,33 @@ fn finish(api: &mut dyn HostApi, mut run: Run) {
             let reply = json!({"recaps": run.records}).to_string();
             let _ = HostServices::reply(api, *call, Ok(reply));
         }
+        Waiter::Dot { pane, session } => {
+            let recap = match run.records.first() {
+                Some(record) => DotRecap::from_record(pane.0, session.clone(), record),
+                None => DotRecap::failed(pane.0, "failed", "the run produced no record"),
+            };
+            deliver_dot(api, *pane, recap);
+        }
     }
+}
+
+/// Drops text whose session is no longer the pane's, keeps a summarized result on the pane and
+/// sends the outcome to the clients.
+fn deliver_dot(api: &mut dyn HostApi, pane: NodeId, recap: DotRecap) {
+    let recap = if recap.is_current(session_of(api, pane).as_deref()) {
+        recap
+    } else {
+        DotRecap::failed(
+            pane.0,
+            "stale",
+            "the pane changed agent session while the recap was written",
+        )
+    };
+    if recap.has_text() {
+        // A pane that vanished meanwhile has nowhere to keep it; the clients still get the text.
+        let _ = HostTree::set_metadata(api, pane, recap.to_payload());
+    }
+    queue_result(None, &recap);
 }
 
 /// What the `get` method of the service answers.

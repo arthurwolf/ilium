@@ -100,7 +100,7 @@ pub(crate) fn build(
     let descriptions: Vec<Vec<String>> = modes
         .iter()
         .map(|mode| {
-            let mut rows = crate::padding_ui::wrap(description(*mode), text_width);
+            let mut rows = selectable_cards::wrap(description(*mode), text_width);
             rows.truncate(MAX_DESCRIPTION_ROWS);
             rows
         })
@@ -224,7 +224,7 @@ fn build_stacked(
     let mut y = first_line;
     for mode in modes {
         let chrome = chrome(app, mode, focused, hovered);
-        let rows = crate::padding_ui::wrap(description(mode), text_width);
+        let rows = selectable_cards::wrap(description(mode), text_width);
         let height = u16::try_from(3 + rows.len().max(1)).unwrap_or(u16::MAX);
         cards.push((mode, Rect::new(0, y, content_width, height)));
         lines.push(Line::from(chrome.top_line(content_width)));

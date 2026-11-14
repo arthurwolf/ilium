@@ -239,26 +239,6 @@ async fn handle_scoped_request(
             crate::resources::handle(state, request_id, request, direct_tx).await;
             false
         }
-        ClientRequest::ApplyRecap {
-            pane_id,
-            session_id,
-            recap_generation,
-            trigger,
-            short,
-            long,
-        } => {
-            super::recaps::handle_apply_recap(
-                state,
-                pane_id,
-                session_id,
-                recap_generation,
-                trigger,
-                short,
-                long,
-            )
-            .await;
-            false
-        }
         // Plugin envelopes go to the plugin host; a server started without plugins drops them.
         ClientRequest::Plugin(envelope) => {
             match state.plugins.get() {
@@ -2418,11 +2398,10 @@ async fn admitted_state_synchronization_events(
                     None
                 } else {
                     // The admitted snapshot is authoritative for this seed.
-                    // Release source guards before awaiting recap storage and
-                    // never acquire a nested tree read behind a queued writer.
+                    // Release source guards and never acquire a nested tree read
+                    // behind a queued writer.
                     drop(panes);
                     drop(tree);
-                    let recap_events = super::recaps::replay_events(state, &snapshot).await;
                     let mut events = vec![ServerEvent::PaneStateSnapshot {
                         tree: snapshot,
                         detection_evidence,
@@ -2432,7 +2411,6 @@ async fn admitted_state_synchronization_events(
                         events.extend(activity);
                     }
                     events.extend(replay_events);
-                    events.extend(recap_events);
                     let statuses = state.workspace_git_status_cache.read().await;
                     let status_replays: Vec<_> = match &events[0] {
                         ServerEvent::PaneStateSnapshot { tree, .. } => statuses
@@ -2594,7 +2572,6 @@ async fn state_synchronization_events(
             .collect();
         (snapshot, detection_evidence, replay_events)
     };
-    let recap_events = super::recaps::replay_events(state, &snapshot).await;
     let mut events = vec![ServerEvent::PaneStateSnapshot {
         tree: snapshot,
         detection_evidence,
@@ -2604,7 +2581,6 @@ async fn state_synchronization_events(
         events.extend(activity);
     }
     events.extend(replay_events);
-    events.extend(recap_events);
     let statuses = state.workspace_git_status_cache.read().await;
     let status_replays: Vec<_> = match &events[0] {
         ServerEvent::PaneStateSnapshot { tree, .. } => statuses
@@ -12212,75 +12188,6 @@ mod tests {
         execution.request_shutdown();
     }
 
-    /// Catches a recap replay that reacquires the source tree while attach
-    /// already holds its read guard and a writer is queued ahead of that read.
-    #[tokio::test]
-    async fn attach_recap_replay_completes_with_a_tree_writer_already_queued() {
-        use std::future::Future;
-        use std::task::{Context, Waker};
-
-        let directory = tempfile::tempdir().expect("isolated attach recap state");
-        let state = snapshot_io_handler_state(&directory);
-        assert!(state
-            .execution
-            .set(crate::execution::ServerExecution::start().expect("finite server execution"))
-            .is_ok());
-        let execution = state.execution.get().expect("execution owner");
-        let quota = execution.client.quota_group();
-        let before = quota.snapshot();
-        let pressure = execution
-            .client
-            .try_reserve_storage(before.limits.worker_bytes - before.worker_bytes)
-            .expect("hold General admission before attach snapshot construction");
-        let (direct_tx, mut direct_rx) = DirectEventSender::channel(16);
-        let mut attach = Box::pin(handle_attach(
-            &state,
-            &state.session_name,
-            &direct_tx,
-            false,
-        ));
-        let mut context = Context::from_waker(Waker::noop());
-
-        // The first pending point is storage admission, after the estimate
-        // released tree and panes. Taking panes now gates the final build.
-        assert!(attach.as_mut().poll(&mut context).is_pending());
-        assert!(
-            state.tree.try_write().is_ok(),
-            "estimate must release tree before byte admission"
-        );
-        let panes = state
-            .panes
-            .try_write()
-            .expect("estimate must release panes before byte admission");
-        drop(pressure);
-        assert!(attach.as_mut().poll(&mut context).is_pending());
-        assert!(
-            state.tree.try_write().is_err(),
-            "final snapshot build must now be holding its tree read"
-        );
-
-        // Polling the real writer once places it ahead of any later reader.
-        // Keep it queued: recap replay must use the already captured tree.
-        let mut writer = Box::pin(state.tree.write());
-        assert!(writer.as_mut().poll(&mut context).is_pending());
-        drop(panes);
-        let completed =
-            tokio::time::timeout(std::time::Duration::from_secs(1), attach.as_mut()).await;
-        drop(attach);
-        drop(writer);
-        execution.request_shutdown();
-        completed.expect("attach deadlocked while recap replay reacquired the source tree");
-        drop(direct_tx);
-        let mut saw_sync_complete = false;
-        while let Some(event) = direct_rx.recv().await {
-            saw_sync_complete |= matches!(event, ServerEvent::InitialStateSyncComplete);
-        }
-        assert!(
-            saw_sync_complete,
-            "attach must deliver a complete seed, not silently close"
-        );
-    }
-
     #[tokio::test]
     async fn initial_state_snapshot_stays_byte_admitted_until_direct_queue_consumes_it() {
         let (state, _pane_id, _directory) =
@@ -14394,7 +14301,7 @@ mod tests {
         let revisions = before.project_activity_revisions(project_id).unwrap();
         let recommendation = AnimationRecommendation {
             version: 1,
-            kind: "night_lights".into(),
+            kind: "images".into(),
             resources: ResourcePolicy::Catalog,
             parameters: vec![],
         };

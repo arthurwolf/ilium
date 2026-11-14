@@ -6,9 +6,7 @@ use crate::location::GeoLocation;
 use crate::plugin_scene::PluginSceneSettings;
 use crate::scene::{Scene, SceneEnv};
 use crate::scenes::{
-    clouds::{CloudsScene, CloudsSettings},
     images::{ImagesScene, ImagesSettings},
-    night_lights::{NightLightsScene, NightLightsSettings},
     openstreetmap::{OpenStreetMapScene, OpenStreetMapSettings},
     spectrum::{SpectrumScene, SpectrumSettings},
     video::{VideoScene, VideoSettings},
@@ -19,8 +17,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AmbientKind {
-    NightLights,
-    Clouds,
     Video,
     Spectrum,
     Images,
@@ -31,9 +27,7 @@ pub enum AmbientKind {
 }
 
 impl AmbientKind {
-    pub const ALL: [Self; 8] = [
-        Self::NightLights,
-        Self::Clouds,
+    pub const ALL: [Self; 6] = [
         Self::Video,
         Self::Spectrum,
         Self::Images,
@@ -45,8 +39,6 @@ impl AmbientKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::OpenStreetMap => "OpenStreetMap",
-            Self::NightLights => "Earth at night",
-            Self::Clouds => "Satellite clouds",
             Self::Video => "Video",
             Self::Spectrum => "Audio spectrum",
             Self::Images => "Images",
@@ -59,10 +51,6 @@ impl AmbientKind {
         match self {
             Self::OpenStreetMap => "Real OpenStreetMap streets, buildings, waterways, parks and railways around ten world places, drawn as Braille dots with fixed or panning cameras.",
             Self::VoxelLandscape => "A seeded isometric block world with forests, deserts, villages, caves and ravines, drifting past in monochrome or pastel dithering.",
-            Self::NightLights => {
-                "City lights seen from orbit, on a borderless map of the dark Earth."
-            }
-            Self::Clouds => "Live weather-satellite clouds, global or over your location.",
             Self::Video => "Play video files, folders or URLs as dithered Braille.",
             Self::Spectrum => "A spectrum analyzer of whatever your system is playing.",
             Self::Images => {
@@ -80,14 +68,8 @@ impl AmbientKind {
             Self::VoxelLandscape => crate::scenes::voxel_landscape::INSPIRED_BY,
             // Classic screensaver look and the public sources each scene draws on.
             Self::OpenStreetMap => &["https://www.openstreetmap.org/copyright"],
-            Self::Clouds | Self::NightLights => &["https://earthdata.nasa.gov/gibs"],
             _ => &[],
         }
-    }
-
-    /// Whether the shared observer location matters to this scene.
-    pub fn uses_location(self) -> bool {
-        matches!(self, Self::NightLights | Self::Clouds)
     }
 
     /// Scenes whose output is not a pure function of elapsed time (network,
@@ -102,8 +84,6 @@ impl AmbientKind {
 pub struct AmbientSettings {
     pub location: GeoLocation,
     pub openstreetmap: OpenStreetMapSettings,
-    pub night_lights: NightLightsSettings,
-    pub clouds: CloudsSettings,
     pub video: VideoSettings,
     pub spectrum: SpectrumSettings,
     pub images: ImagesSettings,
@@ -116,8 +96,6 @@ impl AmbientSettings {
         Self {
             location: self.location.normalized(),
             openstreetmap: self.openstreetmap.normalized(),
-            night_lights: self.night_lights.normalized(),
-            clouds: self.clouds.normalized(),
             video: self.video.normalized(),
             spectrum: self.spectrum.normalized(),
             images: self.images.normalized(),
@@ -129,8 +107,6 @@ impl AmbientSettings {
     pub fn controls(&self, kind: AmbientKind) -> Vec<Control> {
         match kind {
             AmbientKind::OpenStreetMap => self.openstreetmap.controls(),
-            AmbientKind::NightLights => self.night_lights.controls(),
-            AmbientKind::Clouds => self.clouds.controls(),
             AmbientKind::Video => self.video.controls(),
             AmbientKind::Spectrum => self.spectrum.controls(),
             AmbientKind::Images => self.images.controls(),
@@ -147,8 +123,6 @@ impl AmbientSettings {
     ) -> Result<bool, String> {
         match kind {
             AmbientKind::OpenStreetMap => self.openstreetmap.set_control(id, value),
-            AmbientKind::NightLights => self.night_lights.set_control(id, value),
-            AmbientKind::Clouds => self.clouds.set_control(id, value),
             AmbientKind::Video => self.video.set_control(id, value),
             AmbientKind::Spectrum => self.spectrum.set_control(id, value),
             AmbientKind::Images => self.images.set_control(id, value),
@@ -163,8 +137,6 @@ impl AmbientSettings {
         let normalized = self.normalized();
         let settings = match kind {
             AmbientKind::OpenStreetMap => serde_json::to_string(&normalized.openstreetmap),
-            AmbientKind::NightLights => serde_json::to_string(&normalized.night_lights),
-            AmbientKind::Clouds => serde_json::to_string(&normalized.clouds),
             AmbientKind::Video => serde_json::to_string(&normalized.video),
             AmbientKind::Spectrum => serde_json::to_string(&normalized.spectrum),
             AmbientKind::Images => serde_json::to_string(&normalized.images),
@@ -172,7 +144,7 @@ impl AmbientSettings {
             AmbientKind::VoxelLandscape => serde_json::to_string(&normalized.voxel_landscape),
         }
         .unwrap_or_default();
-        if kind.uses_location() || kind == AmbientKind::Plugin {
+        if kind == AmbientKind::Plugin {
             let location = serde_json::to_string(&normalized.location).unwrap_or_default();
             format!("{kind:?}|{settings}|{location}")
         } else {
@@ -197,10 +169,6 @@ impl AmbientSettings {
             AmbientKind::OpenStreetMap => {
                 Box::new(OpenStreetMapScene::new(&settings.openstreetmap, env))
             }
-            AmbientKind::NightLights => {
-                Box::new(NightLightsScene::new(&settings.night_lights, env))
-            }
-            AmbientKind::Clouds => Box::new(CloudsScene::new(&settings.clouds, env)),
             AmbientKind::Video => Box::new(VideoScene::new(&settings.video, env)),
             AmbientKind::Spectrum => Box::new(SpectrumScene::new(&settings.spectrum, env)),
             AmbientKind::Images => match ImagesScene::new(&settings.images, env) {

@@ -191,6 +191,13 @@
         "palette": false,
         "side": "client",
         "category": "Tree"
+      },
+      {
+        "id": "tree-toolbar",
+        "title": "Tree toolbar",
+        "palette": false,
+        "side": "client",
+        "category": "Tree"
       }
     ],
     "services": {

@@ -12,33 +12,6 @@ fn page_states(page: &str, rule: &str) {
     assert!(flat.contains(rule), "{page} must state {rule:?}");
 }
 
-/// REQ: PORT:ilium-client/src/agent_from_line.rs::agent_registry_steps_through_every_provider_and_wraps
-#[test]
-fn port_agent_from_line_agent_registry_steps_through_every_provider_and_wraps() {
-    page_states(
-        "core-plugin-editor.md",
-        "Clicking a TODO line starts an agent with that line as its prompt.",
-    );
-}
-
-/// REQ: PORT:ilium-client/src/agent_from_line.rs::dialog_layout_stays_inside_small_screens
-#[test]
-fn port_agent_from_line_dialog_layout_stays_inside_small_screens() {
-    page_states(
-        "core-plugin-editor.md",
-        "`create-pane` with `initial-input` set to the line text",
-    );
-}
-
-/// REQ: PORT:ilium-client/src/agent_from_line.rs::provider_control_paints_and_hits_exact_buttons_on_responsive_rows
-#[test]
-fn port_agent_from_line_provider_control_paints_and_hits_exact_buttons_on_responsive_rows() {
-    page_states(
-        "core-plugin-editor.md",
-        "Creating an agent from an editor line",
-    );
-}
-
 /// REQ: PORT:ilium-client/src/app.rs::editor_line_context_menu_opens_an_existing_normalized_project_file
 #[test]
 fn port_app_editor_line_context_menu_opens_an_existing_normalized_project_file() {

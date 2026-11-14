@@ -6,4 +6,5 @@ mod common;
 mod crashed_agent_recovery;
 mod crashed_agent_recovery_wire;
 mod frozen_session;
+mod session_recovery;
 mod worktree_ui;

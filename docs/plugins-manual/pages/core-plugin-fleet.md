@@ -126,6 +126,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "agent.read",
       "messages.peer:ilium.core.notifications",
       "services.use:ilium.core.cost/usage",
+      "settings.read-kernel:inference",
       "settings.write-kernel:api",
       "extensions.provide:ilium.core.fleet/selectors",
       "extensions.provide:ilium.core.fleet/before-broadcast",

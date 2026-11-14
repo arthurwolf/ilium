@@ -217,6 +217,14 @@ impl Frame<'_> {
     }
 }
 
+/// One styled terminal grapheme a scene shows in place of the Braille dots of a cell.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextCell {
+    pub symbol: String,
+    pub bold: bool,
+    pub italic: bool,
+}
+
 /// A stateful scene. Created by the package registry from the settings of the spec.
 ///
 /// Rules: time may only be read from `Frame`, never from a clock; `render` must overwrite the
@@ -235,6 +243,13 @@ pub trait Scene: Send {
 
     /// Optional single-cell text above the Braille ink.
     fn native_glyph(&self, _x: u16, _y: u16) -> Option<char> {
+        None
+    }
+
+    /// Optional styled terminal text above the Braille ink: one terminal grapheme (one or two
+    /// columns) with a bold and an italic flag, in the cell's colour. A grapheme two columns
+    /// wide is reported in its left cell only.
+    fn text_cell(&self, _x: u16, _y: u16) -> Option<TextCell> {
         None
     }
 

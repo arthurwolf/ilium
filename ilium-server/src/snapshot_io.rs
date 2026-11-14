@@ -742,12 +742,6 @@ fn estimated_bytes(snapshot: &SessionSnapshot) -> usize {
         add(optional(&preference.workspace_id));
         add(path_size(&preference.worktree_root));
     }
-    add(snapshot.recaps.capacity() * std::mem::size_of::<persistence::PersistedRecap>());
-    for recap in &snapshot.recaps {
-        add(recap.session_id.capacity());
-        add(recap.short.capacity());
-        add(optional(&recap.long));
-    }
     add(snapshot.plugin_node_metadata.capacity()
         * std::mem::size_of::<persistence::PersistedNodeMetadata>());
     for entry in &snapshot.plugin_node_metadata {
@@ -1020,7 +1014,6 @@ mod tests {
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
-            recaps: Vec::new(),
             plugin_node_metadata: Vec::new(),
         }
     }

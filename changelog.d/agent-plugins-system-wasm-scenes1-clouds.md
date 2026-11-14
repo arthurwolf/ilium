@@ -1,0 +1,2 @@
+### Changed
+- Satellite clouds is now a scene of the Scenes plugin, so disabling the plugin removes it from the scene list. It downloads GOES, Meteosat and MODIS imagery through the plugin's `http:gibs.earthdata.nasa.gov` and `http:view.eumetsat.int` grants and keeps its time-lapse frames in memory (no disk cache). The history setting is stored under the key `history` (`latest`, `6h`, `12h`, `24h`); saved projects that selected the old scene load as the plugin scene.

@@ -219,7 +219,6 @@ impl ProjectionRetention {
             | WorkspaceRemoved { .. }
             | WorkspaceCloseOfferReported { .. }
             | PaneSessionTitleCleared { .. }
-            | RecapUpdated { .. }
             | RepoFactsReported { .. }
             | WorkspaceCreateFailed { .. }
             | WorkspaceInventoryReported { .. }

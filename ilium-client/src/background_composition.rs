@@ -1668,7 +1668,7 @@ mod tests {
             ..Default::default()
         };
         assert!(needs_screen_occupancy(&settings));
-        settings.kind = crate::background_animation::AnimationKind::NightLights;
+        settings.kind = crate::background_animation::AnimationKind::Images;
         assert!(!needs_screen_occupancy(&settings));
     }
 
@@ -1807,7 +1807,7 @@ mod tests {
         let probe = FakeProbe::new();
         *app.animation_frame.host_mut() = fake_host(&probe);
         app.animation_settings.enabled = true;
-        app.animation_settings.kind = crate::background_animation::AnimationKind::NightLights;
+        app.animation_settings.kind = crate::background_animation::AnimationKind::Images;
         app.animation_settings.density_percent = 100;
         (app, probe, project)
     }
@@ -1865,7 +1865,7 @@ mod tests {
     fn a_slow_scene_wakes_the_loop_once_per_frame_not_twelve_times_a_second() {
         use crate::background_animation::AnimationKind;
         let (mut app, probe, _project) = ambient_app();
-        app.animation_settings.kind = AnimationKind::NightLights;
+        app.animation_settings.kind = AnimationKind::Images;
         app.ui_settings.motion_level = MotionLevel::Reduced;
         compose_at(&mut app, 0);
         for (frames_per_second, expected_wakeups) in [(1_u32, 10_u32), (2, 20), (12, 120)] {

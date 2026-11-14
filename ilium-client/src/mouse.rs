@@ -15,7 +15,7 @@ use crossterm::event::{
 use ilium_core::{AgentProvider, NodeId, NodeKind, Tree, ROOT_ID};
 use ratatui::layout::{Position, Rect};
 
-use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
+use crate::agent_from_line::EditorLineContextMenu;
 use crate::agent_toolbar::AgentToolbarAction;
 use crate::app::{AgentToolbarModelSubmenuState, App, ContextMenu, Mode, RightPanelTarget};
 use crate::explorer_overlay::{ExplorerOutcome, ExplorerOverlay};
@@ -337,14 +337,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         handle_agent_toolbar_model_submenu_mouse(app, state, mouse);
         return;
     }
-    if matches!(app.mode, Mode::CreateAgentFromLine(_)) {
-        let Mode::CreateAgentFromLine(state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            unreachable!("just matched Mode::CreateAgentFromLine above");
-        };
-        handle_create_agent_from_line_mouse(app, state, mouse);
-        return;
-    }
     if matches!(app.mode, Mode::CreateAgentWorkspace(_)) {
         let Mode::CreateAgentWorkspace(state) = std::mem::replace(&mut app.mode, Mode::Normal)
         else {
@@ -443,9 +435,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     if app.handle_stats_popover_mouse(mouse, position) {
         return;
     }
-    if app.handle_recap_popover_mouse(mouse, position) {
-        return;
-    }
 
     if app.layout.tree_area.contains(position) {
         handle_tree_mouse(app, mouse, position);
@@ -492,7 +481,6 @@ fn is_shared_action_dialog(mode: &Mode) -> bool {
             | Mode::ConfirmClose(_)
             | Mode::ConfirmWorkspaceCloseOffer(_)
             | Mode::ConfirmRemoveWorkspace(_)
-            | Mode::ConfirmSessionRecovery { .. }
     )
 }
 
@@ -510,7 +498,6 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         Mode::ConfirmClose(_)
             | Mode::ConfirmWorkspaceCloseOffer(_)
             | Mode::ConfirmRemoveWorkspace(_)
-            | Mode::ConfirmSessionRecovery { .. }
     ) {
         let layout = crate::modal::confirm_dialog_layout(app.layout.screen_area);
         if let Some(action) = layout.actions.action_at(position) {
@@ -753,12 +740,6 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
         app.leave_pane_focus();
     }
     update_tree_hover(app, position);
-    app.hovered_recap_refresh = match app.emitted_tree_action_at(position) {
-        Some((hit, TreeRowAction::Retitle)) if app.is_known_agent_pane(hit.id) => {
-            Some((hit.id, position))
-        }
-        _ => None,
-    };
 
     if let Some(popover) = &app.agent_popover {
         if popover.is_visible(Instant::now()) {
@@ -1083,10 +1064,7 @@ fn handle_tree_row_action(app: &mut App, id: ilium_core::NodeId, action: TreeRow
             app.request_move(id, ilium_core::TreeMoveDirection::Down);
         }
         TreeRowAction::Close => app.action_close_selected(),
-        TreeRowAction::Retitle => {
-            app.action_request_retitle(id);
-            app.action_request_recap(id);
-        }
+        TreeRowAction::Retitle => app.action_request_retitle(id),
         TreeRowAction::ProjectRestructure => app.action_request_project_restructure(id),
     }
 }
@@ -1464,76 +1442,6 @@ fn handle_agent_toolbar_model_submenu_mouse(
     let pane_id = state.pane_id;
     let action = AgentToolbarAction::CodexReasoningLevel(state.tier_index, item_row as u8);
     app.execute_agent_toolbar_action(pane_id, action);
-}
-
-/// Handles direct manipulation of the agent selector, textarea, and explicit
-/// Create button. The layout comes from the same module the renderer uses.
-fn handle_create_agent_from_line_mouse(
-    app: &mut App,
-    mut state: Box<CreateAgentFromLineState>,
-    mouse: MouseEvent,
-) {
-    use ratatui_textarea::CursorMove;
-
-    let layout = crate::agent_from_line::dialog_layout(app.layout.screen_area);
-    let position = Position::new(mouse.column, mouse.row);
-    let control = crate::agent_from_line::provider_control(app.layout.screen_area, &state);
-    if control.geometry().row.contains(position)
-        && matches!(
-            mouse.kind,
-            MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
-        )
-    {
-        state.focus = CreateAgentFocus::AgentType;
-        let button = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
-            crate::value_control::PointerButton::Right
-        } else {
-            crate::value_control::PointerButton::Left
-        };
-        match control.hit(position, button) {
-            Some(crate::value_control::ControlAction::OpenChoices) => {
-                app.begin_agent_from_line_provider_dialog(state)
-            }
-            Some(crate::value_control::ControlAction::PreviousChoice) => {
-                state.agent_type = state.agent_type.stepped(-1);
-                app.mode = Mode::CreateAgentFromLine(state);
-            }
-            Some(crate::value_control::ControlAction::NextChoice) => {
-                state.agent_type = state.agent_type.stepped(1);
-                app.mode = Mode::CreateAgentFromLine(state);
-            }
-            _ => app.mode = Mode::CreateAgentFromLine(state),
-        }
-        return;
-    }
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        app.mode = Mode::CreateAgentFromLine(state);
-        return;
-    }
-    if !layout.popup.contains(position) {
-        app.mode = Mode::Normal;
-        return;
-    }
-    let prompt_inner = Rect::new(
-        layout.prompt_area.x.saturating_add(1),
-        layout.prompt_area.y.saturating_add(1),
-        layout.prompt_area.width.saturating_sub(2),
-        layout.prompt_area.height.saturating_sub(2),
-    );
-    if prompt_inner.contains(position) {
-        let row = position.y.saturating_sub(prompt_inner.y);
-        let column = position.x.saturating_sub(prompt_inner.x);
-        state.prompt.move_cursor(CursorMove::Jump(row, column));
-        state.focus = CreateAgentFocus::Prompt;
-        app.mode = Mode::CreateAgentFromLine(state);
-        return;
-    }
-    if layout.create_button.contains(position) {
-        state.focus = CreateAgentFocus::CreateButton;
-        app.commit_create_agent_from_line(state);
-        return;
-    }
-    app.mode = Mode::CreateAgentFromLine(state);
 }
 
 fn handle_worktree_manager_mouse(
@@ -2143,53 +2051,11 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
     let position = Position::new(mouse.column, mouse.row);
     let mut layout =
         crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
-    if let Some(mut dialog) = state.padding.dialog {
-        let screen = app.layout.screen_area;
-        let target = crate::padding_dialog::hit(screen, &app.padding_settings, &dialog, position);
-        match mouse.kind {
-            MouseEventKind::Moved => dialog.hover = target,
-            MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(target) = target {
-                    if !crate::padding_dialog::click(app, &mut dialog, target) {
-                        state.padding.dialog = None;
-                        app.mode = Mode::Settings(Box::new(state));
-                        return;
-                    }
-                }
-            }
-            _ => {}
-        }
-        state.padding.dialog = Some(dialog);
-        app.mode = Mode::Settings(Box::new(state));
-        return;
-    }
     if state.tab == crate::app::SettingsTab::Toolbar && layout.content_area.contains(position) {
-        crate::tree_toolbar_settings::handle_mouse(app, &mut state, layout.content_area, mouse);
         app.mode = Mode::Settings(Box::new(state));
-        return;
-    }
-    if state.tab == crate::app::SettingsTab::Padding && layout.content_area.contains(position) {
-        match mouse.kind {
-            MouseEventKind::Moved => {
-                crate::padding_ui::update_hover(layout.content_area, app, &mut state, position)
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(target) =
-                    crate::padding_ui::hit(layout.content_area, &app.padding_settings, position)
-                {
-                    crate::padding_ui::click(app, &mut state, target);
-                    if target == crate::padding_ui::PaddingHit::Field {
-                        app.mode = Mode::Settings(Box::new(state));
-                        app.begin_settings_number_dialog(
-                            crate::value_settings::SettingsNumber::PaddingThreshold,
-                        );
-                        return;
-                    }
-                }
-            }
-            _ => {}
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            app.action_tree_toolbar(ilium_plugin_api::generated::types::CommandOrigin::Menu);
         }
-        app.mode = Mode::Settings(Box::new(state));
         return;
     }
     // Display-mode cards light up under the pointer; leaving them (or the
@@ -3787,63 +3653,6 @@ mod tree_rename_mouse_tests {
 }
 
 #[cfg(test)]
-mod agent_from_line_mouse_tests {
-    use super::*;
-    use crate::agent_from_line::{CreateAgentFromLineState, EditorSourceLine};
-    use crate::app::App;
-    use crossterm::event::KeyModifiers;
-    use ilium_core::PaneContentKind;
-    use std::path::PathBuf;
-
-    #[test]
-    fn clicking_create_submits_the_dialog_prompt() {
-        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let editor_id = app
-            .tree
-            .add_pane(group, "main.rs", PaneContentKind::Editor)
-            .unwrap();
-        app.mode = Mode::CreateAgentFromLine(Box::new(CreateAgentFromLineState::new(
-            EditorSourceLine {
-                pane_id: editor_id,
-                path: PathBuf::from("/work/main.rs"),
-                line_number: 3,
-                text: "do_work();".to_string(),
-            },
-            group,
-        )));
-        app.take_outbound_requests();
-        let layout = crate::agent_from_line::dialog_layout(app.layout.screen_area);
-
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: layout.create_button.x + layout.create_button.width / 2,
-                row: layout.create_button.y,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-
-        assert!(matches!(app.mode, Mode::Normal));
-        assert!(matches!(
-            app.take_outbound_requests().as_slice(),
-            [ilium_ipc::ClientRequest::NewPane {
-                parent_group,
-                kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
-                    command_line,
-                    initial_input,
-                },
-                ..
-            }] if *parent_group == group
-                && command_line == "claude"
-                && initial_input.contains("do_work();")
-        ));
-    }
-}
-
-#[cfg(test)]
 mod tree_order_context_mouse_tests {
     use super::*;
     use crossterm::event::KeyModifiers;
@@ -4469,21 +4278,22 @@ mod shared_dialog_mouse_tests {
 
     #[test]
     fn session_recovery_buttons_do_not_leak_clicks_to_the_obscured_tui() {
+        // The question is the Sessions plugin's popup. A click outside it must never answer the
+        // server (the click would throw a snapshot away) and must not reach the tree behind it:
+        // the popup closes and the kernel asks again.
         let mut app = app();
-        let actions = crate::modal::confirm_dialog_layout(app.layout.screen_area).actions;
-
-        app.mode = Mode::ConfirmSessionRecovery { pane_count: 3 };
-        click(&mut app, actions.cancel_button);
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::ResolveSessionRecovery { restore: false }]
-        );
-
-        app.mode = Mode::ConfirmSessionRecovery { pane_count: 3 };
-        click(&mut app, actions.confirm_button);
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::ResolveSessionRecovery { restore: true }]
+        app.session_recovery_pending =
+            Some(crate::plugin_host::session_recovery::PendingSessionRecovery::new(3));
+        app.mode = Mode::PluginPopup(crate::plugin_host::popup::PopupState::new(
+            "ilium.core.sessions".to_owned(),
+            "session-recovery".to_owned(),
+        ));
+        click(&mut app, Rect::new(0, 0, 1, 1));
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.take_outbound_requests().is_empty());
+        assert!(
+            app.session_recovery_pending.is_some(),
+            "the decision is still open and will be asked again"
         );
     }
 
@@ -4534,68 +4344,6 @@ mod shared_dialog_mouse_tests {
         assert!(matches!(app.mode, Mode::Settings(_)));
         assert!(app.modal_stack.is_empty());
         assert_eq!(app.voice_settings.custom_prompt, "Speak concisely.");
-    }
-
-    #[test]
-    fn line_provider_pointer_cycles_both_directions_and_picker_retains_prompt() {
-        use crate::agent_from_line::{
-            AgentLaunchType, CreateAgentFocus, CreateAgentFromLineState, EditorSourceLine,
-        };
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new("line-provider".into(), directory.path().into());
-        app.set_screen_area(Rect::new(0, 0, 100, 30));
-        let mut state = CreateAgentFromLineState::new(
-            EditorSourceLine {
-                pane_id: NodeId(12),
-                path: directory.path().join("source.rs"),
-                line_number: 17,
-                text: "source line".into(),
-            },
-            ROOT_ID,
-        );
-        state.prompt =
-            ratatui_textarea::TextArea::from(["authored first line", "authored second line"]);
-        state.focus = CreateAgentFocus::AgentType;
-        let original_provider = state.agent_type;
-        let authored = state.prompt_text();
-        let geometry =
-            crate::agent_from_line::provider_control(app.layout.screen_area, &state).geometry();
-        app.mode = Mode::CreateAgentFromLine(Box::new(state));
-        click(&mut app, geometry.value);
-        assert!(
-            matches!(&app.mode, Mode::CreateAgentFromLine(state) if state.agent_type == original_provider.stepped(1) && state.prompt_text() == authored)
-        );
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Right),
-                column: geometry.value.x,
-                row: geometry.value.y,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-        assert!(
-            matches!(&app.mode, Mode::CreateAgentFromLine(state) if state.agent_type == original_provider)
-        );
-        click(&mut app, geometry.open);
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("full provider catalog");
-        };
-        let crate::value_dialog::ValueDialogState::Choice(choice) = &host.dialog else {
-            panic!("choice");
-        };
-        assert_eq!(choice.options().len(), AgentLaunchType::ALL.len());
-        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("catalog");
-        };
-        app.finish_value_dialog(
-            host,
-            crate::value_dialog::DialogOutcome::Choose("Codex".into()),
-        );
-        assert!(
-            matches!(&app.mode, Mode::CreateAgentFromLine(state) if state.agent_type == AgentLaunchType::Codex && state.prompt_text() == authored)
-        );
-        assert!(app.take_outbound_requests().is_empty());
     }
 }
 

@@ -1,11 +1,10 @@
-//! Panel padding: the empty cells between a panel's border and its content.
+//! Panel padding geometry: the empty cells between a panel's border and its content.
 //!
-//! This module is the pure domain for the `[padding]` settings: the three
-//! activation modes, the per-panel side values (0 to [`MAX_PADDING`]) and the
-//! resolution of "how many cells, on which side, for which panel, at this
-//! terminal width". It performs no I/O and no drawing, so layout code, the
-//! settings screen and the fine-tuning preview all ask the same questions of
-//! the same functions.
+//! The Layout core plugin owns the padding settings (their rows, their stored values and the
+//! page they are edited on) and sends the whole table to the kernel as `kernel.set-padding`
+//! when it starts and after every edit. This module is what the kernel keeps: the value types,
+//! the resolution of "how many cells, on which side, for which panel, at this terminal width"
+//! and the application of the result to the pane geometry. It performs no I/O and no drawing.
 //!
 //! The tree panel reads its padding through a process-wide cell
 //! ([`set_tree_padding`] / [`tree_padding`]), the same pattern as
@@ -16,8 +15,12 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use ilium_core::{NodeKind, PaneContentKind};
+use ilium_ipc::PaneResizeCause;
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
+
+use crate::app::App;
 
 /// Largest padding, in cells, on any one side.
 pub const MAX_PADDING: u8 = 3;
@@ -44,28 +47,6 @@ pub enum PaddingMode {
     WidthDependent,
 }
 
-impl PaddingMode {
-    pub const ALL: [Self; 3] = [Self::Disabled, Self::WidthDependent, Self::Enabled];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Disabled => "Disabled",
-            Self::Enabled => "Enabled",
-            Self::WidthDependent => "Size dependent",
-        }
-    }
-
-    pub const fn summary(self) -> &'static str {
-        match self {
-            Self::Disabled => "Content touches the panel borders. No padding is ever applied.",
-            Self::Enabled => "Padding is always applied inside the panel borders.",
-            Self::WidthDependent => {
-                "Padding is applied only while the terminal is at least this many columns wide."
-            }
-        }
-    }
-}
-
 /// Cells of padding on each side of a panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PaddingSides {
@@ -90,10 +71,6 @@ impl PaddingSides {
             top: cells,
             bottom: cells,
         }
-    }
-
-    pub const fn is_none(self) -> bool {
-        self.left == 0 && self.right == 0 && self.top == 0 && self.bottom == 0
     }
 
     /// Shrinks `area` by this padding. An axis that would leave no cell at
@@ -168,19 +145,6 @@ pub enum PaddingPanel {
     Terminal,
     Editor,
     Board,
-}
-
-impl PaddingPanel {
-    pub const RIGHT_KINDS: [Self; 3] = [Self::Terminal, Self::Editor, Self::Board];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Tree => "Tree",
-            Self::Terminal => "Terminals and agents",
-            Self::Editor => "Editors",
-            Self::Board => "Kanban boards",
-        }
-    }
 }
 
 /// The complete `[padding]` configuration.
@@ -289,12 +253,10 @@ impl PaddingSettings {
         Ok(())
     }
 
-    /// The settings of a `[padding]` table read back from `config.toml`, checked like the
-    /// start-up load checks them. Missing keys take their defaults; an empty table is the
-    /// default configuration.
-    pub fn from_table(table: &toml::Table) -> Result<Self, String> {
-        let settings = toml::Value::Table(table.clone())
-            .try_into::<Self>()
+    /// The settings a plugin sent as one JSON object, checked against the same ranges. Missing
+    /// keys take their defaults; an empty object is the default configuration.
+    pub fn from_json(text: &str) -> Result<Self, String> {
+        let settings: Self = serde_json::from_str(text)
             .map_err(|error| format!("padding does not parse: {error}"))?;
         settings.validate()?;
         Ok(settings)
@@ -330,9 +292,83 @@ pub fn tree_padding() -> PaddingSides {
     unpack(TREE_PADDING.load(Ordering::Relaxed))
 }
 
+impl App {
+    /// The padding `panel` gets at the current terminal width.
+    pub fn padding_for(&self, panel: PaddingPanel) -> PaddingSides {
+        self.padding_settings
+            .sides_for(panel, self.layout.screen_area.width)
+    }
+
+    /// The panel kind a pane's content is drawn as.
+    pub(crate) fn padding_panel_for_pane(&self, pane_id: ilium_core::NodeId) -> PaddingPanel {
+        match self.tree.get(pane_id).map(|node| &node.kind) {
+            Some(NodeKind::Pane {
+                content: PaneContentKind::Editor,
+                ..
+            }) => PaddingPanel::Editor,
+            // The Kanban plugin's board pane keeps the board padding.
+            Some(NodeKind::Pane { .. })
+                if self.tree.plugin_pane_kind(pane_id).is_some_and(|kind| {
+                    kind.kind_id() == crate::plugin_host::commands::BOARD_PANE_KIND
+                }) =>
+            {
+                PaddingPanel::Board
+            }
+            _ => PaddingPanel::Terminal,
+        }
+    }
+
+    /// Publishes the tree's current padding. Call after the padding settings
+    /// or the terminal width change; the right-hand panels read their padding
+    /// straight from the settings when viewports are built.
+    pub fn sync_padding(&mut self) {
+        set_tree_padding(self.padding_for(PaddingPanel::Tree));
+    }
+
+    /// Applies the padding the Layout plugin sent (`kernel.set-padding`) to the geometry.
+    /// Nothing is stored here: the plugin keeps the values.
+    pub(crate) fn apply_padding_settings(&mut self, settings: PaddingSettings) {
+        if settings == self.padding_settings {
+            return;
+        }
+        self.padding_settings = settings;
+        self.sync_padding();
+        // Padding changes the interior of every panel, so terminals must be
+        // told their new size even though the outer layout is unchanged.
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn app() -> (App, tempfile::TempDir) {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("padding-app".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        (app, directory)
+    }
+
+    #[test]
+    fn padding_follows_mode_and_terminal_width_per_panel() {
+        let (mut app, _directory) = app();
+        app.layout =
+            crate::layout::UiLayout::from_screen_area(ratatui::layout::Rect::new(0, 0, 120, 40));
+        assert_eq!(app.padding_for(PaddingPanel::Tree), PaddingSides::NONE);
+        app.padding_settings.mode = PaddingMode::Enabled;
+        assert_eq!(
+            app.padding_for(PaddingPanel::Tree),
+            PaddingSides::uniform(1)
+        );
+        app.padding_settings.mode = PaddingMode::WidthDependent;
+        assert_eq!(app.padding_for(PaddingPanel::Terminal), PaddingSides::NONE);
+        app.padding_settings.width_threshold = 120;
+        assert_eq!(
+            app.padding_for(PaddingPanel::Terminal),
+            PaddingSides::uniform(1)
+        );
+    }
 
     #[test]
     fn default_is_disabled_with_a_200_column_threshold() {
@@ -348,21 +384,19 @@ mod tests {
     }
 
     #[test]
-    fn a_table_read_back_from_the_config_file_parses_and_is_checked() {
-        let table: toml::Table =
-            toml::from_str("mode = \"enabled\"\nwidth_threshold = 120\n").expect("toml");
-        let settings = PaddingSettings::from_table(&table).expect("valid table");
+    fn a_json_table_from_the_plugin_parses_and_is_checked() {
+        let settings = PaddingSettings::from_json(r#"{"mode": "enabled", "width_threshold": 120}"#)
+            .expect("valid table");
         assert_eq!(settings.mode, PaddingMode::Enabled);
         assert_eq!(settings.width_threshold, 120);
         assert_eq!(settings.tree, PaddingSettings::default().tree);
         assert_eq!(
-            PaddingSettings::from_table(&toml::Table::new()),
+            PaddingSettings::from_json("{}"),
             Ok(PaddingSettings::default())
         );
-        let out_of_range: toml::Table = toml::from_str("width_threshold = 5\n").expect("toml");
-        assert!(PaddingSettings::from_table(&out_of_range).is_err());
-        let wrong_type: toml::Table = toml::from_str("mode = 3\n").expect("toml");
-        assert!(PaddingSettings::from_table(&wrong_type).is_err());
+        assert!(PaddingSettings::from_json(r#"{"width_threshold": 5}"#).is_err());
+        assert!(PaddingSettings::from_json(r#"{"mode": 3}"#).is_err());
+        assert!(PaddingSettings::from_json("[]").is_err());
     }
 
     #[test]
@@ -470,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_round_trip_through_toml_and_partial_tables_use_defaults() {
+    fn settings_round_trip_through_json_and_partial_tables_use_defaults() {
         let mut settings = PaddingSettings {
             mode: PaddingMode::WidthDependent,
             width_threshold: 150,
@@ -478,10 +512,9 @@ mod tests {
         };
         settings.tree.linked = false;
         settings.tree.sides.left = 3;
-        let text = toml::to_string(&settings).unwrap();
-        let parsed: PaddingSettings = toml::from_str(&text).unwrap();
-        assert_eq!(parsed, settings);
-        let partial: PaddingSettings = toml::from_str("mode = \"enabled\"").unwrap();
+        let text = serde_json::to_string(&settings).unwrap();
+        assert_eq!(PaddingSettings::from_json(&text), Ok(settings));
+        let partial = PaddingSettings::from_json(r#"{"mode": "enabled"}"#).unwrap();
         assert_eq!(partial.mode, PaddingMode::Enabled);
         assert_eq!(partial.width_threshold, 200);
     }

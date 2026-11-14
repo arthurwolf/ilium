@@ -174,7 +174,18 @@ fn body(
                 const { ::core::cell::RefCell::new(::core::option::Option::None) };
         }
 
+        ::std::thread_local! {
+            // Whether this instance already installed its host backend.
+            static __ILIUM_HOST_READY: ::core::cell::Cell<bool> = const { ::core::cell::Cell::new(false) };
+        }
+
         fn __ilium_with<R>(call: impl ::core::ops::FnOnce(&mut __IliumPlugin) -> R) -> R {
+            // A job instance runs `job-runner.run` without `activate` or a renderer: install the
+            // host backend before the first call into the plugin.
+            if !__ILIUM_HOST_READY.with(::core::cell::Cell::get) {
+                __ilium_install_host();
+                __ILIUM_HOST_READY.with(|ready| ready.set(true));
+            }
             __ILIUM_INSTANCE.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 call(slot.get_or_insert_with(<__IliumPlugin as ::core::default::Default>::default))
@@ -221,14 +232,30 @@ fn scene_body(
     name: &Ident,
     manifest_directory: &Path,
 ) -> Result<TokenStream, String> {
-    if let Some(other) = exports.first() {
+    // Lifecycle and renderer are always exported. A scene may also export `job-runner`, the
+    // entry of the background jobs it starts with `jobs.start`: the host runs each job in a
+    // fresh instance of the same component.
+    if let Some(other) = exports
+        .iter()
+        .find(|export| export.as_str() != "job-runner")
+    {
         return Err(format!(
-            "ilium_plugin: a scene component exports only lifecycle and renderer, not `{other}`"
+            "ilium_plugin: a scene component exports lifecycle, renderer and optionally job-runner, not `{other}`"
         ));
     }
+    let exports_jobs = !exports.is_empty();
     let wit_root = wit_root(manifest_directory)?;
     let krate_text = quote!(#krate).to_string().replace(' ', "");
-    let world = "package ilium:plugin-glue@0.1.0;\n\nworld component {\n    export ilium:exports/lifecycle@0.1.0;\n    export ilium:exports/renderer@0.1.0;\n}\n";
+    let world = if exports_jobs {
+        "package ilium:plugin-glue@0.1.0;\n\nworld component {\n    export ilium:exports/lifecycle@0.1.0;\n    export ilium:exports/renderer@0.1.0;\n    export ilium:exports/job-runner@0.1.0;\n}\n"
+    } else {
+        "package ilium:plugin-glue@0.1.0;\n\nworld component {\n    export ilium:exports/lifecycle@0.1.0;\n    export ilium:exports/renderer@0.1.0;\n}\n"
+    };
+    let job_export = if exports_jobs {
+        quote!(#krate::__ilium_wasm_export_job_runner!();)
+    } else {
+        TokenStream::new()
+    };
     let paths: Vec<String> = WIT_DIRECTORIES
         .iter()
         .map(|directory| wit_root.join(directory).to_string_lossy().into_owned())
@@ -242,6 +269,18 @@ fn scene_body(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("ilium_plugin: bindings path does not parse: {error}"))?;
     let runtime_path = format!("{krate_text}::wasm::wit_bindgen::rt");
+    // The host interfaces of the scene world follow `capabilities.scene` of the manifest, like
+    // the server and client sides: a granted interface calls its import, any other answers as a
+    // thread without a host.
+    let grants = side_grants(manifest_directory, "scene")?;
+    let host_macros = HOST_CALLS.iter().map(|host| {
+        let glue_macro = format_ident!("{}", host.glue_macro);
+        if host.always || granted(&grants, host.grant) {
+            quote!(#krate::#glue_macro!(scene __IliumHost);)
+        } else {
+            quote!(#krate::#glue_macro!(off __IliumHost);)
+        }
+    });
     let manifest_path = manifest_directory.join("manifest.json");
     let track_manifest = if manifest_path.is_file() {
         let text = manifest_path.to_string_lossy().into_owned();
@@ -258,6 +297,9 @@ fn scene_body(
 
         /// Implements the `Guest` trait of the lifecycle and renderer exports.
         struct __IliumGlue;
+
+        /// The backend of `host()`: forwards to the component's imports.
+        struct __IliumHost;
 
         // wit-bindgen output: generated code, not held to the workspace lints.
         #[allow(clippy::all, dead_code, unused, missing_docs)]
@@ -276,17 +318,34 @@ fn scene_body(
                 const { ::core::cell::RefCell::new(::core::option::Option::None) };
         }
 
+        ::std::thread_local! {
+            // Whether this instance already installed its host backend.
+            static __ILIUM_HOST_READY: ::core::cell::Cell<bool> = const { ::core::cell::Cell::new(false) };
+        }
+
         fn __ilium_with<R>(call: impl ::core::ops::FnOnce(&mut __IliumPlugin) -> R) -> R {
+            // A job instance runs `job-runner.run` without `activate` or a renderer: install the
+            // host backend before the first call into the plugin.
+            if !__ILIUM_HOST_READY.with(::core::cell::Cell::get) {
+                __ilium_install_host();
+                __ILIUM_HOST_READY.with(|ready| ready.set(true));
+            }
             __ILIUM_INSTANCE.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 call(slot.get_or_insert_with(<__IliumPlugin as ::core::default::Default>::default))
             })
         }
 
-        /// A scene imports no host interface but the frame surface, so there is no host to install.
-        fn __ilium_install_host() {}
+        fn __ilium_install_host() {
+            let backend: ::std::boxed::Box<dyn #krate::HostApi> = ::std::boxed::Box::new(__IliumHost);
+            #krate::set_host(::std::boxed::Box::new(backend));
+        }
+
+        #(#host_macros)*
 
         #krate::__ilium_wasm_export_lifecycle!();
+
+        #job_export
 
         /// One `scene-renderer` resource: the scene and the pixel field it draws into.
         struct __IliumSceneRenderer {
@@ -300,6 +359,8 @@ fn scene_body(
 
         impl bindings::exports::ilium::exports::renderer::GuestSceneRenderer for __IliumSceneRenderer {
             fn new(spec_json: ::std::string::String) -> Self {
+                // The scene constructor may already call `host()` (a first request, the location).
+                __ilium_install_host();
                 Self {
                     program: ::core::cell::RefCell::new(
                         <__IliumPlugin as #krate::SceneProgram>::new(&spec_json),
@@ -380,8 +441,8 @@ fn scene_body(
                 {
                     let _ = surface.write_cell_colors(0, &field.cell_colors);
                 }
-                if !field.glyphs.is_empty() {
-                    let glyph_cells: ::std::vec::Vec<
+                if !field.glyphs.is_empty() || !field.text_glyphs.is_empty() {
+                    let mut glyph_cells: ::std::vec::Vec<
                         #krate::wasm::bindings::ilium::anim::surface::GlyphCell,
                     > = field
                         .glyphs
@@ -395,6 +456,17 @@ fn scene_body(
                             })
                         })
                         .collect();
+                    glyph_cells.extend(field.text_glyphs.iter().map(|glyph| {
+                        // Bit 0 is bold, bit 2 italic (`ilium:types/text.modifiers`).
+                        let modifiers = u32::from(glyph.bold) | (u32::from(glyph.italic) << 2);
+                        #krate::wasm::IntoWit::into_wit(#krate::generated::anim::surface::GlyphCell {
+                            column: glyph.column,
+                            row: glyph.row,
+                            text: ::std::clone::Clone::clone(&glyph.text),
+                            add: #krate::generated::types::text::Modifiers(modifiers),
+                            ..::core::default::Default::default()
+                        })
+                    }));
                     let _ = surface.write_glyphs(&glyph_cells);
                 }
                 surface.present();

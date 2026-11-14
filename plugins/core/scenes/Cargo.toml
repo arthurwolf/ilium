@@ -19,8 +19,8 @@ serde_json = "1.0.151"
 swash = "0.2.9"
 # Provider timestamps and the Coinbase history plan; no clock feature, the host supplies the time.
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
-# Decodes the embedded elevation PNGs of the topographic maps scene (pure Rust, builds for wasm).
-image = { version = "0.25", default-features = false, features = ["png", "tga"] }
+# Decodes the embedded elevation PNGs of the topographic maps scene and the satellite tiles of the clouds scene (pure Rust, builds for wasm).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tga"] }
 # The voxel landscape: texture-pack identity digests and ZIP member inflation (pure Rust, builds for wasm).
 sha2 = "=0.10.9"
 flate2 = "1.1.9"

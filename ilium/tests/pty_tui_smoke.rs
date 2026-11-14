@@ -2488,12 +2488,8 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     std::fs::create_dir_all(&project_dir).expect("create project dir");
     seed_project_config(&xdg, &project_dir);
     let animation_home = xdg.ilium_config_dir.join("animation");
-    let mut seeded_config = ilium_client::config::load(&xdg.ilium_config_dir)
-        .expect("read isolated config before seeding Padding baseline");
-    seeded_config.padding.mode = ilium_client::padding::PaddingMode::WidthDependent;
-    seeded_config.padding.width_threshold = 200;
-    ilium_client::config::save_padding_settings(&xdg.ilium_config_dir, &seeded_config.padding)
-        .expect("seed saved width-dependent Padding threshold");
+    let seeded_config = ilium_client::config::load(&xdg.ilium_config_dir)
+        .expect("read isolated config before opening Settings");
     let mut cleanup_guard = KillSessionOnDrop {
         xdg: &xdg,
         cwd: project_dir.clone(),
@@ -2600,142 +2596,6 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         ilium_client::config::load(&xdg.ilium_config_dir)
     );
 
-    first_client
-        .write(&settings_tab_keys(
-            ilium_client::app::SettingsTab::Appearance,
-            ilium_client::app::SettingsTab::Padding,
-        ))
-        .expect("open the Padding settings tab");
-    assert!(
-        wait_until(
-            || first_client.screen_text().contains("Terminal columns:"),
-            WAIT_TIMEOUT
-        )
-        .await,
-        "expected the Padding threshold control, got: {:?}",
-        first_client.screen_text()
-    );
-    first_client
-        .write(b"j*")
-        .expect("open width-dependent Padding draft");
-    assert!(
-        wait_until(
-            || first_client.screen_text().contains("Value: 200"),
-            WAIT_TIMEOUT
-        )
-        .await,
-        "Padding editor must load the saved threshold before editing"
-    );
-    first_client
-        .write(b"\x7f\x7f\x7f150")
-        .expect("enter a valid unsaved threshold");
-    assert!(
-        wait_until(
-            || first_client.screen_text().contains("Value: 150"),
-            WAIT_TIMEOUT
-        )
-        .await,
-        "the valid padding draft should remain visible before cancellation: {:?}",
-        first_client.screen_text()
-    );
-    first_client
-        .write(b"\x1b")
-        .expect("cancel the valid but unsaved padding draft");
-    assert!(
-        wait_until(
-            || {
-                let screen = first_client.screen_text();
-                screen.contains("Terminal columns:") && !screen.contains("Value:")
-            },
-            WAIT_TIMEOUT
-        )
-        .await,
-        "Padding cancellation must close the exact editor: {:?}",
-        first_client.screen_text()
-    );
-    assert_eq!(
-        ilium_client::config::load(&xdg.ilium_config_dir)
-            .expect("read config after cancelling the valid padding draft")
-            .padding
-            .width_threshold,
-        200,
-        "cancelling the valid draft must retain the saved threshold"
-    );
-    first_client
-        .write(b"*")
-        .expect("reopen the exact width-dependent threshold");
-    assert!(
-        wait_until(
-            || first_client.screen_text().contains("Value: 200"),
-            WAIT_TIMEOUT
-        )
-        .await,
-        "reopened Padding editor must load the saved threshold before editing"
-    );
-    first_client
-        .write(b"\x7f\x7f\x7f150\r")
-        .expect("enter and accept the exact width-dependent threshold");
-    assert!(
-        wait_until(
-            || ilium_client::config::load(&xdg.ilium_config_dir)
-                .is_ok_and(|config| config.padding.width_threshold == 150),
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "accepted exact padding threshold was not persisted: {:?}",
-        ilium_client::config::load(&xdg.ilium_config_dir)
-    );
-    assert_eq!(
-        ilium_client::config::load(&xdg.ilium_config_dir)
-            .expect("read config after accepting exact Padding threshold")
-            .padding
-            .mode,
-        ilium_client::padding::PaddingMode::WidthDependent,
-        "threshold entry must retain the seeded Width-dependent mode"
-    );
-    assert!(
-        wait_until(
-            || {
-                let screen = first_client.screen_text();
-                screen.contains("Terminal columns:") && !screen.contains("Value: 150")
-            },
-            WAIT_TIMEOUT
-        )
-        .await,
-        "Padding save acknowledgement did not close the editor"
-    );
-    first_client
-        .write(b"h")
-        .expect("step the focused Padding threshold down");
-    assert!(
-        wait_until(
-            || ilium_client::config::load(&xdg.ilium_config_dir)
-                .is_ok_and(|config| config.padding.width_threshold == 149),
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "Padding's preserved h alias should step without changing modes"
-    );
-    first_client
-        .write(b"l")
-        .expect("step the focused Padding threshold back up");
-    assert!(
-        wait_until(
-            || ilium_client::config::load(&xdg.ilium_config_dir)
-                .is_ok_and(|config| config.padding.width_threshold == 150),
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "Padding's preserved l alias should restore the exact threshold"
-    );
-    assert_eq!(
-        ilium_client::config::load(&xdg.ilium_config_dir)
-            .expect("read Padding mode after keyboard stepping")
-            .padding
-            .mode,
-        ilium_client::padding::PaddingMode::WidthDependent,
-        "keyboard stepping a threshold must not force another Padding mode"
-    );
 
     // Exercise the shared animation look through the attached client. Derive
     // row and catalog positions from the authoritative control definitions so
@@ -2756,7 +2616,7 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
 
     first_client
         .write(&settings_tab_keys(
-            ilium_client::app::SettingsTab::Padding,
+            ilium_client::app::SettingsTab::Appearance,
             ilium_client::app::SettingsTab::Animations,
         ))
         .expect("open Animations settings");
@@ -3115,85 +2975,6 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         "fresh client did not reload the selected tree order: {:?}",
         fresh_client.screen_text()
     );
-    fresh_client
-        .write(&settings_tab_keys(
-            ilium_client::app::SettingsTab::Appearance,
-            ilium_client::app::SettingsTab::Padding,
-        ))
-        .expect("open Padding in the compact fresh client");
-    assert!(
-        wait_until(
-            || {
-                let screen = fresh_client.screen_text();
-                screen.contains("Columns:") && screen.contains("150")
-            },
-            WAIT_TIMEOUT
-        )
-        .await,
-        "compact fresh client did not reload the exact padding threshold: {:?}",
-        fresh_client.screen_text()
-    );
-    fresh_client
-        .write(b"j*")
-        .expect("open Padding exact entry at 80 columns");
-    assert!(
-        wait_until(
-            || fresh_client.screen_text().contains("Value: 150"),
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "compact Padding editor must show its reloaded value: {:?}",
-        fresh_client.screen_text()
-    );
-    fresh_client
-        .write(b"\x7f\x7f\x7f151\r")
-        .expect("commit a new exact Padding value in the compact client");
-    assert!(
-        wait_until(
-            || ilium_client::config::load(&xdg.ilium_config_dir)
-                .is_ok_and(|config| config.padding.width_threshold == 151)
-                && fresh_client.screen_text().contains("Columns:"),
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "compact Padding edit must persist and close on its receipt: {:?}",
-        fresh_client.screen_text()
-    );
-    fresh_client
-        .write(b"*")
-        .expect("reopen saved compact Padding value");
-    assert!(
-        wait_until(
-            || fresh_client.screen_text().contains("Value: 151"),
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "compact Padding editor must reopen the exact saved value: {:?}",
-        fresh_client.screen_text()
-    );
-    fresh_client
-        .write(b"\x1b")
-        .expect("cancel unchanged compact Padding entry");
-    assert!(
-        wait_until(
-            || {
-                let screen = fresh_client.screen_text();
-                screen.contains("Columns:") && !screen.contains("Value: 151")
-            },
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "Padding editor must close before continuing the fresh-client reload: {:?}",
-        fresh_client.screen_text()
-    );
-    let reloaded_padding = ilium_client::config::load(&xdg.ilium_config_dir)
-        .expect("authoritative Padding read after fresh-client reload")
-        .padding;
-    assert_eq!(
-        reloaded_padding.mode,
-        ilium_client::padding::PaddingMode::WidthDependent
-    );
-    assert_eq!(reloaded_padding.width_threshold, 151);
 
     assert_eq!(
         ilium_client::project_config::load(&animation_home)
@@ -3206,7 +2987,7 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     );
     fresh_client
         .write(&settings_tab_keys(
-            ilium_client::app::SettingsTab::Padding,
+            ilium_client::app::SettingsTab::Appearance,
             ilium_client::app::SettingsTab::Animations,
         ))
         .expect("open Animations in compact fresh client");
@@ -5270,55 +5051,51 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
     // is the third canonical line action after Copy line and Copy entire file.
     tui.write(&sgr_mouse_click(0, context_column + 1, target_row + 3))
         .expect("click create-agent line action");
+    // The dialog belongs to the Editor plugin: the host draws its agent choice, the task text
+    // area (prefilled with the line's goal) and the Create agent button.
     assert!(
         wait_until(
             || {
                 let screen = tui.screen_text();
                 screen.contains("Create agent from line")
                     && screen.contains("Claude")
-                    && screen.contains("Task prompt")
+                    && screen.contains("Codex")
+                    && screen.contains("CREATE_AGENT_TARGET_LINE")
             },
             WAIT_TIMEOUT,
         )
         .await,
-        "expected create-agent modal, got: {:?}",
+        "expected create-agent dialog, got: {:?}",
         tui.screen_text()
     );
 
-    let dialog = ilium_client::agent_from_line::dialog_layout_for_size(120, 40);
-    // The shared provider control cycles through the registry with its
-    // right-hand arrow; options are no longer simultaneous radio buttons.
-    let (provider_next_column, provider_row) = tui
+    // Choose Codex by clicking its option in the choice.
+    let (codex_column, codex_row) = tui
         .with_screen(|screen| {
-            rows_containing(screen, "Agent")
+            rows_containing(screen, "Codex")
+                .first()
+                .copied()
+                .and_then(|row| Some((column_of_text_in_row(screen, row, "Codex")?, row)))
+        })
+        .expect("rendered Codex option of the agent choice");
+    tui.write(&sgr_mouse_click(0, codex_column, codex_row))
+        .expect("select Codex in the agent choice");
+    // The button row is the one that names "Create agent" but is not the dialog title.
+    let (create_column, create_row) = tui
+        .with_screen(|screen| {
+            rows_containing(screen, "Create agent")
                 .into_iter()
                 .find_map(|row| {
-                    (0..screen.size().1).rev().find_map(|column| {
-                        screen
-                            .cell(row, column)
-                            .filter(|cell| cell.contents() == "→")
-                            .map(|_| (column, row))
-                    })
+                    column_of_text_in_row(screen, row, "from line")
+                        .is_none()
+                        .then(|| column_of_text_in_row(screen, row, "Create agent"))
+                        .flatten()
+                        .map(|column| (column, row))
                 })
         })
-        .expect("rendered create-agent provider next button");
-    tui.write(&sgr_mouse_click(0, provider_next_column, provider_row))
-        .expect("select Codex with the provider selector");
-    assert!(
-        wait_until(
-            || tui.screen_text().contains("Agent") && tui.screen_text().contains("Codex"),
-            WAIT_TIMEOUT
-        )
-        .await,
-        "expected Codex selection, got: {:?}",
-        tui.screen_text()
-    );
-    tui.write(&sgr_mouse_click(
-        0,
-        dialog.create_button.x + dialog.create_button.width / 2,
-        dialog.create_button.y,
-    ))
-    .expect("click Create agent");
+        .expect("rendered Create agent button");
+    tui.write(&sgr_mouse_click(0, create_column, create_row))
+        .expect("click Create agent");
 
     let prompt_submitted = wait_until(
         || {

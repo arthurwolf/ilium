@@ -11,6 +11,7 @@ pub mod node_ops;
 pub mod ordering;
 pub mod recent_activity;
 pub mod rename;
+pub mod toolbar_dialog;
 pub mod toolbar_rows;
 
 use std::cell::RefCell;
@@ -23,10 +24,10 @@ use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::host::{HostIntentsHost, HostTopics};
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, Activation, Area, CommandInvokedEvent, CreateFolderSpec,
-    CreateGroupSpec, DecorationVisibility, ErrorCode, Intent, MessageSpec, MessageTarget, NodeId,
-    OpenViewSpec, Outcome, Placement, PluginError, PluginId, PluginSide, RenameNodeSpec,
-    SetBookmarkedSpec, SetDecorationSpec, SetNodeLockedSpec, Submission, TitleSource, UiTree,
-    ViewTarget,
+    CreateGroupSpec, DecorationVisibility, ErrorCode, Intent, InvokeCommandSpec, MessageSpec,
+    MessageTarget, NodeId, OpenViewSpec, Outcome, Placement, PluginError, PluginId, PluginSide,
+    RenameNodeSpec, SetBookmarkedSpec, SetDecorationSpec, SetNodeLockedSpec, Submission,
+    TitleSource, UiTree, ViewTarget,
 };
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 use node_ops::{NodeOp, Snapshot, PLUGIN_ID};
@@ -466,6 +467,8 @@ thread_local! {
     static NEW_GROUP: RefCell<Option<new_group::Dialog>> = const { RefCell::new(None) };
     /// The open "Rename" dialog of this client, if any.
     static RENAME: RefCell<Option<rename::Dialog>> = const { RefCell::new(None) };
+    /// The open tree toolbar editor of this client, if any.
+    static TOOLBAR: RefCell<Option<toolbar_dialog::Dialog>> = const { RefCell::new(None) };
 }
 
 /// Most nodes the dialog reads from the tree; a larger tree offers its first groups only.
@@ -611,6 +614,59 @@ fn rename_action(
     }
 }
 
+/// Opens the tree toolbar editor for the `tree-toolbar` command. Arguments without the buttons,
+/// the catalogue, the defaults and the minutes open nothing.
+fn open_toolbar(arguments_json: &str) -> Vec<Submission> {
+    let Some(request) = toolbar_dialog::Request::from_arguments(arguments_json) else {
+        return Vec::new();
+    };
+    TOOLBAR.with(|cell| *cell.borrow_mut() = Some(toolbar_dialog::Dialog::new(request)));
+    vec![Submission::new(Intent::OpenView(OpenViewSpec {
+        view: toolbar_dialog::view(),
+        focus: true,
+    }))]
+}
+
+/// Applies one action of the tree toolbar editor. A change goes to the kernel at once; the end of
+/// the dialog closes the popup (a popup the kernel closed itself is already gone).
+fn toolbar_action(
+    key: &str,
+    action_id: &str,
+    kind: ActionKind,
+    value: Option<ActionValue>,
+) -> Vec<Submission> {
+    let step = TOOLBAR.with(|cell| {
+        let mut state = cell.borrow_mut();
+        let step = state
+            .as_mut()
+            .map(|dialog| dialog.act(key, action_id, kind, value));
+        if matches!(
+            step,
+            Some(toolbar_dialog::Step::Done | toolbar_dialog::Step::Cancel(_))
+        ) {
+            *state = None;
+        }
+        step
+    });
+    let set = |setting: &toolbar_dialog::Setting| {
+        Submission::new(Intent::InvokeCommand(InvokeCommandSpec {
+            command: toolbar_dialog::SET_TOOLBAR_COMMAND.to_owned(),
+            arguments_json: toolbar_dialog::set_toolbar_arguments(setting),
+        }))
+    };
+    let close = || Submission::new(Intent::CloseView(toolbar_dialog::view()));
+    match step {
+        Some(toolbar_dialog::Step::Set(setting)) => vec![set(&setting)],
+        Some(toolbar_dialog::Step::Done) if kind != ActionKind::Closed => vec![close()],
+        Some(toolbar_dialog::Step::Cancel(restore)) => restore
+            .iter()
+            .map(set)
+            .chain((kind != ActionKind::Closed).then(close))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// The client side of `ilium.core.tree` (core-plugin-tree.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
@@ -620,6 +676,7 @@ impl Lifecycle for TreeClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
         NEW_GROUP.with(|cell| *cell.borrow_mut() = None);
         RENAME.with(|cell| *cell.borrow_mut() = None);
+        TOOLBAR.with(|cell| *cell.borrow_mut() = None);
         Ok(())
     }
 }
@@ -630,6 +687,12 @@ impl Views for TreeClient {
             return RENAME.with(|cell| match cell.borrow().as_ref() {
                 Some(dialog) => dialog.render(),
                 None => rename::closed(),
+            });
+        }
+        if view == toolbar_dialog::view() {
+            return TOOLBAR.with(|cell| match cell.borrow().as_ref() {
+                Some(dialog) => dialog.render(),
+                None => new_group::blank(),
             });
         }
         NEW_GROUP.with(|cell| match cell.borrow().as_ref() {
@@ -654,11 +717,22 @@ impl Handler for TreeClient {
                         submissions.extend(open_new_group(&invoked.arguments_json));
                     } else if bare == rename::POPUP {
                         submissions.extend(open_rename(&invoked.arguments_json));
+                    } else if bare == toolbar_dialog::COMMAND {
+                        submissions.extend(open_toolbar(&invoked.arguments_json));
                     }
                     continue;
                 }
                 Event::UiAction(action) if action.view == rename::view() => {
                     submissions.extend(rename_action(
+                        &action.key,
+                        &action.action_id,
+                        action.kind,
+                        action.value,
+                    ));
+                    continue;
+                }
+                Event::UiAction(action) if action.view == toolbar_dialog::view() => {
+                    submissions.extend(toolbar_action(
                         &action.key,
                         &action.action_id,
                         action.kind,

@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 pub struct SceneEnv {
     /// Host-supplied shared finite and physical allocation admission.
     pub resources: crate::resources::AmbientResources,
-    /// The shared observer position (stars, clouds, night lights).
+    /// The shared observer position (stars, night lights).
     pub location: GeoLocation,
     /// Root for downloaded tiles, catalogs and thumbnails. Scenes create their
     /// own sub-directory below it. May not exist yet.
@@ -255,6 +255,10 @@ impl Scene for PaletteScene {
         self.inner.native_glyph(x, y)
     }
 
+    fn text_cell(&self, x: u16, y: u16) -> Option<SceneText> {
+        self.inner.text_cell(x, y)
+    }
+
     fn set_palette(&mut self, palette: &ScenePalette) {
         self.palette = palette.clone();
         self.inner.set_palette(palette);
@@ -390,6 +394,17 @@ pub struct SavedWorldSource<'a> {
     pub stop: &'a ilium_platform::owned_worker::StopToken,
 }
 
+/// One styled terminal grapheme a scene shows in place of the Braille dots of a cell (see
+/// [`Scene::text_cell`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneText {
+    /// One terminal grapheme, one or two columns wide. An empty symbol marks the cell to the
+    /// right of a two-column grapheme (its continuation), which the host leaves to the lead.
+    pub symbol: String,
+    pub bold: bool,
+    pub italic: bool,
+}
+
 /// A stateful scene. Created by the registry from settings; the host drops it
 /// (which must stop every thread and child process it owns) whenever the
 /// settings that affect it change or another scene is selected.
@@ -467,6 +482,14 @@ pub trait Scene: Send {
     /// map labels). Hosts call this after rendering; it must be bounded,
     /// nonblocking, and return only characters of one terminal cell width.
     fn native_glyph(&self, _x: u16, _y: u16) -> Option<char> {
+        None
+    }
+
+    /// Optional styled terminal text above Braille ink (the Wikipedia scene's article
+    /// letters): one grapheme of one or two columns with a bold and an italic flag, in the
+    /// cell's colour. A grapheme two columns wide is reported in its left cell only; the host
+    /// reserves the cell to its right. Same bounds as [`Scene::native_glyph`].
+    fn text_cell(&self, _x: u16, _y: u16) -> Option<SceneText> {
         None
     }
 

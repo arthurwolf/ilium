@@ -25,7 +25,9 @@
       "http:api.drand.sh",
       "http:meri.digitraffic.fi",
       "http:opensky-network.org",
-      "http:api.openseafeed.com"
+      "http:api.openseafeed.com",
+      "http:gibs.earthdata.nasa.gov",
+      "http:view.eumetsat.int"
     ]
   },
   "activation": [
@@ -6641,6 +6643,463 @@
               "title": "Read time semantics",
               "help": "Open to read the complete value. This is a source notice, not an editable setting.",
               "default": "Position age unavailable. Snapshot build, latest ANY AIS update and network receipt are separate times."
+            }
+          }
+        }
+      },
+      {
+        "id": "night-lights",
+        "title": "Earth at night",
+        "uses_location": true,
+        "family": "maps-space",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 15,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "order": 0,
+              "title": "Imagery",
+              "help": "Latest daily VIIRS night radiance, refreshed on its own; Black Marble is a static, cleaner 2016 composite.",
+              "enum": [
+                "daily",
+                "black_marble"
+              ],
+              "enum_titles": [
+                "Latest daily (VIIRS)",
+                "Black Marble 2016"
+              ],
+              "default": "daily"
+            },
+            "projection": {
+              "type": "string",
+              "order": 1,
+              "title": "Projection",
+              "help": "Flat map, orthographic globe centred on your location, or an equal-area Mollweide ellipse.",
+              "enum": [
+                "flat",
+                "globe",
+                "mollweide"
+              ],
+              "enum_titles": [
+                "Flat map",
+                "Globe",
+                "Mollweide"
+              ],
+              "default": "flat"
+            },
+            "zoom_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Zoom",
+              "help": "100% shows the whole world; larger values magnify around your location.",
+              "minimum": 100,
+              "maximum": 600,
+              "step": 25,
+              "unit": "%",
+              "default": 100
+            },
+            "rotation_deg_per_min": {
+              "type": "integer",
+              "order": 3,
+              "title": "Globe rotation",
+              "help": "How fast the globe turns; 0 keeps your location in the centre.",
+              "minimum": 0,
+              "maximum": 30,
+              "step": 1,
+              "unit": " deg/min",
+              "default": 3,
+              "visible_when": {
+                "key": "projection",
+                "in": [
+                  "globe"
+                ]
+              }
+            },
+            "brightness_percent": {
+              "type": "integer",
+              "order": 4,
+              "title": "Brightness",
+              "help": "Overall gain of the lights after gamma.",
+              "minimum": 25,
+              "maximum": 400,
+              "step": 5,
+              "unit": "%",
+              "default": 120
+            },
+            "gamma_percent": {
+              "type": "integer",
+              "order": 5,
+              "title": "Gamma",
+              "help": "Below 100% reveals faint towns; above 100% keeps only the brightest cities.",
+              "minimum": 30,
+              "maximum": 300,
+              "step": 5,
+              "unit": "%",
+              "default": 70
+            },
+            "threshold_percent": {
+              "type": "integer",
+              "order": 6,
+              "title": "Threshold",
+              "help": "Light dimmer than this share of full scale is treated as darkness, which keeps dithering clean.",
+              "minimum": 0,
+              "maximum": 60,
+              "step": 1,
+              "unit": "%",
+              "default": 8
+            },
+            "glow_percent": {
+              "type": "integer",
+              "order": 7,
+              "title": "Glow",
+              "help": "A soft halo around bright cities so they survive coarse dithering.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 20
+            },
+            "detail": {
+              "type": "string",
+              "order": 8,
+              "title": "Detail",
+              "help": "Tile resolution to download. Automatic follows the terminal size.",
+              "enum": [
+                "auto",
+                "coarse",
+                "fine"
+              ],
+              "enum_titles": [
+                "Automatic",
+                "Coarse (fewer tiles)",
+                "Fine (more tiles)"
+              ],
+              "default": "auto"
+            },
+            "terminator": {
+              "type": "boolean",
+              "order": 9,
+              "title": "Day/night shading",
+              "help": "Hide the lights on the sunlit side of the Earth, using the real position of the Sun.",
+              "default": false
+            },
+            "terminator_strength_percent": {
+              "type": "integer",
+              "order": 10,
+              "title": "Daylight dimming",
+              "help": "How completely daylight hides the lights.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 70,
+              "visible_when": {
+                "key": "terminator",
+                "in": [
+                  true
+                ]
+              }
+            },
+            "coastline": {
+              "type": "boolean",
+              "order": 11,
+              "title": "Coastlines",
+              "help": "Draw a faint coastline for orientation. Off by default: the map has no borders or labels.",
+              "default": false
+            },
+            "coastline_strength_percent": {
+              "type": "integer",
+              "order": 12,
+              "title": "Coastline brightness",
+              "help": "Brightness of the coastline dots.",
+              "minimum": 5,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 25,
+              "visible_when": {
+                "key": "coastline",
+                "in": [
+                  true
+                ]
+              }
+            },
+            "marker": {
+              "type": "boolean",
+              "order": 13,
+              "title": "Location marker",
+              "help": "A blinking dot at your shared location.",
+              "default": false
+            },
+            "refresh_hours": {
+              "type": "integer",
+              "order": 14,
+              "title": "Check for new imagery",
+              "help": "Hours between checks for a newer daily image. Downloaded tiles are cached in the plugin's storage.",
+              "minimum": 1,
+              "maximum": 48,
+              "step": 1,
+              "unit": " h",
+              "default": 6
+            }
+          }
+        }
+      },
+      {
+        "id": "satellite-clouds",
+        "title": "Satellite clouds",
+        "uses_location": true,
+        "family": "maps-space",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "coverage": {
+              "type": "string",
+              "order": 0,
+              "title": "Coverage",
+              "help": "A region around your shared location, or the whole Earth.",
+              "enum": [
+                "local",
+                "global"
+              ],
+              "enum_titles": [
+                "Around my location",
+                "Whole Earth"
+              ],
+              "default": "local"
+            },
+            "source": {
+              "type": "string",
+              "order": 1,
+              "title": "Satellite",
+              "help": "Automatic picks the geostationary satellite that sees your location best, or a world mosaic for the whole Earth.",
+              "enum": [
+                "auto",
+                "goes_east",
+                "goes_west",
+                "meteosat",
+                "indian_ocean",
+                "world_ir",
+                "polar_daily"
+              ],
+              "enum_titles": [
+                "Automatic",
+                "GOES-East (Americas)",
+                "GOES-West (Pacific)",
+                "Meteosat (Europe, Africa)",
+                "Meteosat IODC (Indian Ocean)",
+                "World infrared mosaic",
+                "Daily true colour (MODIS)"
+              ],
+              "default": "auto"
+            },
+            "projection": {
+              "type": "string",
+              "order": 2,
+              "title": "Projection",
+              "help": "Flat map, globe centred on your location, or an equal-area Mollweide ellipse.",
+              "enum": [
+                "flat",
+                "globe",
+                "mollweide"
+              ],
+              "enum_titles": [
+                "Flat map",
+                "Globe",
+                "Mollweide"
+              ],
+              "default": "globe",
+              "visible_when": {
+                "key": "coverage",
+                "in": [
+                  "global"
+                ]
+              }
+            },
+            "rotation_deg_per_min": {
+              "type": "integer",
+              "order": 3,
+              "title": "Globe rotation",
+              "help": "How fast the globe turns; 0 keeps your location in the centre. Used by the globe projection.",
+              "minimum": 0,
+              "maximum": 30,
+              "step": 1,
+              "unit": " deg/min",
+              "default": 2,
+              "visible_when": {
+                "key": "coverage",
+                "in": [
+                  "global"
+                ]
+              }
+            },
+            "zoom_level": {
+              "type": "integer",
+              "order": 4,
+              "title": "Zoom level",
+              "help": "1 shows about 120 degrees of latitude; every level halves the view, down to about 4 degrees.",
+              "minimum": 1,
+              "maximum": 6,
+              "step": 1,
+              "default": 2,
+              "visible_when": {
+                "key": "coverage",
+                "in": [
+                  "local"
+                ]
+              }
+            },
+            "history": {
+              "type": "string",
+              "order": 5,
+              "title": "History",
+              "help": "Show only the latest image, or loop the last hours as a time-lapse. Longer loops download more frames, once.",
+              "enum": [
+                "latest",
+                "6h",
+                "12h",
+                "24h"
+              ],
+              "enum_titles": [
+                "Latest image only",
+                "Last 6 hours",
+                "Last 12 hours",
+                "Last 24 hours"
+              ],
+              "default": "latest"
+            },
+            "playback_fps": {
+              "type": "integer",
+              "order": 6,
+              "title": "Playback speed",
+              "help": "Frames of the time-lapse per second.",
+              "minimum": 1,
+              "maximum": 12,
+              "step": 1,
+              "unit": " fps",
+              "default": 4,
+              "visible_when": {
+                "key": "history",
+                "in": [
+                  "6h",
+                  "12h",
+                  "24h"
+                ]
+              }
+            },
+            "smoothing_percent": {
+              "type": "integer",
+              "order": 7,
+              "title": "Smoothing",
+              "help": "Cross-fade between frames instead of cutting.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 10,
+              "unit": "%",
+              "default": 60,
+              "visible_when": {
+                "key": "history",
+                "in": [
+                  "6h",
+                  "12h",
+                  "24h"
+                ]
+              }
+            },
+            "refresh_minutes": {
+              "type": "integer",
+              "order": 8,
+              "title": "Check for new images",
+              "help": "Minutes between checks for newer satellite images.",
+              "minimum": 5,
+              "maximum": 180,
+              "step": 5,
+              "unit": " min",
+              "default": 20
+            },
+            "contrast_percent": {
+              "type": "integer",
+              "order": 9,
+              "title": "Contrast",
+              "help": "How strongly clouds separate from the ground.",
+              "minimum": 50,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 130
+            },
+            "brightness_percent": {
+              "type": "integer",
+              "order": 10,
+              "title": "Brightness",
+              "help": "Shift the whole picture lighter or darker.",
+              "minimum": -50,
+              "maximum": 50,
+              "step": 5,
+              "unit": "%",
+              "default": 0
+            },
+            "ground_dim_percent": {
+              "type": "integer",
+              "order": 11,
+              "title": "Ground dimming",
+              "help": "Darken land and sea so that clouds stand out.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 50
+            },
+            "invert": {
+              "type": "boolean",
+              "order": 12,
+              "title": "Invert",
+              "help": "Draw clouds as dark ink on a light ground.",
+              "default": false
+            },
+            "land_underlay": {
+              "type": "boolean",
+              "order": 13,
+              "title": "Land underlay",
+              "help": "Fill land with a faint tone from the embedded land mask, useful over the ocean.",
+              "default": false
+            },
+            "land_underlay_percent": {
+              "type": "integer",
+              "order": 14,
+              "title": "Underlay brightness",
+              "help": "Brightness of the land fill.",
+              "minimum": 5,
+              "maximum": 60,
+              "step": 5,
+              "unit": "%",
+              "default": 20,
+              "visible_when": {
+                "key": "land_underlay",
+                "equals": true
+              }
+            },
+            "marker": {
+              "type": "boolean",
+              "order": 15,
+              "title": "Location marker",
+              "help": "A blinking dot at your shared location.",
+              "default": false
+            },
+            "cell_colors": {
+              "type": "boolean",
+              "order": 16,
+              "title": "Colour tint",
+              "help": "Tint each cell with the satellite's own colours (true colour where the source has them) instead of one ink colour.",
+              "default": false
             }
           }
         }

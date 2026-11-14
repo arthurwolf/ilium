@@ -1613,22 +1613,16 @@ struct KnownConfig {
 /// The kernel tab id of the Animations tab, whose `[animations]` table plugins write.
 const ANIMATIONS_TAB: &str = "animations";
 
-/// The `config.toml` table of the panel padding. The Padding tab is not one of the frozen
-/// kernel tab ids, so no `kernel-settings-changed` names it; the table diff decides.
-const PADDING_TABLE: &str = "padding";
-
 /// The tables one reading of `config.toml` changed that the App applies to live state.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct ConfigReload {
     /// The new `[animations]` table, when a `kernel-settings-changed` named that tab.
     pub(crate) animations: Option<toml::Table>,
-    /// The new `[padding]` table (empty when the table was removed), when it changed.
-    pub(crate) padding: Option<toml::Table>,
 }
 
 impl ConfigReload {
-    /// What changed between two readings; `events` are the `config_events` of the same pair.
-    pub(crate) fn between(before: &toml::Table, after: &toml::Table, events: &[Event]) -> Self {
+    /// What the newer reading `after` changed; `events` are the `config_events` of the pair.
+    pub(crate) fn between(after: &toml::Table, events: &[Event]) -> Self {
         let table_of = |name: &str| {
             after
                 .get(name)
@@ -1646,12 +1640,7 @@ impl ConfigReload {
                     .map(table_of)
                     .unwrap_or_default()
             });
-        let padding = (before.get(PADDING_TABLE) != after.get(PADDING_TABLE))
-            .then(|| table_of(PADDING_TABLE));
-        Self {
-            animations,
-            padding,
-        }
+        Self { animations }
     }
 }
 
@@ -2018,9 +2007,8 @@ impl ClientPlugins {
     /// when nothing changed; the event loop calls it on every tick.
     ///
     /// Returns the tables this reading found changed that the App applies live: the
-    /// `[animations]` table a plugin writes through `kernel-settings` (tab `animations`), and
-    /// the `[padding]` table the tree geometry reads while a frame is drawn. The plugin host
-    /// owns neither, so the caller applies them.
+    /// `[animations]` table a plugin writes through `kernel-settings` (tab `animations`). The
+    /// plugin host does not own it, so the caller applies it.
     pub(crate) fn observe(&mut self, focused: Option<ilium_core::NodeId>) -> ConfigReload {
         let mut batch = Vec::new();
         let mut reload = ConfigReload::default();
@@ -2053,7 +2041,7 @@ impl ClientPlugins {
                     known.stamp = stamp;
                     let table = events_feed::read_config(&known.path);
                     let events = events_feed::config_events(&known.table, &table);
-                    reload = ConfigReload::between(&known.table, &table, &events);
+                    reload = ConfigReload::between(&table, &events);
                     batch.extend(events);
                     known.table = table;
                 }
@@ -3101,22 +3089,14 @@ mod tests {
     }
 
     #[test]
-    fn a_config_reading_reloads_animations_and_padding_only_when_they_changed() {
-        let before = config("[padding]\nmode = \"disabled\"\n[animations]\nkind = \"pipes\"\n");
-        let after = config("[padding]\nmode = \"enabled\"\n[animations]\nkind = \"stars\"\n");
+    fn a_config_reading_reloads_animations_only_when_they_changed() {
+        let before = config("[animations]\nkind = \"pipes\"\n");
+        let after = config("[animations]\nkind = \"stars\"\n");
         let events = events_feed::config_events(&before, &after);
-        let reload = ConfigReload::between(&before, &after, &events);
-        assert_eq!(reload.padding, Some(config("mode = \"enabled\"\n")));
+        let reload = ConfigReload::between(&after, &events);
         assert_eq!(reload.animations, Some(config("kind = \"stars\"\n")));
 
-        let unchanged = ConfigReload::between(&after, &after, &[]);
+        let unchanged = ConfigReload::between(&after, &[]);
         assert_eq!(unchanged, ConfigReload::default());
-
-        // Removing the table reloads the defaults: an empty table.
-        let removed = config("[animations]\nkind = \"stars\"\n");
-        let events = events_feed::config_events(&after, &removed);
-        let reload = ConfigReload::between(&after, &removed, &events);
-        assert_eq!(reload.padding, Some(toml::Table::new()));
-        assert_eq!(reload.animations, None);
     }
 }

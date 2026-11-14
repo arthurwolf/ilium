@@ -698,7 +698,6 @@ async fn restore_snapshot_data(
     }
     let persisted_progress_monitors = std::mem::take(&mut snapshot.progress_monitors);
     let persisted_close_preferences = std::mem::take(&mut snapshot.workspace_close_preferences);
-    let persisted_recaps = std::mem::take(&mut snapshot.recaps);
     let persisted_node_metadata = std::mem::take(&mut snapshot.plugin_node_metadata);
     state.agent_debug.restore(snapshot.agent_debug_logs).await;
     #[cfg(test)]
@@ -732,15 +731,6 @@ async fn restore_snapshot_data(
             }
         }
         drop(preferences);
-        {
-            let mut recaps = state.recaps.write().await;
-            recaps.clear();
-            for recap in persisted_recaps {
-                if tree.get(recap.pane_id).is_some() {
-                    recaps.insert(recap.pane_id, recap);
-                }
-            }
-        }
         if let Ok(mut metadata) = state.plugin_node_metadata.lock() {
             metadata.clear();
             for entry in persisted_node_metadata {
@@ -1215,7 +1205,6 @@ mod restore_tests {
                 agent_debug_logs: Vec::new(),
                 progress_monitors: vec![persisted_monitor.clone()],
                 workspace_close_preferences: Vec::new(),
-                recaps: Vec::new(),
                 plugin_node_metadata: Vec::new(),
             },
         )
@@ -1453,7 +1442,6 @@ mod restore_tests {
                 agent_debug_logs: Vec::new(),
                 progress_monitors: Vec::new(),
                 workspace_close_preferences: Vec::new(),
-                recaps: Vec::new(),
                 plugin_node_metadata: Vec::new(),
             },
         )
@@ -1674,7 +1662,6 @@ mod restore_tests {
             }],
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
-            recaps: Vec::new(),
             plugin_node_metadata: Vec::new(),
         };
         let json = serde_json::to_vec_pretty(&snapshot).expect("serialize snapshot fixture");
@@ -1950,7 +1937,6 @@ mod restore_tests {
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
-            recaps: Vec::new(),
             plugin_node_metadata: Vec::new(),
         };
         restore_snapshot_data(&state, snapshot).await;
@@ -2063,7 +2049,6 @@ mod restore_tests {
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
-            recaps: Vec::new(),
             plugin_node_metadata: Vec::new(),
         };
         restore_snapshot_data(&state, snapshot).await;

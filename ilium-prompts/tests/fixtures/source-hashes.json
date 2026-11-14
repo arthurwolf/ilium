@@ -44,18 +44,6 @@
     "sha256": "5ec7738a9565da351bf4c9cd76251d480d753c2d644023d780bb588f67efdc9e"
   },
   {
-    "name": "conversion/missing-result",
-    "sha256": "1ca5bbfd27db1383d12cc60fc3205ea379b29135bd6735a8c16dfad603e841a1"
-  },
-  {
-    "name": "conversion/empty-result",
-    "sha256": "d5a7dc0a797102f00642cbb169b1574d789111c7c3118c7bd7cc14c2facb3b15"
-  },
-  {
-    "name": "conversion/synthetic-first-prompt",
-    "sha256": "336c041610d218d9ed25b6af96eb3b5a7a6fe6092dd4f1015f4d46b9f485ac82"
-  },
-  {
     "name": "naming/session-label-example",
     "sha256": "d8ca5aa413c6b97e26a44eaaf2996a2b86cede72736bb2a37c48c9fc11b3fd96"
   },
@@ -1056,10 +1044,6 @@
     "sha256": "46ff89c55561772fc5e2a4b202cf441f2139555385c2500397561605f12287dd"
   },
   {
-    "name": "agent/goal-from-line",
-    "sha256": "f3f4d083f0c2a7bff2cbd42a673f884820fee48204eb69114f9be125bc807001"
-  },
-  {
     "name": "agent/progress-done",
     "sha256": "6f331d1497b9cf38c254c23d104e130badc4adbdc772cc42154bb5d3c0b98a73"
   },
@@ -1082,18 +1066,6 @@
   {
     "name": "agent/progress-empty-status",
     "sha256": "51d76409563032b515310beb83e00e0ef4a7314ef7063fc3e1346305d5722e7a"
-  },
-  {
-    "name": "conversion/truncated-result",
-    "sha256": "c27236ffc9d5f1f52e9e78b0ab4f3fdea8b3362e88e5fb19aa6ec657bbcf574c"
-  },
-  {
-    "name": "conversion/bash-description-workdir",
-    "sha256": "fee88a6d39d9511a7186ebc6ea35623cf82aa4a51798841445b86e806eceb3fb"
-  },
-  {
-    "name": "conversion/bash-description",
-    "sha256": "840fb55e847dfe4b7732d5325f4082c3450833ea905027f74998957e4c211ac0"
   },
   {
     "name": "agent/progress-observation-stopped",

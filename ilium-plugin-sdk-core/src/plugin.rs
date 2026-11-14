@@ -319,6 +319,11 @@ pub struct SceneField {
     /// as `(column, row, character)`. Cleared before every frame; the component glue writes it
     /// with `write-glyphs`. Colours come from `cell_colors`.
     pub glyphs: Vec<(u16, u16, char)>,
+    /// The styled text plane: terminal text with a style (a whole grapheme, bold or italic) the
+    /// host draws in place of the Braille dots of a cell. A grapheme two columns wide is written
+    /// once, in its left cell; the host reserves the cell to its right. Cleared before every
+    /// frame; the component glue writes it with `write-glyphs`, colours come from `cell_colors`.
+    pub text_glyphs: Vec<TextGlyph>,
     /// The pointer over the field, set by the component glue before `render` when the program
     /// reports `wants_pointer` and the pointer is inside the field; `None` otherwise.
     pub pointer: Option<FieldPointer>,
@@ -326,6 +331,17 @@ pub struct SceneField {
     /// component glue before `render` when the program reports `wants_occupancy`; `None`
     /// otherwise.
     pub occupancy: Option<FieldOccupancy>,
+}
+
+/// One styled terminal grapheme of the text plane of a [`SceneField`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TextGlyph {
+    pub column: u16,
+    pub row: u16,
+    /// One terminal grapheme, one or two columns wide.
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 /// The pointer a scene sees: its cell, the dot inside the cell and whether a button is down.
@@ -414,12 +430,28 @@ impl SceneField {
         self.cell_colors
             .resize(usize::from(columns) * usize::from(rows), 0x00ff_ffff);
         self.glyphs.clear();
+        self.text_glyphs.clear();
     }
 
-    /// Clears every pixel to no ink and drops the glyph plane.
+    /// Clears every pixel to no ink and drops the glyph planes.
     pub fn clear(&mut self) {
         self.pixels.fill(0);
         self.glyphs.clear();
+        self.text_glyphs.clear();
+    }
+
+    /// Puts a styled grapheme of the text plane into cell (`column`, `row`); a cell outside the
+    /// field and an empty text are ignored.
+    pub fn put_text(&mut self, column: u16, row: u16, text: &str, bold: bool, italic: bool) {
+        if column < self.columns && row < self.rows && !text.is_empty() {
+            self.text_glyphs.push(TextGlyph {
+                column,
+                row,
+                text: text.to_owned(),
+                bold,
+                italic,
+            });
+        }
     }
 
     /// Puts a character of the glyph plane into cell (`column`, `row`); a cell outside the
@@ -472,6 +504,14 @@ impl SceneField {
             let index = usize::from(*row) * usize::from(self.columns) + usize::from(*column);
             if let Some(cell) = cells.get_mut(index) {
                 cell.0 = *character;
+            }
+        }
+        for glyph in &self.text_glyphs {
+            let index =
+                usize::from(glyph.row) * usize::from(self.columns) + usize::from(glyph.column);
+            if let (Some(cell), Some(character)) = (cells.get_mut(index), glyph.text.chars().next())
+            {
+                cell.0 = character;
             }
         }
         cells

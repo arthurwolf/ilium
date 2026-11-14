@@ -2,14 +2,11 @@ use super::*;
 use ControlValue::{Bool, Index, Number, Text};
 
 #[test]
-fn provider_polling_remains_authored_while_render_controls_remain_available() {
-    for (kind, id) in [
-        (AnimationKind::Clouds, "refresh_minutes"),
-        (AnimationKind::NightLights, "refresh_hours"),
-    ] {
+fn capture_inputs_remain_authored_while_render_controls_remain_available() {
+    for (kind, id) in [(AnimationKind::Spectrum, "input")] {
         assert!(!inventory(kind).unwrap().contains_key(id));
         assert!(validate_recommendation(
-            &proposal(kind, vec![(id, Number(5))]),
+            &proposal(kind, vec![(id, Index(0))]),
             &AnimationSettings::default(),
         )
         .is_err());
@@ -160,7 +157,7 @@ fn malformed_types_bounds_duplicates_and_inactive_controls_are_rejected() {
     let base = AnimationSettings::default();
     for bad in [
         proposal(AnimationKind::OpenStreetMap, vec![("place", Index(0))]),
-        proposal(AnimationKind::Clouds, vec![("refresh_minutes", Number(5))]),
+        proposal(AnimationKind::Spectrum, vec![("input", Index(0))]),
         proposal(
             AnimationKind::Wikipedia,
             vec![("topic", Text("Paris".into()))],
@@ -168,10 +165,10 @@ fn malformed_types_bounds_duplicates_and_inactive_controls_are_rejected() {
     ] {
         assert!(validate_recommendation(&bad, &base).is_err(), "{bad:?}");
     }
-    assert!(serde_json::from_str::<ProposedRecommendation>(
-        r#"{"kind":"night_lights","parameters":[]}"#
-    )
-    .is_err());
+    assert!(
+        serde_json::from_str::<ProposedRecommendation>(r#"{"kind":"images","parameters":[]}"#)
+            .is_err()
+    );
     assert!(serde_json::from_str::<ProposedRecommendations>(r#"{"definitions":[]}"#).is_err());
     assert!(serde_json::from_str::<ProposedParameter>(
         r#"{"id":"tide_seconds","value":{"Number":2.5}}"#
@@ -230,7 +227,7 @@ fn paris_is_offline_even_when_authored_osm_was_custom() {
 #[test]
 fn saved_choices_cannot_silently_change() {
     let base = AnimationSettings::default();
-    let raw = proposal(AnimationKind::Clouds, vec![("projection", Index(0))]);
+    let raw = proposal(AnimationKind::Spectrum, vec![("style", Index(0))]);
     let mut rec = validate_recommendation(&raw, &base).unwrap();
     assert!(resolve_recommendation(&rec, &base).is_ok());
     let mut bad = raw;
@@ -239,7 +236,7 @@ fn saved_choices_cannot_silently_change() {
     let choice = rec
         .parameters
         .iter_mut()
-        .find(|parameter| parameter.id == "projection")
+        .find(|parameter| parameter.id == "style")
         .unwrap();
     let AnimationValue::Choice { label, .. } = &mut choice.value else {
         panic!("choice")
@@ -397,63 +394,11 @@ fn numeric_dependency_pairs_accept_both_orders_and_reject_invalid_final_values()
 }
 
 #[test]
-fn provider_cadence_is_excluded_but_cloud_playback_and_conditional_controls_work() {
-    // No provider scene is constructed.
-    let authored = AnimationSettings::default();
-    for raw in [
-        proposal(AnimationKind::Clouds, vec![("refresh_minutes", Number(5))]),
-        proposal(
-            AnimationKind::NightLights,
-            vec![("refresh_hours", Number(1))],
-        ),
-    ] {
-        // Try both newly identified polling controls.
-        assert!(validate_recommendation(&raw, &authored).is_err());
+fn conditional_controls_are_exposed_and_capture_inputs_are_not() {
+    let spectrum = inventory(AnimationKind::Spectrum).unwrap();
+    for id in ["bar_width", "bar_gap", "spectrogram_speed"] {
+        assert!(spectrum.contains_key(id), "{id}");
     }
-    let raw = proposal(
-        AnimationKind::Clouds,
-        vec![
-            ("playback_fps", Number(8)),
-            ("rotation_deg_per_min", Number(5)),
-            ("land_underlay_percent", Number(20)),
-            ("history_hours", Index(1)),
-            ("coverage", Index(1)),
-            ("projection", Index(1)),
-            ("land_underlay", Bool(true)),
-        ],
-    );
-    let first = validate_recommendation(&raw, &authored).unwrap();
-    let mut reversed = raw;
-    reversed.parameters.reverse();
-    assert_eq!(
-        validate_recommendation(&reversed, &authored).unwrap(),
-        first
-    );
-    let effective = resolve_recommendation(&first, &authored).unwrap();
-    assert_eq!(effective.ambient.clouds.playback_fps, 8);
-    assert_eq!(
-        effective.ambient.clouds.refresh_minutes,
-        authored.ambient.clouds.refresh_minutes
-    );
-    let clouds = inventory(AnimationKind::Clouds).unwrap();
-    for id in [
-        "projection",
-        "rotation_deg_per_min",
-        "zoom_level",
-        "playback_fps",
-        "smoothing_percent",
-        "land_underlay_percent",
-    ] {
-        assert!(clouds.contains_key(id), "{id}");
-    }
-    assert!(!clouds.contains_key("refresh_minutes"));
-    let lights = inventory(AnimationKind::NightLights).unwrap();
-    for id in [
-        "rotation_deg_per_min",
-        "terminator_strength_percent",
-        "coastline_strength_percent",
-    ] {
-        assert!(lights.contains_key(id), "{id}");
-    }
-    assert!(!lights.contains_key("refresh_hours"));
+    assert!(!spectrum.contains_key("input"));
+    assert!(!spectrum.contains_key("device_name"));
 }

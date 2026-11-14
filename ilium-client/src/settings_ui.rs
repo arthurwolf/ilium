@@ -463,7 +463,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     }
     match state.tab {
         SettingsTab::Toolbar => {
-            crate::tree_toolbar_settings::render(frame, layout.content_area, app, state)
+            render_scrollable(frame, layout.content_area, toolbar_lines(app), state.scroll)
         }
         SettingsTab::LlmInstructions => {}
         SettingsTab::Setup => render_scrollable(
@@ -553,12 +553,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         SettingsTab::Keyboard => {
             let lines = keyboard_lines(&app.keyboard_settings, &app.keybindings);
             render_scrollable(frame, layout.content_area, lines, state.scroll);
-        }
-        SettingsTab::Padding => {
-            crate::padding_ui::render(frame, layout.content_area, app, state);
-            if let Some(dialog) = &state.padding.dialog {
-                crate::padding_dialog::render(frame, area, app, dialog);
-            }
         }
         SettingsTab::Sound => {
             let view = sound_view(app, state.selected_row, layout.content_area.width);
@@ -832,23 +826,6 @@ pub fn settings_help_anchors(
                     layout,
                     &id,
                     1 + i as u16 * 3,
-                    state.scroll,
-                    state.selected_row == i,
-                );
-            }
-        }
-        SettingsTab::Padding => {
-            let lines = [
-                4,
-                crate::padding_ui::CARD_HEIGHT + 2,
-                crate::padding_ui::CARD_HEIGHT + 5,
-            ];
-            for (i, id) in simple_rows("PAD-", 3) {
-                push_help_anchor(
-                    &mut anchors,
-                    layout,
-                    &id,
-                    lines[i],
                     state.scroll,
                     state.selected_row == i,
                 );
@@ -1279,7 +1256,6 @@ pub fn close_button_hit(header_area: Rect, position: Position) -> bool {
 fn tab_icon(tab: SettingsTab) -> &'static str {
     match tab {
         SettingsTab::Appearance => "◐",
-        SettingsTab::Padding => "▢",
         SettingsTab::Icons => "▦",
         SettingsTab::Toolbar => "☷",
         SettingsTab::AgentMonitoring => "◉",
@@ -1940,7 +1916,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
     }
     let total_lines = match tab {
         SettingsTab::Animations => unreachable!("handled by animation geometry"),
-        SettingsTab::Padding | SettingsTab::Toolbar => 0,
+        SettingsTab::Toolbar => 0,
         SettingsTab::Setup => setup_lines(app, selected_row).len() as u16,
         SettingsTab::Inference => inference_lines(
             &app.inference_settings,
@@ -2029,6 +2005,26 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
+}
+
+/// The Settings "Toolbar" page. The buttons of the tree toolbar are edited in the Tree plugin's
+/// dialog (`ilium.core.tree/tree-toolbar`), which Enter or a click on this page opens.
+fn toolbar_lines(app: &App) -> Vec<Line<'static>> {
+    let layout = &app.ui_settings.tree_toolbar_layout;
+    vec![
+        Line::from("Tree toolbar"),
+        Line::from("Enter edits the buttons and the inactivity time"),
+        Line::from(Span::styled(
+            format!(
+                "Edit toolbar…  {} buttons · inactive after {} minutes",
+                layout.entries.len(),
+                app.ui_settings.tree_inactivity_minutes
+            ),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ]
 }
 
 fn setup_lines(app: &App, selected_row: usize) -> Vec<Line<'static>> {

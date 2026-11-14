@@ -337,9 +337,6 @@ pub struct ServerState {
     pub(crate) workspace_git_status_cache: RwLock<HashMap<NodeId, WorkspaceGitStatus>>,
     pub(crate) workspace_close_preferences:
         std::sync::Arc<RwLock<HashMap<NodeId, WorkspaceClosePreference>>>,
-    /// Recaps clients produced, fenced by session and generation. Persisted
-    /// in the session snapshot; the server never generates them.
-    pub(crate) recaps: std::sync::Arc<RwLock<HashMap<NodeId, crate::persistence::PersistedRecap>>>,
     /// What plugins keep on tree nodes, by plugin id and node id. The plugin facade writes
     /// it; session snapshots persist it.
     pub(crate) plugin_node_metadata: std::sync::Arc<PluginNodeMetadata>,
@@ -575,7 +572,6 @@ impl ServerState {
             replacing_panes: std::sync::Mutex::new(HashSet::new()),
             workspace_git_status_cache: RwLock::new(HashMap::new()),
             workspace_close_preferences: std::sync::Arc::new(RwLock::new(HashMap::new())),
-            recaps: std::sync::Arc::new(RwLock::new(HashMap::new())),
             plugin_node_metadata: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::BTreeMap::new(),
             )),

@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use ilium_plugin_core_sessions::SessionsServer;
+use ilium_plugin_core_sessions::{SessionsClient, SessionsServer};
 use ilium_plugin_sdk::primitives::{SessionRef, SignatureSpec};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
@@ -24,6 +24,16 @@ pub fn activated_server() -> FakeHost {
         .side("server")
         .build();
     host.activate::<SessionsServer>();
+    host
+}
+
+/// A client-side host with the manifest grants and the plugin activated.
+pub fn activated_client() -> FakeHost {
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
+    host.activate::<SessionsClient>();
     host
 }
 

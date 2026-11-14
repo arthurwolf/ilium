@@ -128,9 +128,6 @@ pub struct SessionSnapshot {
     pub(crate) progress_monitors: Vec<PersistedProgressMonitor>,
     #[serde(default)]
     pub(crate) workspace_close_preferences: Vec<PersistedWorkspaceClosePreference>,
-    /// Stored pane recaps. Older snapshots default to none.
-    #[serde(default)]
-    pub(crate) recaps: Vec<PersistedRecap>,
     /// What plugins keep on tree nodes (`tree-annotations.set-metadata`), so it survives a
     /// restart like the nodes do. Older snapshots default to none.
     #[serde(default)]
@@ -143,17 +140,6 @@ pub(crate) struct PersistedNodeMetadata {
     pub plugin: String,
     pub node_id: NodeId,
     pub bytes: Vec<u8>,
-}
-
-/// One pane's stored recap together with the fence it was accepted under.
-/// The server never calls a model; clients produce these texts.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct PersistedRecap {
-    pub pane_id: NodeId,
-    pub session_id: String,
-    pub recap_generation: u64,
-    pub short: String,
-    pub long: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -471,7 +457,6 @@ impl LegacyWorkspace {
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
-            recaps: Vec::new(),
             plugin_node_metadata: Vec::new(),
         })
     }
@@ -551,7 +536,6 @@ pub(crate) struct SnapshotSources {
             std::collections::HashMap<NodeId, crate::state::WorkspaceClosePreference>,
         >,
     >,
-    recaps: Arc<tokio::sync::RwLock<std::collections::HashMap<NodeId, PersistedRecap>>>,
     plugin_node_metadata: Arc<crate::state::PluginNodeMetadata>,
     agent_debug: Arc<crate::agent_debug::AgentDebugRecorder>,
     _restored_storage: Option<Arc<ilium_execution::StorageAdmission>>,
@@ -562,7 +546,6 @@ impl SnapshotSources {
             tree: Arc::clone(&state.tree),
             panes: Arc::clone(&state.panes),
             workspace_close_preferences: Arc::clone(&state.workspace_close_preferences),
-            recaps: Arc::clone(&state.recaps),
             plugin_node_metadata: Arc::clone(&state.plugin_node_metadata),
             agent_debug: Arc::clone(&state.agent_debug),
             _restored_storage: state.snapshot_read_storage(),
@@ -582,7 +565,6 @@ pub(crate) async fn capture_snapshot(
         progress_monitors,
         workspace_close_preferences,
         agent_debug_logs,
-        recaps,
         plugin_node_metadata,
     ) = {
         let tree = sources.tree.read().await;
@@ -660,15 +642,6 @@ pub(crate) async fn capture_snapshot(
             })
             .collect::<Vec<_>>();
         workspace_close_preferences.sort_by_key(|preference| preference.pane_id.0);
-        let mut recaps = sources
-            .recaps
-            .read()
-            .await
-            .values()
-            .filter(|recap| tree.get(recap.pane_id).is_some())
-            .cloned()
-            .collect::<Vec<_>>();
-        recaps.sort_by_key(|recap| recap.pane_id.0);
         let plugin_node_metadata = sources
             .plugin_node_metadata
             .lock()
@@ -690,7 +663,6 @@ pub(crate) async fn capture_snapshot(
             progress_monitors,
             workspace_close_preferences,
             agent_debug_logs,
-            recaps,
             plugin_node_metadata,
         )
     };
@@ -701,7 +673,6 @@ pub(crate) async fn capture_snapshot(
         agent_debug_logs,
         progress_monitors,
         workspace_close_preferences,
-        recaps,
         plugin_node_metadata,
     })
 }
@@ -1532,7 +1503,6 @@ mod tests {
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
-            recaps: Vec::new(),
             plugin_node_metadata: Vec::new(),
         }
     }
@@ -2064,29 +2034,6 @@ mod tests {
         }
         let legacy: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
         assert_eq!(legacy.tree.pane_workspace(pane_id), None);
-    }
-
-    #[tokio::test]
-    async fn pane_recaps_survive_snapshot_round_trip_and_default_when_absent() {
-        let path = scratch_snapshot_path();
-        let mut snapshot = sample_snapshot();
-        let pane_id = snapshot.panes[1].node_id;
-        snapshot.recaps = vec![PersistedRecap {
-            pane_id,
-            session_id: "session-a".to_string(),
-            recap_generation: 4,
-            short: "Fixing token expiry in auth.".to_string(),
-            long: Some("The agent is fixing token expiry in the auth module.".to_string()),
-        }];
-
-        write_snapshot_to(&path, &snapshot).await.unwrap();
-        let loaded = load_snapshot(&path).await.unwrap().unwrap();
-        assert_eq!(loaded.recaps, snapshot.recaps);
-
-        let mut old_shape = serde_json::to_value(snapshot).unwrap();
-        old_shape.as_object_mut().unwrap().remove("recaps");
-        let legacy: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
-        assert!(legacy.recaps.is_empty());
     }
 
     #[test]
@@ -2685,7 +2632,6 @@ root:
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
-            recaps: Vec::new(),
             plugin_node_metadata: Vec::new(),
         };
 

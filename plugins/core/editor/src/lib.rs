@@ -4,6 +4,7 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
+pub mod agent_dialog;
 pub mod agent_from_line;
 pub mod buffers;
 pub mod close_dirty;
@@ -23,8 +24,8 @@ use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::generated::types::{
-    BufferRef, CreatePaneSpec, EditorPointerEvent, FsPath, Intent, PointerButton, PointerKind,
-    TextEdit,
+    ActionKind, BufferRef, CreatePaneSpec, EditorPointerEvent, FsPath, Intent, NodeId,
+    OpenViewSpec, PointerButton, PointerKind, TextEdit, ToastSpec, Tone, UiAction,
 };
 use ilium_plugin_sdk::host;
 use ilium_plugin_sdk::host::{EntryKind, HostFs};
@@ -95,6 +96,8 @@ impl ServiceProvider for EditorServer {
 #[derive(Default)]
 pub struct EditorClient {
     buffers: Buffers,
+    /// The "Create agent from line" dialog while it is open.
+    agent_dialog: Option<agent_dialog::Dialog>,
 }
 
 impl EditorClient {
@@ -144,6 +147,54 @@ impl EditorClient {
             }),
             agent_from_line::dedup_key(event.buffer.0, event.position.line),
         ))
+    }
+
+    /// Opens the "Create agent from line" dialog for the line the kernel's line menu named.
+    fn open_agent_dialog(&mut self, arguments_json: &str, out: &mut Vec<Submission>) {
+        match agent_dialog::Dialog::from_arguments(arguments_json) {
+            Ok(dialog) => {
+                self.agent_dialog = Some(dialog);
+                out.push(Submission::new(Intent::OpenView(OpenViewSpec {
+                    view: agent_dialog::view(),
+                    focus: true,
+                })));
+            }
+            Err(message) => out.push(error_toast(&message)),
+        }
+    }
+
+    /// Applies one action of the "Create agent from line" dialog.
+    fn on_agent_dialog_action(&mut self, action: &UiAction, out: &mut Vec<Submission>) {
+        let Some(mut dialog) = self.agent_dialog.take() else {
+            return;
+        };
+        let step = dialog.act(
+            &action.key,
+            &action.action_id,
+            action.kind,
+            action.value.clone(),
+        );
+        // The kernel already removed a popup it closed itself; every other end closes it here.
+        let close = || Submission::new(Intent::CloseView(agent_dialog::view()));
+        match step {
+            agent_dialog::Step::Stay => self.agent_dialog = Some(dialog),
+            agent_dialog::Step::Cancel => {
+                if action.kind != ActionKind::Closed {
+                    out.push(close());
+                }
+            }
+            agent_dialog::Step::Create(created) => {
+                out.push(close());
+                out.push(Submission::new(Intent::CreatePane(CreatePaneSpec {
+                    parent: created.parent.map(NodeId),
+                    title: created.title,
+                    content_kind: "ilium.terminal".to_string(),
+                    cwd: None,
+                    command: Some(vec![created.command]),
+                    initial_input: Some(created.prompt),
+                })));
+            }
+        }
     }
 
     fn list_buffers(&self) -> serde_json::Value {
@@ -213,6 +264,18 @@ impl EditorClient {
     }
 }
 
+/// A short danger toast naming why a command was refused.
+fn error_toast(message: &str) -> Submission {
+    Submission::new(Intent::Toast(ToastSpec {
+        id: Some("editor-error".to_string()),
+        tone: Tone::Danger,
+        title: message.chars().take(60).collect(),
+        body: None,
+        actions: Vec::new(),
+        duration_ms: Some(5000),
+    }))
+}
+
 /// The reply body of a refused service call.
 fn reply_error(code: &str, message: &str) -> serde_json::Value {
     serde_json::json!({"error": {"code": code, "message": message}})
@@ -259,6 +322,12 @@ impl Handler for EditorClient {
                 Event::EditorOpened(reference) => self.open_buffer(reference),
                 Event::EditorClosed(reference) => self.buffers.close(reference.buffer.0),
                 Event::EditorPointer(pointer) => submissions.extend(self.pointer(pointer)),
+                Event::CommandInvoked(invoked) if invoked.command == agent_dialog::COMMAND => {
+                    self.open_agent_dialog(&invoked.arguments_json, &mut submissions);
+                }
+                Event::UiAction(action) if action.view == agent_dialog::view() => {
+                    self.on_agent_dialog_action(&action, &mut submissions);
+                }
                 _ => {}
             }
         }
@@ -267,7 +336,12 @@ impl Handler for EditorClient {
 }
 
 impl Views for EditorClient {
-    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
+    fn render(&mut self, view: ViewTarget, _area: Area) -> UiTree {
+        if view == agent_dialog::view() {
+            if let Some(dialog) = &self.agent_dialog {
+                return dialog.render();
+            }
+        }
         UiTree {
             version: 1,
             nodes: Vec::new(),

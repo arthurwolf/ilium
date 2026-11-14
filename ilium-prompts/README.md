@@ -2,7 +2,7 @@
 
 All application-authored model instructions, examples, tool descriptions, generated agent messages and their context layouts live in `templates/**/*.hbs`. Rust supplies typed state, serialization, clipping budgets and runtime user text.
 
-The `naming`, `voice`, `agent`, `conversion` and `compaction` catalogs explicitly embed these files using `include_str!`. Editing a template changes the next compiled artifact; rebuild to use it. Both debug and release binaries render embedded text without reading template files, locating a source checkout or accepting a template-directory setting.
+The `naming`, `voice`, `agent` catalogs explicitly embed these files using `include_str!`. Editing a template changes the next compiled artifact; rebuild to use it. Both debug and release binaries render embedded text without reading template files, locating a source checkout or accepting a template-directory setting.
 
 ## Edit or add a prompt
 
@@ -21,7 +21,7 @@ HTML escaping is disabled because these are plain-text prompts. Inserted values 
 
 ## Verification
 
-`tests/source_parity.rs` checks extracted bytes and formatting skeletons against hashes captured from the original sources. `format_parity.rs` checks 117 interpolated layouts; `template_parity.rs` compares 12 full naming/restructure variants with the original outputs. Rendering tests cover registration, invalid sources, missing catalog entries, named partials, Unicode and literal user text. Existing caller tests exercise naming styles, retries, voice control, chatroom generation, progress outcomes and conversion behavior.
+`tests/source_parity.rs` checks extracted bytes and formatting skeletons against hashes captured from the original sources. `format_parity.rs` checks 117 interpolated layouts; `template_parity.rs` compares 12 full naming/restructure variants with the original outputs. Rendering tests cover registration, invalid sources, missing catalog entries, named partials, Unicode and literal user text. Existing caller tests exercise naming styles, retries, voice control, chatroom generation, progress outcomes.
 
 The `prompt_probe` example accepts `--input /absolute/path/cases.jsonl`. Each input line contains `name` and `context`; it emits JSONL results with byte count and SHA256. An optional `baseline_source` field renders a captured original for migration comparison. Build with `cargo build -p ilium-prompts --release --example prompt_probe`, copy the artifact to an isolated directory and run it there to verify rendering without source-template access.
 

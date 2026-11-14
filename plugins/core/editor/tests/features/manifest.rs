@@ -58,23 +58,44 @@ fn doc_f_019_client_entry_world_and_exports() {
 
 /// REQ: F-019
 #[test]
-fn doc_f_019_client_capabilities_are_exactly_the_eight_grants() {
+fn doc_f_019_client_capabilities_are_exactly_the_manifest_grants() {
     let manifest = manifest_json();
     let mut expected = vec![
         "editor.read",
         "editor.edit",
-        "editor.provide",
         "fs.read:project",
         "panes.create",
+        "panes.create-command:claude",
+        "panes.create-command:codex",
+        "panes.create-command:agy",
+        "notify.toast",
         "terminal.write",
         "ui.panels",
-        "settings.write-kernel:editor",
+        "services.use:ilium.core.editor/set-setting",
+        "extensions.provide:ilium.core.editor/before-save",
+        "extensions.provide:ilium.core.editor/file-openers",
+        "extensions.provide:ilium.core.editor/line-badges",
     ]
     .into_iter()
     .map(str::to_string)
     .collect::<Vec<_>>();
     expected.sort();
     assert_eq!(string_set(&manifest["capabilities"]["client"]), expected);
+}
+
+/// REQ: F-023
+#[test]
+fn doc_f_023_manifest_contributes_the_create_agent_from_line_command() {
+    let manifest = manifest_json();
+    assert_eq!(
+        manifest["contributes"]["commands"][0]["id"],
+        "create-agent-from-line"
+    );
+    assert!(manifest["activation"]
+        .as_array()
+        .is_some_and(|triggers| triggers
+            .iter()
+            .any(|trigger| trigger == "command:ilium.core.editor/create-agent-from-line")));
 }
 
 /// REQ: F-019

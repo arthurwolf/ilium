@@ -320,7 +320,7 @@ animation:
 
     #[test]
     fn legacy_image_parameters_survive_current_and_other_scene_selections() {
-        for kind in ["images", "night_lights"] {
+        for kind in ["images", "video"] {
             let config: ProjectConfig = serde_norway::from_str(&format!(
                 "animation:\n  kind: {kind}\n  static_image:\n    source: !Builtin 0\n    contrast_percent: 59\n"
             )).unwrap();
@@ -482,7 +482,7 @@ animation:
         })
         .unwrap();
         let settings = crate::background_animation::AnimationSettings {
-            kind: crate::background_animation::AnimationKind::Clouds,
+            kind: crate::background_animation::AnimationKind::Video,
             speed_percent: 150,
             ..Default::default()
         };
@@ -687,14 +687,14 @@ animation:
 
         let project = tempfile::tempdir().unwrap();
         let mut settings = AnimationSettings {
-            kind: AnimationKind::NightLights,
+            kind: AnimationKind::Video,
             enabled: true,
             ..Default::default()
         };
         settings.ambient.location = ilium_ambient::GeoLocation::new("Tromso, Norway", 69.65, 18.96);
         set_animation(project.path(), settings.clone()).unwrap();
         let saved = std::fs::read_to_string(project.path().join(RELATIVE_PATH)).unwrap();
-        assert!(saved.contains("kind: night_lights"), "{saved}");
+        assert!(saved.contains("kind: video"), "{saved}");
         assert!(saved.contains("Tromso, Norway"), "{saved}");
         // Flattened: the location sits directly under `animation`, not under
         // an `ambient` key.
@@ -775,11 +775,11 @@ animation:
         std::fs::create_dir_all(project.path().join(".ilium")).unwrap();
         std::fs::write(
             project.path().join(RELATIVE_PATH),
-            "animation:\n  kind: night_lights\n  future_key: 7\n  night_lights:\n    tomorrow: true\n  location:\n    label: Lima\n    latitude: -12.05\n    longitude: -77.04\n",
+            "animation:\n  kind: video\n  future_key: 7\n  future_block:\n    tomorrow: true\n  location:\n    label: Lima\n    latitude: -12.05\n    longitude: -77.04\n",
         )
         .unwrap();
         let loaded = load(project.path()).unwrap().animation;
-        assert_eq!(loaded.kind, AnimationKind::NightLights);
+        assert_eq!(loaded.kind, AnimationKind::Video);
         assert_eq!(loaded.ambient.location.label, "Lima");
         assert!((loaded.ambient.location.longitude + 77.04).abs() < 1e-9);
 

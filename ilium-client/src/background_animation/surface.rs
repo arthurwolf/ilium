@@ -825,7 +825,7 @@ mod tests {
             ..Default::default()
         };
         let settings = AnimationSettings {
-            kind: super::super::AnimationKind::NightLights,
+            kind: super::super::AnimationKind::Images,
             ..Default::default()
         };
         // Full admission retains the exact initial configuration for retry.
@@ -1151,7 +1151,7 @@ mod tests {
             ..Default::default()
         };
         let mut settings = AnimationSettings {
-            kind: super::super::AnimationKind::NightLights,
+            kind: super::super::AnimationKind::Images,
             ..Default::default()
         };
         let result = surface.request(&settings, 2, 1, Duration::ZERO, None);

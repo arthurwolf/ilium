@@ -112,8 +112,6 @@ fn a_scene_reporting_cell_colors_colors_the_cells_and_others_do_not() {
 #[test]
 fn catalog_has_unique_serializable_scenes_in_user_order() {
     let expected = [
-        "night_lights",
-        "clouds",
         "video",
         "spectrum",
         "images",
@@ -505,12 +503,12 @@ fn hosted_scene_takes_new_settings_in_place_or_is_rebuilt() {
                 applied: factory_applied.clone(),
             })
         }));
-        let kind = ilium_ambient::AmbientKind::Clouds;
+        let kind = ilium_ambient::AmbientKind::Spectrum;
         let mut settings = ilium_ambient::AmbientSettings::default();
         let first = host.sync(kind, &settings, Duration::ZERO);
         // The same settings change nothing.
         assert_eq!(host.sync(kind, &settings, Duration::from_secs(1)), first);
-        settings.clouds.contrast_percent += 10;
+        settings.spectrum.sensitivity += 10;
         let second = host.sync(kind, &settings, Duration::from_secs(5));
         assert_ne!(
             first, second,

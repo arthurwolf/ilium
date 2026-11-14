@@ -1054,6 +1054,7 @@ impl App {
                 if let Some(plugins) = self.wasm_plugins.as_ref() {
                     plugins.dismiss_popup(&state.plugin, &state.popup);
                 }
+                self.session_recovery_popup_gone(&state.plugin, &state.popup);
                 self.close_plugin_popup_mode();
             }
         }

@@ -80,7 +80,11 @@ fn manifest_050_declares_both_sides_and_the_detector_export() {
     let manifest = manifest();
     assert_eq!(manifest["server"]["entry"], "server.wasm");
     assert_eq!(manifest["server"]["world"], "ilium:server/base@0.1.0");
-    assert_eq!(manifest["server"]["exports"], json!(["detector"]));
+    // `service-provider` serves the batched screen verdicts the kernel loop caches.
+    assert_eq!(
+        manifest["server"]["exports"],
+        json!(["detector", "service-provider"])
+    );
     assert_eq!(manifest["client"]["entry"], "client.wasm");
     assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
     assert!(
@@ -141,7 +145,14 @@ fn manifest_050_contributes_exactly_signatures_panels_slots_and_display_modes() 
     keys.sort();
     assert_eq!(
         keys,
-        ["decoration_slots", "display_modes", "panels", "signatures"]
+        [
+            "decoration_slots",
+            "display_modes",
+            "extension_points",
+            "panels",
+            "services",
+            "signatures"
+        ]
     );
 }
 
@@ -149,9 +160,15 @@ fn manifest_050_contributes_exactly_signatures_panels_slots_and_display_modes() 
 #[test]
 fn manifest_050_contributes_the_example_agent_signature() {
     let manifest = manifest();
+    // The generic agent CLIs (opencode, aider) are this plugin's data, not a kernel table:
+    // with the plugin disabled the kernel no longer recognises them.
     assert_eq!(
         manifest["contributes"]["signatures"],
-        json!([{ "id": "example-agent", "process_names": ["example-agent"], "aliases": ["example"], "icon": "robot" }])
+        json!([
+            { "id": "example-agent", "process_names": ["example-agent"], "aliases": ["example"], "icon": "robot" },
+            { "id": "opencode", "process_names": ["opencode"], "icon": "robot" },
+            { "id": "aider", "process_names": ["aider"], "icon": "robot" }
+        ])
     );
 }
 
