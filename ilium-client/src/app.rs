@@ -519,7 +519,6 @@ pub enum AgentSetupTargetStatus {
 /// accidentally expose an impossible field (for example, Kilo has no key).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InferenceSettingField {
-    RestructurePromptTokenLimit,
     OllamaUrl,
     OllamaModel,
     OpenAiUrl,
@@ -535,7 +534,6 @@ pub enum InferenceSettingField {
 impl InferenceSettingField {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::RestructurePromptTokenLimit => "Restructure token budget",
             Self::OllamaUrl => "Ollama API URL",
             Self::OllamaModel => "Ollama model",
             Self::OpenAiUrl => "OpenAI-compatible API URL",
@@ -1292,6 +1290,20 @@ pub enum ContextMenuAction {
     Plugin(u16),
 }
 
+/// The core plugin whose command a context-menu entry runs, or `None` for an entry the kernel
+/// serves itself. The menu hides these entries while their plugin is not running.
+fn core_plugin_entry_owner(action: &ContextMenuAction) -> Option<&'static str> {
+    match action {
+        ContextMenuAction::NewGroup
+        | ContextMenuAction::Rename
+        | ContextMenuAction::MoveUp
+        | ContextMenuAction::MoveDown
+        | ContextMenuAction::SetBookmark { .. } => Some("ilium.core.tree"),
+        ContextMenuAction::NewSplitView => Some("ilium.core.layout"),
+        _ => None,
+    }
+}
+
 impl ContextMenuAction {
     pub const fn menu_order(self) -> (u8, u8) {
         match self {
@@ -2023,10 +2035,8 @@ pub struct App {
     pub sound_discovery: ilium_sound::SoundDiscovery,
     /// Persisted inference provider settings used by title and organization workers.
     pub inference_settings: InferenceSettings,
-    pub(crate) restructure_budget_autosave_deadline: Option<Instant>,
     pub(crate) inference_settings_save_error: Option<String>,
     pub(crate) inference_save_state: crate::filesystem::configurations::InferenceSaveState,
-    pub(crate) restructure_budget_identity: Option<std::sync::Arc<()>>,
     /// Live event-to-actions routing table. Detection is server/render-cache
     /// owned; this client value decides which LLM work enters the outboxes.
     pub trigger_settings: TriggerSettings,
@@ -2672,10 +2682,8 @@ impl App {
             sound_discovery: ilium_sound::SoundDiscovery::default(),
             startup_audio_retention: None,
             inference_settings: InferenceSettings::default(),
-            restructure_budget_autosave_deadline: None,
             inference_settings_save_error: None,
             inference_save_state: Default::default(),
-            restructure_budget_identity: None,
             trigger_settings: TriggerSettings::default(),
             agent_setup_settings: AgentSetupSettings::default(),
             agent_setup_statuses: HashMap::new(),
@@ -7131,17 +7139,7 @@ impl App {
     }
 
     pub fn settings_open_inference_field(&mut self, field: InferenceSettingField) {
-        self.restructure_budget_autosave_deadline = None;
-        if field == InferenceSettingField::RestructurePromptTokenLimit {
-            self.invalidate_restructure_budget_save();
-        } else {
-            self.restructure_budget_identity = None;
-        }
         let value = match field {
-            InferenceSettingField::RestructurePromptTokenLimit => self
-                .inference_settings
-                .restructure_prompt_token_limit
-                .to_string(),
             InferenceSettingField::OllamaUrl => self.inference_settings.ollama.base_url.clone(),
             InferenceSettingField::OllamaModel => self.inference_settings.ollama.model.clone(),
             InferenceSettingField::OpenAiUrl => self.inference_settings.openai.base_url.clone(),
@@ -7169,132 +7167,10 @@ impl App {
         ));
     }
 
-    fn invalidate_restructure_budget_save(&mut self) {
-        self.restructure_budget_identity = Some(std::sync::Arc::new(()));
-        self.inference_save_state = Default::default();
-        self.inference_settings_save_error = None;
-        self.status_message = None;
-    }
-
-    /// Every actual text edit fences earlier receipts, including edit-away/back.
-    /// Valid drafts debounce; cursor movement never calls this method.
-    pub(crate) fn queue_restructure_budget_autosave(&mut self, value: &str, now: Instant) {
-        self.invalidate_restructure_budget_save();
-        self.restructure_budget_autosave_deadline = value
-            .trim()
-            .parse::<u32>()
-            .ok()
-            .filter(|limit| *limit > 0)
-            .map(|_| now + Duration::from_millis(600));
-    }
-
-    pub(crate) fn tick_restructure_budget_autosave(&mut self, now: Instant) -> bool {
-        let Some(deadline) = self.restructure_budget_autosave_deadline else {
-            return false;
-        };
-        if now < deadline {
-            return false;
-        }
-        self.restructure_budget_autosave_deadline = None;
-        let Mode::InferenceSettingPrompt(InferenceSettingField::RestructurePromptTokenLimit, state) =
-            &self.mode
-        else {
-            return false;
-        };
-        let value = state.buf.clone();
-        self.settings_commit_inference_field(
-            InferenceSettingField::RestructurePromptTokenLimit,
-            value,
-        );
-        true
-    }
-
-    pub(crate) fn restructure_budget_input_hint(&self, value: &str) -> (String, bool) {
-        use crate::filesystem::configurations::InferenceSaveState;
-        if !value.trim().parse::<u32>().is_ok_and(|limit| limit > 0) {
-            return (
-                "Enter a positive whole number up to 4294967295".into(),
-                true,
-            );
-        }
-        if self.restructure_budget_autosave_deadline.is_some() {
-            return ("Saving after 600 ms...".into(), false);
-        }
-        if let Some(error) = &self.inference_settings_save_error {
-            return (error.clone(), true);
-        }
-        let hint = match &self.inference_save_state {
-            InferenceSaveState::Pending { .. } => {
-                "Saving; Esc closes this dialog while the save continues"
-            }
-            InferenceSaveState::Durable
-                if value.trim().parse::<u32>()
-                    == Ok(self.inference_settings.restructure_prompt_token_limit) =>
-            {
-                "Saved; Enter confirms and closes after saving, Esc closes"
-            }
-            _ => {
-                "Save not confirmed; Enter saves and closes after confirmation, Esc cancels unsent edits"
-            }
-        };
-        (hint.into(), false)
-    }
-
-    pub(crate) fn commit_restructure_budget(&mut self) {
-        use crate::filesystem::configurations::InferenceSaveState;
-        use std::sync::Arc;
-        let Mode::InferenceSettingPrompt(InferenceSettingField::RestructurePromptTokenLimit, state) =
-            &self.mode
-        else {
-            return;
-        };
-        let Some(limit) = state
-            .buf
-            .trim()
-            .parse::<u32>()
-            .ok()
-            .filter(|limit| *limit > 0)
-        else {
-            return;
-        };
-        let identity = Arc::clone(
-            self.restructure_budget_identity
-                .get_or_insert_with(|| Arc::new(())),
-        );
-        if matches!(
-            &self.inference_save_state,
-            InferenceSaveState::Pending {
-                budget_dialog: Some((current, pending_limit)),
-                ..
-            } if Arc::ptr_eq(current, &identity) && *pending_limit == limit
-        ) {
-            return;
-        }
-        self.settings_commit_inference_field(
-            InferenceSettingField::RestructurePromptTokenLimit,
-            limit.to_string(),
-        );
-        if let InferenceSaveState::Pending { budget_dialog, .. } = &mut self.inference_save_state {
-            *budget_dialog = Some((identity, limit));
-        }
-    }
-
     pub fn settings_commit_inference_field(&mut self, field: InferenceSettingField, value: String) {
         let mut settings = self.inference_settings.clone();
         let value = value.trim().to_string();
         match field {
-            InferenceSettingField::RestructurePromptTokenLimit => {
-                let Ok(limit) = value.parse::<u32>() else {
-                    self.status_message = Some("Restructure token budget must be a positive whole number (up to 4294967295)".into());
-                    return;
-                };
-                if limit == 0 {
-                    self.status_message =
-                        Some("Restructure token budget must be greater than zero".into());
-                    return;
-                }
-                settings.restructure_prompt_token_limit = limit;
-            }
             InferenceSettingField::OllamaUrl => settings.ollama.base_url = value,
             InferenceSettingField::OllamaModel => settings.ollama.model = value,
             InferenceSettingField::OpenAiUrl => settings.openai.base_url = value,
@@ -13966,6 +13842,29 @@ impl App {
     /// `Settings`, which applies everywhere) apply there, none of the
     /// per-node ones.
     fn context_actions_for(&self, target: NodeId) -> Vec<ContextMenuAction> {
+        let mut actions = self.node_context_actions_for(target);
+        actions.retain(|action| self.core_plugin_entry_available(action));
+        actions
+    }
+
+    /// Whether the core plugin that owns a context-menu entry is running. Entries whose command
+    /// is a plugin's (New group, Rename, Move up and down and Bookmark are the Tree plugin's, New
+    /// split view is the Layout plugin's) leave the menu when that plugin is turned off, so the
+    /// feature is gone from the UI and not only inert. Unlocking stays offered
+    /// (see `insert_lock_actions`). Without a plugin host (a client with no plugin runtime) no
+    /// plugin state exists to consult, so the entry stays and its command reports that the plugin
+    /// is not running.
+    fn core_plugin_entry_available(&self, action: &ContextMenuAction) -> bool {
+        let Some(owner) = core_plugin_entry_owner(action) else {
+            return true;
+        };
+        self.wasm_plugins
+            .as_ref()
+            .is_none_or(|plugins| plugins.runs_plugin(owner))
+    }
+
+    /// The node-appropriate entries before the owning plugins' state is applied.
+    fn node_context_actions_for(&self, target: NodeId) -> Vec<ContextMenuAction> {
         if target == ROOT_ID {
             let mut actions = vec![
                 ContextMenuAction::NewTerminal,
@@ -14797,7 +14696,6 @@ impl App {
             .min();
         let next_deadline = autosave_deadline
             .into_iter()
-            .chain(self.restructure_budget_autosave_deadline)
             .chain(self.custom_status_rules_save_deadline)
             .chain(self.next_integration_maintenance_at)
             .min();
@@ -16390,23 +16288,36 @@ impl App {
         {
             self.hovered_last_prompt_button = None;
         }
-        if viewport
-            .plugin_footer_area
-            .is_some_and(|area| area.contains(position))
-        {
-            if let Some(command) = self.plugin_footer_command(id) {
-                if matches!(
-                    mouse.kind,
-                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
-                ) {
-                    self.invoke_plugin_command(
-                        &command,
-                        serde_json::json!({ "node": id.0 }).to_string(),
-                        ilium_plugin_api::generated::types::CommandOrigin::FrameSlot,
-                    );
-                }
-                return;
+        // A click target on a plugin banner or footer row runs the command of the slot under
+        // the pointer; the row text starts one cell in (`draw_plugin_frame_rows`).
+        let frame_row_command = [
+            (
+                viewport.plugin_banner_area,
+                crate::plugin_host::views::FrameRowPlacement::Banner,
+            ),
+            (
+                viewport.plugin_footer_area,
+                crate::plugin_host::views::FrameRowPlacement::FooterRow,
+            ),
+        ]
+        .into_iter()
+        .find_map(|(area, placement)| {
+            let area = area.filter(|area| area.contains(position))?;
+            let column = usize::from(position.x.checked_sub(area.x)?.checked_sub(1)?);
+            self.plugin_frame_row_command(id, placement, column)
+        });
+        if let Some(command) = frame_row_command {
+            if matches!(
+                mouse.kind,
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+            ) {
+                self.invoke_plugin_command(
+                    &command,
+                    serde_json::json!({ "node": id.0 }).to_string(),
+                    ilium_plugin_api::generated::types::CommandOrigin::FrameSlot,
+                );
             }
+            return;
         }
         if matches!(
             mouse.kind,
@@ -17413,6 +17324,44 @@ mod tests {
 
         assert!(crate::tick::on_tick(&mut app, now, false));
         assert_eq!(app.display_last_agent_prompt(pane_id), Some("new prompt"));
+    }
+
+    #[test]
+    fn context_menu_entries_of_core_plugins_name_their_owner() {
+        for action in [
+            ContextMenuAction::NewGroup,
+            ContextMenuAction::Rename,
+            ContextMenuAction::MoveUp,
+            ContextMenuAction::MoveDown,
+            ContextMenuAction::SetBookmark {
+                is_bookmarked: true,
+            },
+        ] {
+            assert_eq!(core_plugin_entry_owner(&action), Some("ilium.core.tree"));
+        }
+        assert_eq!(
+            core_plugin_entry_owner(&ContextMenuAction::NewSplitView),
+            Some("ilium.core.layout")
+        );
+        // Entries the kernel serves itself never depend on a plugin.
+        for action in [
+            ContextMenuAction::NewTerminal,
+            ContextMenuAction::NewFolder,
+            ContextMenuAction::Close,
+            ContextMenuAction::ToggleGroup,
+            ContextMenuAction::Settings,
+        ] {
+            assert_eq!(core_plugin_entry_owner(&action), None);
+        }
+    }
+
+    #[test]
+    fn a_menu_without_a_plugin_host_keeps_the_plugin_owned_entries() {
+        let app = App::new("menu-owner-gate".into(), std::env::temp_dir());
+        assert!(app.wasm_plugins.is_none());
+        let actions = app.context_actions_for(ROOT_ID);
+        assert!(actions.contains(&ContextMenuAction::NewGroup));
+        assert!(actions.contains(&ContextMenuAction::NewSplitView));
     }
 
     #[test]
@@ -18523,7 +18472,7 @@ mod tests {
                 let project = tempfile::tempdir().unwrap();
                 let mut app = App::new("status-test".into(), project.path().to_path_buf());
                 app.set_screen_area(Rect::new(0, 0, width, height));
-                app.animation_settings.kind = crate::background_animation::AnimationKind::Images;
+                app.animation_settings.kind = crate::background_animation::AnimationKind::Video;
                 let settings_before = app.animation_settings.clone();
                 let probe = FakeProbe::new();
                 let report = format!(
@@ -18613,7 +18562,7 @@ mod tests {
             Some("fix time unknown; received 123; error: offline"),
         ] {
             let mut app = app();
-            app.animation_settings.kind = crate::background_animation::AnimationKind::Images;
+            app.animation_settings.kind = crate::background_animation::AnimationKind::Video;
             let probe = FakeProbe::new();
             *probe.status.lock().unwrap() = report.map(str::to_owned);
             *app.animation_frame.host_mut() = fake_host(&probe);

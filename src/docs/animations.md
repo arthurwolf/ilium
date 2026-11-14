@@ -332,7 +332,7 @@ Order below is the order of the animation list in Settings. The key is the value
 | 14 | Satellite clouds | `clouds` | Live weather-satellite clouds, global or over your location. | [animations-maps-space-and-live-data.md](animations-maps-space-and-live-data.md) |
 | 15 | Video | `video` | Play video files, folders or URLs as dithered Braille. | [animations-media-and-games.md](animations-media-and-games.md) |
 | 16 | Audio spectrum | `spectrum` | A spectrum analyzer of whatever your system is playing. | [animations-media-and-games.md](animations-media-and-games.md) |
-| 17 | Images | `images` | Colored Braille images from files, folders or URLs, with slow pan and zoom. | [animations-media-and-games.md](animations-media-and-games.md) |
+| 17 | Images | `images` | Colored Braille images from a picked file, picked folders or four built-in pictures, with slow pan and zoom. A Scenes plugin scene, chosen in the Scene row of Plugin scene. | [animations-media-and-games.md](animations-media-and-games.md) |
 | 18 | Dithered water | `dither_water` | Bayer-dithered 1-bit water: drifting caustic bands, horizon fade and slow ripple rings. | [animations-nature-and-abstract.md](animations-nature-and-abstract.md) |
 | 19 | Atlantic dusk | `atlantic_dusk` | Dithered sea and sky through a full day: drifting clouds, sinking sun, moon and stars. | [animations-nature-and-abstract.md](animations-nature-and-abstract.md) |
 | 20 | Cube clock | `cube_clock` | A quiet clock beside a slowly turning dotted cube. | [animations-nature-and-abstract.md](animations-nature-and-abstract.md) |

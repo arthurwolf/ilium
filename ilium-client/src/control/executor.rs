@@ -129,27 +129,47 @@ fn execute_terminal_typing(
     ))
 }
 
-/// Workspace search is the Search plugin's panel. The control plane can open that panel but
-/// cannot type into it or move through its results, so every other action is refused.
+/// Workspace search is the Search plugin's panel. The control plane forwards each request as the
+/// plugin's open command with `{ "action": ... }`: the plugin types the query, moves the
+/// selection, opens a result or closes the panel, and holds a request that needs the answer of a
+/// query in flight until that answer arrives. The kernel only validates the request.
 fn execute_search(app: &mut App, command: SearchCommand) -> Result<ExecutionReceipt, String> {
-    match command.action {
+    let (arguments, message) = match command.action {
         SearchAction::Query => {
             let query = required_nonempty(command.query, "query")?;
-            app.action_open_search(ilium_plugin_api::generated::types::CommandOrigin::Voice);
-            Ok(ExecutionReceipt {
-                status: "queued",
-                message: "Workspace search panel requested from the Search plugin; the query text is not entered by the control plane".into(),
-                data: json!({ "query": query, "preparation": "not-supported" }),
-                terminate_session_after_delivery: false,
-            })
+            (
+                json!({ "action": "query", "query": query, "index": command.index }),
+                "Workspace search query sent to the Search plugin; results and the optional selection follow its answer",
+            )
         }
-        SearchAction::SelectNext
-        | SearchAction::SelectPrevious
-        | SearchAction::OpenResult
-        | SearchAction::Close => {
-            Err("Workspace search is a plugin panel; the control plane can only open it".to_owned())
-        }
-    }
+        SearchAction::SelectNext => (
+            json!({ "action": "select_next" }),
+            "Search selection move sent to the Search plugin",
+        ),
+        SearchAction::SelectPrevious => (
+            json!({ "action": "select_previous" }),
+            "Search selection move sent to the Search plugin",
+        ),
+        SearchAction::OpenResult => (
+            json!({ "action": "open_result", "index": command.index }),
+            "Opening the search result was sent to the Search plugin",
+        ),
+        SearchAction::Close => (
+            json!({ "action": "close" }),
+            "Closing the workspace search was sent to the Search plugin",
+        ),
+    };
+    app.invoke_plugin_command(
+        crate::plugin_host::commands::SEARCH_COMMAND,
+        arguments.to_string(),
+        ilium_plugin_api::generated::types::CommandOrigin::Voice,
+    );
+    Ok(ExecutionReceipt {
+        status: "queued",
+        message: message.into(),
+        data: arguments,
+        terminate_session_after_delivery: false,
+    })
 }
 
 fn execute_ui(app: &mut App, command: UiCommand) -> Result<ExecutionReceipt, String> {

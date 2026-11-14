@@ -408,7 +408,6 @@ pub struct TerminalPaneRuntime {
     pub(crate) resource_notice_serial: u64,
     /// At most one actor and one coalescing mailbox for detection follow-ups.
     detection_effects: Option<crate::detection_effects::DetectionEffects>,
-    pub(crate) detection_completion: crate::detection_effects::CompletionEpoch,
     pub agent_input_available: bool,
     /// Invalidates admitted automated delivery when this invocation exits or
     /// is replaced. Manual input still awaits its receipt for recovery.
@@ -523,7 +522,6 @@ impl TerminalPaneRuntime {
             pending_resource_notice: None,
             resource_notice_serial: 0,
             detection_effects: None,
-            detection_completion: crate::detection_effects::CompletionEpoch::default(),
             agent_input_available: false,
             agent_input_cancel: watch::channel(0).0,
             verified_agent_exit: None,
@@ -670,16 +668,7 @@ impl TerminalPaneRuntime {
         }
     }
 
-    pub(crate) fn invalidate_detection_completion(&mut self) {
-        self.detection_completion.invalidate();
-    }
-
-    pub(crate) fn retire_detection_completion(&mut self) {
-        self.detection_completion.retire_submission();
-    }
-
     pub(crate) fn cancel_agent_owned_delivery(&mut self) {
-        self.invalidate_detection_completion();
         self.detection_effects = None;
         self.cancel_initial_prompt_delivery();
         self.cancel_progress_delivery_tasks();

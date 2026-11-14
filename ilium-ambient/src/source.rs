@@ -471,43 +471,6 @@ fn read_bounded_stream(
     })
 }
 
-/// Scalar failures for the concrete File producer. No diagnostic String is
-/// constructed inside a finite file-read callback. Generic/custom readers are
-/// not covered: their io::Error may itself own arbitrary data.
-#[derive(Debug)]
-pub(crate) enum FileReadFailure {
-    Io {
-        kind: std::io::ErrorKind,
-        raw_os_error: Option<i32>,
-    },
-    Cancelled,
-    Timeout,
-    TooLarge(usize),
-    Allocation,
-}
-
-pub(crate) fn read_bounded_file_scalar(
-    path: &Path,
-    max_bytes: usize,
-    mut cancelled: impl FnMut() -> bool,
-) -> Result<Vec<u8>, FileReadFailure> {
-    let scalar_io = |error: std::io::Error| FileReadFailure::Io {
-        kind: error.kind(),
-        raw_os_error: error.raw_os_error(),
-    };
-    if cancelled() {
-        return Err(FileReadFailure::Cancelled);
-    }
-    let file = std::fs::File::open(path).map_err(scalar_io)?;
-    read_bounded_stream_result(file, max_bytes, None, cancelled).map_err(|error| match error {
-        ReadFailure::Io(error) => scalar_io(error),
-        ReadFailure::Cancelled => FileReadFailure::Cancelled,
-        ReadFailure::Timeout => FileReadFailure::Timeout,
-        ReadFailure::TooLarge(limit) => FileReadFailure::TooLarge(limit),
-        ReadFailure::Allocation => FileReadFailure::Allocation,
-    })
-}
-
 enum ReadFailure {
     Io(std::io::Error),
     Cancelled,
@@ -806,32 +769,18 @@ mod tests {
     }
 
     #[test]
-    fn scalar_file_failure_preserves_os_identity_and_legacy_diagnostic() {
+    fn missing_file_diagnostic_preserves_the_os_error_text() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("missing-original");
         let original = std::fs::File::open(&path).unwrap_err();
         let legacy = read_bounded_file(&path, 8).unwrap_err();
         assert_eq!(legacy.to_string(), format!("request failed: {original}"));
-        match read_bounded_file_scalar(&path, 8, || false) {
-            Err(FileReadFailure::Io { kind, raw_os_error }) => {
-                assert_eq!(kind, original.kind());
-                assert_eq!(raw_os_error, original.raw_os_error());
-            }
-            other => panic!("wrong actual file failure: {other:?}"),
-        }
-        assert!(matches!(
-            read_bounded_file_scalar(&path, 8, || true),
-            Err(FileReadFailure::Cancelled)
-        ));
         std::fs::write(&path, b"original").unwrap();
         assert!(matches!(
-            read_bounded_file_scalar(&path, 7, || false),
-            Err(FileReadFailure::TooLarge(7))
+            read_bounded_file(&path, 7),
+            Err(FetchError::TooLarge(7))
         ));
-        assert_eq!(
-            read_bounded_file_scalar(&path, 8, || false).unwrap(),
-            b"original"
-        );
+        assert_eq!(read_bounded_file(&path, 8).unwrap(), b"original");
     }
 
     #[test]

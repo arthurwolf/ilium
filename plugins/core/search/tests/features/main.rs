@@ -2,6 +2,7 @@
 //! core-plugin-search.md). Lane core-ui, part features.
 
 mod common;
+mod control;
 mod extension_points;
 mod manifest;
 mod panel_flow;

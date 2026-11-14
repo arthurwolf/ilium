@@ -25,3 +25,8 @@
 ## Move blockers (re-verified 2026-11-14, second pass)
 
 The per-file reasons and the blocker keys B1 to B10 (each with its evidence in the source) are in `docs/tasks/02-cuts/scheduler.md`. The earlier K1 (no `intent_routing.rs`), K3 (no popup text input) and K6 (no terminal menu entries) of this section are closed by the consumer streams; the rest were re-read against the current tree.
+
+## Residue pass (2026-11-14, worktrees/scheduler cluster)
+
+- Verified on disk: `ilium-server/src/{scheduled_input,prompt_queue}.rs`, `ilium-client/src/{scheduled_input,prompt_queue}.rs` and `ilium-prompts/templates/voice/executor/scheduled-terminal-input.hbs` no longer exist. The kernel's per-pane completion epoch (`CompletionEpoch`, the `*_with_completion_locked` submit variants and the completion check at input admission) had no production caller and is removed; `detection_effects.rs` keeps only the title-check mailbox.
+- Kept on purpose, with no producer left in the kernel: `PromptSubmissionSource::{ScheduledInput, QueuedPrompt}` (the plugin's deliveries use `PluginIntent`, which does not get the resource-notice suffix or the authored-title receipt; adding `PluginIntent` to those arms would also suffix text-trigger replies, so the send-input spec needs a per-delivery source or a flag first), `ObjectiveSignal::ScheduledInput`, `IconTarget::ScheduledInput`, `Condition::ScheduledInput` and the `scheduled_input` rule fact (user-configured icons and status rules; always false until the plugin decorates the tree), and `AgentDebugEventKind::ScheduledInput*` and `QueuedPromptDelivered`.

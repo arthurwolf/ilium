@@ -4,20 +4,19 @@ use ControlValue::{Bool, Index, Number, Text};
 #[test]
 fn discovery_inputs_remain_authored_while_render_controls_remain_available() {
     let mut authored = AnimationSettings {
-        kind: AnimationKind::Images,
+        kind: AnimationKind::Video,
         ..Default::default()
     };
-    authored.set_scene_control("mode", Index(1)).unwrap();
-    authored.ambient.images.folders = "synthetic-folder-not-opened".into();
-    assert!(!inventory(AnimationKind::Images)
+    authored.ambient.video.source = "synthetic-source-not-opened.mp4".into();
+    assert!(!inventory(AnimationKind::Video)
         .unwrap()
         .contains_key("recursive"));
-    let mut raw = proposal(AnimationKind::Images, vec![("recursive", Bool(true))]);
+    let mut raw = proposal(AnimationKind::Video, vec![("recursive", Bool(true))]);
     raw.resources = ResourcePolicy::Authored;
     assert!(validate_recommendation(&raw, &authored).is_err());
-    assert!(inventory(AnimationKind::Images)
+    assert!(inventory(AnimationKind::Video)
         .unwrap()
-        .contains_key("motion_strength"));
+        .contains_key("slowed_percent"));
 }
 
 #[test]
@@ -136,10 +135,6 @@ fn conditional_inventory_is_not_default_only() {
     for (kind, ids) in [
         (AnimationKind::Wikipedia, vec!["wiki_zoom"]),
         (
-            AnimationKind::Images,
-            vec!["order", "shuffle_seed", "transition_seconds", "easing"],
-        ),
-        (
             AnimationKind::Video,
             vec!["slowed_percent", "scene_seconds", "seed"],
         ),
@@ -157,7 +152,7 @@ fn malformed_types_bounds_duplicates_and_inactive_controls_are_rejected() {
     let base = AnimationSettings::default();
     for bad in [
         proposal(AnimationKind::OpenStreetMap, vec![("place", Index(0))]),
-        proposal(AnimationKind::Images, vec![("recursive", Bool(true))]),
+        proposal(AnimationKind::Video, vec![("recursive", Bool(true))]),
         proposal(
             AnimationKind::Wikipedia,
             vec![("topic", Text("Paris".into()))],
@@ -227,7 +222,10 @@ fn paris_is_offline_even_when_authored_osm_was_custom() {
 #[test]
 fn saved_choices_cannot_silently_change() {
     let base = AnimationSettings::default();
-    let raw = proposal(AnimationKind::Images, vec![("fit", Index(0))]);
+    let raw = proposal(
+        AnimationKind::Wikipedia,
+        vec![("wiki_render_mode", Index(0))],
+    );
     let mut rec = validate_recommendation(&raw, &base).unwrap();
     assert!(resolve_recommendation(&rec, &base).is_ok());
     let mut bad = raw;
@@ -236,44 +234,13 @@ fn saved_choices_cannot_silently_change() {
     let choice = rec
         .parameters
         .iter_mut()
-        .find(|parameter| parameter.id == "fit")
+        .find(|parameter| parameter.id == "wiki_render_mode")
         .unwrap();
     let AnimationValue::Choice { label, .. } = &mut choice.value else {
         panic!("choice")
     };
     label.push_str(" changed");
     assert!(resolve_recommendation(&rec, &base).is_err());
-}
-
-#[test]
-fn images_reuse_authored_inputs_or_explicitly_choose_curated_builtins() {
-    let mut base = AnimationSettings {
-        kind: AnimationKind::Images,
-        ..Default::default()
-    };
-    base.set_scene_control("mode", Index(1)).unwrap();
-    base.ambient.images.folders = "synthetic-folder-not-opened".into();
-    let before = base.clone();
-    let mut reused = proposal(AnimationKind::Images, vec![("motion", Index(5))]);
-    reused.resources = ResourcePolicy::Authored;
-    let rec = validate_recommendation(&reused, &base).unwrap();
-    let resolved = resolve_recommendation(&rec, &base).unwrap();
-    assert_eq!(selected(&resolved, "mode"), Some(1));
-    assert_eq!(resolved.ambient.images.folders, base.ambient.images.folders);
-    let builtin = proposal(AnimationKind::Images, vec![("builtin_image", Index(2))]);
-    let rec = validate_recommendation(&builtin, &base).unwrap();
-    let resolved = resolve_recommendation(&rec, &base).unwrap();
-    assert_eq!(selected(&resolved, "mode"), Some(0));
-    assert_eq!(selected(&resolved, "source_kind"), Some(0));
-    assert_eq!(selected(&resolved, "builtin_image"), Some(2));
-    assert_eq!(base, before);
-    assert!(!authored_capabilities(&base)
-        .to_string()
-        .contains("synthetic-folder"));
-    let bad = proposal(AnimationKind::Images, vec![("mode", Index(1))]);
-    assert!(validate_recommendation(&bad, &base).is_err());
-    base.ambient.images.folders.clear();
-    assert!(validate_recommendation(&reused, &base).is_err());
 }
 
 #[test]
@@ -295,6 +262,10 @@ fn video_and_fixed_time_require_existing_authored_resources() {
             .source,
         base.ambient.video.source
     );
+    // The capability metadata names no path.
+    let capabilities = authored_capabilities(&base);
+    assert_eq!(capabilities["authored_video"], true);
+    assert!(!capabilities.to_string().contains("synthetic-video"));
 }
 
 #[test]
@@ -325,30 +296,4 @@ fn pointer_table_is_required_total_and_round_trips_durable_values() {
     assert!(validate_recommendations(&table, &["paris".into()], &base).is_err());
     table.project.clear();
     assert!(validate_recommendations(&table, &["paris".into()], &base).is_err());
-}
-
-#[test]
-fn numeric_dependency_pairs_accept_both_orders_and_reject_invalid_final_values() {
-    let base = AnimationSettings::default();
-    let mut authored = base.clone();
-    authored.kind = AnimationKind::Images;
-    authored.set_scene_control("mode", Index(1)).unwrap();
-    authored.ambient.images.folders = "fixture-input-never-opened".into();
-    let mut raw = proposal(
-        AnimationKind::Images,
-        vec![
-            ("transition_seconds", Number(30)),
-            ("display_seconds", Number(120)),
-        ],
-    );
-    raw.resources = ResourcePolicy::Authored;
-    let forward = validate_recommendation(&raw, &authored).unwrap();
-    raw.parameters.reverse();
-    assert_eq!(validate_recommendation(&raw, &authored).unwrap(), forward);
-    raw.parameters
-        .iter_mut()
-        .find(|parameter| parameter.id == "display_seconds")
-        .unwrap()
-        .value = Number(3);
-    assert!(validate_recommendation(&raw, &authored).is_err());
 }

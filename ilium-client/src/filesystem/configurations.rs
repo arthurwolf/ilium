@@ -11,7 +11,6 @@ pub(crate) enum InferenceSaveState {
     Unsaved,
     Pending {
         operation: Arc<()>,
-        budget_dialog: Option<(Arc<()>, u32)>,
     },
     Durable,
 }
@@ -95,32 +94,6 @@ impl ConfigurationFiles {
             intents: Vec::new(),
         }
     }
-    /// Upgrade this host's already-admitted draft write to an explicit Enter
-    /// confirmation. The original operation and write remain unchanged.
-    pub(crate) fn attach_inference_value_dialog(
-        &mut self,
-        operation: &Arc<()>,
-        token: Arc<()>,
-    ) -> Result<(), String> {
-        let intent = self
-            .intents
-            .iter_mut()
-            .find_map(|(_, intent)| match intent {
-                ConfigurationIntent::Inference { operation: current }
-                    if Arc::ptr_eq(current, operation) =>
-                {
-                    Some(intent)
-                }
-                _ => None,
-            })
-            .ok_or("Inference save receipt is no longer available; retry after it settles")?;
-        *intent = ConfigurationIntent::InferenceValueDialog {
-            operation: operation.clone(),
-            token,
-        };
-        Ok(())
-    }
-
     pub(crate) fn notification(&self) -> Arc<tokio::sync::Notify> {
         Arc::clone(&self.ready)
     }

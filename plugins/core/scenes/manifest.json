@@ -31,7 +31,10 @@
       "http:opensky-network.org",
       "http:api.openseafeed.com",
       "http:gibs.earthdata.nasa.gov",
-      "http:view.eumetsat.int"
+      "http:view.eumetsat.int",
+      "fs.read:picked",
+      "http:creator.nightcafe.studio",
+      "http:images.unsplash.com"
     ]
   },
   "activation": [
@@ -7545,6 +7548,266 @@
               "step": 2,
               "unit": " fps",
               "default": 24
+            }
+          }
+        }
+      },
+      {
+        "id": "images",
+        "title": "Images",
+        "family": "media",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 12,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "order": 0,
+              "title": "Show",
+              "help": "A built-in picture, an image file you pick, or every picture found in the chosen folders as a slideshow.",
+              "enum": [
+                "builtin",
+                "file",
+                "folders"
+              ],
+              "enum_titles": [
+                "Built-in picture",
+                "Picked image file",
+                "Folder slideshow"
+              ],
+              "default": "builtin"
+            },
+            "source": {
+              "type": "string",
+              "order": 1,
+              "title": "Picture",
+              "help": "One of the built-in pictures, downloaded when the scene starts.",
+              "enum": [
+                "night_cafe",
+                "mountain_lake",
+                "golden_desktop",
+                "unsplash_desk"
+              ],
+              "enum_titles": [
+                "NightCafe dreamscape",
+                "Ubuntu-like mountain lake",
+                "Ubuntu-like golden desktop",
+                "Unsplash desk"
+              ],
+              "default": "night_cafe",
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "builtin"
+                ]
+              }
+            },
+            "file": {
+              "type": "string",
+              "order": 2,
+              "title": "Image file",
+              "help": "The picture to show: png, jpg, gif, bmp or webp.",
+              "default": "",
+              "picker": "file",
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "file"
+                ]
+              }
+            },
+            "folder": {
+              "type": "string",
+              "order": 3,
+              "title": "Folder",
+              "help": "A folder of pictures.",
+              "default": "",
+              "picker": "directory",
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "folders"
+                ]
+              }
+            },
+            "folder_2": {
+              "type": "string",
+              "order": 4,
+              "title": "Second folder",
+              "help": "A second folder of pictures, optional.",
+              "default": "",
+              "picker": "directory",
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "folders"
+                ]
+              }
+            },
+            "folder_3": {
+              "type": "string",
+              "order": 5,
+              "title": "Third folder",
+              "help": "A third folder of pictures, optional.",
+              "default": "",
+              "picker": "directory",
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "folders"
+                ]
+              }
+            },
+            "recursive": {
+              "type": "boolean",
+              "order": 6,
+              "title": "Include sub-folders",
+              "help": "Also show pictures inside the sub-folders of each folder.",
+              "default": true,
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "folders"
+                ]
+              }
+            },
+            "order": {
+              "type": "string",
+              "order": 7,
+              "title": "Order",
+              "help": "Show the pictures in name order or shuffled.",
+              "enum": [
+                "sequential",
+                "shuffle"
+              ],
+              "enum_titles": [
+                "Sequential",
+                "Shuffle"
+              ],
+              "default": "sequential",
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "folders"
+                ]
+              }
+            },
+            "shuffle_seed": {
+              "type": "integer",
+              "order": 8,
+              "title": "Shuffle seed",
+              "help": "0 picks a different order every time; any other number repeats one order.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 0,
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "folders"
+                ]
+              }
+            },
+            "transition_seconds": {
+              "type": "integer",
+              "order": 9,
+              "title": "Cross-fade",
+              "help": "Length of the fade between two pictures; at most half the display time.",
+              "minimum": 0,
+              "maximum": 30,
+              "step": 1,
+              "default": 3,
+              "unit": " s",
+              "visible_when": {
+                "key": "mode",
+                "in": [
+                  "folders"
+                ]
+              }
+            },
+            "display_seconds": {
+              "type": "integer",
+              "order": 10,
+              "title": "Display time",
+              "help": "How long a picture stays and how long one Ken-Burns move takes.",
+              "minimum": 3,
+              "maximum": 1800,
+              "step": 1,
+              "default": 30,
+              "unit": " s"
+            },
+            "motion": {
+              "type": "string",
+              "order": 11,
+              "title": "Motion",
+              "help": "Slow zoom or pan applied to every picture.",
+              "enum": [
+                "zoom_in",
+                "zoom_out",
+                "pan_horizontal",
+                "pan_vertical",
+                "drift",
+                "zoom_pan",
+                "none"
+              ],
+              "enum_titles": [
+                "Slow zoom in",
+                "Slow zoom out",
+                "Pan left-right",
+                "Pan up-down",
+                "Random drift",
+                "Zoom + pan",
+                "None"
+              ],
+              "default": "zoom_in"
+            },
+            "motion_strength_percent": {
+              "type": "integer",
+              "order": 12,
+              "title": "Motion strength",
+              "help": "Zoom amount or pan range, in percent of the picture.",
+              "minimum": 0,
+              "maximum": 50,
+              "step": 1,
+              "default": 12,
+              "unit": "%"
+            },
+            "easing": {
+              "type": "string",
+              "order": 13,
+              "title": "Easing",
+              "help": "How the motion speeds up and slows down within one picture.",
+              "enum": [
+                "ease_in_out",
+                "linear",
+                "ease_out"
+              ],
+              "enum_titles": [
+                "Smooth",
+                "Linear",
+                "Ease out"
+              ],
+              "default": "ease_in_out"
+            },
+            "fit": {
+              "type": "string",
+              "order": 14,
+              "title": "Fit",
+              "help": "Fill crops the picture to the screen, Fit keeps all of it with borders, Stretch distorts it.",
+              "enum": [
+                "fill",
+                "fit",
+                "stretch"
+              ],
+              "enum_titles": [
+                "Fill (crop)",
+                "Fit (borders)",
+                "Stretch"
+              ],
+              "default": "fill"
             }
           }
         }

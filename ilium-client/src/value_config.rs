@@ -118,19 +118,17 @@ pub enum ScalarNumber {
     LastPromptLines,
     ProgressLines,
     CompletedProgressHideAfter,
-    InferenceTokenBudget,
     WorkingPollSeconds,
     IdlePollSeconds,
     NotificationCoalesce,
 }
 impl ScalarNumber {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::AutoFreezeAfter,
         Self::VoiceVolume,
         Self::LastPromptLines,
         Self::ProgressLines,
         Self::CompletedProgressHideAfter,
-        Self::InferenceTokenBudget,
         Self::WorkingPollSeconds,
         Self::IdlePollSeconds,
         Self::NotificationCoalesce,
@@ -148,7 +146,6 @@ impl ScalarNumber {
                 i128::from(config::MAX_PROGRESS_MAX_LINES),
             ),
             Self::CompletedProgressHideAfter => (0, i128::from(u32::MAX)),
-            Self::InferenceTokenBudget => (1, i128::from(u32::MAX)),
             Self::WorkingPollSeconds | Self::IdlePollSeconds => (0, i128::from(i64::MAX)),
             Self::NotificationCoalesce => (
                 0,

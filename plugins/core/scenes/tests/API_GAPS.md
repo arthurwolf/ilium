@@ -106,6 +106,7 @@ Voxel landscape, chain check (cluster scenes3, 2026-11-14, edits only). Nothing 
 
 - `ilium-ambient/src/minecraft/**` (38,512 lines, another quarter) imports `voxel_landscape::assets`, `catalog`, `surface_*`; `ilium-ambient/src/scene.rs` (`SavedWorldFrameEvidence`, `SavedWorldSource`, `Scene::saved_world_*`, `readiness`) and `ilium-client/src/background_animation/{host,mod}.rs` (`SavedRuntime`) are typed against both. The chain moves as one piece or not at all.
 - (Fixed by cluster scenes1, 2026-11-14, unverified: `scene_body` now emits per-grant host-call macros and installs the backend with `__ilium_install_host()`, so `host()` works in a real scene component; the text below describes the state before the fix.) `ilium-plugin-sdk-macros/src/component.rs::scene_body` emitted `fn __ilium_install_host() {}` and no host-call macros, although `generated_glue.rs` and `wasm/glue.rs` already carry `(scene $host)` arms and `job-runner` lists the `scene` side. So `ilium_plugin_sdk::host()` has no backend inside a real scene component: the `http`/`storage` calls of `live_data` and `live_chess` return the absent answer there (they only work under FakeHost). The fix mirrors `body()` (grants of side `scene`, `HOST_CALLS` loop, `set_host`, optional `job-runner` export). It must be done together with a check that every grant of this manifest (`gpu.kernels`, `media.video`, `location.observer`, the `http:` hosts) is linked by `ilium-plugin-host/src/wiring/scene.rs`, otherwise instantiation of the whole scenes component fails.
+- Re-check (cluster scenes3, round 10, edits only): the dependency is two-way. `voxel_landscape/settings.rs` and `surface_binding.rs` name `minecraft::` (5 references), and 21 files under `ilium-ambient/src/minecraft/` name `voxel_landscape`, so the two trees are one scene kind (`registry.rs` picks the saved-map or the procedural scene under `AmbientKind::VoxelLandscape`). The path-order quarter for scenes3 is 55 `.rs` files (52,327 lines, `assets/metadata.rs` through `tree_decoration_profiles.rs`); `minecraft/` sorts into an earlier quarter and `tree_decorations.rs` onward into a later one, so no single quarter can delete its share. No other cluster had started the chain at this check.
 - The voxel engine needs a worker (`engine.rs` `Worker`, `resources`, `cache_dir`), 5 call sites of `ilium_platform::secure_fs` in `assets/{source,directory_snapshot}.rs`, `pack_sources.rs`, `pack_registry.rs`, and `std::thread` in `surface_retirement.rs`; its clip output (`GeneratedViewportSession`) has to become serialisable job output.
 
 
@@ -159,3 +160,50 @@ Host APIs added so the remaining kernel scenes can move; none of the scenes was 
     per-instance `cache` scope and `jobs` exist. Moving them needs a host-owned saved-world
     service that outlives instances, plus a design decision in the manual. That was not attempted
     here.
+
+## Scenes1 pass (ilium-ambient infrastructure and `minecraft/`), 2026-11-14, edits only, uncompiled
+
+First quarter of the inventory's surviving scene files: `ilium-ambient/examples/scene_probe.rs`, `src/{animation_services,control,debug,dither,geocode,gpu,lib,location,prepared_cache,raster,registry,resources,scene}.rs` and all 52 files of `src/minecraft/` (39,675 lines).
+
+- Deleted: `ilium-ambient/src/animation_services.rs` (the `osm` re-export module) and its `pub mod` line. Nothing in the workspace named it, so no call site changed.
+- Kept by design (a kernel duty or a live kernel consumer): `control`, `dither`, `raster`, `registry`, `scene`, `gpu`, `lib` (scene contract, shared look, GPU adapter); `location` and `geocode` (`ilium-client/src/location_picker.rs:242` and the plugin `ClientGeocoder`); `resources` (`ilium-client/src/background_animation/cache.rs`, `ilium-wikipedia`); `debug` and `examples/scene_probe.rs` (the headless probe that still drives the kernel images, video, openstreetmap and voxel scenes; its pixel tests are mapped to this plugin in `tools/test_port_map.tsv` and stay until those scenes move).
+- Kept, blocked: `prepared_cache.rs` is used only by `minecraft/` (`saved_scene.rs:957`, `projected_route.rs:76`), and all of `minecraft/` imports `scenes::voxel_landscape::{assets, catalog, surface_*}` while `ilium-ambient/src/scene.rs` (`SavedWorldSource`, `SavedWorldFrameEvidence`, `Scene::saved_world_*`) and `ilium-client/src/background_animation/host.rs` (`SavedRuntime`) are typed against both. The chain `minecraft` + `voxel_landscape` + `prepared_cache` moves as one piece or not at all, and it needs the host-owned saved-world service described above (history-writer fence that outlives scene instances, a `Worker`, `secure_fs`, `std::thread` replacements). A partial move would leave a half-ported feature, so the kernel copy is untouched.
+
+## Scenes2 pass (Images moved), 2026-11-15, edits only, uncompiled
+
+Second quarter of the inventory's surviving scene files. Only the `images` scene could move; the
+other scene directories stay in the kernel for the reasons below. Nothing was compiled or tested.
+
+- Moved: `ilium-ambient/src/scenes/images/` (19 files) to `plugins/core/scenes/src/images/`
+  (settings, motion, slideshow, adjust, picture, source, loader, lru, render, tests), registered
+  as scene `images` in `manifest.json` with grants `fs.read:picked`, `http:creator.nightcafe.studio`
+  and `http:images.unsplash.com`. The kernel `AmbientKind::Images`, `ImagesSettings`,
+  `AnimationKind::Images`, the `project_config` static-image migration, the AN-17 settings-help row
+  mapping, the semantic recommender's Images branches and `fdeflate` are gone. A saved `images`
+  selection loads as the plugin scene kind (serde alias); its old per-scene values are not carried
+  over (no migration shim, as with spectrum).
+- Features that changed on the move, because the scene world cannot express them:
+  - Colour rows (preset, brightness, contrast, saturation, hue tint, intensity, opacity): dropped,
+    the shared look owns colour for every scene.
+  - URL and URL-list modes and custom image URLs: dropped. A `http:<host>` grant names one fixed
+    host, so only the four built-in pictures (two hosts) are reachable.
+  - `;`-separated folders and globs: replaced by three directory picker rows
+    (`folder`, `folder_2`, `folder_3`) lent as read-only `picked/<n>` scopes. Glob patterns have
+    no equivalent.
+  - The on-disk download cache and the 32 MiB / 20 000 image scan limits: the scene keeps decoded
+    pictures in an in-memory LRU and limits a picture to 8 MiB encoded and 16 megapixels.
+  - One picture is loaded at a time (no worker pool): the scene steps a loader slice by slice
+    each frame.
+- Manifest limit used: `visible_when` names one controlling key, so `recursive`, `order`,
+  `shuffle_seed` and `transition_seconds` key on `mode` alone, and `motion_strength_percent` and
+  `easing` stay visible when Motion is None.
+- Kept in the kernel, with the blocker:
+  - Voxel landscape and `minecraft/`: tied to `SavedRuntime`, `SceneEnv::resources`/`cache_dir`
+    and the kernel `Worker` (see the saved-world item above).
+  - Video: the `media` import opens local files only (`fs.read` scope), with no URL, glob or
+    series playlist, and `http` responses are capped at 8 MiB, so Germination and URL playback
+    cannot be reproduced.
+  - OpenStreetMap: the location picker and the shared location row are special-cased on
+    `AnimationKind::OpenStreetMap` (see "Not done" above), and the scene reads extracts and
+    Overpass answers larger than the `http` cap.
+- Semantic recommendations can no longer name Images; authored resources are Video only.

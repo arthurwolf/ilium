@@ -4,7 +4,6 @@
 //! Layering: this crate owns scene math, data fetching/decoding and helper
 //! processes; the client owns the Settings UI, compositing and persistence.
 
-pub mod animation_services;
 pub mod control;
 pub mod debug;
 pub mod dither;
@@ -30,7 +29,7 @@ pub use location::GeoLocation;
 pub use raster::{DitherMode, Raster};
 pub use registry::{AmbientKind, AmbientSettings};
 pub use scene::{Frame, MessageScene, OccupancyMask, Scene, SceneEnv, SceneText};
-pub use scenes::{images::ImagesSettings, video::VideoSettings};
+pub use scenes::video::VideoSettings;
 
 // Pure world/renderer contracts support offline capture and acceptance probes.
 pub use scenes::voxel_landscape;

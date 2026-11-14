@@ -3154,7 +3154,6 @@ dependencies = [
  "cap-std",
  "chrono",
  "directories",
- "fdeflate",
  "flate2",
  "ilium-execution",
  "ilium-http",

@@ -297,21 +297,6 @@
     "sha256": "d792f8a27b3c43355782ac2d17392a6f83d88c093e30e79e40a632ad3627a33a"
   },
   {
-    "name": "voice/executor/search-result-index-v0-does-not-exist",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "6415b73e01c8d589cc4539e4d344ab5dfccd802b69c417f6e58df927ebc95615"
-  },
-  {
-    "name": "voice/executor/found-v0-workspace-results-for",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
-      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "0ced4ecbd1ce9d4a555ea5a2fbf147a5906f23e6ba3a0eaaa9831bc284d2ac79"
-  },
-  {
     "name": "voice/executor/focused-pane",
     "context": {
       "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"

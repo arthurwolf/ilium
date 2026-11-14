@@ -6,6 +6,11 @@
 //! answers and is shown only when that revision is the newest one asked. Activating a result
 //! jumps to it (a pane is focused, a file opens in the editor) and closes the panel. State
 //! lives in a thread-local cell because the plugin structs are unit structs.
+//!
+//! The kernel control plane (the voice agent and `ilium ctl`) drives the same panel through the
+//! open command: its arguments `{ "action": ... }` type a query, move the selection, open a
+//! result or close the panel (see `Control`). An action that needs the answer to a query waits
+//! for that answer, so the order of the requests is kept.
 
 use std::cell::RefCell;
 
@@ -30,6 +35,64 @@ const OPEN_CORRELATION: u64 = 1;
 const CLOSE_CORRELATION: u64 = 2;
 /// The built-in groups in the order the panel shows them.
 pub const BUILT_IN_KINDS: [&str; 4] = ["agent", "terminal", "file", "meaning"];
+
+/// What the control plane asks of the panel through the open command's arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Control {
+    /// Types `text` into the panel (opening it) and, when `index` is given, selects that result
+    /// once the answer arrives.
+    Query { text: String, index: Option<usize> },
+    /// Moves the selection one result down; it stops at the last result.
+    SelectNext,
+    /// Moves the selection one result up; it stops at the first result.
+    SelectPrevious,
+    /// Opens the result at `index`, or the selected one, and closes the panel.
+    OpenResult { index: Option<usize> },
+    /// Closes the panel.
+    Close,
+}
+
+/// Reads the arguments of the open command. No arguments, `{}` or an object without `action`
+/// ask for a plain open (`Ok(None)`); an `action` names a `Control`.
+pub fn parse_control(arguments_json: &str) -> Result<Option<Control>, String> {
+    let trimmed = arguments_json.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let value: Value = serde_json::from_str(trimmed)
+        .map_err(|_| "The search command arguments are not JSON".to_string())?;
+    let Some(action) = value.get("action") else {
+        return Ok(None);
+    };
+    let index = value["index"]
+        .as_u64()
+        .and_then(|number| usize::try_from(number).ok());
+    match action.as_str() {
+        Some("query") => {
+            let text = value["query"]
+                .as_str()
+                .filter(|text| !text.trim().is_empty())
+                .ok_or_else(|| "The search query action needs a non-empty query".to_string())?;
+            Ok(Some(Control::Query {
+                text: text.to_string(),
+                index,
+            }))
+        }
+        Some("select_next") => Ok(Some(Control::SelectNext)),
+        Some("select_previous") => Ok(Some(Control::SelectPrevious)),
+        Some("open_result") => Ok(Some(Control::OpenResult { index })),
+        Some("close") => Ok(Some(Control::Close)),
+        _ => Err("Unknown search action".to_string()),
+    }
+}
+
+/// A control request that waits for the answer of the query in flight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Continuation {
+    Move(isize),
+    Select(usize),
+    Open(Option<usize>),
+}
 
 /// One result as the server sent it.
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +154,8 @@ pub struct PanelState {
     /// Hits in display order (grouped), see `group_rank`.
     pub hits: Vec<Hit>,
     pub selected: usize,
+    /// Control requests that wait for the answer of the query in flight.
+    queued: Vec<Continuation>,
 }
 
 thread_local! {
@@ -109,6 +174,27 @@ pub fn with_state<R>(read: impl FnOnce(&PanelState) -> R) -> R {
 
 fn panel_target() -> ViewTarget {
     ViewTarget::Panel(PANEL_ID.to_string())
+}
+
+/// The submission that opens the panel with focus.
+fn open_submission() -> Submission {
+    Submission {
+        intent: Intent::OpenView(OpenViewSpec {
+            view: panel_target(),
+            focus: true,
+        }),
+        correlation: OPEN_CORRELATION,
+        dedup_key: None,
+    }
+}
+
+/// The submission that closes the panel.
+fn close_submission() -> Submission {
+    Submission {
+        intent: Intent::CloseView(panel_target()),
+        correlation: CLOSE_CORRELATION,
+        dedup_key: None,
+    }
 }
 
 /// Position of a kind in the display order: the built-in groups first, other kinds after.
@@ -158,6 +244,7 @@ impl PanelState {
     fn on_closed(&mut self) {
         self.open = false;
         self.pending = false;
+        self.queued.clear();
     }
 
     fn on_filter_changed(&mut self, text: &str) -> Option<Submission> {
@@ -169,6 +256,7 @@ impl PanelState {
         if !changed {
             return None;
         }
+        self.queued.clear();
         self.revision += 1;
         self.last_sent = Some(text.to_string());
         self.pending = true;
@@ -189,18 +277,19 @@ impl PanelState {
         })))
     }
 
-    fn on_results(&mut self, message: &MessageEvent) {
+    /// Shows the answer of the newest query and runs the control requests that waited for it.
+    fn on_results(&mut self, message: &MessageEvent) -> Vec<Submission> {
         if !self.open {
-            return;
+            return Vec::new();
         }
         let Ok(payload) = serde_json::from_slice::<Value>(&message.payload) else {
-            return;
+            return Vec::new();
         };
         let Some(revision) = payload["revision"].as_u64() else {
-            return;
+            return Vec::new();
         };
         if self.expected_revision() != Some(revision) {
-            return;
+            return Vec::new();
         }
         if self.revision == 0 {
             // The answer to a query the panel typed but never sent as a separate revision:
@@ -229,6 +318,74 @@ impl PanelState {
         self.selected = 0;
         self.pending = false;
         self.answered = true;
+        let queued = std::mem::take(&mut self.queued);
+        queued
+            .into_iter()
+            .flat_map(|continuation| self.apply(continuation))
+            .collect()
+    }
+
+    /// Does a control request now, or keeps it for the answer of the query in flight.
+    fn run_or_queue(&mut self, continuation: Continuation) -> Vec<Submission> {
+        if self.pending {
+            self.queued.push(continuation);
+            Vec::new()
+        } else {
+            self.apply(continuation)
+        }
+    }
+
+    fn apply(&mut self, continuation: Continuation) -> Vec<Submission> {
+        match continuation {
+            Continuation::Move(delta) => {
+                if let Some(last) = self.hits.len().checked_sub(1) {
+                    self.selected = self.selected.saturating_add_signed(delta).min(last);
+                }
+                Vec::new()
+            }
+            Continuation::Select(index) => {
+                if index < self.hits.len() {
+                    self.selected = index;
+                }
+                Vec::new()
+            }
+            Continuation::Open(index) => {
+                match index {
+                    Some(index) if index >= self.hits.len() => return Vec::new(),
+                    Some(index) => self.selected = index,
+                    None => {}
+                }
+                self.activate(self.selected)
+            }
+        }
+    }
+
+    /// What the control plane asked of the panel.
+    fn on_control(&mut self, control: Control) -> Vec<Submission> {
+        if !self.open && !matches!(control, Control::Query { .. }) {
+            return Vec::new();
+        }
+        match control {
+            Control::Query { text, index } => {
+                let mut out = Vec::new();
+                if !self.open {
+                    self.on_open();
+                    out.push(open_submission());
+                }
+                out.extend(self.on_filter_changed(&text));
+                if let Some(index) = index {
+                    out.extend(self.run_or_queue(Continuation::Select(index)));
+                }
+                out
+            }
+            Control::SelectNext => self.run_or_queue(Continuation::Move(1)),
+            Control::SelectPrevious => self.run_or_queue(Continuation::Move(-1)),
+            Control::OpenResult { index } => self.run_or_queue(Continuation::Open(index)),
+            Control::Close => {
+                self.on_closed();
+                vec![close_submission()]
+            }
+        }
     }
 
     /// Jumps to the hit at `index` and closes the panel.
@@ -256,11 +413,7 @@ impl PanelState {
             }))),
             _ => {}
         }
-        out.push(Submission {
-            intent: Intent::CloseView(panel_target()),
-            correlation: CLOSE_CORRELATION,
-            dedup_key: None,
-        });
+        out.push(close_submission());
         self.on_closed();
         out
     }
@@ -318,19 +471,20 @@ pub fn on_events(batch: Vec<Event>) -> Vec<Submission> {
         for event in batch {
             match event {
                 Event::CommandInvoked(invoked) if invoked.command == OPEN_COMMAND => {
-                    state.on_open();
-                    out.push(Submission {
-                        intent: Intent::OpenView(OpenViewSpec {
-                            view: panel_target(),
-                            focus: true,
-                        }),
-                        correlation: OPEN_CORRELATION,
-                        dedup_key: None,
-                    });
+                    match parse_control(&invoked.arguments_json) {
+                        Ok(None) => {
+                            state.on_open();
+                            out.push(open_submission());
+                        }
+                        Ok(Some(control)) => out.extend(state.on_control(control)),
+                        // The kernel validates the request before it forwards it; a malformed
+                        // one that still arrives is dropped like any other bad event.
+                        Err(_) => {}
+                    }
                 }
                 Event::UiAction(action) => out.extend(state.on_action(&action)),
                 Event::Message(message) if message.channel == RESULTS_CHANNEL => {
-                    state.on_results(&message);
+                    out.extend(state.on_results(&message));
                 }
                 _ => {}
             }

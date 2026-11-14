@@ -187,10 +187,7 @@ impl App {
             },
         };
         self.enqueue_configuration(directory, change, intent)?;
-        self.inference_save_state = InferenceSaveState::Pending {
-            operation,
-            budget_dialog: None,
-        };
+        self.inference_save_state = InferenceSaveState::Pending { operation };
         self.inference_settings_save_error = None;
         Ok(())
     }
@@ -406,56 +403,6 @@ mod tests {
         );
     }
     #[test]
-    fn exact_inference_budget_preserves_credentials_and_saves_durably() {
-        use crate::value_settings::SettingsNumber;
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = synthetic_app(directory.path());
-        app.inference_settings.openai.api_key = "synthetic-kept-credential".into();
-        app.inference_settings.selected_provider = Provider::KiloGateway;
-        app.inference_settings.kilo_gateway.model = "authored/custom-kilo".into();
-        let attempts = app.configuration_admission.attempts;
-        assert!(app
-            .save_settings_number(
-                SettingsNumber::InferenceTokenBudget,
-                "0",
-                directory.path().into(),
-                None
-            )
-            .is_err());
-        assert!(app
-            .save_settings_number(
-                SettingsNumber::InferenceTokenBudget,
-                "4294967296",
-                directory.path().into(),
-                None
-            )
-            .is_err());
-        assert_eq!(app.configuration_admission.attempts, attempts);
-        app.save_settings_number(
-            SettingsNumber::InferenceTokenBudget,
-            "123456",
-            directory.path().into(),
-            None,
-        )
-        .unwrap();
-        app.settle_filesystem_for_test();
-        let saved = crate::config::load(directory.path()).unwrap().inference;
-        assert_eq!(saved.restructure_prompt_token_limit, 123456);
-        assert_eq!(saved.kilo_gateway.model, "authored/custom-kilo");
-        assert_eq!(saved.openai.api_key, "synthetic-kept-credential");
-        assert_eq!(
-            SettingsNumber::InferenceTokenBudget
-                .stepped(&app, -1)
-                .unwrap(),
-            "123455"
-        );
-        assert!(matches!(
-            app.inference_save_state,
-            crate::filesystem::configurations::InferenceSaveState::Durable
-        ));
-    }
-
-    #[test]
     fn ordinary_inference_catalog_rejects_revision_changed_after_open() {
         use crate::value_settings_choice::SettingsChoice;
         let directory = tempfile::tempdir().unwrap();
@@ -518,7 +465,6 @@ mod tests {
         let current = Arc::new(());
         app.inference_save_state = crate::filesystem::configurations::InferenceSaveState::Pending {
             operation: current.clone(),
-            budget_dialog: None,
         };
         app.finish_inference_save(&obsolete, Ok(()));
         assert!(matches!(&app.inference_save_state,

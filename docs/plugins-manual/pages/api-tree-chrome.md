@@ -442,6 +442,8 @@ export function showQuota(percentUsed: number): Submission {
 
 `pane_frame_slots` reserve a place in the frame of matching panes. At most 4 per plugin. `placement` is `header-icon`, `header-text`, `footer-row` or `banner`. `applies_to` is `all`, `agents`, `terminals`, `pane:<kind>`, or a list of agent signature ids. The intents are `set-frame-slot { pane, slot, content, icon, tooltip }` and `clear-frame-slot { pane, slot }`, at most 10 per second per slot. Filling a slot on a pane that does not match `applies_to` is refused with `invalid-argument`.
 
+A `banner` or `footer-row` slot whose content has a span with a `command` target is clickable. A left click on that slot's text runs the command with the origin `frame-slot` and the arguments `{"node": <pane id>}`, so the plugin knows which pane was clicked even when another pane has focus. A click on the separator between two slots, or on a slot without a command, does nothing.
+
 ```json
 "pane_frame_slots": [ { "id": "model", "placement": "header-text", "applies_to": ["claude", "codex"] } ]
 ```

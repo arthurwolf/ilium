@@ -1078,7 +1078,7 @@ mod tests {
     }
 
     #[test]
-    fn search_control_asks_the_search_plugin_for_its_panel_and_refuses_navigation() {
+    fn search_control_forwards_every_action_to_the_search_plugin_and_checks_the_query() {
         let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
         let mut plane = ControlPlane::default();
 
@@ -1087,25 +1087,54 @@ mod tests {
             VoiceToolInvocation {
                 call_id: "search-1".to_owned(),
                 name: tools::SEARCH_TOOL_NAME.to_owned(),
-                arguments_json: r#"{"action":"query","query":"voice-control needle"}"#.to_owned(),
+                arguments_json: r#"{"action":"query","query":"voice-control needle","index":1}"#
+                    .to_owned(),
             },
         );
         assert_eq!(query.result["status"], "queued");
-        assert_eq!(query.result["data"]["preparation"], "not-supported");
+        assert_eq!(query.result["data"]["action"], "query");
+        assert_eq!(query.result["data"]["query"], "voice-control needle");
+        assert_eq!(query.result["data"]["index"], 1);
         assert_eq!(
             app.status_message.as_deref(),
             Some("ilium.core.search is not running, so this action is unavailable")
         );
 
-        let opened = plane.execute_invocation(
+        for (call_id, arguments_json, action) in [
+            ("search-2", r#"{"action":"select_next"}"#, "select_next"),
+            (
+                "search-3",
+                r#"{"action":"select_previous"}"#,
+                "select_previous",
+            ),
+            (
+                "search-4",
+                r#"{"action":"open_result","index":0}"#,
+                "open_result",
+            ),
+            ("search-5", r#"{"action":"close"}"#, "close"),
+        ] {
+            let forwarded = plane.execute_invocation(
+                &mut app,
+                VoiceToolInvocation {
+                    call_id: call_id.to_owned(),
+                    name: tools::SEARCH_TOOL_NAME.to_owned(),
+                    arguments_json: arguments_json.to_owned(),
+                },
+            );
+            assert_eq!(forwarded.result["status"], "queued", "{action}");
+            assert_eq!(forwarded.result["data"]["action"], action);
+        }
+
+        let blank = plane.execute_invocation(
             &mut app,
             VoiceToolInvocation {
-                call_id: "search-2".to_owned(),
+                call_id: "search-6".to_owned(),
                 name: tools::SEARCH_TOOL_NAME.to_owned(),
-                arguments_json: r#"{"action":"open_result","index":0}"#.to_owned(),
+                arguments_json: r#"{"action":"query","query":"  "}"#.to_owned(),
             },
         );
-        assert_ne!(opened.result["status"], "ok");
+        assert_ne!(blank.result["status"], "queued");
     }
 
     #[test]

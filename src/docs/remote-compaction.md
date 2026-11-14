@@ -39,6 +39,12 @@ Where the upstream prompt is not public the technique is an approximation that r
 
 The transcript, which can contain your prompts, code, tool output and possibly secrets, is sent to the configured provider and model. A notice at the top of the settings tab and of the dialog names that destination. Close it with `x`, `Delete` or its button; the choice is saved and the notice never returns. Secret redaction (on by default) masks tokens and keys before sending, but it is a heuristic.
 
+## The compaction optimizer
+
+The Compaction plugin also analyses your own agent transcripts (`~/.codex/sessions`, `~/.claude/projects`) and recommends the cheapest auto-compaction threshold. Run **Analyze compaction settings** from the command palette on an agent pane: a panel opens for that agent and nothing is scanned until you press `s`. The scan reads the saved transcripts through read-only host file access and shows a plain-text report with the recommendation, corpus and compaction statistics and warnings. A failed or cancelled scan keeps the previous report.
+
+`a` applies the recommendation. A confirmation first shows the resolved file, the key, the old and new value and any override that would shadow it; `Enter` confirms and `Esc` cancels. Only that one key changes (`autoCompactWindow` in `~/.claude/settings.json`, `model_auto_compact_token_limit` in `~/.codex/config.toml`), every other byte stays, and only **new** agent sessions use it. `r` reverts the last apply, and both apply and revert refuse a file that changed in between. Ilium never restarts an agent. Turning the Compaction plugin off removes the optimizer together with the rest of the feature.
+
 ## Limits
 
 * Only Claude Code and Codex sessions with a verified transcript can be compacted.

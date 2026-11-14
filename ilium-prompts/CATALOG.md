@@ -127,9 +127,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/control/policy.rs:205` | [voice/policy/cancelled-the-pending-action](templates/voice/policy/cancelled-the-pending-action.hbs) | `VOICE_POLICY_CANCELLED_THE_PENDING_ACTION` |
 | `ilium-client/src/control/policy.rs:221` | [voice/policy/i-typed-it-into-the-target-terminal](templates/voice/policy/i-typed-it-into-the-target-terminal.hbs) | `VOICE_POLICY_I_TYPED_IT_INTO_THE_TARGET_TERMINAL` |
 | `ilium-client/src/control/policy.rs:236` | [voice/policy/left-the-staged-terminal-text-visible-and](templates/voice/policy/left-the-staged-terminal-text-visible-and.hbs) | `VOICE_POLICY_LEFT_THE_STAGED_TERMINAL_TEXT_VISIBLE_AND` |
-| `ilium-client/src/control/executor.rs:134` | [voice/executor/search-result-index-v0-does-not-exist](templates/voice/executor/search-result-index-v0-does-not-exist.hbs) | `VOICE_EXECUTOR_SEARCH_RESULT_INDEX_V0_DOES_NOT_EXIST` |
-| `ilium-client/src/control/executor.rs:145` | [voice/executor/search-result-index-v0-does-not-exist](templates/voice/executor/search-result-index-v0-does-not-exist.hbs) | `VOICE_EXECUTOR_SEARCH_RESULT_INDEX_V0_DOES_NOT_EXIST` |
-| `ilium-client/src/control/executor.rs:183` | [voice/executor/found-v0-workspace-results-for](templates/voice/executor/found-v0-workspace-results-for.hbs) | `VOICE_EXECUTOR_FOUND_V0_WORKSPACE_RESULTS_FOR` |
 | `ilium-client/src/control/executor.rs:200` | [voice/executor/focused-pane](templates/voice/executor/focused-pane.hbs) | `VOICE_EXECUTOR_FOCUSED_PANE` |
 | `ilium-client/src/control/executor.rs:234` | [voice/executor/node-v0-is-not-a-split-view](templates/voice/executor/node-v0-is-not-a-split-view.hbs) | `VOICE_EXECUTOR_NODE_V0_IS_NOT_A_SPLIT_VIEW` |
 | `ilium-client/src/control/executor.rs:238` | [voice/executor/showing-split](templates/voice/executor/showing-split.hbs) | `VOICE_EXECUTOR_SHOWING_SPLIT` |
@@ -149,9 +146,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/control/executor.rs:71` | [voice/executor/current-ilium-state](templates/voice/executor/current-ilium-state.hbs) | `VOICE_EXECUTOR_CURRENT_ILIUM_STATE` |
 | `ilium-client/src/control/executor.rs:100` | [voice/executor/queued-text-and-enter-for-the-terminal](templates/voice/executor/queued-text-and-enter-for-the-terminal.hbs) | `VOICE_EXECUTOR_QUEUED_TEXT_AND_ENTER_FOR_THE_TERMINAL` |
 | `ilium-client/src/control/executor.rs:114` | [voice/executor/staged-text-in-the-terminal](templates/voice/executor/staged-text-in-the-terminal.hbs) | `VOICE_EXECUTOR_STAGED_TEXT_IN_THE_TERMINAL` |
-| `ilium-client/src/control/executor.rs:151` | [voice/executor/there-is-no-selected-search-result](templates/voice/executor/there-is-no-selected-search-result.hbs) | `VOICE_EXECUTOR_THERE_IS_NO_SELECTED_SEARCH_RESULT` |
-| `ilium-client/src/control/executor.rs:155` | [voice/executor/opened-the-selected-search-result](templates/voice/executor/opened-the-selected-search-result.hbs) | `VOICE_EXECUTOR_OPENED_THE_SELECTED_SEARCH_RESULT` |
-| `ilium-client/src/control/executor.rs:160` | [voice/executor/closed-workspace-search](templates/voice/executor/closed-workspace-search.hbs) | `VOICE_EXECUTOR_CLOSED_WORKSPACE_SEARCH` |
 | `ilium-client/src/control/executor.rs:193` | [voice/executor/focused-the-left-tree-panel](templates/voice/executor/focused-the-left-tree-panel.hbs) | `VOICE_EXECUTOR_FOCUSED_THE_LEFT_TREE_PANEL` |
 | `ilium-client/src/control/executor.rs:206` | [voice/executor/focused-the-next-visible-pane](templates/voice/executor/focused-the-next-visible-pane.hbs) | `VOICE_EXECUTOR_FOCUSED_THE_NEXT_VISIBLE_PANE` |
 | `ilium-client/src/control/executor.rs:211` | [voice/executor/focused-the-previous-visible-pane](templates/voice/executor/focused-the-previous-visible-pane.hbs) | `VOICE_EXECUTOR_FOCUSED_THE_PREVIOUS_VISIBLE_PANE` |
@@ -171,7 +165,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/control/executor.rs:357` | [voice/executor/adding-the-project](templates/voice/executor/adding-the-project.hbs) | `VOICE_EXECUTOR_ADDING_THE_PROJECT` |
 | `ilium-client/src/control/executor.rs:363` | [voice/executor/changing-the-project-s-folder](templates/voice/executor/changing-the-project-s-folder.hbs) | `VOICE_EXECUTOR_CHANGING_THE_PROJECT_S_FOLDER` |
 | `ilium-client/src/control/executor.rs:369` | [voice/executor/creating-the-group](templates/voice/executor/creating-the-group.hbs) | `VOICE_EXECUTOR_CREATING_THE_GROUP` |
-| `ilium-client/src/control/executor.rs:396` | [voice/executor/board-creation-failed](templates/voice/executor/board-creation-failed.hbs) | `VOICE_EXECUTOR_BOARD_CREATION_FAILED` |
 | `ilium-client/src/control/executor.rs:398` | [voice/executor/creating-the-board](templates/voice/executor/creating-the-board.hbs) | `VOICE_EXECUTOR_CREATING_THE_BOARD` |
 | `ilium-client/src/control/executor.rs:423` | [voice/executor/creating-the-split-view](templates/voice/executor/creating-the-split-view.hbs) | `VOICE_EXECUTOR_CREATING_THE_SPLIT_VIEW` |
 | `ilium-client/src/control/executor.rs:429` | [voice/executor/renaming-the-tree-item](templates/voice/executor/renaming-the-tree-item.hbs) | `VOICE_EXECUTOR_RENAMING_THE_TREE_ITEM` |
@@ -191,8 +184,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/control/executor.rs:577` | [voice/executor/target-is-not-an-editor-pane](templates/voice/executor/target-is-not-an-editor-pane.hbs) | `VOICE_EXECUTOR_TARGET_IS_NOT_AN_EDITOR_PANE` |
 | `ilium-client/src/control/executor.rs:595` | [voice/executor/target-is-not-an-editor-pane](templates/voice/executor/target-is-not-an-editor-pane.hbs) | `VOICE_EXECUTOR_TARGET_IS_NOT_AN_EDITOR_PANE` |
 | `ilium-client/src/control/executor.rs:603` | [voice/executor/this-editor-has-no-file-path-yet](templates/voice/executor/this-editor-has-no-file-path-yet.hbs) | `VOICE_EXECUTOR_THIS_EDITOR_HAS_NO_FILE_PATH_YET` |
-| `ilium-client/src/control/executor.rs:609` | [voice/executor/editor-updated](templates/voice/executor/editor-updated.hbs) | `VOICE_EXECUTOR_EDITOR_UPDATED` |
-| `ilium-client/src/control/executor.rs:615` | [voice/executor/editor-updated](templates/voice/executor/editor-updated.hbs) | `VOICE_EXECUTOR_EDITOR_UPDATED` |
 | `ilium-client/src/control/executor.rs:618` | [voice/executor/text-is-required](templates/voice/executor/text-is-required.hbs) | `VOICE_EXECUTOR_TEXT_IS_REQUIRED` |
 | `ilium-client/src/control/executor.rs:620` | [voice/executor/target-is-not-an-editor-pane](templates/voice/executor/target-is-not-an-editor-pane.hbs) | `VOICE_EXECUTOR_TARGET_IS_NOT_AN_EDITOR_PANE` |
 | `ilium-client/src/control/executor.rs:629` | [voice/executor/inserted-text-into-the-editor](templates/voice/executor/inserted-text-into-the-editor.hbs) | `VOICE_EXECUTOR_INSERTED_TEXT_INTO_THE_EDITOR` |
@@ -217,14 +208,11 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/control/executor.rs:715` | [voice/policy/column-is-required](templates/voice/policy/column-is-required.hbs) | `VOICE_POLICY_COLUMN_IS_REQUIRED` |
 | `ilium-client/src/control/executor.rs:719` | [voice/policy/column-is-required](templates/voice/policy/column-is-required.hbs) | `VOICE_POLICY_COLUMN_IS_REQUIRED` |
 | `ilium-client/src/control/executor.rs:720` | [voice/policy/card-is-required](templates/voice/policy/card-is-required.hbs) | `VOICE_POLICY_CARD_IS_REQUIRED` |
-| `ilium-client/src/control/executor.rs:723` | [voice/executor/destination-column-is-required](templates/voice/executor/destination-column-is-required.hbs) | `VOICE_EXECUTOR_DESTINATION_COLUMN_IS_REQUIRED` |
 | `ilium-client/src/control/executor.rs:727` | [voice/policy/column-is-required](templates/voice/policy/column-is-required.hbs) | `VOICE_POLICY_COLUMN_IS_REQUIRED` |
 | `ilium-client/src/control/executor.rs:728` | [voice/policy/card-is-required](templates/voice/policy/card-is-required.hbs) | `VOICE_POLICY_CARD_IS_REQUIRED` |
-| `ilium-client/src/control/executor.rs:729` | [voice/executor/checkbox-is-required](templates/voice/executor/checkbox-is-required.hbs) | `VOICE_EXECUTOR_CHECKBOX_IS_REQUIRED` |
 | `ilium-client/src/control/executor.rs:734` | [voice/policy/column-is-required](templates/voice/policy/column-is-required.hbs) | `VOICE_POLICY_COLUMN_IS_REQUIRED` |
 | `ilium-client/src/control/executor.rs:735` | [voice/policy/card-is-required](templates/voice/policy/card-is-required.hbs) | `VOICE_POLICY_CARD_IS_REQUIRED` |
 | `ilium-client/src/control/executor.rs:740` | [voice/policy/column-is-required](templates/voice/policy/column-is-required.hbs) | `VOICE_POLICY_COLUMN_IS_REQUIRED` |
-| `ilium-client/src/control/executor.rs:748` | [voice/executor/board-updated-and-persisted](templates/voice/executor/board-updated-and-persisted.hbs) | `VOICE_EXECUTOR_BOARD_UPDATED_AND_PERSISTED` |
 | `ilium-client/src/control/executor.rs:758` | [voice/executor/session-lifecycle-request-queued](templates/voice/executor/session-lifecycle-request-queued.hbs) | `VOICE_EXECUTOR_SESSION_LIFECYCLE_REQUEST_QUEUED` |
 | `ilium-client/src/control/executor.rs:768` | [voice/executor/voice-mode-stopped](templates/voice/executor/voice-mode-stopped.hbs) | `VOICE_EXECUTOR_VOICE_MODE_STOPPED` |
 | `ilium-client/src/control/resolver.rs:16` | [voice/resolver/no-ilium-node-has-id](templates/voice/resolver/no-ilium-node-has-id.hbs) | `VOICE_RESOLVER_NO_ILIUM_NODE_HAS_ID` |

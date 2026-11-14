@@ -40,9 +40,7 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
     let tree_activity_changed = app.tick_tree_activity_projection(now);
     let autosave_wrote = app.tick_autosave();
     let resource_saved = app.tick_resource_dialog(now);
-    let budget_saved = app.tick_restructure_budget_autosave(now)
-        | app.tick_inference_number_autosave(now)
-        | app.tick_custom_status_rules_save(now);
+    let custom_status_rules_saved = app.tick_custom_status_rules_save(now);
     let integration_changed = app.tick_integration_maintenance(now);
     // Focus and `config.toml` changes reach the plugins (gap G2); a reloaded `[animations]`
     // table redraws.
@@ -81,7 +79,7 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         || (app.ui_settings.progress_monitor_enabled && !app.resources.waits.is_empty())
         || resource_saved
         || autosave_wrote
-        || budget_saved
+        || custom_status_rules_saved
         || integration_changed
         || config_reloaded
         || session_stats_changed
@@ -602,186 +600,6 @@ mod tests {
     use super::*;
     use crate::app::PendingRetitleRequest;
     use crate::naming::DualTitle;
-
-    #[test]
-    fn restructure_budget_autosaves_after_number_input_debounce() {
-        use crate::app::{InferenceSettingField, Mode};
-        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-        use std::time::Duration;
-        let project = tempfile::tempdir().unwrap();
-        let config = tempfile::tempdir().unwrap();
-        let mut app = App::new("budget-test".into(), project.path().to_path_buf());
-        app.config_dir = Some(config.path().to_path_buf());
-        app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
-        if let Mode::InferenceSettingPrompt(_, state) = &mut app.mode {
-            state.buf.clear();
-            state.cursor = 0;
-        }
-        for character in "234567".chars() {
-            crate::keys::handle_event(
-                &mut app,
-                Event::Key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE)),
-            );
-        }
-        assert_eq!(
-            app.inference_settings.restructure_prompt_token_limit,
-            200_000
-        );
-        let deadline = app.restructure_budget_autosave_deadline.unwrap();
-        on_tick(&mut app, deadline - Duration::from_nanos(1), false);
-        assert_eq!(
-            app.inference_settings.restructure_prompt_token_limit,
-            200_000
-        );
-        on_tick(&mut app, deadline, false);
-        app.settle_filesystem_for_test();
-        assert_eq!(
-            app.inference_settings.restructure_prompt_token_limit,
-            234567
-        );
-        assert_eq!(
-            crate::config::load(config.path())
-                .unwrap()
-                .inference
-                .restructure_prompt_token_limit,
-            234567
-        );
-        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
-    }
-
-    #[test]
-    fn restructure_budget_autosave_cancels_invalid_input_and_escape() {
-        use crate::app::{InferenceSettingField, Mode};
-        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-        let project = tempfile::tempdir().unwrap();
-        let config = tempfile::tempdir().unwrap();
-        let mut app = App::new("budget-test".into(), project.path().to_path_buf());
-        app.config_dir = Some(config.path().to_path_buf());
-        app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
-        if let Mode::InferenceSettingPrompt(_, state) = &mut app.mode {
-            state.buf = "123456".into();
-            state.cursor = 6;
-        }
-        app.queue_restructure_budget_autosave("123456", Instant::now());
-        let deadline = app.restructure_budget_autosave_deadline.unwrap();
-        crate::keys::handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
-        );
-        assert!(app.restructure_budget_autosave_deadline.is_none());
-        assert!(!app.tick_restructure_budget_autosave(deadline));
-        assert!(app.restructure_budget_input_hint("123456x").1);
-        crate::keys::handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        );
-        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
-        crate::keys::handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
-        );
-        assert!(app.restructure_budget_autosave_deadline.is_some());
-        crate::keys::handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-        );
-        assert!(!app.tick_restructure_budget_autosave(deadline));
-        assert_eq!(
-            app.inference_settings.restructure_prompt_token_limit,
-            200_000
-        );
-        assert!(!config.path().join("config.toml").exists());
-    }
-
-    #[test]
-    fn restructure_budget_commit_waits_for_own_durable_success() {
-        use crate::app::{InferenceSettingField, Mode, SettingsState, SettingsTab};
-        use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-
-        let project = tempfile::tempdir().unwrap();
-        let config = tempfile::tempdir().unwrap();
-        let mut app = App::new("budget-receipt-test".into(), project.path().to_path_buf());
-        app.config_dir = Some(config.path().to_path_buf());
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::Appearance,
-            selected_row: 2,
-            scroll: 3,
-            ..SettingsState::default()
-        }));
-        app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
-        if let Mode::InferenceSettingPrompt(_, state) = &mut app.mode {
-            state.buf = "234567".into();
-            state.cursor = 6;
-        }
-        let enter = || Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        crate::keys::handle_event(&mut app, enter());
-        // Admission has not even started the ordered writer yet. Closing now
-        // would lose the user's draft before any durable acknowledgement.
-        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
-        assert!(!config.path().join("config.toml").exists());
-        assert!(!app
-            .restructure_budget_input_hint("234567")
-            .0
-            .starts_with("Saved"));
-        let accepted = app.configuration_admission.accepted;
-        crate::keys::handle_event(&mut app, enter());
-        assert_eq!(app.configuration_admission.accepted, accepted);
-        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
-
-        app.settle_filesystem_for_test();
-        assert_eq!(
-            crate::config::load(config.path())
-                .unwrap()
-                .inference
-                .restructure_prompt_token_limit,
-            234567
-        );
-        assert!(matches!(
-            &app.mode,
-            Mode::Settings(state)
-                if state.tab == SettingsTab::Appearance
-                    && state.selected_row == 2
-                    && state.scroll == 3
-        ));
-        assert!(app.modal_stack.is_empty());
-    }
-
-    #[test]
-    fn restructure_budget_autosave_reports_persistence_failure() {
-        use crate::app::{InferenceSettingField, Mode};
-        let project = tempfile::tempdir().unwrap();
-        let config = tempfile::NamedTempFile::new().unwrap();
-        let mut app = App::new("budget-test".into(), project.path().to_path_buf());
-        app.config_dir = Some(config.path().to_path_buf()); // A file cannot contain config.toml.
-        app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
-        if let Mode::InferenceSettingPrompt(_, state) = &mut app.mode {
-            state.buf = "123456".into();
-        }
-        app.queue_restructure_budget_autosave("123456", Instant::now());
-        assert!(
-            app.tick_restructure_budget_autosave(app.restructure_budget_autosave_deadline.unwrap())
-        );
-        app.settle_filesystem_for_test();
-        let (hint, is_error) = app.restructure_budget_input_hint("123456");
-        assert!(is_error);
-        let error = app.inference_settings_save_error.as_ref().unwrap();
-        assert!(!error.is_empty());
-        assert_eq!(&hint, error);
-        let status = app.status_message.as_ref().unwrap();
-        assert!(status.contains("Could not save"));
-        assert!(status.contains(error));
-        assert!(!hint.starts_with("Saved"));
-        crate::keys::handle_event(
-            &mut app,
-            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Enter,
-                crossterm::event::KeyModifiers::NONE,
-            )),
-        );
-        assert!(matches!(app.mode, Mode::InferenceSettingPrompt(_, _)));
-        app.settle_filesystem_for_test();
-        assert!(app.restructure_budget_input_hint("123456").1);
-    }
 
     #[test]
     fn project_name_result_after_ai_opt_out_does_not_write_or_publish() {

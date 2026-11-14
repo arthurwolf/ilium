@@ -73,7 +73,6 @@ fn kind_for(id: &str) -> Result<AnimationKind, String> {
 fn axes(kind: AnimationKind) -> &'static [&'static str] {
     match kind {
         AnimationKind::Wikipedia => &["wiki_render_mode"],
-        AnimationKind::Images => &["mode", "source_kind", "order", "motion", "display_seconds"],
         AnimationKind::Video => &["mode", "shuffle"],
         _ => &[],
     }
@@ -132,14 +131,6 @@ fn same_protected_inputs(before: &AnimationSettings, after: &AnimationSettings) 
 /// Additional semantic constraints not fully expressed by the UI's ranges.
 /// These narrow the real control, rather than defining a second control table.
 fn narrow(settings: &AnimationSettings, row: &mut Control) {
-    if let ControlKind::Slider { min, max, .. } = &mut row.kind {
-        match (settings.kind, row.id) {
-            (AnimationKind::Images, "transition_seconds") => {
-                *max = (*max).min(i32::from(settings.ambient.images.display_seconds / 2));
-            }
-            _ => {}
-        }
-    }
     if settings.kind == AnimationKind::OpenStreetMap && row.id == "source" {
         row.disabled_options.extend([
             (1, "Semantic uses offline maps only".into()),
@@ -199,13 +190,6 @@ fn write(settings: &mut AnimationSettings, id: &str, value: &ControlValue) -> Re
     Ok(())
 }
 
-fn selected(settings: &AnimationSettings, id: &str) -> Option<usize> {
-    match settings.scene_control(id)?.value {
-        ControlValue::Index(index) => Some(index),
-        _ => None,
-    }
-}
-
 fn has_text(settings: &AnimationSettings, id: &str) -> bool {
     settings
         .scene_control(id)
@@ -218,52 +202,18 @@ fn has_text(settings: &AnimationSettings, id: &str) -> bool {
         })
 }
 
-fn usable_image_source(settings: &AnimationSettings) -> bool {
-    match (
-        selected(settings, "mode"),
-        selected(settings, "source_kind"),
-    ) {
-        (Some(0), Some(0)) => control(settings, "builtin_image")
-            .is_ok_and(|row| validate_value(&row, &row.value).is_ok()),
-        (Some(0), Some(1)) => has_text(settings, "file"),
-        (Some(0), Some(2)) => has_text(settings, "url"),
-        (Some(1), _) => has_text(settings, "folders"),
-        (Some(2), _) => has_text(settings, "urls"),
-        _ => false,
-    }
-}
-
 fn verify_resources(
     settings: &AnimationSettings,
     authored: &AnimationSettings,
     resources: ResourcePolicy,
 ) -> Result<(), String> {
-    match settings.kind {
-        AnimationKind::Images => {
-            if resources == ResourcePolicy::Catalog {
-                if selected(settings, "mode") != Some(0)
-                    || selected(settings, "source_kind") != Some(0)
-                {
-                    return Err("Catalog Images requires single-image built-in mode".into());
-                }
-            } else if settings.ambient.images.mode != authored.ambient.images.mode
-                || settings.ambient.images.source != authored.ambient.images.source
-            {
-                return Err("Authored Images must retain its existing resource selection".into());
-            }
-            if !usable_image_source(settings) {
-                return Err("The selected authored image input is missing or malformed".into());
-            }
+    if settings.kind == AnimationKind::Video {
+        if resources != ResourcePolicy::Authored || !has_text(settings, "source") {
+            return Err("Video requires an existing authored source".into());
         }
-        AnimationKind::Video => {
-            if resources != ResourcePolicy::Authored || !has_text(settings, "source") {
-                return Err("Video requires an existing authored source".into());
-            }
-            if settings.ambient.video.source.trim() != authored.ambient.video.source.trim() {
-                return Err("Semantic Video cannot replace its authored source".into());
-            }
+        if settings.ambient.video.source.trim() != authored.ambient.video.source.trim() {
+            return Err("Semantic Video cannot replace its authored source".into());
         }
-        _ => {}
     }
     Ok(())
 }
@@ -273,26 +223,16 @@ fn prepare(
     resources: ResourcePolicy,
     authored: &AnimationSettings,
 ) -> Result<AnimationSettings, String> {
-    if resources == ResourcePolicy::Authored
-        && !matches!(kind, AnimationKind::Images | AnimationKind::Video)
-    {
-        return Err("Authored resource policy applies only to Images or Video".into());
+    if resources == ResourcePolicy::Authored && kind != AnimationKind::Video {
+        return Err("Authored resource policy applies only to Video".into());
     }
     let mut settings = authored.clone();
     settings.kind = kind;
-    match kind {
-        AnimationKind::OpenStreetMap => {
-            write(&mut settings, "source", &ControlValue::Index(0))?;
-            // Semantic recommendations retain the original offline place contract.
-            // Initialize the mode without exposing authored lists to recommendations.
-            settings.set_scene_control("selection", ControlValue::Index(0))?;
-        }
-        AnimationKind::Images if resources == ResourcePolicy::Catalog => {
-            write(&mut settings, "mode", &ControlValue::Index(0))?;
-            write(&mut settings, "source_kind", &ControlValue::Index(0))?;
-            write(&mut settings, "builtin_image", &ControlValue::Index(0))?;
-        }
-        _ => {}
+    if kind == AnimationKind::OpenStreetMap {
+        write(&mut settings, "source", &ControlValue::Index(0))?;
+        // Semantic recommendations retain the original offline place contract.
+        // Initialize the mode without exposing authored lists to recommendations.
+        settings.set_scene_control("selection", ControlValue::Index(0))?;
     }
     Ok(settings)
 }
@@ -342,18 +282,6 @@ fn checked(
     });
 
     for parameter in &parameters {
-        if kind == AnimationKind::Images && matches!(parameter.id.as_str(), "mode" | "source_kind")
-        {
-            let permitted = match proposal.resources {
-                ResourcePolicy::Catalog => parameter.value == ControlValue::Index(0),
-                ResourcePolicy::Authored => original
-                    .scene_control(&parameter.id)
-                    .is_some_and(|row| row.value == parameter.value),
-            };
-            if !permitted {
-                return Err("Image resource selectors require the declared resource policy".into());
-            }
-        }
         write(&mut next, &parameter.id, &parameter.value)?;
     }
     verify_resources(&next, &original, proposal.resources)?;
@@ -498,15 +426,9 @@ pub fn validate_recommendations(
 
 /// Resource capability metadata contains no paths, URLs, device names or dates.
 pub fn authored_capabilities(authored: &AnimationSettings) -> serde_json::Value {
-    let mut images = authored.clone();
-    images.kind = AnimationKind::Images;
-    let images_usable = usable_image_source(&images);
     let mut video = authored.clone();
     video.kind = AnimationKind::Video;
     serde_json::json!({
-        "authored_images_mode": images_usable.then(|| selected(&images, "mode")).flatten(),
-        "authored_image_source_kind":
-            images_usable.then(|| selected(&images, "source_kind")).flatten(),
         "authored_video": has_text(&video, "source")
     })
 }
@@ -640,9 +562,6 @@ fn notes(kind: AnimationKind) -> &'static str {
         AnimationKind::Wikipedia => {
             "wiki_zoom applies only to Braille. This is today's English Main Page feed, not a selectable topic."
         }
-        AnimationKind::Images => {
-            "resources=catalog selects Single/Built-in, default picture 0. resources=authored keeps the current authored mode and source. order/transition require slideshow; shuffle_seed also requires Shuffle. display_seconds requires slideshow or motion. motion_strength/easing require motion. transition_seconds <= display_seconds/2."
-        }
         AnimationKind::Video => {
             "Requires resources=authored and existing video input. Slowed exposes slowed_percent; Random scenes exposes scene_seconds and hides shuffle/repeat_one. seed requires Random scenes or shuffle."
         }
@@ -660,7 +579,7 @@ fn build_catalog() -> Result<String, String> {
          controls apply. step is a keyboard increment, not universal divisibility. \
          Text, capture input/device, renderer backend, polling and recursive \
          discovery are not writable. resources is catalog or authored; authored \
-         is permitted only for Images or Video. Emit required project and \
+         is permitted only for Video. Emit required project and \
          every-entry pointers even when animations are disabled.\n",
     );
     for kind in AnimationKind::ALL {

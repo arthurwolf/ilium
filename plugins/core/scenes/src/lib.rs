@@ -22,6 +22,7 @@ pub mod fbm_clouds;
 pub mod galactic_empires;
 pub mod growth;
 pub mod hex_expedition;
+pub mod images;
 pub mod kit;
 pub mod live_chess;
 pub mod live_data;

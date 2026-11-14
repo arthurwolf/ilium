@@ -12,7 +12,6 @@ chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 directories = "6.0.0"
 flate2 = "1.1.9"
 png = "=0.18.1"
-fdeflate = "=0.3.7"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp", "tga"] }
 cap-std = "=4.0.3"
 ilium-platform = { path = "../ilium-platform" }

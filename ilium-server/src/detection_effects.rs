@@ -24,48 +24,6 @@ impl Requests {
     }
 }
 
-/// A completion authorizes at most one queued submission. Changing turn or
-/// invocation invalidates pending and claimed authorizations alike.
-#[derive(Default)]
-pub(crate) struct CompletionEpoch {
-    current: u64,
-    claimed: Option<u64>,
-}
-
-impl CompletionEpoch {
-    pub(crate) fn current(&self) -> u64 {
-        self.current
-    }
-
-    pub(crate) fn invalidate(&mut self) {
-        self.current = self.current.wrapping_add(1);
-        self.claimed = None;
-    }
-
-    pub(crate) fn retire_submission(&mut self) {
-        self.current = self.current.wrapping_add(1);
-        // Merely admitting Enter must not authorize another queue head while
-        // the detector still shows Idle. Only a new observed turn reopens it.
-        self.claimed = Some(self.current);
-    }
-
-    pub(crate) fn is_available(&self, expected: u64) -> bool {
-        self.current == expected && self.claimed != Some(expected)
-    }
-
-    pub(crate) fn claim(&mut self, expected: u64) -> bool {
-        if !self.is_available(expected) {
-            return false;
-        }
-        self.claimed = Some(expected);
-        true
-    }
-
-    pub(crate) fn is_claimed_current(&self, expected: u64) -> bool {
-        self.current == expected && self.claimed == Some(expected)
-    }
-}
-
 pub(crate) struct DetectionEffects {
     generation: u64,
     input: PtyInput,
@@ -176,46 +134,5 @@ mod tests {
         assert!(!receiver.has_changed().expect("sender remains alive"));
         drop(sender);
         assert!(receiver.changed().await.is_err());
-    }
-
-    #[tokio::test]
-    async fn completion_waiting_for_durability_cannot_claim_a_newer_turn() {
-        let epoch = Arc::new(tokio::sync::Mutex::new(CompletionEpoch::default()));
-        let captured = epoch.lock().await.current();
-        let (barrier_entered, waiting_at_barrier) = tokio::sync::oneshot::channel();
-        let (release_barrier, barrier) = tokio::sync::oneshot::channel();
-        let delayed = Arc::clone(&epoch);
-        let task = tokio::spawn(async move {
-            barrier_entered.send(()).expect("announce durability wait");
-            barrier.await.expect("durability result");
-            delayed.lock().await.claim(captured)
-        });
-        waiting_at_barrier
-            .await
-            .expect("completion reached barrier");
-        epoch.lock().await.invalidate();
-        release_barrier.send(()).expect("complete durability wait");
-        assert!(!task.await.expect("completion claim"));
-        let current = epoch.lock().await;
-        assert!(!current.is_claimed_current(captured));
-        assert!(current.is_available(current.current()));
-    }
-
-    #[test]
-    fn repeated_completion_requests_authorize_only_one_queued_prompt_per_turn() {
-        let mut epoch = CompletionEpoch::default();
-        let completed = epoch.current();
-        assert!(epoch.claim(completed));
-        assert!(epoch.is_claimed_current(completed));
-        // A second coalesced notification cannot advance the next queue head
-        // before Working (or another detector transition) starts a new epoch.
-        assert!(!epoch.claim(completed));
-        epoch.retire_submission();
-        assert!(!epoch.is_claimed_current(completed));
-        assert!(!epoch.claim(epoch.current()));
-        epoch.invalidate();
-        assert!(!epoch.is_claimed_current(completed));
-        assert!(!epoch.claim(completed));
-        assert!(epoch.claim(epoch.current()));
     }
 }

@@ -19,6 +19,7 @@ pub fn create(scene_id: &str, spec: &Value, env: &SceneEnv) -> Option<Box<dyn Sc
         "dither-water" => crate::dither_water::create(spec, env),
         "fbm-clouds" => crate::fbm_clouds::create(spec, env),
         "hex-expedition" => crate::hex_expedition::create(spec, env),
+        "images" => crate::images::create(spec, env),
         "live-chess" => crate::live_chess::scene::create(spec, env),
         "machine-screen" => crate::machine_screen::create(spec, env),
         "night-lights" => crate::night_lights::create(spec, env),

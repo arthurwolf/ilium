@@ -1,6 +1,5 @@
 use ilium_ambient::minecraft::nbt::{self, Compound, Document, Tag, Text};
 use ilium_ambient::minecraft::region::{chunk_body, verify_identity, Error, Identity, Layout};
-use ilium_ambient::ImagesSettings;
 
 fn must<T, E: std::fmt::Debug>(result: Result<T, E>, what: &str) -> T {
     match result {
@@ -220,90 +219,4 @@ fn verify_identity_version_boundaries_follow_admitted_range() {
     );
     let too_new = verify_identity(&root_document(3219, 9, 9), [9, 9]);
     assert!(matches!(too_new, Err(Error::DataVersion(3219))));
-}
-
-#[test]
-fn images_source_label_single_mode_names_default_builtin_image() {
-    let settings: ImagesSettings = must(serde_json::from_str("{}"), "default settings");
-    assert_eq!(settings.source_label(), "NightCafe dreamscape");
-}
-
-#[test]
-fn images_source_label_single_mode_out_of_range_builtin_falls_back() {
-    let settings: ImagesSettings = must(
-        serde_json::from_str(r#"{"mode":"single","source":{"Builtin":9}}"#),
-        "out of range builtin",
-    );
-    assert_eq!(settings.source_label(), "Built-in image");
-}
-
-#[test]
-fn images_source_label_single_mode_shows_local_file_path() {
-    let settings: ImagesSettings = must(
-        serde_json::from_str(r#"{"source":{"Local":"/srv/pictures/lake.jpg"}}"#),
-        "local source",
-    );
-    assert_eq!(settings.source_label(), "File: /srv/pictures/lake.jpg");
-}
-
-#[test]
-fn images_source_label_single_mode_shows_url_source() {
-    let settings: ImagesSettings = must(
-        serde_json::from_str(r#"{"source":{"Url":"https://img.example/a.jpg"}}"#),
-        "url source",
-    );
-    assert_eq!(settings.source_label(), "URL: https://img.example/a.jpg");
-}
-
-#[test]
-fn images_source_label_folders_mode_lists_folder_patterns() {
-    let settings: ImagesSettings = must(
-        serde_json::from_str(r#"{"mode":"folders","folders":"~/Pictures/*.jpg;/srv/art"}"#),
-        "folders mode",
-    );
-    assert_eq!(
-        settings.source_label(),
-        "Folders: ~/Pictures/*.jpg;/srv/art"
-    );
-}
-
-#[test]
-fn images_source_label_folders_mode_ignores_single_source() {
-    let settings: ImagesSettings = must(
-        serde_json::from_str(r#"{"mode":"folders","folders":"/srv/art","source":{"Builtin":1}}"#),
-        "folders mode with source",
-    );
-    assert_eq!(settings.source_label(), "Folders: /srv/art");
-}
-
-#[test]
-fn images_source_label_url_list_mode_lists_urls() {
-    let settings: ImagesSettings = must(
-        serde_json::from_str(
-            r#"{"mode":"url_list","urls":"https://a.example/1.jpg;https://a.example/2.jpg"}"#,
-        ),
-        "url list mode",
-    );
-    assert_eq!(
-        settings.source_label(),
-        "URLs: https://a.example/1.jpg;https://a.example/2.jpg"
-    );
-}
-
-#[test]
-fn images_source_label_single_mode_ignores_folders_and_urls() {
-    let settings: ImagesSettings = must(
-        serde_json::from_str(r#"{"mode":"single","folders":"/x","urls":"https://u.example/x"}"#),
-        "single mode with other lists",
-    );
-    assert_eq!(settings.source_label(), "NightCafe dreamscape");
-}
-
-#[test]
-fn images_source_label_folders_mode_with_empty_list_keeps_prefix() {
-    let settings: ImagesSettings = must(
-        serde_json::from_str(r#"{"mode":"folders"}"#),
-        "folders mode, empty list",
-    );
-    assert_eq!(settings.source_label(), "Folders: ");
 }

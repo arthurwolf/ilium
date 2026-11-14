@@ -1,13 +1,13 @@
-//! Turning image layers into Braille dot intensities and cell colours.
+//! Turning picture layers into Braille dot intensities and cell colours.
 
 use super::adjust::Adjustment;
-use super::decode::DecodedImage;
 use super::motion::View;
-use crate::scene::Frame;
+use super::picture::Picture;
+use crate::kit::scene::Frame;
 
-/// One image with the part of it that is visible and its blend weight.
+/// One picture with the part of it that is visible and its blend weight.
 pub struct Layer<'a> {
-    pub image: &'a DecodedImage,
+    pub image: &'a Picture,
     pub view: View,
     pub weight: f32,
 }
@@ -19,15 +19,13 @@ fn supersample_count(source_pixels_per_dot: f32) -> usize {
     (source_pixels_per_dot.round().max(1.0) as usize).min(MAX_SUPERSAMPLE)
 }
 
-/// Identity of what `render_layers` would draw; equal keys mean an identical
-/// frame, so the scene can reuse the previous one.
+/// Identity of what `render_layers` would draw; equal keys mean an identical frame, so the
+/// scene can reuse the previous one.
 pub fn layers_key(layers: &[Layer<'_>], width: u16, height: u16) -> Vec<u64> {
-    // The scene supplies at most current + outgoing; reserve the complete
-    // known key before pushes so no old/new growth buffers coexist.
     let mut key = Vec::with_capacity(2 + 6 * layers.len());
     key.extend_from_slice(&[u64::from(width), u64::from(height)]);
     for layer in layers {
-        key.push(layer.image as *const DecodedImage as usize as u64);
+        key.push(layer.image as *const Picture as usize as u64);
         key.push(u64::from(layer.view.x0.to_bits()));
         key.push(u64::from(layer.view.y0.to_bits()));
         key.push(u64::from(layer.view.width.to_bits()));
@@ -44,8 +42,8 @@ struct DotSampler<'a> {
 }
 
 impl DotSampler<'_> {
-    /// Raw blended colour of the dot at raster position (`x`, `y`), or `None`
-    /// when no layer covers it (letterbox border).
+    /// Raw blended colour of the dot at raster position (`x`, `y`), or `None` when no layer
+    /// covers it (letterbox border).
     fn raw(&self, x: usize, y: usize) -> Option<[f32; 3]> {
         let u = (x as f32 + 0.5) / self.dots_width;
         let v = (y as f32 + 0.5) / self.dots_height;
@@ -134,8 +132,8 @@ pub fn render_layers(frame: &mut Frame<'_>, layers: &[Layer<'_>], adjustment: &A
     }
 }
 
-/// A faint dust field with a soft light band drifting across it, shown while
-/// the first image is still loading.
+/// A faint dust field with a soft light band drifting across it, shown while the first
+/// picture is still loading.
 pub fn render_placeholder(frame: &mut Frame<'_>) {
     let cells_wide = usize::from(frame.width);
     let cells_high = usize::from(frame.height);
@@ -161,14 +159,14 @@ pub fn render_placeholder(frame: &mut Frame<'_>) {
 #[cfg(test)]
 mod tests {
     use super::super::motion::{view_rect, Pose};
-    use super::super::settings::{FitMode, ImagesSettings};
+    use super::super::settings::FitMode;
     use super::*;
-    use crate::debug::render_frame;
-    use crate::scene::Scene;
+    use crate::kit::debug::render_frame;
+    use crate::kit::scene::Scene;
     use std::time::Duration;
 
     struct OneLayer<'a> {
-        image: &'a DecodedImage,
+        image: &'a Picture,
         fit: FitMode,
         adjustment: Adjustment,
     }
@@ -186,28 +184,15 @@ mod tests {
         }
     }
 
-    fn neutral() -> Adjustment {
-        Adjustment::from_settings(&ImagesSettings {
-            preset: super::super::settings::ImagePreset::Vivid,
-            brightness_percent: 100,
-            contrast_percent: 100,
-            saturation_percent: 100,
-            intensity_percent: 100,
-            opacity_percent: 100,
-            ..ImagesSettings::default()
-        })
-    }
-
     #[test]
     fn cell_colors_match_the_hand_computed_average() {
-        // A flat colour image: every dot of every cell has the same adjusted
-        // colour, so the cell colour equals the byte-truncated adjustment.
-        let image = DecodedImage::from_rgb(4, 4, vec![[204, 102, 51]; 16]);
-        let adjustment = neutral();
+        // A flat colour picture: every dot of every cell has the same adjusted colour, so the
+        // cell colour equals the byte-truncated adjustment.
+        let image = Picture::from_rgb(4, 4, vec![[204, 102, 51]; 16]);
         let mut scene = OneLayer {
             image: &image,
             fit: FitMode::Stretch,
-            adjustment,
+            adjustment: Adjustment::neutral_for_test(),
         };
         let rendered = render_frame(&mut scene, 6, 3, Duration::ZERO);
         // channel = ((c - 0.5) * 1.28 + 0.5) with c = 0.8, 0.4, 0.2
@@ -240,11 +225,11 @@ mod tests {
                 pixels.push(if x < 4 { [255, 255, 255] } else { [0, 0, 0] });
             }
         }
-        let image = DecodedImage::from_rgb(8, 8, pixels);
+        let image = Picture::from_rgb(8, 8, pixels);
         let mut scene = OneLayer {
             image: &image,
             fit: FitMode::Stretch,
-            adjustment: neutral(),
+            adjustment: Adjustment::neutral_for_test(),
         };
         let rendered = render_frame(&mut scene, 10, 4, Duration::ZERO);
         let width = rendered.raster.width;
@@ -259,12 +244,12 @@ mod tests {
 
     #[test]
     fn fit_mode_leaves_borders_and_fill_covers_everything() {
-        let image = DecodedImage::from_rgb(4, 4, vec![[255, 255, 255]; 16]);
+        let image = Picture::from_rgb(4, 4, vec![[255, 255, 255]; 16]);
         let lit_rows = |fit| {
             let mut scene = OneLayer {
                 image: &image,
                 fit,
-                adjustment: neutral(),
+                adjustment: Adjustment::neutral_for_test(),
             };
             let rendered = render_frame(&mut scene, 40, 10, Duration::ZERO);
             let width = rendered.raster.width;
@@ -276,12 +261,27 @@ mod tests {
         let (fill, _) = lit_rows(FitMode::Fill);
         assert!(fill.iter().all(|lit| *lit), "fill covers the whole screen");
         let (fit, rendered) = lit_rows(FitMode::Fit);
-        // Square image on an 80 x 40 dot screen: full height, 40 dots wide.
+        // Square picture on an 80 x 40 dot screen: full height, 40 dots wide.
         assert!(fit.iter().all(|lit| *lit));
         let width = rendered.raster.width;
         assert_eq!(rendered.raster.dots[width / 2 - 25], 0.0, "left border");
         assert_eq!(rendered.raster.dots[width / 2 + 25], 0.0, "right border");
         assert_eq!(rendered.cell_colors[0], [0, 0, 0]);
+    }
+
+    #[test]
+    fn the_layer_key_changes_with_the_view_and_the_weight() {
+        let image = Picture::from_rgb(2, 2, vec![[1, 2, 3]; 4]);
+        let view = view_rect(FitMode::Fill, 1.0, 2.0, Pose::STILL);
+        let layer = |weight| Layer {
+            image: &image,
+            view,
+            weight,
+        };
+        let first = layers_key(&[layer(1.0)], 10, 5);
+        assert_eq!(first, layers_key(&[layer(1.0)], 10, 5));
+        assert_ne!(first, layers_key(&[layer(0.5)], 10, 5));
+        assert_ne!(first, layers_key(&[layer(1.0)], 11, 5));
     }
 
     #[test]

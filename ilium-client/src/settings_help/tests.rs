@@ -173,8 +173,6 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-64".to_owned()
         } else if kind == AnimationKind::Video {
             "AN-15".to_owned()
-        } else if kind == AnimationKind::Images {
-            "AN-17".to_owned()
         } else if kind == AnimationKind::PluginScene {
             "AN-24".to_owned()
         } else {
@@ -291,7 +289,7 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("status-help-fixture".into(), project.path().to_path_buf());
         app.set_screen_area(Rect::new(0, 0, width, height));
-        app.animation_settings.kind = crate::background_animation::AnimationKind::Images;
+        app.animation_settings.kind = crate::background_animation::AnimationKind::Video;
         let supplied = report.clone();
         *app.animation_frame.host_mut() = AmbientHost::with_factory(Box::new(move |_, _, _| {
             Box::new(ReportScene(supplied.clone()))

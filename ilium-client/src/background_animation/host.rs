@@ -392,9 +392,9 @@ mod saved_runtime_tests {
             Box::new(MessageScene("synthetic saved host scene".into()))
         }));
         let settings = AmbientSettings::default();
-        host.sync(AmbientKind::Images, &settings, Duration::ZERO);
+        host.sync(AmbientKind::Video, &settings, Duration::ZERO);
         host.release();
-        host.sync(AmbientKind::Images, &settings, Duration::from_secs(1));
+        host.sync(AmbientKind::Video, &settings, Duration::from_secs(1));
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 2);
         assert!(Arc::ptr_eq(&seen[0], &seen[1]));

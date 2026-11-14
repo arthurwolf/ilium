@@ -19,11 +19,10 @@ This page documents the animations that play media or run a small game: **Video*
   - [Audio spectrum controls](#audio-spectrum-controls)
   - [Audio spectrum troubleshooting](#audio-spectrum-troubleshooting)
 - [Images](#images)
-  - [Show a single image](#show-a-single-image)
+  - [Show a single picture](#show-a-single-picture)
   - [Show a folder slideshow](#show-a-folder-slideshow)
-  - [Show a URL slideshow](#show-a-url-slideshow)
   - [Images controls](#images-controls)
-  - [Limits, cache and troubleshooting](#limits-cache-and-troubleshooting)
+  - [Limits and troubleshooting](#limits-and-troubleshooting)
 - [Wikipedia](#wikipedia)
   - [Wikipedia controls](#wikipedia-controls)
   - [Caching and offline use](#caching-and-offline-use)
@@ -47,7 +46,7 @@ Things that hold for every scene on this page:
 - Changes save immediately to the project. If a save fails, the previous effective setting is kept and an error is shown.
 - Animation is decoration only. It never changes terminal history or Ilium's copy sources, although selecting text with your outer terminal's own mouse selection can include the decorative Braille dots.
 - The explicitly opened demo preview stays live even when Motion is Off; as a background, scenes freeze when Motion is Off.
-- Shared speed, density and dithering apply to every scene. The shared colour rows are hidden for scenes that paint their own colours (for example Images).
+- Shared speed, density and dithering apply to every scene. The shared colour rows are hidden for scenes that paint their own colours.
 - Scenes with a **Scene status** row use it to report problems (a missing helper program, no audio input, a failed download).
 
 ## Video
@@ -239,77 +238,55 @@ Out-of-range values saved by hand are clamped when the settings load; the FFT si
 
 ## Images
 
-Coloured Braille pictures from files, folders or URLs, with slow pan and zoom (Ken Burns motion) and, in the folder and URL modes, a slideshow with cross-fades. The scene paints its own cell colours, so the shared palette rows are hidden; the controls below set the colour treatment instead.
+Coloured Braille pictures with slow pan and zoom (Ken Burns motion) and, for folders, a slideshow with cross-fades. Images is a scene of the **Scenes** core plugin: choose **Plugin scene** in **Settings → Animations**, then **Images** in the **Scene** row. If the Scenes plugin is disabled, the scene disappears from the list. The scene has no colour rows of its own: the shared look (palette, colour mode, brightness, contrast and the other tone rows) recolours it like any other scene.
 
-Supported image types: `png`, `jpg`, `jpeg`, `gif`, `bmp`, `webp`.
+Supported image types: `png`, `jpg`, `jpeg`, `gif`, `bmp`, `webp`. A picture may be up to 8 MiB encoded and 16 megapixels.
 
-### Show a single image
+### Show a single picture
 
-1. Select **Images** in **Settings → Animations**.
-2. Leave **Source** on **Single image** (the default).
-3. Set **Image from** to one of:
-   - **Built-in list**: pick a **Built-in image** (NightCafe dreamscape, Ubuntu-like mountain lake, Ubuntu-like golden desktop, Unsplash desk). These are links that are downloaded once and cached.
-   - **Local file**: enter an absolute path in **Image file**; a leading `~/` is expanded. The file must exist and have a supported extension, otherwise an error is shown and the old value stays.
-   - **URL**: enter an `https://` link in **Image URL**. It is downloaded in the background and cached.
+1. Select **Images** in the **Scene** row.
+2. Leave **Show** on **Built-in picture** and pick one of four bundled pictures (NightCafe dreamscape, Ubuntu-like mountain lake, Ubuntu-like golden desktop, Unsplash desk). They are downloaded when first shown; the scene shows a soft placeholder until the picture arrives.
+3. Or set **Show** to **Picked image file** and use the **Image file** row to pick a file from disk. The scene can read only the file you pick.
 4. Choose **Motion** and **Fit** as you like.
 
 ### Show a folder slideshow
 
-1. Set **Source** to **Folders / globs**.
-2. In **Folders**, enter directories or glob patterns separated by `;`, for example `~/Pictures;/data/*/wallpapers/**/*.jpg`. Globs support `*`, `?`, `[a-z]` and `**` for any depth. Hidden entries are skipped. Every folder (or the fixed part of a glob) must exist.
-3. Leave **Include subfolders** on to also scan below each plain directory entry; glob patterns choose their own depth with `**`.
-4. Pick the **Order** (Sequential in name order, or Shuffle), the **Seconds per image** and the **Cross-fade**.
-
-### Show a URL slideshow
-
-1. Set **Source** to **URL list**.
-2. In **Image URLs**, enter `https://` image links separated by `;`, or one link to a `.txt` file that holds one image URL per line. Only `https://` is accepted; URLs may be up to 2000 characters.
-3. Set the order, timing and cross-fade as for folders.
+1. Set **Show** to **Folder slideshow**.
+2. Use the **Folder**, **Second folder** and **Third folder** rows to pick up to three directories. The scene can read only the folders you pick.
+3. Leave **Include sub-folders** on to also scan below each folder. Hidden entries are skipped.
+4. Pick the **Order** (Sequential in name order, or Shuffle), the **Display time** and the **Cross-fade**.
 
 ### Images controls
 
-Rows depend on the source mode and on the motion setting. The "Row id" is the control name used in the project configuration.
+Rows depend on the **Show** mode and on the motion setting. The "Row id" is the control name used in the project configuration.
 
 | Control | Row id | Range or values | Default | Shown when |
 | --- | --- | --- | --- | --- |
-| Source | `mode` | Single image, Folders / globs, URL list | Single image | always |
-| Image from | `source_kind` | Built-in list, Local file, URL | Built-in list | Single image |
-| Built-in image | `builtin_image` | 4 bundled links | NightCafe dreamscape | Single image, Built-in list |
-| Image file | `file` | absolute path (`~/` allowed) | empty | Single image, Local file |
-| Image URL | `url` | `https://` link | empty | Single image, URL |
-| Folders | `folders` | `;`-separated directories or globs | empty | Folders / globs |
-| Include subfolders | `recursive` | on / off | on | Folders / globs |
-| Image URLs | `urls` | `;`-separated `https://` links, or one `.txt` list | empty | URL list |
-| Order | `order` | Sequential, Shuffle | Sequential | slideshow modes |
-| Shuffle seed | `shuffle_seed` | 0 to 9999 | 0 | slideshow modes with Shuffle |
-| Seconds per image | `display_seconds` | 3 to 1800 s, step 5 | 30 s | slideshow modes, or whenever Motion is not None |
-| Cross-fade | `transition_seconds` | 0 to 30 s | 3 s | slideshow modes |
+| Show | `mode` | Built-in picture, Picked image file, Folder slideshow | Built-in picture | always |
+| Picture | `source` | 4 bundled pictures | NightCafe dreamscape | Built-in picture |
+| Image file | `file` | a picked file | empty | Picked image file |
+| Folder, Second folder, Third folder | `folder`, `folder_2`, `folder_3` | picked directories | empty | Folder slideshow |
+| Include sub-folders | `recursive` | on / off | on | Folder slideshow |
+| Order | `order` | Sequential, Shuffle | Sequential | Folder slideshow |
+| Shuffle seed | `shuffle_seed` | 0 to 9999 | 0 | Folder slideshow |
+| Cross-fade | `transition_seconds` | 0 to 30 s | 3 s | Folder slideshow |
+| Display time | `display_seconds` | 3 to 1800 s | 30 s | always |
 | Motion | `motion` | Slow zoom in, Slow zoom out, Pan left-right, Pan up-down, Random drift, Zoom + pan, None | Slow zoom in | always |
-| Motion strength | `motion_strength` | 0 to 50 % | 12 % | Motion not None |
-| Easing | `easing` | Smooth, Linear, Ease out | Smooth | Motion not None |
+| Motion strength | `motion_strength_percent` | 0 to 50 % | 12 % | always |
+| Easing | `easing` | Smooth, Linear, Ease out | Smooth | always |
 | Fit | `fit` | Fill (crop), Fit (borders), Stretch | Fill (crop) | always |
-| Preset | `preset` | Dimmed, Vivid, Monochrome, Cool, Warm | Dimmed | always |
-| Brightness | `brightness` | 0 to 200 % | 72 % | always |
-| Contrast | `contrast` | 0 to 200 % | 82 % | always |
-| Saturation | `saturation` | 0 to 200 % (0 is grey) | 82 % | always |
-| Hue tint | `hue` | 0 to 360 deg; 180 is neutral, below is cooler, above is warmer | 180 | always |
-| Intensity | `intensity` | 0 to 100 % | 48 % | always |
-| Opacity | `opacity` | 0 to 100 % | 58 % | always |
 
 Notes:
 
-- The cross-fade is capped at half the display time. **Seconds per image** is also the length of one pan/zoom move, so with Motion on, a single image slowly completes one move per interval.
+- The cross-fade is capped at half the display time. **Display time** is also the length of one pan/zoom move, so with Motion on, a single picture slowly completes one move per interval.
 - A shuffle seed of 0 gives a different order at every start; any other value always gives the same order.
-- The Preset sets the base colour treatment and the six sliders scale it. **Intensity** controls how many dots light up (higher also lights darker areas); **Opacity** controls how strongly the picture shows over the terminal background.
-- With one image and Motion None the scene stops redrawing (1 frame per second); while a move, fade, slideshow step or load is in progress it redraws at about 12 frames per second. Choose **None** to save redraws.
+- With one picture and Motion None the scene stops redrawing (1 frame per second); while a move, fade, slideshow step or load is in progress it redraws at about 12 frames per second. Choose **None** to save redraws.
 
-### Limits, cache and troubleshooting
+### Limits and troubleshooting
 
-- Folder scans stop at 20,000 images, 50,000 directories and a depth of 24. A URL list holds at most 500 URLs; a `.txt` list file may be at most 1 MiB.
-- Each download has a 15 second timeout and a 32 MiB size limit. Downloads are cached on disk under Ilium's cache directory (an `images` folder inside the `ambient` cache) and refreshed after 30 days; if a refresh fails, the stale copy is used.
-- Only a few decoded pictures are kept in memory at once (the six most recent) and the next two are prefetched, so large folders are cheap to browse.
-- Decoding runs on a worker thread; large images are decoded at a bounded size (between 1024x576 and 3840x2160).
-- If a file or URL cannot be loaded, the **Scene status** row explains why and the slideshow moves on.
+- Each download has a 15 second timeout. The bundled pictures are the only network sources; arbitrary URLs and URL lists are not supported.
+- Only a few decoded pictures are kept in memory at once and the next one is prefetched, so large folders are cheap to browse.
+- If a picture cannot be loaded, the **Scene status** row explains why and the slideshow moves on.
 
 ## Wikipedia
 

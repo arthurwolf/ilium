@@ -672,6 +672,20 @@ Side basis: `ilium.core.search/sources` is server because the server `capabiliti
 
 Side basis: `ilium.core.search/rank` is server because the server `capabilities` list holds its grant, and the server answers the query and holds the hits before the client panel shows them.
 
+### Driving the panel from the control plane
+
+The kernel control plane (the voice agent's `ilium_search` tool and `ilium ctl`) has no search code of its own. It runs the plugin's open command, `ilium.core.search/open`, with a JSON object in the command arguments. No arguments, `{}` or an object without `action` open the panel as the key and the toolbar do. An `action` asks for one of these:
+
+| `action` | Other fields | Effect |
+|---|---|---|
+| `query` | `query` (non-empty text), optional `index` | Opens the panel if it is closed, types the text and sends the query. With `index`, that result is selected when the answer arrives. A newer query drops what waited for an older one. |
+| `select_next` | none | Moves the selection one result down and stops at the last result. |
+| `select_previous` | none | Moves the selection one result up and stops at the first result. |
+| `open_result` | optional `index` | Opens the result at `index`, or the selected result, and closes the panel. An `index` past the results does nothing. |
+| `close` | none | Closes the panel. |
+
+All of them except `query` do nothing while the panel is closed. A request that needs the answer of a query in flight (`select_next`, `select_previous`, `open_result`) waits for that answer and runs in the order it arrived. An unknown `action` or a blank `query` is dropped. Opening a result jumps exactly as activating it in the panel does: a pane is focused, a file opens in the editor at its line. With the plugin off, the command has no handler and the control plane reports that the Search plugin is not running.
+
 ### ABI used
 
 - [UI API](/pages/api-ui/) and [ui.panels](/pages/capability-ui-panels/)

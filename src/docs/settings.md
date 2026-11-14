@@ -50,8 +50,7 @@ The tabs appear in this order:
 | Toolbar | Tree toolbar order, buttons and inactivity threshold | `[ui]` |
 | Agent Monitoring | Display mode, polling, custom agent signatures, status icons, progress footer | `[ui]`, `[detection]` |
 | Agent Cost | Spend indicators and what counts as expensive | `[cost]` |
-| Optimization | Scan Codex or Claude Code transcripts and apply the cheapest auto-compaction threshold | none (writes the agent's own config) |
-| Remote compaction | Summarize a Claude or Codex session through the Inference model and resume from it | `[remote_compaction]` |
+| Remote compaction | Summarize a Claude or Codex session through the Inference model and resume from it (a page of the Compaction plugin) | `[plugins."ilium.core.compaction"]` |
 | Keyboard | Prefix keys and per-action key remapping, complete presets | `[keyboard]`, `[keybindings]` |
 | Terminal | Scrollback budget, new-pane directory, parser pool | `[terminal]` |
 | Editor | Line display, line numbers, minimap, autosave, Markdown default | `[editor]` |
@@ -168,13 +167,9 @@ Poll intervals below a few hundred milliseconds are clamped up by the server. Cu
 
 Controls spend indicators and how "expensive" is decided (fixed cuts, burn cuts, quota budget percentage, or a USD budget). Custom thresholds are set under `[cost]`. See [Agent cost](agent-cost.md).
 
-### Optimization
-
-Scans your agent transcripts (`~/.codex/sessions`, `~/.claude/projects`) and recommends the cheapest auto-compaction threshold for your own sessions. The two sub-tabs, **Codex** and **Claude Code**, each open on a **Scan sessions** button: nothing is scanned until you press it. The scan lists the files, reads them with a progress bar (by bytes, with the phase, files done of total, elapsed time and current file; `Esc` or **Cancel** stops it) and then shows the report: the recommendation with an **Optimal: ... - Apply to <agent>** button on top, a comparison of the CLI default, your current setting and the recommendation, corpus and compaction statistics, the cost mix, the fixed prefix, a simulation table with a chart, per-model optima, rework sensitivity, compaction regimes and warnings. Per-model optima are shown for information only: the setting is one global value and cannot be applied per model. A failed or cancelled scan keeps the previous report.
-
-**Apply** opens a confirmation that names the resolved file, the key, the old and new value, the exact change and any environment, project or profile override that would shadow it. Only that one key changes (`autoCompactWindow` in `~/.claude/settings.json`, `model_auto_compact_token_limit` in `~/.codex/config.toml`), comments and everything else stay byte for byte, and only **new** agent sessions use it; running sessions keep the limit they loaded. A **Revert** button appears after an apply and restores the previous value unless the file was edited since. Ilium never restarts an agent. Keys: `←`/`→` agent, `s` scan, `a` apply, `e` apply the simulated optimum, `r` revert, `↑`/`↓`/`PgUp`/`PgDn` scroll. See [Agent cost](agent-cost.md) for the price table the dollar figures use.
-
 ### Remote compaction
+
+This tab is contributed by the Compaction plugin: turning the plugin off removes the tab, the Compact command and the automatic trigger, and the agent toolbar's Compact button sends the agent's own `/compact` again. The compaction optimizer is not a tab: the plugin's **Analyze compaction settings** command opens it as a panel for the focused agent pane (see [Remote compaction](remote-compaction.md)).
 
 Off by default. When on, the Compact button of a Claude or Codex pane summarizes the transcript with the provider and model chosen in the **Inference** tab instead of sending `/compact`, then resumes the agent from that summary. The tab holds the automatic trigger (a context threshold, a wait for a pause and a cooldown), the summarizing technique per agent (the real upstream prompts of Claude Code, Codex, opencode and Gemini CLI, an Ilium blend, or your own prompt), how much recent history stays verbatim, tool-output trimming, secret redaction, the summarizer input window and the number of backups kept. The transcript, which can contain prompts, code and secrets, is sent to that provider: a privacy box at the top of the tab says so and closes for good with `x`, `Delete` or its `[x]` button. The tab also reads each agent's own compaction trigger (user and project settings files, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, the disable variables, Codex `model_auto_compact_token_limit`), shows it next to the CLI default, and warns when it is at or below the remote threshold, because the agent would then always compact first. Percentages assume the agent's default context window. See [Remote compaction](remote-compaction.md).
 

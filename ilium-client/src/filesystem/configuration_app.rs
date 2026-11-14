@@ -11,7 +11,7 @@ pub(crate) struct ConfigurationAdmission {
 use super::configuration::{ConfigurationChange, ConfigurationSaved};
 use super::configurations::{ConfigurationIntent, InferenceSaveState};
 use super::ordered::WriteCompletion;
-use crate::app::{App, InferenceSettingField, Mode};
+use crate::app::{App, Mode};
 use ilium_execution::JobOutcome;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -69,7 +69,6 @@ impl App {
         let operation = Arc::new(());
         self.inference_save_state = InferenceSaveState::Pending {
             operation: Arc::clone(&operation),
-            budget_dialog: None,
         };
         self.inference_settings_save_error = None;
         let prepared = self
@@ -167,7 +166,6 @@ impl App {
         {
             return;
         }
-        self.finish_inference_number_autosave(operation, &result);
         self.finish_inference_save(operation, result.clone());
         if let Some(token) = token {
             self.finish_value_dialog_save(token, result);
@@ -179,13 +177,12 @@ impl App {
         operation: &Arc<()>,
         result: Result<(), String>,
     ) {
-        let budget_dialog = match &self.inference_save_state {
-            InferenceSaveState::Pending {
-                operation: current,
-                budget_dialog,
-            } if Arc::ptr_eq(current, operation) => budget_dialog.clone(),
-            _ => return,
-        };
+        if !matches!(&self.inference_save_state,
+            InferenceSaveState::Pending { operation: current }
+            if Arc::ptr_eq(current, operation))
+        {
+            return;
+        }
         self.inference_save_state = InferenceSaveState::Unsaved;
         if let Err(error) = result {
             self.status_message = Some(format!("Could not save Inference settings: {error}"));
@@ -195,26 +192,6 @@ impl App {
         self.inference_save_state = InferenceSaveState::Durable;
         self.inference_settings_save_error = None;
         self.status_message = Some("Inference settings saved to disk".into());
-        let Some((identity, limit)) = budget_dialog else {
-            return;
-        };
-        let owns_dialog = self
-            .restructure_budget_identity
-            .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, &identity));
-        let owns_value = matches!(
-            &self.mode,
-            Mode::InferenceSettingPrompt(
-                InferenceSettingField::RestructurePromptTokenLimit,
-                state
-            ) if state.buf.trim().parse::<u32>() == Ok(limit)
-        );
-        if !owns_dialog || !owns_value {
-            return;
-        }
-        self.restructure_budget_identity = None;
-        self.restructure_budget_autosave_deadline = None;
-        self.pop_modal();
     }
 
     fn collect_value_dialog_configuration(
@@ -570,104 +547,19 @@ impl App {
 #[cfg(test)]
 mod inference_value_receipt_tests {
     use super::*;
-    use crate::value_dialog::{DialogOutcome, ValueDialogState};
+    use crate::value_dialog::ValueDialogState;
     use crate::value_settings::SettingsNumber;
 
     fn budget_app(directory: &std::path::Path) -> App {
         let mut app = App::new("synthetic-budget-receipt".into(), directory.into());
         app.config_dir = Some(directory.into());
         app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
-            tab: crate::app::SettingsTab::Titles,
+            tab: crate::app::SettingsTab::Editor,
             ..crate::app::SettingsState::default()
         }));
-        app.begin_settings_number_dialog(SettingsNumber::InferenceTokenBudget);
+        app.begin_settings_number_dialog(SettingsNumber::EditorAutosaveDelay);
         app.settle_filesystem_for_test();
         app
-    }
-
-    fn paste_budget(app: &mut App, text: &str) -> std::time::Instant {
-        let Mode::ValueDialog(host) = &mut app.mode else {
-            panic!("number");
-        };
-        let ValueDialogState::Number(number) = &mut host.dialog else {
-            panic!("number");
-        };
-        number.draft.buf.clear();
-        crate::keys::handle_event(app, crossterm::event::Event::Paste(text.into()));
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("number");
-        };
-        let crate::value_dialog_host::ValueTarget::SettingsNumber {
-            autosave: Some(autosave),
-            ..
-        } = &host.target
-        else {
-            panic!("debounce");
-        };
-        autosave.deadline.unwrap()
-    }
-
-    #[test]
-    fn typed_budget_debounces_draft_and_enter_upgrades_same_pending_write() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = budget_app(directory.path());
-        let deadline = paste_budget(&mut app, "123456");
-        let attempts = app.configuration_admission.attempts;
-        assert!(!app.tick_inference_number_autosave(deadline - std::time::Duration::from_millis(1)));
-        assert_eq!(app.configuration_admission.attempts, attempts);
-        assert!(app.tick_inference_number_autosave(deadline));
-        assert!(matches!(&app.mode, Mode::ValueDialog(host) if !host.is_saving()));
-        assert_eq!(app.configuration_admission.attempts, attempts + 1);
-        crate::keys::handle_event(
-            &mut app,
-            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Enter,
-                crossterm::event::KeyModifiers::NONE,
-            )),
-        );
-        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
-        assert_eq!(app.configuration_admission.attempts, attempts + 1);
-        app.settle_filesystem_for_test();
-        assert!(matches!(&app.mode, Mode::Settings(_)));
-        assert_eq!(
-            crate::config::load(directory.path())
-                .unwrap()
-                .inference
-                .restructure_prompt_token_limit,
-            123456
-        );
-    }
-
-    #[test]
-    fn typed_budget_autosave_keeps_dialog_open_and_escape_cancels_unsent_draft() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = budget_app(directory.path());
-        let deadline = paste_budget(&mut app, "123456");
-        assert!(app.tick_inference_number_autosave(deadline));
-        app.settle_filesystem_for_test();
-        assert!(matches!(&app.mode, Mode::ValueDialog(host) if !host.is_saving()));
-        assert!(matches!(
-            app.inference_save_state,
-            InferenceSaveState::Durable
-        ));
-        let next = paste_budget(&mut app, "234567");
-        let attempts = app.configuration_admission.attempts;
-        crate::keys::handle_event(
-            &mut app,
-            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Esc,
-                crossterm::event::KeyModifiers::NONE,
-            )),
-        );
-        assert!(!app.tick_inference_number_autosave(next));
-        assert_eq!(app.configuration_admission.attempts, attempts);
-        assert_eq!(
-            crate::config::load(directory.path())
-                .unwrap()
-                .inference
-                .restructure_prompt_token_limit,
-            123456
-        );
     }
 
     #[test]
@@ -686,7 +578,6 @@ mod inference_value_receipt_tests {
         host.begin_save(token.clone());
         app.inference_save_state = InferenceSaveState::Pending {
             operation: operation.clone(),
-            budget_dialog: None,
         };
         app.collect_inference_value_configuration(
             &operation,
@@ -723,7 +614,6 @@ mod inference_value_receipt_tests {
         let latest = Arc::new(());
         app.inference_save_state = InferenceSaveState::Pending {
             operation: latest.clone(),
-            budget_dialog: None,
         };
         app.status_message = Some("newer save status".into());
         app.inference_settings_save_error = Some("newer save error".into());
@@ -739,66 +629,5 @@ mod inference_value_receipt_tests {
                 Some("newer save error")
             );
         }
-    }
-
-    #[test]
-    fn typed_budget_waits_for_one_own_write_retains_failure_and_retries() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = budget_app(directory.path());
-        std::fs::write(
-            directory.path().join("config.toml"),
-            "invalid synthetic configuration = [",
-        )
-        .unwrap();
-        let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("exact budget");
-        };
-        if let ValueDialogState::Number(number) = &mut host.dialog {
-            number.draft.buf = "123456".into();
-        }
-        let outcome = DialogOutcome::CommitNumber("123456".into());
-        let attempts = app.configuration_admission.attempts;
-        app.commit_settings_number_dialog(&mut host, &outcome)
-            .unwrap();
-        assert!(host.is_saving());
-        assert!(app
-            .commit_settings_number_dialog(&mut host, &outcome)
-            .is_err());
-        assert_eq!(app.configuration_admission.attempts, attempts + 1);
-        app.mode = Mode::ValueDialog(host);
-        app.settle_filesystem_for_test();
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("failure retains child");
-        };
-        assert!(!host.is_saving());
-        let ValueDialogState::Number(number) = &host.dialog else {
-            panic!("number");
-        };
-        assert!(number.error.is_some());
-        assert!(matches!(
-            app.inference_save_state,
-            InferenceSaveState::Unsaved
-        ));
-        std::fs::write(directory.path().join("config.toml"), "").unwrap();
-        let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("retry");
-        };
-        app.finish_value_dialog(host, outcome);
-        assert!(matches!(&app.mode, Mode::ValueDialog(host) if host.is_saving()));
-        app.settle_filesystem_for_test();
-        assert!(
-            matches!(&app.mode, Mode::Settings(state) if state.tab == crate::app::SettingsTab::Titles)
-        );
-        assert!(matches!(
-            app.inference_save_state,
-            InferenceSaveState::Durable
-        ));
-        assert_eq!(
-            crate::config::load(directory.path())
-                .unwrap()
-                .inference
-                .restructure_prompt_token_limit,
-            123456
-        );
     }
 }

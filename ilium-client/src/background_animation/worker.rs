@@ -691,8 +691,6 @@ pub(super) fn settings_fit(settings: &AnimationSettings) -> bool {
     let strings = [
         &ambient.location.label,
         &ambient.video.source,
-        &ambient.images.folders,
-        &ambient.images.urls,
         &ambient.openstreetmap.local_path,
         &ambient.openstreetmap.endpoint,
         &ambient.openstreetmap.coordinates,
@@ -1398,7 +1396,7 @@ mod tests {
         RenderRequest {
             revision,
             settings: AnimationSettings {
-                kind: AnimationKind::Images,
+                kind: AnimationKind::Video,
                 ..Default::default()
             },
             width: 2,

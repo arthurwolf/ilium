@@ -60,8 +60,6 @@ pub enum ValueTarget {
     SettingsNumber {
         field: crate::value_settings::SettingsNumber,
         directory: std::path::PathBuf,
-        inference_revision: Option<u64>,
-        autosave: Option<InferenceNumberAutosave>,
         read: Option<NumericReadState>,
     },
     SettingsChoice {
@@ -78,12 +76,6 @@ pub struct NumericReadState {
     pub runtime_value: String,
     pub accepted_writes: u64,
     pub settled: Result<(), String>,
-}
-
-#[derive(Default)]
-pub struct InferenceNumberAutosave {
-    pub deadline: Option<std::time::Instant>,
-    pub operation: Option<std::sync::Arc<()>>,
 }
 
 pub struct ValueDialogHost {
@@ -347,11 +339,6 @@ impl ValueDialogHost {
                 field,
                 directory,
                 read: None,
-                autosave: (field == crate::value_settings::SettingsNumber::InferenceTokenBudget)
-                    .then(InferenceNumberAutosave::default),
-                inference_revision: (field
-                    == crate::value_settings::SettingsNumber::InferenceTokenBudget)
-                    .then_some(app.onboarding_revision),
             },
             dialog: ValueDialogState::Number(crate::value_dialog::NumberDialogState::new(
                 field.title(),
@@ -423,23 +410,6 @@ impl ValueDialogHost {
     pub(crate) fn number_read_ready(&self) -> Result<(), String> {
         self.number_read()
             .map_or(Ok(()), |read| read.settled.clone())
-    }
-
-    pub(crate) fn inference_budget_draft(&self) -> Option<&str> {
-        self.number_read_ready().ok()?;
-        if !matches!(
-            self.target,
-            ValueTarget::SettingsNumber {
-                autosave: Some(_),
-                ..
-            }
-        ) {
-            return None;
-        }
-        match &self.dialog {
-            ValueDialogState::Number(number) => Some(&number.draft.buf),
-            _ => None,
-        }
     }
 
     pub fn is_saving(&self) -> bool {

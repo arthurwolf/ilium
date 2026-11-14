@@ -1004,20 +1004,20 @@ impl App {
         frame_row_text(&slots, &contents)
     }
 
-    /// The command a click on the footer row of pane `node` runs: the command target of the
-    /// first footer-row slot (in slot order) that shows text and whose content carries one.
-    /// `None` when the row is absent or nothing on it is clickable.
-    pub(crate) fn plugin_footer_command(&self, node: ilium_core::NodeId) -> Option<String> {
+    /// The command a click at `column` of the frame row placed `placement` of pane `node`
+    /// runs: the command target of the slot drawn under that column. `column` counts cells
+    /// from the first character of the row text (the frame draws one blank cell before it).
+    /// `None` when the row is absent or nothing clickable is under the column.
+    pub(crate) fn plugin_frame_row_command(
+        &self,
+        node: ilium_core::NodeId,
+        placement: FrameRowPlacement,
+        column: usize,
+    ) -> Option<String> {
         let (slots, contents) = self.frame_slots_with_contents(node, |slot| {
-            slot.placement.as_deref() == Some(FrameRowPlacement::FooterRow.manifest_name())
+            slot.placement.as_deref() == Some(placement.manifest_name())
         })?;
-        slots.iter().find_map(|slot| {
-            contents
-                .iter()
-                .find(|content| content.plugin == slot.plugin && content.slot == slot.id)
-                .filter(|content| !content.text.trim().is_empty())
-                .and_then(|content| content.command.clone())
-        })
+        frame_row_command_at(&slots, &contents, column)
     }
 
     /// The `pane_frame_slots` entries `keep` selects that apply to pane `node`, with what
@@ -1165,7 +1165,23 @@ fn frame_row_text(
     slots: &[ChromeItem],
     contents: &[super::host::TreeDecoration],
 ) -> Option<String> {
-    let mut ordered: Vec<(usize, String)> = contents
+    let texts: Vec<String> = frame_row_segments(slots, contents)
+        .into_iter()
+        .map(|(shown, _)| shown)
+        .collect();
+    (!texts.is_empty()).then(|| texts.join(FRAME_ROW_SEPARATOR))
+}
+
+/// Between two slots of one frame row.
+const FRAME_ROW_SEPARATOR: &str = " · ";
+
+/// The slots of one frame row as drawn, in slot order: each shown text with the command its
+/// click runs. Blank content takes no place.
+fn frame_row_segments(
+    slots: &[ChromeItem],
+    contents: &[super::host::TreeDecoration],
+) -> Vec<(String, Option<String>)> {
+    let mut ordered: Vec<(usize, String, Option<String>)> = contents
         .iter()
         .filter_map(|content| {
             let index = slots
@@ -1178,14 +1194,35 @@ fn frame_row_text(
                 _ => content.text.trim().to_owned(),
             };
             let shown = sanitize_plugin_text(text.trim(), FRAME_ROW_LIMIT);
-            (!shown.trim().is_empty()).then_some((index, shown))
+            (!shown.trim().is_empty()).then(|| (index, shown, content.command.clone()))
         })
         .collect();
-    ordered.sort_by_key(|(index, _)| *index);
+    ordered.sort_by_key(|(index, _, _)| *index);
     // A slot set both ways (a frame slot and a decoration) shows once.
-    ordered.dedup_by_key(|(index, _)| *index);
-    let texts: Vec<String> = ordered.into_iter().map(|(_, shown)| shown).collect();
-    (!texts.is_empty()).then(|| texts.join(" · "))
+    ordered.dedup_by_key(|(index, _, _)| *index);
+    ordered
+        .into_iter()
+        .map(|(_, shown, command)| (shown, command))
+        .collect()
+}
+
+/// The command of the frame row slot drawn under `column` (cells from the start of the row
+/// text); `None` on a separator, past the end, or on a slot without a click target.
+fn frame_row_command_at(
+    slots: &[ChromeItem],
+    contents: &[super::host::TreeDecoration],
+    column: usize,
+) -> Option<String> {
+    let separator = unicode_width::UnicodeWidthStr::width(FRAME_ROW_SEPARATOR);
+    let mut start = 0;
+    for (shown, command) in frame_row_segments(slots, contents) {
+        let end = start + unicode_width::UnicodeWidthStr::width(shown.as_str());
+        if (start..end).contains(&column) {
+            return command;
+        }
+        start = end + separator;
+    }
+    None
 }
 
 /// Closes every plugin view the right-hand area no longer shows, so a plugin is not asked to
@@ -1422,6 +1459,44 @@ mod tests {
         );
         assert_eq!(frame_row_text(&slots, &[]), None);
         assert_eq!(FrameRowPlacement::Banner.manifest_name(), "banner");
+    }
+
+    #[test]
+    fn a_click_on_a_frame_row_runs_the_command_of_the_slot_under_it() {
+        let slot = |id: &str| ChromeItem {
+            id: id.to_owned(),
+            placement: Some(FrameRowPlacement::FooterRow.manifest_name().to_owned()),
+            ..toolbar_item(None, id)
+        };
+        let slots = [slot("recover"), slot("finished")];
+        let content =
+            |slot: &str, text: &str, command: Option<&str>| super::super::host::TreeDecoration {
+                plugin: "ilium.notes".to_owned(),
+                node: ilium_plugin_api::generated::types::NodeId(4),
+                slot: slot.to_owned(),
+                text: text.to_owned(),
+                icon: None,
+                sort_key: 0,
+                command: command.map(str::to_owned),
+            };
+        let contents = [
+            content("finished", "close", Some("ilium.notes/close")),
+            content("recover", "stopped", None),
+        ];
+        // Drawn as "stopped · close": columns 0..7, separator 7..10, then 10..15.
+        assert_eq!(
+            frame_row_text(&slots, &contents).as_deref(),
+            Some("stopped · close")
+        );
+        assert_eq!(frame_row_command_at(&slots, &contents, 3), None);
+        assert_eq!(frame_row_command_at(&slots, &contents, 8), None);
+        for column in 10..15 {
+            assert_eq!(
+                frame_row_command_at(&slots, &contents, column).as_deref(),
+                Some("ilium.notes/close")
+            );
+        }
+        assert_eq!(frame_row_command_at(&slots, &contents, 15), None);
     }
 
     #[test]

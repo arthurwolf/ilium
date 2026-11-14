@@ -12,3 +12,7 @@ Items the tests call that the skeleton lacks, or manual details the tests had to
 - The queue is evaluated every frame by `app_attention.rs` from kernel pane state; the plugin receives no `PaneFocused`, `AgentActivityChanged` or `AttentionChanged` events (G19 feed `runtime/events_feed.rs` absent; the server feed turns only `TreeSnapshot` and `PaneNodeChanged` into events).
 - Briefing: the `inference` import has no backing provider (`ilium-plugin-host/src/imports/inference.rs` needs the `inference` service of a provider plugin; no core plugin provides it yet).
 - `attention/dialog.rs`: text entry and scrolling now exist in panels, but not in popups (see the tree gaps).
+
+## Re-verified against the tree (2026-11-14, cluster pass)
+
+- The kernel side of the Attention queue is gone: all 15 files of the inventory (`ilium-client/src/attention/*`) are absent, and `rg` finds no `app_attention*` module, no `[attention]` config table and no `attention.*` control path. What `rg -i attention` still finds in `tree_ui.rs`, `config.rs`, `agent_monitoring*.rs` and `settings_help/catalog/topics.json` is the tree's Attention monitoring mode (`ui.agent_monitoring_mode`, `attention_running_indicator`, `attention_progress_reports`), a different feature owned by the tree and agent-toolbar plugins. The G3 and G19 items above are built: `Intent::MarkAttention` and `Intent::AckAttention` route to `ClientEffect` (`plugin_host/effects.rs`), and `AttentionChanged` reaches server plugins through `runtime/events_feed.rs::attention_event`.

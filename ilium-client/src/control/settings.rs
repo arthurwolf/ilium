@@ -1172,43 +1172,12 @@ mod tests {
                 345678
             );
         }
-        app.settings_commit_inference_field(
-            crate::app::InferenceSettingField::RestructurePromptTokenLimit,
-            "234567".into(),
-        );
-        assert_eq!(
-            app.inference_settings.restructure_prompt_token_limit,
-            234567
-        );
-        app.settings_commit_inference_field(
-            crate::app::InferenceSettingField::RestructurePromptTokenLimit,
-            "0".into(),
-        );
-        assert_eq!(
-            app.inference_settings.restructure_prompt_token_limit,
-            234567
-        );
-        for invalid in ["-1", "abc", "1.5", "4294967296", ""] {
-            app.settings_commit_inference_field(
-                crate::app::InferenceSettingField::RestructurePromptTokenLimit,
-                invalid.into(),
-            );
-            assert_eq!(
-                app.inference_settings.restructure_prompt_token_limit,
-                234567
-            );
-            assert!(app
-                .status_message
-                .as_ref()
-                .unwrap()
-                .contains("positive whole number"));
-        }
         let snapshot =
             super::super::snapshot::capture(&app, StateDetail::Compact, &Default::default())
                 .unwrap();
         assert_eq!(
             snapshot.settings["inference"]["restructure_prompt_token_limit"],
-            234567
+            345678
         );
         assert!(snapshot.settings["writable_path_patterns"]
             .as_array()

@@ -1563,16 +1563,6 @@ mod tests {
             }
         }
         let expected: &[&str] = match kind {
-            AnimationKind::Images => &[
-                "builtin_image",
-                "display_seconds",
-                "easing",
-                "motion_strength",
-                "order",
-                "shuffle_seed",
-                "source_kind",
-                "transition_seconds",
-            ],
             AnimationKind::OpenStreetMap => {
                 &["destination", "dwell_seconds", "place", "selection", "tour"]
             }
@@ -3090,7 +3080,7 @@ mod tests {
     fn dependent_rows_follow_the_hosted_scene_through_the_app() {
         let (mut app, probe, _project) = settings_app(140, 40);
         app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
-        app.animation_settings.kind = AnimationKind::Images;
+        app.animation_settings.kind = AnimationKind::Video;
         draw(&mut app, 140, 40);
         assert!(app
             .animation_row_model()
@@ -3202,7 +3192,7 @@ mod tests {
     fn a_color_scene_preview_paints_colored_braille_cells() {
         let (mut app, probe, _project) = settings_app(140, 40);
         probe.uses_colors.store(true, Ordering::SeqCst);
-        app.animation_settings.kind = AnimationKind::Images;
+        app.animation_settings.kind = AnimationKind::Video;
         app.animation_settings.density_percent = 100;
         let terminal = draw(&mut app, 140, 40);
         let colors = rendered_dots(&terminal, Rect::new(0, 0, 140, 40))
@@ -3254,7 +3244,7 @@ mod tests {
         );
         // A shared slider persists through the same path.
         app.settings_adjust_animation_row(3, 1);
-        assert_eq!(app.animation_settings.kind, AnimationKind::Images);
+        assert_eq!(app.animation_settings.kind, AnimationKind::ALL[3]);
         let before = app.animation_settings.speed_percent;
         let speed = row_index(&app, &AnimationRow::Common("speed"));
         app.settings_set_animation_slider(speed, 175);
@@ -3273,7 +3263,7 @@ mod tests {
     fn keyboard_and_mouse_select_the_same_persisted_scene() {
         let (mut app, _probe, project) = settings_app(140, 40);
         key(&mut app, KeyCode::Down);
-        assert_eq!(app.animation_settings.kind, AnimationKind::Video);
+        assert_eq!(app.animation_settings.kind, AnimationKind::ALL[1]);
         let area = content_area(&app);
         let model = app.animation_row_model();
         pointer(
@@ -3282,13 +3272,13 @@ mod tests {
             area.x,
             row_y(area, &model, 3, Scrolls::default()).unwrap(),
         );
-        assert_eq!(app.animation_settings.kind, AnimationKind::Images);
+        assert_eq!(app.animation_settings.kind, AnimationKind::ALL[3]);
         assert_eq!(
             crate::project_config::load(project.path())
                 .unwrap()
                 .animation
                 .kind,
-            AnimationKind::Images
+            AnimationKind::ALL[3]
         );
     }
 
@@ -3587,10 +3577,9 @@ mod tests {
     fn actual_keyboard_changes_keep_palette_and_named_values_after_scene_switches() {
         let (mut app, _probe, project) = settings_app(80, 24);
         app.animation_settings.appearance.mode = ilium_ambient::style::ColorMode::Monotone;
-        for _ in 0..3 {
-            key(&mut app, KeyCode::Down);
-        }
-        assert_eq!(app.animation_settings.kind, AnimationKind::Images);
+        // The saved default is the plugin scene; start the walk from the first row.
+        app.animation_settings.kind = AnimationKind::ALL[0];
+        assert_eq!(app.animation_settings.kind, AnimationKind::Video);
         key(&mut app, KeyCode::Enter);
         let first_control = app.animation_row_model().first_control_index();
         assert_eq!(
@@ -3598,11 +3587,11 @@ mod tests {
             first_control,
             "Enter focuses scene controls"
         );
-        assert_eq!(app.animation_settings.kind, AnimationKind::Images);
+        assert_eq!(app.animation_settings.kind, AnimationKind::Video);
         let untouched = app.animation_settings.ambient.clone();
         key(&mut app, KeyCode::Right);
         assert_ne!(app.animation_settings.ambient, untouched);
-        let edited_images = app.animation_settings.ambient.clone();
+        let edited_ambient = app.animation_settings.ambient.clone();
         for common in ["lightness", "hue", "saturation"] {
             let target = row_index(&app, &AnimationRow::Common(common));
             press_until_row(&mut app, target);
@@ -3617,10 +3606,10 @@ mod tests {
             (61, 211, 1)
         );
         press_until_row(&mut app, 1);
+        assert_eq!(app.animation_settings.kind, AnimationKind::ALL[1]);
+        press_until_row(&mut app, 0);
         assert_eq!(app.animation_settings.kind, AnimationKind::Video);
-        press_until_row(&mut app, 3);
-        assert_eq!(app.animation_settings.kind, AnimationKind::Images);
-        assert_eq!(app.animation_settings.ambient, edited_images);
+        assert_eq!(app.animation_settings.ambient, edited_ambient);
         let reloaded = crate::project_config::load(project.path())
             .unwrap()
             .animation;
@@ -3793,7 +3782,7 @@ mod tests {
             "the whole URL fits full screen"
         );
         // Scenes with no recorded inspiration show no credit.
-        app.animation_settings.kind = AnimationKind::Images;
+        app.animation_settings.kind = AnimationKind::Video;
         let plain = draw(&mut app, 120, 36);
         assert!(credit_row(&plain, 120, 36).is_none());
     }

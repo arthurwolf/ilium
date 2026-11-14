@@ -43,31 +43,34 @@ fn paris() -> AnimationRecommendation {
         ],
     )
 }
-/// The motion strength the recommendation `carpet(index)` selects.
+/// The map width in metres that the recommendation `carpet(index)` selects.
 fn contrast_for(index: usize) -> i32 {
     let mut settings = ilium_ambient::AmbientSettings::default();
     settings
         .set_control(
-            ilium_ambient::AmbientKind::Images,
-            "motion_strength",
+            ilium_ambient::AmbientKind::OpenStreetMap,
+            "map_width_meters",
             ControlValue::Number(contrast_value(index)),
         )
         .unwrap();
-    i32::from(settings.images.motion_strength_percent)
+    settings.openstreetmap.map_width_meters
 }
 fn contrast_value(index: usize) -> i32 {
-    10 + 5 * i32::try_from(index).unwrap_or(0)
+    300 + 100 * i32::try_from(index).unwrap_or(0)
 }
-/// A distinct catalogue Images recommendation per `mode` (a slow zoom of the built-in picture
-/// at its own strength), standing in for a scene with several looks. The motion choice comes
-/// first, so a test can tamper with a choice label.
+/// A distinct catalogue OpenStreetMap recommendation per `mode` (a fixed camera at its own map
+/// width), standing in for a scene with several looks. The camera choice comes first, so a test
+/// can tamper with a choice label.
 fn carpet(mode: usize) -> AnimationRecommendation {
     recommendation(
-        AnimationKind::Images,
+        AnimationKind::OpenStreetMap,
         vec![
-            ("motion", ControlValue::Index(0)),
+            ("camera", ControlValue::Index(0)),
+            ("source", ControlValue::Index(0)),
+            ("place", ControlValue::Index(0)),
+            ("tour", ControlValue::Index(0)),
             (
-                "motion_strength",
+                "map_width_meters",
                 ControlValue::Number(contrast_value(mode)),
             ),
         ],
@@ -208,8 +211,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .images
-            .motion_strength_percent as i32,
+            .openstreetmap
+            .map_width_meters,
         contrast_for(1)
     );
     fixture.app.select_node(fixture.group);
@@ -219,8 +222,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .images
-            .motion_strength_percent as i32,
+            .openstreetmap
+            .map_width_meters,
         contrast_for(0)
     );
     let mut virtual_path = fixture.app.path_to(fixture.group);
@@ -232,8 +235,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .images
-            .motion_strength_percent as i32,
+            .openstreetmap
+            .map_width_meters,
         contrast_for(0)
     );
     fixture.app.tree_state.select(Vec::new());
@@ -246,8 +249,8 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .images
-            .motion_strength_percent as i32,
+            .openstreetmap
+            .map_width_meters,
         contrast_for(5)
     );
     assert!(fixture.app.take_pending_restructure_requests().is_empty());
@@ -285,8 +288,8 @@ fn semantic_cache_revalidates_snapshots_without_rebuilding_equivalent_hosts() {
             .last()
             .unwrap()
             .1
-            .images
-            .motion_strength_percent as i32,
+            .openstreetmap
+            .map_width_meters,
         contrast_for(2)
     );
 }
@@ -462,8 +465,8 @@ fn semantic_undo_restores_effective_choice_and_stale_apply_preserves_it() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .images
-            .motion_strength_percent as i32,
+            .openstreetmap
+            .map_width_meters,
         contrast_for(4)
     );
     let accepted = server_tree.clone();

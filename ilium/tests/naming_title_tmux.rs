@@ -552,13 +552,13 @@ fn misleading_plan(tree: &Tree, group: &str) -> RestructurePlan {
 fn recommendation() -> AnimationRecommendation {
     AnimationRecommendation {
         version: ANIMATION_RECOMMENDATION_VERSION,
-        kind: "images".into(),
+        kind: "open_street_map".into(),
         resources: ResourcePolicy::Catalog,
         parameters: vec![AnimationParameter {
-            id: "mode".into(),
+            id: "camera".into(),
             value: AnimationValue::Choice {
                 index: 0,
-                label: "Single image".into(),
+                label: "Fixed".into(),
             },
         }],
     }

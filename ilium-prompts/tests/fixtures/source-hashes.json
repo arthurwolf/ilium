@@ -452,14 +452,6 @@
     "sha256": "a8ba752de28698ec61442342d4cc253ec4b9985febd65966922d644c8c2a85e4"
   },
   {
-    "name": "voice/executor/search-result-index-v0-does-not-exist",
-    "sha256": "ac3c66a559ea726a4dcce899e5ee3ac7a53246d8001f0a7fc87139bb81e32361"
-  },
-  {
-    "name": "voice/executor/found-v0-workspace-results-for",
-    "sha256": "057d2d6741e87cb3dff2a880d620c5e636a79a5bde218463fd7d0c67555c1228"
-  },
-  {
     "name": "voice/executor/focused-pane",
     "sha256": "d4021d672c6646deec399181029f37b48ee87a44bfe3a9b75ce6b45f2b5bc3c9"
   },
@@ -534,18 +526,6 @@
   {
     "name": "voice/executor/staged-text-in-the-terminal",
     "sha256": "91bd78b00d46852742da66cd954523dff2c44909af5f3c196bfa161bb046ec35"
-  },
-  {
-    "name": "voice/executor/there-is-no-selected-search-result",
-    "sha256": "10633ecdcdcbd1763ef1006d129fa99a0ff7004392b0cb67286e2212db3a5dcb"
-  },
-  {
-    "name": "voice/executor/opened-the-selected-search-result",
-    "sha256": "f536e9d0af04566aedc3ee14362139d076be73128dbde049bc32f3283e9f3522"
-  },
-  {
-    "name": "voice/executor/closed-workspace-search",
-    "sha256": "8d58413c5cf8041ba5e246ff8756812bf055ed350cffaac28dd9ef663016788e"
   },
   {
     "name": "voice/executor/focused-the-left-tree-panel",
@@ -624,10 +604,6 @@
     "sha256": "8c6c96515260075a11a6df9f2782932c8796aa27da0c6dec388706fc445b72d0"
   },
   {
-    "name": "voice/executor/board-creation-failed",
-    "sha256": "c6f838597a272ec91c347aec865b94195709b09c1035aee52075ad5c77465d5f"
-  },
-  {
     "name": "voice/executor/creating-the-board",
     "sha256": "ecfd4bd89e01c1a88e76f23fc1131571a1151a12326b0c610db6aa768a0fbf22"
   },
@@ -696,10 +672,6 @@
     "sha256": "48f980098d1ee26c744cfc41d185868b6c7a42385e227bbb7095066c2c989e18"
   },
   {
-    "name": "voice/executor/editor-updated",
-    "sha256": "d0db9162246ba62438dc514259904c4c4d4f79db2d308f30beea778a7cd3be4b"
-  },
-  {
     "name": "voice/executor/text-is-required",
     "sha256": "027122632bd2e45950a95d23e29692f007a9e1cee360a6a542cb95dcc79acd4e"
   },
@@ -734,18 +706,6 @@
   {
     "name": "voice/executor/toggled-autosave",
     "sha256": "65054c94526e4443ccbfd36dc23abfeee7149eb0d957f2b64635c86f36bc9caa"
-  },
-  {
-    "name": "voice/executor/destination-column-is-required",
-    "sha256": "afd51f3f80018f74f58e61ecbc398b5cfbc2ff3f139240f1e48d327c9109819d"
-  },
-  {
-    "name": "voice/executor/checkbox-is-required",
-    "sha256": "052bece3834b0dd6a08d1c47b99d7d2767ce5c4dd631491b626fec9576413bac"
-  },
-  {
-    "name": "voice/executor/board-updated-and-persisted",
-    "sha256": "4bce49e88366eb9e4707b18289a1c4446f4ed2d6efb1ff064b379d0c58219db6"
   },
   {
     "name": "voice/executor/session-lifecycle-request-queued",

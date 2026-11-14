@@ -1049,24 +1049,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                 .or(cursor);
         }
         Mode::InferenceSettingPrompt(field, state) => {
-            if *field == crate::app::InferenceSettingField::RestructurePromptTokenLimit {
-                let (hint, is_error) = app.restructure_budget_input_hint(&state.buf);
-                let style = if is_error {
-                    Style::new().fg(Color::Red)
-                } else {
-                    Style::new().add_modifier(Modifier::DIM)
-                };
-                cursor = modal::render_text_prompt_with_hint_cursor(
-                    frame,
-                    area,
-                    field.label(),
-                    state,
-                    "Close",
-                    &hint,
-                    style,
-                )
-                .or(cursor);
-            } else if matches!(
+            if matches!(
                 field,
                 crate::app::InferenceSettingField::OpenAiApiKey
                     | crate::app::InferenceSettingField::AnthropicApiKey

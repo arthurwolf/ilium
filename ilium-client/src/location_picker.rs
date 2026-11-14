@@ -2621,7 +2621,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("test".into(), project.path().to_path_buf());
         app.set_screen_area(SCREEN);
-        app.animation_settings.kind = AnimationKind::Images;
+        app.animation_settings.kind = AnimationKind::Video;
         app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()

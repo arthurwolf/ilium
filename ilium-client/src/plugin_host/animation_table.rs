@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn a_scene_name_selects_that_scene() {
         assert_eq!(
-            requested_kind(&table("scene = \"video\""), AnimationKind::Images),
+            requested_kind(&table("scene = \"video\""), AnimationKind::OpenStreetMap),
             Some(AnimationKind::Video)
         );
     }
@@ -70,11 +70,11 @@ mod tests {
     #[test]
     fn an_unknown_scene_asks_for_nothing() {
         assert_eq!(
-            requested_kind(&table("scene = \"no-such-scene\""), AnimationKind::Images),
+            requested_kind(&table("scene = \"no-such-scene\""), AnimationKind::OpenStreetMap),
             None
         );
         assert_eq!(
-            requested_kind(&table("scene = 3"), AnimationKind::Images),
+            requested_kind(&table("scene = 3"), AnimationKind::OpenStreetMap),
             None
         );
     }
@@ -84,7 +84,7 @@ mod tests {
         assert_eq!(
             requested_kind(
                 &table("scene = \"video\"\nsemantic = true"),
-                AnimationKind::Images
+                AnimationKind::OpenStreetMap
             ),
             Some(AnimationKind::Semantic)
         );
@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(
             requested_kind(
                 &table("observer = { lat = 1.0, lon = 2.0 }\n[saved_places]\nhome = { lat = 1.0, lon = 2.0 }"),
-                AnimationKind::Images
+                AnimationKind::OpenStreetMap
             ),
             None
         );

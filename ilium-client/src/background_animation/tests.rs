@@ -33,7 +33,7 @@ fn hosted_kinds_map_to_the_crate_and_are_live_only() {
         // Every remaining kind is live-only, so none of them uses the loop cache.
         assert!(!settings.uses_loop_cache());
     }
-    assert_eq!(AnimationKind::Images.label(), "Images");
+    assert_eq!(AnimationKind::Video.label(), "Video");
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn a_scene_reporting_cell_colors_colors_the_cells_and_others_do_not() {
     let mut frame = AnimationFrame::default();
     *frame.host_mut() = fake_host(&probe);
     let settings = AnimationSettings {
-        kind: AnimationKind::Images,
+        kind: AnimationKind::Video,
         density_percent: 100,
         ..Default::default()
     };
@@ -281,20 +281,18 @@ fn settings_enabled(settings: &AnimationSettings) -> bool {
 #[test]
 fn hosted_controls_route_through_the_crate_and_report_errors() {
     let mut settings = AnimationSettings {
-        kind: AnimationKind::Images,
+        kind: AnimationKind::Video,
         ..Default::default()
     };
     assert_eq!(
         settings.scene_controls(),
-        settings
-            .ambient
-            .controls(ilium_ambient::AmbientKind::Images)
+        settings.ambient.controls(ilium_ambient::AmbientKind::Video)
     );
     // Unknown ids are not an error; the crate decides what is.
     assert_eq!(
         settings.set_scene_control("definitely_not_a_control", ControlValue::Number(1)),
         settings.ambient.clone().set_control(
-            ilium_ambient::AmbientKind::Images,
+            ilium_ambient::AmbientKind::Video,
             "definitely_not_a_control",
             ControlValue::Number(1)
         )
@@ -356,7 +354,7 @@ fn cached_packed_playback_releases_a_previous_hosted_scene() {
     };
     frame.render(
         &AnimationSettings {
-            kind: AnimationKind::Images,
+            kind: AnimationKind::Video,
             ..Default::default()
         },
         4,
@@ -502,12 +500,12 @@ fn hosted_scene_takes_new_settings_in_place_or_is_rebuilt() {
                 applied: factory_applied.clone(),
             })
         }));
-        let kind = ilium_ambient::AmbientKind::Images;
+        let kind = ilium_ambient::AmbientKind::Video;
         let mut settings = ilium_ambient::AmbientSettings::default();
         let first = host.sync(kind, &settings, Duration::ZERO);
         // The same settings change nothing.
         assert_eq!(host.sync(kind, &settings, Duration::from_secs(1)), first);
-        settings.images.motion_strength_percent += 10;
+        settings.video.detail += 10;
         let second = host.sync(kind, &settings, Duration::from_secs(5));
         assert_ne!(
             first, second,
@@ -527,7 +525,7 @@ fn hosted_scene_takes_new_settings_in_place_or_is_rebuilt() {
         );
         // A scene of another kind is never reconfigured with foreign settings.
         host.sync(
-            ilium_ambient::AmbientKind::Video,
+            ilium_ambient::AmbientKind::OpenStreetMap,
             &settings,
             Duration::from_secs(6),
         );

@@ -298,19 +298,23 @@ async fn initial_tree(connection: &mut Connection) -> ilium_client::connection::
     .unwrap()
 }
 
-fn recommendation(kind: &str) -> AnimationRecommendation {
-    let choices: &[(&str, u32, &str)] = match kind {
-        "open_street_map" => &[
-            ("source", 0, "World catalogue"),
-            ("place", 0, "Paris"),
-            ("tour", 0, "Selected place"),
-        ],
-        "images" => &[("mode", 0, "Single image")],
-        _ => unreachable!("fixture uses only two offline scenes"),
+/// An offline Paris recommendation; `camera` is the entry's distinguishing choice
+/// (0 keeps the camera fixed, 1 orbits slowly).
+fn recommendation(camera: u32) -> AnimationRecommendation {
+    let camera_label = match camera {
+        0 => "Fixed",
+        1 => "Slow orbit",
+        _ => unreachable!("fixture uses only two camera choices"),
     };
+    let choices: &[(&str, u32, &str)] = &[
+        ("camera", camera, camera_label),
+        ("source", 0, "World catalogue"),
+        ("place", 0, "Paris"),
+        ("tour", 0, "Selected place"),
+    ];
     let mut recommendation = AnimationRecommendation {
         version: ANIMATION_RECOMMENDATION_VERSION,
-        kind: kind.into(),
+        kind: "open_street_map".into(),
         resources: ResourcePolicy::Catalog,
         parameters: choices
             .iter()
@@ -356,10 +360,10 @@ async fn apply_recommendations(
             plan: RecommendedRestructurePlan {
                 structure,
                 expected_animation_generation: tree.project_animation_generation(project).unwrap(),
-                project: recommendation("open_street_map"),
+                project: recommendation(0),
                 entries: vec![PlanAnimationEntry {
                     path: vec![0],
-                    recommendation: recommendation("images"),
+                    recommendation: recommendation(1),
                 }],
             },
         })
@@ -455,8 +459,8 @@ fn retain_screen(tui: &PtySession, name: &str) {
 }
 
 #[tokio::test]
-async fn project_paris_and_entry_images_render_through_actual_recommendation_transport() {
-    for (scope, expected) in [("project", "OpenStreetMap"), ("entry", "Images")] {
+async fn project_and_entry_paris_render_through_actual_recommendation_transport() {
+    for (scope, expected) in [("project", "OpenStreetMap"), ("entry", "OpenStreetMap")] {
         let mut fixture = Fixture::new(scope, true);
         let authored_before = serde_json::to_value(
             ilium_client::project_config::load(&fixture.project)
@@ -491,7 +495,7 @@ async fn project_paris_and_entry_images_render_through_actual_recommendation_tra
                 .as_ref()
                 .unwrap()
                 .kind,
-            "images"
+            "open_street_map"
         );
         // The animation-only request supplies no title grant. Select the
         // preserved authored pane label after its old group was removed.
@@ -571,7 +575,7 @@ async fn project_paris_and_entry_images_render_through_actual_recommendation_tra
             if scope == "project" {
                 "place=Paris"
             } else {
-                "mode=Single image"
+                "camera=Slow orbit"
             },
         )
         .await;

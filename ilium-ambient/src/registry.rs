@@ -6,7 +6,6 @@ use crate::location::GeoLocation;
 use crate::plugin_scene::PluginSceneSettings;
 use crate::scene::{Scene, SceneEnv};
 use crate::scenes::{
-    images::{ImagesScene, ImagesSettings},
     openstreetmap::{OpenStreetMapScene, OpenStreetMapSettings},
     video::{VideoScene, VideoSettings},
     voxel_landscape::{VoxelLandscapeScene, VoxelLandscapeSettings},
@@ -17,7 +16,6 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum AmbientKind {
     Video,
-    Images,
     /// A scene supplied by a plugin; the Scene row picks which one.
     Plugin,
     VoxelLandscape,
@@ -25,9 +23,8 @@ pub enum AmbientKind {
 }
 
 impl AmbientKind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 4] = [
         Self::Video,
-        Self::Images,
         Self::Plugin,
         Self::VoxelLandscape,
         Self::OpenStreetMap,
@@ -37,7 +34,6 @@ impl AmbientKind {
         match self {
             Self::OpenStreetMap => "OpenStreetMap",
             Self::Video => "Video",
-            Self::Images => "Images",
             Self::Plugin => "Plugin scene",
             Self::VoxelLandscape => "Voxel landscape",
         }
@@ -48,9 +44,6 @@ impl AmbientKind {
             Self::OpenStreetMap => "Real OpenStreetMap streets, buildings, waterways, parks and railways around ten world places, drawn as Braille dots with fixed or panning cameras.",
             Self::VoxelLandscape => "A seeded isometric block world with forests, deserts, villages, caves and ravines, drifting past in monochrome or pastel dithering.",
             Self::Video => "Play video files, folders or URLs as dithered Braille.",
-            Self::Images => {
-                "Colored Braille images from files, folders or URLs, with slow pan and zoom."
-            }
             Self::Plugin => {
                 "A scene supplied by an enabled plugin, such as Dithered waves from the Scenes plugin. Pick the scene and set its own options; colour, dithering and display use the shared rows."
             }
@@ -80,7 +73,6 @@ pub struct AmbientSettings {
     pub location: GeoLocation,
     pub openstreetmap: OpenStreetMapSettings,
     pub video: VideoSettings,
-    pub images: ImagesSettings,
     pub plugin_scene: PluginSceneSettings,
     pub voxel_landscape: VoxelLandscapeSettings,
 }
@@ -91,7 +83,6 @@ impl AmbientSettings {
             location: self.location.normalized(),
             openstreetmap: self.openstreetmap.normalized(),
             video: self.video.normalized(),
-            images: self.images.normalized(),
             plugin_scene: self.plugin_scene.normalized(),
             voxel_landscape: self.voxel_landscape.normalized(),
         }
@@ -101,7 +92,6 @@ impl AmbientSettings {
         match kind {
             AmbientKind::OpenStreetMap => self.openstreetmap.controls(),
             AmbientKind::Video => self.video.controls(),
-            AmbientKind::Images => self.images.controls(),
             AmbientKind::Plugin => self.plugin_scene.controls(),
             AmbientKind::VoxelLandscape => self.voxel_landscape.controls(),
         }
@@ -116,7 +106,6 @@ impl AmbientSettings {
         match kind {
             AmbientKind::OpenStreetMap => self.openstreetmap.set_control(id, value),
             AmbientKind::Video => self.video.set_control(id, value),
-            AmbientKind::Images => self.images.set_control(id, value),
             AmbientKind::Plugin => self.plugin_scene.set_control(id, value),
             AmbientKind::VoxelLandscape => self.voxel_landscape.set_control(id, value),
         }
@@ -129,7 +118,6 @@ impl AmbientSettings {
         let settings = match kind {
             AmbientKind::OpenStreetMap => serde_json::to_string(&normalized.openstreetmap),
             AmbientKind::Video => serde_json::to_string(&normalized.video),
-            AmbientKind::Images => serde_json::to_string(&normalized.images),
             AmbientKind::Plugin => Ok(normalized.plugin_scene.scene_key()),
             AmbientKind::VoxelLandscape => serde_json::to_string(&normalized.voxel_landscape),
         }
@@ -160,20 +148,6 @@ impl AmbientSettings {
                 Box::new(OpenStreetMapScene::new(&settings.openstreetmap, env))
             }
             AmbientKind::Video => Box::new(VideoScene::new(&settings.video, env)),
-            AmbientKind::Images => match ImagesScene::new(&settings.images, env) {
-                Ok(scene) => Box::new(scene),
-                Err(crate::scenes::images::ImagesStartError::Admission(_)) => {
-                    Box::new(crate::scene::MessageScene(
-                        "Images: resource capacity unavailable; retry after pending work completes"
-                            .to_owned(),
-                    ))
-                }
-                Err(crate::scenes::images::ImagesStartError::Loader(_)) => {
-                    Box::new(crate::scene::MessageScene(
-                        "Images: background loader could not start".to_owned(),
-                    ))
-                }
-            },
             AmbientKind::Plugin => settings.plugin_scene.create_scene(env),
             AmbientKind::VoxelLandscape => {
                 if settings.voxel_landscape.saved_maps.source

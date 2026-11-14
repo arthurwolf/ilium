@@ -157,14 +157,6 @@ pub const VOICE_POLICY_LEFT_THE_STAGED_TERMINAL_TEXT_VISIBLE_AND: &str = include
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/policy/left-the-staged-terminal-text-visible-and.hbs"
 ));
-pub const VOICE_EXECUTOR_SEARCH_RESULT_INDEX_V0_DOES_NOT_EXIST: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/search-result-index-v0-does-not-exist.hbs"
-));
-pub const VOICE_EXECUTOR_FOUND_V0_WORKSPACE_RESULTS_FOR: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/found-v0-workspace-results-for.hbs"
-));
 pub const VOICE_EXECUTOR_FOCUSED_PANE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/executor/focused-pane.hbs"
@@ -240,18 +232,6 @@ pub const VOICE_EXECUTOR_QUEUED_TEXT_AND_ENTER_FOR_THE_TERMINAL: &str = include_
 pub const VOICE_EXECUTOR_STAGED_TEXT_IN_THE_TERMINAL: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/executor/staged-text-in-the-terminal.hbs"
-));
-pub const VOICE_EXECUTOR_THERE_IS_NO_SELECTED_SEARCH_RESULT: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/there-is-no-selected-search-result.hbs"
-));
-pub const VOICE_EXECUTOR_OPENED_THE_SELECTED_SEARCH_RESULT: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/opened-the-selected-search-result.hbs"
-));
-pub const VOICE_EXECUTOR_CLOSED_WORKSPACE_SEARCH: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/closed-workspace-search.hbs"
 ));
 pub const VOICE_EXECUTOR_FOCUSED_THE_LEFT_TREE_PANEL: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -329,10 +309,6 @@ pub const VOICE_EXECUTOR_CREATING_THE_GROUP: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/executor/creating-the-group.hbs"
 ));
-pub const VOICE_EXECUTOR_BOARD_CREATION_FAILED: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/board-creation-failed.hbs"
-));
 pub const VOICE_EXECUTOR_CREATING_THE_BOARD: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/executor/creating-the-board.hbs"
@@ -401,10 +377,6 @@ pub const VOICE_EXECUTOR_THIS_EDITOR_HAS_NO_FILE_PATH_YET: &str = include_str!(c
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/executor/this-editor-has-no-file-path-yet.hbs"
 ));
-pub const VOICE_EXECUTOR_EDITOR_UPDATED: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/editor-updated.hbs"
-));
 pub const VOICE_EXECUTOR_TEXT_IS_REQUIRED: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/executor/text-is-required.hbs"
@@ -440,18 +412,6 @@ pub const VOICE_EXECUTOR_TOGGLED_THE_MINIMAP: &str = include_str!(concat!(
 pub const VOICE_EXECUTOR_TOGGLED_AUTOSAVE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/voice/executor/toggled-autosave.hbs"
-));
-pub const VOICE_EXECUTOR_DESTINATION_COLUMN_IS_REQUIRED: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/destination-column-is-required.hbs"
-));
-pub const VOICE_EXECUTOR_CHECKBOX_IS_REQUIRED: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/checkbox-is-required.hbs"
-));
-pub const VOICE_EXECUTOR_BOARD_UPDATED_AND_PERSISTED: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/voice/executor/board-updated-and-persisted.hbs"
 ));
 pub const VOICE_EXECUTOR_SESSION_LIFECYCLE_REQUEST_QUEUED: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -867,14 +827,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
         "voice/policy/left-the-staged-terminal-text-visible-and",
         VOICE_POLICY_LEFT_THE_STAGED_TERMINAL_TEXT_VISIBLE_AND,
     ),
-    (
-        "voice/executor/search-result-index-v0-does-not-exist",
-        VOICE_EXECUTOR_SEARCH_RESULT_INDEX_V0_DOES_NOT_EXIST,
-    ),
-    (
-        "voice/executor/found-v0-workspace-results-for",
-        VOICE_EXECUTOR_FOUND_V0_WORKSPACE_RESULTS_FOR,
-    ),
     ("voice/executor/focused-pane", VOICE_EXECUTOR_FOCUSED_PANE),
     (
         "voice/executor/node-v0-is-not-a-split-view",
@@ -944,18 +896,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     (
         "voice/executor/staged-text-in-the-terminal",
         VOICE_EXECUTOR_STAGED_TEXT_IN_THE_TERMINAL,
-    ),
-    (
-        "voice/executor/there-is-no-selected-search-result",
-        VOICE_EXECUTOR_THERE_IS_NO_SELECTED_SEARCH_RESULT,
-    ),
-    (
-        "voice/executor/opened-the-selected-search-result",
-        VOICE_EXECUTOR_OPENED_THE_SELECTED_SEARCH_RESULT,
-    ),
-    (
-        "voice/executor/closed-workspace-search",
-        VOICE_EXECUTOR_CLOSED_WORKSPACE_SEARCH,
     ),
     (
         "voice/executor/focused-the-left-tree-panel",
@@ -1031,10 +971,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
         VOICE_EXECUTOR_CREATING_THE_GROUP,
     ),
     (
-        "voice/executor/board-creation-failed",
-        VOICE_EXECUTOR_BOARD_CREATION_FAILED,
-    ),
-    (
         "voice/executor/creating-the-board",
         VOICE_EXECUTOR_CREATING_THE_BOARD,
     ),
@@ -1103,10 +1039,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
         VOICE_EXECUTOR_THIS_EDITOR_HAS_NO_FILE_PATH_YET,
     ),
     (
-        "voice/executor/editor-updated",
-        VOICE_EXECUTOR_EDITOR_UPDATED,
-    ),
-    (
         "voice/executor/text-is-required",
         VOICE_EXECUTOR_TEXT_IS_REQUIRED,
     ),
@@ -1141,18 +1073,6 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     (
         "voice/executor/toggled-autosave",
         VOICE_EXECUTOR_TOGGLED_AUTOSAVE,
-    ),
-    (
-        "voice/executor/destination-column-is-required",
-        VOICE_EXECUTOR_DESTINATION_COLUMN_IS_REQUIRED,
-    ),
-    (
-        "voice/executor/checkbox-is-required",
-        VOICE_EXECUTOR_CHECKBOX_IS_REQUIRED,
-    ),
-    (
-        "voice/executor/board-updated-and-persisted",
-        VOICE_EXECUTOR_BOARD_UPDATED_AND_PERSISTED,
     ),
     (
         "voice/executor/session-lifecycle-request-queued",

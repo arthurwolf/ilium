@@ -14,7 +14,6 @@ pub enum SettingsNumber {
     EditorAutosaveDelay,
     VoiceVolume,
     NotificationCoalesce,
-    InferenceTokenBudget,
     WorkingPollSeconds,
     IdlePollSeconds,
 }
@@ -40,7 +39,6 @@ impl UiNumber {
 // Numeric bindings project either live runtime values or a read-only persisted
 // snapshot. Reading a dialog value never applies a whole configuration to App.
 struct NumberSettingsValues<'a> {
-    inference: &'a ilium_inference::InferenceSettings,
     voice: &'a crate::config::VoiceSettings,
     notification: &'a ilium_sound::NotificationSettings,
     ui: &'a crate::config::UiSettings,
@@ -132,7 +130,6 @@ impl SettingsNumber {
         match self {
             Self::WorkingPollSeconds => "Working poll interval (s; 0 = 500 ms minimum)",
             Self::IdlePollSeconds => "Idle poll interval (s; 0 = 500 ms minimum)",
-            Self::InferenceTokenBudget => "Restructure prompt tokens",
             Self::VoiceVolume => "Output volume (%)",
             Self::NotificationCoalesce => "Task notification coalescing (s)",
             Self::Panel(PanelNumber::FixedWidth) => "Fixed panel width",
@@ -153,7 +150,6 @@ impl SettingsNumber {
 
     pub fn snapshot(self, app: &App) -> (NumberSpec, String) {
         self.snapshot_values(NumberSettingsValues {
-            inference: &app.inference_settings,
             voice: &app.voice_settings,
             notification: &app.notification_settings,
             ui: &app.ui_settings,
@@ -165,7 +161,6 @@ impl SettingsNumber {
 
     pub(crate) fn persisted_snapshot(self, config: &crate::config::ClientConfig) -> String {
         self.snapshot_values(NumberSettingsValues {
-            inference: &config.inference,
             voice: &config.voice,
             notification: &config.notifications,
             ui: &config.ui,
@@ -191,10 +186,6 @@ impl SettingsNumber {
                     .detection
                     .map_or(0, |settings| settings.idle_poll_seconds)
                     .to_string(),
-            ),
-            Self::InferenceTokenBudget => (
-                ScalarNumber::InferenceTokenBudget.spec(),
-                values.inference.restructure_prompt_token_limit.to_string(),
             ),
             Self::VoiceVolume => (
                 ScalarNumber::VoiceVolume.spec(),
@@ -387,13 +378,12 @@ impl App {
         if !std::sync::Arc::ptr_eq(&read.token, token) {
             return;
         }
-        // A later destination, selected field, inference revision or accepted
+        // A later destination, selected field or accepted
         // runtime change cannot be overwritten by this older read.
         let matches = match (&host.target, self.modal_stack.last()) {
-            (crate::value_dialog_host::ValueTarget::SettingsNumber { field, directory, inference_revision, .. }, Some(Mode::Settings(parent))) => {
+            (crate::value_dialog_host::ValueTarget::SettingsNumber { field, directory, .. }, Some(Mode::Settings(parent))) => {
                 self.config_dir.as_ref() == Some(directory)
                     && field.snapshot(self).1 == read.runtime_value
-                    && inference_revision.is_none_or(|revision| revision == self.onboarding_revision)
                     && SettingsNumber::at(self, parent.tab, parent.selected_row) == Some(*field)
             }
             (crate::value_dialog_host::ValueTarget::Cost { target, directory, .. }, Some(Mode::Settings(parent))) => {
@@ -414,7 +404,6 @@ impl App {
         if let Some(read) = host.number_read_mut() {
             read.settled = result.as_ref().map(|_| ()).map_err(Clone::clone);
         }
-        let mut edited = false;
         if let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog {
             match result {
                 Ok(value) => {
@@ -423,16 +412,10 @@ impl App {
                     if !number.draft_edited && number.draft.buf.is_empty() {
                         number.draft = crate::text_prompt::TextPromptState::new(value);
                     }
-                    edited = number.draft_edited;
                     number.notice = None;
                 }
                 Err(error) => number.notice = Some(error),
             }
-        }
-        // Typing during the read is retained and starts the same debounce only
-        // after the authoritative gate opens. It cannot save before readback.
-        if edited {
-            self.queue_inference_number_autosave(&mut host, None, std::time::Instant::now());
         }
         self.mode = Mode::ValueDialog(host);
     }
@@ -447,19 +430,12 @@ impl App {
             return self.commit_detection_number_dialog(host, outcome);
         }
         let ValueTarget::SettingsNumber {
-            field,
-            directory,
-            inference_revision,
-            autosave,
-            ..
+            field, directory, ..
         } = &host.target
         else {
             return Err("This is not a numeric settings dialog".into());
         };
         host.number_read_ready()?;
-        if inference_revision.is_some_and(|revision| revision != self.onboarding_revision) {
-            return Err("Inference settings changed; reopen this dialog".into());
-        }
         if host.is_saving() {
             return Err("The previous value is still being saved".into());
         }
@@ -476,147 +452,9 @@ impl App {
             return Err("Enter a number for this setting".into());
         };
         let token = std::sync::Arc::new(());
-        let operation = autosave.as_ref().and_then(|autosave| autosave.operation.as_ref())
-            .filter(|_| text.trim().parse::<u32>() == Ok(self.inference_settings.restructure_prompt_token_limit))
-            .filter(|operation| matches!(&self.inference_save_state,
-                crate::filesystem::configurations::InferenceSaveState::Pending { operation: current, .. }
-                if std::sync::Arc::ptr_eq(current, operation)))
-            .cloned();
-        if let Some(operation) = operation {
-            self.configuration_files
-                .as_mut()
-                .ok_or("Configuration writer unavailable")?
-                .attach_inference_value_dialog(&operation, token.clone())?;
-        } else {
-            self.save_settings_number(*field, text, directory.clone(), Some(token.clone()))?;
-        }
-        if let ValueTarget::SettingsNumber {
-            autosave: Some(autosave),
-            ..
-        } = &mut host.target
-        {
-            autosave.deadline = None;
-            if let crate::filesystem::configurations::InferenceSaveState::Pending {
-                operation,
-                ..
-            } = &self.inference_save_state
-            {
-                autosave.operation = Some(operation.clone());
-            }
-        }
-        if let crate::value_dialog_host::ValueTarget::SettingsNumber {
-            inference_revision: Some(revision),
-            ..
-        } = &mut host.target
-        {
-            *revision = self.onboarding_revision;
-        }
+        self.save_settings_number(*field, text, directory.clone(), Some(token.clone()))?;
         host.begin_save(token);
         Ok(())
-    }
-
-    pub(crate) fn queue_inference_number_autosave(
-        &mut self,
-        host: &mut crate::value_dialog_host::ValueDialogHost,
-        previous: Option<&str>,
-        now: std::time::Instant,
-    ) {
-        let Some(draft) = host.inference_budget_draft() else {
-            return;
-        };
-        if previous == Some(draft) || host.is_saving() {
-            return;
-        }
-        let valid = ScalarNumber::InferenceTokenBudget.parse(draft).is_ok();
-        let crate::value_dialog_host::ValueTarget::SettingsNumber {
-            autosave: Some(autosave),
-            ..
-        } = &mut host.target
-        else {
-            return;
-        };
-        if let Some(operation) = autosave.operation.take() {
-            if matches!(&self.inference_save_state,
-                crate::filesystem::configurations::InferenceSaveState::Pending { operation: current, .. }
-                if std::sync::Arc::ptr_eq(current, &operation))
-            {
-                self.inference_save_state =
-                    crate::filesystem::configurations::InferenceSaveState::Unsaved;
-                self.inference_settings_save_error = None;
-            }
-        }
-        autosave.deadline = valid.then_some(now + std::time::Duration::from_millis(600));
-    }
-
-    pub(crate) fn finish_inference_number_autosave(
-        &mut self,
-        operation: &std::sync::Arc<()>,
-        result: &Result<(), String>,
-    ) {
-        let Mode::ValueDialog(host) = &mut self.mode else {
-            return;
-        };
-        let owns = matches!(&host.target, crate::value_dialog_host::ValueTarget::SettingsNumber { autosave: Some(autosave), .. }
-            if autosave.operation.as_ref().is_some_and(|current| std::sync::Arc::ptr_eq(current, operation)));
-        if owns {
-            if let crate::value_dialog::ValueDialogState::Number(number) = &mut host.dialog {
-                number.error = result.as_ref().err().cloned();
-            }
-        }
-    }
-
-    pub(crate) fn tick_inference_number_autosave(&mut self, now: std::time::Instant) -> bool {
-        let due = matches!(&self.mode, Mode::ValueDialog(host)
-            if matches!(&host.target, crate::value_dialog_host::ValueTarget::SettingsNumber { autosave: Some(autosave), .. }
-                if autosave.deadline.is_some_and(|deadline| now >= deadline)) && !host.is_saving());
-        if !due {
-            return false;
-        }
-        let Mode::ValueDialog(mut host) = std::mem::replace(&mut self.mode, Mode::Normal) else {
-            return false;
-        };
-        let result = (|| {
-            let crate::value_dialog_host::ValueTarget::SettingsNumber {
-                field,
-                directory,
-                inference_revision,
-                autosave: Some(autosave),
-                ..
-            } = &mut host.target
-            else {
-                return Err("Number dialog changed".to_owned());
-            };
-            autosave.deadline = None;
-            if *inference_revision != Some(self.onboarding_revision)
-                || self.config_dir.as_ref() != Some(directory)
-            {
-                return Err("Inference settings changed; reopen this dialog".into());
-            }
-            let Some(Mode::Settings(parent)) = self.modal_stack.last() else {
-                return Err("Settings parent changed".into());
-            };
-            if SettingsNumber::at(self, parent.tab, parent.selected_row) != Some(*field) {
-                return Err("Selected setting changed".into());
-            }
-            let crate::value_dialog::ValueDialogState::Number(number) = &host.dialog else {
-                return Err("Number dialog changed".into());
-            };
-            self.save_settings_number(*field, &number.draft.buf, directory.clone(), None)?;
-            *inference_revision = Some(self.onboarding_revision);
-            if let crate::filesystem::configurations::InferenceSaveState::Pending {
-                operation,
-                ..
-            } = &self.inference_save_state
-            {
-                autosave.operation = Some(operation.clone());
-            }
-            Ok(())
-        })();
-        if let Err(error) = result {
-            host.reject(error);
-        }
-        self.mode = Mode::ValueDialog(host);
-        true
     }
 
     pub(crate) fn step_settings_number(&mut self, field: SettingsNumber, direction: i32) {
@@ -642,15 +480,6 @@ impl App {
     ) -> Result<(), String> {
         use crate::filesystem::configuration::ConfigurationChange;
         use crate::filesystem::configurations::ConfigurationIntent;
-        if field == SettingsNumber::InferenceTokenBudget {
-            let limit = u32::try_from(ScalarNumber::InferenceTokenBudget.parse(text)?)
-                .map_err(|_| "Token budget exceeds storage range")?;
-            let mut desired = self.inference_settings.clone();
-            desired.restructure_prompt_token_limit = limit;
-            self.enqueue_inference_value(directory, &desired, token)?;
-            self.apply_inference_settings_locally(desired);
-            return Ok(());
-        }
         if field.is_detection() {
             let original = self
                 .agent_detection_settings
@@ -674,9 +503,6 @@ impl App {
         let change = match field {
             SettingsNumber::WorkingPollSeconds | SettingsNumber::IdlePollSeconds => {
                 return Err("Server number was not dispatched".into());
-            }
-            SettingsNumber::InferenceTokenBudget => {
-                return Err("Inference number was not dispatched".into());
             }
             SettingsNumber::VoiceVolume => {
                 let mut settings = self.voice_settings.clone();
