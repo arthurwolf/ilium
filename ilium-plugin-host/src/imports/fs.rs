@@ -1992,7 +1992,7 @@ impl HostFs for FsImport {
 
 #[cfg(test)]
 mod tests {
-    use super::{FilePicker, FsImport};
+    use super::{FilePicker, FsImport, SCOPE_PICKED_PREFIX};
     use crate::imports::env::{CancelFlag, ImportEnv};
     use crate::runtime::pending_events::PendingEvents;
     use ilium_plugin_api::generated::host::fs::{HostFs, PickKind, PickSpec, WriteMode};
