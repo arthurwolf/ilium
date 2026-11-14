@@ -17,6 +17,12 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::env::RequestIds;
+use crate::schemas::{Direction, SchemaViolation, ServiceSchemas};
+
+/// The method every service with a schema answers itself: its reply is the schema file, and
+/// the provider is not called. A schema that lists its own `describe` method turns this off,
+/// and that call goes to the provider like any other.
+pub const DESCRIBE_METHOD: &str = "describe";
 
 /// Largest payload of a service call or reply: 64 KiB, as for command arguments.
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
@@ -40,12 +46,29 @@ pub struct PendingServiceCall {
     pub payload_json: String,
 }
 
-/// A call whose provider answered `deferred`.
+/// A call whose provider answered `deferred`. The service and method stay with it, so the
+/// later reply is checked against the method's result schema (gap G13).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DeferredCall {
     provider: String,
     caller: String,
     request: RequestId,
+    service: String,
+    method: String,
+}
+
+/// A reply the result schema of its method refused. The runtime logs each one at level
+/// error for the provider (SVC-009).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefusedReply {
+    /// The provider that gave the reply.
+    pub provider: String,
+    /// The service the call named.
+    pub service: String,
+    /// The method the call named.
+    pub method: String,
+    /// The JSON pointer and what is wrong there.
+    pub violation: String,
 }
 
 /// The end of a service call, for the caller's `request-completed` event.
@@ -68,6 +91,11 @@ pub struct ServiceBrokerState {
     finished: VecDeque<FinishedServiceCall>,
     /// The request and call ids of this runtime; shared with every other import.
     ids: RequestIds,
+    /// The schema files of the provided services (gap G13). Kept here, beside the deferred
+    /// calls, so a deferred reply is checked when the provider sends it.
+    schemas: ServiceSchemas,
+    /// Replies the schemas refused since the runtime last logged them.
+    refused_replies: VecDeque<RefusedReply>,
 }
 
 /// The services of one runtime, shared by the imports of its instances and its pump.
@@ -117,6 +145,55 @@ impl ServiceBrokerState {
         Ok(())
     }
 
+    /// Installs the schema file of `service`, replacing an earlier one (gap G13).
+    pub fn install_schema(&mut self, service: &str, text: &str) -> Result<(), String> {
+        self.schemas.install(service, text)
+    }
+
+    /// Whether `service` has a schema file.
+    pub fn has_schema(&self, service: &str) -> bool {
+        self.schemas.has(service)
+    }
+
+    /// The schema text of `service`, when one was installed.
+    pub fn schema_text(&self, service: &str) -> Option<String> {
+        self.schemas.text(service).map(str::to_owned)
+    }
+
+    /// The answer the kernel gives to a `describe` call itself: the schema text, when the
+    /// service has a schema that does not list its own `describe` method. `None` sends the
+    /// call to the provider.
+    pub fn describe_reply(&self, service: &str, method: &str) -> Option<String> {
+        if method != DESCRIBE_METHOD || self.schemas.has_method(service, DESCRIBE_METHOD) {
+            return None;
+        }
+        self.schema_text(service)
+    }
+
+    /// Checks one half of a call against the schema of its method.
+    pub fn check_schema(
+        &self,
+        service: &str,
+        method: &str,
+        direction: Direction,
+        payload_json: &str,
+    ) -> Result<(), SchemaViolation> {
+        self.schemas.check(service, method, direction, payload_json)
+    }
+
+    /// Records a reply the result schema refused, for the runtime to log.
+    pub fn record_refused_reply(&mut self, refused: RefusedReply) {
+        if self.refused_replies.len() >= BROKER_CAPACITY {
+            self.refused_replies.pop_front();
+        }
+        self.refused_replies.push_back(refused);
+    }
+
+    /// The refused replies since the last drain.
+    pub fn take_refused_replies(&mut self) -> Vec<RefusedReply> {
+        self.refused_replies.drain(..).collect()
+    }
+
     /// Takes the reply a provider gave to the call of `caller` with `request`.
     pub fn take_reply_of(&mut self, caller: &str, request: RequestId) -> Option<String> {
         self.replies.remove(&(caller.to_owned(), request.0))
@@ -153,6 +230,8 @@ impl ServiceBrokerState {
                 provider: provider.to_owned(),
                 caller: call.caller.clone(),
                 request: call.request,
+                service: call.service.clone(),
+                method: call.method.clone(),
             },
         );
     }
@@ -215,6 +294,18 @@ pub fn provided_services(manifest: &serde_json::Value) -> Vec<String> {
         .flatten()
         .filter_map(|service| service.get("name").and_then(serde_json::Value::as_str))
         .map(str::to_owned)
+        .collect()
+}
+
+/// The services a manifest provides that have no schema file in `broker`. Calls to them run
+/// unchecked; the runtime says so once per load (gap G13).
+pub fn services_without_schema(
+    manifest: &serde_json::Value,
+    broker: &ServiceBrokerState,
+) -> Vec<String> {
+    provided_services(manifest)
+        .into_iter()
+        .filter(|service| !broker.has_schema(service))
         .collect()
 }
 
@@ -311,9 +402,35 @@ impl HostServices for BrokeredServices {
                 "no deferred call has that id",
             ));
         }
-        if let Some(deferred) = broker.deferred.remove(&call) {
-            broker.finish(&deferred.caller, deferred.request, outcome);
+        let Some(deferred) = broker.deferred.remove(&call) else {
+            return Ok(());
+        };
+        // A reply the method's result schema refuses is refused here with invalid-argument,
+        // and the caller's request ends as failed(invalid-argument) (gap G13, SVC-009).
+        if let Ok(reply_json) = &outcome {
+            let checked = broker
+                .check_schema(
+                    &deferred.service,
+                    &deferred.method,
+                    Direction::Response,
+                    reply_json,
+                )
+                .map_err(|violation| {
+                    format!("the reply does not match the service schema at {violation}")
+                });
+            if let Err(message) = checked {
+                let error = PluginError::new(ErrorCode::InvalidArgument, message.clone());
+                broker.finish(&deferred.caller, deferred.request, Err(error.clone()));
+                broker.record_refused_reply(RefusedReply {
+                    provider: deferred.provider,
+                    service: deferred.service,
+                    method: deferred.method,
+                    violation: message,
+                });
+                return Err(error);
+            }
         }
+        broker.finish(&deferred.caller, deferred.request, outcome);
         Ok(())
     }
 }
@@ -421,6 +538,134 @@ mod broker_tests {
                 .reply(call, Ok("2".to_owned()))
                 .map_err(|error| error.code),
             Err(ErrorCode::NotFound)
+        );
+    }
+
+    const SCHEMA: &str = r#"{"lookup": {
+        "params": {"type": "object", "required": ["term"]},
+        "result": {"type": "object", "required": ["found"]}
+    }}"#;
+
+    /// A caller and a provider of `a.provider/s` over one broker with `SCHEMA` installed, and
+    /// one call of `lookup` the provider deferred: (caller, provider, request, call).
+    fn deferred_lookup() -> (
+        ServiceBroker,
+        BrokeredServices,
+        BrokeredServices,
+        ilium_plugin_api::generated::types::ids::RequestId,
+        u64,
+    ) {
+        let broker = ServiceBroker::default();
+        super::lock(&broker)
+            .install_schema("a.provider/s", SCHEMA)
+            .expect("the schema installs");
+        let mut caller = BrokeredServices::new(
+            broker.clone(),
+            "a.caller",
+            &grants(&["services.use:a.provider/s"]),
+        );
+        let provider = BrokeredServices::new(
+            broker.clone(),
+            "a.provider",
+            &grants(&["services.provide:a.provider/s"]),
+        );
+        let request = caller
+            .call(
+                "a.provider/s".to_owned(),
+                "lookup".to_owned(),
+                r#"{"term":"x"}"#.to_owned(),
+            )
+            .expect("the caller holds services.use");
+        let pending = super::lock(&broker).take_pending();
+        super::lock(&broker).defer(&pending[0], "a.provider");
+        let call = pending[0].call;
+        (broker, caller, provider, request, call)
+    }
+
+    /// REQ: SVC-009
+    #[test]
+    fn a_deferred_reply_that_fails_the_result_schema_is_refused_and_fails_the_caller() {
+        let (broker, mut caller, mut provider, request, call) = deferred_lookup();
+        let refused = provider
+            .reply(call, Ok(r#"{"definition":"none"}"#.to_owned()))
+            .expect_err("the reply lacks /found");
+        assert_eq!(refused.code, ErrorCode::InvalidArgument);
+        assert!(refused.message.contains("/found"), "{}", refused.message);
+        assert_eq!(caller.take_reply(request), None);
+        let finished = super::lock(&broker).take_finished();
+        assert_eq!(finished.len(), 1);
+        assert_eq!(
+            finished[0].error.as_ref().map(|error| error.code),
+            Some(ErrorCode::InvalidArgument)
+        );
+        let logged = super::lock(&broker).take_refused_replies();
+        assert_eq!(logged.len(), 1);
+        assert_eq!(logged[0].provider, "a.provider");
+        assert_eq!(logged[0].method, "lookup");
+        // The call is answered; a second reply finds nothing.
+        assert_eq!(
+            provider
+                .reply(call, Ok(r#"{"found":true}"#.to_owned()))
+                .map_err(|error| error.code),
+            Err(ErrorCode::NotFound)
+        );
+    }
+
+    #[test]
+    fn a_deferred_reply_that_matches_or_is_an_error_reaches_the_caller() {
+        let (_, mut caller, mut provider, request, call) = deferred_lookup();
+        assert_eq!(
+            provider.reply(call, Ok(r#"{"found":true}"#.to_owned())),
+            Ok(())
+        );
+        assert_eq!(
+            caller.take_reply(request),
+            Some(r#"{"found":true}"#.to_owned())
+        );
+
+        let (_, mut caller, mut provider, request, call) = deferred_lookup();
+        assert_eq!(
+            provider.reply(call, Ok(r#"{"error":"no entry"}"#.to_owned())),
+            Ok(())
+        );
+        assert_eq!(
+            caller.take_reply(request),
+            Some(r#"{"error":"no entry"}"#.to_owned())
+        );
+    }
+
+    #[test]
+    fn describe_is_answered_from_the_schema_unless_the_schema_lists_it() {
+        let broker = ServiceBroker::default();
+        let mut state = super::lock(&broker);
+        assert_eq!(state.describe_reply("a.provider/s", "describe"), None);
+        state
+            .install_schema("a.provider/s", SCHEMA)
+            .expect("installs");
+        assert_eq!(
+            state.describe_reply("a.provider/s", "describe"),
+            Some(SCHEMA.to_owned())
+        );
+        assert_eq!(state.describe_reply("a.provider/s", "lookup"), None);
+        state
+            .install_schema("a.provider/own", r#"{"describe": {"result": {}}}"#)
+            .expect("installs");
+        assert_eq!(state.describe_reply("a.provider/own", "describe"), None);
+    }
+
+    #[test]
+    fn services_without_schema_names_only_the_unchecked_ones() {
+        let broker = ServiceBroker::default();
+        super::lock(&broker)
+            .install_schema("a.provider/s", SCHEMA)
+            .expect("installs");
+        let manifest = serde_json::json!({"contributes": {"services": {"provides": [
+            {"name": "a.provider/s", "version": "0.1.0", "schema": "schemas/s.json"},
+            {"name": "a.provider/bare", "version": "0.1.0"}
+        ]}}});
+        assert_eq!(
+            super::services_without_schema(&manifest, &super::lock(&broker)),
+            vec!["a.provider/bare".to_owned()]
         );
     }
 }

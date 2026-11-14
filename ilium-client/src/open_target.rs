@@ -64,6 +64,30 @@ pub fn resolve_at(
     }
 }
 
+/// What a right-click on a terminal cell can open, asking the link detectors of the enabled
+/// plugins first (contract G5), like a Ctrl+click does. Returns the target the menu's "Open"
+/// entries use and the plugin match that covers the cell, if any. The text of a plugin match
+/// is resolved like a kernel link (a URL, or a path that exists), so it still gets the
+/// kernel's open entries; when it resolves to nothing, the kernel's own detection on the
+/// whole line decides.
+pub(crate) fn resolve_at_with_plugins(
+    line: &str,
+    column: usize,
+    cwd: &Path,
+    home_dir: Option<&Path>,
+    detectors: &[crate::plugin_host::links::LinkDetector],
+) -> (
+    Option<OpenTarget>,
+    Option<crate::plugin_host::links::LinkMatch>,
+) {
+    let found = crate::plugin_host::links::plugin_link_at(detectors, line, column);
+    let from_plugin = found.as_ref().and_then(|found| {
+        resolve_url(&found.text).or_else(|| resolve_at(&found.text, 0, cwd, home_dir))
+    });
+    let target = from_plugin.or_else(|| resolve_at(line, column, cwd, home_dir));
+    (target, found)
+}
+
 /// Validates a URL obtained independently of `link_at` (an OSC-8 hyperlink
 /// label can be any string the foreground program chose to emit).
 pub fn resolve_url(url: &str) -> Option<OpenTarget> {
@@ -144,6 +168,73 @@ mod tests {
             target,
             Some(OpenTarget::Url("https://example.test/docs".to_string()))
         );
+    }
+
+    fn detectors(link_detectors: &str) -> Vec<crate::plugin_host::links::LinkDetector> {
+        let manifest = format!(
+            r#"{{"id":"x","contributes":{{"commands":[{{"id":"open"}}],"link_detectors":{link_detectors}}}}}"#
+        );
+        crate::plugin_host::links::active_detectors(&[("example.plugin".to_owned(), manifest)])
+    }
+
+    #[test]
+    fn a_plugin_match_under_the_click_is_returned_and_its_text_resolved() {
+        let project = tempfile::tempdir().unwrap();
+        let detectors = detectors(r##"[{"id":"issue","regex":"#[0-9]+","command":"open"}]"##);
+        assert_eq!(detectors.len(), 1);
+        // `#42` is no URL and no existing path, and neither is anything else on the line, so
+        // only the plugin match is offered.
+        let (target, found) =
+            resolve_at_with_plugins("fix #42 now", 5, project.path(), None, &detectors);
+        let found = found.expect("the plugin detector covers the clicked cell");
+        assert_eq!(found.detector_id, "issue");
+        assert_eq!(found.command, "example.plugin/open");
+        assert_eq!(found.text, "#42");
+        assert_eq!(target, None);
+        // A click outside every plugin match leaves the kernel alone.
+        let (target, found) = resolve_at_with_plugins(
+            "see https://example.test/x",
+            6,
+            project.path(),
+            None,
+            &detectors,
+        );
+        assert_eq!(found, None);
+        assert_eq!(
+            target,
+            Some(OpenTarget::Url("https://example.test/x".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_plugin_matched_url_or_existing_path_keeps_the_kernel_open_entries() {
+        let project = tempfile::tempdir().unwrap();
+        let file_path = project.path().join("src").join("lib.rs");
+        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        std::fs::write(&file_path, "").unwrap();
+        let detectors = detectors(
+            r#"[{"id":"url","regex":"https?://[^\\s]+","command":"open"},
+                {"id":"path","regex":"[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+","command":"open"}]"#,
+        );
+        let (target, found) = resolve_at_with_plugins(
+            "at https://example.test:8080/a",
+            14,
+            project.path(),
+            None,
+            &detectors,
+        );
+        assert_eq!(found.map(|found| found.detector_id).as_deref(), Some("url"));
+        assert_eq!(
+            target,
+            Some(OpenTarget::Url("https://example.test:8080/a".to_string()))
+        );
+        let (target, found) =
+            resolve_at_with_plugins("at src/lib.rs:3", 5, project.path(), None, &detectors);
+        assert_eq!(
+            found.map(|found| found.detector_id).as_deref(),
+            Some("path")
+        );
+        assert_eq!(target, Some(OpenTarget::File(file_path)));
     }
 
     #[test]

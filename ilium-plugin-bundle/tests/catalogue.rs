@@ -144,3 +144,30 @@ fn service_schemas_are_embedded_as_json_of_the_provided_service() {
         }
     }
 }
+
+/// Every provided service whose manifest entry names a schema file ships that file, so no
+/// core service runs unchecked by mistake (gap G13).
+#[test]
+fn every_named_service_schema_is_embedded() {
+    for plugin in plugins() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(plugin.manifest).expect("manifest is JSON");
+        let named = manifest
+            .pointer("/contributes/services/provides")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry.get("schema").is_some())
+            .filter_map(|entry| entry.get("name").and_then(serde_json::Value::as_str));
+        for service in named {
+            assert!(
+                plugin
+                    .schemas
+                    .iter()
+                    .any(|schema| schema.service == service),
+                "{}: {service} names a schema file that is not embedded",
+                plugin.id
+            );
+        }
+    }
+}

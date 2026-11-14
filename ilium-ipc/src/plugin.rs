@@ -284,6 +284,15 @@ pub enum ControlBody {
         /// The invocation number.
         invocation_id: u64,
     },
+    /// Client to server: the user changed settings of a plugin in this client (the Settings
+    /// plugin rows), so the plugin's server side gets `settings-changed` like its client side
+    /// does. Appended after `CliCancel` (append-only rule).
+    SettingsChanged {
+        /// The plugin id.
+        plugin: String,
+        /// The changed settings keys.
+        keys: Vec<String>,
+    },
 }
 
 /// The handshake record a client sends on attach (HST-103).

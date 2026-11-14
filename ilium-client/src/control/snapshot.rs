@@ -830,7 +830,6 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::WaitingWorkspaceCloseOffer { .. } => "waiting_workspace_close_offer",
         Mode::ConfirmWorkspaceCloseOffer(_) => "confirm_workspace_close_offer",
         Mode::GitSettingPrompt(_, _) => "git_setting_prompt",
-        Mode::CreateGroup(_) => "create_group",
         Mode::PluginPopup(_) => "plugin_popup",
         Mode::CreateBoard(_) => "create_board",
         Mode::BoardPathPicker(_) => "board_path_picker",

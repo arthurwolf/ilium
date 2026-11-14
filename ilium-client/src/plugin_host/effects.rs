@@ -11,7 +11,8 @@
 use std::path::{Component, Path, PathBuf};
 
 use ilium_plugin_api::generated::types::intents::{
-    ExternalTarget, InvokeCommandSpec, MarkAttentionSpec, ToastSpec,
+    EditorOpenSpec, EditorPlacement, ExternalTarget, InvokeCommandSpec, MarkAttentionSpec,
+    ToastSpec,
 };
 use ilium_plugin_api::generated::types::paths::FsPath;
 use ilium_plugin_api::generated::types::{ErrorCode, Intent, Outcome, PluginError};
@@ -41,6 +42,13 @@ pub(crate) enum ClientEffect {
     AckAttention(ilium_core::NodeId),
     /// Open a URL or a file with the desktop's default application.
     OpenExternal(crate::open_target::OpenTarget),
+    /// Open a file in a kernel editor pane. `line` is 1-based, as the kernel's own links are;
+    /// the intent's 0-based line is converted here.
+    EditorOpen {
+        path: PathBuf,
+        line: Option<u32>,
+        placement: EditorPlacement,
+    },
     /// Open a kernel Settings page by its id.
     OpenSettings(String),
     /// Remove the toast with this id if it is still shown.
@@ -186,6 +194,21 @@ fn open_external(
     }
 }
 
+/// An `editor-open` of a plugin: the path must stay inside the project or home scope.
+fn editor_open(spec: EditorOpenSpec, project_dir: &Path, home_dir: Option<&Path>) -> Classified {
+    match resolve_path(&spec.path, project_dir, home_dir) {
+        Some(path) => Classified::Effect(ClientEffect::EditorOpen {
+            path,
+            line: spec.line.map(|line| line.saturating_add(1)),
+            placement: spec.placement,
+        }),
+        None => refused(
+            ErrorCode::InvalidArgument,
+            "the file path must stay inside the project or home scope",
+        ),
+    }
+}
+
 /// Classifies one intent for the client. `project_dir` and `home_dir` resolve file paths.
 pub(crate) fn classify(intent: Intent, project_dir: &Path, home_dir: Option<&Path>) -> Classified {
     match intent {
@@ -197,6 +220,8 @@ pub(crate) fn classify(intent: Intent, project_dir: &Path, home_dir: Option<&Pat
         Intent::Toast(spec) => toast(&spec),
         Intent::DismissToast(id) => Classified::Effect(ClientEffect::DismissToast(id)),
         Intent::OpenExternal(spec) => open_external(spec.target, project_dir, home_dir),
+        // The editor is drawn by the client, so a file opens where the user sits.
+        Intent::EditorOpen(spec) => editor_open(spec, project_dir, home_dir),
         other => Classified::Server(other),
     }
 }
@@ -323,6 +348,42 @@ mod tests {
         ));
         assert!(matches!(
             classify_here(file("../secret")),
+            Classified::Refused(_)
+        ));
+    }
+
+    #[test]
+    fn editor_open_resolves_the_scope_and_makes_the_line_one_based() {
+        let open = |scope: &str, path: &str, line: Option<u32>| {
+            classify_here(Intent::EditorOpen(EditorOpenSpec {
+                path: FsPath {
+                    scope: scope.to_owned(),
+                    path: path.to_owned(),
+                },
+                line,
+                placement: EditorPlacement::Split,
+            }))
+        };
+        assert!(matches!(
+            open("project", "src/main.rs", Some(41)),
+            Classified::Effect(ClientEffect::EditorOpen { path, line: Some(42), placement: EditorPlacement::Split })
+                if path == Path::new("/work/project/src/main.rs")
+        ));
+        assert!(matches!(
+            open("home", "notes.md", None),
+            Classified::Effect(ClientEffect::EditorOpen { path, line: None, .. })
+                if path == Path::new("/home/someone/notes.md")
+        ));
+        assert!(matches!(
+            open("project", "../outside.rs", Some(0)),
+            Classified::Refused(_)
+        ));
+        assert!(matches!(
+            open("project", "//example.org", Some(0)),
+            Classified::Refused(_)
+        ));
+        assert!(matches!(
+            open("cache", "x.rs", Some(0)),
             Classified::Refused(_)
         ));
     }

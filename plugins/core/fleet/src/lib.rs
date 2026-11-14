@@ -4,6 +4,8 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
+pub mod delivery;
+
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;

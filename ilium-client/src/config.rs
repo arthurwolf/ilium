@@ -910,6 +910,11 @@ pub enum TreeOrder {
     /// Most expensive first. Driven by the Agent Cost tab's "sort by cost"
     /// switch rather than chosen here, so it is not part of [`Self::ALL`].
     CostDescending,
+    /// Ascending by the sort keys a plugin set on tree nodes (`contributes.tree_orderings`):
+    /// the decorations it set in the ordering's slot. Chosen from the "Order by" submenu,
+    /// which names the plugin ordering, so it is not part of [`Self::ALL`] and never
+    /// persisted.
+    PluginKey,
 }
 
 impl TreeOrder {
@@ -934,6 +939,7 @@ impl TreeOrder {
             Self::NameAscending => "Name A-Z",
             Self::NameDescending => "Name Z-A",
             Self::CostDescending => "Cost high-low",
+            Self::PluginKey => "Plugin order",
         }
     }
 
@@ -2331,6 +2337,8 @@ fn tree_order_name(tree_order: TreeOrder) -> &'static str {
         TreeOrder::NameDescending => "name_descending",
         // Never persisted: the effective order is derived from [cost].sort_by_cost.
         TreeOrder::CostDescending => "manual",
+        // Never persisted: the plugin ordering is chosen for this client run only.
+        TreeOrder::PluginKey => "manual",
     }
 }
 

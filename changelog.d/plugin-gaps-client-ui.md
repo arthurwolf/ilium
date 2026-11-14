@@ -4,3 +4,9 @@
 - Plugins can recognise their own links in terminal output. Ctrl+O on such a link runs the plugin's link command; links no plugin claims still open as before.
 - Terminal context-menu entries contributed by plugins appear in the terminal right-click menu.
 - Text, path, colour and number settings contributed by plugins can be typed into a prompt from Settings, Plugins. Left and Right step a setting backwards and forwards. The plugin is told when the user changes one of its settings.
+- A right-click on a terminal link a plugin recognises offers "Open link" with the plugin's command, next to the usual open entries.
+- The core terminal plugin opens web links in the browser and `path:line` links in an editor split, through its declared `link-open` command.
+- Tree toolbar buttons contributed by plugins are drawn after the built-in buttons. A click runs the button's command, or opens the popup it names; hovering shows its label.
+- Tree orderings contributed by plugins appear in the tree's "Order by" submenu and sort the tree by the keys the plugin sets on each node.
+- Pane frame header slots contributed by plugins show their text and icons after the pane title.
+- The server side of a plugin is also told when the user changes one of its settings.

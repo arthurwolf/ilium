@@ -27,7 +27,8 @@
       "services.provide:ilium.core.tree/bookmarks"
     ],
     "client": [
-      "tree.read"
+      "tree.read",
+      "ui.panels"
     ]
   },
   "contributes": {
@@ -174,6 +175,13 @@
         "title": "Outdent",
         "palette": false,
         "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "new-group",
+        "title": "New group",
+        "palette": false,
+        "side": "client",
         "category": "Tree"
       }
     ],

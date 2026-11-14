@@ -137,17 +137,30 @@ pub enum TreeToolbarAction {
     /// layout (stable for one frame, like a hit index); the layout entry holds
     /// the profile id. Custom agents are ordinary toolbar entries.
     CustomAgent(usize),
+    /// A button an enabled plugin contributes (`contributes.tree_toolbar`). Carries the
+    /// entry's index in `App::plugin_toolbar_buttons`, stable for one frame like a hit index.
+    /// Plugin buttons follow the layout's own entries and are never persisted in it.
+    Plugin(usize),
+}
+
+/// What the toolbar draws for one contributed plugin button.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginToolbarButton {
+    /// One or two display cells.
+    pub glyph: String,
+    /// Shown in the caption row while the button is hovered.
+    pub title: String,
 }
 
 impl TreeToolbarAction {
     /// One distinct bit per built-in button, for the compact pending-spinner
     /// set. Custom agents track their pending state by profile id instead.
     pub(crate) fn pending_bit(self) -> u16 {
-        if matches!(self, Self::CustomAgent(_)) {
+        if matches!(self, Self::CustomAgent(_) | Self::Plugin(_)) {
             return 0;
         }
         1 << match self {
-            Self::CustomAgent(_) => unreachable!("handled above"),
+            Self::CustomAgent(_) | Self::Plugin(_) => unreachable!("handled above"),
             Self::Search => 0,
             Self::Shell => 1,
             Self::Agent(BuiltinAgentProvider::Claude) => 2,
@@ -218,6 +231,8 @@ impl TreeToolbarAction {
             Self::ActivityFilter => "👁",
             // The profile's own icon is drawn by the caller.
             Self::CustomAgent(_) => "✦",
+            // The plugin's own glyph is drawn by the caller.
+            Self::Plugin(_) => "◆",
         }
     }
 
@@ -242,6 +257,7 @@ impl TreeToolbarAction {
             Self::Settings => Color::Gray,
             Self::ActivityFilter => Color::Cyan,
             Self::CustomAgent(_) => Color::Cyan,
+            Self::Plugin(_) => Color::Rgb(0x7d, 0xcf, 0xff),
         }
     }
 
@@ -262,6 +278,7 @@ impl TreeToolbarAction {
             Self::Settings => "settings",
             Self::ActivityFilter => "show or hide inactive terminals",
             Self::CustomAgent(_) => "custom agent",
+            Self::Plugin(_) => "plugin action",
         }
     }
 }
@@ -437,6 +454,8 @@ pub(crate) struct PaintedTreeRows {
     list: Rect,
     area: Rect,
     toolbar: bool,
+    /// How many contributed plugin buttons the toolbar drew (`TreeToolbarAction::Plugin`).
+    plugin_toolbar_buttons: usize,
     rows: Vec<(TreeNodeHit, u16)>,
     monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
     layout_slots: Option<TreeRowSlots>,
@@ -465,6 +484,7 @@ impl PaintedTreeRows {
             list: area,
             area,
             toolbar: false,
+            plugin_toolbar_buttons: 0,
             rows: vec![(TreeNodeHit { id, row, line: 0 }, 2)],
             monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             layout_slots: None,
@@ -523,6 +543,7 @@ impl PaintedTreeRows {
             list,
             area,
             toolbar: is_toolbar_visible(options.focused, options.hover.toolbar_hovered),
+            plugin_toolbar_buttons: options.plugin_toolbar.len(),
             _metadata: None,
             rows,
             monitoring_mode: options.agent_monitoring_mode,
@@ -804,7 +825,9 @@ impl PaintedTreeRows {
         layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
     ) -> Option<TreeToolbarAction> {
         self.toolbar.then_some(())?;
-        configured_toolbar_action_at(self.area, position, layout)
+        configured_toolbar_button_rects_with_plugins(self.area, layout, self.plugin_toolbar_buttons)
+            .into_iter()
+            .find_map(|(action, button)| button.contains(position).then_some(action))
     }
     pub(crate) fn node_at(&self, position: Position) -> Option<TreeNodeHit> {
         self.list.contains(position).then_some(())?;
@@ -965,6 +988,10 @@ pub struct TreeRenderOptions<'a> {
     pub custom_toolbar_profiles: Option<&'a [ilium_core::custom_agent::CustomAgentProfile]>,
     pub custom_toolbar_selected: Option<&'a str>,
     pub custom_toolbar_pending: Option<&'a HashSet<String>>,
+    /// Buttons enabled plugins contribute to the toolbar, drawn after the layout's entries.
+    pub plugin_toolbar: &'a [PluginToolbarButton],
+    /// Per-node sort keys of the plugin tree ordering `TreeOrder::PluginKey` sorts by.
+    pub plugin_order_ranks: Option<&'a HashMap<NodeId, f64>>,
     pub custom_agent_labels: Option<&'a HashMap<NodeId, (String, String)>>,
     pub focused: bool,
     pub elapsed_ms: u128,
@@ -2989,9 +3016,30 @@ pub(crate) fn configured_toolbar_button_rects(
     configured_toolbar_rects_in_strip(toolbar_area(area), layout)
 }
 
+/// The toolbar of the tree with `plugin_buttons` contributed plugin buttons after the
+/// layout's own left-hand entries. The drawn toolbar and its pointer targets both use this.
+pub(crate) fn configured_toolbar_button_rects_with_plugins(
+    area: Rect,
+    layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+    plugin_buttons: usize,
+) -> Vec<(TreeToolbarAction, Rect)> {
+    configured_toolbar_rects_with_plugins(toolbar_area(area), layout, plugin_buttons)
+}
+
 pub(crate) fn configured_toolbar_rects_in_strip(
     toolbar: Rect,
     layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+) -> Vec<(TreeToolbarAction, Rect)> {
+    configured_toolbar_rects_with_plugins(toolbar, layout, 0)
+}
+
+/// Lays out the layout's entries, then `plugin_buttons` plugin buttons in the space left
+/// before the anchored suffix. Plugin buttons come after every built-in left-hand entry, so
+/// they never move a built-in button; when the strip is too narrow they are the first to go.
+pub(crate) fn configured_toolbar_rects_with_plugins(
+    toolbar: Rect,
+    layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
+    plugin_buttons: usize,
 ) -> Vec<(TreeToolbarAction, Rect)> {
     let visible_width = TOOLBAR_BUTTON_WIDTH - 1;
     if toolbar.width < visible_width {
@@ -3011,15 +3059,22 @@ pub(crate) fn configured_toolbar_rects_in_strip(
     };
     let left_end = toolbar.right().saturating_sub(reserved);
     let mut buttons = Vec::new();
-    for (index, entry) in layout.entries.iter().take(left_count).enumerate() {
+    let left_actions = layout
+        .entries
+        .iter()
+        .take(left_count)
+        .enumerate()
+        .map(|(index, entry)| toolbar_action_for(index, entry))
+        .chain((0..plugin_buttons).map(TreeToolbarAction::Plugin));
+    for (slot, action) in left_actions.enumerate() {
         let x = toolbar
             .x
-            .saturating_add((index as u16).saturating_mul(TOOLBAR_BUTTON_WIDTH));
+            .saturating_add((slot as u16).saturating_mul(TOOLBAR_BUTTON_WIDTH));
         if x.saturating_add(visible_width) > left_end {
             break;
         }
         buttons.push((
-            toolbar_action_for(index, entry),
+            action,
             Rect::new(x, toolbar.y, visible_width, toolbar.height),
         ));
     }
@@ -3386,8 +3441,12 @@ pub(crate) fn render(
     options: TreeRenderOptions<'_>,
 ) -> PaintedTreeRows {
     // Only ordering by cost reads the ranks, so skip copying them otherwise.
+    // A plugin ordering sorts by the keys its plugin set (`TreeOrder::PluginKey`).
     let cost_ranks: HashMap<NodeId, f64> = match options.cost {
         Some(cost) if options.tree_order == TreeOrder::CostDescending => cost.ranks.clone(),
+        _ if options.tree_order == TreeOrder::PluginKey => {
+            options.plugin_order_ranks.cloned().unwrap_or_default()
+        }
         _ => HashMap::new(),
     };
     let mut reserved = HashMap::new();
@@ -3657,6 +3716,7 @@ pub(crate) fn render(
                 profiles: options.custom_toolbar_profiles.unwrap_or(&[]),
                 selected: options.custom_toolbar_selected,
                 pending: options.custom_toolbar_pending,
+                plugins: options.plugin_toolbar,
             },
         );
     }
@@ -4015,6 +4075,8 @@ struct ToolbarPaintContext<'a> {
     profiles: &'a [ilium_core::custom_agent::CustomAgentProfile],
     selected: Option<&'a str>,
     pending: Option<&'a HashSet<String>>,
+    /// Contributed plugin buttons, indexed by `TreeToolbarAction::Plugin`.
+    plugins: &'a [PluginToolbarButton],
 }
 
 /// Draws the five creation buttons plus a caption row naming whichever one
@@ -4035,7 +4097,9 @@ fn draw_toolbar(
     let toolbar = toolbar_area(area);
     let caption_row = Rect::new(toolbar.x, toolbar.y + 1, toolbar.width, 1);
 
-    for (action, button_area) in configured_toolbar_button_rects(area, layout) {
+    for (action, button_area) in
+        configured_toolbar_button_rects_with_plugins(area, layout, custom.plugins.len())
+    {
         let is_hovered = hovered == Some(action);
         let custom_profile = action
             .custom_profile_id(layout)
@@ -4061,6 +4125,11 @@ fn draw_toolbar(
             SPINNER_FRAMES[frame_index].to_string()
         } else if let Some(profile) = custom_profile {
             profile.icon.clone()
+        } else if let TreeToolbarAction::Plugin(index) = action {
+            custom.plugins.get(index).map_or_else(
+                || action.glyph(custom.icons).to_owned(),
+                |button| button.glyph.clone(),
+            )
         } else {
             action.glyph(custom.icons).to_string()
         };
@@ -4078,7 +4147,13 @@ fn draw_toolbar(
                     || action.description().to_owned(),
                     |profile| profile.name.clone(),
                 ),
-            None => action.description().to_owned(),
+            None => match action {
+                TreeToolbarAction::Plugin(index) => custom.plugins.get(index).map_or_else(
+                    || action.description().to_owned(),
+                    |button| button.title.clone(),
+                ),
+                _ => action.description().to_owned(),
+            },
         };
         let caption = Paragraph::new(Line::from(Span::styled(
             format!(" {description}"),
@@ -4106,6 +4181,7 @@ mod tests {
                 list: area,
                 area,
                 toolbar: false,
+                plugin_toolbar_buttons: 0,
                 rows: vec![(
                     TreeNodeHit {
                         id: ROOT_ID,
@@ -4164,6 +4240,7 @@ mod tests {
                     list: area,
                     area,
                     toolbar: false,
+                    plugin_toolbar_buttons: 0,
                     rows: vec![(
                         TreeNodeHit {
                             id: ROOT_ID,
@@ -4242,6 +4319,77 @@ mod tests {
     use ilium_core::GoalState;
 
     #[test]
+    fn plugin_toolbar_buttons_follow_the_layout_entries_without_moving_them() {
+        let layout = crate::tree_toolbar_layout::TreeToolbarLayout::default();
+        let area = Rect::new(0, 0, 200, 8);
+        let without = configured_toolbar_button_rects(area, &layout);
+        let with = configured_toolbar_button_rects_with_plugins(area, &layout, 2);
+        // Every built-in button keeps its cells.
+        for (action, rect) in &without {
+            assert!(with.contains(&(*action, *rect)), "{action:?} moved");
+        }
+        let plugins: Vec<_> = with
+            .iter()
+            .filter(|(action, _)| matches!(action, TreeToolbarAction::Plugin(_)))
+            .collect();
+        assert_eq!(plugins.len(), 2);
+        assert_eq!(plugins[0].0, TreeToolbarAction::Plugin(0));
+        assert_eq!(plugins[1].0, TreeToolbarAction::Plugin(1));
+        // A narrow strip drops plugin buttons before any built-in one.
+        let narrow = Rect::new(0, 0, (without.len() as u16) * TOOLBAR_BUTTON_WIDTH, 8);
+        let narrow_with = configured_toolbar_button_rects_with_plugins(narrow, &layout, 3);
+        assert_eq!(
+            narrow_with
+                .iter()
+                .filter(|(action, _)| !matches!(action, TreeToolbarAction::Plugin(_)))
+                .count(),
+            configured_toolbar_button_rects(narrow, &layout).len()
+        );
+    }
+
+    #[test]
+    fn a_plugin_toolbar_button_draws_its_glyph_and_its_title_when_hovered() {
+        let area = Rect::new(0, 0, 200, 8);
+        let layout = crate::tree_toolbar_layout::TreeToolbarLayout::default();
+        let plugins = [PluginToolbarButton {
+            glyph: "✚".to_owned(),
+            title: "New note".to_owned(),
+        }];
+        let (_, button) = configured_toolbar_button_rects_with_plugins(area, &layout, 1)
+            .into_iter()
+            .find(|(action, _)| *action == TreeToolbarAction::Plugin(0))
+            .expect("the plugin button fits");
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_toolbar(
+                    frame,
+                    area,
+                    (&layout, false),
+                    Some(TreeToolbarAction::Plugin(0)),
+                    0,
+                    0,
+                    ToolbarPaintContext {
+                        icons: &IconSettings::default(),
+                        profiles: &[],
+                        selected: None,
+                        pending: None,
+                        plugins: &plugins,
+                    },
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let row = |y: u16| -> String {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol().to_owned())
+                .collect()
+        };
+        assert!(row(button.y).contains('✚'));
+        assert!(row(button.y + 1).contains("New note"));
+    }
+
+    #[test]
     fn pending_toolbar_button_renders_a_braille_frame_instead_of_its_icon() {
         let area = Rect::new(0, 0, 60, 8);
         let (action, button) = toolbar_button_rects(area)
@@ -4264,6 +4412,7 @@ mod tests {
                             profiles: &[],
                             selected: None,
                             pending: None,
+                            plugins: &[],
                         },
                     )
                 })
@@ -4312,6 +4461,7 @@ mod tests {
             list: list_area(area),
             area,
             toolbar: false,
+            plugin_toolbar_buttons: 0,
             _metadata: None,
             rows: vec![(first, 4), (second, 5)],
             monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -4823,6 +4973,7 @@ mod tests {
             list: area,
             area,
             toolbar: false,
+            plugin_toolbar_buttons: 0,
             rows: vec![(
                 TreeNodeHit {
                     id: ROOT_ID,
@@ -5184,6 +5335,8 @@ mod tests {
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
                         custom_toolbar_pending: None,
+                        plugin_toolbar: &[],
+                        plugin_order_ranks: None,
                         custom_agent_labels: None,
                         focused: false,
                         elapsed_ms,
@@ -6472,6 +6625,8 @@ mod tests {
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
                         custom_toolbar_pending: None,
+                        plugin_toolbar: &[],
+                        plugin_order_ranks: None,
                         custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
@@ -6541,6 +6696,8 @@ mod tests {
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
                         custom_toolbar_pending: None,
+                        plugin_toolbar: &[],
+                        plugin_order_ranks: None,
                         custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
@@ -6638,6 +6795,8 @@ mod tests {
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
                         custom_toolbar_pending: None,
+                        plugin_toolbar: &[],
+                        plugin_order_ranks: None,
                         custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,
@@ -8690,6 +8849,8 @@ mod cost_indicator_tests {
                         custom_toolbar_profiles: None,
                         custom_toolbar_selected: None,
                         custom_toolbar_pending: None,
+                        plugin_toolbar: &[],
+                        plugin_order_ranks: None,
                         custom_agent_labels: None,
                         focused: false,
                         elapsed_ms: 0,

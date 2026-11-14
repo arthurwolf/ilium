@@ -588,7 +588,14 @@ pub(crate) async fn capture_snapshot(
         let tree = sources.tree.read().await;
         let panes = sources.panes.read().await;
         let preferences = sources.workspace_close_preferences.read().await;
-        let retained = capture_estimated_bytes(&tree, &panes, &preferences, progress_override);
+        // Plugin node metadata is copied below, so it counts toward admission too.
+        let metadata_bytes = sources
+            .plugin_node_metadata
+            .lock()
+            .map(|store| estimated_node_metadata_bytes(&store))
+            .unwrap_or(0);
+        let retained = capture_estimated_bytes(&tree, &panes, &preferences, progress_override)
+            .saturating_add(metadata_bytes);
         let limit = crate::snapshot_io::MAX_SNAPSHOT_RETAINED_BYTES;
         if retained > limit {
             return Err(crate::snapshot_io::error(
@@ -797,6 +804,21 @@ fn capture_estimated_bytes(
         estimated_monitor_bytes(monitor).saturating_mul(2)
     }))
 }
+/// What the deep copy of the plugin node metadata retains: one record, the plugin id and the
+/// bytes per entry, as `snapshot_io` counts the captured snapshot.
+fn estimated_node_metadata_bytes(
+    store: &std::collections::BTreeMap<(String, u64), Vec<u8>>,
+) -> usize {
+    store
+        .iter()
+        .map(|((plugin, _), bytes)| {
+            std::mem::size_of::<PersistedNodeMetadata>()
+                .saturating_add(plugin.capacity())
+                .saturating_add(bytes.capacity())
+        })
+        .fold(0, usize::saturating_add)
+}
+
 pub(crate) fn estimated_monitor_bytes(monitor: &PersistedProgressMonitor) -> usize {
     std::mem::size_of::<PersistedProgressMonitor>()
         .saturating_add(monitor.command.capacity())
@@ -2089,6 +2111,17 @@ mod tests {
         old_shape.as_object_mut().unwrap().remove("recaps");
         let legacy: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
         assert!(legacy.recaps.is_empty());
+    }
+
+    #[test]
+    fn plugin_node_metadata_counts_toward_capture_admission() {
+        let mut store = std::collections::BTreeMap::new();
+        assert_eq!(super::estimated_node_metadata_bytes(&store), 0);
+        store.insert(("example.notes".to_owned(), 7), vec![0_u8; 4096]);
+        let one = super::estimated_node_metadata_bytes(&store);
+        assert!(one >= 4096 + "example.notes".len());
+        store.insert(("example.notes".to_owned(), 8), vec![0_u8; 4096]);
+        assert_eq!(super::estimated_node_metadata_bytes(&store), 2 * one);
     }
 
     #[tokio::test]

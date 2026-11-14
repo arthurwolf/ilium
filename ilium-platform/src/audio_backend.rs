@@ -102,6 +102,22 @@ pub fn selected_pulse_capture_supported() -> bool {
     }
 }
 
+/// The trusted installed `parec` helper, which records a Pulse source (PulseAudio, or the Pulse
+/// server of PipeWire) as raw PCM on its standard output. `Unsupported` off Linux.
+pub fn trusted_pulse_capture_helper() -> std::io::Result<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        trusted_linux_audio_program("parec")
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "no audio capture helper for this OS",
+        ))
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn linux_selected_pulse_source(
     endpoint: &str,

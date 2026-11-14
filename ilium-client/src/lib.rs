@@ -854,6 +854,7 @@ async fn run_inner(
             start,
             &options.session_name,
             &options.session_cwd,
+            config.inference.kilo_gateway.paid_proxies.clone(),
         )
     });
     // Without a host the branch below waits on a notification nobody signals.

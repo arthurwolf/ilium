@@ -6,11 +6,13 @@
 //! lock closed, indent, outdent). The client side turns the tree context menu into intents.
 
 pub mod move_mode;
+pub mod new_group;
 pub mod node_ops;
 pub mod ordering;
 pub mod recent_activity;
 pub mod toolbar_rows;
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
@@ -19,11 +21,12 @@ use ilium_plugin_sdk::generated::host::tree::HostTree;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::host::{HostIntentsHost, HostTopics};
 use ilium_plugin_sdk::types::{
-    ActionKind, ActionValue, Activation, CommandInvokedEvent, CreateFolderSpec, CreateGroupSpec,
-    DecorationVisibility, ErrorCode, Intent, NodeId, Outcome, Placement, PluginError,
-    SetBookmarkedSpec, SetDecorationSpec, SetNodeLockedSpec, Submission,
+    ActionKind, ActionValue, Activation, Area, CommandInvokedEvent, CreateFolderSpec,
+    CreateGroupSpec, DecorationVisibility, ErrorCode, Intent, MessageSpec, MessageTarget, NodeId,
+    OpenViewSpec, Outcome, Placement, PluginError, PluginId, PluginSide, SetBookmarkedSpec,
+    SetDecorationSpec, SetNodeLockedSpec, Submission, UiTree, ViewTarget,
 };
-use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 use node_ops::{NodeOp, Snapshot, PLUGIN_ID};
 use serde_json::{json, Value};
 
@@ -302,6 +305,7 @@ impl Handler for TreeServer {
                 Event::Message(message) => {
                     if let Some(submission) =
                         creation_from_message(&message.channel, &message.payload)
+                            .or_else(|| dialog_creation(&message.channel, &message.payload))
                     {
                         submissions.push(submission);
                     }
@@ -353,14 +357,129 @@ fn creation_from_message(channel: &str, payload: &[u8]) -> Option<Submission> {
     Some(Submission::keyed(intent, format!("{channel}-{parent}")))
 }
 
+/// Turns the `create-group` answer of the "New group" dialog (JSON `{"parent", "name"}`) into a
+/// group under that parent. Anything else is not for this handler.
+fn dialog_creation(channel: &str, payload: &[u8]) -> Option<Submission> {
+    if channel != new_group::CHANNEL {
+        return None;
+    }
+    let answer = new_group::Answer::from_payload(payload)?;
+    Some(Submission::new(Intent::CreateGroup(CreateGroupSpec {
+        parent: Some(NodeId(answer.parent)),
+        title: answer.name,
+        placement: Placement::InsideLast,
+        children: Vec::new(),
+    })))
+}
+
+thread_local! {
+    /// The open "New group" dialog of this client, if any.
+    static NEW_GROUP: RefCell<Option<new_group::Dialog>> = const { RefCell::new(None) };
+}
+
+/// Most nodes the dialog reads from the tree; a larger tree offers its first groups only.
+const TREE_READ_LIMIT_DIALOG: usize = 4096;
+
+/// Reads the tree in drawn order as the facts the dialog needs. Without the `tree.read` grant
+/// the tree reads empty and the dialog offers no destination.
+fn group_facts() -> Vec<new_group::GroupFact> {
+    let mut api = host();
+    let mut facts = Vec::new();
+    let mut stack: Vec<NodeId> = HostTree::roots(&mut *api).into_iter().rev().collect();
+    while let Some(id) = stack.pop() {
+        if facts.len() >= TREE_READ_LIMIT_DIALOG {
+            break;
+        }
+        let Some(view) = HostTree::get(&mut *api, id) else {
+            continue;
+        };
+        facts.push(new_group::GroupFact::from_view(&view));
+        stack.extend(HostTree::children(&mut *api, id).into_iter().rev());
+    }
+    facts
+}
+
+/// A message to the server side of this plugin.
+fn message_to_server(channel: &str, payload: Vec<u8>) -> Submission {
+    Submission::new(Intent::Message(MessageSpec {
+        to: MessageTarget {
+            plugin: PluginId(PLUGIN_ID.to_string()),
+            side: PluginSide::Server,
+            client: None,
+        },
+        channel: channel.to_string(),
+        payload,
+    }))
+}
+
+/// Opens the "New group" dialog for the `new-group` command. Without a `parent` argument the
+/// top level is preselected.
+fn open_new_group(arguments_json: &str) -> Vec<Submission> {
+    let facts = group_facts();
+    let preselected = new_group::parent_argument(arguments_json)
+        .or_else(|| facts.first().map(|fact| fact.id))
+        .unwrap_or(0);
+    let dialog = new_group::Dialog::from_facts(preselected, &facts);
+    NEW_GROUP.with(|cell| *cell.borrow_mut() = Some(dialog));
+    vec![Submission::new(Intent::OpenView(OpenViewSpec {
+        view: new_group::view(),
+        focus: true,
+    }))]
+}
+
+/// Applies one action of the "New group" dialog; when it ends the dialog, returns the message
+/// for the server side (if a group is wanted) and the intent that closes the popup.
+fn new_group_action(
+    key: &str,
+    action_id: &str,
+    kind: ActionKind,
+    value: Option<ActionValue>,
+) -> Vec<Submission> {
+    let step = NEW_GROUP.with(|cell| {
+        let mut state = cell.borrow_mut();
+        let step = state
+            .as_mut()
+            .map(|dialog| dialog.act(key, action_id, kind, value));
+        if matches!(
+            step,
+            Some(new_group::Step::Create(_) | new_group::Step::Cancel)
+        ) {
+            *state = None;
+        }
+        step
+    });
+    let close = || Submission::new(Intent::CloseView(new_group::view()));
+    match step {
+        Some(new_group::Step::Create(answer)) => {
+            vec![
+                message_to_server(new_group::CHANNEL, answer.to_payload()),
+                close(),
+            ]
+        }
+        // The kernel already removed a popup it closed itself; every other end closes it here.
+        Some(new_group::Step::Cancel) if kind != ActionKind::Closed => vec![close()],
+        _ => Vec::new(),
+    }
+}
+
 /// The client side of `ilium.core.tree` (core-plugin-tree.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
 pub struct TreeClient;
 
 impl Lifecycle for TreeClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        NEW_GROUP.with(|cell| *cell.borrow_mut() = None);
         Ok(())
+    }
+}
+
+impl Views for TreeClient {
+    fn render(&mut self, view: ViewTarget, _area: Area) -> UiTree {
+        NEW_GROUP.with(|cell| match cell.borrow().as_ref() {
+            Some(dialog) if view == new_group::view() => dialog.render(),
+            _ => new_group::blank(),
+        })
     }
 }
 
@@ -368,8 +487,29 @@ impl Handler for TreeClient {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
         let mut submissions = Vec::new();
         for event in batch {
-            let Event::UiAction(action) = event else {
-                continue;
+            let action = match event {
+                Event::CommandInvoked(invoked) => {
+                    let bare = invoked
+                        .command
+                        .strip_prefix(PLUGIN_ID)
+                        .and_then(|rest| rest.strip_prefix('/'))
+                        .unwrap_or(&invoked.command);
+                    if bare == new_group::POPUP {
+                        submissions.extend(open_new_group(&invoked.arguments_json));
+                    }
+                    continue;
+                }
+                Event::UiAction(action) if action.view == new_group::view() => {
+                    submissions.extend(new_group_action(
+                        &action.key,
+                        &action.action_id,
+                        action.kind,
+                        action.value,
+                    ));
+                    continue;
+                }
+                Event::UiAction(action) => action,
+                _ => continue,
             };
             if action.kind != ActionKind::Activated {
                 continue;
@@ -485,9 +625,9 @@ mod spec_tests {
 
     /// REQ: COR-050
     #[test]
-    fn client_grants_are_read_only() {
+    fn client_grants_are_the_tree_read_and_the_popup() {
         let grants = string_list(&manifest()["capabilities"]["client"]);
-        assert_eq!(grants, vec!["tree.read".to_owned()]);
+        assert_eq!(grants, vec!["tree.read".to_owned(), "ui.panels".to_owned()]);
     }
 
     /// REQ: COR-050

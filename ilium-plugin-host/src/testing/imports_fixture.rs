@@ -10,9 +10,17 @@ use crate::imports::{
     storage::{StorageAuthorization, StorageImport, StorageImportContext, StorageInstanceState},
 };
 use crate::imports::{
-    clock::ClockImport, env::ImportEnv, fs::FsImport, http::HttpImport, jobs::JobsImport,
-    journal::JournalImport, panes::PanesImport, process::ProcessImport, settings::SettingsImport,
-    timers::TimersImport, tree::TreeImport,
+    clock::ClockImport,
+    env::ImportEnv,
+    fs::FsImport,
+    http::HttpImport,
+    jobs::JobsImport,
+    journal::{JournalBook, JournalImport, READ_ALL_GRANT},
+    panes::PanesImport,
+    process::ProcessImport,
+    settings::SettingsImport,
+    timers::TimersImport,
+    tree::TreeImport,
 };
 use crate::storage::StorageContext;
 use crate::telemetry::{LogConfig, LogLevel, PluginLogInstanceBudget, Refusal};
@@ -416,6 +424,10 @@ impl ImportsFixtureBuilder {
             .build()
             .map_err(|error| format!("imports fixture harness did not build: {error}"))?;
         let jobs = FixtureJobs::new(&manifest, self.runner);
+        // The journal stamps entries with the fixture plugin's id, as the runtime does.
+        let journal_import = JournalImport::new(JournalBook::new(), &plugin).reading_all(
+            crate::imports::env::grants_allow(&self.grants, READ_ALL_GRANT),
+        );
         Ok(ImportsFixture {
             log_import,
             logger,
@@ -442,7 +454,7 @@ impl ImportsFixtureBuilder {
             fs_import,
             http_import,
             jobs_import: jobs,
-            journal_import: JournalImport::default(),
+            journal_import,
             panes_import: PanesImport,
             process_import,
             settings_import: SettingsImport,

@@ -2435,6 +2435,8 @@ pub(crate) fn render_live_tree_preview(
             custom_toolbar_profiles: None,
             custom_toolbar_selected: None,
             custom_toolbar_pending: None,
+            plugin_toolbar: &[],
+            plugin_order_ranks: None,
             custom_agent_labels: None,
             focused: false,
             elapsed_ms: if app.ui_settings.motion_level == crate::config::MotionLevel::Off {

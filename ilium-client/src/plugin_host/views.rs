@@ -49,6 +49,32 @@ fn terminal_menu_actions(
         .collect()
 }
 
+/// Longest plugin toolbar glyph, in display cells: one toolbar button holds two.
+const TOOLBAR_GLYPH_CELLS: usize = 2;
+
+/// What the tree toolbar draws for a contributed button. The manifest's `icon` is used when
+/// it is a glyph that fits the button; an icon name such as `plus` does not, so the first
+/// letter of the title stands in for it.
+fn toolbar_button(item: &ChromeItem) -> crate::tree_ui::PluginToolbarButton {
+    let icon = item
+        .icon
+        .as_deref()
+        .map(|icon| sanitize_plugin_text(icon.trim(), TOOLBAR_GLYPH_CELLS))
+        .filter(|icon| {
+            !icon.is_empty()
+                && !icon.chars().any(char::is_alphanumeric)
+                && unicode_width::UnicodeWidthStr::width(icon.as_str()) <= TOOLBAR_GLYPH_CELLS
+        });
+    let title = sanitize_plugin_text(&item.title, SEGMENT_LIMIT);
+    let glyph = icon.unwrap_or_else(|| {
+        title
+            .chars()
+            .find(|character| character.is_alphanumeric())
+            .map_or_else(|| "◆".to_owned(), |first| first.to_uppercase().collect())
+    });
+    crate::tree_ui::PluginToolbarButton { glyph, title }
+}
+
 /// The setting row a Settings text prompt edits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginSettingTarget {
@@ -155,9 +181,10 @@ impl App {
     /// matching node; `terminal` entries belong to the terminal pane's own menu and never
     /// show in the tree menu.
     pub(crate) fn plugin_context_items(&self, target: ilium_core::NodeId) -> Vec<ChromeItem> {
-        // Contributed tree toolbar buttons and row actions have no drawn button yet, so the
-        // menu is where they are reached: toolbar entries on every node, row actions on the
-        // nodes they apply to.
+        // Contributed row actions have no drawn button yet, so the menu is where they are
+        // reached, on the nodes they apply to. Toolbar buttons are drawn in the tree toolbar
+        // (`plugin_toolbar_buttons`), but a narrow or hidden toolbar drops them first, so
+        // the menu keeps them reachable on every node.
         ["context_menu", "tree_toolbar", "row_actions"]
             .into_iter()
             .flat_map(|kind| self.plugin_chrome(kind))
@@ -188,8 +215,9 @@ impl App {
         });
         let is_project = node.is_some_and(ilium_core::Node::is_project);
         kinds.split(',').map(str::trim).any(|kind| match kind {
-            "pane" => is_pane,
-            "agent" => is_agent,
+            "all" => true,
+            "pane" | "panes" => is_pane,
+            "agent" | "agents" => is_agent,
             "group" | "folder" => node.is_some() && !is_pane && target != ilium_core::ROOT_ID,
             "project" => is_project,
             "tree" | "root" => target == ilium_core::ROOT_ID,
@@ -213,6 +241,80 @@ impl App {
             None => "{}".to_owned(),
         };
         self.invoke_plugin_command(command, arguments, origin);
+    }
+
+    /// The buttons enabled plugins contribute to the tree toolbar, in contribution order.
+    /// `TreeToolbarAction::Plugin(index)` indexes this list; the renderer and the click
+    /// handler both read it, so an index means the same button in both.
+    pub(crate) fn plugin_toolbar_buttons(&self) -> Vec<crate::tree_ui::PluginToolbarButton> {
+        self.plugin_chrome("tree_toolbar")
+            .iter()
+            .map(toolbar_button)
+            .collect()
+    }
+
+    /// Runs the contributed toolbar button at `index`: its command with the selected node,
+    /// or, for a button that runs no command, the popup it names.
+    pub(crate) fn run_plugin_toolbar_button(&mut self, index: usize) {
+        let Some(item) = self.plugin_chrome("tree_toolbar").into_iter().nth(index) else {
+            return;
+        };
+        if item.command.is_some() {
+            let node = self.selected_node_id();
+            self.run_plugin_chrome(
+                &item,
+                node,
+                ilium_plugin_api::generated::types::CommandOrigin::TreeToolbar,
+            );
+            return;
+        }
+        match (item.popup_view.as_deref(), self.wasm_plugins.as_ref()) {
+            (Some(popup), Some(plugins)) => plugins.show_popup(&item.plugin, popup),
+            _ => {
+                self.status_message = Some(format!(
+                    "{} runs no command and opens no popup",
+                    sanitize_plugin_text(&item.title, SEGMENT_LIMIT)
+                ));
+            }
+        }
+    }
+
+    /// The tree orderings enabled plugins contribute (`contributes.tree_orderings`), offered
+    /// in the tree's "Order by" submenu.
+    pub(crate) fn plugin_tree_orderings(&self) -> Vec<ChromeItem> {
+        self.plugin_chrome("tree_orderings")
+    }
+
+    /// Whether a plugin tree ordering is chosen and its plugin still contributes it. A choice
+    /// whose plugin was disabled falls back to the built-in order the user picked.
+    pub(crate) fn plugin_tree_ordering_in_effect(&self) -> bool {
+        self.plugin_tree_ordering
+            .as_ref()
+            .is_some_and(|(plugin, id)| {
+                self.plugin_tree_orderings()
+                    .iter()
+                    .any(|ordering| ordering.plugin == *plugin && ordering.id == *id)
+            })
+    }
+
+    /// The per-node keys of the plugin tree ordering in effect: the sort keys its plugin set
+    /// with decorations in the ordering's slot. Empty when no plugin ordering is chosen, or
+    /// when the chosen one is no longer contributed, which leaves the manual order.
+    pub(crate) fn plugin_tree_order_ranks(
+        &self,
+    ) -> std::collections::HashMap<ilium_core::NodeId, f64> {
+        let (Some((plugin, id)), Some(plugins)) = (
+            self.plugin_tree_ordering.as_ref(),
+            self.wasm_plugins.as_ref(),
+        ) else {
+            return std::collections::HashMap::new();
+        };
+        self.plugin_tree_orderings()
+            .into_iter()
+            .find(|ordering| ordering.plugin == *plugin && ordering.id == *id)
+            .and_then(|ordering| ordering.slot)
+            .map(|slot| plugins.sort_keys(plugin, &slot))
+            .unwrap_or_default()
     }
 
     /// The terminal right-click menu entries enabled plugins contribute: `context_menu`
@@ -424,10 +526,15 @@ impl App {
     }
 
     /// Tells the plugin that owns a row that the user changed it in Settings.
-    fn notify_plugin_setting_changed(&self, row: &SettingRow) {
-        if let Some(plugins) = self.wasm_plugins.as_ref() {
-            plugins.settings_changed(&row.plugin, vec![row.key.clone()]);
-        }
+    /// Both halves hear it: the client side directly, the server side through the server.
+    fn notify_plugin_setting_changed(&mut self, row: &SettingRow) {
+        let Some(plugins) = self.wasm_plugins.as_ref() else {
+            return;
+        };
+        plugins.settings_changed(&row.plugin, vec![row.key.clone()]);
+        let request = plugins.settings_changed_request(&row.plugin, vec![row.key.clone()]);
+        // A refused request already told the user why.
+        let _ = self.queue_request(request);
     }
 
     /// Shows a contributed view on the user's request (a menu entry, a key, the plugin list).
@@ -623,19 +730,139 @@ impl App {
 
     /// What client-side plugins attach to one tree row, as one sanitized text; `None` when
     /// nothing decorates the node.
-    pub(crate) fn plugin_decoration_text(&self, node: ilium_core::NodeId) -> Option<String> {
+    pub(crate) fn plugin_decoration_text(
+        &self,
+        node: ilium_core::NodeId,
+        frame_slots: &[ChromeItem],
+    ) -> Option<String> {
         let plugins = self.wasm_plugins.as_ref()?;
         if !plugins.has_decorations() {
             return None;
         }
+        // A decoration in a pane frame slot (`frame_slots`, read once per frame) belongs to
+        // the pane's frame, not the tree row.
         let texts: Vec<String> = plugins
             .decorations_of(node)
             .iter()
+            .filter(|decoration| {
+                !frame_slots
+                    .iter()
+                    .any(|slot| slot.plugin == decoration.plugin && slot.id == decoration.slot)
+            })
             .map(|decoration| sanitize_plugin_text(&decoration.text, SEGMENT_LIMIT))
             .filter(|text| !text.trim().is_empty())
             .collect();
         (!texts.is_empty()).then(|| texts.join(" "))
     }
+}
+
+impl App {
+    /// What plugins show in the header of a pane's frame: the decorations they set on the
+    /// pane in their `pane_frame_slots` placed `header-icon` or `header-text` that apply to
+    /// the pane, icons first, in slot order. `None` when there is nothing to show.
+    pub(crate) fn plugin_frame_header_text(&self, node: ilium_core::NodeId) -> Option<String> {
+        let plugins = self.wasm_plugins.as_ref()?;
+        if !plugins.has_decorations() {
+            return None;
+        }
+        let slots: Vec<ChromeItem> = self
+            .plugin_chrome("pane_frame_slots")
+            .into_iter()
+            .filter(|slot| frame_header_rank(slot).is_some())
+            .filter(|slot| self.frame_slot_applies_to(slot, node))
+            .collect();
+        if slots.is_empty() {
+            return None;
+        }
+        frame_header_text(&slots, &plugins.decorations_of(node))
+    }
+}
+
+impl crate::app::App {
+    /// Whether the pane frame slot `slot` belongs on the frame of pane `node`.
+    fn frame_slot_applies_to(&self, slot: &ChromeItem, node: ilium_core::NodeId) -> bool {
+        let Some(ilium_core::NodeKind::Pane {
+            content, status, ..
+        }) = self.tree.get(node).map(|node| &node.kind)
+        else {
+            return false;
+        };
+        let content = match content {
+            ilium_core::PaneContentKind::Terminal => "terminal",
+            ilium_core::PaneContentKind::Editor => "editor",
+            ilium_core::PaneContentKind::Board => "board",
+        };
+        let signature = match status {
+            ilium_core::PaneStatus::Agent(state) => Some(match &state.class {
+                ilium_core::AgentClass::Claude => "claude".to_owned(),
+                ilium_core::AgentClass::Codex => "codex".to_owned(),
+                ilium_core::AgentClass::Antigravity => "antigravity".to_owned(),
+                ilium_core::AgentClass::Other(name) => name.to_lowercase(),
+            }),
+            _ => None,
+        };
+        frame_slot_applies(slot.target.as_deref(), content, signature.as_deref())
+    }
+}
+
+/// Whether a pane frame slot whose `applies_to` is `applies_to` (comma-joined) matches a
+/// pane showing `content` (`terminal`, `editor`, `board`) with agent `signature`, if any.
+/// The vocabulary is the manual's: `all`, `agents`, `terminals`, `pane:<kind>`, or agent
+/// signature ids. A slot that does not say applies to every pane.
+fn frame_slot_applies(applies_to: Option<&str>, content: &str, signature: Option<&str>) -> bool {
+    let Some(applies_to) = applies_to else {
+        return true;
+    };
+    applies_to.split(',').map(str::trim).any(|kind| match kind {
+        "all" => true,
+        "agents" => signature.is_some(),
+        "terminals" => content == "terminal",
+        _ => match kind.strip_prefix("pane:") {
+            Some(pane_kind) => pane_kind == content,
+            None => signature.is_some_and(|signature| signature.eq_ignore_ascii_case(kind)),
+        },
+    })
+}
+
+/// 0 for a `header-icon` slot, 1 for a `header-text` slot, `None` for a slot placed
+/// elsewhere.
+fn frame_header_rank(slot: &ChromeItem) -> Option<u8> {
+    match slot.placement.as_deref() {
+        Some("header-icon") => Some(0),
+        Some("header-text") => Some(1),
+        _ => None,
+    }
+}
+
+/// The header text of the decorations that sit in one of `slots`: icon slots first, then
+/// text slots, each in slot order, sanitized.
+fn frame_header_text(
+    slots: &[ChromeItem],
+    decorations: &[super::host::TreeDecoration],
+) -> Option<String> {
+    let mut ordered: Vec<(u8, usize, String)> = decorations
+        .iter()
+        .filter_map(|decoration| {
+            let (index, slot) = slots
+                .iter()
+                .enumerate()
+                .find(|(_, slot)| slot.plugin == decoration.plugin && slot.id == decoration.slot)?;
+            let rank = frame_header_rank(slot)?;
+            let shown = if rank == 0 {
+                decoration
+                    .icon
+                    .as_deref()
+                    .unwrap_or(decoration.text.as_str())
+            } else {
+                decoration.text.as_str()
+            };
+            let shown = sanitize_plugin_text(shown.trim(), SEGMENT_LIMIT);
+            (!shown.is_empty()).then_some((rank, index, shown))
+        })
+        .collect();
+    ordered.sort_by_key(|(rank, index, _)| (*rank, *index));
+    let texts: Vec<String> = ordered.into_iter().map(|(_, _, shown)| shown).collect();
+    (!texts.is_empty()).then(|| texts.join(" "))
 }
 
 /// Closes every plugin view the right-hand area no longer shows, so a plugin is not asked to
@@ -704,6 +931,108 @@ mod tests {
             assert_eq!(PluginViewKind::of(&target), Some((kind, "name")));
         }
         assert_eq!(PluginViewKind::of(&ViewTarget::Popup("p".to_owned())), None);
+    }
+
+    fn toolbar_item(icon: Option<&str>, title: &str) -> ChromeItem {
+        ChromeItem {
+            plugin: "ilium.notes".to_owned(),
+            id: "new".to_owned(),
+            title: title.to_owned(),
+            icon: icon.map(str::to_owned),
+            command: Some("ilium.notes/new".to_owned()),
+            target: None,
+            order: 0,
+            popup_view: None,
+            slot: None,
+            placement: None,
+        }
+    }
+
+    #[test]
+    fn a_toolbar_button_uses_a_glyph_icon_or_the_first_letter_of_its_title() {
+        let button = toolbar_button(&toolbar_item(Some("✚"), "New note"));
+        assert_eq!(button.glyph, "✚");
+        assert_eq!(button.title, "New note");
+        // An icon name is no glyph.
+        assert_eq!(
+            toolbar_button(&toolbar_item(Some("plus"), "new note")).glyph,
+            "N"
+        );
+        // Too wide for a button.
+        assert_eq!(toolbar_button(&toolbar_item(Some("→→→"), "Go")).glyph, "G");
+        assert_eq!(toolbar_button(&toolbar_item(None, "\u{1b}[31m")).glyph, "◆");
+    }
+
+    #[test]
+    fn frame_header_text_puts_icons_first_and_skips_other_slots() {
+        let slot = |id: &str, placement: &str| ChromeItem {
+            id: id.to_owned(),
+            placement: Some(placement.to_owned()),
+            ..toolbar_item(None, id)
+        };
+        let slots = [
+            slot("branch", "header-text"),
+            slot("state", "header-icon"),
+            slot("log", "footer-row"),
+        ];
+        let decoration =
+            |slot: &str, text: &str, icon: Option<&str>| super::super::host::TreeDecoration {
+                plugin: "ilium.notes".to_owned(),
+                node: ilium_plugin_api::generated::types::NodeId(4),
+                slot: slot.to_owned(),
+                text: text.to_owned(),
+                icon: icon.map(str::to_owned),
+                sort_key: 0,
+            };
+        let decorations = [
+            decoration("branch", "main", None),
+            decoration("state", "ok", Some("✓")),
+            decoration("log", "tail", None),
+            decoration("other", "x", None),
+        ];
+        assert_eq!(
+            frame_header_text(&slots, &decorations).as_deref(),
+            Some("✓ main")
+        );
+        assert_eq!(frame_header_text(&slots, &decorations[2..]), None);
+    }
+
+    #[test]
+    fn a_frame_slot_follows_the_applies_to_vocabulary_of_the_manual() {
+        assert!(frame_slot_applies(None, "editor", None));
+        assert!(frame_slot_applies(Some("all"), "board", None));
+        assert!(frame_slot_applies(
+            Some("agents"),
+            "terminal",
+            Some("codex")
+        ));
+        assert!(!frame_slot_applies(Some("agents"), "terminal", None));
+        assert!(frame_slot_applies(Some("terminals"), "terminal", None));
+        assert!(!frame_slot_applies(Some("terminals"), "editor", None));
+        assert!(frame_slot_applies(Some("pane:editor"), "editor", None));
+        assert!(!frame_slot_applies(Some("pane:editor"), "terminal", None));
+        assert!(frame_slot_applies(
+            Some("claude,codex"),
+            "terminal",
+            Some("claude")
+        ));
+        assert!(!frame_slot_applies(
+            Some("claude,codex"),
+            "terminal",
+            Some("antigravity")
+        ));
+        assert!(!frame_slot_applies(Some("claude,codex"), "terminal", None));
+    }
+
+    #[test]
+    fn a_frame_slot_reads_its_applies_to_as_a_list_or_one_word() {
+        let manifest = r#"{"contributes":{"pane_frame_slots":[
+            {"id":"model","placement":"header-text","applies_to":["claude","codex"]},
+            {"id":"any","placement":"header-icon","applies_to":"agents"}
+        ]}}"#;
+        let slots = super::super::host::chrome_items("ilium.notes", manifest, "pane_frame_slots");
+        assert_eq!(slots[0].target.as_deref(), Some("claude,codex"));
+        assert_eq!(slots[1].target.as_deref(), Some("agents"));
     }
 
     #[test]

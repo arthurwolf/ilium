@@ -52,4 +52,5 @@ pub mod topics;
 pub mod tree;
 pub mod ui_host;
 pub mod vector;
+mod vector_store;
 pub mod workspace;

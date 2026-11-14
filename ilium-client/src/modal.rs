@@ -16,59 +16,6 @@ use crate::theme;
 
 const TEXT_PROMPT_DEFAULT_HINT: &str = "Click a button or use the shown keyboard shortcut";
 
-/// Fixed width of the "New group" destination picker (see
-/// `App::open_create_group_dialog`) -- wide enough for a few levels of
-/// indentation plus a realistic group name without wrapping.
-const CREATE_GROUP_WIDTH: u16 = 54;
-
-/// At most this many destinations are shown at once; a session with more
-/// nested groups than this scrolls the list (see `create_group_visible_window`)
-/// rather than growing the popup past a reasonable screen fraction.
-pub const CREATE_GROUP_MAX_VISIBLE: usize = 7;
-
-/// Interior row layout of the create-group dialog, computed purely from its
-/// outer `area` -- shared by rendering (`ui::draw_create_group`) and mouse
-/// hit-testing (`App::handle_create_group_mouse`) so neither can drift out
-/// of sync with the other.
-pub struct CreateGroupLayout {
-    pub name_row: Rect,
-    pub label_row: Rect,
-    pub list_area: Rect,
-    pub hint_row: Rect,
-}
-
-/// The outer popup rect, sized to fit every visible destination row (capped
-/// at `CREATE_GROUP_MAX_VISIBLE`) plus the fixed name/label/hint chrome.
-pub fn create_group_dialog_area(screen_area: Rect, destination_count: usize) -> Rect {
-    let visible = destination_count.clamp(1, CREATE_GROUP_MAX_VISIBLE);
-    // Border (2) + name row (1) + spacer (1) + "Create under:" label (1) +
-    // one row per visible destination + hint row (1).
-    let height = 2 + 1 + 1 + 1 + visible as u16 + 1;
-    centered_fixed_rect(CREATE_GROUP_WIDTH, height, screen_area)
-}
-
-/// Splits a create-group dialog's outer `area` into its fixed rows. Assumes
-/// a one-cell border on every edge, matching `theme::block`.
-pub fn create_group_layout(area: Rect) -> CreateGroupLayout {
-    let inner = inset_rect(area, 1);
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // name field
-            Constraint::Length(1), // spacer
-            Constraint::Length(1), // "Create under:" label
-            Constraint::Min(0),    // destination list
-            Constraint::Length(1), // hint
-        ])
-        .split(inner);
-    CreateGroupLayout {
-        name_row: rows[0],
-        label_row: rows[2],
-        list_area: rows[3],
-        hint_row: rows[4],
-    }
-}
-
 /// The `[start, end)` slice of `total` destinations to actually render,
 /// keeping `selected_index` in view. A pure function of the three inputs so
 /// scroll position never needs its own persisted, driftable state.
@@ -83,24 +30,6 @@ pub fn create_group_visible_window(
     let half = capacity / 2;
     let start = selected_index.saturating_sub(half).min(total - capacity);
     (start, start + capacity)
-}
-
-/// Maps a screen position to the destination index it lands on, or `None`
-/// if it's outside the visible list rows. `window` is the `(start, end)`
-/// pair from `create_group_visible_window` for the same `selected_index`/
-/// `total` the caller rendered.
-pub fn create_group_row_at(
-    layout: &CreateGroupLayout,
-    window: (usize, usize),
-    position: Position,
-) -> Option<usize> {
-    if !layout.list_area.contains(position) {
-        return None;
-    }
-    let row_in_window = (position.y - layout.list_area.y) as usize;
-    let (start, end) = window;
-    let index = start + row_in_window;
-    (index < end).then_some(index)
 }
 
 /// A `width` x `height` rect centered within `area`, clamped so it never
@@ -511,8 +440,7 @@ pub fn render_text_prompt_with_hint_cursor(
 
     // `state.cursor` is a *char* index, but `Paragraph` gives wide (CJK/
     // emoji) characters two cells -- the cursor column must be the rendered
-    // display width of everything left of it, exactly as
-    // `ui::draw_create_group` measures its name-field prefix.
+    // display width of everything left of it.
     let prefix: String = state.buf.chars().take(state.cursor).collect();
     let cursor_position = single_line_cursor_position(layout.input_area, prefix.width());
     frame.set_cursor_position(cursor_position);

@@ -1,5 +1,5 @@
 //! Equips the per-instance imports that reach the machine: `process`, `fs`, `http`,
-//! `inference` and `audio`. `jobs` is equipped by the runtime itself, because a job needs the
+//! `inference`, `vector` and `audio`. `jobs` is equipped by the runtime itself, because a job needs the
 //! runtime's queue.
 //!
 //! Every import is built fresh for the instance, from the instance's own grants, so what one
@@ -25,6 +25,7 @@ use crate::imports::generated_dispatch::ImportSet;
 use crate::imports::http::HttpImport;
 use crate::imports::inference::{InferenceBackend, InferenceImport};
 use crate::imports::process::ProcessImport;
+use crate::imports::vector::VectorImport;
 use crate::runtime::InstanceContext;
 
 /// The read-only `fs` scopes of the agents' own folders, by scope name
@@ -145,11 +146,23 @@ impl Backends {
     pub fn fs_root(&self, plugin: &str) -> PathBuf {
         self.data_dir.join("plugins").join("fs").join(plugin)
     }
+
+    /// `<data dir>/plugins/vector/<plugin>/<side>`, where the `vector` indexes of one side of a
+    /// plugin persist. Each side numbers its indexes on its own, so the sides keep apart folders.
+    pub fn vector_root(&self, plugin: &str, side: Side) -> PathBuf {
+        self.data_dir
+            .join("plugins")
+            .join("vector")
+            .join(plugin)
+            .join(side.as_str())
+    }
 }
 
-/// Builds the `process`, `fs`, `http`, `inference` and `audio` imports of one instance and puts
-/// them in `set`. `process` runs on the server only. An `fs` scope folder that cannot be created
-/// leaves `fs` out, so the instance still starts and a call reports the interface as unavailable.
+/// Builds the `process`, `fs`, `http`, `inference`, `vector` and `audio` imports of one instance
+/// and puts them in `set`. `vector` embeds through the inference backend and keeps its indexes
+/// under [`Backends::vector_root`]; without a data folder the indexes live in memory only.
+/// `process` runs on the server only. An `fs` scope folder that cannot be created leaves `fs`
+/// out, so the instance still starts and a call reports the interface as unavailable.
 pub fn equip(backends: &Backends, context: &InstanceContext, set: &mut ImportSet) {
     let env = ImportEnv::for_instance(context);
     set.http = Some(Box::new(HttpImport::new(env.clone())));
@@ -159,6 +172,13 @@ pub fn equip(backends: &Backends, context: &InstanceContext, set: &mut ImportSet
             Some(Arc::clone(backend)),
         )));
     }
+    let vector_store = (!backends.data_dir.as_os_str().is_empty())
+        .then(|| backends.vector_root(&context.plugin, context.side));
+    set.vector = Some(Box::new(VectorImport::new(
+        env.clone(),
+        backends.inference.clone(),
+        vector_store,
+    )));
     if let Some(backend) = &backends.audio {
         set.audio = Some(Box::new(AudioImport::new(
             env.clone(),
@@ -326,6 +346,102 @@ mod tests {
         assert_eq!(outcome, Outcome::Ok);
         let completion = inference.take_completion(request).expect("answer");
         assert_eq!(completion.text, "equip-test");
+    }
+
+    /// Returns one vector per text whose single component is the text length.
+    struct LengthEmbeddings;
+
+    impl InferenceBackend for LengthEmbeddings {
+        fn complete(
+            &self,
+            _request: &ilium_plugin_api::generated::host::inference::CompletionRequest,
+            _cancel: &crate::imports::env::CancelFlag,
+        ) -> Result<
+            ilium_plugin_api::generated::host::inference::Completion,
+            ilium_plugin_api::generated::types::errors::PluginError,
+        > {
+            Err(
+                ilium_plugin_api::generated::types::errors::PluginError::new(
+                    ilium_plugin_api::generated::types::errors::ErrorCode::Unsupported,
+                    "embeddings only",
+                ),
+            )
+        }
+
+        fn models(
+            &self,
+            _cancel: &crate::imports::env::CancelFlag,
+        ) -> Result<Vec<String>, ilium_plugin_api::generated::types::errors::PluginError> {
+            Ok(Vec::new())
+        }
+
+        fn embed(
+            &self,
+            texts: &[String],
+            _purpose: &str,
+            _cancel: &crate::imports::env::CancelFlag,
+        ) -> Result<Vec<Vec<f32>>, ilium_plugin_api::generated::types::errors::PluginError>
+        {
+            Ok(texts.iter().map(|text| vec![text.len() as f32]).collect())
+        }
+    }
+
+    #[test]
+    fn an_equipped_vector_import_embeds_through_the_provider_and_persists_its_indexes() {
+        use ilium_plugin_api::generated::host::vector::HostVector;
+        use ilium_plugin_api::generated::types::events::Event;
+        use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef};
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let backends = Backends::server(
+            scratch.path().join("project"),
+            scratch.path().join("data"),
+            ServerBackendInputs {
+                inference: Some(Arc::new(LengthEmbeddings)),
+                ..ServerBackendInputs::default()
+            },
+        );
+        let context = context(Side::Server, &["inference.embed"]);
+        let mut set = ImportSet::default();
+        equip(&backends, &context, &mut set);
+        let vector = set.vector.as_mut().expect("vector equipped");
+        let request = vector
+            .embed(
+                vec!["abc".to_owned(), "hello".to_owned()],
+                "equip-test".to_owned(),
+            )
+            .expect("accepted");
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        let outcome = loop {
+            let found = context
+                .events
+                .drain()
+                .into_iter()
+                .find_map(|queued| match queued.event {
+                    Event::RequestCompleted(result)
+                        if result.request == RequestRef::Call(request) =>
+                    {
+                        Some(result.outcome)
+                    }
+                    _ => None,
+                });
+            if let Some(outcome) = found {
+                break outcome;
+            }
+            assert!(Instant::now() < deadline, "no completion");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert_eq!(outcome, Outcome::Ok);
+        assert_eq!(
+            vector.take_vectors(request).expect("vectors"),
+            vec![vec![3.0], vec![5.0]]
+        );
+        vector
+            .create_index("notes".to_owned(), 1)
+            .expect("index created");
+        assert!(
+            backends.vector_root("test.equip", Side::Server).is_dir(),
+            "the index is written under the plugin's vector folder"
+        );
     }
 
     #[test]

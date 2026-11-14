@@ -254,7 +254,6 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
                 app.mode = Mode::ConfirmWorkspaceCloseOffer(pane_id);
             }
         }
-        Mode::CreateGroup(state) => handle_create_group_event(app, state, &event),
         Mode::PluginPopup(state) => handle_plugin_popup_event(app, state, &event),
         Mode::CreateBoard(state) => handle_create_board_event(app, state, &event),
         Mode::BoardPathPicker(overlay) => handle_board_path_picker_event(app, overlay, &event),
@@ -1051,7 +1050,11 @@ fn execute_action(app: &mut App, action: Action) {
         Action::ClosePane => app.action_close_selected(),
         Action::NewGroup => {
             let preselected = app.create_group_preselect_target();
-            app.open_create_group_dialog(preselected);
+            app.invoke_plugin_command(
+                "ilium.core.tree/new-group",
+                serde_json::json!({ "parent": preselected.0 }).to_string(),
+                ilium_plugin_api::generated::types::CommandOrigin::Keybinding,
+            );
         }
         Action::NewSplitView => {
             app.action_new_split_view(ilium_plugin_api::generated::types::CommandOrigin::Keybinding)
@@ -1939,45 +1942,6 @@ fn handle_confirm_close_event(app: &mut App, target: ilium_core::NodeId, event: 
         }
         KeyCode::Char('n' | 'N') | KeyCode::Esc => app.mode = Mode::Normal,
         _ => app.mode = Mode::ConfirmClose(target),
-    }
-}
-
-/// While `Mode::CreateGroup(state)` is active: `Up`/`Down` move the
-/// destination selection, `Enter` confirms it, and every other key edits
-/// the name field.
-fn handle_create_group_event(
-    app: &mut App,
-    mut state: crate::app::CreateGroupState,
-    event: &Event,
-) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::CreateGroup(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::CreateGroup(state);
-        return;
-    }
-    match key.code {
-        KeyCode::Esc => app.mode = Mode::Normal,
-        KeyCode::Up => {
-            state.selected_index = state.selected_index.saturating_sub(1);
-            app.mode = Mode::CreateGroup(state);
-        }
-        KeyCode::Down => {
-            state.selected_index =
-                (state.selected_index + 1).min(state.destinations.len().saturating_sub(1));
-            app.mode = Mode::CreateGroup(state);
-        }
-        KeyCode::Enter => {
-            if !app.commit_create_group(&state) {
-                app.mode = Mode::CreateGroup(state);
-            }
-        }
-        _ => {
-            text_prompt::handle_key(&mut state.name, key.code);
-            app.mode = Mode::CreateGroup(state);
-        }
     }
 }
 

@@ -13,7 +13,12 @@ use crate::common::{client_host, manifest_json};
 
 fn detector_regex() -> Regex {
     let manifest = manifest_json();
-    let source = manifest["contributes"]["link_detectors"][0]["regex"]
+    let source = manifest["contributes"]["link_detectors"]
+        .as_array()
+        .expect("link_detectors array")
+        .iter()
+        .find(|detector| detector["id"] == "path-line")
+        .expect("path-line detector")["regex"]
         .as_str()
         .expect("regex string")
         .to_string();

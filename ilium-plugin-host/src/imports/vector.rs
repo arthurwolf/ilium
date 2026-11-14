@@ -1,15 +1,29 @@
 //! Host implementation of `ilium:host/vector`: embedding requests and host-held vector indexes.
 //!
-//! `embed` queues a request for the selected inference provider; the host delivers the vectors with
-//! [`VectorImport::complete_embedding`] and the plugin collects them with `take-vectors` once
-//! `request-completed` fired. The index functions are answered synchronously from memory
-//! (manual page `api-vector`).
+//! `embed` hands the texts to the embedding call of the [`InferenceBackend`] the process composed
+//! (`wiring::wave_two::Backends::inference`), on a worker thread of this instance, and queues
+//! `request-completed` when it answers; the plugin collects the vectors once with `take-vectors`.
+//! Without a backend, or with a provider that offers no embeddings, the request completes
+//! `unsupported`, so it never hangs. The index functions are answered synchronously from memory
+//! and, when the instance has a store, written through to the plugin's own index folder
+//! ([`super::vector_store`]) so the next instance finds them again (manual page `api-vector`).
+//!
+//! Every pending request and every index belongs to the import of one instance: another plugin
+//! cannot take its vectors or reach its indexes. Dropping the import sets the cancel flag, which
+//! lets waiting workers end without calling the backend.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use ilium_plugin_api::generated::host::vector::HostVector;
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{IndexId, RequestId};
+use ilium_plugin_api::generated::types::Outcome;
+
+use super::env::{completion_event, CancelOnDrop, ImportEnv, WorkerGate};
+use super::inference::InferenceBackend;
+use super::vector_store::{StoredIndex, VectorStore};
 
 /// Largest number of texts one `embed` call accepts.
 const EMBED_TEXT_LIMIT: usize = 256;
@@ -21,25 +35,53 @@ const TOP_K_LIMIT: u16 = 100;
 const DEFAULT_INDEX_LIMIT: usize = 4;
 /// Default number of entries over all indexes (`vector_entries`).
 const DEFAULT_ENTRY_LIMIT: usize = 50_000;
+/// Embedding requests one instance may hold before `embed` answers `busy`.
+const PENDING_REQUEST_LIMIT: usize = 64;
+/// Backend calls one instance runs at once; later requests wait for a free slot.
+const CONCURRENT_CALLS: usize = 2;
+/// The grant `embed` needs; the index functions need no more than the interface itself.
+const EMBED_GRANT: &str = "inference.embed";
 
+/// State of one embedding request.
 #[derive(Debug)]
-struct Index {
-    dimensions: usize,
-    entries: BTreeMap<String, Vec<f32>>,
+enum Held {
+    /// Accepted, the provider has not answered yet.
+    Pending,
+    /// Answered, waiting for one `take-vectors`.
+    Completed(Vec<Vec<f32>>),
 }
 
-/// Host side of the `vector` interface.
-#[derive(Debug)]
+fn lock<T>(state: &Mutex<T>) -> MutexGuard<'_, T> {
+    // Every writer does one insert or remove, so the state is consistent after a panic.
+    state.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Host side of the `vector` interface of one plugin instance. Cloning shares the pending
+/// requests (a harness keeps one instance and hands out clones); the workers stop when the last
+/// clone drops.
 pub struct VectorImport {
+    env: ImportEnv,
+    backend: Option<Arc<dyn InferenceBackend>>,
+    requests: Arc<Mutex<BTreeMap<u64, Held>>>,
+    gate: WorkerGate,
+    life: Arc<CancelOnDrop>,
+    store: Option<VectorStore>,
     index_limit: usize,
     entry_limit: usize,
-    next_request: u64,
     next_index: u32,
-    /// Requests accepted but not yet completed by the provider.
-    pending: BTreeSet<u64>,
-    /// Completed requests whose vectors the plugin has not taken yet.
-    completed: BTreeMap<u64, Vec<Vec<f32>>>,
-    indexes: BTreeMap<u32, Index>,
+    indexes: BTreeMap<u32, StoredIndex>,
+}
+
+impl std::fmt::Debug for VectorImport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("VectorImport")
+            .field("plugin", &self.env.plugin())
+            .field("has_backend", &self.backend.is_some())
+            .field("persisted", &self.store.is_some())
+            .field("indexes", &self.indexes.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for VectorImport {
@@ -66,38 +108,180 @@ fn cosine(left: &[f32], right: &[f32]) -> f32 {
     dot / (left_norm * right_norm)
 }
 
+/// Checks the provider's answer: one vector per text, all of one non-zero length.
+fn check_vectors(texts: usize, vectors: &[Vec<f32>]) -> Result<(), PluginError> {
+    if vectors.len() != texts {
+        return Err(error(
+            ErrorCode::Internal,
+            "the provider answered with a different number of vectors than texts",
+        ));
+    }
+    let Some(first) = vectors.first() else {
+        return Ok(());
+    };
+    if first.is_empty() || vectors.iter().any(|vector| vector.len() != first.len()) {
+        return Err(error(
+            ErrorCode::Internal,
+            "the provider answered with vectors of different or zero length",
+        ));
+    }
+    Ok(())
+}
+
 impl VectorImport {
-    /// Creates an import with explicit quota limits (`vector_indexes`, `vector_entries`).
+    /// An import with explicit quota limits (`vector_indexes`, `vector_entries`), no provider and
+    /// no store: `embed` completes `unsupported` and indexes live only as long as the import.
     pub fn with_limits(index_limit: usize, entry_limit: usize) -> Self {
         Self {
+            env: ImportEnv::unrestricted(),
+            backend: None,
+            requests: Arc::default(),
+            gate: WorkerGate::new(CONCURRENT_CALLS),
+            life: Arc::new(CancelOnDrop::default()),
+            store: None,
             index_limit,
             entry_limit,
-            next_request: 1,
             next_index: 1,
-            pending: BTreeSet::new(),
-            completed: BTreeMap::new(),
             indexes: BTreeMap::new(),
         }
     }
 
-    /// Delivers the provider's vectors for `request`. Returns false for a request that is not pending.
-    pub fn complete_embedding(&mut self, request: RequestId, vectors: Vec<Vec<f32>>) -> bool {
-        if !self.pending.remove(&request.0) {
-            return false;
+    /// The import of the instance `env` describes. `backend` answers `embed`; `store_folder`, when
+    /// given, is the plugin's own index folder: the indexes saved there are loaded now and every
+    /// change is written back.
+    pub fn new(
+        env: ImportEnv,
+        backend: Option<Arc<dyn InferenceBackend>>,
+        store_folder: Option<PathBuf>,
+    ) -> Self {
+        let mut import = Self::with_limits(DEFAULT_INDEX_LIMIT, DEFAULT_ENTRY_LIMIT);
+        import.env = env;
+        import.backend = backend;
+        if let Some(folder) = store_folder {
+            let store = VectorStore::new(folder);
+            import.indexes = store.load();
+            import.next_index = import
+                .indexes
+                .keys()
+                .next_back()
+                .map_or(1, |last| last.saturating_add(1));
+            import.store = Some(store);
         }
-        self.completed.insert(request.0, vectors);
+        import
+    }
+
+    /// Delivers vectors for a pending `request` from outside the backend (a host that answers
+    /// embeddings itself) and queues `request-completed`. Returns false for a request that is not
+    /// pending.
+    pub fn complete_embedding(&mut self, request: RequestId, vectors: Vec<Vec<f32>>) -> bool {
+        {
+            let mut requests = lock(&self.requests);
+            if !matches!(requests.get(&request.0), Some(Held::Pending)) {
+                return false;
+            }
+            requests.insert(request.0, Held::Completed(vectors));
+        }
+        self.env.complete(request, Outcome::Ok);
         true
     }
 
     fn total_entries(&self) -> usize {
         self.indexes.values().map(|index| index.entries.len()).sum()
     }
+
+    /// Writes one index through to the store; an import without a store keeps it in memory.
+    fn persist(&self, id: u32) -> Result<(), PluginError> {
+        let (Some(store), Some(index)) = (&self.store, self.indexes.get(&id)) else {
+            return Ok(());
+        };
+        store.save(id, index).map_err(|failure| {
+            PluginError::new(
+                ErrorCode::Io,
+                format!("the vector index could not be saved: {failure}"),
+            )
+        })
+    }
+
+    /// Runs the backend's embedding call on a worker of this instance and completes `id`.
+    fn dispatch(&self, id: RequestId, texts: Vec<String>, purpose: String) {
+        let requests = Arc::clone(&self.requests);
+        let sink = self.env.sink();
+        let guard = sink.worker();
+        let gate = self.gate.clone();
+        let cancel = self.life.flag();
+        let backend = self.backend.clone();
+        let spawned = std::thread::Builder::new()
+            .name("plugin-vector-embed".to_owned())
+            .spawn(move || {
+                let _guard = guard;
+                let answer = match &backend {
+                    None => Err(error(
+                        ErrorCode::Unsupported,
+                        "no inference provider is configured on this side",
+                    )),
+                    Some(backend) => {
+                        let Some(_slot) = gate.enter(&cancel) else {
+                            return;
+                        };
+                        if cancel.is_set() {
+                            return;
+                        }
+                        backend
+                            .embed(&texts, &purpose, &cancel)
+                            .and_then(|vectors| {
+                                check_vectors(texts.len(), &vectors).map(|()| vectors)
+                            })
+                    }
+                };
+                // An ended instance takes nothing; its requests are dropped with it.
+                if cancel.is_set() {
+                    return;
+                }
+                let outcome = {
+                    let mut held = lock(&requests);
+                    match answer {
+                        Ok(vectors) => {
+                            held.insert(id.0, Held::Completed(vectors));
+                            Outcome::Ok
+                        }
+                        Err(failure) => {
+                            held.remove(&id.0);
+                            if failure.code == ErrorCode::Cancelled {
+                                Outcome::Cancelled
+                            } else {
+                                Outcome::Failed(failure)
+                            }
+                        }
+                    }
+                };
+                sink.send(completion_event(id, outcome));
+            });
+        if spawned.is_err() {
+            lock(&self.requests).remove(&id.0);
+            self.env.complete(
+                id,
+                Outcome::Failed(error(
+                    ErrorCode::Internal,
+                    "the embedding worker did not start",
+                )),
+            );
+        }
+    }
 }
 
 impl HostVector for VectorImport {
-    fn embed(&mut self, texts: Vec<String>, _purpose: String) -> Result<RequestId, PluginError> {
+    fn embed(&mut self, texts: Vec<String>, purpose: String) -> Result<RequestId, PluginError> {
+        if !self.env.holds(EMBED_GRANT) {
+            return Err(error(
+                ErrorCode::NotPermitted,
+                "inference.embed is not granted",
+            ));
+        }
         if texts.is_empty() {
-            return Err(error(ErrorCode::InvalidArgument, "embed needs at least one text"));
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "embed needs at least one text",
+            ));
         }
         if texts.len() > EMBED_TEXT_LIMIT {
             return Err(error(
@@ -111,17 +295,34 @@ impl HostVector for VectorImport {
                 "a text for embed is larger than 8 KiB",
             ));
         }
-        let request = self.next_request;
-        self.next_request = request.saturating_add(1);
-        self.pending.insert(request);
-        Ok(RequestId(request))
+        let request = {
+            let mut requests = lock(&self.requests);
+            if requests.len() >= PENDING_REQUEST_LIMIT {
+                return Err(error(
+                    ErrorCode::Busy,
+                    "64 embedding requests are already pending",
+                ));
+            }
+            let request = self.env.next_request();
+            requests.insert(request.0, Held::Pending);
+            request
+        };
+        self.dispatch(request, texts, purpose);
+        Ok(request)
     }
 
     fn take_vectors(&mut self, request: RequestId) -> Option<Vec<Vec<f32>>> {
-        self.completed.remove(&request.0)
+        let mut requests = lock(&self.requests);
+        if !matches!(requests.get(&request.0), Some(Held::Completed(_))) {
+            return None;
+        }
+        match requests.remove(&request.0) {
+            Some(Held::Completed(vectors)) => Some(vectors),
+            _ => None,
+        }
     }
 
-    fn create_index(&mut self, _name: String, dimensions: u16) -> Result<IndexId, PluginError> {
+    fn create_index(&mut self, name: String, dimensions: u16) -> Result<IndexId, PluginError> {
         if dimensions == 0 {
             return Err(error(
                 ErrorCode::InvalidArgument,
@@ -138,11 +339,17 @@ impl HostVector for VectorImport {
         self.next_index = id.saturating_add(1);
         self.indexes.insert(
             id,
-            Index {
+            StoredIndex {
+                name,
                 dimensions: usize::from(dimensions),
                 entries: BTreeMap::new(),
             },
         );
+        if let Err(failure) = self.persist(id) {
+            // An index that cannot be saved is not created: the next instance would not find it.
+            self.indexes.remove(&id);
+            return Err(failure);
+        }
         Ok(IndexId(id))
     }
 
@@ -151,22 +358,23 @@ impl HostVector for VectorImport {
         index: IndexId,
         entries: Vec<(String, Vec<f32>)>,
     ) -> Result<(), PluginError> {
-        let dimensions = self
+        let held = self
             .indexes
             .get(&index.0)
-            .map(|held| held.dimensions)
             .ok_or_else(|| error(ErrorCode::NotFound, "unknown vector index"))?;
-        if entries.iter().any(|(_, vector)| vector.len() != dimensions) {
+        if entries
+            .iter()
+            .any(|(_, vector)| vector.len() != held.dimensions)
+        {
             return Err(error(
                 ErrorCode::InvalidArgument,
                 "a vector length differs from the index dimensions",
             ));
         }
-        let held = self.indexes.get(&index.0);
-        let new_ids: BTreeSet<&String> = entries
+        let new_ids: std::collections::BTreeSet<&String> = entries
             .iter()
             .map(|(id, _)| id)
-            .filter(|id| held.is_some_and(|i| !i.entries.contains_key(*id)))
+            .filter(|id| !held.entries.contains_key(*id))
             .collect();
         if self.total_entries() + new_ids.len() > self.entry_limit {
             return Err(error(
@@ -179,7 +387,7 @@ impl HostVector for VectorImport {
                 held.entries.insert(id, vector);
             }
         }
-        Ok(())
+        self.persist(index.0)
     }
 
     fn remove_entries(&mut self, index: IndexId, ids: Vec<String>) -> Result<(), PluginError> {
@@ -187,8 +395,12 @@ impl HostVector for VectorImport {
             .indexes
             .get_mut(&index.0)
             .ok_or_else(|| error(ErrorCode::NotFound, "unknown vector index"))?;
+        let mut removed = false;
         for id in ids {
-            held.entries.remove(&id);
+            removed |= held.entries.remove(&id).is_some();
+        }
+        if removed {
+            self.persist(index.0)?;
         }
         Ok(())
     }
@@ -223,7 +435,14 @@ impl HostVector for VectorImport {
     }
 
     fn drop_index(&mut self, index: IndexId) {
-        self.indexes.remove(&index.0);
+        if self.indexes.remove(&index.0).is_none() {
+            return;
+        }
+        if let Some(store) = &self.store {
+            // `drop-index` has no error result. A file that cannot be removed comes back with
+            // the next instance, which is the safe direction: no data is lost silently.
+            let _ = store.remove(index.0);
+        }
     }
 }
 
@@ -521,5 +740,164 @@ mod tests {
         let index = import.create_index("notes".to_string(), 2).expect("index");
         import.drop_index(index);
         import.drop_index(index);
+    }
+
+    use super::super::env::{CancelFlag, ImportEnv};
+    use super::super::inference::InferenceBackend;
+    use ilium_plugin_api::generated::host::inference::{Completion, CompletionRequest};
+    use ilium_plugin_api::generated::types::events::Event;
+    use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// Embeds each text as `[length, 1.0]`.
+    struct LengthEmbedder;
+
+    impl InferenceBackend for LengthEmbedder {
+        fn complete(
+            &self,
+            _request: &CompletionRequest,
+            _cancel: &CancelFlag,
+        ) -> Result<Completion, PluginError> {
+            Err(PluginError::new(ErrorCode::Unsupported, "embeddings only"))
+        }
+
+        fn models(&self, _cancel: &CancelFlag) -> Result<Vec<String>, PluginError> {
+            Ok(Vec::new())
+        }
+
+        fn embed(
+            &self,
+            texts: &[String],
+            _purpose: &str,
+            _cancel: &CancelFlag,
+        ) -> Result<Vec<Vec<f32>>, PluginError> {
+            Ok(texts
+                .iter()
+                .map(|text| vec![text.len() as f32, 1.0])
+                .collect())
+        }
+    }
+
+    /// Waits for the `request-completed` of `request` on the queue of `env`.
+    fn outcome_of(env: &ImportEnv, request: RequestId) -> Outcome {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let found = env
+                .events()
+                .drain()
+                .into_iter()
+                .find_map(|queued| match queued.event {
+                    Event::RequestCompleted(result)
+                        if result.request == RequestRef::Call(request) =>
+                    {
+                        Some(result.outcome)
+                    }
+                    _ => None,
+                });
+            if let Some(outcome) = found {
+                return outcome;
+            }
+            assert!(Instant::now() < deadline, "embed never completed");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn embed_completes_through_the_backend_and_the_vectors_are_taken_once() {
+        let env = ImportEnv::unrestricted();
+        let mut import = VectorImport::new(env.clone(), Some(Arc::new(LengthEmbedder)), None);
+        let request = import
+            .embed(
+                vec!["ab".to_string(), "abcd".to_string()],
+                "note search".to_string(),
+            )
+            .expect("accepted");
+        assert_eq!(outcome_of(&env, request), Outcome::Ok);
+        assert_eq!(
+            import.take_vectors(request),
+            Some(vec![vec![2.0, 1.0], vec![4.0, 1.0]]),
+            "one vector per text, in text order"
+        );
+        assert_eq!(import.take_vectors(request), None, "taken only once");
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn embed_without_a_provider_completes_unsupported_instead_of_hanging() {
+        let env = ImportEnv::unrestricted();
+        let mut import = VectorImport::new(env.clone(), None, None);
+        let request = import
+            .embed(vec!["hello".to_string()], "note search".to_string())
+            .expect("accepted");
+        match outcome_of(&env, request) {
+            Outcome::Failed(failure) => assert_eq!(failure.code, ErrorCode::Unsupported),
+            other => panic!("expected unsupported, got {other:?}"),
+        }
+        assert_eq!(import.take_vectors(request), None);
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn embed_without_the_inference_embed_grant_is_not_permitted() {
+        let env = ImportEnv::unrestricted().with_grants(vec!["inference".to_string()]);
+        let mut import = VectorImport::new(env, Some(Arc::new(LengthEmbedder)), None);
+        expect_code(
+            import.embed(vec!["hello".to_string()], "note search".to_string()),
+            ErrorCode::NotPermitted,
+        );
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn another_instance_cannot_take_the_vectors_of_a_request() {
+        let env = ImportEnv::unrestricted();
+        let mut owner = VectorImport::new(env.clone(), Some(Arc::new(LengthEmbedder)), None);
+        let mut other = VectorImport::new(
+            env.clone().with_identity("other.plugin", 2),
+            Some(Arc::new(LengthEmbedder)),
+            None,
+        );
+        let request = owner
+            .embed(vec!["abc".to_string()], "note search".to_string())
+            .expect("accepted");
+        assert_eq!(outcome_of(&env, request), Outcome::Ok);
+        assert_eq!(other.take_vectors(request), None);
+        assert!(owner.take_vectors(request).is_some());
+    }
+
+    /// REQ: API-001
+    #[test]
+    fn indexes_persist_in_the_store_folder_for_the_next_instance() {
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let folder = scratch.path().join("vector").join("example.notes");
+        let index = {
+            let mut first =
+                VectorImport::new(ImportEnv::unrestricted(), None, Some(folder.clone()));
+            let index = first.create_index("notes".to_string(), 2).expect("index");
+            first
+                .upsert(
+                    index,
+                    vec![
+                        ("a".to_string(), vec![1.0, 0.0]),
+                        ("b".to_string(), vec![0.0, 1.0]),
+                    ],
+                )
+                .expect("upsert");
+            first
+                .remove_entries(index, vec!["b".to_string()])
+                .expect("remove");
+            index
+        };
+        let mut second = VectorImport::new(ImportEnv::unrestricted(), None, Some(folder.clone()));
+        let hits = second.top_k(index, vec![1.0, 0.0], 5).expect("top-k");
+        assert_eq!(hits.len(), 1, "the removed entry stays removed");
+        assert_eq!(hits[0].0, "a");
+        let fresh = second.create_index("more".to_string(), 3).expect("index");
+        assert_ne!(fresh, index, "a reloaded store never reuses an index id");
+        second.drop_index(index);
+        let mut third = VectorImport::new(ImportEnv::unrestricted(), None, Some(folder));
+        expect_code(third.top_k(index, vec![1.0, 0.0], 1), ErrorCode::NotFound);
     }
 }

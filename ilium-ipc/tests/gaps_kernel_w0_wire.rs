@@ -56,6 +56,13 @@ fn cli_control_records_round_trip_at_appended_indices() {
             8,
         ),
         (ControlBody::CliCancel { invocation_id: 7 }, 9),
+        (
+            ControlBody::SettingsChanged {
+                plugin: "ilium.core.terminal".into(),
+                keys: vec!["font-size".into()],
+            },
+            10,
+        ),
     ];
     for (body, expected_index) in bodies {
         let bytes = round_trip(&body);

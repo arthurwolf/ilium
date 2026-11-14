@@ -262,6 +262,13 @@ pub(crate) struct ChromeItem {
     pub target: Option<String>,
     /// The `order` of an onboarding step; 0 when the manifest gives none.
     pub order: i64,
+    /// The popup a toolbar button opens (`popup_view`), if it names one.
+    pub popup_view: Option<String>,
+    /// The decoration slot a tree ordering sorts by (`slot`), if it names one.
+    pub slot: Option<String>,
+    /// Where a pane frame slot sits (`placement`: `header-icon`, `header-text`,
+    /// `footer-row`, `banner`), if it says.
+    pub placement: Option<String>,
 }
 
 /// The entries of one contribution kind in a manifest. A manifest that does not parse, or an
@@ -310,11 +317,16 @@ pub(crate) fn chrome_items(plugin: &str, manifest: &str, kind: &str) -> Vec<Chro
                                 .collect::<Vec<_>>()
                                 .join(",")
                         })
+                        // A frame slot may state it as one word (`all`, `agents`, ...).
+                        .or_else(|| text(entry, "applies_to"))
                 }),
                 order: entry
                     .get("order")
                     .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0),
+                popup_view: text(entry, "popup_view"),
+                slot: text(entry, "slot"),
+                placement: text(entry, "placement"),
                 id,
             })
         })
@@ -1338,6 +1350,10 @@ pub(crate) struct ClientPlugins {
     link_cache: Mutex<super::links::DetectorCache>,
     /// Parsed key bindings of the enabled plugins (G1), rebuilt when that set changes.
     binding_cache: Mutex<super::keybindings::BindingCache>,
+    /// `contributed(kind)` per kind, so the frame drawing does not parse every manifest on
+    /// every frame. Cleared when a plugin's server state changes, which is what can change
+    /// the set of enabled plugins; the catalogue itself is fixed for the client's life.
+    chrome_cache: Mutex<BTreeMap<String, Vec<ChromeItem>>>,
 }
 
 impl std::fmt::Debug for ClientPlugins {
@@ -1352,10 +1368,15 @@ impl std::fmt::Debug for ClientPlugins {
 impl ClientPlugins {
     /// Starts the host. `None` when plugins are off or the host could not be built; the
     /// client then runs without plugins and says so in its log.
+    ///
+    /// `paid_proxies` are the Kilo Gateway proxies the client loaded at start
+    /// (`proxy_database::load_paid_proxies`); plugin inference goes through them exactly like
+    /// the client's own naming workers.
     pub(crate) fn start(
         start: ClientPluginStart,
         session_name: &str,
         session_cwd: &std::path::Path,
+        paid_proxies: Vec<ilium_inference::PaidProxy>,
     ) -> Option<Self> {
         if matches!(start.mode, StartMode::NoPlugins) {
             tracing::info!("plugins are off for this client (--no-plugins)");
@@ -1416,6 +1437,10 @@ impl ClientPlugins {
             hidden.extend(disabled.iter().map(ToString::to_string));
         }
         let log: Arc<dyn LogSink> = Arc::new(TracingLog);
+        // `ilium:host/inference` answers through the provider selected in Settings, and Kilo
+        // Gateway calls go out through the paid proxies the client loaded, never the home IP.
+        let inference = ilium_plugin_host::imports::inference_backend::SettingsInference::of_user();
+        inference.set_paid_proxies(paid_proxies);
         let provider = wiring::import_provider(wiring::ProcessImports {
             storage_root: wiring::storage_root(&start.data_dir),
             scope: StorageContext {
@@ -1430,10 +1455,7 @@ impl ClientPlugins {
                 session_cwd.to_path_buf(),
                 start.data_dir.clone(),
                 wiring::wave_two::ClientBackendInputs {
-                    // `ilium:host/inference` answers through the provider selected in Settings.
-                    inference: Some(Arc::new(
-                        ilium_plugin_host::imports::inference_backend::SettingsInference::of_user(),
-                    )),
+                    inference: Some(Arc::new(inference)),
                     audio: Some(Arc::new(super::audio_backend::ClientAudio)),
                     // The kernel picker panel is not drawn yet, so `fs.pick` stays unsupported.
                     picker: None,
@@ -1509,6 +1531,7 @@ impl ClientPlugins {
             last_refusal: None,
             link_cache: Mutex::new(super::links::DetectorCache::default()),
             binding_cache: Mutex::new(super::keybindings::BindingCache::default()),
+            chrome_cache: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -1725,6 +1748,9 @@ impl ClientPlugins {
                     .get(&target)
                     .is_none_or(|previous| !wiring::is_disabled_state(previous));
                 self.server_states.insert(target.clone(), state);
+                if let Ok(mut cache) = self.chrome_cache.lock() {
+                    cache.clear();
+                }
                 if let Ok(mut hidden) = self.shared.disabled.lock() {
                     if enabled {
                         hidden.remove(&target);
@@ -1975,6 +2001,27 @@ impl ClientPlugins {
         }
     }
 
+    /// Opens a plugin's popup on the kernel's own authority: the user pressed a contributed
+    /// toolbar button that names a `popup_view` and runs no command. The plugin is activated
+    /// first, like for `show_view`.
+    pub(crate) fn show_popup(&self, plugin: &str, popup: &str) {
+        let shared = Arc::clone(&self.shared);
+        let owner = plugin.to_owned();
+        let popup = popup.to_owned();
+        let posted = self.shared.post(move |runtime| {
+            if let Err(error) = runtime.activate(&owner) {
+                tracing::warn!("{owner} did not start, its popup stays closed: {error}");
+                return;
+            }
+            log_errors("pump", runtime.pump());
+            shared.open_popup(&owner, popup);
+            shared.refresh_popup(runtime);
+        });
+        if !posted {
+            tracing::debug!("the plugin host is gone, the popup of {plugin} stays closed");
+        }
+    }
+
     /// Tells the host how many cells a view has. A change asks the plugin for a new tree.
     pub(crate) fn set_view_area(&self, plugin: &str, view: &ViewTarget, area: (u16, u16)) {
         let changed = self.shared.views.lock().is_ok_and(|mut views| {
@@ -2135,6 +2182,31 @@ impl ClientPlugins {
         found
     }
 
+    /// The sort keys one plugin set on tree nodes with its decorations in `slot`: what a
+    /// tree ordering it contributes (`contributes.tree_orderings`) sorts by. Client-side and
+    /// server-side decorations both count.
+    pub(crate) fn sort_keys(
+        &self,
+        plugin: &str,
+        slot: &str,
+    ) -> std::collections::HashMap<ilium_core::NodeId, f64> {
+        let mut keys = std::collections::HashMap::new();
+        let mut add = |decoration: &TreeDecoration| {
+            if decoration.plugin == plugin && decoration.slot == slot {
+                keys.insert(
+                    ilium_core::NodeId(decoration.node.0),
+                    decoration.sort_key as f64,
+                );
+            }
+        };
+        if let Ok(decorations) = self.shared.decorations.lock() {
+            decorations.iter().for_each(&mut add);
+        }
+        self.server_decorations()
+            .for_each(|decoration| add(&decoration));
+        keys
+    }
+
     /// Whether any plugin decorates the tree, so the tree drawing can skip the lookup.
     pub(crate) fn has_decorations(&self) -> bool {
         self.shared
@@ -2151,6 +2223,23 @@ impl ClientPlugins {
     /// `context_menu`, `row_actions`, `panels`, `settings`, `onboarding_steps`), in catalogue
     /// order. Onboarding steps are ordered by their `order`.
     pub(crate) fn contributed(&self, kind: &str) -> Vec<ChromeItem> {
+        if let Some(items) = self
+            .chrome_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(kind).cloned())
+        {
+            return items;
+        }
+        let items = self.contributed_uncached(kind);
+        if let Ok(mut cache) = self.chrome_cache.lock() {
+            cache.insert(kind.to_owned(), items.clone());
+        }
+        items
+    }
+
+    /// [`Self::contributed`] read from the manifests.
+    fn contributed_uncached(&self, kind: &str) -> Vec<ChromeItem> {
         let mut items: Vec<ChromeItem> = self
             .catalogue
             .iter()
@@ -2290,6 +2379,24 @@ impl ClientPlugins {
             .1
     }
 
+    /// The request that tells the plugin's server side about settings the user changed here;
+    /// the server delivers `settings-changed` to it (`ControlBody::SettingsChanged`).
+    pub(crate) fn settings_changed_request(
+        &self,
+        plugin: &str,
+        keys: Vec<String>,
+    ) -> ClientRequest {
+        self.shared
+            .envelope(
+                plugin,
+                EnvelopeBody::Control(ControlBody::SettingsChanged {
+                    plugin: plugin.to_owned(),
+                    keys,
+                }),
+            )
+            .1
+    }
+
     /// Deactivates every plugin and joins the host thread. Intents submitted while stopping
     /// are cancelled at once, because the event loop no longer carries them to the server.
     pub(crate) async fn stop(&self) {
@@ -2334,6 +2441,13 @@ mod tests {
         assert_eq!(items[0].command.as_deref(), Some("ilium.notes/new-note"));
         assert_eq!(items[1].title, "other");
         assert_eq!(items[1].command.as_deref(), Some("ilium.other/run"));
+        assert_eq!(items[0].popup_view, None);
+        let popup = r#"{"contributes": {"tree_toolbar": [
+            {"id": "pick", "label": "Pick", "popup_view": "picker"}
+        ]}}"#;
+        let items = chrome_items("ilium.notes", popup, "tree_toolbar");
+        assert_eq!(items[0].popup_view.as_deref(), Some("picker"));
+        assert_eq!(items[0].command, None);
         assert!(chrome_items("ilium.notes", manifest, "panels").is_empty());
         assert!(chrome_items("ilium.notes", "not json", "panels").is_empty());
     }

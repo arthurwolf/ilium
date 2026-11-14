@@ -19,8 +19,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::app::{
     AgentToolbarModelSubmenuState, App, BoardDeleteTarget, BoardRenameTarget, ContextMenu,
-    CreateBoardState, CreateGroupState, FocusTarget, Mode, PaneRuntime, RightPanelTarget,
-    SubmenuItemAction, FROZEN_DIALOG_BUTTON_LABEL,
+    CreateBoardState, FocusTarget, Mode, PaneRuntime, RightPanelTarget, SubmenuItemAction,
+    FROZEN_DIALOG_BUTTON_LABEL,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::icon_settings::IconTarget;
@@ -917,6 +917,10 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         })
         .collect();
     let tree_visibility = app.active_tree_projection(std::time::Instant::now());
+    // Contributed plugin buttons, indexed like `TreeToolbarAction::Plugin`.
+    let plugin_toolbar = app.plugin_toolbar_buttons();
+    // The keys `TreeOrder::PluginKey` sorts by; empty unless a plugin ordering is chosen.
+    let plugin_order_ranks = app.plugin_tree_order_ranks();
     // Owned once per frame so the render options can borrow it.
     let blocking_error_facts = app.blocking_error_facts();
     // Copied out before the mutable tree borrow below; the view facts read the whole app.
@@ -932,6 +936,8 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             custom_toolbar_profiles: Some(&app.custom_agents.profiles),
             custom_toolbar_selected: app.custom_toolbar_selected.as_deref(),
             custom_toolbar_pending: Some(&custom_toolbar_pending),
+            plugin_toolbar: &plugin_toolbar,
+            plugin_order_ranks: Some(&plugin_order_ranks),
             custom_agent_labels: Some(&custom_agent_labels),
             focused: tree_focused,
             elapsed_ms: if matches!(
@@ -1034,7 +1040,10 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         .collect();
     painted_rows.retain_values(values);
     paint_tree_blocking_errors(frame, app, &mut painted_rows);
-    painted_rows.paint_plugin_decorations(frame, |node| app.plugin_decoration_text(node));
+    // Read once per frame, not once per row.
+    let frame_slots = app.plugin_chrome("pane_frame_slots");
+    painted_rows
+        .paint_plugin_decorations(frame, |node| app.plugin_decoration_text(node, &frame_slots));
     app.record_composed_tree_rows(painted_rows);
     draw_cost_card(frame, app);
     draw_status_bar(frame, layout.status_area, app);
@@ -1221,9 +1230,6 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
             crate::worktree_dialog::draw_dialog(frame, area, state);
         }
         Mode::WorktreeManager(state) => crate::worktree_manager::render(frame, area, state),
-        Mode::CreateGroup(state) => {
-            cursor = draw_create_group(frame, app, state).or(cursor);
-        }
         Mode::PluginPopup(state) => crate::plugin_host::popup::draw(frame, area, state, app),
         Mode::CreateBoard(state) => {
             cursor = draw_create_board(frame, area, state).or(cursor);
@@ -1769,9 +1775,20 @@ fn draw_context_menu(
     let lines = popup_rows(&layout, width, |index| {
         let item = &submenu.items[index];
         let checked = if matches!(submenu.parent, crate::app::ContextMenuAction::OrderBy) {
-            Some(
-                matches!(&item.action, SubmenuItemAction::SetTreeOrder(order) if *order == current_tree_order),
-            )
+            Some(match &item.action {
+                // A plugin ordering in effect replaces the built-in order's check.
+                SubmenuItemAction::SetTreeOrder(order) => {
+                    *order == current_tree_order
+                        && !submenu.items.iter().any(|item| {
+                            matches!(
+                                item.action,
+                                SubmenuItemAction::SetPluginTreeOrdering { active: true, .. }
+                            )
+                        })
+                }
+                SubmenuItemAction::SetPluginTreeOrdering { active, .. } => *active,
+                _ => false,
+            })
         } else {
             None
         };
@@ -2463,126 +2480,6 @@ fn draw_create_agent_from_line(
 /// command's effect clear without duplicating potentially long tree names.
 fn app_menu_title(_menu: &ContextMenu) -> &'static str {
     "Tree actions"
-}
-
-const GROUP_ACCENT: Color = Color::Rgb(0x7a, 0xa2, 0xf7);
-
-/// Draws the "New group" destination picker: an always-editable name field
-/// (optional -- left blank it defaults to "group") plus the flattened list
-/// of every existing group, top level first, with the current selection
-/// highlighted in the same accent used for the real tree's selected row.
-fn draw_create_group(frame: &mut Frame, app: &App, state: &CreateGroupState) -> Option<Position> {
-    let mut cursor = None;
-    frame.render_widget(Clear, state.area);
-    let block = theme::block(true).title(theme::chrome_title("New group"));
-    let layout = modal::create_group_layout(state.area);
-    frame.render_widget(block, state.area);
-
-    let name_label = Span::styled("Name  ", Style::new().add_modifier(Modifier::DIM));
-    let name_value = if state.name.buf.is_empty() {
-        Span::styled(
-            "group",
-            Style::new().add_modifier(Modifier::DIM | Modifier::ITALIC),
-        )
-    } else {
-        Span::raw(state.name.buf.as_str())
-    };
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![name_label, name_value])),
-        layout.name_row,
-    );
-    // `state.name.cursor` (see `TextPromptState`) is a *char* index, not a
-    // display column -- measuring the prefix's `UnicodeWidthStr::width()`
-    // (like `draw_scheduled_input_field` does) rather than the raw char
-    // count is required so a wide (CJK/emoji) name doesn't land the cursor
-    // to the left of where the character actually renders.
-    if layout.name_row.width > 0 {
-        let prefix: String = state.name.buf.chars().take(state.name.cursor).collect();
-        // `saturating_add` throughout -- an unbounded prefix width could
-        // otherwise overflow `u16` (panic in debug, wrap to a bogus column
-        // in release) before the `.min()` clamp below ever got a chance to
-        // run -- see the identical fix (and its rationale) in
-        // `modal::render_text_prompt`.
-        let cursor_x = layout
-            .name_row
-            .x
-            .saturating_add(6)
-            .saturating_add(u16::try_from(prefix.width()).unwrap_or(u16::MAX));
-        // `Rect::right()` is exclusive (the first column *outside* the rect),
-        // so clamping to it directly would let the cursor land one cell past
-        // the row's real last cell -- see the identical fix in
-        // `modal::render_text_prompt` for the same `Rect::right()` pitfall.
-        let position = Position::new(
-            cursor_x.min(layout.name_row.right().saturating_sub(1)),
-            layout.name_row.y,
-        );
-        frame.set_cursor_position(position);
-        cursor = Some(position);
-    }
-
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            "Create under:",
-            Style::new().add_modifier(Modifier::DIM | Modifier::UNDERLINED),
-        )),
-        layout.label_row,
-    );
-
-    let (start, end) = modal::create_group_visible_window(
-        state.selected_index,
-        state.destinations.len(),
-        modal::CREATE_GROUP_MAX_VISIBLE,
-    );
-    let rows: Vec<Line> = state.destinations[start..end]
-        .iter()
-        .enumerate()
-        .map(|(offset, destination)| {
-            let index = start + offset;
-            let is_top_level = destination.id == ROOT_ID;
-            let indent = "  ".repeat(destination.depth.saturating_sub(1));
-            let icon = if is_top_level {
-                app.ui_settings.icons.glyph(IconTarget::TopLevel)
-            } else {
-                app.ui_settings.icons.glyph(IconTarget::Group)
-            };
-            // Build name via format! to avoid cloning node.name — format! reads
-            // the source and produces a new owned String only once needed.
-            let name_str = if is_top_level {
-                "Top level"
-            } else {
-                app.tree
-                    .get(destination.id)
-                    .map(|node| node.name.as_str())
-                    .unwrap_or("group")
-            };
-            let row_style = if index == state.selected_index {
-                theme::selected_style().add_modifier(Modifier::BOLD)
-            } else if is_top_level {
-                Style::new().fg(GROUP_ACCENT).add_modifier(Modifier::BOLD)
-            } else {
-                Style::new()
-            };
-            Line::from(Span::styled(
-                format!(" {indent}{icon} {name_str}"),
-                row_style,
-            ))
-        })
-        .collect();
-    frame.render_widget(Paragraph::new(rows), layout.list_area);
-
-    let scroll_hint = if state.destinations.len() > modal::CREATE_GROUP_MAX_VISIBLE {
-        " · more above/below"
-    } else {
-        ""
-    };
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            format!("\u{2191}\u{2193} choose · Enter/click create · Esc cancel{scroll_hint}"),
-            Style::new().add_modifier(Modifier::DIM),
-        )),
-        layout.hint_row,
-    );
-    cursor
 }
 
 /// Draws the focused pane's live content (terminal screen or editor
@@ -3597,7 +3494,12 @@ fn pane_title(app: &App, id: NodeId) -> String {
                 ),
                 _ => node.name.clone(),
             };
-            crate::pane_title::decorate_pane_title(status, &logical_title)
+            let title = crate::pane_title::decorate_pane_title(status, &logical_title);
+            // Header slots plugins contribute (`pane_frame_slots`) follow the title.
+            match app.plugin_frame_header_text(id) {
+                Some(plugin_text) => format!("{title} {plugin_text}"),
+                None => title,
+            }
         }
         NodeKind::Container(_) | NodeKind::Folder { .. } => node.name.clone(),
     }
@@ -3664,7 +3566,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::WorktreeManager(..) => "WORKTREES",
         Mode::WaitingWorkspaceCloseOffer { .. } => "CHECKING WORKTREE",
         Mode::ConfirmWorkspaceCloseOffer(..) => "WORKTREE CLOSE",
-        Mode::CreateGroup(_) => "NEW GROUP",
         Mode::PluginPopup(_) => "PLUGIN DIALOG",
         Mode::CreateBoard(_) => "NEW BOARD",
         Mode::BoardPathPicker(_) => "BOARD PATH",

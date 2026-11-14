@@ -103,11 +103,11 @@ fn manifest_050_server_grants_are_the_five_tree_grants_in_order() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_client_holds_only_tree_read() {
+fn manifest_050_client_holds_tree_read_and_the_popup_grant() {
     let manifest = manifest();
     assert_eq!(
         manifest["capabilities"]["client"],
-        serde_json::json!(["tree.read"])
+        serde_json::json!(["tree.read", "ui.panels"])
     );
 }
 

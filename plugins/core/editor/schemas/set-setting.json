@@ -1,0 +1,28 @@
+{
+  "set": {
+    "params": {
+      "type": "object",
+      "properties": {
+        "tab": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tab",
+        "key",
+        "value"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  }
+}

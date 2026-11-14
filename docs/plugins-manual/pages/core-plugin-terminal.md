@@ -67,14 +67,18 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     "client": [
       "terminal.read-screen", "editor.edit",
       "commands.invoke:ilium.core.editor/*", "ui.panels", "settings.write-kernel:terminal",
+      "open-external",
       "extensions.provide:ilium.core.terminal/open-link",
       "extensions.provide:ilium.core.terminal/link-actions"
     ]
   },
   "contributes": {
     "link_detectors": [
-      { "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" },
-      { "id": "url", "regex": "https?://[^\\s]+", "command": "link-open" }
+      { "id": "url", "regex": "https?://[^\\s]+", "command": "link-open" },
+      { "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" }
+    ],
+    "commands": [
+      { "id": "link-open", "title": "Open link", "side": "client" }
     ],
     "extension_points": [
       {
@@ -243,6 +247,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "commands.invoke:ilium.core.editor/*",
       "ui.panels",
       "settings.write-kernel:terminal",
+      "open-external",
       "extensions.provide:ilium.core.terminal/open-link",
       "extensions.provide:ilium.core.terminal/link-actions"
     ]
@@ -254,14 +259,21 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   "contributes": {
     "link_detectors": [
       {
-        "id": "path-line",
-        "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+",
-        "command": "link-open"
-      },
-      {
         "id": "url",
         "regex": "https?://[^\\s]+",
         "command": "link-open"
+      },
+      {
+        "id": "path-line",
+        "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+",
+        "command": "link-open"
+      }
+    ],
+    "commands": [
+      {
+        "id": "link-open",
+        "title": "Open link",
+        "side": "client"
       }
     ],
     "extension_points": [
@@ -412,7 +424,7 @@ If the plugin is disabled, the tab stays in the rail with its stored values show
 
 #### Clickable links
 
-Paths and URLs in terminal output become links that open the editor. The manifest declares a `link_detectors` entry for paths with a `:line` suffix. On `link-activated` the client submits `editor-open` with the path, the line and `placement: split`. Pages: [terminal primitive](/pages/primitives-terminal/), [commands.invoke](/pages/capability-commands-invoke/), [events](/pages/api-events/) and [intents](/pages/api-intents/).
+Paths and URLs in terminal output become links. The manifest declares two `link_detectors` entries, `url` first so a `host:port` inside a URL stays part of the URL, then `path-line` for paths with a `:line` suffix. Both name the client command `link-open`, which `contributes.commands` declares. On `link-activated` the client submits `editor-open` for a `path-line` link, with the path, the line and `placement: split`, and `open-external` for an `http` or `https` URL. Pages: [terminal primitive](/pages/primitives-terminal/), [commands.invoke](/pages/capability-commands-invoke/), [events](/pages/api-events/) and [intents](/pages/api-intents/).
 
 **Rust**
 

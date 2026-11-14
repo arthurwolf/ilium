@@ -17,9 +17,7 @@ use ratatui::layout::{Position, Rect};
 
 use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorLineContextMenu};
 use crate::agent_toolbar::AgentToolbarAction;
-use crate::app::{
-    AgentToolbarModelSubmenuState, App, ContextMenu, CreateGroupState, Mode, RightPanelTarget,
-};
+use crate::app::{AgentToolbarModelSubmenuState, App, ContextMenu, Mode, RightPanelTarget};
 use crate::explorer_overlay::{ExplorerOutcome, ExplorerOverlay};
 use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
@@ -433,13 +431,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             unreachable!("just matched Mode::ExplorerFileMenu");
         };
         handle_explorer_file_menu_mouse(app, menu, mouse);
-        return;
-    }
-    if matches!(app.mode, Mode::CreateGroup(_)) {
-        let Mode::CreateGroup(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            unreachable!("just matched Mode::CreateGroup above");
-        };
-        handle_create_group_mouse(app, state, mouse);
         return;
     }
     if matches!(app.mode, Mode::PluginPopup(_)) {
@@ -1545,9 +1536,17 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
         }
         // Custom agents launch from the click handler, which owns the profile lookup.
         TreeToolbarAction::CustomAgent(_) => return,
+        TreeToolbarAction::Plugin(index) => {
+            app.run_plugin_toolbar_button(index);
+            return;
+        }
         TreeToolbarAction::Group => {
             let preselected = app.create_group_preselect_target();
-            app.open_create_group_dialog(preselected);
+            app.invoke_plugin_command(
+                "ilium.core.tree/new-group",
+                serde_json::json!({ "parent": preselected.0 }).to_string(),
+                ilium_plugin_api::generated::types::CommandOrigin::TreeToolbar,
+            );
             return;
         }
         TreeToolbarAction::Project => {
@@ -2211,36 +2210,6 @@ fn place_prompt_cursor(
     let inner_x = field_area.x.saturating_add(1);
     let clicked_offset = usize::from(position.x.saturating_sub(inner_x));
     prompt.cursor = clicked_offset.min(prompt.buf.chars().count());
-}
-
-/// Mouse handling for the create-group dialog: clicking a destination row
-/// immediately creates the group there, clicking outside cancels.
-fn handle_create_group_mouse(app: &mut App, state: CreateGroupState, mouse: MouseEvent) {
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        app.mode = Mode::CreateGroup(state);
-        return;
-    }
-    let position = Position::new(mouse.column, mouse.row);
-    if !state.area.contains(position) {
-        app.mode = Mode::Normal;
-        return;
-    }
-    let layout = crate::modal::create_group_layout(state.area);
-    let window = crate::modal::create_group_visible_window(
-        state.selected_index,
-        state.destinations.len(),
-        crate::modal::CREATE_GROUP_MAX_VISIBLE,
-    );
-    match crate::modal::create_group_row_at(&layout, window, position) {
-        Some(index) => {
-            let mut state = state;
-            state.selected_index = index;
-            if !app.commit_create_group(&state) {
-                app.mode = Mode::CreateGroup(state);
-            }
-        }
-        None => app.mode = Mode::CreateGroup(state),
-    }
 }
 
 /// Gives board creation the same direct field selection and explicit
@@ -4591,17 +4560,13 @@ mod tree_rename_mouse_tests {
 
         // A press dispatched while a modal owns the screen: not part of the
         // pair, whatever it lands on.
-        app.open_create_group_dialog(ilium_core::ROOT_ID);
-        let popup = crate::modal::create_group_dialog_area(
-            app.layout.screen_area,
-            app.tree.list_groups().len(),
-        );
+        app.mode = Mode::ConfirmClose(folder);
         handle_mouse_event(
             &mut app,
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
-                column: popup.x + 1,
-                row: popup.y + 3,
+                column: 1,
+                row: 1,
                 modifiers: KeyModifiers::NONE,
             },
         );

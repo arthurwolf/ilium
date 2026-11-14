@@ -4,6 +4,9 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! a minimal real implementation: it activates cleanly and acknowledges events without submissions until the host calls it needs exist.
 
+pub mod comparison;
+pub mod custody;
+
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
 use ilium_plugin_sdk::generated::types::events::Event;

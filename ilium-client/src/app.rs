@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ilium_core::{
-    AgentActivity, AgentProvider, BuiltinAgentProvider, GroupListing, Node, NodeId, NodeKind,
-    PaneContentKind, PaneStatus, PaneTitleSource, SplitOrientation, Tree, ROOT_ID,
+    AgentActivity, AgentProvider, BuiltinAgentProvider, Node, NodeId, NodeKind, PaneContentKind,
+    PaneStatus, PaneTitleSource, SplitOrientation, Tree, ROOT_ID,
 };
 use ilium_ipc::{ClientRequest, PaneResizeCause, PromptSubmissionSource};
 use ratatui::layout::{Position, Rect};
@@ -463,8 +463,6 @@ pub enum Mode {
         pane_id: NodeId,
     },
     ConfirmWorkspaceCloseOffer(NodeId),
-    /// The "New group" destination picker is open.
-    CreateGroup(CreateGroupState),
     /// A popup a plugin opened; the plugin owns the content, the kernel the chrome.
     PluginPopup(crate::plugin_host::popup::PopupState),
     /// Board creation owns its storage choice and destination before a tree
@@ -1744,6 +1742,12 @@ impl ContextMenuAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubmenuItemAction {
     SetTreeOrder(TreeOrder),
+    /// A tree ordering a plugin contributes; `active` marks the ordering in effect.
+    SetPluginTreeOrdering {
+        plugin: String,
+        id: String,
+        active: bool,
+    },
     AgentHere(BuiltinAgentProvider),
     AgentAtWorktree(BuiltinAgentProvider),
     AgentAtProjectRoot(BuiltinAgentProvider),
@@ -1766,6 +1770,7 @@ impl SubmenuItemAction {
             Self::SetTreeOrder(TreeOrder::AgeAscending | TreeOrder::AgeDescending) => 1,
             Self::SetTreeOrder(TreeOrder::NameAscending | TreeOrder::NameDescending) => 2,
             Self::SetTreeOrder(TreeOrder::CostDescending) => 3,
+            Self::SetPluginTreeOrdering { .. } => 4,
             Self::CopyWorktreeBranch | Self::CopyWorktreePath => 1,
             Self::RemoveWorktree => 2,
             _ => 0,
@@ -2002,16 +2007,6 @@ pub struct ExplorerFileMenu {
     pub target_group: NodeId,
     pub file_path: PathBuf,
     pub area: Rect,
-}
-
-/// State of the "New group" destination-picker dialog. `destinations` is a
-/// snapshot taken when the dialog opened -- it does not track further tree
-/// mutations, matching every other modal in ilium.
-pub struct CreateGroupState {
-    pub area: Rect,
-    pub destinations: Vec<GroupListing>,
-    pub selected_index: usize,
-    pub name: TextPromptState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2624,6 +2619,9 @@ pub struct App {
     pub(crate) claude_goals: crate::session_goal_claude::ClaudeGoalStore,
     pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
+    /// The plugin tree ordering chosen in the "Order by" submenu, as (plugin id, ordering
+    /// id); `None` uses `ui_settings.tree_order`. Not persisted.
+    pub(crate) plugin_tree_ordering: Option<(String, String)>,
     pub custom_toolbar_selected: Option<String>,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
     /// Toolbar buttons whose click was accepted but whose server-side work
@@ -3303,6 +3301,7 @@ impl App {
             claude_goals: crate::session_goal_claude::ClaudeGoalStore::default(),
             statistics_diagnostic: None,
             tree_toolbar_hovered: false,
+            plugin_tree_ordering: None,
             custom_toolbar_selected: None,
             hovered_tree_toolbar_action: None,
             pending_toolbar_actions: Vec::new(),
@@ -12016,6 +12015,8 @@ impl App {
     /// Selects the tree's presentation order immediately and persists it in
     /// `[ui]`, shared by the settings row and context-menu submenu.
     pub fn settings_set_tree_order(&mut self, tree_order: crate::config::TreeOrder) {
+        // A built-in order replaces a plugin ordering chosen earlier.
+        self.plugin_tree_ordering = None;
         let mut ui = self.ui_settings.clone();
         ui.tree_order = tree_order;
         self.apply_and_persist_ui_settings(ui);
@@ -15040,27 +15041,6 @@ impl App {
         }
     }
 
-    /// Builds the "New group" destination-picker state, snapshotting the
-    /// tree's current group listing, with `preselected` (a group id, or
-    /// `ROOT_ID` for the top level) highlighted. Falls back to index `0`
-    /// if `preselected` isn't a group (e.g. a stale id) -- the dialog
-    /// always has at least the top-level entry.
-    pub fn open_create_group_dialog(&mut self, preselected: NodeId) {
-        let destinations = self.tree.list_groups();
-        let selected_index = destinations
-            .iter()
-            .position(|destination| destination.id == preselected)
-            .unwrap_or(0);
-        let area =
-            crate::modal::create_group_dialog_area(self.layout.screen_area, destinations.len());
-        self.mode = Mode::CreateGroup(CreateGroupState {
-            area,
-            destinations,
-            selected_index,
-            name: TextPromptState::new(""),
-        });
-    }
-
     /// Destination to preselect when "New group" is triggered without a
     /// specific click target (leader key, toolbar button): the explicitly
     /// selected group (or the parent of a selected pane) if there is one,
@@ -15108,19 +15088,6 @@ impl App {
             Some(NodeKind::Folder { .. }) => self.tree.parent_of(target).unwrap_or(ROOT_ID),
             None => ROOT_ID,
         }
-    }
-
-    /// Queues a `NewGroup` request for the destination currently selected
-    /// in `state`, named from its text field, and returns to `Mode::Normal`.
-    pub fn commit_create_group(&mut self, state: &CreateGroupState) -> bool {
-        let Some(destination) = state.destinations.get(state.selected_index) else {
-            return false;
-        };
-        let admitted = self.request_new_group(destination.id, state.name.buf.clone());
-        if admitted {
-            self.mode = Mode::Normal;
-        }
-        admitted
     }
 
     fn normal_group_for_node(&self, node_id: NodeId) -> Option<NodeId> {
@@ -15925,6 +15892,7 @@ impl App {
             snapshot_ordinal,
         };
         let session_cwd = self.session_cwd.clone();
+        let detectors = self.plugin_link_detectors();
         let make_request = || crate::terminal_context_preparation::ContextRequest {
             key: key.clone(),
             source_row,
@@ -15933,6 +15901,7 @@ impl App {
             cwd: session_cwd.clone(),
             home: home_dir.clone(),
             history_context: history_context.clone(),
+            detectors: std::sync::Arc::clone(&detectors),
         };
         let Some(preparation) = &mut self.terminal_context_preparation else {
             self.status_message = Some("Terminal context preparation is unavailable".into());
@@ -16138,6 +16107,16 @@ impl App {
             }
             extra.push(TerminalContextAction::OpenExternally(target));
             blueprint.actions.splice(insert..insert, extra);
+        }
+        // A plugin link detector matched under the click: its command can open the link the
+        // plugin's way, as Ctrl+O would (G5).
+        if let Some(found) = text.plugin_link.clone() {
+            blueprint.actions.push(TerminalContextAction::PluginLink {
+                plugin: found.plugin,
+                detector_id: found.detector_id,
+                command: found.command,
+                text: found.text,
+            });
         }
         blueprint
             .actions
@@ -16417,6 +16396,20 @@ impl App {
             TerminalContextAction::Plugin { command, .. } => {
                 self.run_plugin_terminal_entry(&command, menu.pane_id)
             }
+            TerminalContextAction::PluginLink {
+                plugin,
+                detector_id,
+                command,
+                text,
+            } => self.activate_plugin_link_in(
+                &crate::plugin_host::links::LinkMatch {
+                    plugin,
+                    detector_id,
+                    command,
+                    text,
+                },
+                Some(menu.pane_id),
+            ),
         }
     }
 
@@ -16762,11 +16755,42 @@ impl App {
         }
     }
 
+    /// The "Order by" submenu: the built-in orders, then the tree orderings enabled plugins
+    /// contribute. The selected row is the plugin ordering in effect, if any.
+    fn order_by_submenu_items(
+        &self,
+        built_in: Vec<SubmenuItem>,
+        built_in_selected: usize,
+    ) -> (Vec<SubmenuItem>, usize) {
+        let mut items = built_in;
+        let mut selected = built_in_selected;
+        for ordering in self.plugin_tree_orderings() {
+            let active = self
+                .plugin_tree_ordering
+                .as_ref()
+                .is_some_and(|(plugin, id)| *plugin == ordering.plugin && *id == ordering.id);
+            if active {
+                selected = items.len();
+            }
+            items.push(SubmenuItem {
+                label: ilium_plugin_host::render::sanitize_plugin_text(&ordering.title, 40),
+                action: SubmenuItemAction::SetPluginTreeOrdering {
+                    plugin: ordering.plugin,
+                    id: ordering.id,
+                    active,
+                },
+                disabled_reason: None,
+                disabled_reason_retention: None,
+            });
+        }
+        (items, selected)
+    }
+
     /// Opens a submenu beside its parent row, flipping it to the left when
     /// the terminal has no room on the right.
     pub fn open_context_submenu(&self, menu: &mut ContextMenu, parent: ContextMenuAction) {
         let (items, selected_index): (Vec<SubmenuItem>, usize) = match parent {
-            ContextMenuAction::OrderBy => (
+            ContextMenuAction::OrderBy => self.order_by_submenu_items(
                 TreeOrder::ALL
                     .iter()
                     .map(|tree_order| SubmenuItem {
@@ -16779,6 +16803,7 @@ impl App {
                             TreeOrder::NameAscending => "Name (A–Z)",
                             TreeOrder::NameDescending => "Name (Z–A)",
                             TreeOrder::CostDescending => "Cost (highest first)",
+                            TreeOrder::PluginKey => "Plugin order",
                         }
                         .to_string(),
                         disabled_reason: None,
@@ -17006,6 +17031,9 @@ impl App {
         self.select_node(target);
         match item.action.clone() {
             SubmenuItemAction::SetTreeOrder(tree_order) => self.settings_set_tree_order(tree_order),
+            SubmenuItemAction::SetPluginTreeOrdering { plugin, id, .. } => {
+                self.plugin_tree_ordering = Some((plugin, id));
+            }
             SubmenuItemAction::AgentHere(provider) => {
                 self.action_new_command_pane(provider.command_line());
             }
@@ -17731,7 +17759,11 @@ impl App {
             ContextMenuAction::NewEditor => self.action_new_editor(),
             ContextMenuAction::NewGroup => {
                 let preselected = self.create_group_target_for_click(target);
-                self.open_create_group_dialog(preselected);
+                self.invoke_plugin_command(
+                    "ilium.core.tree/new-group",
+                    serde_json::json!({ "parent": preselected.0 }).to_string(),
+                    ilium_plugin_api::generated::types::CommandOrigin::Menu,
+                );
             }
             ContextMenuAction::NewSplitView => {
                 self.action_new_split_view(ilium_plugin_api::generated::types::CommandOrigin::Menu);

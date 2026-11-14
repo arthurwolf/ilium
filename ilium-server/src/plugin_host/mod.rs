@@ -309,6 +309,7 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
             .iter()
             .map(|plugin| (plugin.id.as_str(), plugin.manifest.as_str())),
         disabled.clone(),
+        matches!(start.mode, StartMode::SafePlugins),
     );
     publish_signatures(state, &contributed);
     let log: Arc<dyn LogSink> = Arc::new(TracingLog);
@@ -358,6 +359,9 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         },
     );
     runtime.set_durable_timer_file(wiring::durable_timers_path(&start.data_dir, "server"));
+    // The plugin journal belongs to the session: it sits beside the session snapshot, so its
+    // entries survive a restart of this session's server (capability-journal-read).
+    runtime.set_journal_file(state.snapshot_path.with_extension("plugin-journal.jsonl"));
     // Every service call is checked against the provider's schema file (gap G13).
     for schema in start
         .catalogue
@@ -586,6 +590,21 @@ impl PluginHostHandle {
             EnvelopeBody::Control(ControlBody::CliCancel { invocation_id }) => {
                 self.cli_cancel(invocation_id, direct_tx);
             }
+            EnvelopeBody::Control(ControlBody::SettingsChanged {
+                plugin: target,
+                keys,
+            }) => {
+                // The user changed settings of the plugin in a client; its server side hears
+                // the same `settings-changed` the client side does. A plugin whose server side
+                // is not running reads the settings when it starts.
+                let change = settings_changed_event(keys);
+                self.post(move |runtime| {
+                    if let Err(error) = runtime.deliver(&target, vec![change]) {
+                        tracing::debug!("settings-changed not delivered to {target}: {error}");
+                    }
+                    log_errors("pump", runtime.pump());
+                });
+            }
             body @ (EnvelopeBody::Event(_)
             | EnvelopeBody::ClientRequest(_)
             | EnvelopeBody::ClientReply(_))
@@ -697,11 +716,15 @@ impl PluginHostHandle {
             _ => "refused:host.timeout".to_owned(),
         };
         if !name.starts_with("refused:") {
-            if let (Ok(mut contributed), Some(state)) =
-                (self.signatures.lock(), self.publisher.state.upgrade())
-            {
+            // The lock is released before the await: the new set is taken out first.
+            let active = self.signatures.lock().ok().map(|mut contributed| {
                 contributed.set_enabled(&plugin_id, enabled);
-                publish_signatures(&state, &contributed);
+                contributed.active()
+            });
+            if let (Some(active), Some(state)) = (active, self.publisher.state.upgrade()) {
+                // Panes identify again with the new set at once, not at their next slow
+                // check (gap G6).
+                state.replace_contributed_signatures(active).await;
             }
         }
         name
@@ -732,6 +755,28 @@ impl PluginHostHandle {
 /// How often the server side looks at `config.toml` for kernel settings, theme and keymap
 /// changes (gap G2). A stat per tick; the file is read only when it changed.
 const CONFIG_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+
+/// How long the feed waits for a new pane's screen to learn its size for `pane-created`.
+const PANE_SIZE_BUDGET: Duration = Duration::from_millis(200);
+
+/// Gives each `pane-created` event the size of its pane's terminal screen. A pane with no
+/// terminal yet, or one that does not answer within the budget, keeps 0 x 0.
+async fn fill_pane_sizes(state: &ServerState, events: &mut [Event]) {
+    for event in events.iter_mut() {
+        let Event::PaneCreated(info) = event else {
+            continue;
+        };
+        let read = crate::pane::read_current_terminal_screen(
+            state,
+            ilium_core::NodeId(info.node.0),
+            |screen| screen.size(),
+        );
+        if let Ok(Some((rows, columns))) = tokio::time::timeout(PANE_SIZE_BUDGET, read).await {
+            info.columns = columns;
+            info.rows = rows;
+        }
+    }
+}
 
 /// The modification time and length of a file, `None` when it cannot be read.
 fn file_stamp(path: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
@@ -791,13 +836,13 @@ pub(crate) fn spawn_feed(
                         let mut batch = facade::tree_delta(&known, &current);
                         known = current;
                         let current_views = facade::tree_views(tree);
-                        batch.extend(events_feed::node_events(
-                            &views,
-                            &current_views,
-                            None,
-                            |id| facade::title_origin(tree, id),
-                        ));
+                        let mut node_events =
+                            events_feed::node_events(&views, &current_views, None, |id| {
+                                facade::title_origin(tree, id)
+                            });
                         views = current_views;
+                        fill_pane_sizes(&state, &mut node_events).await;
+                        batch.extend(node_events);
                         batch
                     }
                     ServerEvent::PaneNodeChanged(node) => {
@@ -852,5 +897,31 @@ impl Drop for ClientPresence {
                 ilium_plugin_api::generated::types::ClientId(self.client),
             )]);
         }
+    }
+}
+
+/// The `settings-changed` event a client reported for a plugin (`ControlBody::SettingsChanged`):
+/// the same change, origin and side the client side of the plugin is given.
+fn settings_changed_event(keys: Vec<String>) -> Event {
+    Event::SettingsChanged(ilium_plugin_api::generated::types::SettingsChange {
+        keys,
+        origin: ilium_plugin_api::generated::types::SettingsOrigin::User,
+        side: PluginSide::Client,
+    })
+}
+
+#[cfg(test)]
+mod settings_changed_tests {
+    use ilium_plugin_api::generated::types::{Event, SettingsOrigin};
+
+    #[test]
+    fn a_client_settings_change_reaches_the_server_side_as_settings_changed() {
+        let Event::SettingsChanged(change) =
+            super::settings_changed_event(vec!["font-size".to_owned()])
+        else {
+            panic!("a settings-changed event");
+        };
+        assert_eq!(change.keys, ["font-size"]);
+        assert_eq!(change.origin, SettingsOrigin::User);
     }
 }

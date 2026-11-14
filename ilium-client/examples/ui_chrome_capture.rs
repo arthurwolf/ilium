@@ -362,15 +362,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ("agent-message-empty", synthetic_agent_message(0)),
             ("agent-message-overflow", synthetic_agent_message(40)),
             (
-                "create-group-empty",
-                ilium_client::app::Mode::CreateGroup(ilium_client::app::CreateGroupState {
-                    area: Rect::new(0, 0, width, height),
-                    destinations: Vec::new(),
-                    selected_index: 0,
-                    name: ilium_client::text_prompt::TextPromptState::new("Synthetic group"),
-                }),
-            ),
-            (
                 "board-card-prompt",
                 ilium_client::app::Mode::BoardCardPrompt(
                     ilium_core::ROOT_ID,

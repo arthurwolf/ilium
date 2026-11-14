@@ -18,8 +18,8 @@ use ilium_plugin_sdk::primitives::{HostTerminal, ScreenPart};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{
-    EditorOpenSpec, EditorPlacement, FsPath, Intent, NodeId, RenameNodeSpec, RequestRef,
-    RequestResult, Submission, TimerId, TitleOrigin, TitleSource,
+    EditorOpenSpec, EditorPlacement, ExternalTarget, FsPath, Intent, NodeId, OpenExternalSpec,
+    RenameNodeSpec, RequestRef, RequestResult, Submission, TimerId, TitleOrigin, TitleSource,
 };
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider};
 
@@ -271,6 +271,16 @@ fn parse_path_line(text: &str) -> Option<(&str, u32)> {
     Some((path, line.parse().ok()?))
 }
 
+/// The text of a `url` link when it is an `http` or `https` URL with something after the
+/// scheme; anything else the `url` detector could be handed is not opened.
+fn web_url(text: &str) -> Option<&str> {
+    let lowered = text.to_ascii_lowercase();
+    let rest = lowered
+        .strip_prefix("https://")
+        .or_else(|| lowered.strip_prefix("http://"))?;
+    (!rest.is_empty()).then_some(text)
+}
+
 /// The client side of `ilium.core.terminal` (core-plugin-terminal.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = [])]
 #[derive(Default)]
@@ -293,20 +303,31 @@ impl Handler for TerminalClient {
             let Event::LinkActivated(link) = event else {
                 continue;
             };
-            if link.detector_id != "path-line" {
-                continue;
-            }
-            let Some((path, line)) = parse_path_line(&link.text) else {
-                continue;
+            let intent = match link.detector_id.as_str() {
+                "path-line" => {
+                    let Some((path, line)) = parse_path_line(&link.text) else {
+                        continue;
+                    };
+                    Intent::EditorOpen(EditorOpenSpec {
+                        path: FsPath {
+                            scope: "project".to_string(),
+                            path: path.to_string(),
+                        },
+                        line: Some(line.saturating_sub(1)),
+                        placement: EditorPlacement::Split,
+                    })
+                }
+                "url" => {
+                    let Some(url) = web_url(&link.text) else {
+                        continue;
+                    };
+                    Intent::OpenExternal(OpenExternalSpec {
+                        target: ExternalTarget::Url(url.to_string()),
+                    })
+                }
+                _ => continue,
             };
-            submissions.push(Submission::new(Intent::EditorOpen(EditorOpenSpec {
-                path: FsPath {
-                    scope: "project".to_string(),
-                    path: path.to_string(),
-                },
-                line: Some(line.saturating_sub(1)),
-                placement: EditorPlacement::Split,
-            })));
+            submissions.push(Submission::new(intent));
         }
         submissions
     }
@@ -342,9 +363,19 @@ mod spec_tests {
             .expect("extension point is declared in the manifest")
     }
 
+    fn detector(manifest: &Value, id: &str) -> Value {
+        manifest["contributes"]["link_detectors"]
+            .as_array()
+            .expect("link_detectors is an array")
+            .iter()
+            .find(|detector| detector["id"] == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("detector {id} is declared"))
+    }
+
     fn path_line_regex() -> regex::Regex {
         let manifest = manifest();
-        let detector = &manifest["contributes"]["link_detectors"][0];
+        let detector = &detector(&manifest, "path-line");
         let pattern = detector["regex"]
             .as_str()
             .expect("path-line regex is a string");
@@ -460,10 +491,57 @@ mod spec_tests {
     #[test]
     fn path_line_detector_matches_a_path_with_a_line_suffix() {
         let manifest = manifest();
-        let detector = &manifest["contributes"]["link_detectors"][0];
-        assert_eq!(detector["id"], "path-line");
+        let detector = detector(&manifest, "path-line");
         assert_eq!(detector["command"], "link-open");
         assert!(path_line_regex().is_match("src/server/routes.rs:42"));
+    }
+
+    #[test]
+    fn link_open_is_a_declared_client_command_and_the_url_detector_comes_first() {
+        let manifest = manifest();
+        let commands = manifest["contributes"]["commands"]
+            .as_array()
+            .expect("commands is an array");
+        assert!(commands
+            .iter()
+            .any(|command| command["id"] == "link-open" && command["side"] == "client"));
+        // Detectors are tried in manifest order: a `host:8080` inside a URL must not open as
+        // a path.
+        assert_eq!(manifest["contributes"]["link_detectors"][0]["id"], "url");
+        assert!(string_list(&manifest["capabilities"]["client"])
+            .iter()
+            .any(|grant| grant == "open-external"));
+    }
+
+    #[test]
+    fn only_web_urls_open_externally() {
+        assert_eq!(
+            web_url("https://example.org:8080/a"),
+            Some("https://example.org:8080/a")
+        );
+        assert_eq!(web_url("HTTP://example.org"), Some("HTTP://example.org"));
+        assert_eq!(web_url("https://"), None);
+        assert_eq!(web_url("a.rs:1"), None);
+        assert_eq!(web_url("file:///etc/passwd"), None);
+    }
+
+    #[test]
+    fn a_url_link_submits_open_external() {
+        let mut client = TerminalClient::default();
+        let submissions = client.on_events(vec![Event::LinkActivated(
+            ilium_plugin_sdk::types::LinkActivatedEvent {
+                node: NodeId(3),
+                detector_id: "url".to_string(),
+                text: "https://example.org/x".to_string(),
+            },
+        )]);
+        assert_eq!(submissions.len(), 1);
+        assert_eq!(
+            submissions[0].intent,
+            Intent::OpenExternal(OpenExternalSpec {
+                target: ExternalTarget::Url("https://example.org/x".to_string()),
+            })
+        );
     }
 
     #[test]

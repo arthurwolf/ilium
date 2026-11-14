@@ -146,15 +146,34 @@ fn cor_050_client_side_activates_with_the_manifest_grants() {
 
 /// REQ: COR-050
 #[test]
-fn cor_050_contributes_only_the_path_line_link_detector() {
+fn cor_050_contributes_the_link_detectors_and_the_link_open_command() {
     let manifest = manifest_json();
     let contributes = manifest["contributes"]
         .as_object()
         .expect("contributes object");
-    assert_eq!(contributes.keys().collect::<Vec<_>>(), ["link_detectors"]);
+    assert_eq!(
+        contributes.keys().collect::<Vec<_>>(),
+        [
+            "commands",
+            "extension_points",
+            "link_detectors",
+            "services",
+            "topics"
+        ]
+    );
+    // `url` comes first: detectors are tried in manifest order, and a `host:8080` inside a
+    // URL also matches `path-line`.
     assert_eq!(
         manifest["contributes"]["link_detectors"],
-        json!([{ "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" }])
+        json!([
+            { "id": "url", "regex": "https?://[^\\s]+", "command": "link-open" },
+            { "id": "path-line", "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+", "command": "link-open" }
+        ])
+    );
+    // EXT-050: a detector's command names a declared command.
+    assert_eq!(
+        manifest["contributes"]["commands"],
+        json!([{ "id": "link-open", "title": "Open link", "side": "client" }])
     );
 }
 

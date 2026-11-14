@@ -1,13 +1,23 @@
 //! Host implementation of `ilium:host/journal`.
 //!
-//! One bounded in-memory journal per runtime ([`JournalBook`]), shared by the imports of its
-//! plugins. Writes are limited to 20 per second per plugin and event kind, and payloads to
-//! 4 KiB. Two runtimes in one process keep two journals.
+//! One bounded journal per runtime ([`JournalBook`]), shared by the imports of its plugins.
+//! Writes are limited to 20 per second per plugin and event kind, and payloads to 4 KiB. Two
+//! runtimes in one process keep two journals.
+//!
+//! - The host sets `source` to the writing plugin's id and ignores anything the plugin says
+//!   about it; a plugin cannot write a host entry kind (`pane-created`, `pane-exited`,
+//!   `input-sent`) or a kind starting with `host.` (capability-journal-read SEC-167).
+//! - A plugin reads its own entries; with the `journal.read` grant it reads every entry.
+//! - With a journal file ([`JournalBook::attach_file`]) the entries survive a restart: every
+//!   accepted entry is appended as one JSON line, the file is loaded when it is attached, and it
+//!   is rewritten with only the retained entries once it holds twice as many lines.
 
 use ilium_plugin_api::generated::host::journal::{HostJournal, JournalEntry};
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{EpochMs, NodeId};
 use std::collections::{HashMap, VecDeque};
+use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -16,12 +26,22 @@ const READ_CAP_ENTRIES: usize = 1_000;
 const RETAINED_ENTRIES: usize = 10_000;
 const RATE_PER_WINDOW: u32 = 20;
 const RATE_WINDOW_MILLIS: u64 = 1_000;
+/// Entry kinds only the host writes.
+const HOST_KINDS: [&str; 3] = ["pane-created", "pane-exited", "input-sent"];
+/// Prefix of every other host entry kind.
+const HOST_KIND_PREFIX: &str = "host.";
+/// The grant that reads host entries and other plugins' entries.
+pub const READ_ALL_GRANT: &str = "journal.read";
 
 #[derive(Default)]
 struct JournalState {
     entries: VecDeque<JournalEntry>,
     /// Per (plugin, kind): window start and number of accepted writes in it.
     windows: HashMap<(String, String), (Instant, u32)>,
+    /// The journal file and how many lines it holds.
+    file: Option<(PathBuf, usize)>,
+    /// Why the journal file was last given up.
+    file_error: Option<String>,
 }
 
 /// The journal of one runtime. Cloning shares the entries.
@@ -35,8 +55,62 @@ impl std::fmt::Debug for JournalState {
         formatter
             .debug_struct("JournalState")
             .field("entries", &self.entries.len())
+            .field("file", &self.file)
             .finish()
     }
+}
+
+/// The newest `RETAINED_ENTRIES` entries of a journal file; lines that do not parse are skipped.
+fn load_entries(path: &Path) -> std::io::Result<(VecDeque<JournalEntry>, usize)> {
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((VecDeque::new(), 0));
+        }
+        Err(error) => return Err(error),
+    };
+    let mut entries = VecDeque::new();
+    let mut lines = 0usize;
+    for line in std::io::BufReader::new(file).lines() {
+        let line = line?;
+        lines += 1;
+        if let Ok(entry) = serde_json::from_str::<JournalEntry>(&line) {
+            if entries.len() >= RETAINED_ENTRIES {
+                entries.pop_front();
+            }
+            entries.push_back(entry);
+        }
+    }
+    Ok((entries, lines))
+}
+
+/// Writes `entries` as the whole journal file, through a temporary file and a rename.
+fn rewrite_file(path: &Path, entries: &VecDeque<JournalEntry>) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension("jsonl.tmp");
+    let mut text = String::new();
+    for entry in entries {
+        text.push_str(&serde_json::to_string(entry).map_err(std::io::Error::other)?);
+        text.push('\n');
+    }
+    std::fs::write(&temporary, text)?;
+    std::fs::rename(&temporary, path)
+}
+
+/// Appends one entry to the journal file.
+fn append_line(path: &Path, entry: &JournalEntry) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut line = serde_json::to_string(entry).map_err(std::io::Error::other)?;
+    line.push('\n');
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?
+        .write_all(line.as_bytes())
 }
 
 impl JournalBook {
@@ -48,6 +122,36 @@ impl JournalBook {
     fn lock(&self) -> MutexGuard<'_, JournalState> {
         // Every writer pushes one entry, so the journal is consistent after a panic.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Keeps the journal in `path` from now on and loads the entries it holds, ahead of any
+    /// entry written before. A file that cannot be read leaves the journal in memory only and is
+    /// returned as the error.
+    pub fn attach_file(&self, path: PathBuf) -> std::io::Result<()> {
+        let (mut loaded, lines) = load_entries(&path)?;
+        let mut state = self.lock();
+        let written: Vec<JournalEntry> = state.entries.drain(..).collect();
+        let written_count = written.len();
+        for entry in &written {
+            if let Err(error) = append_line(&path, entry) {
+                state.entries.extend(written.iter().cloned());
+                return Err(error);
+            }
+        }
+        loaded.extend(written);
+        while loaded.len() > RETAINED_ENTRIES {
+            loaded.pop_front();
+        }
+        let lines = lines + written_count;
+        state.entries = loaded;
+        state.file = Some((path, lines));
+        state.file_error = None;
+        Ok(())
+    }
+
+    /// Why the journal stopped writing its file, if it did; entries then stay in memory only.
+    pub fn file_error(&self) -> Option<String> {
+        self.lock().file_error.clone()
     }
 
     /// How many entries the journal holds.
@@ -66,6 +170,30 @@ impl JournalBook {
     }
 }
 
+impl JournalState {
+    /// Adds an accepted entry, trims the oldest one past the bound and writes it to the file.
+    fn push(&mut self, entry: JournalEntry) {
+        if self.entries.len() >= RETAINED_ENTRIES {
+            self.entries.pop_front();
+        }
+        if let Some((path, lines)) = &mut self.file {
+            let written = if *lines >= RETAINED_ENTRIES * 2 {
+                let mut retained = self.entries.clone();
+                retained.push_back(entry.clone());
+                rewrite_file(path, &retained).map(|()| *lines = retained.len())
+            } else {
+                append_line(path, &entry).map(|()| *lines += 1)
+            };
+            if let Err(error) = written {
+                // The entry stays in memory; the file is not tried again until it is reattached.
+                self.file_error = Some(format!("{}: {error}", path.display()));
+                self.file = None;
+            }
+        }
+        self.entries.push_back(entry);
+    }
+}
+
 fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -78,6 +206,8 @@ fn now_millis() -> u64 {
 pub struct JournalImport {
     book: JournalBook,
     plugin: String,
+    /// Whether the plugin holds `journal.read` and so reads every entry.
+    reads_all: bool,
 }
 
 impl Default for JournalImport {
@@ -87,12 +217,27 @@ impl Default for JournalImport {
 }
 
 impl JournalImport {
-    /// The import of `plugin` over the runtime's journal.
+    /// The import of `plugin` over the runtime's journal; it reads its own entries only.
     pub fn new(book: JournalBook, plugin: &str) -> Self {
         Self {
             book,
             plugin: plugin.to_owned(),
+            reads_all: false,
         }
+    }
+
+    /// The import of a plugin that holds `journal.read` when `granted` is true.
+    pub fn reading_all(mut self, granted: bool) -> Self {
+        self.reads_all = granted;
+        self
+    }
+}
+
+fn refuse(code: ErrorCode, message: &str) -> PluginError {
+    PluginError {
+        code,
+        message: message.to_owned(),
+        retry_after_ms: None,
     }
 }
 
@@ -104,11 +249,16 @@ impl HostJournal for JournalImport {
         payload_json: String,
     ) -> Result<(), PluginError> {
         if payload_json.len() > PAYLOAD_LIMIT_BYTES {
-            return Err(PluginError {
-                code: ErrorCode::InvalidArgument,
-                message: "payload-json exceeds 4 KiB".to_string(),
-                retry_after_ms: None,
-            });
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                "payload-json exceeds 4 KiB",
+            ));
+        }
+        if HOST_KINDS.contains(&kind.as_str()) || kind.starts_with(HOST_KIND_PREFIX) {
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                "this entry kind is written by the host only",
+            ));
         }
         let mut state = self.book.lock();
         let now = Instant::now();
@@ -116,7 +266,8 @@ impl HostJournal for JournalImport {
             .windows
             .entry((self.plugin.clone(), kind.clone()))
             .or_insert((now, 0));
-        let elapsed_millis = u64::try_from(now.duration_since(window.0).as_millis()).unwrap_or(u64::MAX);
+        let elapsed_millis =
+            u64::try_from(now.duration_since(window.0).as_millis()).unwrap_or(u64::MAX);
         if elapsed_millis >= RATE_WINDOW_MILLIS {
             *window = (now, 0);
         }
@@ -129,13 +280,10 @@ impl HostJournal for JournalImport {
             });
         }
         window.1 += 1;
-        if state.entries.len() >= RETAINED_ENTRIES {
-            state.entries.pop_front();
-        }
-        state.entries.push_back(JournalEntry {
+        state.push(JournalEntry {
             at: EpochMs(now_millis()),
             pane,
-            source: "plugin".to_string(),
+            source: self.plugin.clone(),
             kind,
             payload_json,
         });
@@ -149,6 +297,7 @@ impl HostJournal for JournalImport {
             .entries
             .iter()
             .rev()
+            .filter(|entry| self.reads_all || entry.source == self.plugin)
             .filter(|entry| entry.at.0 >= since.0 && (pane.is_none() || entry.pane == pane))
             .take(wanted)
             .cloned()
@@ -382,5 +531,61 @@ mod tests {
             .log_event(None, kind, "{}".to_string())
             .expect("another plugin has its own window");
         assert_eq!(book.len(), 21);
+    }
+
+    /// REQ: CAP-011
+    #[test]
+    fn a_plugin_reads_other_plugins_entries_only_with_journal_read() {
+        let book = super::JournalBook::new();
+        let mut writer = JournalImport::new(book.clone(), "a.writer");
+        let mut reader = JournalImport::new(book.clone(), "a.reader");
+        let mut auditor = JournalImport::new(book.clone(), "a.auditor").reading_all(true);
+        writer
+            .log_event(None, unique_kind("foreign"), "{}".to_string())
+            .expect("accepted");
+        reader
+            .log_event(None, unique_kind("own"), "{}".to_string())
+            .expect("accepted");
+        let own = reader.read(None, EpochMs(0), 10);
+        assert_eq!(own.len(), 1, "without the grant only the own entry");
+        assert_eq!(own[0].source, "a.reader", "the host sets the source");
+        let every = auditor.read(None, EpochMs(0), 10);
+        assert_eq!(every.len(), 2);
+        assert_eq!(every[0].source, "a.writer");
+    }
+
+    #[test]
+    fn host_entry_kinds_are_refused() {
+        for kind in ["pane-created", "pane-exited", "input-sent", "host.anything"] {
+            assert_invalid_argument(log_event(None, kind, "{}"));
+        }
+    }
+
+    #[test]
+    fn entries_survive_a_restart_through_the_journal_file() {
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let path = scratch
+            .path()
+            .join("sessions")
+            .join("default.plugin-journal.jsonl");
+        let first = super::JournalBook::new();
+        let mut before = JournalImport::new(first.clone(), "a.writer");
+        before
+            .log_event(Some(NodeId(3)), unique_kind("early"), "{}".to_string())
+            .expect("accepted before the file is attached");
+        first.attach_file(path.clone()).expect("attached");
+        before
+            .log_event(None, unique_kind("late"), "{\"n\":1}".to_string())
+            .expect("accepted");
+        assert_eq!(first.file_error(), None);
+
+        let second = super::JournalBook::new();
+        second.attach_file(path).expect("reloaded");
+        let mut after = JournalImport::new(second, "a.writer");
+        let entries = after.read(None, EpochMs(0), 10);
+        let kinds: Vec<String> = entries.iter().map(|entry| entry.kind.clone()).collect();
+        assert_eq!(kinds, vec![unique_kind("early"), unique_kind("late")]);
+        assert_eq!(entries[0].pane, Some(NodeId(3)));
+        assert_eq!(entries[1].payload_json, "{\"n\":1}");
     }
 }

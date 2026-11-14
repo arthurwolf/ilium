@@ -61,6 +61,16 @@ pub enum TerminalContextAction {
         title: String,
         command: String,
     },
+    /// A link a plugin's `link_detectors` entry matched under the click (G5). Choosing it
+    /// runs the detector's command and sends `link-activated` to the plugin, as Ctrl+O does.
+    /// The fields are those of the plugin host's link match, kept as plain text so this
+    /// public menu type does not expose the crate-private plugin host types.
+    PluginLink {
+        plugin: String,
+        detector_id: String,
+        command: String,
+        text: String,
+    },
 }
 
 impl TerminalContextAction {
@@ -81,6 +91,7 @@ impl TerminalContextAction {
             Self::ToggleAgentToolbar { .. } => (4, 0),
             Self::ShowAgentDebugLog => (4, 1),
             Self::Plugin { .. } => (5, 0),
+            Self::PluginLink { .. } => (0, 2),
         }
     }
 
@@ -115,6 +126,7 @@ impl TerminalContextAction {
             }
             Self::OpenInEditor { .. } => IconTarget::Editor,
             Self::Plugin { .. } => IconTarget::Project,
+            Self::PluginLink { .. } => IconTarget::OpenExternal,
         }
     }
 
@@ -152,8 +164,18 @@ impl TerminalContextAction {
             Self::OpenExternally(target) => target.menu_label().to_string(),
             Self::OpenInEditor { .. } => "Open in editor".to_string(),
             Self::Plugin { title, .. } => title.clone(),
+            Self::PluginLink { text, .. } => plugin_link_label(text),
         }
     }
+}
+
+/// Longest link text shown in a plugin link entry, in characters.
+const PLUGIN_LINK_LABEL_CHARACTERS: usize = 40;
+
+/// "Open link <text>", the text sanitized and cut so the menu stays narrow.
+fn plugin_link_label(text: &str) -> String {
+    let shown = ilium_plugin_host::render::sanitize_plugin_text(text, PLUGIN_LINK_LABEL_CHARACTERS);
+    format!("Open link {shown}")
 }
 
 /// Mouse-anchored terminal menu with the text that was visible on open.
@@ -187,5 +209,37 @@ impl TerminalPaneContextMenu {
             self.area.height.saturating_sub(2),
             self.row_offset,
         )
+    }
+}
+
+#[cfg(test)]
+mod plugin_link_tests {
+    use super::TerminalContextAction;
+
+    fn link(text: &str) -> TerminalContextAction {
+        TerminalContextAction::PluginLink {
+            plugin: "example.plugin".to_owned(),
+            detector_id: "url".to_owned(),
+            command: "example.plugin/open".to_owned(),
+            text: text.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_plugin_link_entry_sits_with_the_open_entries_and_names_its_text() {
+        let action = link("https://example.test/x");
+        assert_eq!(action.menu_order().0, 0);
+        assert_eq!(
+            action.icon_target(),
+            crate::icon_settings::IconTarget::OpenExternal
+        );
+        assert_eq!(action.label(), "Open link https://example.test/x");
+    }
+
+    #[test]
+    fn a_plugin_link_label_drops_control_sequences_and_stays_short() {
+        let label = link(&format!("\u{1b}[31m{}", "a".repeat(200))).label();
+        assert!(!label.contains('\u{1b}'));
+        assert!(label.chars().count() <= "Open link ".len() + 41);
     }
 }

@@ -752,6 +752,34 @@ impl ServerState {
         };
     }
 
+    /// Replaces the agent signatures the enabled plugins contribute (gap G6) and makes every
+    /// terminal pane identify its agent again now, as a change of the user's own signatures
+    /// does. The swap and the revision bump happen under the settings write lock, so a
+    /// detection pass that read the old set is discarded instead of applied.
+    pub(crate) async fn replace_contributed_signatures(&self, signatures: Vec<AgentSignature>) {
+        {
+            let mut settings = self.agent_detection_settings.write().await;
+            match self.contributed_signatures.write() {
+                Ok(mut slot) => *slot = signatures,
+                Err(poisoned) => *poisoned.into_inner() = signatures,
+            }
+            settings.revision = settings.revision.saturating_add(1);
+        }
+        let now = std::time::Instant::now();
+        {
+            let mut panes = self.panes.write().await;
+            for resource in panes.values_mut() {
+                if let PaneResource::Terminal(runtime) = resource {
+                    // The cached identity was found with the old signatures.
+                    runtime.detection_schedule.identity_system_generation = None;
+                    crate::detection::force_check(&mut runtime.detection_schedule, now);
+                    runtime.detection_schedule.next_due = now;
+                }
+            }
+        }
+        self.detection_schedule_changed.notify_one();
+    }
+
     /// Returns a non-zero, monotonically increasing generation used to fence
     /// replacement, terminal delivery, and clear requests for one monitor.
     pub fn allocate_progress_monitor_id(&self) -> u64 {

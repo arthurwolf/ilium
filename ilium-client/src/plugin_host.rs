@@ -4,6 +4,7 @@
 //! `ClientPluginHost` below and the two rigs are the earlier models the red tests drive.
 
 pub mod audio_backend;
+pub mod audio_capture;
 pub mod commands;
 pub(crate) mod effects;
 pub mod host;

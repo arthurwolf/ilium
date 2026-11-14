@@ -77,6 +77,8 @@ impl App {
     pub(crate) fn effective_tree_order(&self) -> crate::config::TreeOrder {
         if self.cost_settings.sort_by_cost {
             crate::config::TreeOrder::CostDescending
+        } else if self.plugin_tree_ordering_in_effect() {
+            crate::config::TreeOrder::PluginKey
         } else {
             self.ui_settings.tree_order
         }

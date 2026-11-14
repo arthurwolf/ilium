@@ -6,6 +6,7 @@
 //! external-open service, and Settings pages through the ordinary Settings screen.
 
 use ilium_core::{NodeId, NodeKind};
+use ilium_plugin_api::generated::types::intents::EditorPlacement;
 
 use super::{App, Mode, SettingsTab};
 use crate::attention::{AttentionItem, AttentionKind, AttentionSource, Briefing};
@@ -35,6 +36,11 @@ impl App {
                 self.queue_external_open(target, None);
                 true
             }
+            ClientEffect::EditorOpen {
+                path,
+                line,
+                placement,
+            } => self.plugin_open_editor(plugin, path, line, placement),
             ClientEffect::OpenSettings(page) => {
                 if !matches!(self.mode, Mode::Normal) {
                     // Another screen has the user: a plugin never replaces it.
@@ -60,6 +66,37 @@ impl App {
                 is_shown
             }
         }
+    }
+
+    /// Opens a file a plugin named in a new editor pane. `split` opens it beside the focused
+    /// pane, in the same group; `new-pane` and `replace` open it where a new pane of the user
+    /// would go (the kernel has no in-place replacement of a pane).
+    fn plugin_open_editor(
+        &mut self,
+        plugin: &str,
+        path: std::path::PathBuf,
+        line: Option<u32>,
+        placement: EditorPlacement,
+    ) -> bool {
+        let beside_focused = match placement {
+            EditorPlacement::Split => self
+                .focused_pane_id()
+                .and_then(|pane| self.tree.parent_of(pane)),
+            EditorPlacement::NewPane | EditorPlacement::Replace => None,
+        };
+        let parent_group = match beside_focused {
+            Some(group) => group,
+            None => self.group_for_new_node(),
+        };
+        if !self.request_new_editor_at(parent_group, path.clone(), line, None) {
+            self.status_message = Some(format!("{plugin}: {} could not open", path.display()));
+            return true;
+        }
+        self.status_message = Some(match line {
+            Some(line) => format!("Opening {} at line {line}", path.display()),
+            None => format!("Opening {}", path.display()),
+        });
+        true
     }
 
     fn plugin_focus_node(&mut self, plugin: &str, node: NodeId) -> bool {

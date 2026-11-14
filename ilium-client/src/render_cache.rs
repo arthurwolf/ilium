@@ -1168,12 +1168,17 @@ fn selection_reconciliation(app: &App, new_tree: &ilium_core::Tree) -> Selection
         return SelectionReconciliation::Unchanged;
     }
 
-    let visible_node_ids = crate::tree_ui::visible_tree_node_ids_ranked(
-        &app.tree,
-        &app.tree_state,
-        app.effective_tree_order(),
-        &app.cost_tracker.overlay().ranks,
-    );
+    let tree_order = app.effective_tree_order();
+    // The keys the drawn tree sorted by: a plugin ordering's own, otherwise the spend.
+    let plugin_order_ranks;
+    let ranks = if tree_order == crate::config::TreeOrder::PluginKey {
+        plugin_order_ranks = app.plugin_tree_order_ranks();
+        &plugin_order_ranks
+    } else {
+        &app.cost_tracker.overlay().ranks
+    };
+    let visible_node_ids =
+        crate::tree_ui::visible_tree_node_ids_ranked(&app.tree, &app.tree_state, tree_order, ranks);
     let Some(selected_index) = visible_node_ids
         .iter()
         .position(|node_id| *node_id == selected_node_id)

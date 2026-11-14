@@ -64,7 +64,7 @@ use crate::imports::timers::{self, TimerBook, TimersImport};
 use crate::imports::topics::{self, PluginTopics, TopicOutbox};
 use crate::imports::ui_host::UiHostImport;
 use crate::imports::vector::VectorImport;
-use crate::imports::workspace::{WorkspaceImport, WorkspaceWorld};
+use crate::imports::workspace::WorkspaceImport;
 use crate::instance::{ExportCall, ExportReply, PluginInstance};
 use crate::linker::LinkerCache;
 use crate::runtime::pending_events::{PendingEvents, WORKER_POLL_INTERVAL};
@@ -78,6 +78,8 @@ pub mod events_feed;
 mod hooks;
 mod jobs;
 pub mod pending_events;
+#[cfg(test)]
+mod service_schema_tests;
 
 /// The plugin API string passed to `activate`.
 const API: &str = "ilium:plugin@0.1.0";
@@ -283,8 +285,6 @@ pub struct HostRuntime {
     services: ServiceBroker,
     /// Hook chain breach counters and stops.
     hooks: hooks::HookState,
-    /// The schemas of the services this runtime's plugins provide (gap G13).
-    service_schemas: crate::schemas::ServiceSchemas,
     /// Topics and service calls that cross to the other side's runtime.
     cross_side: cross_side::CrossSideState,
     /// The running CLI invocations and what they printed.
@@ -342,7 +342,6 @@ impl HostRuntime {
             extension_book: ExtensionBook::with_ids(ids.clone()),
             services: Arc::new(Mutex::new(ServiceBrokerState::with_ids(ids.clone()))),
             hooks: hooks::HookState::default(),
-            service_schemas: crate::schemas::ServiceSchemas::default(),
             cross_side: cross_side::CrossSideState::default(),
             key_grabs: KeyGrabs::new(),
             journal: JournalBook::new(),
@@ -434,6 +433,20 @@ impl HostRuntime {
                 PluginState::ManifestOnly
             }
         };
+        // A provider without a schema file is legal while porters write their schemas; the
+        // side that runs its component says so once per load (gap G13).
+        if state == PluginState::Loaded {
+            let unchecked =
+                crate::imports::services::services_without_schema(&manifest, &lock(&self.services));
+            for service in unchecked {
+                self.log.line(
+                    &plugin.id,
+                    self.side,
+                    Level::Info,
+                    &format!("service {service} has no schema file; its calls are not checked"),
+                );
+            }
+        }
         self.plugins.insert(
             plugin.id,
             PluginRecord {
@@ -596,7 +609,14 @@ impl HostRuntime {
                 jobs::declared_jobs(&record.manifest),
             ))),
             keys: Some(Box::new(KeysImport::new(self.key_grabs.clone(), plugin))),
-            journal: Some(Box::new(JournalImport::new(self.journal.clone(), plugin))),
+            journal: Some(Box::new(
+                JournalImport::new(self.journal.clone(), plugin).reading_all(
+                    crate::imports::env::grants_allow(
+                        &record.granted,
+                        crate::imports::journal::READ_ALL_GRANT,
+                    ),
+                ),
+            )),
             audio: Some(Box::new(AudioImport::new(
                 ImportEnv::for_instance(&self.instance_context(plugin, record, instance)),
                 None,
@@ -609,9 +629,16 @@ impl HostRuntime {
             fonts: Some(Box::new(FontsImport::default())),
             codec: Some(Box::new(CodecImport)),
             sounds: Some(Box::new(SoundsImport)),
-            vector: Some(Box::new(VectorImport::default())),
-            workspace: Some(Box::new(WorkspaceImport::with_world(
-                WorkspaceWorld::default(),
+            // Without a provider `embed` completes `unsupported` on this instance's queue;
+            // `wiring::wave_two::equip` replaces it with the provider and the index store.
+            vector: Some(Box::new(VectorImport::new(
+                ImportEnv::for_instance(&self.instance_context(plugin, record, instance)),
+                None,
+                None,
+            ))),
+            workspace: Some(Box::new(WorkspaceImport::over_kernel(
+                Arc::clone(&self.kernel),
+                &record.granted,
             ))),
             ..ImportSet::default()
         };
@@ -926,12 +953,13 @@ impl HostRuntime {
     /// the service is checked against it before the provider sees it, and every immediate
     /// reply before the caller does. A file that is not a schema file is refused.
     pub fn install_schema(&mut self, service: &str, text: &str) -> Result<(), String> {
-        self.service_schemas.install(service, text)
+        lock(&self.services).install_schema(service, text)
     }
 
-    /// The schema text of a service, when one was installed.
-    pub fn service_schema(&self, service: &str) -> Option<&str> {
-        self.service_schemas.text(service)
+    /// The schema text of a service, when one was installed. A `describe` call of the
+    /// service gets the same text (see `route_services`).
+    pub fn service_schema(&self, service: &str) -> Option<String> {
+        lock(&self.services).schema_text(service)
     }
 
     /// Names the file that keeps durable timers across restarts and loads what it holds. A file
@@ -943,6 +971,20 @@ impl HostRuntime {
             self.log.line("", self.side, Level::Warn, &warning);
         }
         *lock(&self.durable_timers) = Some(store);
+    }
+
+    /// Keeps the plugin journal in `path` from now on, so its entries survive a restart, and
+    /// loads what the file holds. A file that cannot be read keeps the journal in memory and
+    /// gives one log line. Call it before the first activation.
+    pub fn set_journal_file(&mut self, path: std::path::PathBuf) {
+        if let Err(error) = self.journal.attach_file(path.clone()) {
+            self.log.line(
+                "",
+                self.side,
+                Level::Warn,
+                &format!("plugin journal {} not loaded: {error}", path.display()),
+            );
+        }
     }
 
     /// Copies the durable timers of every held book into the store and writes the file when
@@ -1113,6 +1155,15 @@ impl HostRuntime {
                 );
                 continue;
             };
+            // `describe` of a service with a schema is the schema text; the kernel answers
+            // it on either side, without starting the provider (gap G13).
+            {
+                let mut broker = lock(&self.services);
+                if let Some(schema) = broker.describe_reply(&call.service, &call.method) {
+                    broker.complete(&call, schema);
+                    continue;
+                }
+            }
             // A provider with no component on this side lives on the other side.
             if self.state(&provider) == Some(PluginState::ManifestOnly) {
                 match self.cross_side.send_call(&call, Instant::now()) {
@@ -1135,12 +1186,13 @@ impl HostRuntime {
                 continue;
             }
             // A request the service's schema refuses never reaches the provider (gap G13).
-            if let Err(violation) = self.service_schemas.check(
+            let request_check = lock(&self.services).check_schema(
                 &call.service,
                 &call.method,
                 crate::schemas::Direction::Request,
                 &call.payload_json,
-            ) {
+            );
+            if let Err(violation) = request_check {
                 lock(&self.services).fail(
                     &call,
                     PluginError::new(
@@ -1159,22 +1211,29 @@ impl HostRuntime {
             });
             match self.call_export(&provider, export) {
                 Ok(ExportReply::ServiceReply(ServiceReply::Done(reply))) => {
-                    match self.service_schemas.check(
+                    let mut broker = lock(&self.services);
+                    match broker.check_schema(
                         &call.service,
                         &call.method,
                         crate::schemas::Direction::Response,
                         &reply,
                     ) {
-                        Ok(()) => lock(&self.services).complete(&call, reply),
-                        Err(violation) => lock(&self.services).fail(
-                            &call,
-                            PluginError::new(
-                                ErrorCode::InvalidArgument,
-                                format!(
-                                    "the reply does not match the service schema at {violation}"
-                                ),
-                            ),
-                        ),
+                        Ok(()) => broker.complete(&call, reply),
+                        Err(violation) => {
+                            let message = format!(
+                                "the reply does not match the service schema at {violation}"
+                            );
+                            broker.fail(
+                                &call,
+                                PluginError::new(ErrorCode::InvalidArgument, message.clone()),
+                            );
+                            broker.record_refused_reply(crate::imports::services::RefusedReply {
+                                provider: provider.clone(),
+                                service: call.service.clone(),
+                                method: call.method.clone(),
+                                violation: message,
+                            });
+                        }
                     }
                 }
                 Ok(ExportReply::ServiceReply(ServiceReply::Deferred)) => {
@@ -1192,6 +1251,20 @@ impl HostRuntime {
                     failures.push(error);
                 }
             }
+        }
+        // Every reply a result schema refused, immediate or deferred, is an error in the
+        // provider's log (SVC-009).
+        let refused = lock(&self.services).take_refused_replies();
+        for reply in refused {
+            self.log.line(
+                &reply.provider,
+                self.side,
+                Level::Error,
+                &format!(
+                    "service {} method {}: {}",
+                    reply.service, reply.method, reply.violation
+                ),
+            );
         }
         let finished = lock(&self.services).take_finished();
         let mut results = lock(&self.results);

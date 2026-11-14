@@ -1,9 +1,10 @@
 //! The client's [`AudioBackend`] for `ilium:host/audio`: devices come from the voice crate's
-//! device catalogue, and `play` goes through the same system player as notification sounds.
+//! device catalogue, `play` goes through the same system player as notification sounds, and
+//! captures record through the Pulse helper ([`super::audio_capture`]).
 
 use ilium_plugin_api::generated::host::audio::AudioDevice;
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
-use ilium_plugin_host::imports::audio::AudioBackend;
+use ilium_plugin_host::imports::audio::{AudioBackend, CaptureSource, CaptureStream, FrameSink};
 use ilium_plugin_host::imports::env::CancelFlag;
 
 /// Sound devices and the system player of this computer.
@@ -44,6 +45,16 @@ impl AudioBackend for ClientAudio {
         }
         ilium_sound::play_prepared_wav(wav)
             .map_err(|error| PluginError::new(ErrorCode::Io, error.to_string()))
+    }
+
+    fn open_capture(
+        &self,
+        source: &CaptureSource,
+        sample_rate: u32,
+        channels: u8,
+        frames: FrameSink,
+    ) -> Result<CaptureStream, PluginError> {
+        super::audio_capture::start(source, sample_rate, channels, frames)
     }
 }
 

@@ -113,6 +113,12 @@ fn compare_nodes(
             // `sort_by` is stable, so equal spend keeps the manual order.
             rank(right_id).total_cmp(&rank(left_id))
         }
+        TreeOrder::PluginKey => {
+            // Ascending sort keys; a node the plugin gave no key sinks below every keyed
+            // one, and `sort_by` is stable, so ties keep the manual order.
+            let rank = |id: NodeId| cost_ranks.get(&id).copied().unwrap_or(f64::INFINITY);
+            rank(left_id).total_cmp(&rank(right_id))
+        }
     }
 }
 
@@ -169,6 +175,28 @@ mod tests {
         ids.iter()
             .filter_map(|id| tree.get(*id).map(|node| node.name.clone()))
             .collect()
+    }
+
+    #[test]
+    fn plugin_key_sorts_by_ascending_key_and_keeps_unkeyed_nodes_last() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let later = tree
+            .add_pane(group, "later", PaneContentKind::Terminal)
+            .unwrap();
+        tree.add_pane(group, "unkeyed", PaneContentKind::Terminal)
+            .unwrap();
+        let first = tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let ranks = HashMap::from([(later, 7.0), (first, -2.0)]);
+        let ordered = ordered_children_ranked(&tree, group, TreeOrder::PluginKey, &ranks);
+        assert_eq!(names(&tree, &ordered), ["first", "later", "unkeyed"]);
+        // Without keys the mode is the manual order.
+        assert_eq!(
+            names(&tree, &ordered_children(&tree, group, TreeOrder::PluginKey)),
+            ["later", "unkeyed", "first"]
+        );
     }
 
     #[test]

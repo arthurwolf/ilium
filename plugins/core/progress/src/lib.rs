@@ -4,6 +4,9 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! a minimal real implementation: it activates cleanly and acknowledges events without submissions until the host calls it needs exist.
 
+pub mod guard;
+pub mod timing;
+
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;

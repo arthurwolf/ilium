@@ -196,8 +196,18 @@ impl crate::app::App {
     /// Opens (Ctrl+O) a link a plugin detector matched: `link-activated` goes to the owner and
     /// the detector's command runs with the detector id and the text as its arguments.
     pub(crate) fn activate_plugin_link(&mut self, found: &LinkMatch) {
-        let screen = self.popup_screen();
         let pane = self.active_pane_id();
+        self.activate_plugin_link_in(found, pane);
+    }
+
+    /// Opens a plugin-matched link of a known pane, such as the pane a right-click menu was
+    /// opened on.
+    pub(crate) fn activate_plugin_link_in(
+        &mut self,
+        found: &LinkMatch,
+        pane: Option<ilium_core::NodeId>,
+    ) {
+        let screen = self.popup_screen();
         let Some(plugins) = self.wasm_plugins.as_ref() else {
             self.status_message = Some(format!(
                 "{} is not available: plugins are off",

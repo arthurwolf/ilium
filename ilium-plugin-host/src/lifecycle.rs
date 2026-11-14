@@ -66,7 +66,8 @@ fn with_table<T>(action: impl FnOnce(&mut BTreeMap<String, PluginEntry>) -> T) -
     action(&mut guard)
 }
 
-fn is_core_plugin(plugin_id: &str) -> bool {
+/// Whether a plugin is a core plugin, the only kind `--safe-plugins` starts.
+pub fn is_core_plugin(plugin_id: &str) -> bool {
     plugin_id.starts_with("ilium.core.")
 }
 

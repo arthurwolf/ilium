@@ -35,6 +35,7 @@
       "commands.invoke:ilium.core.editor/*",
       "ui.panels",
       "settings.write-kernel:terminal",
+      "open-external",
       "extensions.provide:ilium.core.terminal/open-link",
       "extensions.provide:ilium.core.terminal/link-actions"
     ]
@@ -46,14 +47,21 @@
   "contributes": {
     "link_detectors": [
       {
-        "id": "path-line",
-        "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+",
-        "command": "link-open"
-      },
-      {
         "id": "url",
         "regex": "https?://[^\\s]+",
         "command": "link-open"
+      },
+      {
+        "id": "path-line",
+        "regex": "[./A-Za-z0-9_-]+\\.[a-z]+:[0-9]+",
+        "command": "link-open"
+      }
+    ],
+    "commands": [
+      {
+        "id": "link-open",
+        "title": "Open link",
+        "side": "client"
       }
     ],
     "extension_points": [

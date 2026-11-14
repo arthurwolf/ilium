@@ -3,6 +3,8 @@
 //! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
 //! implementing the lifecycle, the handler and the exports its manifest lists. Minimal conforming bodies: no contributions are produced until the feature logic moves here.
 
+pub mod shell_title;
+
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
@@ -167,10 +169,7 @@ mod spec_tests {
         let grants = server_capabilities(&shipped_manifest());
         for tab in OWNED_KERNEL_TABS {
             let grant = format!("settings.write-kernel:{tab}");
-            assert!(
-                grants.contains(&grant),
-                "missing server grant {grant}"
-            );
+            assert!(grants.contains(&grant), "missing server grant {grant}");
         }
     }
 

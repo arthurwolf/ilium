@@ -261,6 +261,13 @@ impl ServiceSchemas {
         self.services.contains_key(service)
     }
 
+    /// Whether the schema of `service` lists `method`.
+    pub fn has_method(&self, service: &str, method: &str) -> bool {
+        self.services
+            .get(service)
+            .is_some_and(|schema| schema.methods.contains_key(method))
+    }
+
     /// The schema text of `service`, for `describe`.
     pub fn text(&self, service: &str) -> Option<&str> {
         self.services
@@ -397,6 +404,9 @@ mod tests {
         }}"#;
         schemas.install("ilium.core.cost/usage", text).unwrap();
         assert!(schemas.has("ilium.core.cost/usage"));
+        assert!(schemas.has_method("ilium.core.cost/usage", "usage"));
+        assert!(!schemas.has_method("ilium.core.cost/usage", "describe"));
+        assert!(!schemas.has_method("x/y", "usage"));
         assert_eq!(schemas.text("ilium.core.cost/usage"), Some(text));
         let check = |direction, payload| {
             schemas.check("ilium.core.cost/usage", "usage", direction, payload)

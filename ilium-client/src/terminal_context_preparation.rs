@@ -30,6 +30,8 @@ pub(crate) struct ContextRequest {
     pub cwd: PathBuf,
     pub home: Option<PathBuf>,
     pub history_context: Option<HistoryContext>,
+    /// Link detectors of the enabled plugins (G5); the menu asks them before the kernel.
+    pub detectors: Arc<[crate::plugin_host::links::LinkDetector]>,
 }
 pub(crate) struct ContextText {
     pub source_line_text: String,
@@ -37,6 +39,8 @@ pub(crate) struct ContextText {
     pub full_history: String,
     pub selection_text: Option<String>,
     pub open_target: Option<crate::open_target::OpenTarget>,
+    /// The plugin link detector match under the clicked cell, if any.
+    pub plugin_link: Option<crate::plugin_host::links::LinkMatch>,
     pub history_path: Option<PathBuf>,
     pub warning: Option<String>,
     pub source_hold: Option<Retained<()>>,
@@ -92,6 +96,7 @@ impl Job for ContextJob {
             full_history,
             selection_text,
             open_target,
+            plugin_link: None,
             history_path: None,
             warning: None,
             source_hold: None,
@@ -104,6 +109,7 @@ struct ResolveJob {
     cwd: PathBuf,
     home: Option<PathBuf>,
     history_context: Option<HistoryContext>,
+    detectors: Arc<[crate::plugin_host::links::LinkDetector]>,
 }
 impl Job for ResolveJob {
     type Output = ContextText;
@@ -112,13 +118,16 @@ impl Job for ResolveJob {
         if context.stop_requested() {
             return Err("context target resolution cancelled".into());
         }
-        self.text.open_target = crate::open_target::resolve_at(
+        // Plugin link detectors first (G5), then the kernel's detection, then an OSC 8 link.
+        let (target, plugin_link) = crate::open_target::resolve_at_with_plugins(
             &self.text.source_line_text,
             self.column,
             &self.cwd,
             self.home.as_deref(),
-        )
-        .or(self.text.open_target);
+            &self.detectors,
+        );
+        self.text.open_target = target.or(self.text.open_target);
+        self.text.plugin_link = plugin_link;
         if let (Some(home), Some((class, session, path, transcript_hint))) =
             (&self.home, &self.history_context)
         {
@@ -162,6 +171,7 @@ struct Slot {
     home: Option<PathBuf>,
     pending: Pending,
     history_context: Option<HistoryContext>,
+    detectors: Arc<[crate::plugin_host::links::LinkDetector]>,
 }
 pub(crate) struct ContextCompletion {
     pub key: ContextKey,
@@ -661,6 +671,7 @@ impl TerminalContextPreparation {
             cwd,
             home,
             history_context,
+            detectors,
         } = request;
         self.cancel();
         let cost = view.preparation_cost()?;
@@ -683,6 +694,7 @@ impl TerminalContextPreparation {
             cwd,
             home,
             history_context,
+            detectors,
             pending: Pending::Cpu(receipt),
         });
         Ok(())
@@ -766,6 +778,7 @@ impl TerminalContextPreparation {
             cwd: slot.cwd.clone(),
             home: slot.home.clone(),
             history_context: slot.history_context.clone(),
+            detectors: Arc::clone(&slot.detectors),
         };
         match reservation.submit(job) {
             Ok(receipt) => {
@@ -1180,6 +1193,7 @@ mod tests {
             cwd: PathBuf::from("/"),
             home: None,
             history_context: None,
+            detectors: Arc::from(Vec::new()),
         });
         view.feed(b"\r\nnewer output");
         let completion = collect(&mut preparation);
@@ -1244,6 +1258,7 @@ mod tests {
                 cwd: PathBuf::from("/"),
                 home: Some(home.path().to_owned()),
                 history_context: Some((class.clone(), session.into(), PathBuf::from("/"), None)),
+                detectors: Arc::from(Vec::new()),
             });
             let completion = collect(&mut preparation);
             let text = completion.text.unwrap_or_else(|error| {
@@ -1295,6 +1310,7 @@ mod tests {
             cwd: PathBuf::from("/"),
             home: None,
             history_context: None,
+            detectors: Arc::from(Vec::new()),
         });
         preparation.cancel();
         assert!(preparation.collect().is_none());

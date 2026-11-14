@@ -45,6 +45,21 @@ pub trait InferenceBackend: Send + Sync {
 
     /// The models the selected provider offers.
     fn models(&self, cancel: &CancelFlag) -> Result<Vec<String>, PluginError>;
+
+    /// One embedding per text, in the order of `texts` (`ilium:host/vector` `embed`). A provider
+    /// without an embedding endpoint keeps this default, so `embed` completes `unsupported`.
+    fn embed(
+        &self,
+        texts: &[String],
+        purpose: &str,
+        cancel: &CancelFlag,
+    ) -> Result<Vec<Vec<f32>>, PluginError> {
+        let _ = (texts, purpose, cancel);
+        Err(error(
+            ErrorCode::Unsupported,
+            "the selected inference provider offers no embeddings",
+        ))
+    }
 }
 
 /// State of one inference request.

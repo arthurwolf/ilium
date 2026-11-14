@@ -105,7 +105,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "services.provide:ilium.core.tree/bookmarks"
     ],
     "client": [
-      "tree.read"
+      "tree.read",
+      "ui.panels"
     ]
   },
   "contributes": {
@@ -252,6 +253,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "title": "Outdent",
         "palette": false,
         "side": "server",
+        "category": "Tree"
+      },
+      {
+        "id": "new-group",
+        "title": "New group",
+        "palette": false,
+        "side": "client",
         "category": "Tree"
       }
     ],
@@ -702,6 +710,18 @@ Other plugins change what `ilium.core.tree` does through the points below. The p
 The bookmarks service takes a JSON request `{"op": "list"}`, `{"op": "add", "node": <id>}` or `{"op": "remove", "node": <id>}`. `list` answers `{"bookmarks": [<id>, ...]}` in tree order. `add` and `remove` answer `{"ok": true, "node": <id>, "bookmarked": <bool>}`, or `{"error": "<text>"}` when the node does not exist. The topic `changed` carries `change` as `added` (first seen), `updated` or `removed`.
 
 **Commands** (server side, category Tree): `move-up`, `move-down`, `set-bookmark`, `set-locked-closed`, `indent` and `outdent`. The first four take `{"node": <id>}`, the two switches also `"on": <bool>`; the tree context menu invokes them. `indent` and `outdent` act on the node of the command context. A move at the outer boundary of the tree submits nothing.
+
+**Command `new-group`** (client side, category Tree): the "New group" dialog. The key binding, the Group button of the tree toolbar and the "New group" entry of the tree context menu run `ilium.core.tree/new-group` with the JSON arguments `{"parent": id}`, the group the selection points at. The dialog belongs to this plugin: the kernel has no built-in copy, so with Tree off those entry points report that Tree is not running.
+
+| Step | Who | What |
+| --- | --- | --- |
+| 1 | kernel | Runs `new-group` with `{"parent": id}`. |
+| 2 | client side | Reads the tree (`tree.roots`, `tree.children`, `tree.get`) in drawn order, offers the top level and every group or project that can hold a group (a split view, a worktree, a folder and a pane are not offered), indents them by depth and submits `open-view` for the popup `new-group`. |
+| 3 | kernel | Draws the popup: a name input and a destination list, with the buttons Create and Cancel, and reports `ui-action` events. |
+| 4 | client side | On Create (or Enter in the name field) sends the message `create-group` with the JSON payload `{"parent", "name"}` to the server side and submits `close-view`. A blank name is `group`. |
+| 5 | server side | Submits `create-group` under that parent, last. A payload that is not that object is ignored. |
+
+The client side holds `ui.panels` for the popup and `tree.read` for the destinations.
 
 Decoration slots, row actions and display modes of every plugin are drawn by the tree.
 

@@ -6,7 +6,7 @@
 //!
 //! This is a child module of `facade` so it can use the facade's private request helpers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -40,14 +40,44 @@ const MAXIMUM_RESTRUCTURE_OPERATIONS: usize = 256;
 const MAXIMUM_COALESCE_WINDOW_MS: u32 = 60_000;
 /// Most coalescing keys remembered at once; the oldest is forgotten first.
 const MAXIMUM_COALESCE_KEYS: usize = 1024;
+/// Most desktop notices one plugin shows per [`NOTIFY_RATE_WINDOW`]
+/// (capability-notify-desktop.md, "More than 6 notices per minute").
+const MAXIMUM_NOTICES_PER_WINDOW: usize = 6;
+/// The sliding window of the per-plugin notice rate.
+const NOTIFY_RATE_WINDOW: Duration = Duration::from_secs(60);
 
-/// Notify coalescing memory: when each `(plugin, key)` last reached the desktop.
+/// Notify coalescing memory: when each `(plugin, key)` last reached the desktop, and when each
+/// plugin's recent notices did, for the per-plugin rate.
 #[derive(Debug, Default)]
 pub(crate) struct NotifyCoalescer {
     shown: HashMap<(String, String), Instant>,
+    recent: HashMap<String, VecDeque<Instant>>,
 }
 
 impl NotifyCoalescer {
+    /// Whether a plugin may show one more notice now, under the rate of 6 per minute. Only
+    /// [`Self::record_notice`] uses up a place, so a refused or failed notice does not.
+    pub(crate) fn within_rate(&mut self, plugin: &str, now: Instant) -> bool {
+        let Some(shown) = self.recent.get_mut(plugin) else {
+            return true;
+        };
+        while shown
+            .front()
+            .is_some_and(|first| now.saturating_duration_since(*first) >= NOTIFY_RATE_WINDOW)
+        {
+            shown.pop_front();
+        }
+        shown.len() < MAXIMUM_NOTICES_PER_WINDOW
+    }
+
+    /// Records that a plugin's notice reached the notifier.
+    pub(crate) fn record_notice(&mut self, plugin: &str, now: Instant) {
+        self.recent
+            .entry(plugin.to_owned())
+            .or_default()
+            .push_back(now);
+    }
+
     /// Whether a notice with this key may show now; records it when it may.
     pub(crate) fn admit(
         &mut self,
@@ -1089,6 +1119,18 @@ impl ServerFacade {
                 "the user turned desktop notifications off",
             );
         }
+        // Checked before the coalescing key, so a refused notice does not start its window.
+        let within_rate = self
+            .notify_coalescer
+            .lock()
+            .map(|mut coalescer| coalescer.within_rate(&plugin.0, Instant::now()))
+            .unwrap_or(true);
+        if !within_rate {
+            return refused(
+                ErrorCode::RateLimited,
+                "a plugin shows at most 6 desktop notices per minute",
+            );
+        }
         if let Some(key) = spec.coalesce_key.as_deref() {
             if spec.coalesce_window_ms > 0 {
                 let window = Duration::from_millis(u64::from(spec.coalesce_window_ms));
@@ -1116,6 +1158,9 @@ impl ServerFacade {
         );
         if !crate::notifications::send_admitted(&execution.client, pending) {
             return failed(ErrorCode::Busy, "the notifier did not admit the notice");
+        }
+        if let Ok(mut coalescer) = self.notify_coalescer.lock() {
+            coalescer.record_notice(&plugin.0, Instant::now());
         }
         if spec.sound.is_some() {
             // The notice is shown; a sound the player cannot queue does not undo it.
@@ -1384,5 +1429,26 @@ mod tests {
         assert!(!coalescer.admit("p", "build", window, start + Duration::from_secs(1)));
         assert!(coalescer.admit("q", "build", window, start + Duration::from_secs(1)));
         assert!(coalescer.admit("p", "build", window, start + Duration::from_secs(6)));
+    }
+
+    #[test]
+    fn a_plugin_shows_at_most_six_notices_per_minute() {
+        let mut coalescer = NotifyCoalescer::default();
+        let start = Instant::now();
+        for second in 0..6 {
+            let now = start + Duration::from_secs(second);
+            assert!(coalescer.within_rate("p", now));
+            coalescer.record_notice("p", now);
+        }
+        assert!(!coalescer.within_rate("p", start + Duration::from_secs(30)));
+        // A refusal uses up nothing: asking again changes nothing.
+        assert!(!coalescer.within_rate("p", start + Duration::from_secs(30)));
+        // Another plugin has its own allowance.
+        assert!(coalescer.within_rate("q", start + Duration::from_secs(30)));
+        // The first notice leaves the window after a minute, which frees one place.
+        let later = start + Duration::from_secs(60);
+        assert!(coalescer.within_rate("p", later));
+        coalescer.record_notice("p", later);
+        assert!(!coalescer.within_rate("p", later));
     }
 }
