@@ -1,6 +1,4 @@
-//! Settings normalization and control round trips (moved from the kernel `ilium-ambient/tests`).
-use crate::control::{ControlValue, SceneSettings};
-use crate::voxel_landscape::VoxelLandscapeSettings;
+use ilium_ambient::{ControlValue, SceneSettings, VoxelLandscapeSettings};
 
 #[test]
 fn invalid_loaded_settings_are_bounded_without_changing_seed() {

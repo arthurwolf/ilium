@@ -287,7 +287,9 @@ fn tiles_with_core_side(region: Region, core_side: i32) -> Result<Vec<(Region, R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::voxel_landscape::surface_entities::{model, AtlasLayout, ClimateSkin, ALL_SPECIES};
+    use crate::scenes::voxel_landscape::surface_entities::{
+        model, AtlasLayout, ClimateSkin, ALL_SPECIES,
+    };
 
     #[test]
     fn horizon_plan_serves_a_slow_pan_over_terrain_following_regions() {

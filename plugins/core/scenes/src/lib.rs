@@ -35,7 +35,6 @@ pub mod solar_system;
 pub mod stars;
 pub mod topographic_maps;
 pub mod vector_td;
-pub mod voxel_landscape;
 pub mod wind;
 
 // The kit modules at the crate root, so the scenes moved here keep their `crate::raster::...`

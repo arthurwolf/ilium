@@ -1069,7 +1069,7 @@ fn simulated_satellites_are_optional_persisted_and_raise_cadence() {
     let mut settings = StarsSettings::default();
     assert!(!settings.satellites);
     assert!(settings
-        .set_control("satellites", crate::ControlValue::Bool(true))
+        .set_control("satellites", crate::control::ControlValue::Bool(true))
         .unwrap());
     let restored: StarsSettings =
         serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();

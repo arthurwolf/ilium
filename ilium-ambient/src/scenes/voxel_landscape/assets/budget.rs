@@ -153,6 +153,9 @@ struct Counter {
     limit: u64,
     used: AtomicU64,
     peak: AtomicU64,
+    // Last: every logical reservation keeps physical storage admitted through
+    // the last retained model, texture, source map or emitted-frame owner.
+    _storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
 
 /// Clone this same budget into workers and retained snapshots. Creating a new
@@ -162,6 +165,20 @@ struct Counter {
 pub struct ByteBudget(Arc<Counter>);
 impl ByteBudget {
     pub fn new(limit: u64) -> Result<Self> {
+        Self::new_with_storage(limit, None)
+    }
+    /// The caller must reserve this complete limit before creating payloads.
+    /// Clones cover the same allocations; they never invent a second quota.
+    pub(crate) fn with_storage(
+        limit: u64,
+        storage: Arc<ilium_execution::StorageAdmission>,
+    ) -> Result<Self> {
+        Self::new_with_storage(limit, Some(storage))
+    }
+    fn new_with_storage(
+        limit: u64,
+        storage: Option<Arc<ilium_execution::StorageAdmission>>,
+    ) -> Result<Self> {
         if limit == 0 || limit > 2048 * MIB {
             return Err(AssetError::Limit {
                 resource: "working bytes",
@@ -173,6 +190,7 @@ impl ByteBudget {
             limit,
             used: AtomicU64::new(0),
             peak: AtomicU64::new(0),
+            _storage: storage,
         })))
     }
     pub fn used(&self) -> u64 {
@@ -273,6 +291,36 @@ mod tests {
         assert!(limits.rgba_bytes(0, 1).is_err());
     }
     #[test]
+    fn physical_storage_survives_budget_handle_until_last_retained_reservation() {
+        use ilium_execution::{QuotaGroup, QuotaLimits};
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 0,
+            worker_bytes: 16,
+        });
+        let physical = Arc::new(quota.reserve_external_storage(16).unwrap());
+        let budget = ByteBudget::with_storage(16, physical).unwrap();
+        let stop = AtomicBool::new(false);
+        let owner = budget.reserve(6, Cancel::new(&stop)).unwrap();
+        let second_owner = budget.clone().reserve(4, Cancel::new(&stop)).unwrap();
+        drop(budget);
+        assert_eq!(quota.snapshot().worker_bytes, 16);
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert!(quota.reserve_external_storage(1).is_err());
+        drop(owner);
+        assert_eq!(quota.snapshot().worker_bytes, 16);
+        drop(second_owner);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        let replacement = quota.reserve_external_storage(16).unwrap();
+        drop(replacement);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
     fn shrink_releases_only_unused_headroom_and_rejects_growth_without_mutation() {
         let stop = AtomicBool::new(false);
         let cancel = Cancel::new(&stop);
@@ -326,12 +374,13 @@ mod tests {
     #[test]
     fn original_external_cancellation_refuses_new_budget_work_without_releasing_retained_credit() {
         let native = AtomicBool::new(false);
-        let external = AtomicBool::new(false);
-        let cancelled = || external.load(Ordering::Acquire);
+        let external = ilium_platform::owned_worker::StopToken::default();
+        let child = external.child();
+        let cancelled = || child.is_stopped();
         let cancel = Cancel::new(&native).with_external_cancellation(&cancelled);
         let budget = ByteBudget::new(32).unwrap();
         let retained = budget.reserve(16, cancel).unwrap();
-        external.store(true, Ordering::Release);
+        external.stop();
         assert!(!native.load(Ordering::Acquire));
         assert_eq!(cancel.check(), Err(AssetError::Cancelled));
         assert!(budget.reserve(1, cancel).is_err());

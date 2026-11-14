@@ -907,7 +907,7 @@ impl BindingSources {
                         | AssetError::Limit { .. }),
                     ) => return Err(error),
                     Err(error) => {
-                        eprintln!("reviewed image fallback mount unavailable: {error}");
+                        tracing::warn!("reviewed image fallback mount unavailable: {error}");
                         (None, true)
                     }
                 }

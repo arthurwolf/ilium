@@ -88,8 +88,7 @@ world cannot do, and what the scenes therefore do instead:
   kept in the plugin's shared storage (`live-data/<name>`), and fleet markers are prepared in the
   frame when the data or the viewport changed.
 
-Voxel landscape (`src/voxel_landscape/`): the assets, geometry, surface and colour code is moved
-into this plugin, with its tests. Not yet wired as a registry scene, because the guest world lacks:
+Voxel landscape: the port was reverted; the scene stays in the kernel (`ilium-ambient/src/scenes/voxel_landscape`) because the saved-world module `ilium-ambient/src/minecraft` depends on it. A guest port needs the gaps below first:
 
 - A scene component cannot export `job-runner` and cannot call `ilium_plugin_sdk::host()`:
   `ilium-plugin-sdk-macros/src/component.rs::scene_body` rejects exports and

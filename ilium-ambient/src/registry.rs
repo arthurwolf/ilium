@@ -12,6 +12,7 @@ use crate::scenes::{
     openstreetmap::{OpenStreetMapScene, OpenStreetMapSettings},
     spectrum::{SpectrumScene, SpectrumSettings},
     video::{VideoScene, VideoSettings},
+    voxel_landscape::{VoxelLandscapeScene, VoxelLandscapeSettings},
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,17 +26,19 @@ pub enum AmbientKind {
     Images,
     /// A scene supplied by a plugin; the Scene row picks which one.
     Plugin,
+    VoxelLandscape,
     OpenStreetMap,
 }
 
 impl AmbientKind {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::NightLights,
         Self::Clouds,
         Self::Video,
         Self::Spectrum,
         Self::Images,
         Self::Plugin,
+        Self::VoxelLandscape,
         Self::OpenStreetMap,
     ];
 
@@ -48,12 +51,14 @@ impl AmbientKind {
             Self::Spectrum => "Audio spectrum",
             Self::Images => "Images",
             Self::Plugin => "Plugin scene",
+            Self::VoxelLandscape => "Voxel landscape",
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
             Self::OpenStreetMap => "Real OpenStreetMap streets, buildings, waterways, parks and railways around ten world places, drawn as Braille dots with fixed or panning cameras.",
+            Self::VoxelLandscape => "A seeded isometric block world with forests, deserts, villages, caves and ravines, drifting past in monochrome or pastel dithering.",
             Self::NightLights => {
                 "City lights seen from orbit, on a borderless map of the dark Earth."
             }
@@ -72,6 +77,7 @@ impl AmbientKind {
     /// Where the design of this scene came from; shown only in the demo.
     pub fn inspired_by(self) -> &'static [&'static str] {
         match self {
+            Self::VoxelLandscape => crate::scenes::voxel_landscape::INSPIRED_BY,
             // Classic screensaver look and the public sources each scene draws on.
             Self::OpenStreetMap => &["https://www.openstreetmap.org/copyright"],
             Self::Clouds | Self::NightLights => &["https://earthdata.nasa.gov/gibs"],
@@ -102,6 +108,7 @@ pub struct AmbientSettings {
     pub spectrum: SpectrumSettings,
     pub images: ImagesSettings,
     pub plugin_scene: PluginSceneSettings,
+    pub voxel_landscape: VoxelLandscapeSettings,
 }
 
 impl AmbientSettings {
@@ -115,6 +122,7 @@ impl AmbientSettings {
             spectrum: self.spectrum.normalized(),
             images: self.images.normalized(),
             plugin_scene: self.plugin_scene.normalized(),
+            voxel_landscape: self.voxel_landscape.normalized(),
         }
     }
 
@@ -127,6 +135,7 @@ impl AmbientSettings {
             AmbientKind::Spectrum => self.spectrum.controls(),
             AmbientKind::Images => self.images.controls(),
             AmbientKind::Plugin => self.plugin_scene.controls(),
+            AmbientKind::VoxelLandscape => self.voxel_landscape.controls(),
         }
     }
 
@@ -144,6 +153,7 @@ impl AmbientSettings {
             AmbientKind::Spectrum => self.spectrum.set_control(id, value),
             AmbientKind::Images => self.images.set_control(id, value),
             AmbientKind::Plugin => self.plugin_scene.set_control(id, value),
+            AmbientKind::VoxelLandscape => self.voxel_landscape.set_control(id, value),
         }
     }
 
@@ -159,6 +169,7 @@ impl AmbientSettings {
             AmbientKind::Spectrum => serde_json::to_string(&normalized.spectrum),
             AmbientKind::Images => serde_json::to_string(&normalized.images),
             AmbientKind::Plugin => Ok(normalized.plugin_scene.scene_key()),
+            AmbientKind::VoxelLandscape => serde_json::to_string(&normalized.voxel_landscape),
         }
         .unwrap_or_default();
         if kind.uses_location() || kind == AmbientKind::Plugin {
@@ -207,6 +218,48 @@ impl AmbientSettings {
                 }
             },
             AmbientKind::Plugin => settings.plugin_scene.create_scene(env),
+            AmbientKind::VoxelLandscape => {
+                if settings.voxel_landscape.saved_maps.source
+                    == crate::minecraft::settings::WorldSource::SavedMaps
+                {
+                    Box::new(crate::minecraft::saved_scene::SavedScene::new(
+                        &settings.voxel_landscape.saved_maps,
+                        &settings.voxel_landscape,
+                        env,
+                    ))
+                } else {
+                    Box::new(VoxelLandscapeScene::new(&settings.voxel_landscape, env))
+                }
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod saved_map_tests {
+    use super::*;
+
+    #[test]
+    fn saved_map_source_reaches_saved_scene_without_opening_a_world() {
+        let mut settings = AmbientSettings::default();
+        settings.voxel_landscape.saved_maps.source =
+            crate::minecraft::settings::WorldSource::SavedMaps;
+        settings.voxel_landscape.saved_maps.saves_folder = "relative/saves".into();
+        let environment = crate::scene::SceneEnv::for_test(
+            std::env::temp_dir(),
+            crate::resources::test_resources(),
+        );
+
+        let scene = settings.create_scene(AmbientKind::VoxelLandscape, &environment);
+
+        let status = scene
+            .status()
+            .expect("invalid saved-map folder should remain visible in the scene status");
+        assert!(
+            status.starts_with(
+                "Saved maps folder must be an absolute path, or blank for automatic discovery"
+            ),
+            "saved-map validation should remain visible before live preparation details: {status}"
+        );
     }
 }

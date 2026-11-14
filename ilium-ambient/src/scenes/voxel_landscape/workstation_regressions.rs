@@ -1290,10 +1290,21 @@ fn table(value: &NormalizedState, bank: &TextureBank) -> MaterialTable {
 }
 
 #[test]
-fn bound_mesh_keeps_exact_cell_owners_and_bank() {
+fn bound_mesh_keeps_exact_cell_owners_bank_and_last_storage_reservation() {
+    use ilium_execution::{QuotaGroup, QuotaLimits};
     // Admit default decoder scratch separately from retained fixture/model bytes.
     let bytes = usize::try_from(Limits::default().decoder_scratch_bytes).unwrap() + (64 << 20);
-    let budget = ByteBudget::new(u64::try_from(bytes).unwrap()).unwrap();
+    let quota = QuotaGroup::new(QuotaLimits {
+        clients: 0,
+        jobs: 0,
+        service_jobs: 0,
+        input_bytes: 0,
+        result_bytes: 0,
+        worker_threads: 0,
+        worker_bytes: bytes,
+    });
+    let storage = Arc::new(quota.reserve_external_storage(bytes).unwrap());
+    let budget = ByteBudget::with_storage(u64::try_from(bytes).unwrap(), storage).unwrap();
     let stop = AtomicBool::new(false);
     let cancel = Cancel::new(&stop);
     let defs = definitions(&budget, cancel, true);
@@ -1363,7 +1374,10 @@ fn bound_mesh_keeps_exact_cell_owners_and_bank() {
     drop(defs);
     drop(bank);
     drop(budget);
+    assert_eq!(quota.snapshot().worker_bytes, bytes);
+    assert!(quota.reserve_external_storage(1).is_err());
     drop(mesh);
+    assert_eq!(quota.snapshot().worker_bytes, 0);
 }
 
 #[test]

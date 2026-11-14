@@ -40,6 +40,10 @@ pub use scenes::{
     spectrum::SpectrumSettings, video::VideoSettings,
 };
 
+// Pure world/renderer contracts support offline capture and acceptance probes.
+pub use scenes::voxel_landscape;
+pub use scenes::voxel_landscape::VoxelLandscapeSettings;
+
 pub use scenes::openstreetmap::address_search as openstreetmap_address_search;
 pub use scenes::openstreetmap::{
     AddressProvider, AddressSearchSettings, GeometryMap, OpenStreetMapSettings, SourceElement,

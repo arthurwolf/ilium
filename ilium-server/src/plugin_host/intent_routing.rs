@@ -45,10 +45,10 @@ fn agent_activity_names(activity: ilium_core::AgentActivity) -> (&'static str, &
 fn builtin_agent_action(
     class: &ilium_core::AgentClass,
     action_id: &str,
-) -> Option<super::signatures::SignatureActionSpec> {
+) -> Option<super::super::signatures::SignatureActionSpec> {
     match (class, action_id) {
         (ilium_core::AgentClass::Claude | ilium_core::AgentClass::Codex, "compact") => {
-            Some(super::signatures::SignatureActionSpec::new(
+            Some(super::super::signatures::SignatureActionSpec::new(
                 "/compact\r",
                 &["idle", "done", "awaiting-approval", "menu"],
             ))

@@ -83,7 +83,7 @@ fn resolve_generated_sources(
         Ok(settings) => Some(settings),
         Err(AssetError::Cancelled) => return Err(AssetError::Cancelled),
         Err(error) => {
-            eprintln!("reviewed image fallback unavailable: {error}");
+            tracing::warn!("reviewed image fallback unavailable: {error}");
             None
         }
     };

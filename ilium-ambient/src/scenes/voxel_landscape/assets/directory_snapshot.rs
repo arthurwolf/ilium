@@ -129,7 +129,7 @@ pub(crate) fn snapshot_directory(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::voxel_landscape::assets::identity::AssetPath;
+    use crate::scenes::voxel_landscape::assets::identity::AssetPath;
     use std::sync::atomic::AtomicBool;
 
     fn write_pack(directory: &std::path::Path, files: &[(&str, &[u8])]) {

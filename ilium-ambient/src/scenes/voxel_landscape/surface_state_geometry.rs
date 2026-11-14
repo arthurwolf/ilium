@@ -1701,8 +1701,8 @@ mod tests {
 
     fn compile_cultivated_plant_quads(
         id: &str,
-    ) -> Vec<crate::voxel_landscape::assets::models::ModelQuad> {
-        use crate::voxel_landscape::assets::{
+    ) -> Vec<crate::scenes::voxel_landscape::assets::models::ModelQuad> {
+        use crate::scenes::voxel_landscape::assets::{
             block_state::BlockState,
             budget::{ByteBudget, Cancel, Limits},
             compatibility::DefinitionSet,

@@ -109,15 +109,6 @@ fn retry_delay(interval: Duration, failures: u32) -> Duration {
         .min(Duration::from_secs(900).max(interval))
 }
 
-/// One owned source request loop. Closures must bound network and decode work;
-/// dropping the poller requests stop and transfers the bounded join to the
-/// existing ambient reaper so the presentation thread cannot stall on HTTP.
-fn retry_delay(interval: Duration, failures: u32) -> Duration {
-    interval
-        .saturating_mul(1_u32 << failures.min(8))
-        .min(Duration::from_secs(900).max(interval))
-}
-
 /// Builds the requests of one refresh at the given wall clock (ms since the epoch), or says
 /// why none may be made now (a shared request floor, an invalid identity).
 pub type Plan = Box<dyn FnMut(i64) -> Result<Vec<Request>, String> + Send>;
@@ -132,6 +123,9 @@ enum Stage {
     },
 }
 
+/// One owned source request loop. Closures must bound network and decode work;
+/// dropping the poller requests stop and transfers the bounded join to the
+/// existing ambient reaper so the presentation thread cannot stall on HTTP.
 pub struct Poller<T> {
     transport: Box<dyn Transport>,
     plan: Plan,

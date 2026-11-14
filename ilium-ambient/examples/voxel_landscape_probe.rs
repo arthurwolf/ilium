@@ -7,7 +7,7 @@
 //! --pack-profile 0..7 --pack-path ABSOLUTE_PATH [--pack-mount archive|directory]
 //! Matrix mode accepts --profile 0..7 or --texture-source java-default.
 //! Profile order is the current FULL_PACKS order, not legacy persisted indices.
-use ilium_plugin_core_scenes::{
+use ilium_ambient::{
     control::SceneSettings,
     raster::{self, DitherMode, Raster},
     scene::Frame,
@@ -51,7 +51,7 @@ fn selected_pack(arguments: &mut BTreeMap<String, String>) -> Result<OptionalSel
             let profile = profile
                 .parse::<usize>()
                 .map_err(|_| format!("Invalid --pack-profile: {profile}"))?;
-            if profile >= ilium_plugin_core_scenes::voxel_landscape::pack_profiles::FULL_PACKS.len() {
+            if profile >= ilium_ambient::voxel_landscape::pack_profiles::FULL_PACKS.len() {
                 return Err(format!("Unknown --pack-profile: {profile}"));
             }
             let path = PathBuf::from(path);
@@ -88,7 +88,7 @@ impl GeneratedTextureSource {
         match self {
             Self::SelectedPack => 0,
             Self::JavaDefault => {
-                ilium_plugin_core_scenes::voxel_landscape::GENERATED_TEXTURE_SOURCE_JAVA_DEFAULT
+                ilium_ambient::voxel_landscape::GENERATED_TEXTURE_SOURCE_JAVA_DEFAULT
             }
         }
     }
@@ -102,7 +102,7 @@ impl GeneratedTextureSource {
 }
 
 fn qualified_texture_frame(
-    frame: &ilium_plugin_core_scenes::voxel_landscape::surface_binding::StreamedViewport,
+    frame: &ilium_ambient::voxel_landscape::surface_binding::StreamedViewport,
 ) -> Result<(usize, String), String> {
     let (satisfied, required) = frame.material_coverage;
     if required == 0 || satisfied != required {
@@ -246,7 +246,7 @@ fn parse_matrix_arguments(
         }
     };
     if let Some(profile) = profile {
-        if profile >= ilium_plugin_core_scenes::voxel_landscape::pack_profiles::FULL_PACKS.len() {
+        if profile >= ilium_ambient::voxel_landscape::pack_profiles::FULL_PACKS.len() {
             return Err(format!("Unknown --profile: {profile}"));
         }
     }
@@ -341,12 +341,12 @@ fn parse_matrix_arguments(
 
 fn generated_center_biome(settings: &VoxelLandscapeSettings, position: [i32; 2]) -> &'static str {
     let seed = u64::from(settings.seed);
-    let sample = ilium_plugin_core_scenes::voxel_landscape::terrain_fields::TerrainFields::new(seed).sample(
+    let sample = ilium_ambient::voxel_landscape::terrain_fields::TerrainFields::new(seed).sample(
         position[0],
         position[1],
         settings.rivers,
     );
-    ilium_plugin_core_scenes::voxel_landscape::surface_biome_selector::select(seed, position, sample).id()
+    ilium_ambient::voxel_landscape::surface_biome_selector::select(seed, position, sample).id()
 }
 
 fn require_requested_biome(requested: &str, actual: &str) -> Result<(), String> {
@@ -362,7 +362,7 @@ fn require_requested_biome(requested: &str, actual: &str) -> Result<(), String> 
 fn capture_matrix(values: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let arguments = parse_matrix_arguments(values)?;
     let stopped = std::sync::atomic::AtomicBool::new(false);
-    let cancel = ilium_plugin_core_scenes::voxel_landscape::assets::Cancel::new(&stopped);
+    let cancel = ilium_ambient::voxel_landscape::assets::Cancel::new(&stopped);
     let mut settings = VoxelLandscapeSettings {
         pack_profile: arguments.profile.unwrap_or_default(),
         generated_texture_source: arguments.texture_source.setting_index(),
@@ -374,7 +374,7 @@ fn capture_matrix(values: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     }
     .normalized();
     if arguments.texture_source == GeneratedTextureSource::SelectedPack {
-        settings = ilium_plugin_core_scenes::voxel_landscape::pack_registry::resolve_registered(
+        settings = ilium_ambient::voxel_landscape::pack_registry::resolve_registered(
             &settings,
             &arguments.cache_root,
             cancel,
@@ -386,13 +386,13 @@ fn capture_matrix(values: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     let scale = VoxelLandscapeScene::scale(&settings);
     let region = VoxelLandscapeScene::surface_region(camera, scale, arguments.size)?;
     let mut session =
-        ilium_plugin_core_scenes::voxel_landscape::surface_binding::GeneratedViewportSession::open(
+        ilium_ambient::voxel_landscape::surface_binding::GeneratedViewportSession::open(
             region,
             scale,
             arguments.size,
             &settings,
             None,
-            ilium_plugin_core_scenes::voxel_landscape::surface_binding::scene_budget()?,
+            ilium_ambient::voxel_landscape::surface_binding::scene_budget()?,
             cancel,
         )?;
     let mut frames = Vec::with_capacity(arguments.times_ms.len());
@@ -615,16 +615,16 @@ fn capture() -> Result<(), Box<dyn std::error::Error>> {
         let scale = VoxelLandscapeScene::scale(&settings);
         let surface_region = VoxelLandscapeScene::surface_region(camera, scale, size)?;
         let stopped = std::sync::atomic::AtomicBool::new(false);
-        let cancel = ilium_plugin_core_scenes::voxel_landscape::assets::Cancel::new(&stopped);
+        let cancel = ilium_ambient::voxel_landscape::assets::Cancel::new(&stopped);
         let started = Instant::now();
         let mut session =
-            ilium_plugin_core_scenes::voxel_landscape::surface_binding::GeneratedViewportSession::open(
+            ilium_ambient::voxel_landscape::surface_binding::GeneratedViewportSession::open(
                 surface_region,
                 scale,
                 size,
                 &settings,
                 None,
-                ilium_plugin_core_scenes::voxel_landscape::surface_binding::scene_budget()?,
+                ilium_ambient::voxel_landscape::surface_binding::scene_budget()?,
                 cancel,
             )?;
         let loaded_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -642,8 +642,8 @@ fn capture() -> Result<(), Box<dyn std::error::Error>> {
         let (profile_id, profile_name, source_path) =
             selected_profile.map_or((None, None, None), |(profile, path)| {
                 (
-                    Some(ilium_plugin_core_scenes::voxel_landscape::pack_profiles::FULL_PACKS[profile].id),
-                    Some(ilium_plugin_core_scenes::voxel_landscape::pack_profiles::FULL_PACKS[profile].name),
+                    Some(ilium_ambient::voxel_landscape::pack_profiles::FULL_PACKS[profile].id),
+                    Some(ilium_ambient::voxel_landscape::pack_profiles::FULL_PACKS[profile].name),
                     Some(path),
                 )
             });
@@ -702,7 +702,7 @@ mod tests {
         covered_texture_pixels, generated_center_biome, parse_matrix_arguments, selected_pack,
         VoxelLandscapeSettings,
     };
-    use ilium_plugin_core_scenes::control::SceneSettings;
+    use ilium_ambient::control::SceneSettings;
     use std::collections::BTreeMap;
 
     fn matrix_arguments() -> Vec<String> {
