@@ -36,7 +36,6 @@ pub enum ConfigurationChange {
     Triggers(crate::trigger_settings::TriggerSettings),
     Voice(crate::config::VoiceSettings),
     Debug(crate::config::DebugSettings),
-    Api(crate::config::ApiSettings),
     Keymap(
         crate::config::KeyboardSettings,
         Vec<crate::keymap::KeyBinding>,
@@ -124,8 +123,6 @@ impl Job for ConfigurationWrite {
             Voice(value) => crate::config::save_voice_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Debug(value) => crate::config::save_debug_settings(directory, &value)
-                .map(|()| ConfigurationSaved::Plain),
-            Api(value) => crate::config::save_api_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Keymap(keyboard, bindings) => {
                 crate::config::save_keymap_settings(directory, &keyboard, &bindings)
@@ -293,7 +290,6 @@ impl ConfigurationChange {
             Triggers(value) => serialized_bound(value)?,
             Voice(value) => serialized_bound(value)?,
             Debug(value) => serialized_bound(value)?,
-            Api(value) => serialized_bound(value)?,
             AgentSetup { previous, desired } => {
                 serialized_bound(previous)? + serialized_bound(desired)?
             }
@@ -353,7 +349,6 @@ impl ConfigurationChange {
             Triggers(value) => Triggers(normalize(&value)?),
             Voice(value) => Voice(normalize(&value)?),
             Debug(value) => Debug(normalize(&value)?),
-            Api(value) => Api(normalize(&value)?),
             Animation(value) => Animation(normalize(&value)?),
             ProjectName {
                 proposal: value,

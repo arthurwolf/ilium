@@ -613,7 +613,6 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::CommandPrompt(_) => "command_prompt",
         Mode::InferenceSettingPrompt(_, _) => "inference_setting_prompt",
         Mode::VoiceSettingPrompt(_, _) => "voice_setting_prompt",
-        Mode::ApiSettingPrompt(_) => "api_setting_prompt",
         Mode::PluginSettingPrompt(_, _) => "plugin_setting_prompt",
         Mode::AgentSetupPathPrompt(_, _) => "agent_setup_path_prompt",
         Mode::AgentSetupPrompt(_) => "agent_setup_prompt",

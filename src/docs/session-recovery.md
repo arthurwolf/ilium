@@ -95,7 +95,7 @@ What does not survive:
 | Policy | Value | Effect |
 | --- | --- | --- |
 | Restore automatically (default) | `restore_automatically` | Rebuild the tree and relaunch panes without asking |
-| Ask before restoring | `ask_before_restore` | The server starts with an empty tree and, when a client attaches, asks "Restore previous session?" showing the number of stored panes. Choose **Restore** or **Discard** |
+| Ask before restoring | `ask_before_restore` | The server starts with an empty tree and, when a client attaches, asks "Restore previous session?" showing the number of stored panes. Choose **Restore** or **Discard**; Escape does not discard, the question is asked again |
 | Start fresh | `start_fresh` | Ignore the snapshot and start with an empty tree. The previous snapshot is backed up first when backups are enabled |
 
 ```toml

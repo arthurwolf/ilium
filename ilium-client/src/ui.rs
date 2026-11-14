@@ -1096,14 +1096,9 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
             )
             .or(cursor);
         }
-        Mode::ApiSettingPrompt(state) => {
-            cursor = modal::render_text_prompt_cursor(frame, area, "HTTP API port", state, "Apply")
-                .or(cursor);
-        }
         Mode::PluginSettingPrompt(target, state) => {
-            cursor =
-                modal::render_text_prompt_cursor(frame, area, &target.title, state, "Apply")
-                    .or(cursor);
+            cursor = modal::render_text_prompt_cursor(frame, area, &target.title, state, "Apply")
+                .or(cursor);
         }
         Mode::GitSettingPrompt(field, state) => {
             cursor = modal::render_text_prompt_cursor(frame, area, field.label(), state, "Apply")
@@ -2335,7 +2330,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::CommandPrompt(_) => "RUN COMMAND",
         Mode::InferenceSettingPrompt(_, _) => "INFERENCE SETTING",
         Mode::VoiceSettingPrompt(_, _) => "VOICE SETTING",
-        Mode::ApiSettingPrompt(_) => "HTTP API PORT",
         Mode::PluginSettingPrompt(_, _) => "PLUGIN SETTING",
         Mode::GitSettingPrompt(_, _) => "GIT SETTING",
         Mode::AnimationTextPrompt(_, _) => "ANIMATION SETTING",

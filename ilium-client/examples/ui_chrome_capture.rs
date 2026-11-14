@@ -241,12 +241,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 ),
             ),
             (
-                "api-port-prompt",
-                ilium_client::app::Mode::ApiSettingPrompt(
-                    ilium_client::text_prompt::TextPromptState::new("7421"),
-                ),
-            ),
-            (
                 "save-as-prompt",
                 ilium_client::app::Mode::SaveAs(
                     ilium_core::ROOT_ID,
@@ -459,12 +453,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 app.git_settings.setup_command =
                     "synthetic-setup --example --long-readable-argument".to_owned();
                 app.settings_open_git_text_field(ilium_client::app::GitTextField::SetupCommand);
-            } else if name == "api-port-prompt" {
-                app.mode = ilium_client::app::Mode::Settings(SettingsState {
-                    tab: SettingsTab::Api,
-                    ..SettingsState::default()
-                });
-                app.settings_open_api_port();
             } else if name == "context-menu" {
                 let group = app
                     .tree
@@ -536,9 +524,7 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     "type": "artifact", "synthetic": true, "fixture": name,
                     "width": width, "height": height, "cells": cells,
                     "stats_popover_visible": stats_popover_visible,
-                    "retained_parent": if name == "api-port-prompt" {
-                        Some("Settings/Api")
-                    } else if name == "settings-icon-catalogue" {
+                    "retained_parent": if name == "settings-icon-catalogue" {
                         Some("Settings/Icons")
                     } else if name == "settings-keyboard-picker" {
                         Some("Settings/Keyboard")

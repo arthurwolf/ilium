@@ -118,20 +118,18 @@ pub enum ScalarNumber {
     LastPromptLines,
     ProgressLines,
     CompletedProgressHideAfter,
-    ApiPort,
     InferenceTokenBudget,
     WorkingPollSeconds,
     IdlePollSeconds,
     NotificationCoalesce,
 }
 impl ScalarNumber {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 9] = [
         Self::AutoFreezeAfter,
         Self::VoiceVolume,
         Self::LastPromptLines,
         Self::ProgressLines,
         Self::CompletedProgressHideAfter,
-        Self::ApiPort,
         Self::InferenceTokenBudget,
         Self::WorkingPollSeconds,
         Self::IdlePollSeconds,
@@ -150,7 +148,6 @@ impl ScalarNumber {
                 i128::from(config::MAX_PROGRESS_MAX_LINES),
             ),
             Self::CompletedProgressHideAfter => (0, i128::from(u32::MAX)),
-            Self::ApiPort => (1, i128::from(u16::MAX)),
             Self::InferenceTokenBudget => (1, i128::from(u32::MAX)),
             Self::WorkingPollSeconds | Self::IdlePollSeconds => (0, i128::from(i64::MAX)),
             Self::NotificationCoalesce => (
@@ -251,7 +248,6 @@ mod tests {
                 assert!(field.parse(invalid).is_err());
             }
         }
-        assert_eq!(ScalarNumber::ApiPort.parse("8873").unwrap(), 8873);
         assert_eq!(
             ScalarNumber::CompletedProgressHideAfter
                 .parse("17")

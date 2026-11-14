@@ -47,6 +47,8 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
     // Focus and `config.toml` changes reach the plugins (gap G2); a reloaded `[animations]`
     // table redraws.
     let config_reloaded = app.tick_wasm_plugin_feed();
+    // The crash-recovery question the Sessions plugin asks for the server is retried here.
+    let session_recovery_changed = app.drive_session_recovery(now);
     let session_stats_changed = app.tick_session_stats(now);
     let session_models_changed = app.tick_session_models(now);
     let session_goals_changed = app.tick_session_goals(now);
@@ -96,6 +98,7 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         || animation_hover_changed
         || location_picker_changed
         || setup_prompt_changed
+        || session_recovery_changed
 }
 
 /// Re-fires a manual retitle that landed while `titles_loading` already

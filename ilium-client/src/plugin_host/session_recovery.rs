@@ -111,8 +111,9 @@ impl App {
             }
             pending.unanswered_asks += 1;
             if pending.unanswered_asks >= MAXIMUM_UNANSWERED_ASKS {
-                self.status_message =
-                    Some("The session recovery question did not open; restored the snapshot".into());
+                self.status_message = Some(
+                    "The session recovery question did not open; restored the snapshot".into(),
+                );
                 self.resolve_session_recovery(true);
                 return true;
             }

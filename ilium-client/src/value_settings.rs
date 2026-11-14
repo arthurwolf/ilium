@@ -12,7 +12,6 @@ pub enum SettingsNumber {
     TerminalScrollback,
     TerminalEngineMemory,
     EditorAutosaveDelay,
-    ApiPort,
     VoiceVolume,
     NotificationCoalesce,
     InferenceTokenBudget,
@@ -47,7 +46,6 @@ struct NumberSettingsValues<'a> {
     ui: &'a crate::config::UiSettings,
     terminal: &'a crate::config::TerminalSettings,
     editor: &'a crate::config::EditorSettings,
-    api: &'a crate::config::ApiSettings,
     detection: Option<&'a ilium_ipc::AgentDetectionSettings>,
 }
 
@@ -134,7 +132,6 @@ impl SettingsNumber {
             SettingsTab::Editor if EditorRow::ALL.get(row) == Some(&EditorRow::AutosaveDelay) => {
                 Some(Self::EditorAutosaveDelay)
             }
-            SettingsTab::Api if row == 0 => Some(Self::ApiPort),
             _ => None,
         }
     }
@@ -159,7 +156,6 @@ impl SettingsNumber {
             Self::TerminalScrollback => "Scrollback budget (MiB)",
             Self::TerminalEngineMemory => "Parser pool budget (MiB; 0 = Off)",
             Self::EditorAutosaveDelay => "Autosave delay (ms)",
-            Self::ApiPort => "HTTP API port",
         }
     }
 
@@ -171,7 +167,6 @@ impl SettingsNumber {
             ui: &app.ui_settings,
             terminal: &app.terminal_settings,
             editor: &app.editor_settings,
-            api: &app.api_settings,
             detection: app.agent_detection_settings.as_ref(),
         })
     }
@@ -184,7 +179,6 @@ impl SettingsNumber {
             ui: &config.ui,
             terminal: &config.terminal,
             editor: &config.editor,
-            api: &config.api,
             detection: None,
         })
         .1
@@ -245,7 +239,6 @@ impl SettingsNumber {
                 value_config::editor_autosave_spec(),
                 values.editor.autosave_delay_ms.to_string(),
             ),
-            Self::ApiPort => (ScalarNumber::ApiPort.spec(), values.api.port.to_string()),
         }
     }
 
@@ -747,19 +740,12 @@ impl App {
                 value_config::set_editor_autosave_delay(&mut settings, text)?;
                 ConfigurationChange::Editor(settings)
             }
-            SettingsNumber::ApiPort => {
-                let mut settings = self.api_settings;
-                settings.port = u16::try_from(ScalarNumber::ApiPort.parse(text)?)
-                    .map_err(|_| "API port exceeds its storage range".to_owned())?;
-                ConfigurationChange::Api(settings)
-            }
         };
         let intent = match token {
             Some(token) => ConfigurationIntent::ValueDialog { token },
             None => ConfigurationIntent::Plain {
                 label: "numeric settings",
-                success: (field == SettingsNumber::ApiPort)
-                    .then_some("HTTP API port saved; restart the server to apply it"),
+                success: None,
             },
         };
         // Admission precedes local runtime changes. The same immutable values
@@ -811,10 +797,6 @@ impl App {
                     intent,
                 )?;
                 self.apply_editor_settings(settings);
-            }
-            ConfigurationChange::Api(settings) => {
-                self.enqueue_configuration(directory, ConfigurationChange::Api(settings), intent)?;
-                self.api_settings = settings;
             }
             _ => return Err("Unsupported numeric settings destination".into()),
         }
@@ -1162,7 +1144,12 @@ mod tests {
         assert!(matches!(app.mode, Mode::Settings(_)));
         let config = crate::config::load(directory.path()).unwrap();
         assert_eq!(config.editor.autosave_delay_ms, 1101);
-        assert_eq!(config.api.port, 8873);
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("port = 8873"),
+            "the unrelated [api] table survives the retry"
+        );
     }
 
     #[test]

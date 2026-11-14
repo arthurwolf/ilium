@@ -79,8 +79,6 @@ pub struct ClientConfig {
     pub voice: VoiceSettings,
     /// Opt-in process diagnostics shown in the Debug tab.
     pub debug: DebugSettings,
-    /// Loopback HTTP API listener configuration read by the detached server.
-    pub api: ApiSettings,
     /// Agent-spend indicators and how "expensive" is decided.
     pub cost: CostSettings,
     pub onboarding: crate::onboarding::progress::OnboardingProgress,
@@ -104,7 +102,6 @@ impl Default for ClientConfig {
             git: GitSettings::default(),
             voice: VoiceSettings::default(),
             debug: DebugSettings::default(),
-            api: ApiSettings::default(),
             cost: CostSettings::default(),
             onboarding: crate::onboarding::progress::OnboardingProgress::default(),
         }
@@ -286,20 +283,6 @@ pub struct AgentSetupSettings {
 #[serde(default)]
 pub struct DebugSettings {
     pub file_logging_enabled: bool,
-}
-
-/// Durable `[api]` settings. A changed port takes effect when the detached
-/// server next starts, avoiding an implicit server restart from the TUI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ApiSettings {
-    pub port: u16,
-}
-
-impl Default for ApiSettings {
-    fn default() -> Self {
-        Self { port: 8872 }
-    }
 }
 
 /// Durable `[voice]` settings. Runtime ownership lives in `crate::run`; this
@@ -1207,8 +1190,6 @@ struct RawClientConfig {
     #[serde(default)]
     debug: DebugSettings,
     #[serde(default)]
-    api: ApiSettings,
-    #[serde(default)]
     cost: CostSettings,
     #[serde(default)]
     onboarding: crate::onboarding::progress::OnboardingProgress,
@@ -1582,7 +1563,6 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         git: raw.git,
         voice: raw.voice,
         debug: raw.debug,
-        api: raw.api,
         cost: raw.cost.sanitized(),
         onboarding: raw.onboarding,
     })
@@ -2604,15 +2584,6 @@ pub fn save_debug_settings(config_dir: &Path, debug: &DebugSettings) -> Result<(
         source: Box::new(ConfigSaveError::Serialize(source)),
     })?;
     save_table(config_dir, "debug", value)
-}
-
-/// Persists only `[api]`, preserving all unrelated client and server settings.
-pub fn save_api_settings(config_dir: &Path, api: &ApiSettings) -> Result<(), ClientError> {
-    let value = toml::Value::try_from(api).map_err(|source| ClientError::ConfigSave {
-        path: config_dir.join("config.toml"),
-        source: Box::new(ConfigSaveError::Serialize(source)),
-    })?;
-    save_table(config_dir, "api", value)
 }
 
 /// Reads and parses `path` as a generic TOML document for [`save_ui_settings`]

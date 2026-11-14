@@ -68,6 +68,9 @@ pub(crate) enum ClientEffect {
     SetTreeRowLayout(crate::tree_row_layout::TreeRowLayout),
     /// Set the panel padding (`kernel.set-padding`).
     SetPadding(crate::padding::PaddingSettings),
+    /// Answer the server's crash-recovery question (`kernel.resolve-session-recovery`): restore
+    /// the stored snapshot, or discard it and start fresh.
+    ResolveSessionRecovery { restore: bool },
     /// Set the buttons of the tree toolbar and the inactivity threshold
     /// (`kernel.set-tree-toolbar`).
     SetTreeToolbar {
@@ -294,6 +297,12 @@ fn kernel_command(spec: &InvokeCommandSpec) -> Classified {
             Ok(settings) => Classified::Effect(ClientEffect::SetPadding(settings)),
             Err(reason) => refused(ErrorCode::InvalidArgument, reason),
         },
+        super::session_recovery::RESOLVE_COMMAND => {
+            match super::session_recovery::restore_argument(&spec.arguments_json) {
+                Ok(restore) => Classified::Effect(ClientEffect::ResolveSessionRecovery { restore }),
+                Err(reason) => refused(ErrorCode::InvalidArgument, reason),
+            }
+        }
         other => refused(
             ErrorCode::NotFound,
             format!("{other} is not a kernel command"),
@@ -509,6 +518,26 @@ mod tests {
             Classified::Refused(_)
         ));
         assert!(matches!(set("[]"), Classified::Refused(_)));
+    }
+
+    #[test]
+    fn resolve_session_recovery_takes_a_restore_flag() {
+        let resolve = |arguments_json: &str| {
+            classify_here(Intent::InvokeCommand(InvokeCommandSpec {
+                command: super::super::session_recovery::RESOLVE_COMMAND.to_owned(),
+                arguments_json: arguments_json.to_owned(),
+            }))
+        };
+        assert!(matches!(
+            resolve(r#"{"restore": true}"#),
+            Classified::Effect(ClientEffect::ResolveSessionRecovery { restore: true })
+        ));
+        assert!(matches!(
+            resolve(r#"{"restore": false}"#),
+            Classified::Effect(ClientEffect::ResolveSessionRecovery { restore: false })
+        ));
+        assert!(matches!(resolve("{}"), Classified::Refused(_)));
+        assert!(matches!(resolve("true"), Classified::Refused(_)));
     }
 
     #[test]

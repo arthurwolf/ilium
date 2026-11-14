@@ -178,9 +178,7 @@ pub fn apply(settings: &mut PaddingSettings, key: &str, value: &str) -> Result<(
             let (name, field) = other
                 .rsplit_once('_')
                 .filter(|(_, field)| *field == "all" || *field == "linked" || is_side(field))
-                .and_then(|(name, field)| {
-                    PANEL_KEYS.contains(&name).then_some((name, field))
-                })
+                .and_then(|(name, field)| PANEL_KEYS.contains(&name).then_some((name, field)))
                 .ok_or_else(|| format!("unknown padding row {other}"))?;
             let choice = choice_mut(&mut edited, name)
                 .ok_or_else(|| format!("unknown padding row {other}"))?;

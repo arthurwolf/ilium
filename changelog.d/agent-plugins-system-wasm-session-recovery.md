@@ -1,0 +1,3 @@
+### Changed
+- The "Restore previous session?" question that appears with the recovery policy "Ask before restoring" now belongs to the Sessions plugin. The kernel runs the plugin's `session-recovery` command with the stored pane count and carries out the answer through the new kernel command `kernel.resolve-session-recovery`; the wording and the Discard and Restore buttons are unchanged. Without the plugin (disabled or no plugin host) the snapshot is restored without asking, so the attach never hangs.
+- Closing the recovery question with Escape or a click outside it no longer discards the snapshot: the question is asked again, and only the Discard button throws the snapshot away. The first-run setup offers now wait until the question is answered.

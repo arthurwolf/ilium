@@ -2596,7 +2596,6 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         ilium_client::config::load(&xdg.ilium_config_dir)
     );
 
-
     // Exercise the shared animation look through the attached client. Derive
     // row and catalog positions from the authoritative control definitions so
     // this reaches a non-adjacent real option without hard-coding display text.

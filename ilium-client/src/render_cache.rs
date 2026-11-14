@@ -2986,16 +2986,21 @@ mod tests {
 
         app.maybe_show_agent_setup_prompt();
         assert!(matches!(app.mode, crate::app::Mode::Normal));
+        // The recovery question is the Sessions plugin's popup. While the server waits for the
+        // answer the kernel draws no dialog of its own, and the setup offer stays queued behind
+        // it instead of opening over the question.
         apply(
             &mut app,
             ServerEvent::SessionRecoveryAvailable { pane_count: 2 },
         );
+        // This app has no plugin host, so nobody can ask: the kernel restores the snapshot
+        // (the decision never hangs the attach) and the offers are free to open.
+        assert!(app.session_recovery_pending.is_none());
+        assert!(app
+            .take_outbound_requests()
+            .contains(&ClientRequest::ResolveSessionRecovery { restore: true }));
         apply(&mut app, ServerEvent::InitialStateSyncComplete);
         app.settle_filesystem_for_test();
-        assert!(matches!(
-            app.mode,
-            crate::app::Mode::ConfirmSessionRecovery { pane_count: 2 }
-        ));
         for path in [
             directory.path().join("global-chatroom.md"),
             directory.path().join("global-progress.md"),

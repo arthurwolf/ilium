@@ -145,12 +145,13 @@ fn manifest_050_declares_both_sides_with_their_worlds() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_server_grants_are_the_nine_fleet_grants_in_order() {
+fn manifest_050_server_grants_are_the_fleet_grants_in_order() {
     assert_eq!(
         strings(&manifest()["capabilities"]["server"]),
         [
             "cli.contribute",
             "sessions.cross",
+            "fs.read:project",
             "http-api.route:/create_agent",
             "terminal.write",
             "panes.create",
@@ -158,6 +159,11 @@ fn manifest_050_server_grants_are_the_nine_fleet_grants_in_order() {
             "agent.read",
             "messages.peer:ilium.core.notifications",
             "services.use:ilium.core.cost/usage",
+            "settings.read-kernel:inference",
+            "settings.write-kernel:api",
+            "extensions.provide:ilium.core.fleet/selectors",
+            "extensions.provide:ilium.core.fleet/before-broadcast",
+            "notify.toast",
         ]
     );
 }

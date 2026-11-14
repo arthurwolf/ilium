@@ -141,7 +141,6 @@ fn all_client_savers_share_the_document_owner() {
         ("debug", |dir| {
             save_debug_settings(dir, &DebugSettings::default())
         }),
-        ("api", |dir| save_api_settings(dir, &ApiSettings::default())),
     ];
     for &(name, saver) in savers {
         let directory = tempfile::tempdir().unwrap();

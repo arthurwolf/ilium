@@ -286,6 +286,33 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
           "project"
         ]
       }
+    ],
+    "settings": [
+      {
+        "kind": "tab",
+        "id": "api",
+        "title": "API",
+        "sections": [
+          {
+            "id": "api-port",
+            "title": "Local HTTP API (applies when the server next starts)",
+            "scope": "server",
+            "rows": [
+              {
+                "type": "number",
+                "key": "port",
+                "title": "HTTP API port",
+                "default": 8872,
+                "minimum": 1,
+                "maximum": 65535,
+                "step": 1,
+                "kernel_tab": "api",
+                "kernel_key": "port"
+              }
+            ]
+          }
+        ]
+      }
     ]
   },
   "limits_tier": "first-party"

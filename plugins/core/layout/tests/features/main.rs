@@ -5,6 +5,7 @@ mod common;
 mod extension_points;
 mod follow_focus;
 mod manifest;
+mod padding_command;
 mod preview_render;
 mod resize;
 mod split_client;

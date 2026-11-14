@@ -1056,7 +1056,6 @@ async fn run_inner(
     app.apply_voice_settings(config.voice);
     app.apply_cost_settings(config.cost);
     app.apply_debug_settings(config.debug);
-    app.apply_api_settings(config.api);
     app.request_debug_logging_reconciliation();
     app.request_agent_debug_menu_reconciliation();
     app.sound_discovery = sound_discovery;

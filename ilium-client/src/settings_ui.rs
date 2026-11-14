@@ -600,12 +600,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             .lines,
             state.scroll,
         ),
-        SettingsTab::Api => render_scrollable(
-            frame,
-            layout.content_area,
-            api_lines(&app.api_settings, state.selected_row),
-            state.scroll,
-        ),
         SettingsTab::Plugins => render_scrollable(
             frame,
             layout.content_area,
@@ -872,14 +866,6 @@ pub fn settings_help_anchors(
                 state.selected_row == 0,
             );
         }
-        SettingsTab::Api => push_help_anchor(
-            &mut anchors,
-            layout,
-            "API-01",
-            1,
-            state.scroll,
-            state.selected_row == 0,
-        ),
         SettingsTab::CustomAgents => push_help_anchor(
             &mut anchors,
             layout,
@@ -1273,7 +1259,6 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Triggers => "⚑",
         SettingsTab::CustomAgents => "✦",
         SettingsTab::Debug => "⌕",
-        SettingsTab::Api => "⇄",
         SettingsTab::Plugins => "⬡",
         SettingsTab::About => "ⓘ",
         SettingsTab::Setup => "⚙",
@@ -1999,7 +1984,6 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::Debug => debug_view(&app.debug_settings, selected_row, content_area.width)
             .lines
             .len() as u16,
-        SettingsTab::Api => api_lines(&app.api_settings, selected_row).len() as u16,
         SettingsTab::LlmInstructions => 0,
         SettingsTab::Plugins => plugin_lines(app, selected_row).len() as u16,
         SettingsTab::About => about_lines().len() as u16,
@@ -5050,7 +5034,6 @@ fn settings_control_row(
                 Some(crate::value_settings::SettingsNumber::EditorAutosaveDelay) => {
                     "Autosave delay"
                 }
-                Some(crate::value_settings::SettingsNumber::ApiPort) => "HTTP API port",
                 _ => crate::value_settings_choice::SettingsChoice::at(app, state.tab, row)?.title(),
             };
             (
@@ -5231,7 +5214,6 @@ pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
         SettingsTab::Terminal => crate::app::TerminalRow::ALL.len(),
         SettingsTab::Git => crate::app::GitRow::ALL.len(),
         SettingsTab::Editor => crate::app::EditorRow::ALL.len(),
-        SettingsTab::Api => crate::app::ApiRow::ALL.len(),
         _ => 0,
     }
 }
@@ -5634,17 +5616,6 @@ pub fn debug_content_hit(content_area: Rect, scroll: u16, position: Position) ->
         content_area.x + ROW_LEFT_INSET + LABEL_COLUMN_WIDTH
     };
     (position.x >= control_start).then_some(0)
-}
-
-fn api_lines(settings: &crate::config::ApiSettings, selected: usize) -> Vec<Line<'static>> {
-    setting_lines(
-        &[(
-            "HTTP API port",
-            settings.port.to_string(),
-            "Loopback-only /create_agent API. Changes apply when the detached server next starts.",
-        )],
-        selected,
-    )
 }
 
 /// The Plugins tab: one switch row per WebAssembly plugin, in the shared three-line row
@@ -6699,7 +6670,6 @@ mod number_control_tests {
                 SettingsTab::AgentMonitoring,
                 SettingsTab::Terminal,
                 SettingsTab::Editor,
-                SettingsTab::Api,
                 SettingsTab::Inference,
                 SettingsTab::Sound,
                 SettingsTab::VoiceControl,
@@ -6810,7 +6780,6 @@ mod number_control_tests {
                 SettingsTab::AgentMonitoring,
                 SettingsTab::Terminal,
                 SettingsTab::Editor,
-                SettingsTab::Api,
                 SettingsTab::Inference,
                 SettingsTab::Sound,
                 SettingsTab::VoiceControl,

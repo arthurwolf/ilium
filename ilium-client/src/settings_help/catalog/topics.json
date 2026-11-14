@@ -1270,18 +1270,6 @@
     "caveat": "Projects and split views are never removed automatically, and only closing the last item triggers it; an already-empty group is left alone."
   },
   {
-    "id": "API-01",
-    "title": "HTTP API port",
-    "explanation": "“Choose the port for the loopback-only `/create_agent` API on the detached server’s next start.”",
-    "specimen": "`127.0.0.1:<synthetic port A>` → `127.0.0.1:<synthetic port B>` under “next server start.”",
-    "states": "configured future listener address changes.",
-    "motion": "static.",
-    "caveat": "no listener starts now; never depict non-loopback access or a real user port.",
-    "frames": [
-      "`127.0.0.1:<synthetic port A>` → `127.0.0.1:<synthetic port B>` under “next server start.”"
-    ]
-  },
-  {
     "id": "PLUGIN-01",
     "title": "Plugin on or off",
     "explanation": "“Turn one plugin on or off. The server remembers the choice and applies it at once: turning a plugin off stops it and removes what it added; turning it on starts it again. Core plugins stay on.”",

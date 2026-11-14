@@ -124,6 +124,8 @@ fn activated_client() -> FakeHost {
         .expect("manifest loads")
         .side("client");
     host.activate::<LayoutClient>();
+    // The first batch carries the padding table to the kernel; deliver it before the dialog tests.
+    host.deliver_one(Event::NodeRemoved(NodeId(u64::MAX)));
     host
 }
 

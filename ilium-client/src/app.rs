@@ -29,7 +29,7 @@ use crate::agent_feature_setup::{AgentFeature, FeatureSetupStatus};
 use crate::agent_from_line::{EditorLineContextAction, EditorLineContextMenu, EditorSourceLine};
 use crate::agent_toolbar::{AgentToolbarAction, EffortLevel};
 use crate::config::{
-    AgentSetupSettings, ApiSettings, DebugSettings, EditorSettings, GitSettings, KeyboardSettings,
+    AgentSetupSettings, DebugSettings, EditorSettings, GitSettings, KeyboardSettings,
     LeftPanelSizingMode, TerminalSettings, UiSettings, VoiceSettings,
 };
 use crate::cost_settings::{CostRow, CostSettings};
@@ -291,8 +291,6 @@ pub enum Mode {
     InferenceSettingPrompt(InferenceSettingField, TextPromptState),
     /// Masked single-line OpenAI credential editor.
     VoiceSettingPrompt(VoiceSettingField, TextPromptState),
-    /// Edits the loopback HTTP API port from Settings.
-    ApiSettingPrompt(TextPromptState),
     /// Edits one typed setting row a plugin contributes (text, path, colour, number) from the
     /// Settings plugin list.
     PluginSettingPrompt(
@@ -461,7 +459,6 @@ pub enum SettingsTab {
     /// Agent spend indicators and how "expensive" is decided.
     Cost,
     Debug,
-    Api,
     /// The WebAssembly plugins of this installation, each with an on/off switch.
     Plugins,
     About,
@@ -623,7 +620,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 22] = [
+    pub const ALL: [SettingsTab; 21] = [
         Self::Appearance,
         Self::Icons,
         Self::Toolbar,
@@ -642,7 +639,6 @@ impl SettingsTab {
         Self::Triggers,
         Self::CustomAgents,
         Self::Debug,
-        Self::Api,
         Self::Plugins,
         Self::About,
         Self::Setup,
@@ -669,7 +665,6 @@ impl SettingsTab {
             Self::AgentMonitoring => "Agent Monitoring",
             Self::Cost => "Agent Cost",
             Self::Debug => "Debug",
-            Self::Api => "API",
             Self::Plugins => "Plugins",
             Self::About => "About",
         }
@@ -937,15 +932,6 @@ impl GitTextField {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DebugRow {
     FileLogging,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApiRow {
-    Port,
-}
-
-impl ApiRow {
-    pub const ALL: [Self; 1] = [Self::Port];
 }
 
 impl DebugRow {
@@ -2094,7 +2080,6 @@ pub struct App {
     pub(crate) detection_number_pending: Option<crate::value_detection::DetectionNumberPending>,
     pub agent_detection_signature_input: Option<String>,
     pub debug_settings: DebugSettings,
-    pub api_settings: ApiSettings,
     pub voice_connection_state: ilium_voice::VoiceConnectionState,
     pub voice_input_devices: Vec<String>,
     pub voice_output_devices: Vec<String>,
@@ -2725,7 +2710,6 @@ impl App {
             detection_number_pending: None,
             agent_detection_signature_input: None,
             debug_settings: DebugSettings::default(),
-            api_settings: ApiSettings::default(),
             voice_connection_state: ilium_voice::VoiceConnectionState::Disabled,
             voice_input_devices: Vec::new(),
             voice_output_devices: Vec::new(),
@@ -3290,13 +3274,6 @@ impl App {
         if !host.finish_save(token, result) {
             return;
         }
-        let api_port_saved = matches!(
-            host.target,
-            crate::value_dialog_host::ValueTarget::SettingsNumber {
-                field: crate::value_settings::SettingsNumber::ApiPort,
-                ..
-            }
-        );
         if matches!(
             host.target,
             crate::value_dialog_host::ValueTarget::SettingsChoice {
@@ -3312,14 +3289,7 @@ impl App {
         if success {
             self.pop_modal();
             if self.status_message.as_deref() == Some("Saving settings…") {
-                self.status_message = Some(
-                    if api_port_saved {
-                        "HTTP API port saved; restart the server to apply it"
-                    } else {
-                        "Settings saved to disk"
-                    }
-                    .into(),
-                );
+                self.status_message = Some("Settings saved to disk".into());
             }
         } else {
             self.status_message = error;
@@ -5658,40 +5628,6 @@ impl App {
         self.debug_settings = settings;
     }
 
-    pub fn apply_api_settings(&mut self, settings: ApiSettings) {
-        self.api_settings = settings;
-    }
-
-    pub fn settings_open_api_port(&mut self) {
-        self.push_modal(Mode::ApiSettingPrompt(TextPromptState::new(
-            self.api_settings.port.to_string(),
-        )));
-    }
-
-    pub fn settings_commit_api_port(&mut self, value: String) {
-        let Ok(port) = value.trim().parse::<u16>() else {
-            self.status_message =
-                Some("HTTP API port must be a number from 1 to 65535".to_string());
-            return;
-        };
-        if port == 0 {
-            self.status_message =
-                Some("HTTP API port must be a number from 1 to 65535".to_string());
-            return;
-        }
-        self.api_settings.port = port;
-        if let Some(directory) = self.config_dir.clone() {
-            let _ = self.enqueue_configuration(
-                directory,
-                crate::filesystem::configuration::ConfigurationChange::Api(self.api_settings),
-                crate::filesystem::configurations::ConfigurationIntent::Plain {
-                    label: "API settings",
-                    success: Some("HTTP API port saved; restart the server to apply it"),
-                },
-            );
-        }
-    }
-
     /// Asks the async owner to synchronize this value with both the local
     /// tracing writer and the detached server. `Option<bool>` coalesces rapid
     /// toggles before the event loop next runs.
@@ -6912,6 +6848,8 @@ impl App {
             || !self.is_initial_state_sync_complete
             || !self.is_agent_setup_policy_available
             || !matches!(self.mode, Mode::Normal)
+            // The server waits for the crash-recovery answer; the offers come after it.
+            || self.session_recovery_pending.is_some()
         {
             return;
         }
@@ -24397,8 +24335,7 @@ mod tests {
         assert_eq!(SettingsTab::Titles.next(), SettingsTab::Triggers);
         assert_eq!(SettingsTab::Triggers.next(), SettingsTab::CustomAgents);
         assert_eq!(SettingsTab::CustomAgents.next(), SettingsTab::Debug);
-        assert_eq!(SettingsTab::Debug.next(), SettingsTab::Api);
-        assert_eq!(SettingsTab::Api.next(), SettingsTab::Plugins);
+        assert_eq!(SettingsTab::Debug.next(), SettingsTab::Plugins);
         assert_eq!(SettingsTab::Plugins.next(), SettingsTab::About);
         assert_eq!(SettingsTab::About.next(), SettingsTab::Setup);
         assert_eq!(SettingsTab::Setup.next(), SettingsTab::Appearance);
@@ -25108,6 +25045,23 @@ mod tests {
         assert!(matches!(app.mode, Mode::Normal));
         assert_eq!(app.pending_agent_setup_prompts.len(), 1);
         assert!(!project.path().join("CLAUDE.md").exists());
+    }
+
+    #[test]
+    fn setup_offers_wait_while_the_server_waits_for_the_recovery_answer() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("setup-test".into(), project.path().to_path_buf());
+        app.is_initial_state_sync_complete = true;
+        app.is_agent_setup_policy_available = true;
+        app.session_recovery_pending =
+            Some(crate::plugin_host::session_recovery::PendingSessionRecovery::new(2));
+        app.pending_agent_setup_prompts
+            .push_back(crate::setup_prompt::SetupPromptScope::Project(
+                project.path().to_path_buf(),
+            ));
+        app.maybe_show_agent_setup_prompt();
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(app.pending_agent_setup_prompts.len(), 1);
     }
 
     #[test]

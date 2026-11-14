@@ -80,9 +80,17 @@ pub fn client_host() -> FakeHost {
         .side("client")
 }
 
+/// An event the plugin ignores. The first batch after activation carries the padding table to
+/// the kernel, so a helper delivers this one to clear that submission out of later assertions.
+pub fn ignored_event() -> Event {
+    Event::NodeRemoved(NodeId(u64::MAX))
+}
+
+/// The client plugin, activated, with its start-up padding submission already delivered.
 pub fn activated_client() -> FakeHost {
     let mut host = client_host();
     host.activate::<LayoutClient>();
+    host.deliver_one(ignored_event());
     host
 }
 

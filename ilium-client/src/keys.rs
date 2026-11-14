@@ -171,7 +171,6 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         Mode::VoiceSettingPrompt(field, state) => {
             handle_voice_setting_prompt(app, field, state, &event)
         }
-        Mode::ApiSettingPrompt(state) => handle_api_setting_prompt(app, state, &event),
         Mode::PluginSettingPrompt(target, state) => {
             handle_plugin_setting_prompt(app, target, state, &event)
         }
@@ -1064,25 +1063,6 @@ fn handle_voice_setting_prompt(
         }
         PromptOutcome::Cancel => app.pop_modal(),
         PromptOutcome::Continue => app.mode = Mode::VoiceSettingPrompt(field, state),
-    }
-}
-
-fn handle_api_setting_prompt(app: &mut App, mut state: TextPromptState, event: &Event) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::ApiSettingPrompt(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::ApiSettingPrompt(state);
-        return;
-    }
-    match text_prompt::handle_key(&mut state, key.code) {
-        PromptOutcome::Commit => {
-            app.settings_commit_api_port(state.buf);
-            app.pop_modal();
-        }
-        PromptOutcome::Cancel => app.pop_modal(),
-        PromptOutcome::Continue => app.mode = Mode::ApiSettingPrompt(state),
     }
 }
 
@@ -2722,25 +2702,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Debug => {
             state.selected_row = state.selected_row.saturating_sub(1);
-        }
-        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Api => {
-            state.selected_row = state.selected_row.saturating_sub(1);
-        }
-        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Api => {
-            state.selected_row =
-                (state.selected_row + 1).min(crate::app::ApiRow::ALL.len().saturating_sub(1));
-        }
-        KeyCode::Left
-        | KeyCode::Char('h')
-        | KeyCode::Right
-        | KeyCode::Char('l')
-        | KeyCode::Enter
-        | KeyCode::Char(' ')
-            if state.tab == SettingsTab::Api =>
-        {
-            app.mode = Mode::Settings(Box::new(state));
-            app.settings_open_api_port();
-            return;
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Plugins => {
             state.selected_row = state.selected_row.saturating_sub(1);

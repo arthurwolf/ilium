@@ -45,7 +45,7 @@ The tabs appear in this order:
 | Tab | What it controls | Main config table |
 | --- | --- | --- |
 | User Interface | Left panel sizing, tree order, identifiers, colour scheme, motion, density, toolbars, banners, progress footer, selection and tree behaviours | `[ui]`, `[theme]` |
-| Padding | Blank cells between the panel borders and the tree or pane content | `[padding]` |
+| Padding | Blank cells between the panel borders and the tree or pane content (a page of the Layout plugin) | `[plugins."ilium.core.layout"]` |
 | Icons | Every configurable sidebar, toolbar and menu glyph | `[ui.icons]` |
 | Toolbar | Tree toolbar order, buttons and inactivity threshold | `[ui]` |
 | Agent Monitoring | Display mode, polling, custom agent signatures, status icons, progress footer | `[ui]`, `[detection]` |
@@ -126,9 +126,7 @@ The progress-monitor options (Progress monitor, Progress footer lines, Progress 
 
 Pads the content of the left tree panel and the right panels (terminals and agents, editors, boards) inside their borders. Padding never touches borders, the agent toolbar, the last-prompt banner or the progress footer; it only moves the terminal, tree list, editor or board content inward.
 
-Three cards choose the mode: **Disabled** (the default, no padding), **Size dependent** (padding applies while the terminal is at least a threshold wide; the threshold defaults to 200 columns and accepts 11 to 1000, edited with the steppers or by typing), and **Enabled** (always). Hover and click behave like the other card pickers. The threshold uses `- value + *`: the arrows step by one column and `*` opens exact keyboard entry. Confirm with `Enter`; `Esc` cancels without changing the saved mode or threshold. Invalid entries and failed saves retain the draft for correction or retry. A confirmed threshold selects **Size dependent**.
-
-Unless the mode is Disabled, a **Padding fine-tuning** button opens a near-fullscreen dialog. The left column holds the settings and the right column a live preview with a neutral dummy tree and dummy agent. Each panel (tree, right panels) has a **Link all sides** option and four side groups (Left, Right, Top, Bottom), each set to 0 to 3 cells with clickable buttons; linking hides the individual sides. **Share right panels** makes terminals, editors and boards use one setting; turn it off to pick a type and give it its own. The default is one cell on every side.
+The page belongs to the Layout plugin and appears in the Settings rail while that plugin runs; with the plugin disabled there is no Padding page and no padding. A **Padding** choice sets the mode: **Disabled** (the default, no padding), **Size dependent** (padding applies while the terminal is at least a threshold wide; the threshold defaults to 200 columns and accepts 11 to 1000) and **Enabled** (always). **Same padding for every right-hand panel** makes terminals, editors and boards use the shared right-hand values; turn it off to give each its own section. Each panel section (Tree, Right-hand panels, Terminals and agents, Editors, Kanban boards) has **Same padding on every side** with one value from 0 to 3 cells, or, with that switch off, a Left, Right, Top and Bottom value. The default is one cell on every side. An out-of-range value is refused and the stored value stays.
 
 ### Icons
 
@@ -371,7 +369,7 @@ The file is a set of tables. Only the tables and keys you want to change need to
 | Table | Contents |
 | --- | --- |
 | `[keyboard]`, `[keybindings]` | Prefix keys; action-to-key remapping |
-| `[padding]` | `mode` (`disabled`, `enabled`, `width_dependent`), `width_threshold`, per-panel sides |
+| `[plugins."ilium.core.layout"]` | Padding: `mode` (`disabled`, `enabled`, `width_dependent`), `width_threshold`, `right_panels_shared`, and per panel (`tree`, `right_shared`, `terminal`, `editor`, `board`) `<panel>_linked`, `<panel>_all`, `<panel>_left`, `<panel>_right`, `<panel>_top`, `<panel>_bottom` |
 | `[theme]` | Four colour overrides: `accent_bg`, `accent_fg`, `border_focused`, `border_unfocused` (hex such as `#1f6feb`) |
 | `[ui]`, `[ui.icons]` | Interface options and icon assignments (keys below) |
 | `[sound]`, `[notifications]` | Sound source, file and events; desktop notification flags |
