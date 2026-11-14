@@ -3,20 +3,29 @@
 //! `host` is the real composition the event loop runs (foundation contract section 12);
 //! `ClientPluginHost` below and the two rigs are the earlier models the red tests drive.
 
+pub mod animation_table;
 pub mod audio_backend;
 pub mod audio_capture;
+pub mod clipboard_backend;
 pub mod commands;
 pub(crate) mod effects;
+pub mod file_picker;
 pub mod host;
 pub mod keybindings;
 pub(crate) mod links;
+pub mod media_backend;
+pub(crate) mod onboarding_steps;
+pub(crate) mod plugin_panes;
 pub mod popup;
 pub(crate) mod remote;
 pub mod screens_rig;
+pub(crate) mod settings_rail;
 pub mod settings_rows;
+pub(crate) mod sound_gate;
 pub mod ui_state;
 pub mod view;
 pub mod views;
+pub(crate) mod when;
 pub mod widget_rig;
 
 use std::sync::Mutex;

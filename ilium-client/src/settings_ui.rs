@@ -454,7 +454,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     }
 
     render_header(frame, layout.header_area);
-    render_tab_list(frame, layout.tab_list_area, state.tab);
+    render_settings_rail(frame, layout.tab_list_area, app, state.tab);
     if state.tab == SettingsTab::Icons {
         if let Some(editor) = &state.tree_layout_editor {
             crate::tree_layout_settings::render(frame, layout.content_area, app, editor);
@@ -1475,34 +1475,69 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
     }
 }
 
-/// One blank top-padding line, then each tab's label with one blank spacer
-/// line after it -- see [`tab_at`] for the matching hit-test arithmetic.
+/// What the rail draws for a built-in tab.
+fn built_in_rail_label(tab: SettingsTab) -> crate::plugin_host::settings_rail::RailLabel {
+    crate::plugin_host::settings_rail::RailLabel {
+        icon: tab_icon(tab),
+        label: tab.label().to_owned(),
+        compact: compact_tab_label(tab).to_owned(),
+    }
+}
+
+/// The built-in rail alone: what Settings draws when no plugin contributes a page.
+#[cfg(test)]
 fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
-    let row_height = tab_row_height(area);
-    let start_index = tab_window_start(area, active, row_height);
-    let has_overflow = tab_list_overflows(area);
+    let labels: Vec<_> = SettingsTab::ALL
+        .into_iter()
+        .map(built_in_rail_label)
+        .collect();
+    let active_index = SettingsTab::ALL
+        .iter()
+        .position(|tab| *tab == active)
+        .unwrap_or(0);
+    render_rail(frame, area, &labels, active_index);
+}
+
+/// The rail of the live Settings screen: built-in tabs, then contributed plugin pages
+/// ([`App::settings_rail`]). [`settings_rail_entry_at`] hit-tests the same list.
+fn render_settings_rail(frame: &mut Frame, area: Rect, app: &App, active: SettingsTab) {
+    let labels = app.settings_rail_labels(built_in_rail_label);
+    render_rail(frame, area, &labels, app.settings_rail_active(active));
+}
+
+/// One blank top-padding line, then each entry's label with one blank spacer
+/// line after it -- see [`rail_index_at`] for the matching hit-test arithmetic.
+fn render_rail(
+    frame: &mut Frame,
+    area: Rect,
+    labels: &[crate::plugin_host::settings_rail::RailLabel],
+    active_index: usize,
+) {
+    let count = labels.len();
+    let row_height = rail_row_height(area, count);
+    let start_index = rail_window_start(area, active_index, row_height, count);
+    let has_overflow = rail_overflows(area, count);
     let label_area = Rect {
         width: area.width.saturating_sub(u16::from(has_overflow)),
         ..area
     };
-    let mut lines = Vec::with_capacity(
-        usize::from(TAB_LIST_TOP_PADDING) + SettingsTab::ALL.len() * usize::from(row_height),
-    );
+    let mut lines =
+        Vec::with_capacity(usize::from(TAB_LIST_TOP_PADDING) + count * usize::from(row_height));
     lines.extend((0..TAB_LIST_TOP_PADDING).map(|_| Line::from("")));
-    for tab in SettingsTab::ALL.into_iter().skip(start_index) {
-        let style = if tab == active {
+    for (index, entry) in labels.iter().enumerate().skip(start_index) {
+        let style = if index == active_index {
             theme::selected_style().add_modifier(Modifier::BOLD)
         } else {
             Style::new()
         };
-        let icon = tab_icon(tab);
+        let icon = entry.icon;
         let icon_padding = " ".repeat(2_usize.saturating_sub(icon.width()));
         // One cell stays free before the overflow scrollbar so labels never touch it.
         let scrollbar_gap = usize::from(has_overflow);
         let available_label_width = usize::from(label_area.width).saturating_sub(4 + scrollbar_gap);
         // A label is shown whole or not at all: a cut word reads as a defect, while
         // the icon still identifies the tab when no full label fits the column.
-        let label = [tab.label(), compact_tab_label(tab)]
+        let label = [entry.label.as_str(), entry.compact.as_str()]
             .into_iter()
             .find(|candidate| candidate.width() <= available_label_width)
             .unwrap_or("");
@@ -1524,7 +1559,7 @@ fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
             height: area.height - TAB_LIST_TOP_PADDING,
             ..area
         };
-        let mut scrollbar_state = ScrollbarState::new(SettingsTab::ALL.len())
+        let mut scrollbar_state = ScrollbarState::new(count)
             .position(start_index)
             .viewport_content_length(usize::from(scrollbar_area.height / row_height));
         frame.render_stateful_widget(
@@ -1539,9 +1574,106 @@ fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
     }
 }
 
+/// The rail entry a click at `position` lands on: a label row, or the overflow scrollbar
+/// track. Uses the same entry list and active index as [`render_settings_rail`].
+pub(crate) fn settings_rail_entry_at(
+    app: &App,
+    area: Rect,
+    position: Position,
+    active: SettingsTab,
+) -> Option<crate::plugin_host::settings_rail::SettingsRailEntry> {
+    let rail = app.settings_rail();
+    let active_index = app.settings_rail_active(active);
+    rail_index_at(area, position, active_index, rail.len())
+        .or_else(|| rail_scrollbar_index(area, position, rail.len()))
+        .and_then(|index| rail.get(index).copied())
+}
+
+fn rail_overflows(area: Rect, count: usize) -> bool {
+    usize::from(area.height.saturating_sub(TAB_LIST_TOP_PADDING) / rail_row_height(area, count))
+        < count
+}
+
+/// The index of the rail entry under `position`, for a rail of `count` entries whose
+/// window follows `active_index`.
+fn rail_index_at(
+    area: Rect,
+    position: Position,
+    active_index: usize,
+    count: usize,
+) -> Option<usize> {
+    if !area.contains(position) {
+        return None;
+    }
+    if rail_overflows(area, count) && position.x == area.right().saturating_sub(1) {
+        return None;
+    }
+    let row = position.y - area.y;
+    if row < TAB_LIST_TOP_PADDING {
+        return None;
+    }
+    let row = row - TAB_LIST_TOP_PADDING;
+    let row_height = rail_row_height(area, count);
+    if !row.is_multiple_of(row_height) {
+        return None;
+    }
+    let index =
+        rail_window_start(area, active_index, row_height, count) + usize::from(row / row_height);
+    (index < count).then_some(index)
+}
+
+/// The index a click on the rail's overflow scrollbar track selects.
+fn rail_scrollbar_index(area: Rect, position: Position, count: usize) -> Option<usize> {
+    if !rail_overflows(area, count)
+        || area.width == 0
+        || area.height <= TAB_LIST_TOP_PADDING
+        || position.x != area.right().saturating_sub(1)
+        || position.y < area.y.saturating_add(TAB_LIST_TOP_PADDING)
+        || position.y >= area.bottom()
+    {
+        return None;
+    }
+    let track_height = usize::from(area.height - TAB_LIST_TOP_PADDING);
+    let track_row = usize::from(position.y - area.y - TAB_LIST_TOP_PADDING);
+    let index =
+        track_row.saturating_mul(count.saturating_sub(1)) / track_height.saturating_sub(1).max(1);
+    (index < count).then_some(index)
+}
+
+fn rail_window_start(area: Rect, active_index: usize, row_height: u16, count: usize) -> usize {
+    let visible_rows = usize::from(
+        area.height
+            .saturating_sub(TAB_LIST_TOP_PADDING)
+            .checked_div(row_height)
+            .unwrap_or(0),
+    )
+    .max(1);
+    if visible_rows >= count {
+        return 0;
+    }
+    active_index
+        .min(count.saturating_sub(1))
+        .saturating_add(1)
+        .saturating_sub(visible_rows)
+        .min(count.saturating_sub(visible_rows))
+}
+
+/// Keeps the spacious two-line rail when it fits and compacts to one line
+/// per entry on short terminals so the final entries remain visible and clickable.
+fn rail_row_height(area: Rect, count: usize) -> u16 {
+    let entries = u16::try_from(count).unwrap_or(u16::MAX);
+    let spacious_height =
+        TAB_LIST_TOP_PADDING.saturating_add(entries.saturating_mul(TAB_ROW_HEIGHT));
+    if area.height >= spacious_height {
+        TAB_ROW_HEIGHT
+    } else {
+        1
+    }
+}
+
+#[cfg(test)]
 fn tab_list_overflows(area: Rect) -> bool {
-    usize::from(area.height.saturating_sub(TAB_LIST_TOP_PADDING) / tab_row_height(area))
-        < SettingsTab::ALL.len()
+    rail_overflows(area, SettingsTab::ALL.len())
 }
 
 /// The tab a click at `position` lands on, if any -- reproduces
@@ -1557,43 +1689,25 @@ pub fn tab_at_for_active(
     position: Position,
     active: SettingsTab,
 ) -> Option<SettingsTab> {
-    if !tab_list_area.contains(position) {
-        return None;
-    }
-    if tab_list_overflows(tab_list_area) && position.x == tab_list_area.right().saturating_sub(1) {
-        return None;
-    }
-    let row = position.y - tab_list_area.y;
-    if row < TAB_LIST_TOP_PADDING {
-        return None;
-    }
-    let row = row - TAB_LIST_TOP_PADDING;
-    let row_height = tab_row_height(tab_list_area);
-    if !row.is_multiple_of(row_height) {
-        return None;
-    }
-    let index = tab_window_start(tab_list_area, active, row_height) + usize::from(row / row_height);
-    SettingsTab::ALL.get(index).copied()
+    let active_index = SettingsTab::ALL
+        .iter()
+        .position(|tab| *tab == active)
+        .unwrap_or(0);
+    rail_index_at(
+        tab_list_area,
+        position,
+        active_index,
+        SettingsTab::ALL.len(),
+    )
+    .and_then(|index| SettingsTab::ALL.get(index).copied())
 }
 
 /// Clicking the visible navigation scrollbar selects a tab at that track
 /// position; the active-follow window then brings it into view without any
 /// extra scroll state that could disagree with keyboard navigation.
 pub fn tab_scrollbar_target(area: Rect, position: Position) -> Option<SettingsTab> {
-    if !tab_list_overflows(area)
-        || area.width == 0
-        || area.height <= TAB_LIST_TOP_PADDING
-        || position.x != area.right().saturating_sub(1)
-        || position.y < area.y.saturating_add(TAB_LIST_TOP_PADDING)
-        || position.y >= area.bottom()
-    {
-        return None;
-    }
-    let track_height = usize::from(area.height - TAB_LIST_TOP_PADDING);
-    let track_row = usize::from(position.y - area.y - TAB_LIST_TOP_PADDING);
-    let tab_index = track_row.saturating_mul(SettingsTab::ALL.len().saturating_sub(1))
-        / track_height.saturating_sub(1).max(1);
-    SettingsTab::ALL.get(tab_index).copied()
+    rail_scrollbar_index(area, position, SettingsTab::ALL.len())
+        .and_then(|index| SettingsTab::ALL.get(index).copied())
 }
 
 /// Whether the page draws its document scrollbar in the reserved right-hand
@@ -1620,39 +1734,6 @@ pub(crate) fn content_scrollbar_target(
     let track_row = u64::from(position.y.saturating_sub(area.y));
     let scroll = track_row.saturating_mul(u64::from(max_scroll)) / track_height;
     u16::try_from(scroll).ok()
-}
-
-fn tab_window_start(area: Rect, active: SettingsTab, row_height: u16) -> usize {
-    let visible_rows = usize::from(
-        area.height
-            .saturating_sub(TAB_LIST_TOP_PADDING)
-            .checked_div(row_height)
-            .unwrap_or(0),
-    )
-    .max(1);
-    if visible_rows >= SettingsTab::ALL.len() {
-        return 0;
-    }
-    let active_index = SettingsTab::ALL
-        .iter()
-        .position(|tab| *tab == active)
-        .unwrap_or(0);
-    active_index
-        .saturating_add(1)
-        .saturating_sub(visible_rows)
-        .min(SettingsTab::ALL.len().saturating_sub(visible_rows))
-}
-
-/// Keeps the spacious two-line rail when it fits and compacts to one line
-/// per tab on short terminals so the final Triggers/About entries remain
-/// visible and clickable.
-const fn tab_row_height(area: Rect) -> u16 {
-    let spacious_height = TAB_LIST_TOP_PADDING + SettingsTab::ALL.len() as u16 * TAB_ROW_HEIGHT;
-    if area.height >= spacious_height {
-        TAB_ROW_HEIGHT
-    } else {
-        1
-    }
 }
 
 /// Maps the same measured wrapped rows used by [`text_trigger_view`] to an
@@ -7830,6 +7911,61 @@ mod tests {
             ),
             Some((0, -1))
         );
+    }
+
+    #[test]
+    fn plugin_pages_on_the_rail_draw_and_hit_on_the_same_rows() {
+        use crate::plugin_host::settings_rail::{RailLabel, PLUGIN_PAGE_ICON};
+        let mut labels: Vec<RailLabel> = SettingsTab::ALL
+            .into_iter()
+            .map(built_in_rail_label)
+            .collect();
+        for page in ["Notes sync", "Weather"] {
+            labels.push(RailLabel {
+                icon: PLUGIN_PAGE_ICON,
+                label: page.to_owned(),
+                compact: String::new(),
+            });
+        }
+        let count = labels.len();
+        // A spacious rail, a compact one and one that overflows and follows the active entry.
+        for height in [80_u16, 40, 12] {
+            let area = Rect::new(0, 0, 24, height);
+            for active in [0, count - 2, count - 1] {
+                let mut terminal =
+                    Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+                terminal
+                    .draw(|frame| render_rail(frame, area, &labels, active))
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let mut seen_active = false;
+                for y in area.y..area.bottom() {
+                    let row: String = (area.x..area.right().saturating_sub(1))
+                        .map(|x| buffer[(x, y)].symbol().to_owned())
+                        .collect();
+                    let hit = rail_index_at(area, Position::new(4, y), active, count);
+                    match hit {
+                        Some(index) => {
+                            let drawn = &labels[index];
+                            assert!(
+                                row.contains(drawn.icon),
+                                "row {y} at height {height} hits {index} but draws {row:?}"
+                            );
+                            seen_active |= index == active;
+                        }
+                        None => assert!(
+                            labels.iter().all(|label| label.label.is_empty()
+                                || !row.contains(label.label.as_str())),
+                            "row {y} at height {height} draws {row:?} but hits nothing"
+                        ),
+                    }
+                }
+                assert!(
+                    seen_active,
+                    "the active entry {active} is visible at {height}"
+                );
+            }
+        }
     }
 
     #[test]

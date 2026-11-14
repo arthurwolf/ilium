@@ -819,8 +819,12 @@ pub(crate) fn estimated_tree_bytes(tree: &ilium_core::Tree) -> usize {
                 progress_monitors,
                 launch_cwd,
                 workspace,
+                plugin_pane,
                 ..
             } => {
+                if let Some(kind) = plugin_pane {
+                    add(kind.kind_id().len().saturating_mul(2));
+                }
                 match status {
                     PaneStatus::Agent(state) => add(class_size(&state.class)),
                     PaneStatus::AgentUnavailable(recovery) => {

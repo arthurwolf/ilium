@@ -912,8 +912,8 @@ pub enum TreeOrder {
     CostDescending,
     /// Ascending by the sort keys a plugin set on tree nodes (`contributes.tree_orderings`):
     /// the decorations it set in the ordering's slot. Chosen from the "Order by" submenu,
-    /// which names the plugin ordering, so it is not part of [`Self::ALL`] and never
-    /// persisted.
+    /// which names the plugin ordering, so it is not part of [`Self::ALL`]; the choice
+    /// itself persists as [`UiSettings::plugin_tree_ordering`].
     PluginKey,
 }
 
@@ -945,6 +945,41 @@ impl TreeOrder {
 
     pub fn stepped(self, direction: i32) -> Self {
         stepped_value(&Self::ALL, self, direction)
+    }
+}
+
+/// A plugin tree ordering the user chose (`contributes.tree_orderings`), remembered across
+/// restarts as `ui.plugin_tree_ordering = "<plugin id>/<ordering id>"`. The choice is kept
+/// even while its plugin is disabled or missing; it applies again once the plugin
+/// contributes the ordering, and until then the built-in [`TreeOrder`] is used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginTreeOrderingChoice {
+    pub plugin: String,
+    pub ordering: String,
+}
+
+impl PluginTreeOrderingChoice {
+    /// Reads the config spelling. Ordering ids never contain `/`, so the last `/` splits;
+    /// either half empty is not a choice.
+    pub fn parse(value: &str) -> Option<Self> {
+        let (plugin, ordering) = value.trim().rsplit_once('/')?;
+        if plugin.is_empty() || ordering.is_empty() {
+            return None;
+        }
+        Some(Self {
+            plugin: plugin.to_string(),
+            ordering: ordering.to_string(),
+        })
+    }
+
+    /// The config spelling [`Self::parse`] reads back.
+    pub fn config_value(&self) -> String {
+        format!("{}/{}", self.plugin, self.ordering)
+    }
+
+    /// Whether this choice names the ordering `ordering` of `plugin`.
+    pub fn names(&self, plugin: &str, ordering: &str) -> bool {
+        self.plugin == plugin && self.ordering == ordering
     }
 }
 
@@ -1107,6 +1142,10 @@ pub struct UiSettings {
     /// Split-view child order remains structural because it controls pane
     /// placement in the right panel.
     pub tree_order: TreeOrder,
+    /// The plugin tree ordering chosen in the tree's "Order by" submenu
+    /// (`contributes.tree_orderings`). It overrides [`Self::tree_order`] while its plugin
+    /// still contributes it, and choosing a built-in order clears it.
+    pub plugin_tree_ordering: Option<PluginTreeOrderingChoice>,
     pub tree_row_layout: crate::tree_row_layout::TreeRowLayout,
     pub tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout,
     pub tree_inactivity_minutes: u16,
@@ -1227,6 +1266,7 @@ impl Default for UiSettings {
             color_scheme: ColorScheme::Dark,
             agent_identifiers: AgentIdentifierSettings::default(),
             tree_order: TreeOrder::Manual,
+            plugin_tree_ordering: None,
             tree_row_layout: crate::tree_row_layout::TreeRowLayout::default(),
             tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout::default(),
             tree_inactivity_minutes: 15,
@@ -1366,6 +1406,8 @@ struct RawUiConfig {
     codex_agent_icon: Option<String>,
     antigravity_agent_icon: Option<String>,
     tree_order: Option<String>,
+    /// `"<plugin id>/<ordering id>"`, see [`PluginTreeOrderingChoice`].
+    plugin_tree_ordering: Option<String>,
     tree_row_layout: Option<crate::tree_row_layout::TreeRowLayout>,
     tree_toolbar_layout: Option<crate::tree_toolbar_layout::TreeToolbarLayout>,
     tree_inactivity_minutes: Option<u16>,
@@ -1941,6 +1983,12 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             antigravity_icon,
         },
         tree_order,
+        // A malformed choice is dropped rather than failing the whole config: the value is
+        // only ever written by the client, and losing it just restores the built-in order.
+        plugin_tree_ordering: raw
+            .plugin_tree_ordering
+            .as_deref()
+            .and_then(PluginTreeOrderingChoice::parse),
         tree_row_layout: raw.tree_row_layout.unwrap_or_default().normalized(),
         tree_toolbar_layout: raw.tree_toolbar_layout.unwrap_or_default().normalized(),
         tree_inactivity_minutes: raw.tree_inactivity_minutes.unwrap_or(15).max(1),
@@ -3383,6 +3431,12 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         "tree_order".to_string(),
         toml::Value::String(tree_order_name(ui.tree_order).to_string()),
     );
+    if let Some(choice) = &ui.plugin_tree_ordering {
+        table.insert(
+            "plugin_tree_ordering".to_string(),
+            toml::Value::String(choice.config_value()),
+        );
+    }
     table.insert(
         "motion_level".to_string(),
         toml::Value::String(
@@ -4863,6 +4917,55 @@ mod tests {
     }
 
     #[test]
+    fn a_plugin_tree_ordering_choice_round_trips_and_clears() {
+        let dir = scratch_dir();
+        let mut ui = UiSettings {
+            plugin_tree_ordering: PluginTreeOrderingChoice::parse("ilium.core.cost/by-cost"),
+            ..UiSettings::default()
+        };
+        save_ui_settings(&dir, &ui).expect("save the plugin ordering choice");
+        let loaded = load(&dir).expect("load the plugin ordering choice").ui;
+        let choice = loaded
+            .plugin_tree_ordering
+            .expect("the choice survives a restart");
+        assert!(choice.names("ilium.core.cost", "by-cost"));
+        assert_eq!(choice.config_value(), "ilium.core.cost/by-cost");
+
+        // Choosing a built-in order clears the plugin choice on disk too.
+        ui.plugin_tree_ordering = None;
+        save_ui_settings(&dir, &ui).expect("save without a plugin ordering");
+        assert_eq!(
+            load(&dir)
+                .expect("load cleared choice")
+                .ui
+                .plugin_tree_ordering,
+            None
+        );
+    }
+
+    #[test]
+    fn a_malformed_plugin_tree_ordering_falls_back_to_the_built_in_order() {
+        for malformed in ["", "no-separator", "/by-cost", "ilium.core.cost/"] {
+            assert_eq!(
+                PluginTreeOrderingChoice::parse(malformed),
+                None,
+                "{malformed:?}"
+            );
+        }
+        let dir = scratch_dir();
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\ntree_order = \"type\"\nplugin_tree_ordering = \"broken\"\n",
+        )
+        .unwrap();
+        let ui = load(&dir)
+            .expect("a malformed choice never fails the config")
+            .ui;
+        assert_eq!(ui.plugin_tree_ordering, None);
+        assert_eq!(ui.tree_order, TreeOrder::Type);
+    }
+
+    #[test]
     fn ui_color_scheme_selects_the_matching_theme_preset() {
         let dir = scratch_dir();
         std::fs::write(dir.join("config.toml"), "[ui]\ncolor_scheme = \"light\"\n").unwrap();
@@ -5350,6 +5453,10 @@ mod tests {
                 antigravity_icon: AntigravityAgentIcon::Orbit,
             },
             tree_order: TreeOrder::NameDescending,
+            plugin_tree_ordering: Some(PluginTreeOrderingChoice {
+                plugin: "ilium.core.cost".to_string(),
+                ordering: "by-cost".to_string(),
+            }),
             tree_row_layout: crate::tree_row_layout::TreeRowLayout::mixed(),
             tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout::default(),
             tree_inactivity_minutes: 15,

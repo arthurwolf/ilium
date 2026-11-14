@@ -176,7 +176,7 @@ pub fn settings_changed(keys: &[&str]) -> Event {
 
 /// Renders one view of the plugin directly through its `views` export (native mode).
 pub fn render_direct(view: ViewTarget, columns: u16, rows: u16) -> UiTree {
-    let mut client = AmbientClient;
+    let mut client = AmbientClient::default();
     client.render(view, Area { columns, rows })
 }
 

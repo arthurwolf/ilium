@@ -174,6 +174,10 @@ pub struct FakeKernelState {
     pub plugins: BTreeMap<String, bool>,
     pub videos: BTreeMap<(String, String), VideoInfo>,
     pub ffmpeg_available: bool,
+    /// `set_ffmpeg_available(false)` was called: the media decoder answers `unsupported`.
+    /// Separate from `ffmpeg_available`, whose default is `false`, so an unscripted kernel has
+    /// `ffmpeg`.
+    pub ffmpeg_missing: bool,
     pub bytes_video: Option<VideoInfo>,
     pub video_positions: BTreeMap<u64, u64>,
     pub next_id: u64,
@@ -1179,7 +1183,9 @@ impl FakeKernel {
 
     /// Whether ffmpeg is available.
     pub fn set_ffmpeg_available(&self, available: bool) {
-        self.state().ffmpeg_available = available;
+        let mut state = self.state();
+        state.ffmpeg_available = available;
+        state.ffmpeg_missing = !available;
     }
 
     /// The info of videos opened from bytes.

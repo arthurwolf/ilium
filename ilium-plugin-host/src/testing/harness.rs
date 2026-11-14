@@ -79,7 +79,6 @@ use crate::imports::kernel_settings::KernelSettingsImport;
 use crate::imports::keymap::KeymapImport;
 use crate::imports::keys::KeysImport;
 use crate::imports::location::LocationImport;
-use crate::imports::media::MediaImport;
 use crate::imports::plugins::PluginsImport;
 use crate::imports::sessions::SessionsImport;
 use crate::imports::sounds::SoundsImport;
@@ -923,6 +922,7 @@ struct HarnessImports {
     keys: KeysImport,
     sessions: SessionsImport,
     terminal: TerminalImport,
+    media: super::kernel_media::SharedMedia,
 }
 
 impl std::fmt::Debug for HarnessHandle {
@@ -2163,9 +2163,24 @@ impl HarnessHandle {
         self.imports.client_requests.clone()
     }
 
-    /// The `ilium:host/clipboard` interface as the plugin sees it.
+    /// The `ilium:host/clipboard` interface as the plugin sees it: the fake kernel's clipboard,
+    /// behind the instance's grants.
     pub fn clipboard(&self) -> impl HostClipboard {
-        ClipboardImport
+        ClipboardImport::new(
+            self.import_env(),
+            self.kernel.clone() as Arc<dyn crate::imports::clipboard::ClipboardBackend>,
+        )
+    }
+
+    /// The import environment of this instance: its plugin id and current grants.
+    fn import_env(&self) -> crate::imports::env::ImportEnv {
+        let granted: Vec<String> = harness_lock(&self.admission.grants)
+            .iter()
+            .map(|grant| grant.as_str().to_owned())
+            .collect();
+        crate::imports::env::ImportEnv::unrestricted()
+            .with_identity(&self.plugin.0, 1)
+            .with_grants(granted)
     }
 
     /// The `ilium:host/geocode` interface as the plugin sees it.
@@ -2217,9 +2232,12 @@ impl HarnessHandle {
         LocationImport
     }
 
-    /// The `ilium:host/media` interface as the plugin sees it.
+    /// The `ilium:host/media` interface as the plugin sees it: the videos seeded in the fake
+    /// kernel, one import shared by every call so open videos and the quota carry over.
     pub fn media(&self) -> impl HostMedia {
-        MediaImport
+        self.imports
+            .media
+            .handle(&self.kernel, || self.import_env())
     }
 
     /// The `ilium:host/plugins` interface as the plugin sees it.
@@ -2234,7 +2252,7 @@ impl HarnessHandle {
 
     /// The `ilium:host/sounds` interface as the plugin sees it.
     pub fn sounds(&self) -> impl HostSounds {
-        SoundsImport
+        SoundsImport::default()
     }
 
     /// The `ilium:host/ui-host` interface as the plugin sees it.

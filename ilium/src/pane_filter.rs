@@ -148,6 +148,8 @@ pub(crate) enum PaneKind {
     Board,
     /// A restored agent pane whose agent is not running.
     UnavailableAgent,
+    /// A pane whose body a plugin draws (a plugin pane kind).
+    Plugin,
 }
 
 impl PaneKind {
@@ -158,6 +160,7 @@ impl PaneKind {
             PaneStatus::Editor { .. } => Self::Editor,
             PaneStatus::Board => Self::Board,
             PaneStatus::AgentUnavailable(_) => Self::UnavailableAgent,
+            PaneStatus::Plugin { .. } => Self::Plugin,
         }
     }
 
@@ -168,6 +171,7 @@ impl PaneKind {
             Self::Editor => "editor",
             Self::Board => "board",
             Self::UnavailableAgent => "unavailable-agent",
+            Self::Plugin => "plugin",
         }
     }
 }

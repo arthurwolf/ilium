@@ -1,5 +1,5 @@
 //! Pure editing logic for a single-line text input, shared by every modal
-//! that collects a name or command line (`Mode::Rename`, `Mode::CommandPrompt`
+//! that collects a name or command line (`Mode::CommandPrompt`, `Mode::SaveAs`
 //! in `app.rs`). Kept free of `ratatui`/`crossterm` types beyond `KeyCode` so
 //! it can be unit-tested without a terminal, and so rendering (`modal.rs`)
 //! stays a pure function of this state.

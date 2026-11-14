@@ -1,7 +1,7 @@
 {
   "api": "ilium:plugin@0.1.0",
   "id": "ilium.core.session-convert",
-  "name": "Session convert",
+  "name": "Session conversion",
   "version": "0.1.0",
   "publisher": "Ilium",
   "description": "Session conversion lets a conversation continue under the other agent.",
@@ -30,11 +30,14 @@
       "panes.read",
       "panes.lifecycle",
       "panes.create",
+      "panes.create-command:codex",
+      "panes.create-command:claude",
       "tree.write",
       "agent.read",
       "fs.read:agent-sessions:claude",
       "fs.read:agent-sessions:codex",
-      "fs.write:agent-config:claude",
+      "fs.read:agent-config:claude",
+      "agent-config.propose:claude",
       "process.run:codex",
       "process.long-lived",
       "jobs.run",
@@ -71,9 +74,8 @@
     "context_menu": [
       {
         "id": "pane-convert",
-        "applies_to": [
-          "pane"
-        ],
+        "target": "tree-node",
+        "when": "node.kind == \"pane\" && pane.primitive == \"agent\"",
         "dynamic": true,
         "command": "convert"
       }

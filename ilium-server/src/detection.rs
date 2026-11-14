@@ -3582,6 +3582,7 @@ fn describe_pane_status(
         },
         PaneStatus::Editor { .. } => "Editor pane; agent detection does not apply.".to_string(),
         PaneStatus::Board => "Board pane; agent detection does not apply.".to_string(),
+        PaneStatus::Plugin { .. } => "Plugin pane; agent detection does not apply.".to_string(),
     };
     let signals = ilium_core::project_pane_signals(status, progress, has_scheduled_input, None);
     format!(

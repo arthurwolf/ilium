@@ -4,6 +4,7 @@
 mod common;
 mod docs_user;
 mod extension_points;
+mod forward;
 mod kernel_tab;
 mod manifest;
 mod semantic;

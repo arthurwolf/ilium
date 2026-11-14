@@ -5211,9 +5211,9 @@ fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
                 close_on_exit: false,
             }
         }
-        // `create_pane` refuses a plugin pane kind before it asks for a plan: the server owns
-        // no terminal or editor for it. This arm keeps the match exhaustive without inventing
-        // a process for the pane, so the plan it returns has no spawn.
+        // `create_pane` hands a plugin pane kind to `create_plugin_pane` before it asks for a
+        // plan: the server owns no terminal or editor for it. This arm keeps the match
+        // exhaustive without inventing a process for the pane; it is never spawned.
         NewPaneKind::Plugin { title, .. } => NewPanePlan {
             spawn_kind: PaneSnapshotKind::Editor { path: None },
             name: title,
@@ -5297,10 +5297,9 @@ async fn create_pane(
     kind: NewPaneKind,
     working_directory: NewPaneWorkingDirectory,
 ) -> Result<NodeId, String> {
-    if let NewPaneKind::Plugin { kind_id, .. } = &kind {
-        return Err(format!(
-            "plugin pane kind {kind_id} cannot be created: this server has no plugin pane host"
-        ));
+    if let NewPaneKind::Plugin { kind_id, title } = kind {
+        let kinds = state.plugins.get().map(|host| host.pane_kinds());
+        return create_plugin_pane(state, kinds, parent_group, &kind_id, title).await;
     }
     let plan = new_pane_plan(kind);
     let spawn_description = format!("{:?}", plan.spawn_kind);
@@ -5428,6 +5427,56 @@ async fn create_pane(
     if plan.close_on_exit {
         start_close_on_exit_watcher(state, pane_id).await;
     }
+    Ok(pane_id)
+}
+
+/// Longest plugin pane title, in characters (the basic primitive's `set-title` limit).
+const PLUGIN_PANE_TITLE_CHARACTERS: usize = 256;
+
+/// Creates a pane of a plugin pane kind (gap G14a). It is a tree node only: the plugin draws
+/// its body on the client, so nothing is spawned or registered in `state.panes`, and the tree
+/// snapshot alone restores it. `kinds` is the catalogue's pane kind table, `None` when plugins
+/// are off; a kind no catalogue plugin contributes is refused.
+async fn create_plugin_pane(
+    state: &Arc<ServerState>,
+    kinds: Option<&crate::plugin_host::pane_kinds::PaneKinds>,
+    parent_group: NodeId,
+    kind_id: &str,
+    title: String,
+) -> Result<NodeId, String> {
+    let Some(kinds) = kinds else {
+        return Err(format!(
+            "plugin pane kind {kind_id} cannot be created: plugins are off for this server"
+        ));
+    };
+    let (kind, default_title) = kinds
+        .admit(kind_id, None)
+        .map(|(kind, entry)| (kind, entry.title.clone()))?;
+    let title: String = title
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(PLUGIN_PANE_TITLE_CHARACTERS)
+        .collect();
+    let name = if title.trim().is_empty() {
+        default_title
+    } else {
+        title
+    };
+    let mut tree = state.tree.write().await;
+    let parent_group = if parent_group == ilium_core::ROOT_ID {
+        let project_id = tree
+            .ensure_launch_project(state.session_cwd.clone())
+            .map_err(|error| format!("failed to create pane: {error}"))?;
+        tree.ensure_project_default_group(project_id, "default")
+            .map_err(|error| format!("failed to create pane: {error}"))?
+    } else {
+        resolve_parent_group(&mut tree, parent_group, &state.session_cwd)
+    };
+    let pane_id = tree
+        .add_plugin_pane(parent_group, name, kind)
+        .map_err(|error| format!("failed to create pane: {error}"))?;
+    drop(tree);
+    broadcast_and_persist(state).await;
     Ok(pane_id)
 }
 
@@ -9545,6 +9594,135 @@ mod tests {
         state.clear_blocking_error(Some(group), "new_pane");
         let events = initial_state_events(&state, false, false).await;
         assert!(events.iter().any(|event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty())));
+    }
+
+    const KANBAN_MANIFEST: &str = r#"{"contributes": {"pane_kinds": [
+        {"id": "board", "title": "Board", "primitive": "basic", "wants_keys": true}
+    ]}}"#;
+
+    #[tokio::test]
+    async fn a_plugin_pane_is_a_tree_node_with_no_process_and_survives_a_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let group = state
+            .tree
+            .write()
+            .await
+            .add_group(ilium_core::ROOT_ID, "project")
+            .unwrap();
+        let kinds = crate::plugin_host::pane_kinds::PaneKinds::of_manifests([(
+            "ilium.core.kanban",
+            KANBAN_MANIFEST,
+        )]);
+        let pane = create_plugin_pane(
+            &state,
+            Some(&kinds),
+            group,
+            "ilium.core.kanban.board",
+            String::new(),
+        )
+        .await
+        .unwrap();
+        // No PTY, editor or unrestored entry: nothing runs behind a plugin pane.
+        assert!(!state.panes.read().await.contains_key(&pane));
+        let tree = state.tree.read().await.clone();
+        assert_eq!(
+            tree.plugin_pane_kind(pane)
+                .map(ilium_core::PluginPaneKind::kind_id),
+            Some("ilium.core.kanban.board")
+        );
+        // An empty title falls back to the kind's title.
+        assert_eq!(tree.get(pane).map(|node| node.name.as_str()), Some("Board"));
+        assert_eq!(tree.parent_of(pane), Some(group));
+
+        let saved = serde_json::to_string(&tree).unwrap();
+        let restored: ilium_core::Tree = serde_json::from_str(&saved).unwrap();
+        restored.validate().unwrap();
+        assert!(matches!(
+            restored.get(pane).map(|node| &node.kind),
+            Some(ilium_core::NodeKind::Pane {
+                content: PaneContentKind::Plugin,
+                status: PaneStatus::Plugin { dirty: false },
+                ..
+            })
+        ));
+        assert_eq!(restored.plugin_pane_kind(pane), tree.plugin_pane_kind(pane));
+    }
+
+    #[tokio::test]
+    async fn a_plugin_pane_keeps_its_title_and_refuses_unknown_kinds_and_plugins_off() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let group = state
+            .tree
+            .write()
+            .await
+            .add_group(ilium_core::ROOT_ID, "project")
+            .unwrap();
+        let kinds = crate::plugin_host::pane_kinds::PaneKinds::of_manifests([(
+            "ilium.core.kanban",
+            KANBAN_MANIFEST,
+        )]);
+        let titled = create_plugin_pane(
+            &state,
+            Some(&kinds),
+            group,
+            "ilium.core.kanban.board",
+            "Sprint\u{7}".to_owned(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state
+                .tree
+                .read()
+                .await
+                .get(titled)
+                .map(|node| node.name.clone()),
+            Some("Sprint".to_owned())
+        );
+        let ids_before = state.tree.read().await.all_ids().count();
+        let unknown = create_plugin_pane(
+            &state,
+            Some(&kinds),
+            group,
+            "example.other.board",
+            String::new(),
+        )
+        .await
+        .unwrap_err();
+        assert!(unknown.contains("no plugin contributes"), "{unknown}");
+        assert_eq!(state.tree.read().await.all_ids().count(), ids_before);
+
+        // Through the wire: this test state runs no plugin host, so the request is refused
+        // with a typed outcome instead of a node nobody could draw.
+        let (sender, mut replies) = DirectEventSender::channel(16);
+        handle_request(
+            &state,
+            ClientRequest::NewPane {
+                request_id: 77,
+                parent_group: group,
+                kind: NewPaneKind::Plugin {
+                    kind_id: "ilium.core.kanban.board".into(),
+                    title: "Board".into(),
+                },
+                working_directory: NewPaneWorkingDirectory::ProjectRoot,
+            },
+            &sender,
+        )
+        .await;
+        let (request_id, result) = loop {
+            match tokio::time::timeout(Duration::from_secs(5), replies.recv()).await {
+                Ok(Some(ServerEvent::PaneCreateFinished { request_id, result })) => {
+                    break (request_id, result);
+                }
+                Ok(Some(_)) => {}
+                other => panic!("creation must report its outcome, got {other:?}"),
+            }
+        };
+        assert_eq!(request_id, 77);
+        assert!(result.unwrap_err().contains("plugins are off"));
+        assert_eq!(state.tree.read().await.all_ids().count(), ids_before);
     }
 
     #[tokio::test]

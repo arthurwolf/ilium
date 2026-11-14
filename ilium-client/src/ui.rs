@@ -1133,6 +1133,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         Mode::Explorer(overlay, _)
         | Mode::FolderExplorer(overlay, _)
         | Mode::ProjectFolderExplorer(overlay, _)
+        | Mode::PluginFilePicker(overlay, _)
         | Mode::BoardPathPicker(overlay) => {
             explorer_overlay::render(frame, area, overlay, std::time::SystemTime::now());
         }
@@ -1271,10 +1272,6 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                     modal::DialogButtonTone::Danger,
                 ),
             );
-        }
-        Mode::Rename(state) => {
-            cursor =
-                modal::render_text_prompt_cursor(frame, area, "Rename", state, "Rename").or(cursor);
         }
         Mode::CommandPrompt(state) => {
             cursor = modal::render_text_prompt_cursor(frame, area, "Run command", state, "Run")
@@ -2646,6 +2643,10 @@ fn draw_pane_runtime(
     let pane_focused =
         matches!(app.focus, FocusTarget::Pane) && app.active_pane_id() == Some(viewport.pane_id);
     let pane_title = pane_title(app, viewport.pane_id);
+    // A plugin pane has no local runtime: its owner plugin draws the body (gap G14b).
+    if crate::plugin_host::plugin_panes::draw(frame, app, &viewport, pane_focused, &pane_title) {
+        return;
+    }
     let completed_agent_close_action = app.completed_agent_close_action(viewport);
     let Some(runtime) = app.panes.get(&viewport.pane_id) else {
         let blocking_error = app
@@ -2966,6 +2967,8 @@ fn draw_pane_runtime(
             );
         }
     }
+
+    draw_plugin_frame_rows(frame, app, viewport);
 
     if let Some(briefing_area) = viewport.briefing_area {
         if matches!(runtime, PaneRuntime::Terminal(_)) {
@@ -3505,6 +3508,39 @@ fn pane_title(app: &App, id: NodeId) -> String {
     }
 }
 
+/// Draws the plugin banner and footer rows (`pane_frame_slots` placed `banner` and
+/// `footer-row`) in the rows [`App::pane_viewports`] reserved for them. The banner uses the
+/// native prompt banner's look; the footer is a dim status line.
+fn draw_plugin_frame_rows(
+    frame: &mut Frame,
+    app: &App,
+    viewport: crate::split_layout::PaneViewport,
+) {
+    use crate::plugin_host::views::FrameRowPlacement;
+    let rows = [
+        (
+            viewport.plugin_banner_area,
+            FrameRowPlacement::Banner,
+            crate::theme::last_prompt_style(app.ui_settings.color_scheme),
+        ),
+        (
+            viewport.plugin_footer_area,
+            FrameRowPlacement::FooterRow,
+            Style::new().add_modifier(Modifier::DIM),
+        ),
+    ];
+    for (area, placement, style) in rows {
+        let Some(area) = area else {
+            continue;
+        };
+        let Some(text) = app.plugin_frame_row_text(viewport.pane_id, placement) else {
+            continue;
+        };
+        frame.render_widget(Clear, area);
+        frame.render_widget(Paragraph::new(format!(" {text}")).style(style), area);
+    }
+}
+
 /// Compact, stable class name for the selected-terminal title.
 fn agent_class_title(class: &AgentClass) -> &str {
     class.label()
@@ -3530,7 +3566,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Move => "MOVE",
         // The buffer itself is shown in the modal popup (see `draw`), not
         // here -- the status bar only names the mode while one is open.
-        Mode::Rename(_) => "RENAME",
         Mode::CommandPrompt(_) => "RUN COMMAND",
         Mode::InferenceSettingPrompt(_, _) => "INFERENCE SETTING",
         Mode::VoiceSettingPrompt(_, _) => "VOICE SETTING",
@@ -3548,6 +3583,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ExplorerFileMenu(_) => "FILE ACTIONS",
         Mode::FolderExplorer(..) => "FOLDER PICKER",
         Mode::ProjectFolderExplorer(..) => "PROJECT FOLDER PICKER",
+        Mode::PluginFilePicker(..) => "PLUGIN FILE PICKER",
         Mode::ContextMenu(..) => "TREE ACTIONS",
         Mode::TerminalPaneContextMenu(..) => "TERMINAL ACTIONS",
         Mode::AgentToolbarModelSubmenu(..) => "MODEL STRENGTH",

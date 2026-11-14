@@ -30,3 +30,8 @@ Every gap-dependent testkit item is used only in `tests/features/common.rs` (and
 - Kernel (A5): nothing collects the `palettes` and `style-presets` extension points; `ilium-ambient/src/style.rs` and `style_filters.rs` use their built-in tables only.
 - Package (A6): `plugins/core/ambient/assets/` does not exist, so the gallery cannot reference `thumbs/<scene>.png` and `clips/<scene>.webm` yet.
 - Cuts: `docs/tasks/02-cuts/ambient.md` holds no hunks and keys A1 to A7 name the missing consumer for each blocked kernel file.
+
+## Update (visuals group, move pass)
+
+- Kernel (A2) is closed for the keys `scene` and `semantic`: `ilium-client` applies a change of the `[animations]` table to the live animation (`plugin_host/animation_table.rs`, `App::apply_plugin_animation_table`), and the client part forwards a user change of its rows to `set-setting` (`src/forward.rs`, `tests/features/forward.rs`). Still wanted: the same for `observer` (the client keeps the observer location in the animation home's `.ilium/config.yaml`) and `saved_places` (the kernel has none), and a write-back of the current scene into `[animations]` when the kernel Animations tab changes it, so a read of tab `animations` shows the live value.
+- `ilium-plugin-testkit`: `FakeHost::stub_service` and `service_calls` are what `tests/features/forward.rs` uses. The fake answers any unstubbed service with `{"ok":true}`, so the test pins the call and the refusal handling, not the server part's write; that write stays pinned by `tests/features/set_setting.rs`.

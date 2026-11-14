@@ -36,6 +36,84 @@ pub enum PaneContentKind {
     Terminal,
     Editor,
     Board,
+    /// A pane whose body a plugin draws: a pane kind a plugin contributes in its manifest's
+    /// `pane_kinds`. The node's `plugin_pane` names the kind. Appended last so every earlier
+    /// variant keeps its bincode index.
+    Plugin,
+}
+
+/// Longest global pane kind id a plugin pane may carry, in UTF-8 bytes. A plugin id is at most
+/// 128 bytes and a local kind id at most 64, so this leaves room for both and the dot.
+pub const MAXIMUM_PLUGIN_PANE_KIND_ID_BYTES: usize = 256;
+
+/// The pane kind a [`PaneContentKind::Plugin`] pane shows: the global kind id
+/// `<plugin-id>.<local-id>`, where the local id is the `id` of the plugin's `pane_kinds` entry.
+/// A local id never contains a dot (manifest schema), so the owner plugin is everything before
+/// the last dot. Validated on construction and on deserialization, so a restored snapshot can
+/// never carry a kind id with no owner.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct PluginPaneKind {
+    kind_id: String,
+}
+
+impl PluginPaneKind {
+    /// Checks and wraps a global pane kind id such as `ilium.core.kanban.board`.
+    pub fn new(kind_id: impl Into<String>) -> Result<Self, TreeError> {
+        let kind_id = kind_id.into();
+        let valid_local = |local: &str| {
+            !local.is_empty()
+                && local.len() <= 64
+                && local
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+                && !local.starts_with('-')
+                && !local.ends_with('-')
+        };
+        let is_valid = kind_id.len() <= MAXIMUM_PLUGIN_PANE_KIND_ID_BYTES
+            && kind_id
+                .rsplit_once('.')
+                .is_some_and(|(plugin, local)| !plugin.is_empty() && valid_local(local))
+            && !kind_id.chars().any(char::is_control);
+        if is_valid {
+            Ok(Self { kind_id })
+        } else {
+            Err(TreeError::InvalidPluginPaneKind(kind_id))
+        }
+    }
+
+    /// The global kind id, `<plugin-id>.<local-id>`.
+    pub fn kind_id(&self) -> &str {
+        &self.kind_id
+    }
+
+    /// The id of the plugin that provides this kind and draws its panes.
+    pub fn plugin(&self) -> &str {
+        self.kind_id
+            .rsplit_once('.')
+            .map_or("", |(plugin, _local)| plugin)
+    }
+
+    /// The local id of the kind inside its plugin's manifest.
+    pub fn local_kind(&self) -> &str {
+        self.kind_id
+            .rsplit_once('.')
+            .map_or("", |(_plugin, local)| local)
+    }
+}
+
+impl TryFrom<String> for PluginPaneKind {
+    type Error = TreeError;
+
+    fn try_from(kind_id: String) -> Result<Self, Self::Error> {
+        Self::new(kind_id)
+    }
+}
+
+impl From<PluginPaneKind> for String {
+    fn from(kind: PluginPaneKind) -> Self {
+        kind.kind_id
+    }
 }
 
 /// Maximum UTF-8 byte lengths accepted from an unattended progress probe.
@@ -907,15 +985,20 @@ pub enum PaneStatus {
     Board,
     /// Historical agent data without a currently authorized live composer.
     AgentUnavailable(Box<AgentRecovery>),
+    /// A pane a plugin draws ([`PaneContentKind::Plugin`]); `true` means the plugin marked its
+    /// content as having unsaved changes through the basic primitive.
+    Plugin { dirty: bool },
 }
 
 impl PaneStatus {
     pub const fn agent_state(&self) -> Option<&AgentState> {
         match self {
             Self::Agent(state) => Some(state),
-            Self::PlainShell | Self::Editor { .. } | Self::Board | Self::AgentUnavailable(_) => {
-                None
-            }
+            Self::PlainShell
+            | Self::Editor { .. }
+            | Self::Board
+            | Self::AgentUnavailable(_)
+            | Self::Plugin { .. } => None,
         }
     }
 
@@ -924,7 +1007,7 @@ impl PaneStatus {
         match self {
             Self::Agent(state) => Some(state),
             Self::AgentUnavailable(recovery) => Some(&recovery.last_known_state),
-            Self::PlainShell | Self::Editor { .. } | Self::Board => None,
+            Self::PlainShell | Self::Editor { .. } | Self::Board | Self::Plugin { .. } => None,
         }
     }
 
@@ -956,6 +1039,7 @@ enum PaneStatusWire {
     // Append only. Existing variant indices and payloads remain unchanged.
     // Older peers cannot decode this new variant; this is not a negotiation.
     AgentUnavailable(Box<AgentRecovery>),
+    Plugin { dirty: bool },
 }
 
 impl Serialize for PaneStatus {
@@ -974,6 +1058,7 @@ impl Serialize for PaneStatus {
             Self::Editor { dirty } => PaneStatusWire::Editor { dirty: *dirty },
             Self::Board => PaneStatusWire::Board,
             Self::AgentUnavailable(recovery) => PaneStatusWire::AgentUnavailable(recovery.clone()),
+            Self::Plugin { dirty } => PaneStatusWire::Plugin { dirty: *dirty },
         };
         wire.serialize(serializer)
     }
@@ -993,6 +1078,7 @@ impl<'de> Deserialize<'de> for PaneStatus {
             PaneStatusWire::Editor { dirty } => Self::Editor { dirty },
             PaneStatusWire::Board => Self::Board,
             PaneStatusWire::AgentUnavailable(recovery) => Self::AgentUnavailable(recovery),
+            PaneStatusWire::Plugin { dirty } => Self::Plugin { dirty },
         })
     }
 }
@@ -1178,7 +1264,7 @@ pub fn project_pane_signals(
                 now_rule: if shell_output.is_some() { "A8" } else { "A9" },
             };
         }
-        PaneStatus::Editor { .. } | PaneStatus::Board => {
+        PaneStatus::Editor { .. } | PaneStatus::Board | PaneStatus::Plugin { .. } => {
             return PaneSignals {
                 objective: ObjectiveSignal::None,
                 now: NowSignal::None,
@@ -1658,6 +1744,12 @@ pub enum NodeKind {
         /// Worktree creation provenance; the live Git state is not persisted.
         #[serde(default)]
         workspace: Option<Box<PaneWorkspace>>,
+        /// Present exactly for [`PaneContentKind::Plugin`]: the plugin pane kind the pane shows.
+        /// Kept in the pure tree, like `board_storage`, because a plugin pane has no PTY or
+        /// server process; the snapshot of the tree is what restores it. `serde(default)` keeps
+        /// snapshots written before plugin panes existed loadable.
+        #[serde(default)]
+        plugin_pane: Option<PluginPaneKind>,
     },
     /// A persisted filesystem root. Its descendants are read locally by the
     /// client and intentionally never become server-owned domain nodes.
@@ -1856,6 +1948,12 @@ pub enum TreeError {
     NotAPane(NodeId),
     #[error("pane {0:?} is not a terminal")]
     NotATerminal(NodeId),
+    #[error("pane {0:?} is not a plugin pane")]
+    NotAPluginPane(NodeId),
+    #[error("a plugin pane needs its pane kind; create it with add_plugin_pane")]
+    PluginPaneKindRequired,
+    #[error("plugin pane kind {0:?} is not a global kind id of the form <plugin-id>.<local-id>")]
+    InvalidPluginPaneKind(String),
     #[error("pane {pane_id:?} progress is invalid: {reason}")]
     InvalidPaneProgress { pane_id: NodeId, reason: String },
     #[error("scheduled input must contain text, Enter, or both")]
@@ -2660,12 +2758,14 @@ impl Tree {
             return Err(TreeError::PanesRequireGroup);
         }
         self.validate_new_pane_parent(parent)?;
-        let id = self.alloc_id();
         let status = match content {
             PaneContentKind::Terminal => PaneStatus::PlainShell,
             PaneContentKind::Editor => PaneStatus::Editor { dirty: false },
             PaneContentKind::Board => PaneStatus::Board,
+            // A plugin pane is meaningless without its kind: `add_plugin_pane` names it.
+            PaneContentKind::Plugin => return Err(TreeError::PluginPaneKindRequired),
         };
+        let id = self.alloc_id();
         self.push_child(parent, id)?;
         self.nodes.insert(
             id,
@@ -2695,6 +2795,7 @@ impl Tree {
                     progress_monitors: Vec::new(),
                     launch_cwd: None,
                     workspace: None,
+                    plugin_pane: None,
                 },
             },
         );
@@ -2767,10 +2868,93 @@ impl Tree {
                     progress_monitors: Vec::new(),
                     launch_cwd: None,
                     workspace: None,
+                    plugin_pane: None,
                 },
             },
         );
         Ok(id)
+    }
+
+    /// Adds a pane whose body a plugin draws. The kind is persisted in the tree, so the pane
+    /// survives a snapshot round trip without any server process behind it; what the plugin
+    /// keeps for the pane lives in its node metadata or storage, not here.
+    pub fn add_plugin_pane(
+        &mut self,
+        parent: NodeId,
+        name: impl Into<String>,
+        kind: PluginPaneKind,
+    ) -> Result<NodeId, TreeError> {
+        if parent == ROOT_ID {
+            return Err(TreeError::PanesRequireGroup);
+        }
+        self.validate_new_pane_parent(parent)?;
+        let id = self.alloc_id();
+        self.push_child(parent, id)?;
+        self.nodes.insert(
+            id,
+            Node {
+                id,
+                parent: Some(parent),
+                name: name.into(),
+                short_name: None,
+                inferred_icon: None,
+                inferred_animation: None,
+                animation_generation: 0,
+                is_name_fixed: false,
+                presentation_revision: 0,
+                is_bookmarked: false,
+                activity_revision: 0,
+                last_restructure_activity_revision: None,
+                last_focus_activity_revision: None,
+                structure_source: StructureSource::Manual,
+                kind: NodeKind::Pane {
+                    content: PaneContentKind::Plugin,
+                    status: PaneStatus::Plugin { dirty: false },
+                    title_source: PaneTitleSource::Automatic,
+                    board_storage: None,
+                    scheduled_input: None,
+                    prompt_queue: Vec::new(),
+                    last_prompt: None,
+                    progress_monitors: Vec::new(),
+                    launch_cwd: None,
+                    workspace: None,
+                    plugin_pane: Some(kind),
+                },
+            },
+        );
+        Ok(id)
+    }
+
+    /// The plugin pane kind of a pane, `None` for any other node.
+    pub fn plugin_pane_kind(&self, id: NodeId) -> Option<&PluginPaneKind> {
+        match &self.get(id)?.kind {
+            NodeKind::Pane {
+                content: PaneContentKind::Plugin,
+                plugin_pane: Some(kind),
+                ..
+            } => Some(kind),
+            _ => None,
+        }
+    }
+
+    /// Records whether a plugin pane has unsaved changes (the basic primitive's dirty mark).
+    /// Returns whether the status changed.
+    pub fn set_plugin_pane_dirty(&mut self, id: NodeId, dirty: bool) -> Result<bool, TreeError> {
+        let node = self.nodes.get_mut(&id).ok_or(TreeError::NodeNotFound(id))?;
+        let NodeKind::Pane {
+            content: PaneContentKind::Plugin,
+            status,
+            ..
+        } = &mut node.kind
+        else {
+            return Err(TreeError::NotAPluginPane(id));
+        };
+        let next = PaneStatus::Plugin { dirty };
+        if *status == next {
+            return Ok(false);
+        }
+        *status = next;
+        Ok(true)
     }
 
     /// Adds a filesystem root beneath a group. Only this stable reference is
@@ -4909,6 +5093,30 @@ impl Tree {
             ));
         }
 
+        // A plugin pane and its kind come together: a kind on any other pane, or a plugin pane
+        // without its kind or status, could never be drawn and is refused like any other
+        // corrupt snapshot.
+        for node in self.nodes.values() {
+            let NodeKind::Pane {
+                content,
+                status,
+                plugin_pane,
+                ..
+            } = &node.kind
+            else {
+                continue;
+            };
+            let is_plugin = *content == PaneContentKind::Plugin;
+            if is_plugin != plugin_pane.is_some()
+                || is_plugin != matches!(status, PaneStatus::Plugin { .. })
+            {
+                return Err(TreeError::InvalidStructure(format!(
+                    "pane {:?} has an inconsistent plugin pane kind",
+                    node.id
+                )));
+            }
+        }
+
         let mut worktree_identities = HashSet::new();
         for node in self.nodes.values() {
             let NodeKind::Container(container) = &node.kind else {
@@ -5979,6 +6187,160 @@ mod tests {
                 ..
             }) if saved_storage == &storage
         ));
+    }
+
+    #[test]
+    fn a_plugin_pane_kind_names_its_owner_and_local_id() {
+        let kind = PluginPaneKind::new("ilium.core.kanban.board").unwrap();
+        assert_eq!(kind.kind_id(), "ilium.core.kanban.board");
+        assert_eq!(kind.plugin(), "ilium.core.kanban");
+        assert_eq!(kind.local_kind(), "board");
+        for invalid in [
+            "",
+            "board",
+            ".board",
+            "ilium.core.kanban.",
+            "ilium.core.kanban.Board",
+            "ilium.core.kanban.-board",
+            "ilium.core.kanban.bo ard",
+        ] {
+            assert!(
+                matches!(
+                    PluginPaneKind::new(invalid),
+                    Err(TreeError::InvalidPluginPaneKind(rejected)) if rejected == invalid
+                ),
+                "{invalid:?} must be refused"
+            );
+        }
+        let too_long = format!("{}.board", "p".repeat(MAXIMUM_PLUGIN_PANE_KIND_ID_BYTES));
+        assert!(PluginPaneKind::new(too_long).is_err());
+    }
+
+    #[test]
+    fn add_plugin_pane_records_its_kind_and_survives_a_snapshot_round_trip() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let kind = PluginPaneKind::new("ilium.core.kanban.board").unwrap();
+        let pane = tree.add_plugin_pane(group, "Sprint", kind.clone()).unwrap();
+        assert!(matches!(
+            tree.get(pane).map(|node| &node.kind),
+            Some(NodeKind::Pane {
+                content: PaneContentKind::Plugin,
+                status: PaneStatus::Plugin { dirty: false },
+                board_storage: None,
+                plugin_pane: Some(saved),
+                ..
+            }) if saved == &kind
+        ));
+        assert_eq!(tree.plugin_pane_kind(pane), Some(&kind));
+        tree.validate().unwrap();
+        // A snapshot that is a clone of the tree restores the same kind (the server's JSON
+        // snapshot round trip is covered in ilium-server's persistence tests).
+        let restored = tree.clone();
+        restored.validate().unwrap();
+        assert_eq!(restored.plugin_pane_kind(pane), Some(&kind));
+    }
+
+    /// Plugin pane kinds and statuses keep their serialized form, and a kind id with no owner
+    /// is refused while deserializing rather than restored into a pane nobody can draw.
+    #[test]
+    fn a_plugin_pane_kind_and_status_round_trip_through_serde() {
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        struct Saved {
+            kind: PluginPaneKind,
+            content: PaneContentKind,
+            status: PaneStatus,
+        }
+        let saved = Saved {
+            kind: PluginPaneKind::new("ilium.core.kanban.board").unwrap(),
+            content: PaneContentKind::Plugin,
+            status: PaneStatus::Plugin { dirty: true },
+        };
+        let text = toml::to_string(&saved).unwrap();
+        assert!(
+            text.contains("kind = \"ilium.core.kanban.board\""),
+            "{text}"
+        );
+        assert_eq!(toml::from_str::<Saved>(&text).unwrap(), saved);
+        let ownerless = text.replace("ilium.core.kanban.board", "board");
+        assert!(toml::from_str::<Saved>(&ownerless).is_err());
+    }
+
+    #[test]
+    fn a_plugin_pane_needs_its_kind() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let ids_before = tree.all_ids().count();
+        assert!(matches!(
+            tree.add_pane(group, "kindless", PaneContentKind::Plugin),
+            Err(TreeError::PluginPaneKindRequired)
+        ));
+        assert_eq!(tree.all_ids().count(), ids_before);
+        let kind = PluginPaneKind::new("example.notes.note").unwrap();
+        assert!(matches!(
+            tree.add_plugin_pane(ROOT_ID, "root", kind),
+            Err(TreeError::PanesRequireGroup)
+        ));
+    }
+
+    #[test]
+    fn validate_refuses_a_plugin_pane_without_its_kind_and_a_kind_on_another_pane() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let kind = PluginPaneKind::new("example.notes.note").unwrap();
+        let plugin = tree.add_plugin_pane(group, "Notes", kind.clone()).unwrap();
+        let shell = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+
+        let mut kindless = tree.clone();
+        let NodeKind::Pane { plugin_pane, .. } = &mut kindless.get_mut(plugin).unwrap().kind else {
+            panic!("pane")
+        };
+        *plugin_pane = None;
+        assert!(kindless.validate().is_err());
+
+        let mut stray = tree.clone();
+        let NodeKind::Pane { plugin_pane, .. } = &mut stray.get_mut(shell).unwrap().kind else {
+            panic!("pane")
+        };
+        *plugin_pane = Some(kind);
+        assert!(stray.validate().is_err());
+
+        let mut wrong_status = tree.clone();
+        let NodeKind::Pane { status, .. } = &mut wrong_status.get_mut(plugin).unwrap().kind else {
+            panic!("pane")
+        };
+        *status = PaneStatus::Board;
+        assert!(wrong_status.validate().is_err());
+        tree.validate().unwrap();
+    }
+
+    #[test]
+    fn a_plugin_pane_carries_its_dirty_mark() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let kind = PluginPaneKind::new("example.notes.note").unwrap();
+        let plugin = tree.add_plugin_pane(group, "Notes", kind).unwrap();
+        let shell = tree
+            .add_pane(group, "shell", PaneContentKind::Terminal)
+            .unwrap();
+        assert!(tree.set_plugin_pane_dirty(plugin, true).unwrap());
+        assert!(!tree.set_plugin_pane_dirty(plugin, true).unwrap());
+        assert!(matches!(
+            tree.get(plugin).map(|node| &node.kind),
+            Some(NodeKind::Pane {
+                status: PaneStatus::Plugin { dirty: true },
+                ..
+            })
+        ));
+        assert!(matches!(
+            tree.set_plugin_pane_dirty(shell, true),
+            Err(TreeError::NotAPluginPane(id)) if id == shell
+        ));
+        let status = PaneStatus::Plugin { dirty: true };
+        assert!(status.agent_state().is_none());
+        assert!(status.known_agent_state().is_none());
     }
 
     #[test]

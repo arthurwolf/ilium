@@ -10,6 +10,7 @@ pub mod new_group;
 pub mod node_ops;
 pub mod ordering;
 pub mod recent_activity;
+pub mod rename;
 pub mod toolbar_rows;
 
 use std::cell::RefCell;
@@ -23,8 +24,9 @@ use ilium_plugin_sdk::host::{HostIntentsHost, HostTopics};
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, Activation, Area, CommandInvokedEvent, CreateFolderSpec,
     CreateGroupSpec, DecorationVisibility, ErrorCode, Intent, MessageSpec, MessageTarget, NodeId,
-    OpenViewSpec, Outcome, Placement, PluginError, PluginId, PluginSide, SetBookmarkedSpec,
-    SetDecorationSpec, SetNodeLockedSpec, Submission, UiTree, ViewTarget,
+    OpenViewSpec, Outcome, Placement, PluginError, PluginId, PluginSide, RenameNodeSpec,
+    SetBookmarkedSpec, SetDecorationSpec, SetNodeLockedSpec, Submission, TitleSource, UiTree,
+    ViewTarget,
 };
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 use node_ops::{NodeOp, Snapshot, PLUGIN_ID};
@@ -306,6 +308,7 @@ impl Handler for TreeServer {
                     if let Some(submission) =
                         creation_from_message(&message.channel, &message.payload)
                             .or_else(|| dialog_creation(&message.channel, &message.payload))
+                            .or_else(|| dialog_rename(&message.channel, &message.payload))
                     {
                         submissions.push(submission);
                     }
@@ -372,9 +375,26 @@ fn dialog_creation(channel: &str, payload: &[u8]) -> Option<Submission> {
     })))
 }
 
+/// Turns the `rename-node` answer of the "Rename" dialog (JSON `{"node", "title"}`) into a
+/// rename of that node. Anything else is not for this handler.
+fn dialog_rename(channel: &str, payload: &[u8]) -> Option<Submission> {
+    if channel != rename::CHANNEL {
+        return None;
+    }
+    let answer = rename::Answer::from_payload(payload)?;
+    Some(Submission::new(Intent::RenameNode(RenameNodeSpec {
+        node: NodeId(answer.node),
+        title: answer.title,
+        source: TitleSource::Plugin,
+        expected_revision: None,
+    })))
+}
+
 thread_local! {
     /// The open "New group" dialog of this client, if any.
     static NEW_GROUP: RefCell<Option<new_group::Dialog>> = const { RefCell::new(None) };
+    /// The open "Rename" dialog of this client, if any.
+    static RENAME: RefCell<Option<rename::Dialog>> = const { RefCell::new(None) };
 }
 
 /// Most nodes the dialog reads from the tree; a larger tree offers its first groups only.
@@ -462,6 +482,64 @@ fn new_group_action(
     }
 }
 
+/// Opens the "Rename" dialog for the `rename` command with the node to rename (`{"node": id}`).
+/// A row that is not a node of the tree does nothing; a worktree row is refused with a toast.
+fn open_rename(arguments_json: &str) -> Vec<Submission> {
+    let Some(node) = rename::node_argument(arguments_json) else {
+        return Vec::new();
+    };
+    let fact = {
+        let mut api = host();
+        HostTree::get(&mut *api, NodeId(node)).map(|view| rename::NodeFact::from_view(&view))
+    };
+    match rename::Dialog::open(fact.as_ref()) {
+        Ok(dialog) => {
+            RENAME.with(|cell| *cell.borrow_mut() = Some(dialog));
+            vec![Submission::new(Intent::OpenView(OpenViewSpec {
+                view: rename::view(),
+                focus: true,
+            }))]
+        }
+        Err(refusal) => refusal
+            .toast()
+            .map(|toast| Submission::new(Intent::Toast(toast)))
+            .into_iter()
+            .collect(),
+    }
+}
+
+/// Applies one action of the "Rename" dialog; when it ends the dialog, returns the message for
+/// the server side (if a rename is wanted) and the intent that closes the popup.
+fn rename_action(
+    key: &str,
+    action_id: &str,
+    kind: ActionKind,
+    value: Option<ActionValue>,
+) -> Vec<Submission> {
+    let step = RENAME.with(|cell| {
+        let mut state = cell.borrow_mut();
+        let step = state
+            .as_mut()
+            .map(|dialog| dialog.act(key, action_id, kind, value));
+        if matches!(step, Some(rename::Step::Rename(_) | rename::Step::Cancel)) {
+            *state = None;
+        }
+        step
+    });
+    let close = || Submission::new(Intent::CloseView(rename::view()));
+    match step {
+        Some(rename::Step::Rename(answer)) => {
+            vec![
+                message_to_server(rename::CHANNEL, answer.to_payload()),
+                close(),
+            ]
+        }
+        // The kernel already removed a popup it closed itself; every other end closes it here.
+        Some(rename::Step::Cancel) if kind != ActionKind::Closed => vec![close()],
+        _ => Vec::new(),
+    }
+}
+
 /// The client side of `ilium.core.tree` (core-plugin-tree.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
@@ -470,12 +548,19 @@ pub struct TreeClient;
 impl Lifecycle for TreeClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
         NEW_GROUP.with(|cell| *cell.borrow_mut() = None);
+        RENAME.with(|cell| *cell.borrow_mut() = None);
         Ok(())
     }
 }
 
 impl Views for TreeClient {
     fn render(&mut self, view: ViewTarget, _area: Area) -> UiTree {
+        if view == rename::view() {
+            return RENAME.with(|cell| match cell.borrow().as_ref() {
+                Some(dialog) => dialog.render(),
+                None => rename::closed(),
+            });
+        }
         NEW_GROUP.with(|cell| match cell.borrow().as_ref() {
             Some(dialog) if view == new_group::view() => dialog.render(),
             _ => new_group::blank(),
@@ -496,7 +581,18 @@ impl Handler for TreeClient {
                         .unwrap_or(&invoked.command);
                     if bare == new_group::POPUP {
                         submissions.extend(open_new_group(&invoked.arguments_json));
+                    } else if bare == rename::POPUP {
+                        submissions.extend(open_rename(&invoked.arguments_json));
                     }
+                    continue;
+                }
+                Event::UiAction(action) if action.view == rename::view() => {
+                    submissions.extend(rename_action(
+                        &action.key,
+                        &action.action_id,
+                        action.kind,
+                        action.value,
+                    ));
                     continue;
                 }
                 Event::UiAction(action) if action.view == new_group::view() => {
@@ -625,9 +721,16 @@ mod spec_tests {
 
     /// REQ: COR-050
     #[test]
-    fn client_grants_are_the_tree_read_and_the_popup() {
+    fn client_grants_are_the_tree_read_the_popup_and_the_toast() {
         let grants = string_list(&manifest()["capabilities"]["client"]);
-        assert_eq!(grants, vec!["tree.read".to_owned(), "ui.panels".to_owned()]);
+        assert_eq!(
+            grants,
+            vec![
+                "tree.read".to_owned(),
+                "ui.panels".to_owned(),
+                "notify.toast".to_owned()
+            ]
+        );
     }
 
     /// REQ: COR-050

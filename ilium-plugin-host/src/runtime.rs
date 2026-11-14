@@ -628,7 +628,7 @@ impl HostRuntime {
             ))),
             fonts: Some(Box::new(FontsImport::default())),
             codec: Some(Box::new(CodecImport)),
-            sounds: Some(Box::new(SoundsImport)),
+            sounds: Some(Box::new(SoundsImport::for_manifest(&record.manifest))),
             // Without a provider `embed` completes `unsupported` on this instance's queue;
             // `wiring::wave_two::equip` replaces it with the provider and the index store.
             vector: Some(Box::new(VectorImport::new(

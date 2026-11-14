@@ -8,6 +8,7 @@
 
 pub mod control;
 pub mod credit;
+pub mod forward;
 pub mod help;
 pub mod hover;
 pub mod number;
@@ -18,21 +19,30 @@ pub mod set_setting;
 pub mod values;
 pub mod visibility;
 
+use std::collections::BTreeMap;
+
 use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::generated::host::kernel_settings::HostKernelSettings;
+use ilium_plugin_sdk::generated::host::log::Level;
+use ilium_plugin_sdk::generated::host::services::HostServices;
+use ilium_plugin_sdk::generated::host::settings::HostSettings;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{
-    Alignment, Area, NodeFlags, ParagraphSpec, Span, Style, UiNode, UiTree, ViewTarget, Widget,
+    Alignment, Area, NodeFlags, Outcome, ParagraphSpec, RequestRef, SettingsOrigin, Span, Style,
+    UiNode, UiTree, ViewTarget, Widget,
 };
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 
 /// The client side of `ilium.core.ambient` (core-plugin-ambient.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
-pub struct AmbientClient;
+pub struct AmbientClient {
+    /// The `set-setting` calls still waiting for their reply: the request, and the row it carries.
+    pending: BTreeMap<u64, String>,
+}
 
 impl Lifecycle for AmbientClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
@@ -41,9 +51,76 @@ impl Lifecycle for AmbientClient {
 }
 
 impl Handler for AmbientClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+    /// A change of one of the plugin's own rows by the user is stored in the Animations kernel
+    /// tab through the service `ilium.core.ambient/set-setting`; the client applies it from there.
+    /// A change this plugin or a file made is not forwarded again.
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        for event in batch {
+            match event {
+                Event::SettingsChanged(change) if change.origin == SettingsOrigin::User => {
+                    self.forward_rows(&change.keys);
+                }
+                Event::RequestCompleted(result) => {
+                    if let RequestRef::Call(request) = result.request {
+                        self.finish_call(request.0, &result.outcome);
+                    }
+                }
+                _ => {}
+            }
+        }
         Vec::new()
     }
+}
+
+impl AmbientClient {
+    /// Sends one service call per changed row that reaches the kernel tab.
+    fn forward_rows(&mut self, changed: &[String]) {
+        let mut api = host();
+        let values: serde_json::Value =
+            serde_json::from_str(&HostSettings::get_json(&mut *api)).unwrap_or_default();
+        for call in forward::calls(changed, &values) {
+            match HostServices::call(
+                &mut *api,
+                forward::SERVICE.to_owned(),
+                forward::METHOD.to_owned(),
+                call.payload_json,
+            ) {
+                Ok(request) => {
+                    self.pending.insert(request.0, call.key);
+                }
+                Err(error) => log_failure(&call.key, &error.message),
+            }
+        }
+    }
+
+    /// Reports a refused or failed call; a call that was stored needs no report.
+    fn finish_call(&mut self, request: u64, outcome: &Outcome) {
+        let Some(key) = self.pending.remove(&request) else {
+            return;
+        };
+        let mut api = host();
+        match outcome {
+            Outcome::Ok => {
+                let reply = HostServices::take_reply(
+                    &mut *api,
+                    ilium_plugin_sdk::types::RequestId(request),
+                );
+                if let Some(refusal) = reply.as_deref().and_then(forward::refusal_of) {
+                    log_failure(&key, &refusal);
+                }
+            }
+            Outcome::Refused(error) | Outcome::Failed(error) => log_failure(&key, &error.message),
+            _ => log_failure(&key, "the call did not complete"),
+        }
+    }
+}
+
+/// Logs that a row could not be stored in the Animations tab.
+fn log_failure(key: &str, reason: &str) {
+    ilium_plugin_sdk::log::log(
+        Level::Warn,
+        &format!("ambient: the {key} row was not stored in the Animations tab: {reason}"),
+    );
 }
 
 impl Views for AmbientClient {

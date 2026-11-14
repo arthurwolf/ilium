@@ -13,6 +13,7 @@
 mod cli_bridge;
 mod facade;
 mod http_routes;
+pub(crate) mod pane_kinds;
 mod remote;
 mod signatures;
 
@@ -255,6 +256,8 @@ pub(crate) struct PluginHostHandle {
     http: Arc<HttpRoutes>,
     /// The agent signatures of the catalogue plugins, republished on enable and disable.
     signatures: Mutex<signatures::ContributedSignatures>,
+    /// The basic pane kinds of the catalogue plugins (gap G14a): what a plugin pane may be.
+    pane_kinds: Arc<pane_kinds::PaneKinds>,
 }
 
 fn log_errors(what: &str, errors: Vec<ilium_plugin_host::runtime::RuntimeError>) {
@@ -402,6 +405,13 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         })
         .collect();
     let http = Arc::new(HttpRoutes::new(&start.catalogue, http_calls));
+    let pane_kinds = Arc::new(pane_kinds::PaneKinds::of_manifests(
+        start
+            .catalogue
+            .iter()
+            .map(|plugin| (plugin.id.as_str(), plugin.manifest.as_str())),
+    ));
+    facade.set_pane_kinds(Arc::clone(&pane_kinds));
     let catalogue = start.catalogue;
     let first = publisher.clone();
     // Loading compiles components; it runs on the host thread so `run()` is not held up.
@@ -432,6 +442,7 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         cli_tasks: Mutex::new(JoinSet::new()),
         http,
         signatures: Mutex::new(contributed),
+        pane_kinds,
     }))
 }
 
@@ -443,6 +454,11 @@ fn publish_signatures(state: &ServerState, contributed: &signatures::Contributed
 }
 
 impl PluginHostHandle {
+    /// The basic pane kinds the catalogue plugins contribute.
+    pub(crate) fn pane_kinds(&self) -> &pane_kinds::PaneKinds {
+        &self.pane_kinds
+    }
+
     /// Queues work for the runtime and publishes what it changed. False when the host stopped.
     fn post(&self, job: impl FnOnce(&mut HostRuntime) + Send + 'static) -> bool {
         let publisher = self.publisher.clone();

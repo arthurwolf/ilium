@@ -150,6 +150,33 @@ pub struct PluginToolbarButton {
     pub glyph: String,
     /// Shown in the caption row while the button is hovered.
     pub title: String,
+    /// Shown beside the glyph when the strip has room for every caption (`caption`, at most
+    /// [`PLUGIN_TOOLBAR_CAPTION_CELLS`] cells, already sanitized).
+    pub caption: Option<String>,
+}
+
+/// The widest caption a contributed toolbar button shows beside its glyph, in cells
+/// (reference-manifest.md `tree_toolbar`).
+pub const PLUGIN_TOOLBAR_CAPTION_CELLS: u16 = 12;
+
+impl PluginToolbarButton {
+    /// The display width of the caption, 0 without one; at most
+    /// [`PLUGIN_TOOLBAR_CAPTION_CELLS`].
+    pub fn caption_cells(&self) -> u16 {
+        self.caption.as_deref().map_or(0, |caption| {
+            u16::try_from(UnicodeWidthStr::width(caption))
+                .unwrap_or(u16::MAX)
+                .min(PLUGIN_TOOLBAR_CAPTION_CELLS)
+        })
+    }
+}
+
+/// The caption widths of `buttons`, in order: what toolbar geometry needs of them.
+pub(crate) fn plugin_caption_cells(buttons: &[PluginToolbarButton]) -> Vec<u16> {
+    buttons
+        .iter()
+        .map(PluginToolbarButton::caption_cells)
+        .collect()
 }
 
 impl TreeToolbarAction {
@@ -454,8 +481,9 @@ pub(crate) struct PaintedTreeRows {
     list: Rect,
     area: Rect,
     toolbar: bool,
-    /// How many contributed plugin buttons the toolbar drew (`TreeToolbarAction::Plugin`).
-    plugin_toolbar_buttons: usize,
+    /// The caption widths of the contributed plugin buttons the toolbar drew, one per
+    /// button (`TreeToolbarAction::Plugin`), so hits use the drawn geometry.
+    plugin_toolbar_captions: Vec<u16>,
     rows: Vec<(TreeNodeHit, u16)>,
     monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
     layout_slots: Option<TreeRowSlots>,
@@ -484,7 +512,7 @@ impl PaintedTreeRows {
             list: area,
             area,
             toolbar: false,
-            plugin_toolbar_buttons: 0,
+            plugin_toolbar_captions: Vec::new(),
             rows: vec![(TreeNodeHit { id, row, line: 0 }, 2)],
             monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             layout_slots: None,
@@ -543,7 +571,7 @@ impl PaintedTreeRows {
             list,
             area,
             toolbar: is_toolbar_visible(options.focused, options.hover.toolbar_hovered),
-            plugin_toolbar_buttons: options.plugin_toolbar.len(),
+            plugin_toolbar_captions: plugin_caption_cells(options.plugin_toolbar),
             _metadata: None,
             rows,
             monitoring_mode: options.agent_monitoring_mode,
@@ -825,9 +853,13 @@ impl PaintedTreeRows {
         layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
     ) -> Option<TreeToolbarAction> {
         self.toolbar.then_some(())?;
-        configured_toolbar_button_rects_with_plugins(self.area, layout, self.plugin_toolbar_buttons)
-            .into_iter()
-            .find_map(|(action, button)| button.contains(position).then_some(action))
+        configured_toolbar_button_rects_with_plugins(
+            self.area,
+            layout,
+            &self.plugin_toolbar_captions,
+        )
+        .into_iter()
+        .find_map(|(action, button)| button.contains(position).then_some(action))
     }
     pub(crate) fn node_at(&self, position: Position) -> Option<TreeNodeHit> {
         self.list.contains(position).then_some(())?;
@@ -2428,6 +2460,19 @@ fn pane_label_with_icons(
             ),
             Span::styled(name.to_string(), Style::new().fg(Color::Cyan)),
         ),
+        // A plugin pane shows its plugin-set title; unsaved work is marked like an editor's.
+        PaneStatus::Plugin { dirty } => {
+            let style = Style::new().fg(Color::Blue);
+            let text = if *dirty {
+                format!("{name}*")
+            } else {
+                name.to_string()
+            };
+            (
+                Span::styled(icons.glyph(IconTarget::Board).to_string(), style),
+                Span::styled(text, style),
+            )
+        }
     };
     let is_quiet_running = agent_monitoring_mode
         == crate::agent_monitoring::AgentMonitoringMode::Attention
@@ -3021,25 +3066,28 @@ pub(crate) fn configured_toolbar_button_rects(
 pub(crate) fn configured_toolbar_button_rects_with_plugins(
     area: Rect,
     layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
-    plugin_buttons: usize,
+    plugin_captions: &[u16],
 ) -> Vec<(TreeToolbarAction, Rect)> {
-    configured_toolbar_rects_with_plugins(toolbar_area(area), layout, plugin_buttons)
+    configured_toolbar_rects_with_plugins(toolbar_area(area), layout, plugin_captions)
 }
 
 pub(crate) fn configured_toolbar_rects_in_strip(
     toolbar: Rect,
     layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
 ) -> Vec<(TreeToolbarAction, Rect)> {
-    configured_toolbar_rects_with_plugins(toolbar, layout, 0)
+    configured_toolbar_rects_with_plugins(toolbar, layout, &[])
 }
 
-/// Lays out the layout's entries, then `plugin_buttons` plugin buttons in the space left
-/// before the anchored suffix. Plugin buttons come after every built-in left-hand entry, so
-/// they never move a built-in button; when the strip is too narrow they are the first to go.
+/// Lays out the layout's entries, then one plugin button per entry of `plugin_captions` in
+/// the space left before the anchored suffix. Plugin buttons come after every built-in
+/// left-hand entry, so they never move a built-in button; when the strip is too narrow they
+/// are the first to go. A plugin button widens to show its caption (the width in
+/// `plugin_captions`, 0 for none) only when every button with its caption fits: the
+/// sidebar is wide. Otherwise every plugin button is the plain glyph width.
 pub(crate) fn configured_toolbar_rects_with_plugins(
     toolbar: Rect,
     layout: &crate::tree_toolbar_layout::TreeToolbarLayout,
-    plugin_buttons: usize,
+    plugin_captions: &[u16],
 ) -> Vec<(TreeToolbarAction, Rect)> {
     let visible_width = TOOLBAR_BUTTON_WIDTH - 1;
     if toolbar.width < visible_width {
@@ -3058,25 +3106,37 @@ pub(crate) fn configured_toolbar_rects_with_plugins(
         0
     };
     let left_end = toolbar.right().saturating_sub(reserved);
-    let mut buttons = Vec::new();
-    let left_actions = layout
-        .entries
-        .iter()
-        .take(left_count)
-        .enumerate()
-        .map(|(index, entry)| toolbar_action_for(index, entry))
-        .chain((0..plugin_buttons).map(TreeToolbarAction::Plugin));
-    for (slot, action) in left_actions.enumerate() {
-        let x = toolbar
-            .x
-            .saturating_add((slot as u16).saturating_mul(TOOLBAR_BUTTON_WIDTH));
-        if x.saturating_add(visible_width) > left_end {
-            break;
+    // Places the left-hand buttons; returns them and whether every one fit.
+    let place_left = |with_captions: bool| {
+        let built_in = layout
+            .entries
+            .iter()
+            .take(left_count)
+            .enumerate()
+            .map(|(index, entry)| (toolbar_action_for(index, entry), visible_width));
+        let plugins = plugin_captions.iter().enumerate().map(|(index, cells)| {
+            let width = if with_captions && *cells > 0 {
+                visible_width.saturating_add(1).saturating_add(*cells)
+            } else {
+                visible_width
+            };
+            (TreeToolbarAction::Plugin(index), width)
+        });
+        let mut placed = Vec::new();
+        let mut x = toolbar.x;
+        for (action, width) in built_in.chain(plugins) {
+            if x.saturating_add(width) > left_end {
+                return (placed, false);
+            }
+            placed.push((action, Rect::new(x, toolbar.y, width, toolbar.height)));
+            // One blank cell separates buttons, as `TOOLBAR_BUTTON_WIDTH` does.
+            x = x.saturating_add(width).saturating_add(1);
         }
-        buttons.push((
-            action,
-            Rect::new(x, toolbar.y, visible_width, toolbar.height),
-        ));
+        (placed, true)
+    };
+    let (mut buttons, everything_fits) = place_left(true);
+    if !everything_fits && plugin_captions.iter().any(|cells| *cells > 0) {
+        buttons = place_left(false).0;
     }
     if anchored {
         for (index, entry) in suffix.iter().rev().enumerate() {
@@ -4097,8 +4157,9 @@ fn draw_toolbar(
     let toolbar = toolbar_area(area);
     let caption_row = Rect::new(toolbar.x, toolbar.y + 1, toolbar.width, 1);
 
+    let plugin_captions = plugin_caption_cells(custom.plugins);
     for (action, button_area) in
-        configured_toolbar_button_rects_with_plugins(area, layout, custom.plugins.len())
+        configured_toolbar_button_rects_with_plugins(area, layout, &plugin_captions)
     {
         let is_hovered = hovered == Some(action);
         let custom_profile = action
@@ -4133,7 +4194,21 @@ fn draw_toolbar(
         } else {
             action.glyph(custom.icons).to_string()
         };
-        let button = Paragraph::new(Line::from(Span::styled(format!(" {glyph} "), style)));
+        // A widened plugin button has room for its caption beside the glyph.
+        let caption = match action {
+            TreeToolbarAction::Plugin(index) if button_area.width > TOOLBAR_BUTTON_WIDTH - 1 => {
+                custom
+                    .plugins
+                    .get(index)
+                    .and_then(|button| button.caption.as_deref())
+            }
+            _ => None,
+        };
+        let label = match caption {
+            Some(caption) => format!(" {glyph} {caption} "),
+            None => format!(" {glyph} "),
+        };
+        let button = Paragraph::new(Line::from(Span::styled(label, style)));
         frame.render_widget(button, button_area);
     }
 
@@ -4181,7 +4256,7 @@ mod tests {
                 list: area,
                 area,
                 toolbar: false,
-                plugin_toolbar_buttons: 0,
+                plugin_toolbar_captions: Vec::new(),
                 rows: vec![(
                     TreeNodeHit {
                         id: ROOT_ID,
@@ -4240,7 +4315,7 @@ mod tests {
                     list: area,
                     area,
                     toolbar: false,
-                    plugin_toolbar_buttons: 0,
+                    plugin_toolbar_captions: Vec::new(),
                     rows: vec![(
                         TreeNodeHit {
                             id: ROOT_ID,
@@ -4323,7 +4398,7 @@ mod tests {
         let layout = crate::tree_toolbar_layout::TreeToolbarLayout::default();
         let area = Rect::new(0, 0, 200, 8);
         let without = configured_toolbar_button_rects(area, &layout);
-        let with = configured_toolbar_button_rects_with_plugins(area, &layout, 2);
+        let with = configured_toolbar_button_rects_with_plugins(area, &layout, &[0, 0]);
         // Every built-in button keeps its cells.
         for (action, rect) in &without {
             assert!(with.contains(&(*action, *rect)), "{action:?} moved");
@@ -4337,7 +4412,7 @@ mod tests {
         assert_eq!(plugins[1].0, TreeToolbarAction::Plugin(1));
         // A narrow strip drops plugin buttons before any built-in one.
         let narrow = Rect::new(0, 0, (without.len() as u16) * TOOLBAR_BUTTON_WIDTH, 8);
-        let narrow_with = configured_toolbar_button_rects_with_plugins(narrow, &layout, 3);
+        let narrow_with = configured_toolbar_button_rects_with_plugins(narrow, &layout, &[0, 0, 0]);
         assert_eq!(
             narrow_with
                 .iter()
@@ -4348,14 +4423,50 @@ mod tests {
     }
 
     #[test]
+    fn plugin_captions_widen_their_buttons_only_when_every_caption_fits() {
+        let layout = crate::tree_toolbar_layout::TreeToolbarLayout::default();
+        let plugin_rects = |area: Rect, captions: &[u16]| -> Vec<Rect> {
+            configured_toolbar_button_rects_with_plugins(area, &layout, captions)
+                .into_iter()
+                .filter(|(action, _)| matches!(action, TreeToolbarAction::Plugin(_)))
+                .map(|(_, rect)| rect)
+                .collect()
+        };
+        let wide = Rect::new(0, 0, 200, 8);
+        let shown = plugin_rects(wide, &[7, 0]);
+        assert_eq!(shown.len(), 2);
+        // Glyph cells, a space, then the seven caption cells.
+        assert_eq!(shown[0].width, TOOLBAR_BUTTON_WIDTH - 1 + 1 + 7);
+        assert_eq!(shown[1].width, TOOLBAR_BUTTON_WIDTH - 1);
+        assert_eq!(shown[1].x, shown[0].right() + 1);
+        // Built-in buttons never move for a caption.
+        let without = configured_toolbar_button_rects(wide, &layout);
+        let with = configured_toolbar_button_rects_with_plugins(wide, &layout, &[7, 0]);
+        for (action, rect) in &without {
+            assert!(with.contains(&(*action, *rect)), "{action:?} moved");
+        }
+        // The narrowest strip with room for both plain buttons has no room for a caption:
+        // it drops every caption, never a button.
+        let snug_width = (1..=200)
+            .find(|width| plugin_rects(Rect::new(0, 0, *width, 8), &[0, 0]).len() == 2)
+            .expect("two plugin buttons fit in 200 cells");
+        let plain = plugin_rects(Rect::new(0, 0, snug_width, 8), &[7, 0]);
+        assert_eq!(plain.len(), 2);
+        assert!(plain
+            .iter()
+            .all(|rect| rect.width == TOOLBAR_BUTTON_WIDTH - 1));
+    }
+
+    #[test]
     fn a_plugin_toolbar_button_draws_its_glyph_and_its_title_when_hovered() {
         let area = Rect::new(0, 0, 200, 8);
         let layout = crate::tree_toolbar_layout::TreeToolbarLayout::default();
         let plugins = [PluginToolbarButton {
             glyph: "✚".to_owned(),
             title: "New note".to_owned(),
+            caption: None,
         }];
-        let (_, button) = configured_toolbar_button_rects_with_plugins(area, &layout, 1)
+        let (_, button) = configured_toolbar_button_rects_with_plugins(area, &layout, &[0])
             .into_iter()
             .find(|(action, _)| *action == TreeToolbarAction::Plugin(0))
             .expect("the plugin button fits");
@@ -4461,7 +4572,7 @@ mod tests {
             list: list_area(area),
             area,
             toolbar: false,
-            plugin_toolbar_buttons: 0,
+            plugin_toolbar_captions: Vec::new(),
             _metadata: None,
             rows: vec![(first, 4), (second, 5)],
             monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -4727,6 +4838,8 @@ mod tests {
             PaneStatus::Editor { dirty: true },
             PaneStatus::Editor { dirty: false },
             PaneStatus::Board,
+            PaneStatus::Plugin { dirty: false },
+            PaneStatus::Plugin { dirty: true },
             PaneStatus::PlainShell,
         ] {
             let line = custom_pane_label(
@@ -4973,7 +5086,7 @@ mod tests {
             list: area,
             area,
             toolbar: false,
-            plugin_toolbar_buttons: 0,
+            plugin_toolbar_captions: Vec::new(),
             rows: vec![(
                 TreeNodeHit {
                     id: ROOT_ID,

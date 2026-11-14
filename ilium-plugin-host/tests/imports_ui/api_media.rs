@@ -111,7 +111,7 @@ fn wit_media_open_video_bytes_opens_from_memory() {
 
 /// REQ: WIT:ilium:host/media.open-video-bytes
 #[test]
-fn wit_media_open_video_bytes_sixteen_mib_boundary_quota_exceeded() {
+fn wit_media_open_video_bytes_sixteen_mib_boundary_invalid_argument() {
     let rig = seeded();
     rig.kernel.set_bytes_video(info());
     let at_limit = rig
@@ -127,7 +127,8 @@ fn wit_media_open_video_bytes_sixteen_mib_boundary_quota_exceeded() {
                 .media()
                 .open_video_bytes(vec![0; 16 * MIB + 1], "video/mp4".to_owned())
         ),
-        ErrorCode::QuotaExceeded
+        // api-media "Video from bytes and ranges": more than 16 MiB is `invalid-argument`.
+        ErrorCode::InvalidArgument
     );
 }
 

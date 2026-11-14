@@ -25,7 +25,8 @@ pub fn decorate_pane_title(status: &PaneStatus, title: &str) -> String {
         PaneStatus::PlainShell
         | PaneStatus::AgentUnavailable(_)
         | PaneStatus::Editor { .. }
-        | PaneStatus::Board => title.to_string(),
+        | PaneStatus::Board
+        | PaneStatus::Plugin { .. } => title.to_string(),
     }
 }
 

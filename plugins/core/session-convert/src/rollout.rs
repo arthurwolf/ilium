@@ -130,10 +130,26 @@ impl ParsedRollout {
 
 /// Parses a whole rollout. Only the first `session_meta` owns the rollout's identity.
 pub fn parse_rollout_text(text: &str) -> ParsedRollout {
+    match parse_rollout_text_checked(text, &mut |_, _| Ok::<(), std::convert::Infallible>(())) {
+        Ok(parsed) => parsed,
+        Err(never) => match never {},
+    }
+}
+
+/// Parses a whole rollout like [`parse_rollout_text`], and calls `before_line(index, total)` before each
+/// physical line (blank lines included; `index` counts from 0, `total` is the number of lines). The first
+/// error `before_line` returns stops the parse and is returned, which is how a job reports progress and
+/// honours a cancel request between lines.
+pub fn parse_rollout_text_checked<E>(
+    text: &str,
+    before_line: &mut dyn FnMut(usize, usize) -> Result<(), E>,
+) -> Result<ParsedRollout, E> {
     let mut meta = RolloutMeta::default();
     let mut items = Vec::new();
     let mut counts = RolloutCounts::default();
-    for line in text.lines() {
+    let total = text.lines().count();
+    for (index, line) in text.lines().enumerate() {
+        before_line(index, total)?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -158,13 +174,13 @@ pub fn parse_rollout_text(text: &str) -> ParsedRollout {
             }
         }
     }
-    ParsedRollout {
+    Ok(ParsedRollout {
         meta,
         items,
         json_lines: counts.json_lines,
         malformed_lines: counts.malformed_lines,
         dropped_by_kind: counts.dropped_by_kind,
-    }
+    })
 }
 
 /// What one non-blank line means, independent of scan state.

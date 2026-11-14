@@ -314,6 +314,7 @@ fn node_snapshot(app: &App, node_id: NodeId) -> Option<NodeSnapshot> {
                 PaneContentKind::Terminal => "terminal",
                 PaneContentKind::Editor => "editor",
                 PaneContentKind::Board => "board",
+                PaneContentKind::Plugin => "plugin",
             }
             .to_owned(),
             Some(pane_status_snapshot(status)),
@@ -373,6 +374,7 @@ fn pane_status_snapshot(status: &PaneStatus) -> Value {
         }),
         PaneStatus::Editor { dirty } => json!({ "kind": "editor", "dirty": dirty }),
         PaneStatus::Board => json!({ "kind": "board" }),
+        PaneStatus::Plugin { dirty } => json!({ "kind": "plugin", "dirty": dirty }),
     }
 }
 
@@ -796,7 +798,6 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::LeaderPending => "leader_pending",
         Mode::NavigationLeaderPending => "navigation_leader_pending",
         Mode::Move => "move",
-        Mode::Rename(_) => "rename",
         Mode::CommandPrompt(_) => "command_prompt",
         Mode::InferenceSettingPrompt(_, _) => "inference_setting_prompt",
         Mode::VoiceSettingPrompt(_, _) => "voice_setting_prompt",
@@ -811,6 +812,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::ExplorerFileMenu(_) => "file_actions",
         Mode::FolderExplorer(..) => "folder_picker",
         Mode::ProjectFolderExplorer(..) => "project_folder_picker",
+        Mode::PluginFilePicker(..) => "plugin_file_picker",
         Mode::ContextMenu(_) => "context_menu",
         Mode::TerminalPaneContextMenu(_) => "terminal_pane_context_menu",
         Mode::AgentToolbarModelSubmenu(_) => "agent_toolbar_model_submenu",

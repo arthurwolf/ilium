@@ -1,5 +1,5 @@
 //! Equips the per-instance imports that reach the machine: `process`, `fs`, `http`,
-//! `inference`, `vector` and `audio`. `jobs` is equipped by the runtime itself, because a job needs the
+//! `inference`, `vector`, `audio`, `clipboard` and `media`. `jobs` is equipped by the runtime itself, because a job needs the
 //! runtime's queue.
 //!
 //! Every import is built fresh for the instance, from the instance's own grants, so what one
@@ -19,11 +19,13 @@ use ilium_plugin_api::grants::Grant;
 use ilium_plugin_api::side::Side;
 
 use crate::imports::audio::{AudioBackend, AudioImport};
+use crate::imports::clipboard::{ClipboardBackend, ClipboardImport};
 use crate::imports::env::ImportEnv;
 use crate::imports::fs::{FilePicker, FsImport};
 use crate::imports::generated_dispatch::ImportSet;
 use crate::imports::http::HttpImport;
 use crate::imports::inference::{InferenceBackend, InferenceImport};
+use crate::imports::media::{MediaBackend, MediaImport, VideoFiles};
 use crate::imports::process::ProcessImport;
 use crate::imports::vector::VectorImport;
 use crate::runtime::InstanceContext;
@@ -67,6 +69,10 @@ pub struct ClientBackendInputs {
     pub audio: Option<Arc<dyn AudioBackend>>,
     /// Shows the picker of `fs.pick`.
     pub picker: Option<Arc<dyn FilePicker>>,
+    /// Reads and writes the desktop clipboard for `ilium:host/clipboard`.
+    pub clipboard: Option<Arc<dyn ClipboardBackend>>,
+    /// Decodes video for `ilium:host/media` (client and scene instances).
+    pub media: Option<Arc<dyn MediaBackend>>,
     /// The agents' transcript and configuration folders.
     pub agent_scopes: AgentScopes,
 }
@@ -85,6 +91,10 @@ pub struct Backends {
     pub audio: Option<Arc<dyn AudioBackend>>,
     /// Shows the `fs.pick` picker.
     pub picker: Option<Arc<dyn FilePicker>>,
+    /// The desktop clipboard; `None` leaves `clipboard` unlinked.
+    pub clipboard: Option<Arc<dyn ClipboardBackend>>,
+    /// The video decoder; `None` leaves `media` unlinked.
+    pub media: Option<Arc<dyn MediaBackend>>,
     /// Read-only `fs` scopes of the agents' folders.
     pub agent_scopes: AgentScopes,
 }
@@ -98,6 +108,8 @@ impl std::fmt::Debug for Backends {
             .field("inference", &self.inference.is_some())
             .field("audio", &self.audio.is_some())
             .field("picker", &self.picker.is_some())
+            .field("clipboard", &self.clipboard.is_some())
+            .field("media", &self.media.is_some())
             .field("agent_scopes", &self.agent_scopes)
             .finish()
     }
@@ -137,6 +149,8 @@ impl Backends {
             inference: inputs.inference,
             audio: inputs.audio,
             picker: inputs.picker,
+            clipboard: inputs.clipboard,
+            media: inputs.media,
             agent_scopes: inputs.agent_scopes,
             ..Self::new(project_dir, data_dir)
         }
@@ -145,6 +159,15 @@ impl Backends {
     /// `<data dir>/plugins/fs/<plugin>`, the root of the three private `fs` scopes of a plugin.
     pub fn fs_root(&self, plugin: &str) -> PathBuf {
         self.data_dir.join("plugins").join("fs").join(plugin)
+    }
+
+    /// `<data dir>/plugins/media-spool/<plugin>`, where `open-video-bytes` writes a clip for the
+    /// decoder. Host-private: no `fs` scope reaches it.
+    pub fn media_spool(&self, plugin: &str) -> PathBuf {
+        self.data_dir
+            .join("plugins")
+            .join("media-spool")
+            .join(plugin)
     }
 
     /// `<data dir>/plugins/vector/<plugin>/<side>`, where the `vector` indexes of one side of a
@@ -158,8 +181,10 @@ impl Backends {
     }
 }
 
-/// Builds the `process`, `fs`, `http`, `inference`, `vector` and `audio` imports of one instance
-/// and puts them in `set`. `vector` embeds through the inference backend and keeps its indexes
+/// Builds the `process`, `fs`, `http`, `inference`, `vector`, `audio`, `clipboard` and `media`
+/// imports of one instance and puts them in `set`. `clipboard` is equipped on the client only and
+/// `media` on the client and scene sides; `media` opens files with the instance's `fs` rules, so
+/// it is equipped only together with `fs`. `vector` embeds through the inference backend and keeps its indexes
 /// under [`Backends::vector_root`]; without a data folder the indexes live in memory only.
 /// `process` runs on the server only. An `fs` scope folder that cannot be created leaves `fs`
 /// out, so the instance still starts and a call reports the interface as unavailable.
@@ -185,6 +210,14 @@ pub fn equip(backends: &Backends, context: &InstanceContext, set: &mut ImportSet
             Some(Arc::clone(backend)),
         )));
     }
+    if context.side == Side::Client {
+        if let Some(backend) = &backends.clipboard {
+            set.clipboard = Some(Box::new(ClipboardImport::new(
+                env.clone(),
+                Arc::clone(backend),
+            )));
+        }
+    }
     let has_project = !backends.project_dir.as_os_str().is_empty();
     if context.side == Side::Server {
         let mut process = ProcessImport::new(env.clone());
@@ -194,7 +227,7 @@ pub fn equip(backends: &Backends, context: &InstanceContext, set: &mut ImportSet
         set.process = Some(Box::new(process));
     }
     let root = backends.fs_root(&context.plugin);
-    let mut fs = FsImport::new(env);
+    let mut fs = FsImport::new(env.clone());
     if let Some(picker) = &backends.picker {
         fs.set_file_picker(Arc::clone(picker));
     }
@@ -219,6 +252,18 @@ pub fn equip(backends: &Backends, context: &InstanceContext, set: &mut ImportSet
             .is_err()
         {
             return;
+        }
+    }
+    if context.side != Side::Server {
+        if let (Some(backend), Ok(resolver)) = (&backends.media, fs.read_resolver()) {
+            let spool = (!backends.data_dir.as_os_str().is_empty())
+                .then(|| backends.media_spool(&context.plugin));
+            set.media = Some(Box::new(MediaImport::new(
+                env,
+                Some(Arc::new(resolver) as Arc<dyn VideoFiles>),
+                Some(Arc::clone(backend)),
+                spool,
+            )));
         }
     }
     set.fs = Some(Box::new(fs));
@@ -482,5 +527,153 @@ mod tests {
         let mut set = ImportSet::default();
         equip(&backends, &context(Side::Server, &[]), &mut set);
         assert!(backends.fs_root("test.equip").join("data").is_dir());
+    }
+
+    /// A decoder that knows one size and returns one grey frame per run.
+    struct OneFrameDecoder;
+
+    struct OneFrame(Option<Vec<u8>>);
+
+    impl crate::imports::media::FrameSource for OneFrame {
+        fn next_frame(
+            &mut self,
+        ) -> Result<Option<Vec<u8>>, ilium_plugin_api::generated::types::errors::PluginError>
+        {
+            Ok(self.0.take())
+        }
+    }
+
+    impl MediaBackend for OneFrameDecoder {
+        fn probe(
+            &self,
+            _file: &Path,
+        ) -> Result<
+            ilium_plugin_api::generated::host::media::VideoInfo,
+            ilium_plugin_api::generated::types::errors::PluginError,
+        > {
+            Ok(ilium_plugin_api::generated::host::media::VideoInfo {
+                width: 32,
+                height: 18,
+                frames_per_second: 30.0,
+                duration_millis: Some(1_000),
+            })
+        }
+
+        fn decode(
+            &self,
+            request: &crate::imports::media::DecodeRequest,
+        ) -> Result<
+            Box<dyn crate::imports::media::FrameSource>,
+            ilium_plugin_api::generated::types::errors::PluginError,
+        > {
+            let bytes = (request.width * request.height * 3) as usize;
+            Ok(Box::new(OneFrame(Some(vec![128; bytes]))))
+        }
+    }
+
+    fn client_backends(scratch: &Path) -> Backends {
+        let backends = Backends::client(
+            scratch.join("project"),
+            scratch.join("data"),
+            ClientBackendInputs {
+                clipboard: Some(Arc::new(
+                    crate::imports::clipboard::MemoryClipboard::default(),
+                )),
+                media: Some(Arc::new(OneFrameDecoder)),
+                ..ClientBackendInputs::default()
+            },
+        );
+        std::fs::create_dir_all(&backends.project_dir).expect("project folder");
+        backends
+    }
+
+    #[test]
+    fn the_client_gets_clipboard_and_media_and_the_server_neither() {
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let backends = client_backends(scratch.path());
+        let mut client_set = ImportSet::default();
+        equip(&backends, &context(Side::Client, &[]), &mut client_set);
+        assert!(client_set.clipboard.is_some());
+        assert!(client_set.media.is_some());
+        let mut scene_set = ImportSet::default();
+        equip(&backends, &context(Side::Scene, &[]), &mut scene_set);
+        assert!(scene_set.clipboard.is_none(), "clipboard is client only");
+        assert!(scene_set.media.is_some(), "scenes play video too");
+        let mut server_set = ImportSet::default();
+        equip(&backends, &context(Side::Server, &[]), &mut server_set);
+        assert!(server_set.clipboard.is_none());
+        assert!(server_set.media.is_none());
+    }
+
+    #[test]
+    fn an_equipped_clipboard_writes_through_the_backend_on_its_grant() {
+        use ilium_plugin_api::generated::host::clipboard::HostClipboard;
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let memory = Arc::new(crate::imports::clipboard::MemoryClipboard::default());
+        let backends = Backends::client(
+            scratch.path().join("project"),
+            scratch.path().join("data"),
+            ClientBackendInputs {
+                clipboard: Some(Arc::clone(&memory) as Arc<dyn ClipboardBackend>),
+                ..ClientBackendInputs::default()
+            },
+        );
+        let mut set = ImportSet::default();
+        equip(
+            &backends,
+            &context(Side::Client, &["clipboard.write"]),
+            &mut set,
+        );
+        let clipboard = set.clipboard.as_mut().expect("clipboard equipped");
+        clipboard
+            .write_text("copied by a plugin".to_owned())
+            .expect("written");
+        assert_eq!(memory.get().as_deref(), Some("copied by a plugin"));
+        // The read grant is not held, so the plugin cannot read it back.
+        assert_eq!(clipboard.read_text(), None);
+    }
+
+    #[test]
+    fn an_equipped_media_import_plays_a_project_file_it_may_read() {
+        use ilium_plugin_api::generated::host::media::HostMedia;
+        use ilium_plugin_api::generated::types::paths::FsPath;
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let backends = client_backends(scratch.path());
+        std::fs::write(backends.project_dir.join("intro.mp4"), b"video").expect("clip");
+        let clip = FsPath {
+            scope: "project".to_owned(),
+            path: "intro.mp4".to_owned(),
+        };
+        let mut set = ImportSet::default();
+        equip(
+            &backends,
+            &context(Side::Client, &["media.video", "fs.read:project"]),
+            &mut set,
+        );
+        let media = set.media.as_mut().expect("media equipped");
+        let (video, info) = media.open_video(clip.clone()).expect("opens");
+        assert_eq!((info.width, info.height), (32, 18));
+        let frame = media
+            .next_frame(video, 4, 3)
+            .expect("decodes")
+            .expect("frame");
+        assert_eq!(frame.len(), 4 * 3 * 3);
+        // Without `fs.read:project` the same file stays closed.
+        let mut unread = ImportSet::default();
+        equip(
+            &backends,
+            &context(Side::Client, &["media.video"]),
+            &mut unread,
+        );
+        let refused = unread
+            .media
+            .as_mut()
+            .expect("media equipped")
+            .open_video(clip)
+            .expect_err("refused");
+        assert_eq!(
+            refused.code,
+            ilium_plugin_api::generated::types::errors::ErrorCode::NotPermitted
+        );
     }
 }

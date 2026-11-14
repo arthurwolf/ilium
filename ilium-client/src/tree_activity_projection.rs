@@ -34,7 +34,7 @@ pub(crate) fn visible_nodes(tree: &Tree, active_terminals: &HashSet<NodeId>) -> 
         if matches!(
             &node.kind,
             NodeKind::Pane {
-                content: PaneContentKind::Editor | PaneContentKind::Board,
+                content: PaneContentKind::Editor | PaneContentKind::Board | PaneContentKind::Plugin,
                 ..
             }
         ) && node.parent.is_some_and(|parent| visible.contains(&parent))

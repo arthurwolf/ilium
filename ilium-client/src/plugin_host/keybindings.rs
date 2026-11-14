@@ -221,13 +221,19 @@ impl App {
         self.run_plugin_binding(&chord, |mode| *mode == BindingMode::Global)
     }
 
-    /// The content kind a `pane:<kind>` binding names for a pane.
-    fn pane_content_kind_name(&self, pane: ilium_core::NodeId) -> Option<&'static str> {
+    /// The content kind a `pane:<kind>` binding names for a pane. A plugin pane is named by
+    /// its global pane kind id, such as `ilium.core.kanban.board`.
+    fn pane_content_kind_name(&self, pane: ilium_core::NodeId) -> Option<String> {
         match &self.tree.get(pane)?.kind {
-            ilium_core::NodeKind::Pane { content, .. } => Some(match content {
-                ilium_core::PaneContentKind::Terminal => "terminal",
-                ilium_core::PaneContentKind::Editor => "editor",
-                ilium_core::PaneContentKind::Board => "board",
+            ilium_core::NodeKind::Pane {
+                content,
+                plugin_pane,
+                ..
+            } => Some(match content {
+                ilium_core::PaneContentKind::Terminal => "terminal".to_owned(),
+                ilium_core::PaneContentKind::Editor => "editor".to_owned(),
+                ilium_core::PaneContentKind::Board => "board".to_owned(),
+                ilium_core::PaneContentKind::Plugin => plugin_pane.as_ref()?.kind_id().to_owned(),
             }),
             _ => None,
         }

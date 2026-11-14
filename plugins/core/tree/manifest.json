@@ -28,7 +28,8 @@
     ],
     "client": [
       "tree.read",
-      "ui.panels"
+      "ui.panels",
+      "notify.toast"
     ]
   },
   "contributes": {
@@ -180,6 +181,13 @@
       {
         "id": "new-group",
         "title": "New group",
+        "palette": false,
+        "side": "client",
+        "category": "Tree"
+      },
+      {
+        "id": "rename",
+        "title": "Rename",
         "palette": false,
         "side": "client",
         "category": "Tree"

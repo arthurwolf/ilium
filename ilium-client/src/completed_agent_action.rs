@@ -65,6 +65,8 @@ mod tests {
             last_prompt_bottom_rule: None,
             briefing_bottom_rule: None,
             progress_rule: None,
+            plugin_banner_area: None,
+            plugin_footer_area: None,
         };
 
         let action = layout(viewport).expect("non-empty pane content has an action row");
@@ -88,6 +90,8 @@ mod tests {
             last_prompt_bottom_rule: None,
             briefing_bottom_rule: None,
             progress_rule: None,
+            plugin_banner_area: None,
+            plugin_footer_area: None,
         };
 
         assert_eq!(layout(viewport), None);

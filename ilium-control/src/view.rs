@@ -66,6 +66,7 @@ fn status_view(status: &PaneStatus) -> Value {
         PaneStatus::PlainShell => json!({"kind": "shell"}),
         PaneStatus::Editor { dirty } => json!({"kind": "editor", "dirty": dirty}),
         PaneStatus::Board => json!({"kind": "board"}),
+        PaneStatus::Plugin { dirty } => json!({"kind": "plugin", "dirty": dirty}),
         PaneStatus::Agent(agent) => json!({
             "kind": "agent",
             "agent": to_value(&agent.class),
@@ -94,6 +95,7 @@ pub fn pane_detail(tree: &Tree, id: NodeId) -> Option<Value> {
         launch_cwd,
         workspace,
         board_storage,
+        plugin_pane,
         ..
     } = &node.kind
     else {
@@ -103,6 +105,7 @@ pub fn pane_detail(tree: &Tree, id: NodeId) -> Option<Value> {
         PaneContentKind::Terminal => "terminal",
         PaneContentKind::Editor => "editor",
         PaneContentKind::Board => "board",
+        PaneContentKind::Plugin => "plugin",
     };
     let mut detail = Map::new();
     detail.insert("content".into(), json!(content_name));
@@ -137,6 +140,9 @@ pub fn pane_detail(tree: &Tree, id: NodeId) -> Option<Value> {
     );
     if board_storage.is_some() {
         detail.insert("board_storage".into(), to_value(board_storage));
+    }
+    if let Some(kind) = plugin_pane {
+        detail.insert("plugin_pane_kind".into(), json!(kind.kind_id()));
     }
     Some(Value::Object(detail))
 }

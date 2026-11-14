@@ -66,7 +66,7 @@ fn manifest_050_identity_and_api_version() {
     let manifest = manifest();
     assert_eq!(manifest["api"], "ilium:plugin@0.1.0");
     assert_eq!(manifest["id"], "ilium.core.session-convert");
-    assert_eq!(manifest["name"], "Session convert");
+    assert_eq!(manifest["name"], "Session conversion");
     assert_eq!(manifest["version"], "0.1.0");
     assert_eq!(manifest["publisher"], "Ilium");
     assert_eq!(manifest["license"], "MIT");
@@ -88,18 +88,21 @@ fn manifest_050_declares_both_sides_with_their_worlds_and_exports() {
 
 /// REQ: COR-050, F-077
 #[test]
-fn manifest_050_server_grants_are_the_fifteen_of_the_page_in_order() {
+fn manifest_050_server_grants_are_those_of_the_page_in_order() {
     assert_eq!(
         strings(&manifest()["capabilities"]["server"]),
         [
             "panes.read",
             "panes.lifecycle",
             "panes.create",
+            "panes.create-command:codex",
+            "panes.create-command:claude",
             "tree.write",
             "agent.read",
             "fs.read:agent-sessions:claude",
             "fs.read:agent-sessions:codex",
-            "fs.write:agent-config:claude",
+            "fs.read:agent-config:claude",
+            "agent-config.propose:claude",
             "process.run:codex",
             "process.long-lived",
             "jobs.run",
@@ -169,7 +172,7 @@ fn manifest_050_command_convert_is_titled_convert_session_in_category_agents() {
 fn manifest_050_context_menu_entry_is_dynamic_for_panes_and_runs_convert() {
     assert_eq!(
         manifest()["contributes"]["context_menu"],
-        json!([{"id": "pane-convert", "applies_to": ["pane"], "dynamic": true, "command": "convert"}])
+        json!([{"id": "pane-convert", "target": "tree-node", "when": "node.kind == \"pane\" && pane.primitive == \"agent\"", "dynamic": true, "command": "convert"}])
     );
 }
 

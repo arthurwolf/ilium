@@ -1,17 +1,22 @@
 //! Core plugin `ilium.core.session-convert` (manual page core-plugin-session-convert.md).
 //!
 //! The pure conversion core lives in the modules below (`rollout` parses a Codex rollout, `claude_writer` maps its
-//! items to Claude content, `paths` names the Claude project directory, `error` holds the one-line failure texts).
-//! Reading and writing the transcripts, the `codex app-server` import and the ledger are host work (foundation
-//! gaps G10 fs/process and G17 jobs); the two sides below keep the activation state and answer event batches with
-//! no submissions until those host interfaces exist.
+//! items to Claude content, `transcript` assembles the Claude Code lines, `verify` checks them, `convert` ties the
+//! three together, `paths` names the Claude project directory, `error` holds the one-line failure texts).
+//! The server side runs the `codex-to-claude` job on them: it reads the rollout through the host `fs` import,
+//! converts it, verifies the result and returns it as the job output. Writing the transcript into the Claude
+//! project directory (`propose-agent-config`), the `codex app-server` import and the ledger are host work that
+//! still has no consumer, so the event handler answers batches with no submissions.
 
 pub mod claude_writer;
+pub mod convert;
 pub mod error;
 pub mod lenient_json;
 pub mod paths;
 pub mod prompts;
 pub mod rollout;
+pub mod transcript;
+pub mod verify;
 
 /// Tool results longer than this are cut while the source is parsed, so one command dump can neither dominate
 /// the replayed context nor sit in memory.
@@ -26,11 +31,113 @@ use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
+use ilium_plugin_sdk::host::{HostClock, HostFs, HostJobs};
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::{ErrorCode, PluginError};
+use ilium_plugin_sdk::types::{ErrorCode, FsPath, PluginError};
 use ilium_plugin_sdk::{
-    ilium_plugin, Handler, JobRunner, Lifecycle, MenuProvider, ServiceProvider, Views,
+    host, ilium_plugin, Handler, HostApi, JobRunner, Lifecycle, MenuProvider, ServiceProvider,
+    Views,
 };
+
+use crate::convert::{convert_rollout, ConvertInput, PROGRESS_EVERY_LINES};
+use crate::error::ConvertError;
+use crate::transcript::HashedIdentifiers;
+
+/// The scope the job reads rollouts from (grant `fs.read:agent-sessions:codex`).
+const CODEX_SESSIONS_SCOPE: &str = "agent-sessions:codex";
+/// One `fs.read` call returns at most this many bytes (host limit 1 MiB).
+const READ_CHUNK_BYTES: u32 = 1024 * 1024;
+/// A rollout larger than this is refused: the job holds the text, the lines and the output in memory
+/// (manifest `memory_mib` is 256).
+const MAX_ROLLOUT_BYTES: usize = 48 * 1024 * 1024;
+
+/// How a conversion failure reaches the caller of the job.
+fn job_error(error: ConvertError) -> PluginError {
+    let code = match &error {
+        ConvertError::Cancelled => ErrorCode::Cancelled,
+        ConvertError::EmptyConversation { .. } | ConvertError::InvalidSessionId(_) => {
+            ErrorCode::InvalidArgument
+        }
+        ConvertError::SourceNotFound { .. } => ErrorCode::NotFound,
+        ConvertError::FileTooLarge { .. } => ErrorCode::QuotaExceeded,
+        ConvertError::SourceChanged { .. } => ErrorCode::Conflict,
+        ConvertError::Unsupported { .. } => ErrorCode::Unsupported,
+        ConvertError::SourceUnreadable { .. }
+        | ConvertError::TargetWrite { .. }
+        | ConvertError::InsufficientDiskSpace { .. } => ErrorCode::Io,
+        _ => ErrorCode::Internal,
+    };
+    PluginError::new(code, error.to_string())
+}
+
+/// Reads a whole rollout of the Codex session scope in host-sized chunks.
+fn read_rollout(api: &mut dyn HostApi, rollout: &str) -> Result<String, PluginError> {
+    let mut bytes: Vec<u8> = Vec::new();
+    loop {
+        let chunk = HostFs::read(
+            api,
+            FsPath {
+                scope: CODEX_SESSIONS_SCOPE.to_string(),
+                path: rollout.to_string(),
+            },
+            bytes.len() as u64,
+            READ_CHUNK_BYTES,
+        )?;
+        if chunk.is_empty() {
+            break;
+        }
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > MAX_ROLLOUT_BYTES {
+            return Err(job_error(ConvertError::FileTooLarge {
+                path: rollout.into(),
+                bytes: bytes.len() as u64,
+                maximum: MAX_ROLLOUT_BYTES as u64,
+            }));
+        }
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// The `codex-to-claude` job: rollout path in, converted and verified transcript out.
+fn run_codex_to_claude(input: &[u8]) -> Result<Vec<u8>, PluginError> {
+    let request: ConvertInput = serde_json::from_slice(input).map_err(|error| {
+        PluginError::new(
+            ErrorCode::InvalidArgument,
+            format!("job input must be {{\"rollout\": <path>}}: {error}"),
+        )
+    })?;
+    let mut handle = host();
+    let api: &mut dyn HostApi = &mut *handle;
+    let text = read_rollout(api, &request.rollout)?;
+    let now_millis = HostClock::now_unix_millis(api);
+    let fallback_timestamp = chrono::DateTime::from_timestamp_millis(now_millis as i64)
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
+    let seed = format!("{}\u{0}{now_millis}", request.rollout);
+    let mut identifiers = HashedIdentifiers::new(seed);
+    let output = convert_rollout(
+        &text,
+        std::path::Path::new(&request.rollout),
+        &mut identifiers,
+        fallback_timestamp,
+        &mut |index, total| {
+            if index % PROGRESS_EVERY_LINES != 0 {
+                return Ok(());
+            }
+            if HostJobs::is_cancelled(&mut *api) {
+                return Err(ConvertError::Cancelled);
+            }
+            HostJobs::report_progress(&mut *api, 100.0 * index as f32 / total.max(1) as f32);
+            Ok(())
+        },
+    )
+    .map_err(job_error)?;
+    serde_json::to_vec(&output).map_err(|error| {
+        PluginError::new(
+            ErrorCode::Internal,
+            format!("cannot encode the job output: {error}"),
+        )
+    })
+}
 
 /// The server side of `ilium.core.session-convert` (core-plugin-session-convert.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["job-runner", "service-provider"])]
@@ -55,30 +162,13 @@ impl Handler for SessionConvertServer {
 
 impl JobRunner for SessionConvertServer {
     fn run(&mut self, kind: String, input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
-        if input.is_empty() {
-            return Err(PluginError {
-                code: ErrorCode::InvalidArgument,
-                message: format!("job kind {kind}: empty input"),
-                retry_after_ms: None,
-            });
-        }
         if kind != "codex-to-claude" {
-            return Err(PluginError {
-                code: ErrorCode::Unsupported,
-                message: format!("unknown job kind {kind}"),
-                retry_after_ms: None,
-            });
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                format!("unknown job kind {kind}"),
+            ));
         }
-        let transcript = String::from_utf8(input).map_err(|_| PluginError {
-            code: ErrorCode::InvalidArgument,
-            message: "transcript is not valid UTF-8".to_string(),
-            retry_after_ms: None,
-        })?;
-        let messages = transcript
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .count();
-        Ok(format!("{{\"messages\":{messages}}}").into_bytes())
+        run_codex_to_claude(&input)
     }
 }
 
@@ -344,7 +434,11 @@ mod spec_tests {
         assert_eq!(contributes["commands"][0]["category"], "Agents");
         let menu_entry = &contributes["context_menu"][0];
         assert_eq!(menu_entry["id"], "pane-convert");
-        assert_eq!(string_list(&menu_entry["applies_to"]), vec!["pane"]);
+        assert_eq!(menu_entry["target"], "tree-node");
+        assert_eq!(
+            menu_entry["when"],
+            "node.kind == \"pane\" && pane.primitive == \"agent\""
+        );
         assert_eq!(menu_entry["dynamic"], true);
         assert_eq!(menu_entry["command"], "convert");
         let panel = &contributes["panels"][0];

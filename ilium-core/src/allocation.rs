@@ -358,6 +358,7 @@ impl AllocationSize for PaneStatus {
             Self::Editor { dirty } => 0usize.saturating_add(dirty.heap_bytes()),
             Self::Board => 0usize,
             Self::AgentUnavailable(value0) => 0usize.saturating_add(value0.heap_bytes()),
+            Self::Plugin { dirty } => 0usize.saturating_add(dirty.heap_bytes()),
         }
     }
 }
@@ -368,6 +369,7 @@ impl AllocationSize for PaneContentKind {
             Self::Terminal => 0usize,
             Self::Editor => 0usize,
             Self::Board => 0usize,
+            Self::Plugin => 0usize,
         }
     }
 }
@@ -568,6 +570,7 @@ impl AllocationSize for NodeKind {
                 progress_monitors,
                 launch_cwd,
                 workspace,
+                plugin_pane,
             } => 0usize
                 .saturating_add(content.heap_bytes())
                 .saturating_add(status.heap_bytes())
@@ -578,7 +581,8 @@ impl AllocationSize for NodeKind {
                 .saturating_add(last_prompt.heap_bytes())
                 .saturating_add(progress_monitors.heap_bytes())
                 .saturating_add(launch_cwd.heap_bytes())
-                .saturating_add(workspace.heap_bytes()),
+                .saturating_add(workspace.heap_bytes())
+                .saturating_add(plugin_pane.heap_bytes()),
             Self::Folder {
                 path,
                 expanded,
@@ -588,6 +592,11 @@ impl AllocationSize for NodeKind {
                 .saturating_add(expanded.heap_bytes())
                 .saturating_add(locked_closed.heap_bytes()),
         }
+    }
+}
+impl AllocationSize for PluginPaneKind {
+    fn heap_bytes(&self) -> usize {
+        self.kind_id.capacity()
     }
 }
 impl AllocationSize for BoardStorage {

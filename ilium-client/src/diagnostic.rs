@@ -162,6 +162,7 @@ fn contextual_text(app: &App) -> Option<String> {
         Mode::Explorer(state, _)
         | Mode::FolderExplorer(state, _)
         | Mode::ProjectFolderExplorer(state, _)
+        | Mode::PluginFilePicker(state, _)
         | Mode::BoardPathPicker(state) => state.diagnostic_text().map(str::to_owned),
         Mode::AgentMessageDialog(state) => state.error.clone(),
         Mode::ValueDialog(host) => match &host.dialog {
@@ -449,7 +450,7 @@ mod tests {
     #[test]
     fn metadata_is_bounded_and_drafts_are_excluded() {
         let mut app = App::new("session\nforged label".into(), "/project/modal".into());
-        app.mode = Mode::Rename(crate::text_prompt::TextPromptState::new("private draft"));
+        app.mode = Mode::CommandPrompt(crate::text_prompt::TextPromptState::new("private draft"));
         app.status_message = Some("public failure".into());
         let report = current_text(&app).unwrap();
         assert!(report.contains("Session: session\\nforged label\n"));
@@ -462,7 +463,7 @@ mod tests {
     #[test]
     fn explicit_runtime_shortcut_opens_without_context_and_preserves_draft() {
         let mut app = App::new("test".into(), std::env::temp_dir());
-        app.mode = Mode::Rename(crate::text_prompt::TextPromptState::new("private draft"));
+        app.mode = Mode::CommandPrompt(crate::text_prompt::TextPromptState::new("private draft"));
         let event = Event::Key(KeyEvent::new(KeyCode::F(9), KeyModifiers::CONTROL));
         assert_eq!(
             crate::keys::editor_loan_event_target(&app, &event),
@@ -473,10 +474,10 @@ mod tests {
         assert!(text.contains("Ilium diagnostic context"));
         assert!(text.contains("no server query was made"));
         assert!(!text.contains("private draft"));
-        assert!(matches!(app.mode, Mode::Rename(_)));
+        assert!(matches!(app.mode, Mode::CommandPrompt(_)));
         assert!(intercept_event(&mut app, &event));
         assert!(app.diagnostic_view.is_none());
-        assert!(matches!(app.mode, Mode::Rename(_)));
+        assert!(matches!(app.mode, Mode::CommandPrompt(_)));
     }
 
     #[test]
@@ -492,7 +493,7 @@ mod tests {
     #[test]
     fn diagnostic_overlay_consumes_paste_without_editing_parent_draft() {
         let mut app = App::new("test".into(), std::env::temp_dir());
-        app.mode = Mode::Rename(crate::text_prompt::TextPromptState::new("retained draft"));
+        app.mode = Mode::CommandPrompt(crate::text_prompt::TextPromptState::new("retained draft"));
         app.status_message = Some("storage unavailable".into());
         intercept_event(
             &mut app,
@@ -507,7 +508,7 @@ mod tests {
             &mut app,
             &Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
         );
-        let Mode::Rename(prompt) = &app.mode else {
+        let Mode::CommandPrompt(prompt) = &app.mode else {
             panic!("draft mode replaced")
         };
         assert_eq!(prompt.buf, "retained draft");

@@ -437,6 +437,7 @@ fn activate(app: &mut App, hit: Hit) {
                     app.onboarding_progress.finish();
                     app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
                     app.onboarding_dismiss_pending = true;
+                    app.begin_plugin_onboarding_steps();
                 }
                 Ok(Navigation::Moved) => {}
                 Err(_) => {
@@ -453,6 +454,7 @@ fn activate(app: &mut App, hit: Hit) {
             app.onboarding_progress.finish();
             app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
             app.onboarding_dismiss_pending = true;
+            app.begin_plugin_onboarding_steps();
         }
         Hit::Skip if matches!(step, Step::SoundChoice | Step::SoundConfiguration) => {
             app.settings_select_sound_source(ilium_sound::SoundSourceKind::Muted);

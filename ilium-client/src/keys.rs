@@ -150,6 +150,10 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         if matches!(app.mode, Mode::Normal) && app.handle_plugin_view_paste(pasted) {
             return;
         }
+        // The same for the focused text input of a focused plugin pane (G14b).
+        if matches!(app.mode, Mode::Normal) && app.handle_plugin_pane_paste(pasted) {
+            return;
+        }
         if app.native_terminal_paste_destination().is_some() {
             app.handle_terminal_paste(pasted);
             return;
@@ -170,7 +174,6 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         Mode::ProjectFolderExplorer(overlay, selection) => {
             handle_project_folder_explorer_event(app, overlay, selection, &event)
         }
-        Mode::Rename(state) => handle_rename_event(app, state, &event),
         Mode::CommandPrompt(state) => handle_command_prompt_event(app, state, &event),
         Mode::InferenceSettingPrompt(field, state) => {
             handle_inference_setting_prompt(app, field, state, &event)
@@ -257,6 +260,10 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         Mode::PluginPopup(state) => handle_plugin_popup_event(app, state, &event),
         Mode::CreateBoard(state) => handle_create_board_event(app, state, &event),
         Mode::BoardPathPicker(overlay) => handle_board_path_picker_event(app, overlay, &event),
+        Mode::PluginFilePicker(overlay, pick) => {
+            let escape = is_escape(&event);
+            app.plugin_file_picker_event(overlay, pick, &event, escape)
+        }
         Mode::BoardCardPrompt(pane_id, state) => {
             handle_board_card_prompt(app, pane_id, state, &event)
         }
@@ -1402,34 +1409,6 @@ fn handle_project_folder_explorer_event(
             app.status_message = Some(format!("Project picker error: {err}"));
             app.mode = Mode::ProjectFolderExplorer(overlay, selection);
         }
-    }
-}
-
-/// While `Mode::Rename(state)` is active: `Enter` queues a `RenameNode`
-/// request, `Esc` cancels. Every other key is delegated to
-/// `text_prompt::handle_key`, shared with the other text-prompt modes.
-fn handle_rename_event(app: &mut App, mut state: TextPromptState, event: &Event) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::Rename(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::Rename(state);
-        return;
-    }
-
-    match text_prompt::handle_key(&mut state, key.code) {
-        PromptOutcome::Commit => {
-            if let Some(id) = app.selected_node_id() {
-                if !app.request_rename(id, state.buf.clone(), None, None) {
-                    app.mode = Mode::Rename(state);
-                    return;
-                }
-            }
-            app.mode = Mode::Normal;
-        }
-        PromptOutcome::Cancel => app.mode = Mode::Normal,
-        PromptOutcome::Continue => app.mode = Mode::Rename(state),
     }
 }
 
@@ -3265,18 +3244,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             app.mode = Mode::Normal;
             return;
         }
-        KeyCode::Tab => {
-            state.tab = state.tab.next();
-            state.selected_row = 0;
-            state.trigger_action_cursor = 0;
-            state.scroll = 0;
-        }
-        KeyCode::BackTab => {
-            state.tab = state.tab.previous();
-            state.selected_row = 0;
-            state.trigger_action_cursor = 0;
-            state.scroll = 0;
-        }
+        // The rail holds the built-in tabs, then the settings pages plugins contribute.
+        KeyCode::Tab => app.step_settings_rail(&mut state, true),
+        KeyCode::BackTab => app.step_settings_rail(&mut state, false),
         KeyCode::Char('f') if state.tab == SettingsTab::Animations => {
             state.animation_fullscreen = true;
         }
@@ -5801,12 +5771,12 @@ mod indent_outdent_tests {
     #[test]
     fn atomic_paste_reuses_existing_character_input_for_text_prompt_modes() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
-        app.mode = Mode::Rename(TextPromptState::new("before-"));
+        app.mode = Mode::CommandPrompt(TextPromptState::new("before-"));
 
         handle_event(&mut app, Event::Paste("café 世界".to_string()));
 
-        let Mode::Rename(state) = &app.mode else {
-            panic!("pasting text should keep the rename prompt open");
+        let Mode::CommandPrompt(state) = &app.mode else {
+            panic!("pasting text should keep the command prompt open");
         };
         assert_eq!(state.buf, "before-café 世界");
     }

@@ -108,6 +108,10 @@ mod attention_briefing_app;
 // can use the private external-open queue.
 #[path = "plugin_host/effects_app.rs"]
 mod plugin_effects_app;
+// The clipboard and file picker of client plugins; a child module so it can open the explorer
+// overlay with the App's execution client.
+#[path = "plugin_host/devices_app.rs"]
+mod plugin_devices_app;
 use ilium_ipc::TextTriggerSettings;
 
 /// Rows scrolled per wheel notch over a terminal pane's own scrollback --
@@ -379,8 +383,6 @@ pub enum Mode {
     /// a second general leader while a different general prefix is configured.
     NavigationLeaderPending,
     Move,
-    /// In-progress rename prompt for the selected node.
-    Rename(TextPromptState),
     /// In-progress command-line prompt for `Action::RunCommand`.
     CommandPrompt(TextPromptState),
     /// Edits one provider-specific inference setting from the settings tab.
@@ -430,6 +432,12 @@ pub enum Mode {
     /// A directory-only picker that creates a project or changes one
     /// project's inherited cwd.
     ProjectFolderExplorer(Box<ExplorerOverlay>, ProjectFolderSelection),
+    /// The file picker a plugin asked for (`fs.pick`), stacked over the screen it opened on;
+    /// the pick answers the waiting plugin.
+    PluginFilePicker(
+        Box<ExplorerOverlay>,
+        crate::plugin_host::file_picker::PluginPick,
+    ),
     /// A mouse-anchored action menu for one tree node.
     ContextMenu(ContextMenu),
     /// A pane-scoped right-click menu for copying the visible terminal text.
@@ -2364,6 +2372,9 @@ pub struct App {
     /// clipboard content can disappear when its last owner is dropped.
     pub(crate) terminal_clipboard: Option<crate::terminal_clipboard::ClipboardService>,
     pending_clipboard_copies: std::collections::HashMap<u64, String>,
+    /// Plugin clipboard calls the clipboard helper is running, by completion id.
+    plugin_clipboard_waiting:
+        std::collections::HashMap<u64, plugin_devices_app::PendingPluginClipboard>,
     /// A Ctrl-clicked terminal target waiting for explicit Open or Copy confirmation.
     pub pending_terminal_link: Option<crate::terminal_links::TerminalLink>,
     pending_terminal_link_storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
@@ -2385,8 +2396,16 @@ pub struct App {
     /// The WebAssembly plugin host of this client, when plugins are on. Named apart from the
     /// animation plugin fields around it, which are a different, older mechanism.
     pub(crate) wasm_plugins: Option<crate::plugin_host::host::ClientPlugins>,
+    /// The plugin settings page the Settings rail opened, `(plugin, page title)`: the
+    /// Plugins tab then lists that page's rows only (`plugin_host::settings_rail`).
+    pub(crate) settings_plugin_page: Option<(String, String)>,
+    /// Contributed onboarding steps still to show after the first-run wizard,
+    /// `(plugin, step id)` in walk order (`plugin_host::onboarding_steps`).
+    pub(crate) plugin_onboarding_queue: std::collections::VecDeque<(String, String)>,
     /// The keyboard cursor inside the plugin view the right-hand area shows.
     pub(crate) plugin_view_cursor: crate::plugin_host::view::ViewCursor,
+    /// The view cursor of each plugin pane (gap G14b), so split plugin panes stay apart.
+    pub(crate) plugin_pane_cursors: crate::plugin_host::plugin_panes::PaneCursors,
     semantic_presentation: semantic_presentation::SemanticPresentation,
     // These leases outlive all App-owned animation snapshots and presentation
     // caches. Each version is separately charged before its first deep copy.
@@ -2619,9 +2638,6 @@ pub struct App {
     pub(crate) claude_goals: crate::session_goal_claude::ClaudeGoalStore,
     pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
-    /// The plugin tree ordering chosen in the "Order by" submenu, as (plugin id, ordering
-    /// id); `None` uses `ui_settings.tree_order`. Not persisted.
-    pub(crate) plugin_tree_ordering: Option<(String, String)>,
     pub custom_toolbar_selected: Option<String>,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
     /// Toolbar buttons whose click was accepted but whose server-side work
@@ -3154,6 +3170,7 @@ impl App {
             external_open_status_storage: None,
             terminal_clipboard: None,
             pending_clipboard_copies: std::collections::HashMap::new(),
+            plugin_clipboard_waiting: std::collections::HashMap::new(),
             pending_terminal_link: None,
             pending_terminal_link_storage: None,
             exit_reason: None,
@@ -3165,7 +3182,10 @@ impl App {
             plugin_catalogue_preparation: None,
             plugin_catalogue: None,
             wasm_plugins: None,
+            settings_plugin_page: None,
+            plugin_onboarding_queue: std::collections::VecDeque::new(),
             plugin_view_cursor: Default::default(),
+            plugin_pane_cursors: Default::default(),
             animation_frame: Default::default(),
             plugin_permission_session: None,
             semantic_presentation: semantic_presentation::SemanticPresentation::new(
@@ -3301,7 +3321,6 @@ impl App {
             claude_goals: crate::session_goal_claude::ClaudeGoalStore::default(),
             statistics_diagnostic: None,
             tree_toolbar_hovered: false,
-            plugin_tree_ordering: None,
             custom_toolbar_selected: None,
             hovered_tree_toolbar_action: None,
             pending_toolbar_actions: Vec::new(),
@@ -5071,7 +5090,7 @@ impl App {
                     viewport
                 };
                 let viewport = self.with_briefing_slot(viewport);
-                if self.shows_progress_footer(viewport.pane_id) {
+                let viewport = if self.shows_progress_footer(viewport.pane_id) {
                     viewport.with_progress_reserved(
                         crate::progress_bar::reserved_height(
                             self.ui_settings.progress_max_lines.into(),
@@ -5080,7 +5099,8 @@ impl App {
                     )
                 } else {
                     viewport
-                }
+                };
+                self.with_plugin_frame_rows(viewport)
             })
             .map(|mut viewport| {
                 // Padding applies last and only to the content itself: the
@@ -5091,6 +5111,29 @@ impl App {
                 viewport
             })
             .collect()
+    }
+
+    /// Reserves the plugin banner and footer rows (`pane_frame_slots` placed `banner` and
+    /// `footer-row`) out of the terminal, each only while a plugin shows something there.
+    /// The drawing reads the same text, so the PTY size and the frame agree.
+    fn with_plugin_frame_rows(&self, viewport: PaneViewport) -> PaneViewport {
+        use crate::plugin_host::views::FrameRowPlacement;
+        let viewport = if self
+            .plugin_frame_row_text(viewport.pane_id, FrameRowPlacement::Banner)
+            .is_some()
+        {
+            viewport.with_plugin_banner_reserved()
+        } else {
+            viewport
+        };
+        if self
+            .plugin_frame_row_text(viewport.pane_id, FrameRowPlacement::FooterRow)
+            .is_some()
+        {
+            viewport.with_plugin_footer_reserved()
+        } else {
+            viewport
+        }
     }
 
     /// Reserves the briefing box's rows right below the prompt banner. The
@@ -10009,6 +10052,12 @@ impl App {
     /// go to the server through the ordinary queue, a toast becomes the status line, and a
     /// changed view asks for a redraw. Returns whether to redraw.
     pub(crate) fn collect_wasm_plugin_outputs(&mut self) -> bool {
+        // Plugin sounds follow the user's sound source, as notification sounds do.
+        if let Some(plugins) = self.wasm_plugins.as_ref() {
+            plugins.set_sounds_muted(
+                self.sound_settings.source == ilium_sound::SoundSourceKind::Muted,
+            );
+        }
         let Some(outputs) = self
             .wasm_plugins
             .as_ref()
@@ -10078,9 +10127,50 @@ impl App {
                     self.plugin_view_closed(&plugin, &view);
                     needs_redraw = true;
                 }
+                crate::plugin_host::host::Output::Clipboard {
+                    plugin,
+                    request,
+                    reply,
+                } => self.run_plugin_clipboard(plugin, request, reply),
+                crate::plugin_host::host::Output::PickPath {
+                    plugin,
+                    spec,
+                    reply,
+                } => {
+                    self.open_plugin_file_picker(plugin, spec, reply);
+                    needs_redraw = true;
+                }
             }
         }
+        if needs_redraw {
+            self.resize_panes_after_plugin_frame_change();
+        }
         needs_redraw
+    }
+
+    /// Plugin frame rows (`pane_frame_slots` placed `banner` or `footer-row`) appear and
+    /// disappear with what plugins set, which changes a terminal's rows without any layout
+    /// event. Resizes the displayed panes whose size moved; a pane never sized yet is left to
+    /// the ordinary layout path.
+    fn resize_panes_after_plugin_frame_change(&mut self) {
+        let moved = self.pane_viewports().iter().any(|viewport| {
+            matches!(
+                self.panes.get(&viewport.pane_id),
+                Some(PaneRuntime::Terminal(_))
+            ) && self
+                .requested_pane_sizes
+                .get(&viewport.pane_id)
+                .is_some_and(|size| {
+                    *size
+                        != (
+                            viewport.content_area.height.max(1),
+                            viewport.content_area.width.max(1),
+                        )
+                })
+        });
+        if moved {
+            self.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
+        }
     }
 
     /// The rows of the Settings plugin list; empty when this client runs without plugins.
@@ -12015,10 +12105,19 @@ impl App {
     /// Selects the tree's presentation order immediately and persists it in
     /// `[ui]`, shared by the settings row and context-menu submenu.
     pub fn settings_set_tree_order(&mut self, tree_order: crate::config::TreeOrder) {
-        // A built-in order replaces a plugin ordering chosen earlier.
-        self.plugin_tree_ordering = None;
         let mut ui = self.ui_settings.clone();
         ui.tree_order = tree_order;
+        // A built-in order replaces a plugin ordering chosen earlier, on disk too.
+        ui.plugin_tree_ordering = None;
+        self.apply_and_persist_ui_settings(ui);
+    }
+
+    /// Chooses a plugin tree ordering from the "Order by" submenu and persists the choice in
+    /// `[ui]`, so the tree keeps that order after a restart.
+    pub(crate) fn settings_set_plugin_tree_ordering(&mut self, plugin: String, ordering: String) {
+        let mut ui = self.ui_settings.clone();
+        ui.plugin_tree_ordering =
+            Some(crate::config::PluginTreeOrderingChoice { plugin, ordering });
         self.apply_and_persist_ui_settings(ui);
     }
 
@@ -16594,6 +16693,9 @@ impl App {
         completion: ilium_execution::Retained<crate::terminal_clipboard::Completion>,
     ) {
         let id = completion.view().id;
+        if self.finish_plugin_clipboard(id, &completion.view().result) {
+            return;
+        }
         if self
             .light_copy_selection
             .as_mut()
@@ -16766,9 +16868,10 @@ impl App {
         let mut selected = built_in_selected;
         for ordering in self.plugin_tree_orderings() {
             let active = self
+                .ui_settings
                 .plugin_tree_ordering
                 .as_ref()
-                .is_some_and(|(plugin, id)| *plugin == ordering.plugin && *id == ordering.id);
+                .is_some_and(|choice| choice.names(&ordering.plugin, &ordering.id));
             if active {
                 selected = items.len();
             }
@@ -17032,7 +17135,7 @@ impl App {
         match item.action.clone() {
             SubmenuItemAction::SetTreeOrder(tree_order) => self.settings_set_tree_order(tree_order),
             SubmenuItemAction::SetPluginTreeOrdering { plugin, id, .. } => {
-                self.plugin_tree_ordering = Some((plugin, id));
+                self.settings_set_plugin_tree_ordering(plugin, id);
             }
             SubmenuItemAction::AgentHere(provider) => {
                 self.action_new_command_pane(provider.command_line());
@@ -18508,21 +18611,26 @@ impl App {
         }
     }
 
+    /// The arguments of the `rename` command: the node the selection points at. A resource or
+    /// foreign-invocation row has no editable tree node (`None`); a verified local participant
+    /// row already resolves to its real pane.
+    pub(crate) fn rename_command_arguments(&self) -> Option<String> {
+        let id = self.selected_node_id()?;
+        self.tree.get(id)?;
+        Some(serde_json::json!({ "node": id.0 }).to_string())
+    }
+
+    /// "Rename" from the key binding, the double-click, the row action or the context menu. The
+    /// tree plugin owns the dialog and the worktree-row refusal.
     pub fn action_start_rename(&mut self) {
-        let Some(id) = self.selected_node_id() else {
+        let Some(arguments) = self.rename_command_arguments() else {
             return;
         };
-        // Resource and foreign-invocation rows have no editable tree node.
-        // Verified local participant rows already resolve to their real pane.
-        let Some(node) = self.tree.get(id) else {
-            return;
-        };
-        if node.is_worktree() {
-            self.status_message = Some("The worktree row uses its branch name".into());
-            return;
-        }
-        let current_name = node.name.clone();
-        self.mode = Mode::Rename(TextPromptState::new(current_name));
+        self.invoke_plugin_command(
+            "ilium.core.tree/rename",
+            arguments,
+            ilium_plugin_api::generated::types::CommandOrigin::Keybinding,
+        );
     }
 
     pub fn action_save_focused_editor(&mut self) {
@@ -19102,6 +19210,10 @@ impl App {
         let Some(id) = self.active_pane_id() else {
             return;
         };
+        if self.is_plugin_pane(id) {
+            self.handle_plugin_pane_key(id, key);
+            return;
+        }
         let pane_content_area = self
             .pane_viewport(id)
             .map(|viewport| viewport.content_area)
@@ -20516,6 +20628,11 @@ impl App {
         };
         let id = viewport.pane_id;
         self.hovered_goal_resume = None;
+        if self.is_plugin_pane(id) {
+            self.hovered_progress = None;
+            self.handle_plugin_pane_mouse(&viewport, mouse, position);
+            return;
+        }
         self.hovered_progress = (matches!(mouse.kind, crossterm::event::MouseEventKind::Moved)
             && viewport
                 .progress_area
@@ -26009,6 +26126,53 @@ mod tests {
             app.take_outbound_requests().as_slice(),
             [ClientRequest::ReparentNode { node_id, .. }] if *node_id == pane
         ));
+
+        let _ = std::fs::remove_dir_all(config_dir);
+    }
+
+    #[test]
+    fn a_plugin_tree_ordering_choice_persists_until_a_built_in_order_replaces_it() {
+        let config_dir = std::env::temp_dir()
+            .join("ilium-app-plugin-tree-order-tests")
+            .join(format!("{:?}", std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&config_dir);
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let mut app = app();
+        app.config_dir = Some(config_dir.clone());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let item = SubmenuItem {
+            label: "By cost".to_string(),
+            action: SubmenuItemAction::SetPluginTreeOrdering {
+                plugin: "ilium.core.cost".to_string(),
+                id: "by-cost".to_string(),
+                active: false,
+            },
+            disabled_reason: None,
+            disabled_reason_retention: None,
+        };
+        app.execute_context_submenu_item(&item, group);
+
+        let persisted = crate::config::load(&config_dir)
+            .unwrap()
+            .ui
+            .plugin_tree_ordering
+            .expect("the submenu choice is written to config.toml");
+        assert!(persisted.names("ilium.core.cost", "by-cost"));
+        // No plugin contributes the ordering in this app, so the built-in order applies
+        // while the choice stays remembered for when the plugin is back.
+        assert!(!app.plugin_tree_ordering_in_effect());
+        assert_eq!(app.effective_tree_order(), TreeOrder::Manual);
+
+        app.settings_set_tree_order(TreeOrder::Type);
+        assert_eq!(app.ui_settings.plugin_tree_ordering, None);
+        assert_eq!(
+            crate::config::load(&config_dir)
+                .unwrap()
+                .ui
+                .plugin_tree_ordering,
+            None
+        );
 
         let _ = std::fs::remove_dir_all(config_dir);
     }

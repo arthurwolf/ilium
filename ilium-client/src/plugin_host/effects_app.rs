@@ -140,12 +140,31 @@ impl App {
         true
     }
 
-    /// Lets the plugin host report focus and `config.toml` changes (gap G2); every tick.
+    /// Lets the plugin host report focus and `config.toml` changes (gap G2); every tick. A
+    /// plugin's write to the `animations` kernel tab is applied to the live animation here.
     pub(crate) fn tick_wasm_plugin_feed(&mut self) {
         let focused = self.focused_pane_id();
-        if let Some(plugins) = self.wasm_plugins.as_mut() {
-            plugins.observe(focused);
+        let animations = self
+            .wasm_plugins
+            .as_mut()
+            .and_then(|plugins| plugins.observe(focused));
+        if let Some(table) = animations {
+            self.apply_plugin_animation_table(&table);
         }
+    }
+
+    /// Applies the `[animations]` table a plugin wrote through `kernel-settings` (the ambient
+    /// plugin's `set-setting` service): the scene it names, or the semantic animation. Goes
+    /// through the one save path of the Animations tab, so a refused save reports the same
+    /// status message and changes nothing.
+    pub(crate) fn apply_plugin_animation_table(&mut self, table: &toml::Table) {
+        let Some(kind) = crate::plugin_host::animation_table::requested_kind(
+            table,
+            self.animation_settings.kind,
+        ) else {
+            return;
+        };
+        self.settings_select_animation_scene(kind);
     }
 
     /// Drops plugin attention marks whose node left the tree.

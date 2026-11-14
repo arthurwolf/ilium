@@ -162,6 +162,10 @@ fn type_rank(node: &Node) -> u8 {
             content: PaneContentKind::Board,
             ..
         } => 9,
+        NodeKind::Pane {
+            content: PaneContentKind::Plugin,
+            ..
+        } => 10,
     }
 }
 

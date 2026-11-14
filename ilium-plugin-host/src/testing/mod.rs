@@ -11,6 +11,7 @@ pub mod fake_net;
 pub mod fake_registry;
 pub mod harness;
 pub mod imports_fixture;
+pub mod kernel_media;
 pub mod ipc_harness;
 pub mod life;
 pub mod menu;

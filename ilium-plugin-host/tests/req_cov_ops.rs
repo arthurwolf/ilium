@@ -74,7 +74,7 @@ fn clipboard_secret_is_written_only_after_the_user_runs_the_command() {
 #[test]
 fn secret_clipboard_entry_is_cleared_after_thirty_seconds() {
     // An empty text is a valid clipboard write.
-    let mut clipboard = ClipboardImport;
+    let mut clipboard = ClipboardImport::default();
     let clear = clipboard.write_text(String::new());
     assert!(clear.is_ok(), "CAP-893: writing an empty text must be accepted, got {clear:?}");
     not_implemented(
@@ -87,7 +87,7 @@ fn secret_clipboard_entry_is_cleared_after_thirty_seconds() {
 #[test]
 fn clipboard_write_text_is_not_logged_and_only_its_length_is_logged() {
     let token = "ghp_fixture_token_0123456789";
-    let mut clipboard = ClipboardImport;
+    let mut clipboard = ClipboardImport::default();
     let result = clipboard.write_text(token.to_string());
     assert!(result.is_ok(), "CAP-894: a plain token must be accepted, got {result:?}");
     not_implemented(

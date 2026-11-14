@@ -15,4 +15,5 @@ mod move_rename;
 mod new_group_dialog;
 mod node_commands;
 mod ordering;
+mod rename_dialog;
 mod topics_services;

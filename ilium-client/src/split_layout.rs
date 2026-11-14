@@ -66,6 +66,12 @@ pub struct PaneViewport {
     pub briefing_bottom_rule: Option<Rect>,
     /// One-row frame rule above the progress slot.
     pub progress_rule: Option<Rect>,
+    /// Plugin banner row (`pane_frame_slots` placed `banner`) at the top of the terminal,
+    /// below the prompt and briefing slots; present only while a plugin shows one.
+    pub plugin_banner_area: Option<Rect>,
+    /// Plugin footer row (`pane_frame_slots` placed `footer-row`) at the bottom of the
+    /// terminal, above the progress slot; present only while a plugin shows one.
+    pub plugin_footer_area: Option<Rect>,
 }
 
 impl PaneViewport {
@@ -89,6 +95,8 @@ impl PaneViewport {
             last_prompt_bottom_rule: None,
             briefing_bottom_rule: None,
             progress_rule: None,
+            plugin_banner_area: None,
+            plugin_footer_area: None,
         }
     }
 
@@ -226,6 +234,54 @@ impl PaneViewport {
             content_area,
             progress_area: Some(progress_area),
             progress_rule: has_rule.then(|| self.rule_row(progress_y - 1)),
+            ..self
+        }
+    }
+
+    /// Reserves one row at the top of what is left of `content_area` for a plugin banner,
+    /// retaining one terminal row. A no-op when only that row is left.
+    pub fn with_plugin_banner_reserved(self) -> Self {
+        if self.content_area.height <= 1 {
+            return self;
+        }
+        let banner = Rect::new(
+            self.content_area.x,
+            self.content_area.y,
+            self.content_area.width,
+            1,
+        );
+        Self {
+            content_area: Rect::new(
+                self.content_area.x,
+                self.content_area.y + 1,
+                self.content_area.width,
+                self.content_area.height - 1,
+            ),
+            plugin_banner_area: Some(banner),
+            ..self
+        }
+    }
+
+    /// Reserves one row at the bottom of what is left of `content_area` for a plugin footer
+    /// row, retaining one terminal row. A no-op when only that row is left.
+    pub fn with_plugin_footer_reserved(self) -> Self {
+        if self.content_area.height <= 1 {
+            return self;
+        }
+        let footer_y = self.content_area.y + self.content_area.height - 1;
+        Self {
+            content_area: Rect::new(
+                self.content_area.x,
+                self.content_area.y,
+                self.content_area.width,
+                self.content_area.height - 1,
+            ),
+            plugin_footer_area: Some(Rect::new(
+                self.content_area.x,
+                footer_y,
+                self.content_area.width,
+                1,
+            )),
             ..self
         }
     }
@@ -382,6 +438,42 @@ mod tests {
         assert_eq!(rule.width, viewport.outer_area.width);
         assert_eq!(framed.content_area.height + 1, plain.content_area.height);
         assert_eq!(framed.content_area.y, rule.y + 1);
+    }
+
+    #[test]
+    fn plugin_banner_and_footer_rows_come_out_of_the_terminal_and_keep_one_row() {
+        let viewport =
+            allocate_viewports(Rect::new(0, 0, 40, 12), SplitOrientation::Vertical, &ids(1))[0];
+        let terminal = viewport.content_area;
+        let both = viewport
+            .with_plugin_banner_reserved()
+            .with_plugin_footer_reserved();
+        assert_eq!(
+            both.plugin_banner_area,
+            Some(Rect::new(terminal.x, terminal.y, terminal.width, 1))
+        );
+        assert_eq!(
+            both.plugin_footer_area,
+            Some(Rect::new(
+                terminal.x,
+                terminal.bottom() - 1,
+                terminal.width,
+                1
+            ))
+        );
+        assert_eq!(both.content_area.y, terminal.y + 1);
+        assert_eq!(both.content_area.height, terminal.height - 2);
+
+        let one_row = PaneViewport {
+            content_area: Rect::new(terminal.x, terminal.y, terminal.width, 1),
+            ..viewport
+        };
+        let kept = one_row
+            .with_plugin_banner_reserved()
+            .with_plugin_footer_reserved();
+        assert_eq!(kept.plugin_banner_area, None);
+        assert_eq!(kept.plugin_footer_area, None);
+        assert_eq!(kept.content_area.height, 1);
     }
 
     #[test]

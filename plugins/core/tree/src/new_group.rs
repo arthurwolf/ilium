@@ -329,14 +329,14 @@ pub fn blank() -> UiTree {
     }
 }
 
-fn span(text: &str) -> Span {
+pub(crate) fn span(text: &str) -> Span {
     Span {
         text: text.to_owned(),
         style: Style::default(),
     }
 }
 
-fn button(id: &str, label: &str, role: ButtonRole, is_cancel: bool) -> DialogButton {
+pub(crate) fn button(id: &str, label: &str, role: ButtonRole, is_cancel: bool) -> DialogButton {
     DialogButton {
         id: id.to_owned(),
         label: label.to_owned(),
@@ -345,7 +345,7 @@ fn button(id: &str, label: &str, role: ButtonRole, is_cancel: bool) -> DialogBut
     }
 }
 
-fn node(key: &str, widget: Widget) -> UiNode {
+pub(crate) fn node(key: &str, widget: Widget) -> UiNode {
     UiNode {
         key: Some(key.to_owned()),
         widget,

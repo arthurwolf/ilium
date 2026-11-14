@@ -89,6 +89,8 @@ pub(crate) struct ServerFacade {
     input_stages: Mutex<tokio::task::JoinSet<()>>,
     /// When each coalescing key of a plugin's `notify` last reached the desktop.
     notify_coalescer: Mutex<intent_routing::NotifyCoalescer>,
+    /// The basic pane kinds of the catalogue, set once when the host starts (gap G14a).
+    pane_kinds: std::sync::OnceLock<Arc<super::pane_kinds::PaneKinds>>,
 }
 
 /// Most nodes one plugin keeps metadata on.
@@ -186,16 +188,21 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
     let (class, content_kind) = match &node.kind {
         NodeKind::Container(_) => (NodeClass::Container, None),
         NodeKind::Folder { .. } => (NodeClass::Folder, None),
-        NodeKind::Pane { content, .. } => (
+        NodeKind::Pane {
+            content,
+            plugin_pane,
+            ..
+        } => (
             NodeClass::Pane,
-            Some(
-                match content {
-                    PaneContentKind::Terminal => TERMINAL_KIND,
-                    PaneContentKind::Editor => EDITOR_KIND,
-                    PaneContentKind::Board => BOARD_KIND,
-                }
-                .to_owned(),
-            ),
+            Some(match content {
+                PaneContentKind::Terminal => TERMINAL_KIND.to_owned(),
+                PaneContentKind::Editor => EDITOR_KIND.to_owned(),
+                PaneContentKind::Board => BOARD_KIND.to_owned(),
+                // A plugin pane reads as its global kind id, `<plugin-id>.<local-id>`.
+                PaneContentKind::Plugin => plugin_pane
+                    .as_ref()
+                    .map_or_else(String::new, |kind| kind.kind_id().to_owned()),
+            }),
         ),
     };
     Some(TreeNode {
@@ -401,7 +408,13 @@ impl ServerFacade {
             live_chrome: Mutex::new(Vec::new()),
             input_stages: Mutex::new(tokio::task::JoinSet::new()),
             notify_coalescer: Mutex::new(intent_routing::NotifyCoalescer::default()),
+            pane_kinds: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Hands the facade the catalogue's pane kinds; only the first call counts.
+    pub(crate) fn set_pane_kinds(&self, kinds: Arc<super::pane_kinds::PaneKinds>) {
+        let _ = self.pane_kinds.set(kinds);
     }
 
     /// The chrome changes server plugins made since the last call, in order.
@@ -439,6 +452,43 @@ impl ServerFacade {
                 "the chrome queue is poisoned".to_owned(),
             ),
         }
+    }
+
+    /// Sets the unsaved-changes mark of a plugin pane (`basic.set-dirty`, gap G14a) and
+    /// publishes it when it changed. Only the plugin that owns the pane's kind may set it.
+    fn set_plugin_pane_dirty(
+        &self,
+        plugin: &str,
+        pane: NodeId,
+        dirty: bool,
+    ) -> Result<(), PluginError> {
+        let Some(state) = self.state.upgrade() else {
+            return Err(PluginError::new(
+                ErrorCode::Internal,
+                "the server is shutting down".to_owned(),
+            ));
+        };
+        let node = to_core(pane);
+        let changed = self.tokio.block_on(async {
+            let mut tree = state.tree.write().await;
+            if tree
+                .plugin_pane_kind(node)
+                .map(ilium_core::PluginPaneKind::plugin)
+                != Some(plugin)
+            {
+                return Err(PluginError::new(
+                    ErrorCode::NotPermitted,
+                    "only the plugin that draws a plugin pane marks it dirty".to_owned(),
+                ));
+            }
+            tree.set_plugin_pane_dirty(node, dirty)
+                .map_err(|error| PluginError::new(ErrorCode::InvalidArgument, error.to_string()))
+        })?;
+        if changed {
+            self.tokio
+                .block_on(crate::ipc::handlers::broadcast_and_persist(&state));
+        }
+        Ok(())
     }
 
     fn with_tree<R>(&self, read: impl FnOnce(&Tree) -> R) -> Option<R> {
@@ -496,9 +546,9 @@ impl ServerFacade {
         self.forward_to_clients(origin, intent)
     }
 
-    fn create_pane(&self, spec: CreatePaneSpec) -> Outcome {
+    fn create_pane(&self, origin: &Origin, spec: CreatePaneSpec) -> Outcome {
         if !spec.content_kind.is_empty() && spec.content_kind != TERMINAL_KIND {
-            return unsupported("create-pane for a content kind other than ilium.terminal");
+            return self.create_plugin_pane(origin, spec);
         }
         let working_directory = match &spec.cwd {
             None => NewPaneWorkingDirectory::ProjectRoot,
@@ -554,6 +604,51 @@ impl ServerFacade {
                 }
                 Outcome::OkNode(to_plugin(node))
             }
+            RequestEnd::Done => failed(
+                ErrorCode::Internal,
+                "the server did not report the created pane",
+            ),
+            RequestEnd::Failed(message) => failed(ErrorCode::Internal, message),
+            RequestEnd::TimedOut => failed(ErrorCode::TimedOut, "pane creation timed out"),
+        }
+    }
+
+    /// Creates a pane of a plugin pane kind (gap G14a): a tree node the plugin draws on the
+    /// client, with no process behind it. Only the plugin that contributes the kind may create
+    /// its panes, and a plugin pane takes no command, input or working directory.
+    fn create_plugin_pane(&self, origin: &Origin, spec: CreatePaneSpec) -> Outcome {
+        let Origin::Plugin { plugin, .. } = origin else {
+            return refused(
+                ErrorCode::NotPermitted,
+                "only a plugin creates panes of a plugin pane kind",
+            );
+        };
+        if spec.command.is_some() || spec.initial_input.is_some() || spec.cwd.is_some() {
+            return refused(
+                ErrorCode::InvalidArgument,
+                "a plugin pane takes no command, initial input or working directory",
+            );
+        }
+        let Some(kinds) = self.pane_kinds.get() else {
+            return failed(ErrorCode::Internal, "the pane kind table is not ready");
+        };
+        let title = match kinds.admit(&spec.content_kind, Some(plugin.0.as_str())) {
+            Ok((_, entry)) if spec.title.is_empty() => entry.title.clone(),
+            Ok(_) => spec.title.clone(),
+            Err(message) => return refused(ErrorCode::InvalidArgument, message),
+        };
+        let request_id = self.next_request.fetch_add(1, Ordering::Relaxed);
+        let request = ClientRequest::NewPane {
+            request_id,
+            parent_group: spec.parent.map_or(ilium_core::ROOT_ID, to_core),
+            kind: NewPaneKind::Plugin {
+                kind_id: spec.content_kind,
+                title,
+            },
+            working_directory: NewPaneWorkingDirectory::ProjectRoot,
+        };
+        match self.request(request, Some(request_id)) {
+            RequestEnd::Created(node) => Outcome::OkNode(to_plugin(node)),
             RequestEnd::Done => failed(
                 ErrorCode::Internal,
                 "the server did not report the created pane",
@@ -801,7 +896,7 @@ impl KernelFacade for ServerFacade {
                 node_id: to_core(spec.node),
                 locked_closed: spec.locked,
             }),
-            Intent::CreatePane(spec) => self.create_pane(spec),
+            Intent::CreatePane(spec) => self.create_pane(origin, spec),
             Intent::ResizePane(spec) => {
                 let current = self.panes().size(spec.pane);
                 let columns = spec.columns.or(current.map(|size| size.0));
@@ -1114,11 +1209,12 @@ impl WorkspaceAccess for ServerFacade {
 impl BasicBackend for ServerFacade {
     fn apply_basic(
         &self,
-        _plugin: &str,
+        plugin: &str,
         pane: NodeId,
         change: BasicChange,
     ) -> Result<(), PluginError> {
         match change {
+            BasicChange::Dirty(dirty) => self.set_plugin_pane_dirty(plugin, pane, dirty),
             BasicChange::Title(title) => {
                 match self.request(
                     ClientRequest::RenameNode {

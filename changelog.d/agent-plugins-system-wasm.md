@@ -11,6 +11,7 @@
 - Plugin API: a pane whose agent is unavailable still reports its agent, with the activity `none`.
 
 ### Changed
+- The tree "Rename" dialog (key binding, double-click on a row, row action, context menu) is now provided by the Tree plugin instead of built-in code; with Tree off the status line says the action is unavailable. The control snapshot no longer reports a `rename` mode.
 - The "New split view" dialog of the Layout plugin reads the tree itself; the plugin now asks for `tree.read` and `agent.read` on the client side.
 - The "New split view" dialog is now provided by the Layout plugin instead of built-in code. It looks and works the same with `Enter`, `Space` and the arrow keys; an empty split is created with the **Create empty** button instead of the `e` key, the orientation is switched with `Up` and `Down`, and the toolbar Split button no longer shows a spinner. With the Layout plugin off, the action reports that Layout is not running.
 - Plugin contract: `create-split-spec` has an optional `parent` group and accepts 0 to 4 panes, so a plugin can create an empty split view in a chosen group.

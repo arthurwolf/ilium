@@ -992,7 +992,8 @@ impl App {
     pub(crate) fn tick_plugin_edits(&mut self, now: Instant) -> bool {
         let popup = self.tick_plugin_popup_edits(now);
         let panel = self.tick_plugin_view_edits(now);
-        popup || panel
+        let panes = self.tick_plugin_pane_edits(now);
+        popup || panel || panes
     }
 
     /// How long until the next unsent plugin edit falls due, so the event loop wakes for it;
@@ -1008,6 +1009,7 @@ impl App {
         popup
             .into_iter()
             .chain(panel)
+            .chain(self.plugin_pane_edit_due())
             .min()
             .map(|due| due.saturating_duration_since(now))
     }

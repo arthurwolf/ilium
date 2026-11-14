@@ -515,6 +515,7 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         Mode::Explorer(..)
             | Mode::FolderExplorer(..)
             | Mode::ProjectFolderExplorer(..)
+            | Mode::PluginFilePicker(..)
             | Mode::BoardPathPicker(..)
     ) {
         match std::mem::replace(&mut app.mode, Mode::Normal) {
@@ -524,6 +525,9 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             }
             Mode::ProjectFolderExplorer(overlay, selection) => {
                 handle_project_folder_explorer_mouse(app, overlay, selection, mouse)
+            }
+            Mode::PluginFilePicker(overlay, pick) => {
+                app.plugin_file_picker_event(overlay, pick, &Event::Mouse(mouse), false)
             }
             Mode::BoardPathPicker(mut overlay) => {
                 match overlay.handle(&Event::Mouse(mouse), app.layout.screen_area) {
@@ -709,8 +713,7 @@ fn handle_smart_copy_mouse(app: &mut App, mouse: MouseEvent, position: Position)
 fn is_shared_action_dialog(mode: &Mode) -> bool {
     matches!(
         mode,
-        Mode::Rename(_)
-            | Mode::CommandPrompt(_)
+        Mode::CommandPrompt(_)
             | Mode::InferenceSettingPrompt(_, _)
             | Mode::VoiceSettingPrompt(_, _)
             | Mode::ApiSettingPrompt(_)
@@ -785,8 +788,7 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         return;
     }
     let state = match &mut app.mode {
-        Mode::Rename(state)
-        | Mode::CommandPrompt(state)
+        Mode::CommandPrompt(state)
         | Mode::InferenceSettingPrompt(_, state)
         | Mode::VoiceSettingPrompt(_, state)
         | Mode::ApiSettingPrompt(state)
@@ -2335,6 +2337,30 @@ fn update_animation_hover(
 }
 
 /// Pointer tab changes share the same row and scroll reset semantics.
+/// A click on a Settings rail entry: a built-in tab opens as before; a plugin settings page
+/// shows the Plugins tab narrowed to that page's rows.
+fn select_settings_pointer_rail_entry(
+    app: &mut App,
+    state: &mut crate::app::SettingsState,
+    entry: crate::plugin_host::settings_rail::SettingsRailEntry,
+    content_area: Rect,
+) {
+    use crate::plugin_host::settings_rail::SettingsRailEntry;
+    match entry {
+        SettingsRailEntry::Tab(tab) => {
+            let leaving_plugin_page = app.open_settings_plugin_page().is_some();
+            app.settings_plugin_page = None;
+            if leaving_plugin_page && tab == state.tab {
+                // Back from a plugin page to the whole Plugins tab: start at its top.
+                state.selected_row = 0;
+                state.scroll = 0;
+            }
+            select_settings_pointer_tab(app, state, tab, content_area);
+        }
+        SettingsRailEntry::PluginPage(_) => app.select_settings_rail_entry(state, entry),
+    }
+}
+
 fn select_settings_pointer_tab(
     app: &App,
     state: &mut crate::app::SettingsState,
@@ -2677,14 +2703,14 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 app.mode = Mode::Normal;
                 return;
             }
-            if let Some(tab) =
-                crate::settings_ui::tab_at_for_active(layout.tab_list_area, position, state.tab)
-                    .or_else(|| {
-                        crate::settings_ui::tab_scrollbar_target(layout.tab_list_area, position)
-                    })
-            {
+            if let Some(entry) = crate::settings_ui::settings_rail_entry_at(
+                app,
+                layout.tab_list_area,
+                position,
+                state.tab,
+            ) {
                 crate::tree_layout_settings::dismiss(app, &mut state);
-                select_settings_pointer_tab(app, &mut state, tab, layout.content_area);
+                select_settings_pointer_rail_entry(app, &mut state, entry, layout.content_area);
             } else if layout.content_area.contains(position) {
                 let row = position.y.saturating_sub(layout.content_area.y + 2);
                 let editor_width = if layout.content_area.width < 86 {
@@ -3492,13 +3518,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     return;
                 }
             }
-            if let Some(tab) =
-                crate::settings_ui::tab_at_for_active(layout.tab_list_area, position, state.tab)
-                    .or_else(|| {
-                        crate::settings_ui::tab_scrollbar_target(layout.tab_list_area, position)
-                    })
-            {
-                select_settings_pointer_tab(app, &mut state, tab, layout.content_area);
+            if let Some(entry) = crate::settings_ui::settings_rail_entry_at(
+                app,
+                layout.tab_list_area,
+                position,
+                state.tab,
+            ) {
+                select_settings_pointer_rail_entry(app, &mut state, entry, layout.content_area);
             } else if crate::settings_ui::has_shared_content_scrollbar(state.tab)
                 && content_scrollbar_area.contains(position)
             {
@@ -4507,7 +4533,10 @@ mod tree_rename_mouse_tests {
 
         assert!(is_tree_rename_double_click(&mut app, folder));
         app.action_start_rename();
-        assert!(matches!(app.mode, Mode::Rename(_)));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("ilium.core.tree is not running, so this action is unavailable")
+        );
         assert!(app.take_outbound_requests().is_empty());
         assert!(app.last_tree_click.is_none());
     }
@@ -4532,7 +4561,10 @@ mod tree_rename_mouse_tests {
         assert!(!is_tree_rename_double_click(&mut app, folder));
         assert!(is_tree_rename_double_click(&mut app, folder));
         app.action_start_rename();
-        assert!(matches!(app.mode, Mode::Rename(_)));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("ilium.core.tree is not running, so this action is unavailable")
+        );
     }
 
     #[test]
@@ -4543,7 +4575,10 @@ mod tree_rename_mouse_tests {
         assert!(!is_tree_rename_double_click(&mut app, folder));
         assert!(is_tree_rename_double_click(&mut app, folder));
         app.action_start_rename();
-        assert!(matches!(app.mode, Mode::Rename(_)));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("ilium.core.tree is not running, so this action is unavailable")
+        );
     }
 
     /// Regression: clicking a row, dismissing a modal with the mouse, then
@@ -4613,7 +4648,10 @@ mod tree_rename_mouse_tests {
         click(&mut app, position, MouseEventKind::Up(MouseButton::Left));
         click(&mut app, position, MouseEventKind::Down(MouseButton::Left));
 
-        assert!(matches!(app.mode, Mode::Rename(_)));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("ilium.core.tree is not running, so this action is unavailable")
+        );
         assert_eq!(app.selected_node_id(), Some(pane));
         assert!(app.last_tree_click.is_none());
         assert!(app.tree.get(split).is_some());
@@ -5635,12 +5673,12 @@ mod shared_dialog_mouse_tests {
         app.tree_state.select(vec![group_id]);
         let layout = crate::modal::text_prompt_dialog_layout(app.layout.screen_area);
 
-        app.mode = Mode::Rename(TextPromptState::new("renamed"));
+        app.mode = Mode::CommandPrompt(TextPromptState::new("renamed"));
         click(&mut app, layout.actions.cancel_button);
         assert!(matches!(app.mode, Mode::Normal));
         assert!(app.take_outbound_requests().is_empty());
 
-        app.mode = Mode::Rename(TextPromptState::new("renamed"));
+        app.mode = Mode::CommandPrompt(TextPromptState::new("renamed"));
         handle_mouse_event(
             &mut app,
             MouseEvent {
@@ -5651,20 +5689,14 @@ mod shared_dialog_mouse_tests {
             },
         );
         assert!(
-            matches!(&app.mode, Mode::Rename(state) if state.cursor == 2),
+            matches!(&app.mode, Mode::CommandPrompt(state) if state.cursor == 2),
             "input clicks should place the text cursor relative to the field"
         );
 
+        app.mode = Mode::CommandPrompt(TextPromptState::new(""));
         click(&mut app, layout.actions.confirm_button);
-        assert!(matches!(
-            app.take_outbound_requests().as_slice(),
-            [ClientRequest::RenameNode {
-                node_id,
-                title,
-                short_title: None,
-                inferred_icon: None,
-            }] if *node_id == group_id && title == "renamed"
-        ));
+        assert!(matches!(app.mode, Mode::Normal));
+        assert!(app.take_outbound_requests().is_empty());
     }
 
     #[test]

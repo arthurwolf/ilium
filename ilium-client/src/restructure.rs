@@ -599,6 +599,7 @@ fn describe_pane_status(status: &PaneStatus) -> String {
         ),
         PaneStatus::Editor { .. } => "Editor".to_string(),
         PaneStatus::Board => "Board".to_string(),
+        PaneStatus::Plugin { .. } => "Plugin pane".to_string(),
     }
 }
 

@@ -498,23 +498,10 @@ fn keyboard_rename_and_close_resolve_verified_rows_and_ignore_unowned_virtual_ro
             vec![fixture.project, fixture.resource, row]
         };
         fixture.app.select_tree_path(path);
-        fixture.app.action_start_rename();
-        key(&mut fixture.app, KeyCode::Enter);
-        let renamed: Vec<_> = fixture
-            .app
-            .take_outbound_requests()
-            .into_iter()
-            .filter_map(|request| {
-                if let ClientRequest::RenameNode { node_id, .. } = request {
-                    Some(node_id)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let arguments = fixture.app.rename_command_arguments();
         assert_eq!(
-            renamed,
-            expected.into_iter().collect::<Vec<_>>(),
+            arguments,
+            expected.map(|id| serde_json::json!({ "node": id.0 }).to_string()),
             "{kind} rename"
         );
         fixture.app.mode = Mode::Normal;

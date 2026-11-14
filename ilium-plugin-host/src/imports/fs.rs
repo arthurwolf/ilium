@@ -43,8 +43,14 @@ use crate::runtime::pending_events::EventSink;
 /// without one leaves `pick` unsupported.
 pub trait FilePicker: Send + Sync {
     /// Blocks until the user confirms a path (`Some`) or dismisses the picker (`None`). Returns
-    /// early with `None` once `cancel` is set (the instance ended).
-    fn pick(&self, spec: &PickSpec, cancel: &CancelFlag) -> Result<Option<PathBuf>, PluginError>;
+    /// early with `None` once `cancel` is set (the instance ended). `plugin` is the asking
+    /// plugin, which the picker names to the user.
+    fn pick(
+        &self,
+        plugin: &str,
+        spec: &PickSpec,
+        cancel: &CancelFlag,
+    ) -> Result<Option<PathBuf>, PluginError>;
 }
 
 /// The paths the user chose for one instance and the answers waiting for `take-picked`.
@@ -295,6 +301,45 @@ impl FsImport {
     /// Resolves a scope-relative path to a real location, enforcing the scope rules.
     fn resolve(&mut self, path: &FsPath, access: Access) -> Result<Resolved, PluginError> {
         resolve_in(&mut self.state, path, access)
+    }
+
+    /// A resolver that reads paths with this import's scopes and grants, for the other imports
+    /// that take an `fs-path` (`media`). Take it after the scopes are configured: it shares the
+    /// project grants and the picked paths with this import, and copies the scope folders.
+    pub fn read_resolver(&mut self) -> Result<FsReadResolver, PluginError> {
+        let dirs = self.state.scope_dirs()?;
+        Ok(FsReadResolver {
+            env: self.env.clone(),
+            project: self.state.project.clone(),
+            read_only: self.state.read_only.clone(),
+            picks: Arc::clone(&self.state.picks),
+            dirs,
+        })
+    }
+}
+
+/// Resolves `fs-path`s for reading under exactly the rules of the `fs` import it came from
+/// ([`FsImport::read_resolver`]), so an import that opens a plugin's file never grows a second
+/// copy of the scope, grant and link checks.
+#[derive(Debug, Clone)]
+pub struct FsReadResolver {
+    env: ImportEnv,
+    project: Option<ProjectScope>,
+    read_only: BTreeMap<String, PathBuf>,
+    picks: Arc<Mutex<PickBook>>,
+    dirs: ScopeDirs,
+}
+
+impl FsReadResolver {
+    /// The real location of `path`, which the instance may read: the scope must be granted for
+    /// reading, the path must stay inside it (no `..`, no absolute path, no link out of it).
+    pub fn resolve_read(&self, path: &FsPath) -> Result<PathBuf, PluginError> {
+        let mut state = FsState::new(self.env.clone());
+        state.project = self.project.clone();
+        state.read_only = self.read_only.clone();
+        state.picks = Arc::clone(&self.picks);
+        state.dirs = Some(self.dirs.clone());
+        resolve_in(&mut state, path, Access::Read).map(|resolved| resolved.target)
     }
 }
 
@@ -1357,11 +1402,12 @@ impl HostFs for FsImport {
         let sink = self.env.sink();
         let guard = sink.worker();
         let cancel = self.life.flag();
+        let plugin = self.env.plugin().to_owned();
         let spawned = std::thread::Builder::new()
             .name("plugin-fs-pick".to_owned())
             .spawn(move || {
                 let _guard = guard;
-                let answer = picker.pick(&spec, &cancel);
+                let answer = picker.pick(&plugin, &spec, &cancel);
                 if cancel.is_set() {
                     return;
                 }
@@ -1555,6 +1601,7 @@ mod tests {
     impl FilePicker for FixedPicker {
         fn pick(
             &self,
+            _plugin: &str,
             _spec: &PickSpec,
             _cancel: &CancelFlag,
         ) -> Result<Option<PathBuf>, PluginError> {

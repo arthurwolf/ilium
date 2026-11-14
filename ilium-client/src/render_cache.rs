@@ -1137,6 +1137,9 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
                     newly_opened_pane = Some(pane_id);
                 }
             }
+            // A plugin pane has no local runtime to load: its owner plugin draws it when the
+            // pane is displayed (`plugin_panes`), so there is nothing to open here.
+            PaneContentKind::Plugin => {}
         }
     }
     app.reconcile_right_panel_target();

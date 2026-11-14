@@ -106,7 +106,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "client": [
       "tree.read",
-      "ui.panels"
+      "ui.panels",
+      "notify.toast"
     ]
   },
   "contributes": {
@@ -258,6 +259,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       {
         "id": "new-group",
         "title": "New group",
+        "palette": false,
+        "side": "client",
+        "category": "Tree"
+      },
+      {
+        "id": "rename",
+        "title": "Rename",
         "palette": false,
         "side": "client",
         "category": "Tree"
@@ -722,6 +730,18 @@ The bookmarks service takes a JSON request `{"op": "list"}`, `{"op": "add", "nod
 | 5 | server side | Submits `create-group` under that parent, last. A payload that is not that object is ignored. |
 
 The client side holds `ui.panels` for the popup and `tree.read` for the destinations.
+
+**Command `rename`** (client side, category Tree): the "Rename" dialog. The Rename key binding (`,` by default), the double-click on a tree row, the Rename row action and the "Rename" entry of the tree context menu run `ilium.core.tree/rename` with the JSON arguments `{"node": id}`, the node the selection points at. The dialog belongs to this plugin: the kernel has no built-in copy, so with Tree off those entry points report that Tree is not running.
+
+| Step | Who | What |
+| --- | --- | --- |
+| 1 | kernel | Runs `rename` with `{"node": id}`. |
+| 2 | client side | Reads the node with `tree.get`. A row that is not a node of the tree (a resource row, a foreign invocation, a stale id) does nothing. A worktree row shows the toast `The worktree row uses its branch name`. Any other node opens the popup `rename` through `open-view`. |
+| 3 | kernel | Draws the popup: one name input holding the current name, with the buttons Rename and Cancel, and reports `ui-action` events. |
+| 4 | client side | On Rename (or Enter in the name field) sends the message `rename-node` with the JSON payload `{"node", "title"}` to the server side and submits `close-view`. The name is sent as typed. Cancel and Esc send nothing. |
+| 5 | server side | Submits `rename-node` for that node. A payload that is not that object is ignored. |
+
+The client side holds `notify.toast` for the worktree refusal.
 
 Decoration slots, row actions and display modes of every plugin are drawn by the tree.
 

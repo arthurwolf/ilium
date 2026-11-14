@@ -144,6 +144,99 @@ pub(crate) enum Output {
         plugin: String,
         effect: super::effects::ClientEffect,
     },
+    /// A plugin reads or writes the clipboard (`ilium:host/clipboard`); the event loop runs it
+    /// on the client's clipboard service and answers on `reply`.
+    Clipboard {
+        plugin: String,
+        request: super::clipboard_backend::PluginClipboardRequest,
+        reply: mpsc::Sender<super::clipboard_backend::PluginClipboardReply>,
+    },
+    /// A plugin asks the user for a path (`fs.pick`); the event loop shows the file picker and
+    /// answers on `reply`, `None` when the user dismisses it. Dropping `reply` also dismisses.
+    PickPath {
+        plugin: String,
+        spec: ilium_plugin_api::generated::host::fs::PickSpec,
+        reply: mpsc::Sender<Option<PathBuf>>,
+    },
+}
+
+/// How long a backend polls between checks that the host is still running while it waits for
+/// the event loop.
+const ASK_POLL: Duration = Duration::from_millis(50);
+
+/// What came of a question a backend put to the event loop ([`OutputPort::ask`]).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Asked<T> {
+    /// The event loop answered.
+    Answered(T),
+    /// No answer within the time limit.
+    TimedOut,
+    /// The event loop dropped the question without an answer.
+    Dropped,
+    /// The host is stopping or the caller gave up.
+    Stopped,
+}
+
+/// Lets a backend on the plugin runtime thread hand an [`Output`] to the event loop and wait
+/// for its answer. Holds the shared state weakly, so a backend kept by an instance never keeps
+/// the host alive.
+#[derive(Clone)]
+pub(crate) struct OutputPort {
+    shared: std::sync::Weak<Shared>,
+}
+
+impl std::fmt::Debug for OutputPort {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("OutputPort")
+    }
+}
+
+impl OutputPort {
+    /// Whether the host is stopping (or gone).
+    pub(crate) fn stopping(&self) -> bool {
+        self.shared
+            .upgrade()
+            .is_none_or(|shared| shared.stopping.load(Ordering::Acquire))
+    }
+
+    /// Hands `output` to the event loop; `false` when the host is stopping.
+    fn send(&self, output: Output) -> bool {
+        match self.shared.upgrade() {
+            Some(shared) if !shared.stopping.load(Ordering::Acquire) => {
+                shared.push(output);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Asks the event loop with the output `question` builds around a reply channel, and blocks
+    /// until it answers, `limit` passes, the host stops or `gave_up` turns true.
+    pub(crate) fn ask<T>(
+        &self,
+        question: impl FnOnce(mpsc::Sender<T>) -> Output,
+        limit: Option<Duration>,
+        gave_up: &dyn Fn() -> bool,
+    ) -> Asked<T> {
+        let (reply, answer) = mpsc::channel();
+        if !self.send(question(reply)) {
+            return Asked::Stopped;
+        }
+        let started = std::time::Instant::now();
+        loop {
+            match answer.recv_timeout(ASK_POLL) {
+                Ok(value) => return Asked::Answered(value),
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Asked::Dropped,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            if self.stopping() || gave_up() {
+                return Asked::Stopped;
+            }
+            if limit.is_some_and(|limit| started.elapsed() >= limit) {
+                return Asked::TimedOut;
+            }
+        }
+    }
 }
 
 /// A panel, settings page or onboarding step a plugin has open, with the tree the plugin last
@@ -269,6 +362,12 @@ pub(crate) struct ChromeItem {
     /// Where a pane frame slot sits (`placement`: `header-icon`, `header-text`,
     /// `footer-row`, `banner`), if it says.
     pub placement: Option<String>,
+    /// The `when` context expression that hides the entry outside its context, if any
+    /// (evaluated by `plugin_host::when`).
+    pub when: Option<String>,
+    /// The short text a tree toolbar button shows beside its icon when the sidebar is wide
+    /// (`caption`, at most 12 cells), if it gives one.
+    pub caption: Option<String>,
 }
 
 /// The entries of one contribution kind in a manifest. A manifest that does not parse, or an
@@ -327,6 +426,8 @@ pub(crate) fn chrome_items(plugin: &str, manifest: &str, kind: &str) -> Vec<Chro
                 popup_view: text(entry, "popup_view"),
                 slot: text(entry, "slot"),
                 placement: text(entry, "placement"),
+                when: text(entry, "when"),
+                caption: text(entry, "caption"),
                 id,
             })
         })
@@ -361,6 +462,11 @@ struct Shared {
     segments: Mutex<Vec<StatusSegment>>,
     /// Tree decorations of client-side plugins.
     decorations: Mutex<Vec<TreeDecoration>>,
+    /// Pane frame slot contents client-side plugins set (`set-frame-slot`), one per
+    /// (plugin, pane, slot). Kept in the decoration shape: a pane plus a slot id plus text.
+    frame_slots: Mutex<Vec<TreeDecoration>>,
+    /// The sound catalogue, play rate and mute of client plugins (`play-sound`).
+    sounds: Mutex<super::sound_gate::SoundGate>,
     /// The resolved key map, as the event loop last mirrored it.
     keymap: Mutex<Vec<KeyBinding>>,
     /// Columns and rows of the screen, as the event loop last reported them.
@@ -670,7 +776,55 @@ impl Shared {
         if let Ok(mut decorations) = self.decorations.lock() {
             decorations.retain(|decoration| decoration.plugin != plugin);
         }
+        if let Ok(mut frame_slots) = self.frame_slots.lock() {
+            frame_slots.retain(|content| content.plugin != plugin);
+        }
+        if let Ok(mut sounds) = self.sounds.lock() {
+            sounds.forget(plugin);
+        }
         self.push(Output::Redraw);
+    }
+
+    /// Plays one `play-sound` of a client plugin through the client's audio output, after
+    /// the catalogue, rate and mute checks of [`super::sound_gate`]. `ok` means the sound
+    /// was handed to the audio output: playback runs on its own thread, so a slow player
+    /// never holds up the plugin host, and a failing device is only logged.
+    fn play_sound(&self, plugin: &str, sound: &str) -> Outcome {
+        let decision = match self.sounds.lock() {
+            Ok(mut gate) => gate.decide(plugin, sound, std::time::Instant::now()),
+            Err(_) => {
+                return Outcome::Failed(PluginError::new(
+                    ErrorCode::Internal,
+                    "the sound gate is unavailable",
+                ))
+            }
+        };
+        match decision {
+            super::sound_gate::SoundDecision::Play(wav) => {
+                let plugin_id = plugin.to_owned();
+                let spawned = std::thread::Builder::new()
+                    .name("ilium-plugin-sound".to_owned())
+                    .spawn(move || {
+                        let cancel = ilium_plugin_host::imports::env::CancelFlag::default();
+                        if let Err(error) = ilium_plugin_host::imports::audio::AudioBackend::play(
+                            &super::audio_backend::ClientAudio,
+                            wav,
+                            &cancel,
+                        ) {
+                            tracing::debug!(plugin = %plugin_id, "plugin sound did not play: {}", error.message);
+                        }
+                    });
+                match spawned {
+                    Ok(_) => Outcome::Ok,
+                    Err(error) => {
+                        Outcome::Failed(PluginError::new(ErrorCode::Io, error.to_string()))
+                    }
+                }
+            }
+            super::sound_gate::SoundDecision::Muted => Outcome::Ok,
+            super::sound_gate::SoundDecision::Refused(error) => Outcome::Refused(error),
+            super::sound_gate::SoundDecision::Failed(error) => Outcome::Failed(error),
+        }
     }
 
     fn set_screen(&self, screen: (u16, u16)) {
@@ -921,6 +1075,42 @@ impl KernelFacade for ClientFacade {
                 self.shared.push(Output::Redraw);
                 Outcome::Ok
             }
+            // A pane frame slot is drawn by this client only, so its content stays here
+            // (contract `pane_frame_slots`); the server never draws a frame.
+            // A client plugin's sound comes out of this client's audio output; the server
+            // never hears of it.
+            Intent::PlaySound(sound) => self.shared.play_sound(&plugin.0, &sound),
+            Intent::SetFrameSlot(spec) => {
+                let content = TreeDecoration {
+                    plugin: plugin.0.clone(),
+                    node: spec.pane,
+                    slot: spec.slot,
+                    text: spec.content.iter().map(|span| span.text.as_str()).collect(),
+                    icon: spec.icon,
+                    sort_key: 0,
+                };
+                if let Ok(mut frame_slots) = self.shared.frame_slots.lock() {
+                    frame_slots.retain(|known| {
+                        !(known.plugin == content.plugin
+                            && known.node == content.node
+                            && known.slot == content.slot)
+                    });
+                    frame_slots.push(content);
+                }
+                self.shared.push(Output::Redraw);
+                Outcome::Ok
+            }
+            Intent::ClearFrameSlot(key) => {
+                if let Ok(mut frame_slots) = self.shared.frame_slots.lock() {
+                    frame_slots.retain(|known| {
+                        !(known.plugin == plugin.0
+                            && known.node == key.pane
+                            && known.slot == key.slot)
+                    });
+                }
+                self.shared.push(Output::Redraw);
+                Outcome::Ok
+            }
             // Attention, toasts, external opens and kernel commands are client-local (gap
             // G3); everything else goes to the server.
             other => match self.shared.apply_client_effect(&plugin.0, other) {
@@ -1134,6 +1324,9 @@ fn log_errors(what: &str, errors: Vec<RuntimeError>) {
     }
 }
 
+/// How long a displayed plugin pane waits before its view is asked for again.
+const PANE_VIEW_RETRY: Duration = Duration::from_secs(5);
+
 fn to_plugin(node: ilium_core::NodeId) -> NodeId {
     NodeId(node.0)
 }
@@ -1204,16 +1397,21 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
     let (class, content_kind) = match &node.kind {
         NodeKind::Container(_) => (NodeClass::Container, None),
         NodeKind::Folder { .. } => (NodeClass::Folder, None),
-        NodeKind::Pane { content, .. } => (
+        NodeKind::Pane {
+            content,
+            plugin_pane,
+            ..
+        } => (
             NodeClass::Pane,
-            Some(
-                match content {
-                    PaneContentKind::Terminal => "ilium.terminal",
-                    PaneContentKind::Editor => "ilium.editor",
-                    PaneContentKind::Board => "ilium.board",
-                }
-                .to_owned(),
-            ),
+            Some(match content {
+                PaneContentKind::Terminal => "ilium.terminal".to_owned(),
+                PaneContentKind::Editor => "ilium.editor".to_owned(),
+                PaneContentKind::Board => "ilium.board".to_owned(),
+                // The same global kind id the server facade reports for this node.
+                PaneContentKind::Plugin => plugin_pane
+                    .as_ref()
+                    .map_or_else(String::new, |kind| kind.kind_id().to_owned()),
+            }),
         ),
     };
     Some(TreeNode {
@@ -1309,6 +1507,9 @@ struct KnownConfig {
     checked: std::time::Instant,
 }
 
+/// The kernel tab id of the Animations tab, whose `[animations]` table plugins write.
+const ANIMATIONS_TAB: &str = "animations";
+
 /// The modification time and length of a file, `None` when it cannot be read.
 fn file_stamp(path: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
     let metadata = std::fs::metadata(path).ok()?;
@@ -1354,6 +1555,9 @@ pub(crate) struct ClientPlugins {
     /// every frame. Cleared when a plugin's server state changes, which is what can change
     /// the set of enabled plugins; the catalogue itself is fixed for the client's life.
     chrome_cache: Mutex<BTreeMap<String, Vec<ChromeItem>>>,
+    /// When the view of each displayed plugin pane was last asked for (gap G14b), so a pane
+    /// whose plugin fails to start is not asked again on every frame.
+    pane_view_requests: Mutex<Vec<(String, ViewTarget, std::time::Instant)>>,
 }
 
 impl std::fmt::Debug for ClientPlugins {
@@ -1415,6 +1619,13 @@ impl ClientPlugins {
             views: Mutex::new(Vec::new()),
             segments: Mutex::new(Vec::new()),
             decorations: Mutex::new(Vec::new()),
+            frame_slots: Mutex::new(Vec::new()),
+            sounds: Mutex::new(super::sound_gate::SoundGate::new(
+                start
+                    .catalogue
+                    .iter()
+                    .map(|plugin| (plugin.id.as_str(), plugin.manifest.as_str())),
+            )),
             keymap: Mutex::new(Vec::new()),
             screen: Mutex::new((0, 0)),
             runtime: Mutex::new(None),
@@ -1437,6 +1648,9 @@ impl ClientPlugins {
             hidden.extend(disabled.iter().map(ToString::to_string));
         }
         let log: Arc<dyn LogSink> = Arc::new(TracingLog);
+        let port = OutputPort {
+            shared: Arc::downgrade(&shared),
+        };
         // `ilium:host/inference` answers through the provider selected in Settings, and Kilo
         // Gateway calls go out through the paid proxies the client loaded, never the home IP.
         let inference = ilium_plugin_host::imports::inference_backend::SettingsInference::of_user();
@@ -1457,8 +1671,16 @@ impl ClientPlugins {
                 wiring::wave_two::ClientBackendInputs {
                     inference: Some(Arc::new(inference)),
                     audio: Some(Arc::new(super::audio_backend::ClientAudio)),
-                    // The kernel picker panel is not drawn yet, so `fs.pick` stays unsupported.
-                    picker: None,
+                    // `fs.pick` shows the client's file picker over whatever is on screen.
+                    picker: Some(Arc::new(super::file_picker::ClientFilePicker::new(
+                        port.clone(),
+                    ))),
+                    // `clipboard` goes through the client's own clipboard helper process.
+                    clipboard: Some(Arc::new(super::clipboard_backend::ClientClipboard::new(
+                        port,
+                    ))),
+                    // `media` decodes with `ffmpeg`, in a child process per open video.
+                    media: Some(Arc::new(super::media_backend::FfmpegMedia::new())),
                     agent_scopes: directories::BaseDirs::new()
                         .map(|dirs| wiring::wave_two::agent_scopes_in(dirs.home_dir()))
                         .unwrap_or_default(),
@@ -1532,6 +1754,7 @@ impl ClientPlugins {
             link_cache: Mutex::new(super::links::DetectorCache::default()),
             binding_cache: Mutex::new(super::keybindings::BindingCache::default()),
             chrome_cache: Mutex::new(BTreeMap::new()),
+            pane_view_requests: Mutex::new(Vec::new()),
         })
     }
 
@@ -1599,8 +1822,13 @@ impl ClientPlugins {
     /// Tells the plugins what changed outside a tree snapshot (gap G2): the focused pane and,
     /// at most every two seconds, `config.toml` (kernel settings, theme and keymap). Cheap
     /// when nothing changed; the event loop calls it on every tick.
-    pub(crate) fn observe(&mut self, focused: Option<ilium_core::NodeId>) {
+    ///
+    /// Returns the new `[animations]` table when this reading found it changed. A plugin
+    /// writes it through `kernel-settings` (tab `animations`), and the caller applies it to
+    /// the live animation settings, which the plugin host itself does not own.
+    pub(crate) fn observe(&mut self, focused: Option<ilium_core::NodeId>) -> Option<toml::Table> {
         let mut batch = Vec::new();
+        let mut animations = None;
         let focused = focused.map(to_plugin);
         if let Some(event) = events_feed::focus_event(self.known_focus, focused) {
             batch.push(event);
@@ -1629,19 +1857,32 @@ impl ClientPlugins {
                 if stamp != known.stamp {
                     known.stamp = stamp;
                     let table = events_feed::read_config(&known.path);
-                    batch.extend(events_feed::config_events(&known.table, &table));
+                    let events = events_feed::config_events(&known.table, &table);
+                    if events.iter().any(|event| {
+                        matches!(event, Event::KernelSettingsChanged(change) if change.tab == ANIMATIONS_TAB)
+                    }) {
+                        animations = Some(
+                            ilium_plugin_host::config_settings::table_of_tab(ANIMATIONS_TAB)
+                                .and_then(|name| table.get(name))
+                                .and_then(toml::Value::as_table)
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                    }
+                    batch.extend(events);
                     known.table = table;
                 }
             }
             Some(_) => {}
         }
         if batch.is_empty() {
-            return;
+            return animations;
         }
         self.shared.post(move |runtime| {
             log_errors("event delivery", runtime.broadcast(&batch));
             log_errors("pump", runtime.pump());
         });
+        animations
     }
 
     /// Routes plugin traffic from the server. Returns whether the plugin list changed.
@@ -2068,6 +2309,44 @@ impl ClientPlugins {
             .unwrap_or_default()
     }
 
+    /// Whether `plugin` is in the catalogue and enabled, so it can draw its plugin panes.
+    pub(crate) fn runs_plugin(&self, plugin: &str) -> bool {
+        self.catalogue.iter().any(|entry| entry.id == plugin)
+            && !self.shared.is_disabled(plugin)
+            && !self
+                .server_states
+                .get(plugin)
+                .is_some_and(|state| wiring::is_disabled_state(state))
+    }
+
+    /// Opens the view of a displayed plugin pane unless it is open. A request that did not
+    /// open the view (the plugin failed to start) is repeated after `PANE_VIEW_RETRY`, not on
+    /// every frame.
+    pub(crate) fn ensure_pane_view(&self, plugin: &str, view: &ViewTarget) {
+        if self.view_is_open(plugin, view) {
+            // Opened: the next time this pane is shown after a dismissal, ask again at once.
+            if let Ok(mut requests) = self.pane_view_requests.lock() {
+                requests.retain(|(owner, target, _)| !(owner == plugin && target == view));
+            }
+            return;
+        }
+        let now = std::time::Instant::now();
+        let due = self.pane_view_requests.lock().is_ok_and(|mut requests| {
+            requests.retain(|(_, _, asked)| now.duration_since(*asked) < PANE_VIEW_RETRY);
+            if requests
+                .iter()
+                .any(|(owner, target, _)| owner == plugin && target == view)
+            {
+                return false;
+            }
+            requests.push((plugin.to_owned(), view.clone(), now));
+            true
+        });
+        if due {
+            self.show_view(plugin, view.clone());
+        }
+    }
+
     /// Whether a view is open.
     pub(crate) fn view_is_open(&self, plugin: &str, view: &ViewTarget) -> bool {
         self.shared.views.lock().is_ok_and(|views| {
@@ -2205,6 +2484,43 @@ impl ClientPlugins {
         self.server_decorations()
             .for_each(|decoration| add(&decoration));
         keys
+    }
+
+    /// What plugins put in the frame slots of one pane: the contents they set with
+    /// `set-frame-slot`, then decorations they set on the pane under a frame slot's id.
+    /// Callers keep only the slots a `pane_frame_slots` entry declares.
+    pub(crate) fn frame_slot_contents_of(&self, node: ilium_core::NodeId) -> Vec<TreeDecoration> {
+        let pane = to_plugin(node);
+        let mut found: Vec<TreeDecoration> = self
+            .shared
+            .frame_slots
+            .lock()
+            .map(|frame_slots| {
+                frame_slots
+                    .iter()
+                    .filter(|content| content.node == pane)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        found.extend(self.decorations_of(node));
+        found
+    }
+
+    /// Mutes or unmutes the `play-sound` intents of client plugins (Settings > Sounds).
+    pub(crate) fn set_sounds_muted(&self, muted: bool) {
+        if let Ok(mut sounds) = self.shared.sounds.lock() {
+            sounds.set_muted(muted);
+        }
+    }
+
+    /// Whether any plugin may have frame slot content, so frame drawing can skip the lookup.
+    pub(crate) fn has_frame_slot_contents(&self) -> bool {
+        self.shared
+            .frame_slots
+            .lock()
+            .is_ok_and(|frame_slots| !frame_slots.is_empty())
+            || self.has_decorations()
     }
 
     /// Whether any plugin decorates the tree, so the tree drawing can skip the lookup.

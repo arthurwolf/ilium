@@ -307,12 +307,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ),
             ("search-overflow", synthetic_search()),
             (
-                "rename-prompt",
-                ilium_client::app::Mode::Rename(ilium_client::text_prompt::TextPromptState::new(
-                    "Synthetic pane name",
-                )),
-            ),
-            (
                 "command-prompt",
                 ilium_client::app::Mode::CommandPrompt(
                     ilium_client::text_prompt::TextPromptState::new("synthetic-command --example"),

@@ -307,6 +307,10 @@ The schema file for `set-setting` (`schemas/set-setting.json`, shown here becaus
 }
 ```
 
+#### From a changed row to the running animation
+
+When the user changes the `scene`, `semantic`, `observer` or `saved_places` row in Settings, Plugins, the client part receives `settings-changed` (origin `user`), reads its settings object and calls `set-setting` once per changed row. A change that the plugin, another plugin, a reset or a file made is not sent again, so nothing echoes. The server part validates the value and stores it in the `animations` kernel tab, which is the `[animations]` table of `config.toml`. The client watches that table: when it changes, the client selects the scene it names (`scene`), or the semantic animation when `semantic` is true, through the same save path as the Animations tab. `semantic` set to false while the semantic animation is current returns to the stored `scene`, or to `stars` when none is stored. A refusal of the service (an unknown scene, a missing grant) is logged by the client part and changes nothing. `observer` and `saved_places` are stored but not applied by the client yet. With the plugin off, no row exists and nothing writes the table, so the scene only changes through the kernel Animations tab.
+
 ### Kernel tabs this plugin owns
 
 This plugin is the single owner of the following built-in Settings tabs. Its server part holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab, see [kernel settings](/pages/api-kernel-settings-and-keymap/#writing-a-kernel-tab)). The values stay in the same tables as before (the project YAML `animation` key, see the table above), so no user setting moves. [COR-030] [COR-033]

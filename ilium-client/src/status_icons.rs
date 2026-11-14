@@ -193,6 +193,14 @@ pub fn identity_explanation(status: &PaneStatus) -> StatusExplanation {
             title: "Board",
             body: "This tree entry is a board pane.",
         },
+        PaneStatus::Plugin { dirty: true } => StatusExplanation {
+            title: "Plugin pane, unsaved",
+            body: "This tree entry is a pane drawn by a plugin; the plugin reports unsaved changes.",
+        },
+        PaneStatus::Plugin { dirty: false } => StatusExplanation {
+            title: "Plugin pane",
+            body: "This tree entry is a pane drawn by a plugin.",
+        },
     }
 }
 
@@ -201,6 +209,7 @@ pub(crate) fn missing_identity_evidence_reason(content: PaneContentKind) -> Stri
         PaneContentKind::Terminal => "Why: the server has not sent this terminal's process-classification evidence yet.".to_string(),
         PaneContentKind::Editor => "Why: the saved tree marks this as an editor pane, so the icon identifies its pane kind rather than an agent process.".to_string(),
         PaneContentKind::Board => "Why: the saved tree marks this as a board pane, so the icon identifies its pane kind rather than an agent process.".to_string(),
+        PaneContentKind::Plugin => "Why: the saved tree marks this as a plugin pane, so the icon identifies its pane kind rather than an agent process.".to_string(),
     }
 }
 
@@ -232,6 +241,9 @@ pub(crate) fn identity_provenance_reason(
         PaneStatus::Board => {
             "Why: the server-owned pane status identifies this entry as a board pane.".to_string()
         }
+        PaneStatus::Plugin { dirty } => format!(
+            "Why: the server-owned pane status identifies this entry as a plugin pane (dirty={dirty})."
+        ),
         PaneStatus::Agent(agent) => {
             let class_name = match &agent.class {
                 ilium_core::AgentClass::Claude => "Claude Code",
@@ -1208,6 +1220,7 @@ mod tests {
         for (content, pane_name) in [
             (PaneContentKind::Editor, "editor pane"),
             (PaneContentKind::Board, "board pane"),
+            (PaneContentKind::Plugin, "plugin pane"),
         ] {
             let reason = missing_identity_evidence_reason(content);
             assert!(reason.contains(pane_name));

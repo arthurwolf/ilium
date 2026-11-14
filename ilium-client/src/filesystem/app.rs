@@ -770,6 +770,7 @@ impl App {
                 Mode::Explorer(overlay, _)
                 | Mode::FolderExplorer(overlay, _)
                 | Mode::ProjectFolderExplorer(overlay, _)
+                | Mode::PluginFilePicker(overlay, _)
                 | Mode::BoardPathPicker(overlay) => overlay.close_preparation(),
                 _ => {}
             }
@@ -787,6 +788,7 @@ impl App {
                 Mode::Explorer(overlay, _)
                 | Mode::FolderExplorer(overlay, _)
                 | Mode::ProjectFolderExplorer(overlay, _)
+                | Mode::PluginFilePicker(overlay, _)
                 | Mode::BoardPathPicker(overlay) => overlay.preparation_pending(),
                 _ => false,
             }
@@ -799,6 +801,7 @@ impl App {
                 Mode::Explorer(overlay, _)
                 | Mode::FolderExplorer(overlay, _)
                 | Mode::ProjectFolderExplorer(overlay, _)
+                | Mode::PluginFilePicker(overlay, _)
                 | Mode::BoardPathPicker(overlay) => overlay.poll(),
                 _ => false,
             }

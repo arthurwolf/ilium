@@ -8,6 +8,7 @@ pub mod animation_services;
 pub mod control;
 pub mod debug;
 pub mod dither;
+pub mod external;
 pub mod geocode;
 pub mod gpu;
 pub mod live_chess;
