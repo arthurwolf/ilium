@@ -12,7 +12,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use ilium_plugin_sdk::host::HostCli;
-use ilium_plugin_sdk::types::RequestId;
 use ilium_plugin_sdk::HostApi;
 
 use crate::messages::{capped_context, tail_messages, unread_context, UnreadReader};
@@ -284,7 +283,7 @@ pub fn on_invoked(api: &mut dyn HostApi, invocation: u64, argv: &[String], cwd: 
             since_last_read: true,
             ..
         } => match HostCli::read_stdin(api, invocation, HOOK_INPUT_LIMIT) {
-            Ok(RequestId(request)) => PENDING.with(|pending| {
+            Ok(request) => PENDING.with(|pending| {
                 pending.borrow_mut().insert(
                     request,
                     PendingContext {

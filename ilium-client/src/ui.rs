@@ -3515,8 +3515,6 @@ fn draw_voice_control(frame: &mut Frame, area: Rect, app: &App) {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    #[test]
     use super::*;
     use crate::app::{PaneRuntime, RightPanelTarget};
     use crate::terminal_view::TerminalView;

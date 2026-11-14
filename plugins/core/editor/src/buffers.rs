@@ -53,7 +53,7 @@ impl EditError {
 }
 
 /// One open buffer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Buffer {
     pub reference: BufferRef,
     lines: Vec<String>,

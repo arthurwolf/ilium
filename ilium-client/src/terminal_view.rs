@@ -1354,7 +1354,6 @@ impl PaintedTerminal {
             .map(|charge| charge.reserve_capture(bytes))
             .transpose()
     }
-    #[cfg(test)]
     pub(crate) fn allocation_bytes(&self) -> usize {
         self.snapshot
             .allocation_charge

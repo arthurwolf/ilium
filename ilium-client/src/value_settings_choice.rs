@@ -225,7 +225,7 @@ fn tree_order_catalog(app: &App) -> (Vec<ChoiceOption>, String) {
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 42] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
