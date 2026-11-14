@@ -1308,6 +1308,26 @@ async fn composer_fixture(fixture: &Fixture) -> (NodeId, PathBuf) {
         None,
         std::time::Duration::from_secs(1),
     );
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if runtime.session.try_screen_snapshot().is_some_and(|screen| {
+                ilium_detect::is_agent_prompt_ready_at_cursor(
+                    &ilium_core::AgentClass::Codex,
+                    &screen.text,
+                    screen.cursor_position.0,
+                    screen.cursor_position.1,
+                    &screen.dimmed_cells,
+                )
+            }) {
+                break;
+            }
+            screens.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    // Capture identity only after the shell drew its prompt: right after spawn the
+    // child may not have exec'd /bin/sh yet and still carry the test binary's name.
     let mut system = System::new();
     system.refresh_processes(ProcessesToUpdate::Some(&[Pid::from_u32(process_id)]), true);
     let process = system.process(Pid::from_u32(process_id)).unwrap();
@@ -1327,24 +1347,6 @@ async fn composer_fixture(fixture: &Fixture) -> (NodeId, PathBuf) {
     runtime.detected_agent_class = Some(ilium_core::AgentClass::Codex);
     runtime.detection_schedule.cached_identity = Some(identity);
     runtime.agent_input_available = true;
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            if runtime.session.try_screen_snapshot().is_some_and(|screen| {
-                ilium_detect::is_agent_prompt_ready_at_cursor(
-                    &ilium_core::AgentClass::Codex,
-                    &screen.text,
-                    screen.cursor_position.0,
-                    screen.cursor_position.1,
-                    &screen.dimmed_cells,
-                )
-            }) {
-                break;
-            }
-            screens.changed().await.unwrap();
-        }
-    })
-    .await
-    .unwrap();
     let pane = fixture
         .state
         .tree

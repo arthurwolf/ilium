@@ -186,7 +186,8 @@ pub fn sync_parent_directory_if_supported(path: &Path) -> io::Result<DirectorySy
 
 #[cfg(all(test, not(windows)))]
 thread_local! {static RESOURCE_TEST_DIRECTORY_SYNC_FAILURE:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
-#[cfg(all(test, not(windows)))]
+// Only the Linux-only resource ledger tests inject this failure.
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) fn fail_next_replacement_directory_sync_for_test() {
     RESOURCE_TEST_DIRECTORY_SYNC_FAILURE.with(|failure| failure.set(true));
 }
