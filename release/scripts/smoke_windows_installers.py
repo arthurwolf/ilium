@@ -156,7 +156,7 @@ def probe(directory: Path, binding: dict, kind: str, label: str, evidence: journ
     project = root / 'project'  # The supported --cwd contract supplies the session identity.
     project.mkdir()  # Ensure the native CLI sees an absolute existing project.
     evidence.record('execution-scope', label=label, project=str(project), path=environment['PATH'], source_resolution='absolute-installed-images-and-system-only-PATH', physical_source_hiding=False)  # Do not overclaim filesystem isolation.
-    job, server, pane, primary, failures = windows_job(evidence.root, label), None, None, None, []  # Hold custody through final retirement.
+    job, server, panes, primary, failures = windows_job(evidence.root, label), None, [], None, []  # Hold custody through final retirement.
     try:  # Always release this private job, including partial startup.
         observed = inventory(directory, binding['files'], kind)  # Recheck installed bytes immediately before execution.
         evidence.record('installed-files', label=label, files=observed)  # Separate payload from generated metadata by its names.
@@ -220,16 +220,17 @@ def probe(directory: Path, binding: dict, kind: str, label: str, evidence: journ
                 evidence.record('scratch-diagnostic', label=label, command=['ctl', 'screen'], error=str(diagnostic_error))
             raise
         require(plain(marker).read_text(encoding='ascii').strip() == nonce, 'pane marker differs')  # A stale or wrong project cannot pass.
-        pane = job.hold_image(system / 'cmd.exe')  # Require the system shell inside this private job.
-        require(server.alive() and pane.alive(), 'server or pane exited before readiness')  # Marker creation alone is insufficient.
-        evidence.record('owned-processes', label=label, server=server.identity, pane=pane.identity, server_sha256=package.sha(directory / 'ilium-server.exe'), marker=nonce)  # Record handle-bound native identity.
+        panes = job.hold_images(system / 'cmd.exe', 2)  # Require both inside this private job, and no others.
+        require(server.alive() and all(item.alive() for item in panes), 'server or pane exited before readiness')  # Marker creation alone is insufficient.
+        evidence.record('owned-processes', label=label, server=server.identity, pane=[item.identity for item in panes], server_sha256=package.sha(directory / 'ilium-server.exe'), marker=nonce)  # Record handle-bound native identity.
         listed = checked_run(job, command + ['ls'], environment, project, evidence, label + '-ls')  # Retain the supported human-readable listing unchanged.
-        require(bool(listed['stdout'].strip()) and server.alive() and pane.alive(), 'installed listing/liveness failed')  # Do not invent an undocumented listing parser.
+        require(bool(listed['stdout'].strip()) and server.alive() and all(item.alive() for item in panes), 'installed listing/liveness failed')  # Do not invent an undocumented listing parser.
         checked_run(job, command + ['kill-session', 'default'], environment, project, evidence, label + '-kill-session')  # Only an established task-owned session may be retired.
-        require(server.wait(30) and pane.wait(30), 'original server or pane did not exit')  # Wait on retained handles, never a later PID lookup.
-        evidence.record('retirement-readback', label=label, server=server.identity, pane=pane.identity, original_handles_signaled=True)  # Record original identity before releasing references.
+        require(server.wait(30) and all(item.wait(30) for item in panes), 'original server or pane did not exit')  # Wait on retained handles, never a later PID lookup.
+        evidence.record('retirement-readback', label=label, server=server.identity, pane=[item.identity for item in panes], original_handles_signaled=True)  # Record original identity before releasing references.
         server.close()  # Keep exited-process references from delaying job accounting.
-        pane.close()  # Both original exit observations remain in retained evidence.
+        for item in panes:
+            item.close()
         wait_until(lambda: job.active_count() == 0, 10, 'session left owned descendants running')  # Graceful success requires the complete job to empty.
         require(inventory(directory, binding['files'], kind) == observed, 'installed files changed during lifecycle')  # Include uninstaller custody in the within-run invariant.
         evidence.record('lifecycle', label=label, state='passed', original_server_exited=True, original_pane_exited=True, job_empty=True)  # This row follows graceful readbacks only.
@@ -237,7 +238,7 @@ def probe(directory: Path, binding: dict, kind: str, label: str, evidence: journ
         primary = error  # Cleanup cannot replace this primary error.
     finally:  # Never signal a foreign process by PID or image name.
         attempt(label + '-job-retirement', job.terminate_and_close, failures, evidence)  # Force only the private job on failure.
-        for owned in (server, pane):  # Retained process handles outlive PID reuse.
+        for owned in (server, *panes):  # Retained process handles outlive PID reuse.
             if owned is not None:  # Partial startup may not have acquired both handles.
                 attempt(label + '-handle-close', owned.close, failures, evidence)  # Close only handles acquired by this gate.
         transaction['uncertain'] |= bool(failures)  # Do not uninstall while process retirement is unverified.
