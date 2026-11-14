@@ -157,7 +157,8 @@ pub(crate) struct ViewCursor {
     pub drag: Option<Drag>,
 }
 
-fn clean(text: &str) -> String {
+/// Plugin text made safe to draw (shared with the popup host).
+pub(crate) fn clean(text: &str) -> String {
     sanitize_plugin_text(text, SPAN_LIMIT)
 }
 
@@ -366,12 +367,12 @@ struct Mark {
 }
 
 /// The display width of a text in cells.
-fn cells(text: &str) -> usize {
+pub(crate) fn cells(text: &str) -> usize {
     unicode_width::UnicodeWidthStr::width(text)
 }
 
 /// The longest start of `text` that fits `room` cells.
-fn fit(text: &str, room: usize) -> String {
+pub(crate) fn fit(text: &str, room: usize) -> String {
     let mut used = 0usize;
     let mut fitted = String::new();
     for character in text.chars() {

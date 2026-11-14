@@ -748,6 +748,12 @@ fn estimated_bytes(snapshot: &SessionSnapshot) -> usize {
         add(recap.short.capacity());
         add(optional(&recap.long));
     }
+    add(snapshot.plugin_node_metadata.capacity()
+        * std::mem::size_of::<persistence::PersistedNodeMetadata>());
+    for entry in &snapshot.plugin_node_metadata {
+        add(entry.plugin.capacity());
+        add(entry.bytes.capacity());
+    }
     bytes
 }
 
@@ -1024,6 +1030,7 @@ mod tests {
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
             recaps: Vec::new(),
+            plugin_node_metadata: Vec::new(),
         }
     }
     fn parked(

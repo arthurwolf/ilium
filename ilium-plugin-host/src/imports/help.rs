@@ -1,31 +1,34 @@
-//! Host implementation of `ilium:host/help` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/help` over a fixed table of topics.
 //!
-//! Written once by the skeleton lane from the generated `HostHelp` trait; hand-owned afterwards.
+//! The runtime equips `imports::backed::KernelHelp`, which reads the kernel's live help
+//! catalogue; this import serves a table handed to it at construction, for hosts that have no
+//! kernel. Its table belongs to the import value, never to a thread or the process.
 
 use ilium_plugin_api::generated::host::help::HostHelp;
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-
-thread_local! {
-    /// Help topics the kernel published, keyed by global id `<plugin>/<local-id>` (or `ilium/<id>`).
-    /// Per thread because `HelpImport` is a stateless handle; the kernel fills it before guest calls.
-    static HELP_TOPICS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
-}
-
-/// Replaces the published help topics (global id to markdown text) visible to this thread's imports.
-pub fn publish_help_topics(topics: impl IntoIterator<Item = (String, String)>) {
-    HELP_TOPICS.with(|held| *held.borrow_mut() = topics.into_iter().collect());
-}
+use std::sync::Arc;
 
 /// True when `id` has the global form `<prefix>/<local>` with both parts non-empty.
 fn is_global_topic_id(id: &str) -> bool {
     matches!(id.split_once('/'), Some((prefix, local)) if !prefix.is_empty() && !local.is_empty())
 }
 
-/// Host side of the `help` interface.
-#[derive(Debug)]
-pub struct HelpImport;
+/// Host side of the `help` interface: topics keyed by global id `<plugin>/<local-id>` (or
+/// `ilium/<id>`) to their markdown.
+#[derive(Debug, Clone, Default)]
+pub struct HelpImport {
+    topics: Arc<HashMap<String, String>>,
+}
+
+impl HelpImport {
+    /// An import answering from `topics` (global id to markdown).
+    pub fn with_topics(topics: impl IntoIterator<Item = (String, String)>) -> Self {
+        Self {
+            topics: Arc::new(topics.into_iter().collect()),
+        }
+    }
+}
 
 impl HostHelp for HelpImport {
     /// Unknown, malformed or local ids give `None`, never a failure (case-sensitive match).
@@ -33,7 +36,7 @@ impl HostHelp for HelpImport {
         if !is_global_topic_id(&id) {
             return None;
         }
-        HELP_TOPICS.with(|held| held.borrow().get(&id).cloned())
+        self.topics.get(&id).cloned()
     }
 }
 
@@ -209,5 +212,20 @@ mod tests {
     fn declined_grant_with_empty_id_is_none() {
         let (_kernel, host) = declined_help_rig(&["help.read"]);
         assert_eq!(topic_of(&host, ""), None);
+    }
+
+    #[test]
+    fn a_fixed_table_answers_global_ids_and_is_its_own() {
+        let mut help = super::HelpImport::with_topics([(
+            SEARCH_TOPIC_ID.to_owned(),
+            SEARCH_TOPIC_TEXT.to_owned(),
+        )]);
+        assert_eq!(
+            help.topic(SEARCH_TOPIC_ID.to_owned()),
+            Some(SEARCH_TOPIC_TEXT.to_owned())
+        );
+        assert_eq!(help.topic("notes.search".to_owned()), None);
+        let mut empty = super::HelpImport::default();
+        assert_eq!(empty.topic(SEARCH_TOPIC_ID.to_owned()), None);
     }
 }

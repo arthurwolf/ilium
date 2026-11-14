@@ -252,10 +252,38 @@ impl SettingRow {
         rounded.clamp(low, high)
     }
 
-    /// The value for text a person typed into a number row: it is parsed, then clamped.
+    /// Whether the row's value is typed: a number, or one of the text kinds (`text`,
+    /// `text-area`, `path`, `color`, and a `choice` without fixed options). Enter on such a row
+    /// opens a text prompt in Settings.
+    pub(crate) fn takes_text(&self) -> bool {
+        match self.kind.as_str() {
+            "number" | "text" | "text-area" | "path" | "color" => true,
+            "choice" => self.options().is_none(),
+            _ => false,
+        }
+    }
+
+    /// The text a prompt for this row starts with: the value in effect as plain text.
+    pub(crate) fn prompt_text(&self) -> String {
+        match &self.value {
+            Value::Null => String::new(),
+            other => plain(other),
+        }
+    }
+
+    /// The value for text a person typed: a number row parses and clamps it, a text row takes
+    /// it as it is (the store checks it against the row's schema on commit). An empty text
+    /// resets the row to its default.
     pub(crate) fn typed(&self, text: &str) -> Result<Value, String> {
-        if self.kind != "number" {
+        if !self.takes_text() {
             return Err(format!("a {} row does not take typed text here", self.kind));
+        }
+        if self.kind != "number" {
+            return Ok(if text.is_empty() {
+                Value::Null
+            } else {
+                Value::String(text.to_owned())
+            });
         }
         let number: f64 = text
             .trim()
@@ -478,7 +506,30 @@ mod tests {
         assert_eq!(volume.typed("-4"), Ok(json!(0)));
         assert!(volume.typed("loud").is_err());
         assert!(volume.typed("NaN").is_err());
-        assert!(row("label").typed("1").is_err());
+        assert!(row("muted").typed("1").is_err());
+        assert!(
+            !row("mode").takes_text(),
+            "a choice with fixed options steps"
+        );
+    }
+
+    #[test]
+    fn a_text_row_takes_typed_text_and_stores_it() {
+        let mut label = row("label");
+        assert!(label.takes_text());
+        assert_eq!(label.prompt_text(), "ilium");
+        let (store, _directory) = store();
+        let value = label.typed("dev box").expect("text is accepted");
+        assert!(label.commit(&store, value));
+        assert_eq!(label.value, json!("dev box"));
+        assert_eq!(
+            store.read("acme.demo").expect("read").get("label"),
+            Some(&json!("dev box"))
+        );
+        // An empty text resets the row to its default.
+        assert_eq!(label.typed(""), Ok(Value::Null));
+        assert!(label.commit(&store, Value::Null));
+        assert_eq!(label.value, json!("ilium"));
     }
 
     #[test]

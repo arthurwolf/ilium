@@ -723,6 +723,7 @@ fn is_shared_action_dialog(mode: &Mode) -> bool {
             | Mode::InferenceSettingPrompt(_, _)
             | Mode::VoiceSettingPrompt(_, _)
             | Mode::ApiSettingPrompt(_)
+            | Mode::PluginSettingPrompt(_, _)
             | Mode::GitSettingPrompt(_, _)
             | Mode::AnimationTextPrompt(_, _)
             | Mode::AgentSetupPathPrompt(_, _)
@@ -798,6 +799,7 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         | Mode::InferenceSettingPrompt(_, state)
         | Mode::VoiceSettingPrompt(_, state)
         | Mode::ApiSettingPrompt(state)
+        | Mode::PluginSettingPrompt(_, state)
         | Mode::GitSettingPrompt(_, state)
         | Mode::AnimationTextPrompt(_, state)
         | Mode::AgentSetupPathPrompt(_, state)
@@ -3968,11 +3970,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     app.plugin_list_rows().len(),
                 ) {
                     state.selected_row = index;
+                    // Settings is put back first: a typed setting row opens its prompt over it.
+                    app.mode = Mode::Settings(Box::new(state));
                     if app.settings_activate_plugin_row(index) {
                         // The row opened a plugin view: Settings closes so it is visible.
                         app.mode = Mode::Normal;
-                        return;
                     }
+                    return;
                 }
             } else if state.tab == crate::app::SettingsTab::Api {
                 if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(

@@ -634,7 +634,18 @@ fn transient_host(
             },
             basic: None,
             log: Arc::clone(&log),
-            backends: wiring::wave_two::Backends::new(absolute_cwd.clone(), dir.clone()),
+            backends: wiring::wave_two::Backends::server(
+                absolute_cwd.clone(),
+                dir.clone(),
+                wiring::wave_two::ServerBackendInputs {
+                    inference: Some(Arc::new(
+                        ilium_plugin_host::imports::inference_backend::SettingsInference::of_user(),
+                    )),
+                    agent_scopes: directories::BaseDirs::new()
+                        .map(|dirs| wiring::wave_two::agent_scopes_in(dirs.home_dir()))
+                        .unwrap_or_default(),
+                },
+            ),
         })
     });
     let runtime = HostRuntime::new(

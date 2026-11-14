@@ -3,9 +3,12 @@
 //! `host` is the real composition the event loop runs (foundation contract section 12);
 //! `ClientPluginHost` below and the two rigs are the earlier models the red tests drive.
 
+pub mod audio_backend;
 pub mod commands;
+pub(crate) mod effects;
 pub mod host;
 pub mod keybindings;
+pub(crate) mod links;
 pub mod popup;
 pub(crate) mod remote;
 pub mod screens_rig;

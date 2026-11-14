@@ -114,6 +114,102 @@ pub(crate) fn detectors_for<'a>(
         .collect()
 }
 
+/// The fully qualified commands (`<plugin>/<command>`) the given manifests declare in
+/// `contributes.commands`.
+fn declared_commands<'a>(
+    manifests: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> std::collections::BTreeSet<String> {
+    let mut declared = std::collections::BTreeSet::new();
+    for (plugin, manifest) in manifests {
+        let Ok(manifest) = serde_json::from_str::<Value>(manifest) else {
+            continue;
+        };
+        let entries = manifest
+            .pointer("/contributes/commands")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten();
+        for entry in entries {
+            if let Some(id) = entry.get("id").and_then(Value::as_str).map(str::trim) {
+                if !id.is_empty() {
+                    declared.insert(format!("{plugin}/{id}"));
+                }
+            }
+        }
+    }
+    declared
+}
+
+/// The detectors of the enabled plugins that the click path uses: those whose command an
+/// enabled plugin declares (EXT-050 says the command must name a declared command). A detector
+/// whose command does not resolve would take the click away from the kernel's own link
+/// handling and then do nothing, so it is left out and the kernel keeps the click.
+pub(crate) fn active_detectors(manifests: &[(String, String)]) -> Vec<LinkDetector> {
+    let pairs = || {
+        manifests
+            .iter()
+            .map(|(plugin, manifest)| (plugin.as_str(), manifest.as_str()))
+    };
+    let declared = declared_commands(pairs());
+    detectors_for(pairs())
+        .into_iter()
+        .filter(|detector| declared.contains(&detector.command))
+        .collect()
+}
+
+/// The compiled detectors of the enabled plugins, rebuilt only when the set of enabled
+/// manifests changes, so a click never recompiles a regex.
+#[derive(Debug, Default)]
+pub(crate) struct DetectorCache {
+    built: Option<(Vec<(String, String)>, std::sync::Arc<[LinkDetector]>)>,
+}
+
+impl DetectorCache {
+    /// The detectors for `manifests`, compiled once per distinct set.
+    pub(crate) fn detectors(
+        &mut self,
+        manifests: Vec<(String, String)>,
+    ) -> std::sync::Arc<[LinkDetector]> {
+        match &self.built {
+            Some((built_for, detectors)) if *built_for == manifests => {
+                std::sync::Arc::clone(detectors)
+            }
+            _ => {
+                let detectors: std::sync::Arc<[LinkDetector]> = active_detectors(&manifests).into();
+                self.built = Some((manifests, std::sync::Arc::clone(&detectors)));
+                detectors
+            }
+        }
+    }
+}
+
+impl crate::app::App {
+    /// The link detectors of the enabled plugins, handed to the terminal link job of a click.
+    /// Empty without a plugin host.
+    pub(crate) fn plugin_link_detectors(&self) -> std::sync::Arc<[LinkDetector]> {
+        self.wasm_plugins
+            .as_ref()
+            .map(super::host::ClientPlugins::link_detectors)
+            .unwrap_or_else(|| std::sync::Arc::from(Vec::new()))
+    }
+
+    /// Opens (Ctrl+O) a link a plugin detector matched: `link-activated` goes to the owner and
+    /// the detector's command runs with the detector id and the text as its arguments.
+    pub(crate) fn activate_plugin_link(&mut self, found: &LinkMatch) {
+        let screen = self.popup_screen();
+        let pane = self.active_pane_id();
+        let Some(plugins) = self.wasm_plugins.as_ref() else {
+            self.status_message = Some(format!(
+                "{} is not available: plugins are off",
+                found.command
+            ));
+            return;
+        };
+        plugins.activate_link(found, pane, screen);
+        self.status_message = Some(format!("Opening {} with {}", found.text, found.command));
+    }
+}
+
 /// The first detector whose match covers the cell `column` of `line`, or `None` so the caller
 /// falls back to the kernel's link handling. `column` is a terminal cell column, so wide
 /// characters before it are accounted for.
@@ -240,6 +336,47 @@ mod tests {
         assert!(detectors_of("p", "{}").is_empty());
         assert!(detectors_of("p", "not json").is_empty());
         assert_eq!(plugin_link_at(&[], "src/a.rs:1", 2), None);
+    }
+
+    #[test]
+    fn only_detectors_whose_command_is_declared_reach_the_click_path() {
+        let declared = r##"{"id":"example.issues","contributes":{
+            "commands":[{"id":"open","title":"Open issue"}],
+            "link_detectors":[
+                {"id":"issue-ref","regex":"#[0-9]+","command":"open"},
+                {"id":"dangling","regex":"[a-z]+","command":"missing"}
+            ]}}"##;
+        let manifests = vec![
+            ("example.issues".to_owned(), declared.to_owned()),
+            ("core".to_owned(), terminal_manifest()),
+        ];
+        let detectors = active_detectors(&manifests);
+        assert_eq!(detectors.len(), 1, "{detectors:?}");
+        assert_eq!(detectors[0].command, "example.issues/open");
+        let found = plugin_link_at(&detectors, "fix #42 now", 5).expect("on the reference");
+        assert_eq!(found.text, "#42");
+        assert_eq!(
+            serde_json::from_str::<Value>(&found.arguments_json()).unwrap(),
+            serde_json::json!({ "detector_id": "issue-ref", "text": "#42" })
+        );
+        // The terminal plugin's detectors name an undeclared command: the kernel keeps them.
+        assert_eq!(plugin_link_at(&detectors, "src/a.rs:12", 3), None);
+    }
+
+    #[test]
+    fn the_cache_compiles_once_per_set_of_enabled_manifests() {
+        let manifests = vec![(
+            "example.issues".to_owned(),
+            r##"{"contributes":{"commands":[{"id":"open"}],
+                "link_detectors":[{"id":"i","regex":"#[0-9]+","command":"open"}]}}"##
+                .to_owned(),
+        )];
+        let mut cache = DetectorCache::default();
+        let first = cache.detectors(manifests.clone());
+        let again = cache.detectors(manifests);
+        assert!(std::sync::Arc::ptr_eq(&first, &again));
+        assert_eq!(first.len(), 1);
+        assert!(cache.detectors(Vec::new()).is_empty());
     }
 
     #[test]

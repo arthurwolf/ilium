@@ -131,6 +131,18 @@ pub struct SessionSnapshot {
     /// Stored pane recaps. Older snapshots default to none.
     #[serde(default)]
     pub(crate) recaps: Vec<PersistedRecap>,
+    /// What plugins keep on tree nodes (`tree-annotations.set-metadata`), so it survives a
+    /// restart like the nodes do. Older snapshots default to none.
+    #[serde(default)]
+    pub(crate) plugin_node_metadata: Vec<PersistedNodeMetadata>,
+}
+
+/// One plugin's metadata on one node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PersistedNodeMetadata {
+    pub plugin: String,
+    pub node_id: NodeId,
+    pub bytes: Vec<u8>,
 }
 
 /// One pane's stored recap together with the fence it was accepted under.
@@ -460,6 +472,7 @@ impl LegacyWorkspace {
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
             recaps: Vec::new(),
+            plugin_node_metadata: Vec::new(),
         })
     }
 }
@@ -539,6 +552,7 @@ pub(crate) struct SnapshotSources {
         >,
     >,
     recaps: Arc<tokio::sync::RwLock<std::collections::HashMap<NodeId, PersistedRecap>>>,
+    plugin_node_metadata: Arc<crate::state::PluginNodeMetadata>,
     agent_debug: Arc<crate::agent_debug::AgentDebugRecorder>,
     _restored_storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
@@ -549,6 +563,7 @@ impl SnapshotSources {
             panes: Arc::clone(&state.panes),
             workspace_close_preferences: Arc::clone(&state.workspace_close_preferences),
             recaps: Arc::clone(&state.recaps),
+            plugin_node_metadata: Arc::clone(&state.plugin_node_metadata),
             agent_debug: Arc::clone(&state.agent_debug),
             _restored_storage: state.snapshot_read_storage(),
         }
@@ -568,6 +583,7 @@ pub(crate) async fn capture_snapshot(
         workspace_close_preferences,
         agent_debug_logs,
         recaps,
+        plugin_node_metadata,
     ) = {
         let tree = sources.tree.read().await;
         let panes = sources.panes.read().await;
@@ -646,6 +662,21 @@ pub(crate) async fn capture_snapshot(
             .cloned()
             .collect::<Vec<_>>();
         recaps.sort_by_key(|recap| recap.pane_id.0);
+        let plugin_node_metadata = sources
+            .plugin_node_metadata
+            .lock()
+            .map(|store| {
+                store
+                    .iter()
+                    .filter(|((_, node), _)| tree.get(NodeId(*node)).is_some())
+                    .map(|((plugin, node), bytes)| PersistedNodeMetadata {
+                        plugin: plugin.clone(),
+                        node_id: NodeId(*node),
+                        bytes: bytes.clone(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         (
             tree.clone(),
             pane_snapshots,
@@ -653,6 +684,7 @@ pub(crate) async fn capture_snapshot(
             workspace_close_preferences,
             agent_debug_logs,
             recaps,
+            plugin_node_metadata,
         )
     };
     Ok(SessionSnapshot {
@@ -663,6 +695,7 @@ pub(crate) async fn capture_snapshot(
         progress_monitors,
         workspace_close_preferences,
         recaps,
+        plugin_node_metadata,
     })
 }
 
@@ -1478,6 +1511,7 @@ mod tests {
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
             recaps: Vec::new(),
+            plugin_node_metadata: Vec::new(),
         }
     }
 
@@ -2055,6 +2089,29 @@ mod tests {
         old_shape.as_object_mut().unwrap().remove("recaps");
         let legacy: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
         assert!(legacy.recaps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn plugin_node_metadata_survives_snapshot_round_trip_and_defaults_when_absent() {
+        let path = scratch_snapshot_path();
+        let mut snapshot = sample_snapshot();
+        let node_id = snapshot.panes[0].node_id;
+        snapshot.plugin_node_metadata = vec![PersistedNodeMetadata {
+            plugin: "example.notes".to_string(),
+            node_id,
+            bytes: b"{\"pinned\":true}".to_vec(),
+        }];
+        write_snapshot_to(&path, &snapshot).await.unwrap();
+        let loaded = load_snapshot(&path).await.unwrap().unwrap();
+        assert_eq!(loaded.plugin_node_metadata, snapshot.plugin_node_metadata);
+
+        let mut old_shape = serde_json::to_value(snapshot).unwrap();
+        old_shape
+            .as_object_mut()
+            .unwrap()
+            .remove("plugin_node_metadata");
+        let legacy: SessionSnapshot = serde_json::from_value(old_shape).unwrap();
+        assert!(legacy.plugin_node_metadata.is_empty());
     }
 
     #[test]
@@ -2647,6 +2704,7 @@ root:
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
             recaps: Vec::new(),
+            plugin_node_metadata: Vec::new(),
         };
 
         assert!(normalize_agent_resumes(

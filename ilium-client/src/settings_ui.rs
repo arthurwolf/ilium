@@ -6159,7 +6159,11 @@ fn plugin_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
                     .find(|row| row.plugin == setting.plugin && row.key == setting.key);
                 let value = current.map_or(setting.default, |row| row.display());
                 let how = match current {
-                    Some(row) if row.is_editable() => "Enter changes it",
+                    Some(row) if row.kind == "number" => {
+                        "Left and Right step it, Enter types a value"
+                    }
+                    Some(row) if row.takes_text() => "Enter types a new value",
+                    Some(row) if row.is_editable() => "Left and Right change it",
                     _ => "edit it in the plugin's page or config.toml",
                 };
                 (

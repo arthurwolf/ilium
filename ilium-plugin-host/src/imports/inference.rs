@@ -1,15 +1,23 @@
-//! Host implementation of `ilium:host/inference` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/inference`.
 //!
-//! Written once by the skeleton lane from the generated `HostInference` trait; hand-owned afterwards.
+//! The import of one plugin instance validates a request, hands it to the [`InferenceBackend`] the
+//! process composed (`wiring::wave_two::Backends::inference`) on a worker thread of its own, and
+//! queues `request-completed` for the plugin when the backend answers. The plugin then fetches
+//! the answer once with `take-completion` or `take-models`.
+//!
+//! Every pending request belongs to the import of one instance: another plugin cannot take it.
+//! Dropping the import (the instance ends) sets the cancel flag, which stops the streaming
+//! backend mid-answer and lets waiting workers end without calling it.
 
 use ilium_plugin_api::generated::host::inference::{Completion, CompletionRequest, HostInference};
 use ilium_plugin_api::generated::types::errors::PluginError;
 use ilium_plugin_api::generated::types::ids::RequestId;
+use ilium_plugin_api::generated::types::Outcome;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use super::env::RequestIds;
+use super::env::{CancelFlag, CancelOnDrop, ImportEnv, WorkerGate};
 
 use ilium_plugin_api::generated::types::errors::ErrorCode;
 
@@ -19,6 +27,25 @@ const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_JSON_SCHEMA_BYTES: usize = 64 * 1024;
 /// Pending requests (completions and model listings) one plugin may hold.
 const PENDING_REQUEST_LIMIT: usize = 64;
+/// Backend calls one instance runs at once; later requests wait for a free slot.
+const CONCURRENT_CALLS: usize = 4;
+/// The grant `complete` and `models` need.
+const INFERENCE_GRANT: &str = "inference";
+
+/// Where an instance's completions come from. The server and the client compose one from the
+/// user's provider settings (`imports::inference_backend::SettingsInference`); tests use fakes.
+pub trait InferenceBackend: Send + Sync {
+    /// Runs one completion. A backend that streams checks `cancel` between chunks and returns
+    /// `cancelled` once it is set.
+    fn complete(
+        &self,
+        request: &CompletionRequest,
+        cancel: &CancelFlag,
+    ) -> Result<Completion, PluginError>;
+
+    /// The models the selected provider offers.
+    fn models(&self, cancel: &CancelFlag) -> Result<Vec<String>, PluginError>;
+}
 
 /// State of one inference request.
 #[derive(Debug)]
@@ -46,63 +73,201 @@ fn error(code: ErrorCode, message: &str) -> PluginError {
     }
 }
 
+fn lock(state: &Mutex<InferenceState>) -> MutexGuard<'_, InferenceState> {
+    // Every writer does one insert or remove, so the state is consistent after a panic.
+    state.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// What a worker hands back to the state of its import.
+enum Answer {
+    Completion(Result<Completion, PluginError>),
+    Models(Result<Vec<String>, PluginError>),
+}
+
 /// Host side of the `inference` interface of one plugin instance: its pending requests are its
 /// own and go away with it. Cloning shares them (a test harness keeps one instance and hands out
-/// clones).
-#[derive(Debug, Clone, Default)]
+/// clones); the workers stop when the last clone drops.
+#[derive(Clone)]
 pub struct InferenceImport {
+    env: ImportEnv,
+    backend: Option<Arc<dyn InferenceBackend>>,
     state: Arc<Mutex<InferenceState>>,
-    ids: RequestIds,
+    gate: WorkerGate,
+    life: Arc<CancelOnDrop>,
+}
+
+impl std::fmt::Debug for InferenceImport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("InferenceImport")
+            .field("plugin", &self.env.plugin())
+            .field("has_backend", &self.backend.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for InferenceImport {
+    fn default() -> Self {
+        Self::new(ImportEnv::unrestricted(), None)
+    }
 }
 
 impl InferenceImport {
-    /// An import drawing request ids from `ids`, the allocator of the runtime.
-    pub fn new(ids: RequestIds) -> Self {
+    /// The import of the instance `env` describes, answered by `backend`. Without a backend every
+    /// accepted request completes with `unsupported`.
+    pub fn new(env: ImportEnv, backend: Option<Arc<dyn InferenceBackend>>) -> Self {
         Self {
+            env,
+            backend,
             state: Arc::default(),
-            ids,
+            gate: WorkerGate::new(CONCURRENT_CALLS),
+            life: Arc::new(CancelOnDrop::default()),
         }
     }
 
-    fn state(&self) -> MutexGuard<'_, InferenceState> {
-        // Every writer does one insert or remove, so the state is consistent after a panic.
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    /// Whether this instance holds the `inference` grant.
+    fn check_grant(&self) -> Result<(), PluginError> {
+        if self.env.holds(INFERENCE_GRANT) {
+            Ok(())
+        } else {
+            Err(error(ErrorCode::NotPermitted, "inference is not granted"))
+        }
     }
 
     /// Records a new pending entry, or `busy` at the 64-request limit.
     fn hold_pending(&self, entry: Held) -> Result<RequestId, PluginError> {
-        let mut state = self.state();
+        let mut state = lock(&self.state);
         if state.held.len() >= PENDING_REQUEST_LIMIT {
-            return Err(error(ErrorCode::Busy, "64 inference requests are already pending"));
+            return Err(error(
+                ErrorCode::Busy,
+                "64 inference requests are already pending",
+            ));
         }
-        let id = self.ids.next_request();
+        let id = self.env.next_request();
         state.held.insert(id.0, entry);
         Ok(id)
+    }
+
+    /// Runs `work` on a worker of this instance and completes `id` with its answer.
+    fn dispatch(
+        &self,
+        id: RequestId,
+        work: impl FnOnce(&dyn InferenceBackend, &CancelFlag) -> Answer + Send + 'static,
+    ) {
+        let state = Arc::clone(&self.state);
+        let sink = self.env.sink();
+        let guard = sink.worker();
+        let gate = self.gate.clone();
+        let cancel = self.life.flag();
+        let backend = self.backend.clone();
+        let spawned = std::thread::Builder::new()
+            .name("plugin-inference".to_owned())
+            .spawn(move || {
+                let _guard = guard;
+                let answer = match &backend {
+                    None => Answer::Completion(Err(error(
+                        ErrorCode::Unsupported,
+                        "no inference provider is configured on this side",
+                    ))),
+                    Some(backend) => {
+                        let Some(_slot) = gate.enter(&cancel) else {
+                            return;
+                        };
+                        if cancel.is_set() {
+                            return;
+                        }
+                        work(backend.as_ref(), &cancel)
+                    }
+                };
+                // An ended instance takes nothing; its requests are dropped with it.
+                if cancel.is_set() {
+                    return;
+                }
+                let outcome = {
+                    let mut held = lock(&state);
+                    match answer {
+                        Answer::Completion(Ok(completion)) => {
+                            held.held.insert(id.0, Held::Completed(completion));
+                            Outcome::Ok
+                        }
+                        Answer::Models(Ok(models)) => {
+                            held.held.insert(id.0, Held::ModelsListed(models));
+                            Outcome::Ok
+                        }
+                        Answer::Completion(Err(failure)) | Answer::Models(Err(failure)) => {
+                            held.held.remove(&id.0);
+                            if failure.code == ErrorCode::Cancelled {
+                                Outcome::Cancelled
+                            } else {
+                                Outcome::Failed(failure)
+                            }
+                        }
+                    }
+                };
+                sink.send(super::env::completion_event(id, outcome));
+            });
+        if spawned.is_err() {
+            lock(&self.state).held.remove(&id.0);
+            self.env.complete(
+                id,
+                Outcome::Failed(error(
+                    ErrorCode::Internal,
+                    "the inference worker did not start",
+                )),
+            );
+        }
     }
 }
 
 impl HostInference for InferenceImport {
     fn complete(&mut self, request: CompletionRequest) -> Result<RequestId, PluginError> {
+        self.check_grant()?;
         if request.messages.is_empty() {
-            return Err(error(ErrorCode::InvalidArgument, "messages must not be empty"));
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "messages must not be empty",
+            ));
         }
-        let total_bytes: usize = request.messages.iter().map(|message| message.content.len()).sum();
+        let total_bytes: usize = request
+            .messages
+            .iter()
+            .map(|message| message.content.len())
+            .sum();
         if total_bytes > MAX_MESSAGE_BYTES {
             return Err(error(ErrorCode::InvalidArgument, "messages exceed 4 MiB"));
         }
         if let Some(schema) = &request.json_schema {
             if schema.len() > MAX_JSON_SCHEMA_BYTES {
-                return Err(error(ErrorCode::InvalidArgument, "json schema exceeds 64 KiB"));
+                return Err(error(
+                    ErrorCode::InvalidArgument,
+                    "json schema exceeds 64 KiB",
+                ));
             }
             if serde_json::from_str::<serde_json::Value>(schema).is_err() {
-                return Err(error(ErrorCode::InvalidArgument, "json schema is not valid JSON"));
+                return Err(error(
+                    ErrorCode::InvalidArgument,
+                    "json schema is not valid JSON",
+                ));
             }
         }
-        self.hold_pending(Held::PendingCompletion)
+        let id = self.hold_pending(Held::PendingCompletion)?;
+        self.dispatch(id, move |backend, cancel| {
+            Answer::Completion(backend.complete(&request, cancel).and_then(|completion| {
+                if completion.text.len() > MAX_MESSAGE_BYTES {
+                    Err(error(
+                        ErrorCode::Internal,
+                        "the provider answered with more than 4 MiB",
+                    ))
+                } else {
+                    Ok(completion)
+                }
+            }))
+        });
+        Ok(id)
     }
 
     fn take_completion(&mut self, request: RequestId) -> Option<Completion> {
-        let mut state = self.state();
+        let mut state = lock(&self.state);
         match state.held.get(&request.0) {
             Some(Held::Completed(_)) => match state.held.remove(&request.0) {
                 Some(Held::Completed(completion)) => Some(completion),
@@ -113,11 +278,14 @@ impl HostInference for InferenceImport {
     }
 
     fn models(&mut self) -> Result<RequestId, PluginError> {
-        self.hold_pending(Held::PendingModels)
+        self.check_grant()?;
+        let id = self.hold_pending(Held::PendingModels)?;
+        self.dispatch(id, |backend, cancel| Answer::Models(backend.models(cancel)));
+        Ok(id)
     }
 
     fn take_models(&mut self, request: RequestId) -> Option<Vec<String>> {
-        let mut state = self.state();
+        let mut state = lock(&self.state);
         match state.held.get(&request.0) {
             Some(Held::ModelsListed(_)) => match state.held.remove(&request.0) {
                 Some(Held::ModelsListed(models)) => Some(models),
@@ -127,7 +295,8 @@ impl HostInference for InferenceImport {
         }
     }
 
-    /// No provider call is open on a bare import, so a well-formed reply names an unknown call.
+    /// Provider calls go to the backend the process composed, so no `inference-provider` call is
+    /// ever open on this import and a well-formed reply names an unknown call.
     fn provider_reply(
         &mut self,
         _call: u64,
@@ -135,26 +304,100 @@ impl HostInference for InferenceImport {
     ) -> Result<(), PluginError> {
         if let Ok(completion) = &outcome {
             if completion.text.len() > MAX_MESSAGE_BYTES {
-                return Err(error(ErrorCode::InvalidArgument, "reply text exceeds 4 MiB"));
+                return Err(error(
+                    ErrorCode::InvalidArgument,
+                    "reply text exceeds 4 MiB",
+                ));
             }
         }
-        Err(error(ErrorCode::NotFound, "no open provider call has this id"))
+        Err(error(
+            ErrorCode::NotFound,
+            "no open provider call has this id",
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::InferenceImport;
+    use super::{InferenceBackend, InferenceImport};
+    use crate::imports::env::{CancelFlag, ImportEnv};
+    use crate::runtime::pending_events::PendingEvents;
     use ilium_plugin_api::generated::host::inference::{
         ChatMessage, Completion, CompletionRequest, HostInference,
     };
     use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
+    use ilium_plugin_api::generated::types::events::Event;
     use ilium_plugin_api::generated::types::ids::RequestId;
+    use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     /// Limit on all messages together, in content bytes (API page "Limits": 4 MiB).
     const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
     /// Limit on the `json_schema` text (API page "Limits": 64 KiB).
     const MAX_JSON_SCHEMA_BYTES: usize = 64 * 1024;
+
+    /// Answers with the last user message reversed, or waits for cancel when told to block.
+    #[derive(Default)]
+    struct FakeBackend {
+        block: bool,
+        calls: AtomicUsize,
+    }
+
+    impl InferenceBackend for FakeBackend {
+        fn complete(
+            &self,
+            request: &CompletionRequest,
+            cancel: &CancelFlag,
+        ) -> Result<Completion, PluginError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            while self.block {
+                if cancel.is_set() {
+                    return Err(PluginError::new(ErrorCode::Cancelled, "cancelled"));
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let last = request
+                .messages
+                .last()
+                .map(|message| message.content.chars().rev().collect())
+                .unwrap_or_default();
+            Ok(Completion {
+                text: last,
+                model: "fake-model".to_owned(),
+                input_tokens: 1,
+                output_tokens: 1,
+            })
+        }
+
+        fn models(&self, _cancel: &CancelFlag) -> Result<Vec<String>, PluginError> {
+            Ok(vec!["fake-model".to_owned()])
+        }
+    }
+
+    fn import_with(backend: Arc<FakeBackend>, events: &PendingEvents) -> InferenceImport {
+        InferenceImport::new(
+            ImportEnv::unrestricted().with_events(events.clone()),
+            Some(backend as Arc<dyn InferenceBackend>),
+        )
+    }
+
+    /// Waits for `request-completed` of `request` and returns its outcome.
+    fn completion_of(events: &PendingEvents, request: RequestId) -> Outcome {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            for queued in events.drain() {
+                if let Event::RequestCompleted(result) = queued.event {
+                    if result.request == RequestRef::Call(request) {
+                        return result.outcome;
+                    }
+                }
+            }
+            assert!(Instant::now() < deadline, "no completion for {request:?}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
 
     fn user_message(content: String) -> ChatMessage {
         ChatMessage {
@@ -221,6 +464,102 @@ mod tests {
             result.is_ok(),
             "valid request must return a request id, got {result:?}"
         );
+    }
+
+    /// REQ: API-005
+    #[test]
+    fn a_completion_is_answered_by_the_backend_and_taken_once() {
+        let events = PendingEvents::new();
+        let backend = Arc::new(FakeBackend::default());
+        let mut import = import_with(Arc::clone(&backend), &events);
+        let request = import
+            .complete(simple_request(None))
+            .expect("accepted request");
+        assert_eq!(completion_of(&events, request), Outcome::Ok);
+        let completion = import.take_completion(request).expect("answer");
+        assert_eq!(completion.text, "olleh");
+        assert_eq!(completion.model, "fake-model");
+        assert_eq!(import.take_completion(request), None);
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// REQ: API-005
+    #[test]
+    fn models_are_answered_by_the_backend() {
+        let events = PendingEvents::new();
+        let mut import = import_with(Arc::new(FakeBackend::default()), &events);
+        let request = import.models().expect("accepted listing");
+        assert_eq!(completion_of(&events, request), Outcome::Ok);
+        assert_eq!(
+            import.take_models(request),
+            Some(vec!["fake-model".to_owned()])
+        );
+    }
+
+    #[test]
+    fn without_a_backend_a_request_fails_as_unsupported() {
+        let events = PendingEvents::new();
+        let mut import =
+            InferenceImport::new(ImportEnv::unrestricted().with_events(events.clone()), None);
+        let request = import
+            .complete(simple_request(None))
+            .expect("accepted request");
+        match completion_of(&events, request) {
+            Outcome::Failed(failure) => assert_eq!(failure.code, ErrorCode::Unsupported),
+            other => panic!("expected failed(unsupported), got {other:?}"),
+        }
+        assert_eq!(import.take_completion(request), None);
+    }
+
+    #[test]
+    fn a_plugin_without_the_grant_is_refused() {
+        let mut import = InferenceImport::new(
+            ImportEnv::unrestricted().with_grants(vec!["http:example.com".to_owned()]),
+            Some(Arc::new(FakeBackend::default()) as Arc<dyn InferenceBackend>),
+        );
+        expect_error(
+            import.complete(simple_request(None)),
+            ErrorCode::NotPermitted,
+        );
+        expect_error(import.models(), ErrorCode::NotPermitted);
+    }
+
+    #[test]
+    fn another_instance_cannot_take_an_answer() {
+        let events = PendingEvents::new();
+        let backend = Arc::new(FakeBackend::default());
+        let mut first = import_with(Arc::clone(&backend), &events);
+        let mut second = import_with(backend, &events);
+        let request = first.complete(simple_request(None)).expect("accepted");
+        assert_eq!(completion_of(&events, request), Outcome::Ok);
+        assert_eq!(second.take_completion(request), None);
+        assert!(first.take_completion(request).is_some());
+    }
+
+    #[test]
+    fn dropping_the_instance_cancels_a_streaming_answer() {
+        let events = PendingEvents::new();
+        let backend = Arc::new(FakeBackend {
+            block: true,
+            calls: AtomicUsize::new(0),
+        });
+        let mut import = import_with(Arc::clone(&backend), &events);
+        import.complete(simple_request(None)).expect("accepted");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while backend.calls.load(Ordering::SeqCst) == 0 {
+            assert!(Instant::now() < deadline, "the backend was never called");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        drop(import);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while events.workers() > 0 {
+            assert!(Instant::now() < deadline, "the worker did not stop");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(events
+            .drain()
+            .iter()
+            .all(|queued| !matches!(queued.event, Event::RequestCompleted(_))));
     }
 
     /// REQ: API-061
@@ -290,7 +629,14 @@ mod tests {
     /// REQ: API-073
     #[test]
     fn complete_returns_busy_for_65th_pending_request() {
-        let mut import = InferenceImport::default();
+        let events = PendingEvents::new();
+        let mut import = import_with(
+            Arc::new(FakeBackend {
+                block: true,
+                calls: AtomicUsize::new(0),
+            }),
+            &events,
+        );
         for accepted_index in 0..64 {
             let result = import.complete(simple_request(None));
             assert!(

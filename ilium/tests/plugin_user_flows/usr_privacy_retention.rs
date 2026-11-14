@@ -17,7 +17,10 @@ fn usr_955_every_kind_of_stored_data_has_a_retention_row_with_its_deleting_comma
     states(&page, "| Crash records |");
     states(&page, "| Pre-migration backups |");
     states(&page, "| Support-bundle staging files |");
-    states(&page, "| `installed.json` extras that hold settings values |");
+    states(
+        &page,
+        "| `installed.json` extras that hold settings values |",
+    );
 }
 
 /// REQ: USR-955
@@ -54,7 +57,9 @@ fn usr_956_ilium_states_no_access_log_period_of_its_own_for_a_registry() {
     let page = manual_page("user-privacy");
     let line = page
         .lines()
-        .find(|line| line.contains("The registry operator decides how long its access logs keep them"))
+        .find(|line| {
+            line.contains("The registry operator decides how long its access logs keep them")
+        })
         .expect("the registry paragraph must name the operator's log period");
     assert!(
         !line.contains("day"),
@@ -95,17 +100,29 @@ fn usr_957_the_provider_request_carries_only_those_fields_and_the_cache_expires(
         limit: 5,
         language: None,
     };
-    let mut import = GeocodeImport;
+    let mut import = GeocodeImport::default();
     // The query text is bounded to 2..=200 characters before anything could leave the host.
     assert!(import.search(query("a".repeat(1))).is_err());
     assert!(import.search(query("a".repeat(201))).is_err());
-    let short = import.search(query("ab".to_string())).expect("2 characters");
-    let long = import.search(query("a".repeat(200))).expect("200 characters");
+    let short = import
+        .search(query("ab".to_string()))
+        .expect("2 characters");
+    let long = import
+        .search(query("a".repeat(200)))
+        .expect("200 characters");
     // A reverse lookup takes the coordinates of the point and nothing else.
     let reverse = import
-        .reverse(GeoPoint { lat: 38.7, lon: -9.1 })
+        .reverse(GeoPoint {
+            lat: 38.7,
+            lon: -9.1,
+        })
         .expect("valid point");
-    assert!(import.reverse(GeoPoint { lat: 91.0, lon: 0.0 }).is_err());
+    assert!(import
+        .reverse(GeoPoint {
+            lat: 91.0,
+            lon: 0.0
+        })
+        .is_err());
     // Each answer is handed over once and is not kept by the import afterwards.
     for request in [short, long, reverse] {
         assert!(import.take_places(request).is_some());

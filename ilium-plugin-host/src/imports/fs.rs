@@ -8,8 +8,11 @@
 //! waits for the matching `take-*` call. Failures are returned by the call itself. A watch polls
 //! its folder on a worker thread owned by the import and queues `fs-changed` events.
 //!
-//! Scopes that need a user decision (`project`, `picked`, `pick`, `agent-config.propose`) are not
-//! granted by this import: they answer `not-permitted` until the grant layer wires them in.
+//! The `project` scope opens on its grants. Read-only named scopes (`agent-sessions:<agent>`,
+//! `agent-config:<agent>`) open on `fs.read:<scope>` once the composition root points them at a
+//! folder (`configure_read_only_scope`). `pick` asks the [`FilePicker`] of the process on a worker
+//! thread; each confirmed path becomes a `picked/<n>` scope of this instance, opened by
+//! `fs.read:picked` or `fs.write:picked`. `agent-config.propose` still answers `not-permitted`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -21,8 +24,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ilium_plugin_api::generated::host::fs::{
-    ConfigChange, DirEntry, EntryKind, FsMetadata, HostFs, PickSpec, ProposalResult, RevisionToken,
-    Revisioned, ScannedEntry, ScopeRoot, TailChunk, WriteMode,
+    ConfigChange, DirEntry, EntryKind, FsMetadata, HostFs, PickKind, PickSpec, ProposalResult,
+    RevisionToken, Revisioned, ScannedEntry, ScopeRoot, TailChunk, WriteMode,
 };
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::events::{Event, FsChangedEvent};
@@ -33,8 +36,27 @@ use ilium_plugin_api::grants::Grant;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
-use super::env::{ImportEnv, RequestIds};
+use super::env::{completion_event, CancelFlag, CancelOnDrop, ImportEnv, RequestIds};
 use crate::runtime::pending_events::EventSink;
+
+/// Asks the user for a path. The client composes one that shows the kernel's picker; a side
+/// without one leaves `pick` unsupported.
+pub trait FilePicker: Send + Sync {
+    /// Blocks until the user confirms a path (`Some`) or dismisses the picker (`None`). Returns
+    /// early with `None` once `cancel` is set (the instance ended).
+    fn pick(&self, spec: &PickSpec, cancel: &CancelFlag) -> Result<Option<PathBuf>, PluginError>;
+}
+
+/// The paths the user chose for one instance and the answers waiting for `take-picked`.
+#[derive(Debug, Default)]
+struct PickBook {
+    /// `picked/<n>` is `chosen[n]`.
+    chosen: Vec<PathBuf>,
+    answers: HashMap<u64, Option<FsPath>>,
+}
+
+/// Prefix of the scopes the user chose with `pick`.
+const SCOPE_PICKED_PREFIX: &str = "picked/";
 
 /// Largest `max_bytes` of a synchronous `read` or `tail` (1 MiB).
 const SYNC_READ_MAX_BYTES: u32 = 1024 * 1024;
@@ -74,6 +96,15 @@ const WATCH_MAX_PATHS: usize = 1_024;
 pub struct FsImport {
     env: ImportEnv,
     state: FsState,
+    picker: Option<Arc<dyn FilePicker>>,
+    /// Sets the cancel flag of running picks when the instance ends.
+    life: CancelOnDrop,
+}
+
+impl std::fmt::Debug for dyn FilePicker {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("FilePicker")
+    }
 }
 
 impl Default for FsImport {
@@ -147,6 +178,10 @@ impl Drop for WatchEntry {
 struct FsState {
     env: ImportEnv,
     project: Option<ProjectScope>,
+    /// Read-only scopes by name (`agent-sessions:claude`), each opened by `fs.read:<name>`.
+    read_only: BTreeMap<String, PathBuf>,
+    /// What `pick` returned; shared with the pick workers.
+    picks: Arc<Mutex<PickBook>>,
     dirs: Option<ScopeDirs>,
     /// Scratch folder created by this state; removed when the thread ends.
     owned_dir: Option<PathBuf>,
@@ -174,7 +209,27 @@ impl FsImport {
         Self {
             state: FsState::new(env.clone()),
             env,
+            picker: None,
+            life: CancelOnDrop::default(),
         }
+    }
+
+    /// Lets `pick` ask `picker` for a path.
+    pub fn set_file_picker(&mut self, picker: Arc<dyn FilePicker>) {
+        self.picker = Some(picker);
+    }
+
+    /// Adds the read-only scope `scope` rooted at `root`; it opens only while the instance holds
+    /// `fs.read:<scope>` (and `fs.watch:<scope>` for a watch). A root that does not exist (the
+    /// agent is not installed) is `not-found` and leaves the scope out.
+    pub fn configure_read_only_scope(
+        &mut self,
+        scope: &str,
+        root: &Path,
+    ) -> Result<(), PluginError> {
+        let canonical = fs::canonicalize(root).map_err(io_error)?;
+        self.state.read_only.insert(scope.to_owned(), canonical);
+        Ok(())
     }
 
     /// Points the three scopes at real folders (created when missing).
@@ -271,6 +326,8 @@ impl FsState {
         Self {
             env,
             project: None,
+            read_only: BTreeMap::new(),
+            picks: Arc::default(),
             dirs: None,
             owned_dir: None,
             next_id: 0,
@@ -412,12 +469,10 @@ fn resolve_in(state: &mut FsState, path: &FsPath, access: Access) -> Result<Reso
                     "scope project is not granted",
                 )),
             },
-            other => Err(plugin_error(
-                ErrorCode::NotPermitted,
-                format!("scope {other} is not granted"),
-            )),
+            other => extra_scope_root(state, other, access),
         }
     }?;
+    let picked_target = path.scope.starts_with(SCOPE_PICKED_PREFIX);
     if path.path.contains('\0') {
         return Err(plugin_error(
             ErrorCode::InvalidArgument,
@@ -454,18 +509,23 @@ fn resolve_in(state: &mut FsState, path: &FsPath, access: Access) -> Result<Reso
             "the project's .ilium folder is hidden",
         ));
     }
-    let mut probe = target.clone();
-    while fs::symlink_metadata(&probe).is_err() {
-        if !probe.pop() {
-            break;
+    // A picked save path may not exist yet: the user chose that very path, so it is its own
+    // scope and needs no ancestor check.
+    let chosen_path_itself = picked_target && normalised.is_empty();
+    if !chosen_path_itself {
+        let mut probe = target.clone();
+        while fs::symlink_metadata(&probe).is_err() {
+            if !probe.pop() {
+                break;
+            }
         }
-    }
-    let canonical_probe = fs::canonicalize(&probe).map_err(io_error)?;
-    if !canonical_probe.starts_with(&root) {
-        return Err(plugin_error(
-            ErrorCode::NotPermitted,
-            "path leaves its scope through a link",
-        ));
+        let canonical_probe = fs::canonicalize(&probe).map_err(io_error)?;
+        if !canonical_probe.starts_with(&root) {
+            return Err(plugin_error(
+                ErrorCode::NotPermitted,
+                "path leaves its scope through a link",
+            ));
+        }
     }
     Ok(Resolved {
         key: format!("{}:{}", path.scope, normalised.join("/")),
@@ -474,6 +534,64 @@ fn resolve_in(state: &mut FsState, path: &FsPath, access: Access) -> Result<Reso
         scope: path.scope.clone(),
         writable,
     })
+}
+
+/// The grant family an access needs on a granted scope.
+fn access_family(access: Access) -> &'static [&'static str] {
+    match access {
+        Access::Read => &["fs.read"],
+        Access::Write => &["fs.write"],
+        Access::Watch => &["fs.watch"],
+        Access::Lock => &["fs.read", "fs.write"],
+    }
+}
+
+/// The root and writability of a `picked/<n>` or read-only named scope.
+fn extra_scope_root(
+    state: &FsState,
+    scope: &str,
+    access: Access,
+) -> Result<(PathBuf, bool), PluginError> {
+    let refused = || {
+        plugin_error(
+            ErrorCode::NotPermitted,
+            format!("scope {scope} is not granted"),
+        )
+    };
+    if let Some(index) = scope.strip_prefix(SCOPE_PICKED_PREFIX) {
+        let granted = access_family(access)
+            .iter()
+            .all(|family| state.env.holds(&format!("{family}:picked")));
+        let chosen = index.parse::<usize>().ok().and_then(|index| {
+            state
+                .picks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .chosen
+                .get(index)
+                .cloned()
+        });
+        return match chosen {
+            Some(root) if granted => Ok((root, state.env.holds("fs.write:picked"))),
+            _ => Err(refused()),
+        };
+    }
+    let Some(root) = state.read_only.get(scope) else {
+        return Err(refused());
+    };
+    let granted = match access {
+        Access::Read => state.env.holds(&format!("fs.read:{scope}")),
+        // The agent configuration folders are never watched (api-fs "Scopes").
+        Access::Watch => {
+            !scope.starts_with("agent-config:") && state.env.holds(&format!("fs.watch:{scope}"))
+        }
+        Access::Write | Access::Lock => false,
+    };
+    if granted {
+        Ok((root.clone(), false))
+    } else {
+        Err(refused())
+    }
 }
 
 fn kind_of(file_type: fs::FileType) -> EntryKind {
@@ -713,10 +831,9 @@ fn scope_root_of(state: &mut FsState, scope: &str) -> Result<PathBuf, PluginErro
             .as_ref()
             .map(|project| project.root.clone())
             .ok_or_else(|| plugin_error(ErrorCode::NotPermitted, "scope project is not granted")),
-        other => Err(plugin_error(
-            ErrorCode::NotPermitted,
-            format!("scope {other} is not granted"),
-        )),
+        other => extra_scope_root(state, other, Access::Watch)
+            .map(|(root, _)| root)
+            .and_then(|root| fs::canonicalize(&root).map_err(io_error)),
     }
 }
 
@@ -895,6 +1012,18 @@ impl HostFs for FsImport {
             },
         ];
         roots.extend(project);
+        let read_only: Vec<ScopeRoot> = self.with_state(|state| {
+            state
+                .read_only
+                .keys()
+                .filter(|scope| state.env.holds(&format!("fs.read:{scope}")))
+                .map(|scope| ScopeRoot {
+                    scope: scope.clone(),
+                    writable: false,
+                })
+                .collect()
+        });
+        roots.extend(read_only);
         roots
     }
 
@@ -1198,11 +1327,77 @@ impl HostFs for FsImport {
         });
     }
 
-    fn pick(&mut self, _spec: PickSpec) -> Result<RequestId, PluginError> {
-        Err(plugin_error(
-            ErrorCode::NotPermitted,
-            "the fs.pick grant is not held",
-        ))
+    fn pick(&mut self, spec: PickSpec) -> Result<RequestId, PluginError> {
+        if !self.env.holds("fs.pick") {
+            return Err(plugin_error(
+                ErrorCode::NotPermitted,
+                "the fs.pick grant is not held",
+            ));
+        }
+        if !self.env.holds("fs.read:picked") && !self.env.holds("fs.write:picked") {
+            return Err(plugin_error(
+                ErrorCode::NotPermitted,
+                "fs.pick needs fs.read:picked or fs.write:picked",
+            ));
+        }
+        if spec.kind == PickKind::SaveFile && !self.env.holds("fs.write:picked") {
+            return Err(plugin_error(
+                ErrorCode::NotPermitted,
+                "a save-file pick needs fs.write:picked",
+            ));
+        }
+        let Some(picker) = self.picker.clone() else {
+            return Err(plugin_error(
+                ErrorCode::Unsupported,
+                "no file picker is available on this side",
+            ));
+        };
+        let id = self.env.next_request();
+        let picks = Arc::clone(&self.state.picks);
+        let sink = self.env.sink();
+        let guard = sink.worker();
+        let cancel = self.life.flag();
+        let spawned = std::thread::Builder::new()
+            .name("plugin-fs-pick".to_owned())
+            .spawn(move || {
+                let _guard = guard;
+                let answer = picker.pick(&spec, &cancel);
+                if cancel.is_set() {
+                    return;
+                }
+                let outcome = {
+                    let mut book = picks
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    match answer {
+                        Ok(Some(chosen)) => {
+                            let scope = format!("{SCOPE_PICKED_PREFIX}{}", book.chosen.len());
+                            book.chosen.push(chosen);
+                            book.answers.insert(
+                                id.0,
+                                Some(FsPath {
+                                    scope,
+                                    path: String::new(),
+                                }),
+                            );
+                            Outcome::Ok
+                        }
+                        Ok(None) => {
+                            book.answers.insert(id.0, None);
+                            Outcome::Ok
+                        }
+                        Err(failure) => Outcome::Failed(failure),
+                    }
+                };
+                sink.send(completion_event(id, outcome));
+            });
+        if spawned.is_err() {
+            return Err(plugin_error(
+                ErrorCode::Internal,
+                "the picker worker did not start",
+            ));
+        }
+        Ok(id)
     }
 
     fn read_with_revision(&mut self, path: FsPath) -> Result<RequestId, PluginError> {
@@ -1323,8 +1518,14 @@ impl HostFs for FsImport {
         self.with_state(|state| state.lock_answers.remove(&request.0))
     }
 
-    fn take_picked(&mut self, _request: RequestId) -> Option<FsPath> {
-        None
+    fn take_picked(&mut self, request: RequestId) -> Option<FsPath> {
+        self.state
+            .picks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .answers
+            .remove(&request.0)
+            .flatten()
     }
 
     fn take_revisioned(&mut self, request: RequestId) -> Option<Revisioned> {
@@ -1338,8 +1539,153 @@ impl HostFs for FsImport {
 
 #[cfg(test)]
 mod tests {
-    use super::FsImport;
+    use super::{FilePicker, FsImport};
+    use crate::imports::env::{CancelFlag, ImportEnv};
+    use crate::runtime::pending_events::PendingEvents;
     use ilium_plugin_api::generated::host::fs::{HostFs, PickKind, PickSpec, WriteMode};
+    use ilium_plugin_api::generated::types::events::Event;
+    use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// Confirms a fixed path, or dismisses the picker when it has none.
+    struct FixedPicker(Option<PathBuf>);
+
+    impl FilePicker for FixedPicker {
+        fn pick(
+            &self,
+            _spec: &PickSpec,
+            _cancel: &CancelFlag,
+        ) -> Result<Option<PathBuf>, PluginError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn picking_import(granted: &[&str], picked: Option<PathBuf>) -> (FsImport, PendingEvents) {
+        let events = PendingEvents::new();
+        let mut fs_import = FsImport::new(
+            ImportEnv::unrestricted()
+                .with_events(events.clone())
+                .with_grants(granted.iter().map(|grant| (*grant).to_owned()).collect()),
+        );
+        fs_import.set_file_picker(Arc::new(FixedPicker(picked)));
+        (fs_import, events)
+    }
+
+    fn wait_for_completion(
+        events: &PendingEvents,
+        request: ilium_plugin_api::generated::types::ids::RequestId,
+    ) -> Outcome {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            for queued in events.drain() {
+                if let Event::RequestCompleted(result) = queued.event {
+                    if result.request == RequestRef::Call(request) {
+                        return result.outcome;
+                    }
+                }
+            }
+            assert!(Instant::now() < deadline, "no completion for {request:?}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn open_file_spec() -> PickSpec {
+        PickSpec {
+            kind: PickKind::OpenFile,
+            title: "Choose a file".to_owned(),
+            extensions: vec!["md".to_owned()],
+        }
+    }
+
+    #[test]
+    fn a_confirmed_pick_becomes_a_readable_picked_scope() {
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        let chosen = scratch.path().join("notes.md");
+        std::fs::write(&chosen, b"picked bytes").expect("chosen file");
+        let (mut fs_import, events) = picking_import(&["fs.pick", "fs.read:picked"], Some(chosen));
+        let request = fs_import.pick(open_file_spec()).expect("pick accepted");
+        assert_eq!(wait_for_completion(&events, request), Outcome::Ok);
+        let picked = fs_import.take_picked(request).expect("chosen path");
+        assert_eq!(picked.scope, "picked/0");
+        assert!(picked.path.is_empty());
+        assert_eq!(fs_import.take_picked(request), None);
+        let read = fs_import.read_all(picked.clone()).expect("read accepted");
+        assert_eq!(fs_import.take_bytes(read), Some(b"picked bytes".to_vec()));
+        assert_eq!(
+            error_code_of(fs_import.write(picked, b"x".to_vec(), WriteMode::Replace)),
+            Some(ErrorCode::NotPermitted),
+            "fs.read:picked alone does not allow writing"
+        );
+    }
+
+    #[test]
+    fn a_dismissed_pick_completes_with_no_path() {
+        let (mut fs_import, events) = picking_import(&["fs.pick", "fs.read:picked"], None);
+        let request = fs_import.pick(open_file_spec()).expect("pick accepted");
+        assert_eq!(wait_for_completion(&events, request), Outcome::Ok);
+        assert_eq!(fs_import.take_picked(request), None);
+    }
+
+    #[test]
+    fn pick_needs_a_picked_scope_grant_and_a_picker() {
+        let (mut no_scope, _) = picking_import(&["fs.pick"], None);
+        assert_eq!(
+            error_code_of(no_scope.pick(open_file_spec())),
+            Some(ErrorCode::NotPermitted)
+        );
+        let mut no_picker = FsImport::new(
+            ImportEnv::unrestricted()
+                .with_grants(vec!["fs.pick".to_owned(), "fs.read:picked".to_owned()]),
+        );
+        assert_eq!(
+            error_code_of(no_picker.pick(open_file_spec())),
+            Some(ErrorCode::Unsupported)
+        );
+    }
+
+    #[test]
+    fn a_read_only_agent_scope_opens_on_its_read_grant_only() {
+        let scratch = tempfile::tempdir().expect("scratch folder");
+        std::fs::write(scratch.path().join("session.jsonl"), b"{}\n").expect("transcript");
+        let granted = |grants: &[&str]| {
+            let mut fs_import = FsImport::new(
+                ImportEnv::unrestricted()
+                    .with_grants(grants.iter().map(|grant| (*grant).to_owned()).collect()),
+            );
+            fs_import
+                .configure_read_only_scope("agent-sessions:claude", scratch.path())
+                .expect("scope root");
+            fs_import
+        };
+        let mut reader = granted(&["fs.read:agent-sessions:claude"]);
+        assert!(reader
+            .roots()
+            .iter()
+            .any(|root| root.scope == "agent-sessions:claude" && !root.writable));
+        let read = reader
+            .read_all(fs_path("agent-sessions:claude", "session.jsonl"))
+            .expect("read accepted");
+        assert_eq!(reader.take_bytes(read), Some(b"{}\n".to_vec()));
+        assert_eq!(
+            error_code_of(reader.write(
+                fs_path("agent-sessions:claude", "session.jsonl"),
+                b"x".to_vec(),
+                WriteMode::Replace
+            )),
+            Some(ErrorCode::NotPermitted)
+        );
+        let mut stranger = granted(&["fs.read:agent-sessions:codex"]);
+        assert_eq!(
+            error_code_of(stranger.read_all(fs_path("agent-sessions:claude", "session.jsonl"))),
+            Some(ErrorCode::NotPermitted)
+        );
+        assert!(stranger
+            .roots()
+            .iter()
+            .all(|root| root.scope != "agent-sessions:claude"));
+    }
     use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
     use ilium_plugin_api::generated::types::paths::FsPath;
 
@@ -1642,7 +1988,8 @@ mod tests {
     /// REQ: CAP-018
     #[test]
     fn pick_without_the_fs_pick_grant_is_not_permitted() {
-        let mut fs_import = FsImport::default();
+        let mut fs_import =
+            FsImport::new(ImportEnv::unrestricted().with_grants(vec!["fs.read:picked".to_owned()]));
         let spec = PickSpec {
             kind: PickKind::OpenFile,
             title: "Choose a file".to_owned(),

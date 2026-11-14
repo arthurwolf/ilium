@@ -56,6 +56,11 @@ pub struct AttentionQueue {
     /// reply, including replies that found nothing to report. Not persisted:
     /// after a restart every agent is analysed once more.
     analysed: HashMap<NodeId, u64>,
+    /// Panes a plugin marked with `mark-attention`, kept until the plugin acks
+    /// them or the pane goes away. A kernel item for the same pane is shown in
+    /// its place; the mark comes back once the kernel item clears. Not
+    /// persisted: a plugin marks again after a restart.
+    plugin_marks: HashMap<NodeId, AttentionItem>,
 }
 
 impl AttentionQueue {
@@ -226,6 +231,7 @@ impl AttentionQueue {
         self.items.retain(|pane_id, item| {
             item.source == AttentionSource::Llm && live.get(pane_id) == Some(&item.fingerprint)
         });
+        let pending_marks = self.plugin_marks.values().cloned().collect::<Vec<_>>();
         self.last_looked_ms
             .retain(|pane_id, _| live.contains_key(pane_id));
         self.visited_as
@@ -242,6 +248,46 @@ impl AttentionQueue {
             };
             self.items.insert(merged.pane_id, merged);
         }
+        for mark in pending_marks {
+            self.items.entry(mark.pane_id).or_insert(mark);
+        }
+        self.reconcile_snoozes();
+    }
+
+    /// Records a plugin's `mark-attention`. It shows at once unless the
+    /// kernel already holds an item for the pane.
+    pub fn mark_from_plugin(&mut self, item: AttentionItem) {
+        let pane_id = item.pane_id;
+        self.plugin_marks.insert(pane_id, item.clone());
+        let is_free = match self.items.get(&pane_id) {
+            None => true,
+            Some(existing) => existing.source == AttentionSource::Plugin,
+        };
+        if is_free {
+            self.items.insert(pane_id, item);
+        }
+        self.reconcile_snoozes();
+    }
+
+    /// Clears a plugin's mark of one pane. Returns whether there was one.
+    pub fn ack_from_plugin(&mut self, pane_id: NodeId) -> bool {
+        let had_mark = self.plugin_marks.remove(&pane_id).is_some();
+        if self
+            .items
+            .get(&pane_id)
+            .is_some_and(|item| item.source == AttentionSource::Plugin)
+        {
+            self.items.remove(&pane_id);
+        }
+        self.reconcile_snoozes();
+        had_mark
+    }
+
+    /// Drops the plugin marks of panes that `keep` no longer vouches for.
+    pub fn retain_plugin_marks(&mut self, keep: impl Fn(NodeId) -> bool) {
+        self.plugin_marks.retain(|pane_id, _| keep(*pane_id));
+        self.items
+            .retain(|pane_id, item| item.source != AttentionSource::Plugin || keep(*pane_id));
         self.reconcile_snoozes();
     }
 
@@ -299,8 +345,7 @@ impl AttentionQueue {
     pub fn expire(&mut self, now_ms: u64, ttl_ms: u64) -> usize {
         let before = self.items.len();
         self.items.retain(|_, item| {
-            item.source == AttentionSource::Instant
-                || now_ms.saturating_sub(item.created_ms) <= ttl_ms
+            item.source != AttentionSource::Llm || now_ms.saturating_sub(item.created_ms) <= ttl_ms
         });
         self.reconcile_snoozes();
         before - self.items.len()
@@ -308,6 +353,7 @@ impl AttentionQueue {
 
     pub fn clear(&mut self) {
         self.items.clear();
+        self.plugin_marks.clear();
         self.snoozed.clear();
         self.analysed.clear();
     }
@@ -438,6 +484,50 @@ mod tests {
 
     fn live(panes: &[u64]) -> LiveFingerprints {
         panes.iter().map(|p| (NodeId(*p), 100 + p)).collect()
+    }
+
+    #[test]
+    fn a_plugin_mark_survives_reconcile_until_acked() {
+        let mut queue = AttentionQueue::new();
+        queue.mark_from_plugin(item(7, AttentionKind::Changed, 40, AttentionSource::Plugin));
+        assert_eq!(queue.ordered().len(), 1);
+        // Pane 7 is not an agent: the instant layer never vouches for it.
+        queue.reconcile_instant(&live(&[1]), Vec::new());
+        assert_eq!(
+            queue.item(NodeId(7)).map(|item| item.source),
+            Some(AttentionSource::Plugin)
+        );
+        queue.expire(u64::MAX, 1);
+        assert!(queue.item(NodeId(7)).is_some());
+        assert!(queue.ack_from_plugin(NodeId(7)));
+        assert!(queue.item(NodeId(7)).is_none());
+        assert!(!queue.ack_from_plugin(NodeId(7)));
+    }
+
+    #[test]
+    fn a_kernel_item_shows_in_place_of_a_plugin_mark_which_returns_after() {
+        let mut queue = AttentionQueue::new();
+        queue.mark_from_plugin(item(1, AttentionKind::Changed, 40, AttentionSource::Plugin));
+        queue.reconcile_instant(
+            &live(&[1]),
+            vec![item(
+                1,
+                AttentionKind::Question,
+                90,
+                AttentionSource::Instant,
+            )],
+        );
+        assert_eq!(
+            queue.item(NodeId(1)).map(|item| item.source),
+            Some(AttentionSource::Instant)
+        );
+        queue.reconcile_instant(&live(&[1]), Vec::new());
+        assert_eq!(
+            queue.item(NodeId(1)).map(|item| item.source),
+            Some(AttentionSource::Plugin)
+        );
+        queue.retain_plugin_marks(|pane| pane != NodeId(1));
+        assert!(queue.item(NodeId(1)).is_none());
     }
 
     #[test]

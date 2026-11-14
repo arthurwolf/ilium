@@ -126,3 +126,21 @@ fn completeness_agrees_with_the_mode_and_the_missing_list() {
             .all(|plugin| SIDES.iter().all(|side| plugin.component(side).is_none())));
     }
 }
+
+#[test]
+fn service_schemas_are_embedded_as_json_of_the_provided_service() {
+    let agent_setup = ilium_plugin_bundle::find("ilium.core.agent-setup").expect("agent-setup");
+    let install = agent_setup
+        .schemas
+        .iter()
+        .find(|schema| schema.text.contains("\"install\""))
+        .expect("agent-setup embeds schemas/install.json");
+    assert!(install.service.starts_with("ilium.core.agent-setup/"));
+    for plugin in plugins() {
+        for schema in plugin.schemas {
+            let parsed: serde_json::Value =
+                serde_json::from_str(schema.text).expect("schema files are JSON");
+            assert!(parsed.is_object(), "{} schema root", schema.service);
+        }
+    }
+}

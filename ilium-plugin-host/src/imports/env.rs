@@ -285,9 +285,119 @@ pub fn completion_event(request: RequestId, outcome: Outcome) -> Event {
     })
 }
 
+/// A flag the workers of one import poll; it is set once the import is gone. Cloning shares the
+/// flag.
+#[derive(Debug, Clone, Default)]
+pub struct CancelFlag(Arc<std::sync::atomic::AtomicBool>);
+
+impl CancelFlag {
+    /// Whether the owner asked its workers to stop.
+    pub fn is_set(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+
+    /// Asks every worker holding this flag to stop.
+    pub fn set(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+/// Sets its [`CancelFlag`] when dropped. An import keeps one in an `Arc`, so the flag is set when
+/// the last clone of the import (the instance) goes away and its workers stop.
+#[derive(Debug, Default)]
+pub struct CancelOnDrop(CancelFlag);
+
+impl CancelOnDrop {
+    /// The flag this guard sets.
+    pub fn flag(&self) -> CancelFlag {
+        self.0.clone()
+    }
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.set();
+    }
+}
+
+/// Bounds how many workers of one import run at once. Cloning shares the bound.
+#[derive(Debug, Clone)]
+pub struct WorkerGate {
+    running: Arc<(std::sync::Mutex<usize>, std::sync::Condvar)>,
+    limit: usize,
+}
+
+/// One running slot of a [`WorkerGate`]; dropping it lets the next waiting worker run.
+#[derive(Debug)]
+pub struct GateSlot {
+    running: Arc<(std::sync::Mutex<usize>, std::sync::Condvar)>,
+}
+
+impl Drop for GateSlot {
+    fn drop(&mut self) {
+        let (count, freed) = &*self.running;
+        let mut count = count.lock().unwrap_or_else(|poison| poison.into_inner());
+        *count = count.saturating_sub(1);
+        freed.notify_one();
+    }
+}
+
+impl WorkerGate {
+    /// A gate letting at most `limit` workers (at least one) run at once.
+    pub fn new(limit: usize) -> Self {
+        Self {
+            running: Arc::default(),
+            limit: limit.max(1),
+        }
+    }
+
+    /// Waits for a free slot; `None` when `cancel` is set first.
+    pub fn enter(&self, cancel: &CancelFlag) -> Option<GateSlot> {
+        let (count, freed) = &*self.running;
+        let mut held = count.lock().unwrap_or_else(|poison| poison.into_inner());
+        loop {
+            if cancel.is_set() {
+                return None;
+            }
+            if *held < self.limit {
+                *held += 1;
+                return Some(GateSlot {
+                    running: Arc::clone(&self.running),
+                });
+            }
+            held = freed
+                .wait_timeout(held, std::time::Duration::from_millis(50))
+                .unwrap_or_else(|poison| poison.into_inner())
+                .0;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cancel_guard_sets_its_flag_when_the_last_owner_drops() {
+        let guard = Arc::new(CancelOnDrop::default());
+        let flag = guard.flag();
+        let other_owner = Arc::clone(&guard);
+        drop(guard);
+        assert!(!flag.is_set());
+        drop(other_owner);
+        assert!(flag.is_set());
+    }
+
+    #[test]
+    fn a_worker_gate_admits_up_to_its_limit_and_refuses_after_cancel() {
+        let gate = WorkerGate::new(1);
+        let cancel = CancelFlag::default();
+        let first = gate.enter(&cancel).expect("first slot");
+        cancel.set();
+        assert!(gate.enter(&cancel).is_none());
+        drop(first);
+        assert!(gate.enter(&CancelFlag::default()).is_some());
+    }
 
     #[test]
     fn request_ids_are_unique_across_clones() {

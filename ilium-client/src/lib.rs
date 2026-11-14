@@ -1576,6 +1576,7 @@ async fn run_inner(
         if app.refresh_startup_progress() {
             needs_redraw = true;
         }
+        needs_redraw |= app.tick_plugin_edits(now);
         let voice_output_owner = voice_service.as_ref().map(ilium_voice::VoiceService::instance_identity);
         control_plane.synchronize_voice_instance(voice_output_owner.clone());
         let mut voice_tool_outputs = Vec::new();
@@ -1602,6 +1603,7 @@ async fn run_inner(
         if app.is_displayed_terminal_awaiting_engine() {
             tick_delay = tick_delay.min(Duration::from_millis(50));
         }
+        if let Some(delay) = app.plugin_edit_delay(now) { tick_delay = tick_delay.min(delay); }
         if let Some(delay) = app.source_window_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if let Some(delay) = app.text_trigger_preview_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if let Some(delay) = app.sound_studio_preview_retry_delay(now) { tick_delay = tick_delay.min(delay); }

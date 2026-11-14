@@ -211,6 +211,10 @@ pub struct VersionedTextTriggerSettings {
     pub(crate) retention: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
 }
 
+/// Plugin metadata on tree nodes, by `(plugin id, node id)`.
+pub(crate) type PluginNodeMetadata =
+    std::sync::Mutex<std::collections::BTreeMap<(String, u64), Vec<u8>>>;
+
 /// One coherent runtime snapshot consumed by the detector. Keeping the
 /// interval and registry update under one lock ensures a detection tick never
 /// combines values from two Settings revisions.
@@ -324,6 +328,9 @@ pub struct ServerState {
     /// The plugin host of this session, set once after restore when plugins are on. It holds
     /// the state only weakly, so the two do not keep each other alive.
     pub(crate) plugins: std::sync::OnceLock<Arc<crate::plugin_host::PluginHostHandle>>,
+    /// Agent signatures the enabled plugins contribute (`contributes.signatures`), matched
+    /// by the detection loop after the user's custom signatures (gap G6).
+    pub(crate) contributed_signatures: std::sync::RwLock<Vec<AgentSignature>>,
     /// Keep applied logging transitions and their IPC broadcasts in one order.
     pub(crate) debug_logging_transaction: Mutex<()>,
     /// Serializes schedule replacement with the executor's final freshness
@@ -360,6 +367,9 @@ pub struct ServerState {
     /// Recaps clients produced, fenced by session and generation. Persisted
     /// in the session snapshot; the server never generates them.
     pub(crate) recaps: std::sync::Arc<RwLock<HashMap<NodeId, crate::persistence::PersistedRecap>>>,
+    /// What plugins keep on tree nodes, by plugin id and node id. The plugin facade writes
+    /// it; session snapshots persist it.
+    pub(crate) plugin_node_metadata: std::sync::Arc<PluginNodeMetadata>,
     workspace_git_full_requests: mpsc::Sender<NodeId>,
     workspace_git_full_receiver: Mutex<Option<mpsc::Receiver<NodeId>>>,
     workspace_creation_tasks: std::sync::Mutex<WorkspaceCreationTasks>,
@@ -590,6 +600,7 @@ impl ServerState {
             execution: std::sync::OnceLock::new(),
             startup_progress: std::sync::OnceLock::new(),
             plugins: std::sync::OnceLock::new(),
+            contributed_signatures: std::sync::RwLock::new(Vec::new()),
             debug_logging_transaction: Mutex::new(()),
             scheduled_input_transaction: Mutex::new(()),
             prompt_queue_transaction: Mutex::new(()),
@@ -602,6 +613,9 @@ impl ServerState {
             workspace_git_status_cache: RwLock::new(HashMap::new()),
             workspace_close_preferences: std::sync::Arc::new(RwLock::new(HashMap::new())),
             recaps: std::sync::Arc::new(RwLock::new(HashMap::new())),
+            plugin_node_metadata: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::BTreeMap::new(),
+            )),
             workspace_git_full_requests,
             workspace_git_full_receiver: Mutex::new(Some(workspace_git_full_receiver)),
             workspace_creation_tasks: std::sync::Mutex::new(WorkspaceCreationTasks::default()),

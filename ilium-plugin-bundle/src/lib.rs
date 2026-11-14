@@ -16,6 +16,15 @@ pub struct HelpTopic {
     pub markdown: &'static str,
 }
 
+/// The schema file of one service a core plugin provides (gap G13).
+#[derive(Debug, Clone, Copy)]
+pub struct ServiceSchema {
+    /// The service name, `<plugin id>/<name>`.
+    pub service: &'static str,
+    /// The text of the schema file: method name to `params` and `result` schemas.
+    pub text: &'static str,
+}
+
 /// One core plugin: its manifest and the component of each side it has.
 #[derive(Debug, Clone, Copy)]
 pub struct BundledPlugin {
@@ -33,6 +42,8 @@ pub struct BundledPlugin {
     pub scene: Option<&'static [u8]>,
     /// The help topics of the manifest whose file exists in the plugin directory.
     pub help: &'static [HelpTopic],
+    /// The schema files of the services the plugin provides.
+    pub schemas: &'static [ServiceSchema],
 }
 
 impl BundledPlugin {

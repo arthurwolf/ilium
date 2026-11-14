@@ -59,6 +59,8 @@ pub fn resolve_at(
     match link_at(line, column, cwd, home_dir)? {
         TerminalLink::Url(url) => resolve_url(&url),
         TerminalLink::File { path, .. } => resolve_path(&path, cwd, home_dir),
+        // `link_at` is the kernel's own detection; plugin matches never come from it.
+        TerminalLink::Plugin { .. } => None,
     }
 }
 

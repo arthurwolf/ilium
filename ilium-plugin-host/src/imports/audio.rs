@@ -1,12 +1,55 @@
-//! Host implementation of `ilium:host/audio` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/audio`.
 //!
-//! Written once by the skeleton lane from the generated `HostAudio` trait; hand-owned afterwards.
+//! `devices` and `play` go to the [`AudioBackend`] the process composed
+//! (`wiring::wave_two::Backends::audio`): the client lists its sound devices and plays through the
+//! system player. `play` encodes the samples as a WAV and runs the backend on a worker thread of
+//! the instance, which queues `request-completed` when playback ends; dropping the instance
+//! cancels a playback that has not started. Capture streams are validated and counted against
+//! the quota, but no backend delivers `audio-frames` yet.
 
 use ilium_plugin_api::generated::host::audio::{AudioDevice, HostAudio};
+use ilium_plugin_api::generated::types::Outcome;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use super::env::RequestIds;
+use super::env::{CancelFlag, CancelOnDrop, ImportEnv};
+
+/// The sound devices and the player of a process.
+pub trait AudioBackend: Send + Sync {
+    /// The input and output devices of the computer.
+    fn devices(&self) -> Vec<AudioDevice>;
+
+    /// Plays one WAV file and returns when playback ended. A backend that can stop early checks
+    /// `cancel`.
+    fn play(&self, wav: &[u8], cancel: &CancelFlag) -> Result<(), PluginError>;
+}
+
+/// Grants that let a plugin see the device list (api-audio "Grants").
+const AUDIO_GRANTS: [&str; 3] = ["audio.capture", "audio.loopback", "audio.playback"];
+
+/// A 16-bit PCM WAV file of interleaved `samples`.
+pub fn pcm_wav(samples: &[i16], sample_rate: u32, channels: u8) -> Vec<u8> {
+    let data_bytes = u32::try_from(samples.len() * 2).unwrap_or(u32::MAX);
+    let block_align = u16::from(channels) * 2;
+    let byte_rate = sample_rate * u32::from(block_align);
+    let mut wav = Vec::with_capacity(44 + samples.len() * 2);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36u32.saturating_add(data_bytes)).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&u16::from(channels).to_le_bytes());
+    wav.extend_from_slice(&sample_rate.to_le_bytes());
+    wav.extend_from_slice(&byte_rate.to_le_bytes());
+    wav.extend_from_slice(&block_align.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_bytes.to_le_bytes());
+    for sample in samples {
+        wav.extend_from_slice(&sample.to_le_bytes());
+    }
+    wav
+}
 
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
@@ -54,27 +97,54 @@ fn validate_format(sample_rate: u32, channels: u8) -> Result<(), PluginError> {
         ));
     }
     match channels {
-        0 => Err(refuse(ErrorCode::InvalidArgument, "channels must be 1 or 2")),
+        0 => Err(refuse(
+            ErrorCode::InvalidArgument,
+            "channels must be 1 or 2",
+        )),
         1 | 2 => Ok(()),
-        _ => Err(refuse(ErrorCode::Unsupported, "only mono and stereo are supported")),
+        _ => Err(refuse(
+            ErrorCode::Unsupported,
+            "only mono and stereo are supported",
+        )),
     }
 }
 
 /// Host side of the `audio` interface of one plugin instance: its open streams are its own and go
 /// away with it. Cloning shares the streams (a test harness keeps one instance and hands out
 /// clones).
-#[derive(Debug, Clone, Default)]
+#[derive(Clone)]
 pub struct AudioImport {
     state: Arc<Mutex<AudioState>>,
-    ids: RequestIds,
+    env: ImportEnv,
+    backend: Option<Arc<dyn AudioBackend>>,
+    life: Arc<CancelOnDrop>,
+}
+
+impl std::fmt::Debug for AudioImport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AudioImport")
+            .field("plugin", &self.env.plugin())
+            .field("has_backend", &self.backend.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for AudioImport {
+    fn default() -> Self {
+        Self::new(ImportEnv::unrestricted(), None)
+    }
 }
 
 impl AudioImport {
-    /// An import drawing request ids from `ids`, the allocator of the runtime.
-    pub fn new(ids: RequestIds) -> Self {
+    /// The import of the instance `env` describes; `backend` lists devices and plays. Without
+    /// one the device list is empty and an accepted playback completes with `unsupported`.
+    pub fn new(env: ImportEnv, backend: Option<Arc<dyn AudioBackend>>) -> Self {
         Self {
             state: Arc::default(),
-            ids,
+            env,
+            backend,
+            life: Arc::new(CancelOnDrop::default()),
         }
     }
 
@@ -87,7 +157,10 @@ impl AudioImport {
     fn open_stream(&self) -> Result<u64, PluginError> {
         let mut state = self.state();
         if state.open.len() >= MAX_OPEN_STREAMS {
-            return Err(refuse(ErrorCode::QuotaExceeded, "too many open capture streams"));
+            return Err(refuse(
+                ErrorCode::QuotaExceeded,
+                "too many open capture streams",
+            ));
         }
         let id = state.next_capture;
         state.next_capture += 1;
@@ -98,8 +171,11 @@ impl AudioImport {
 
 impl HostAudio for AudioImport {
     fn devices(&mut self) -> Vec<AudioDevice> {
-        // Listing needs the `audio` grant; without a grant or a backend the list is empty.
-        Vec::new()
+        let granted = AUDIO_GRANTS.iter().any(|grant| self.env.holds(grant));
+        match &self.backend {
+            Some(backend) if granted => backend.devices(),
+            _ => Vec::new(),
+        }
     }
 
     fn open_capture(
@@ -109,9 +185,14 @@ impl HostAudio for AudioImport {
         channels: u8,
     ) -> Result<u64, PluginError> {
         validate_format(sample_rate, channels)?;
-        // `devices()` lists nothing here, so any named device is not in the list.
-        if device.is_some() {
-            return Err(refuse(ErrorCode::NotFound, "device is not in devices()"));
+        if let Some(device) = &device {
+            let listed = self
+                .devices()
+                .iter()
+                .any(|known| known.is_input && &known.id == device);
+            if !listed {
+                return Err(refuse(ErrorCode::NotFound, "device is not in devices()"));
+            }
         }
         self.open_stream()
     }
@@ -141,15 +222,160 @@ impl HostAudio for AudioImport {
         }
         let frames = sample_count / u64::from(channels);
         if frames > MAX_PLAY_SECONDS * u64::from(sample_rate) {
-            return Err(refuse(ErrorCode::InvalidArgument, "playback is longer than 30 s"));
+            return Err(refuse(
+                ErrorCode::InvalidArgument,
+                "playback is longer than 30 s",
+            ));
         }
-        Ok(self.ids.next_request())
+        if !self.env.holds("audio.playback") {
+            return Err(refuse(
+                ErrorCode::NotPermitted,
+                "audio.playback is not granted",
+            ));
+        }
+        let id = self.env.next_request();
+        let sink = self.env.sink();
+        let guard = sink.worker();
+        let cancel = self.life.flag();
+        let backend = self.backend.clone();
+        let spawned = std::thread::Builder::new()
+            .name("plugin-audio-play".to_owned())
+            .spawn(move || {
+                let _guard = guard;
+                let outcome = match backend {
+                    None => Outcome::Failed(refuse(
+                        ErrorCode::Unsupported,
+                        "no audio output on this side",
+                    )),
+                    Some(backend) => {
+                        let wav = pcm_wav(&samples, sample_rate, channels);
+                        match backend.play(&wav, &cancel) {
+                            Ok(()) => Outcome::Ok,
+                            Err(failure) => Outcome::Failed(failure),
+                        }
+                    }
+                };
+                if !cancel.is_set() {
+                    sink.send(super::env::completion_event(id, outcome));
+                }
+            });
+        if spawned.is_err() {
+            return Err(refuse(
+                ErrorCode::Internal,
+                "the playback worker did not start",
+            ));
+        }
+        Ok(id)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::AudioImport;
+    use super::{pcm_wav, AudioBackend, AudioImport};
+    use crate::imports::env::{CancelFlag, ImportEnv};
+    use crate::runtime::pending_events::PendingEvents;
+    use ilium_plugin_api::generated::host::audio::AudioDevice;
+    use ilium_plugin_api::generated::types::events::Event;
+    use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    /// Lists one device and records the WAV files it was asked to play.
+    #[derive(Default)]
+    struct RecordingOutput {
+        played: Mutex<Vec<Vec<u8>>>,
+    }
+
+    impl AudioBackend for RecordingOutput {
+        fn devices(&self) -> Vec<AudioDevice> {
+            vec![AudioDevice {
+                id: "speakers".to_owned(),
+                name: "Speakers".to_owned(),
+                is_input: false,
+                is_default: true,
+            }]
+        }
+
+        fn play(&self, wav: &[u8], _cancel: &CancelFlag) -> Result<(), PluginError> {
+            self.played.lock().expect("played").push(wav.to_vec());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn devices_come_from_the_backend_only_while_an_audio_grant_is_held() {
+        let backend = Arc::new(RecordingOutput::default());
+        let mut granted = AudioImport::new(
+            ImportEnv::unrestricted().with_grants(vec!["audio.playback".to_owned()]),
+            Some(Arc::clone(&backend) as Arc<dyn AudioBackend>),
+        );
+        assert_eq!(granted.devices().len(), 1);
+        let mut ungranted = AudioImport::new(
+            ImportEnv::unrestricted().with_grants(Vec::new()),
+            Some(backend as Arc<dyn AudioBackend>),
+        );
+        assert!(ungranted.devices().is_empty());
+    }
+
+    #[test]
+    fn play_hands_a_wav_to_the_backend_and_completes() {
+        let events = PendingEvents::new();
+        let backend = Arc::new(RecordingOutput::default());
+        let mut audio = AudioImport::new(
+            ImportEnv::unrestricted().with_events(events.clone()),
+            Some(Arc::clone(&backend) as Arc<dyn AudioBackend>),
+        );
+        let request = expect_ok(audio.play(vec![1i16, -1], 16_000, 1));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let outcome = loop {
+            let found = events
+                .drain()
+                .into_iter()
+                .find_map(|queued| match queued.event {
+                    Event::RequestCompleted(result)
+                        if result.request == RequestRef::Call(request) =>
+                    {
+                        Some(result.outcome)
+                    }
+                    _ => None,
+                });
+            if let Some(outcome) = found {
+                break outcome;
+            }
+            assert!(Instant::now() < deadline, "playback never completed");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(outcome, Outcome::Ok);
+        let played = backend.played.lock().expect("played");
+        assert_eq!(played.as_slice(), &[pcm_wav(&[1, -1], 16_000, 1)]);
+    }
+
+    #[test]
+    fn play_without_the_playback_grant_is_not_permitted() {
+        let mut audio = AudioImport::new(
+            ImportEnv::unrestricted().with_grants(vec!["audio.capture".to_owned()]),
+            None,
+        );
+        assert_eq!(
+            error_code_of(audio.play(vec![0i16; 2], 16_000, 1)),
+            ErrorCode::NotPermitted
+        );
+    }
+
+    #[test]
+    fn a_pcm_wav_has_a_valid_header() {
+        let wav = pcm_wav(&[0, 1, 2, 3], 48_000, 2);
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..16], b"WAVEfmt ");
+        assert_eq!(u32::from_le_bytes([wav[4], wav[5], wav[6], wav[7]]), 36 + 8);
+        assert_eq!(u16::from_le_bytes([wav[22], wav[23]]), 2);
+        assert_eq!(
+            u32::from_le_bytes([wav[24], wav[25], wav[26], wav[27]]),
+            48_000
+        );
+        assert_eq!(&wav[36..40], b"data");
+        assert_eq!(wav.len(), 44 + 8);
+    }
     use ilium_plugin_api::generated::host::audio::HostAudio;
     use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 

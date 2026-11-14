@@ -1,7 +1,7 @@
 //! Host implementation of `ilium:anim/surface`.
 //!
-//! Hand-owned. Frame surface state lives per thread, keyed by handle, because the import carries
-//! no scene session yet. Capability-gated reads (occupancy, pointer) answer `none` and the
+//! Hand-owned. Frame surface state belongs to the import value of one scene instance, keyed by
+//! handle, because the import carries no scene session yet. Capability-gated reads (occupancy, pointer) answer `none` and the
 //! cell-colour plane is ignored until the matching grant is installed by the scene host.
 
 use ilium_plugin_api::generated::anim::surface::{
@@ -9,8 +9,8 @@ use ilium_plugin_api::generated::anim::surface::{
 };
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ui::PixelFormat;
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Default surface width in cells.
@@ -23,20 +23,11 @@ const SURFACE_HEIGHT: u32 = 24;
 const GLYPH_CELLS_PER_FRAME_LIMIT: usize = 131_072;
 
 /// Mutable state of one frame surface.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct SurfaceState {
     glyph_count: usize,
     frames_presented: u64,
     last_receipt: Option<FrameReceipt>,
-}
-
-thread_local! {
-    static SURFACES: RefCell<HashMap<u32, SurfaceState>> = RefCell::new(HashMap::new());
-}
-
-/// Runs `action` on the state of `handle`, creating it on first use.
-fn with_surface<T>(handle: FrameSurfaceHandle, action: impl FnOnce(&mut SurfaceState) -> T) -> T {
-    SURFACES.with(|cell| action(cell.borrow_mut().entry(handle.0).or_default()))
 }
 
 /// Builds a surface error with no retry delay.
@@ -59,9 +50,23 @@ fn row_bytes(format: PixelFormat) -> usize {
     }
 }
 
-/// Host side of the `surface` interface.
-#[derive(Debug)]
-pub struct SurfaceImport;
+/// Host side of the `surface` interface of one scene instance. Cloning shares its surfaces.
+#[derive(Debug, Clone, Default)]
+pub struct SurfaceImport {
+    surfaces: Arc<Mutex<HashMap<u32, SurfaceState>>>,
+}
+
+impl SurfaceImport {
+    /// Runs `action` on the state of `handle`, creating it on first use.
+    fn with_surface<T>(
+        &self,
+        handle: FrameSurfaceHandle,
+        action: impl FnOnce(&mut SurfaceState) -> T,
+    ) -> T {
+        let mut surfaces = self.surfaces.lock().unwrap_or_else(PoisonError::into_inner);
+        action(surfaces.entry(handle.0).or_default())
+    }
+}
 
 impl HostSurface for SurfaceImport {
     fn frame_surface_size(&mut self, _handle: FrameSurfaceHandle) -> (u32, u32) {
@@ -117,7 +122,7 @@ impl HostSurface for SurfaceImport {
             .duration_since(UNIX_EPOCH)
             .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
             .unwrap_or_default();
-        with_surface(handle, |surface| {
+        self.with_surface(handle, |surface| {
             surface.frames_presented += 1;
             surface.last_receipt = Some(FrameReceipt {
                 frame: surface.frames_presented,
@@ -147,12 +152,12 @@ impl HostSurface for SurfaceImport {
                 "a glyph cell lies outside the surface",
             ));
         }
-        with_surface(handle, |surface| surface.glyph_count = cells.len());
+        self.with_surface(handle, |surface| surface.glyph_count = cells.len());
         Ok(())
     }
 
     fn frame_surface_clear_glyphs(&mut self, handle: FrameSurfaceHandle) {
-        with_surface(handle, |surface| surface.glyph_count = 0);
+        self.with_surface(handle, |surface| surface.glyph_count = 0);
     }
 
     fn frame_surface_set_owner_ids(
@@ -171,7 +176,7 @@ impl HostSurface for SurfaceImport {
     }
 
     fn frame_surface_last_receipt(&mut self, handle: FrameSurfaceHandle) -> Option<FrameReceipt> {
-        with_surface(handle, |surface| surface.last_receipt.clone())
+        self.with_surface(handle, |surface| surface.last_receipt.clone())
     }
 }
 
@@ -219,7 +224,7 @@ mod tests {
     /// REQ: RND-016
     #[test]
     fn write_glyphs_accepts_exactly_the_per_frame_cell_limit() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let cells = vec![glyph_cell(0, 0, " "); GLYPH_CELLS_PER_FRAME_LIMIT];
         expect_ok(surface.frame_surface_write_glyphs(SURFACE_HANDLE, cells));
     }
@@ -228,7 +233,7 @@ mod tests {
     /// REQ: RND-016
     #[test]
     fn write_glyphs_rejects_one_cell_over_the_per_frame_limit() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let cells = vec![glyph_cell(0, 0, " "); GLYPH_CELLS_PER_FRAME_LIMIT + 1];
         let code = error_code_of(surface.frame_surface_write_glyphs(SURFACE_HANDLE, cells));
         assert_eq!(code, ErrorCode::QuotaExceeded);
@@ -238,7 +243,7 @@ mod tests {
     /// REQ: RND-016
     #[test]
     fn write_glyphs_accepts_an_empty_cell_list() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         expect_ok(surface.frame_surface_write_glyphs(SURFACE_HANDLE, Vec::new()));
     }
 
@@ -247,7 +252,7 @@ mod tests {
     /// REQ: RND-016
     #[test]
     fn write_glyphs_rejects_a_cell_outside_the_surface() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let cells = vec![glyph_cell(0, u16::MAX, "x")];
         let code = error_code_of(surface.frame_surface_write_glyphs(SURFACE_HANDLE, cells));
         assert_eq!(code, ErrorCode::InvalidArgument);
@@ -257,7 +262,7 @@ mod tests {
     /// REQ: RND-016
     #[test]
     fn clear_glyphs_is_accepted_on_a_surface_without_glyphs() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         surface.frame_surface_clear_glyphs(SURFACE_HANDLE);
     }
 
@@ -265,7 +270,7 @@ mod tests {
     /// REQ: RND-006
     #[test]
     fn set_owner_ids_accepts_a_full_row_of_zero_ids() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let (width, _height) = surface.frame_surface_size(SURFACE_HANDLE);
         let ids = vec![0u16; width as usize];
         expect_ok(surface.frame_surface_set_owner_ids(SURFACE_HANDLE, 0, ids));
@@ -275,7 +280,7 @@ mod tests {
     /// REQ: RND-006
     #[test]
     fn set_owner_ids_rejects_a_first_row_past_the_height() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let (_width, height) = surface.frame_surface_size(SURFACE_HANDLE);
         let code =
             error_code_of(surface.frame_surface_set_owner_ids(SURFACE_HANDLE, height, vec![1u16]));
@@ -286,7 +291,7 @@ mod tests {
     /// REQ: RND-004
     #[test]
     fn write_rows_accepts_one_whole_gray8_row() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let (width, _height) = surface.frame_surface_size(SURFACE_HANDLE);
         let data = vec![0u8; width as usize];
         expect_ok(surface.frame_surface_write_rows(SURFACE_HANDLE, 0, PixelFormat::Gray8, data));
@@ -296,7 +301,7 @@ mod tests {
     /// REQ: RND-004
     #[test]
     fn write_rows_accepts_two_whole_rgb8_rows() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let (width, _height) = surface.frame_surface_size(SURFACE_HANDLE);
         let data = vec![0u8; 3 * width as usize * 2];
         expect_ok(surface.frame_surface_write_rows(SURFACE_HANDLE, 0, PixelFormat::Rgb8, data));
@@ -306,7 +311,7 @@ mod tests {
     /// REQ: RND-004
     #[test]
     fn write_rows_accepts_one_whole_rgba8_row() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let (width, _height) = surface.frame_surface_size(SURFACE_HANDLE);
         let data = vec![0u8; 4 * width as usize];
         expect_ok(surface.frame_surface_write_rows(SURFACE_HANDLE, 0, PixelFormat::Rgba8, data));
@@ -316,7 +321,7 @@ mod tests {
     /// REQ: RND-004
     #[test]
     fn write_rows_drops_a_partial_trailing_row_without_error() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let (width, _height) = surface.frame_surface_size(SURFACE_HANDLE);
         let data = vec![0u8; width as usize + 1];
         expect_ok(surface.frame_surface_write_rows(SURFACE_HANDLE, 0, PixelFormat::Gray8, data));
@@ -326,7 +331,7 @@ mod tests {
     /// REQ: RND-004
     #[test]
     fn write_rows_rejects_empty_data() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let code = error_code_of(surface.frame_surface_write_rows(
             SURFACE_HANDLE,
             0,
@@ -341,7 +346,7 @@ mod tests {
     /// REQ: RND-005
     #[test]
     fn write_rows_rejects_a_first_row_at_the_height() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let (width, height) = surface.frame_surface_size(SURFACE_HANDLE);
         let data = vec![0u8; width as usize];
         let code = error_code_of(surface.frame_surface_write_rows(
@@ -357,7 +362,7 @@ mod tests {
     /// REQ: RND-005
     #[test]
     fn write_rows_ignores_rows_that_fall_past_the_height() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         let (width, height) = surface.frame_surface_size(SURFACE_HANDLE);
         let data = vec![0u8; 2 * width as usize];
         expect_ok(surface.frame_surface_write_rows(
@@ -372,7 +377,7 @@ mod tests {
     /// REQ: RND-006
     #[test]
     fn write_cell_colors_is_ignored_without_uses_cell_colors() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         expect_ok(surface.frame_surface_write_cell_colors(SURFACE_HANDLE, 0, vec![0x00ff00]));
     }
 
@@ -380,7 +385,7 @@ mod tests {
     /// REQ: RND-006
     #[test]
     fn occupancy_is_none_without_wants_occupancy() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         assert!(surface.frame_surface_occupancy(SURFACE_HANDLE).is_none());
     }
 
@@ -388,7 +393,7 @@ mod tests {
     /// REQ: RND-006
     #[test]
     fn pointer_is_none_without_wants_pointer() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         assert!(surface.frame_surface_pointer(SURFACE_HANDLE).is_none());
     }
 
@@ -396,7 +401,7 @@ mod tests {
     /// REQ: RND-003
     #[test]
     fn last_receipt_is_none_before_the_first_frame_is_presented() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         assert!(surface.frame_surface_last_receipt(SURFACE_HANDLE).is_none());
     }
 
@@ -404,7 +409,7 @@ mod tests {
     /// REQ: RND-003
     #[test]
     fn present_produces_a_receipt_for_the_frame() {
-        let mut surface = SurfaceImport;
+        let mut surface = SurfaceImport::default();
         surface.frame_surface_present(SURFACE_HANDLE);
         assert!(surface.frame_surface_last_receipt(SURFACE_HANDLE).is_some());
     }

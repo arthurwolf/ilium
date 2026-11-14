@@ -1271,6 +1271,20 @@ impl KernelFacade for FakeKernel {
     fn process_kind(&self) -> ProcessKind {
         self.process_kind
     }
+
+    fn help(&self) -> Option<&dyn ilium_plugin_api::kernel::HelpCatalog> {
+        Some(self)
+    }
+}
+
+impl ilium_plugin_api::kernel::HelpCatalog for FakeKernel {
+    fn topic(&self, id: &str) -> Option<String> {
+        self.state().help_topics.get(id).cloned()
+    }
+
+    fn topic_ids(&self) -> Vec<String> {
+        self.state().help_topics.keys().cloned().collect()
+    }
 }
 
 /// One whole-file change of a proposal, as the plugin sent it (CAP-886).

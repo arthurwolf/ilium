@@ -303,6 +303,8 @@ pub(crate) struct LinkRequest<'a> {
     pub column: usize,
     pub cwd: &'a std::path::Path,
     pub home: Option<&'a std::path::Path>,
+    /// Link detectors of the enabled plugins (G5); they are asked before the kernel's own.
+    pub detectors: Arc<[crate::plugin_host::links::LinkDetector]>,
 }
 pub(crate) struct LinkCompletion {
     pub id: u64,
@@ -322,6 +324,7 @@ struct LinkJob {
     column: usize,
     cwd: PathBuf,
     home: Option<PathBuf>,
+    detectors: Arc<[crate::plugin_host::links::LinkDetector]>,
 }
 impl Job for LinkJob {
     type Output = PreparedLink;
@@ -337,18 +340,30 @@ impl Job for LinkJob {
             .rows(0, columns)
             .nth(self.row)
             .unwrap_or_default();
-        let link =
-            crate::terminal_links::link_at(&line, self.column, &self.cwd, self.home.as_deref())
-                .or_else(|| {
-                    let column =
-                        crate::terminal_links::cell_column_to_byte_offset(&line, self.column);
-                    self.source.links.iter().rev().find_map(|(label, target)| {
-                        let start = line.find(label)?;
-                        (start..start + label.len())
-                            .contains(&column)
-                            .then(|| crate::terminal_links::TerminalLink::Url(target.clone()))
-                    })
-                });
+        // A plugin detector whose match covers the cell wins; the kernel's detection is the
+        // fallback (contract G5).
+        let plugin_link =
+            crate::plugin_host::links::plugin_link_at(&self.detectors, &line, self.column).map(
+                |found| crate::terminal_links::TerminalLink::Plugin {
+                    plugin: found.plugin,
+                    detector_id: found.detector_id,
+                    command: found.command,
+                    text: found.text,
+                },
+            );
+        let link = plugin_link
+            .or_else(|| {
+                crate::terminal_links::link_at(&line, self.column, &self.cwd, self.home.as_deref())
+            })
+            .or_else(|| {
+                let column = crate::terminal_links::cell_column_to_byte_offset(&line, self.column);
+                self.source.links.iter().rev().find_map(|(label, target)| {
+                    let start = line.find(label)?;
+                    (start..start + label.len())
+                        .contains(&column)
+                        .then(|| crate::terminal_links::TerminalLink::Url(target.clone()))
+                })
+            });
         if context.stop_requested() {
             return Err("Terminal link preparation cancelled".into());
         }
@@ -356,6 +371,17 @@ impl Job for LinkJob {
             + match &link {
                 Some(crate::terminal_links::TerminalLink::Url(url)) => url.capacity(),
                 Some(crate::terminal_links::TerminalLink::File { path, .. }) => path.capacity(),
+                Some(crate::terminal_links::TerminalLink::Plugin {
+                    plugin,
+                    detector_id,
+                    command,
+                    text,
+                }) => {
+                    plugin.capacity()
+                        + detector_id.capacity()
+                        + command.capacity()
+                        + text.capacity()
+                }
                 None => 0,
             }
             + 128;
@@ -412,6 +438,7 @@ impl TerminalContextPreparation {
             column,
             cwd,
             home,
+            detectors,
         } = request;
         if self.links.len() >= 8 {
             return Err(
@@ -443,6 +470,7 @@ impl TerminalContextPreparation {
             column,
             cwd: cwd.to_path_buf(),
             home: home.map(std::path::Path::to_path_buf),
+            detectors,
         };
         let receipt = reservation.submit(job).map_err(|rejected| {
             format!(
@@ -947,6 +975,76 @@ mod tests {
         }
     }
     #[test]
+    fn a_plugin_link_detector_wins_over_the_kernel_link_and_misses_fall_back() {
+        let manifests = vec![(
+            "example.issues".to_owned(),
+            r##"{"contributes":{"commands":[{"id":"open"}],
+                "link_detectors":[{"id":"issue-ref","regex":"#[0-9]+","command":"open"}]}}"##
+                .to_owned(),
+        )];
+        let detectors: Arc<[crate::plugin_host::links::LinkDetector]> =
+            crate::plugin_host::links::active_detectors(&manifests).into();
+        let mut owner = TerminalContextPreparation::new(crate::execution::test_client());
+        let mut view = TerminalView::new(4, 80);
+        view.feed(b"see #42 in ./original.rs:12");
+        let source = view.painted_source();
+        for (id, column) in [(91, 5), (92, 15)] {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match owner.request_link(
+                    &source,
+                    LinkRequest {
+                        id,
+                        pane_id: NodeId(72),
+                        row: 0,
+                        column,
+                        cwd: std::path::Path::new("/captured"),
+                        home: None,
+                        detectors: Arc::clone(&detectors),
+                    },
+                ) {
+                    Ok(_) => break,
+                    Err(error)
+                        if error == "Terminal link CPU admission: Busy"
+                            && Instant::now() < deadline =>
+                    {
+                        std::thread::yield_now()
+                    }
+                    Err(error) => panic!("link fixture admission: {error}"),
+                }
+            }
+            let completion = loop {
+                if let Some(completion) = owner.collect_link() {
+                    break completion;
+                }
+                assert!(Instant::now() < deadline, "link completion deadline");
+                std::thread::yield_now();
+            };
+            let output = completion.result.unwrap();
+            let output = output.view();
+            if id == 91 {
+                assert_eq!(
+                    output.link,
+                    Some(crate::terminal_links::TerminalLink::Plugin {
+                        plugin: "example.issues".to_owned(),
+                        detector_id: "issue-ref".to_owned(),
+                        command: "example.issues/open".to_owned(),
+                        text: "#42".to_owned(),
+                    })
+                );
+            } else {
+                assert_eq!(
+                    output.link,
+                    Some(crate::terminal_links::TerminalLink::File {
+                        path: PathBuf::from("/captured/./original.rs"),
+                        line: Some(12),
+                        column: None
+                    })
+                );
+            }
+        }
+    }
+    #[test]
     fn ctrl_link_cpu_job_preserves_original_source_path_offsets_and_no_link() {
         let mut owner = TerminalContextPreparation::new(crate::execution::test_client());
         let mut view = TerminalView::new(4, 80);
@@ -966,6 +1064,7 @@ mod tests {
                         column,
                         cwd: std::path::Path::new("/captured"),
                         home: None,
+                        detectors: Arc::from(Vec::new()),
                     },
                 ) {
                     Ok(_) => break,

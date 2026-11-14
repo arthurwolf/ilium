@@ -104,6 +104,10 @@ mod attention_dialog_app;
 // Glue between the pure briefing box and the live queue.
 #[path = "app_attention_briefing.rs"]
 mod attention_briefing_app;
+// Client effects of plugin intents (focus, attention, external opens); a child module so it
+// can use the private external-open queue.
+#[path = "plugin_host/effects_app.rs"]
+mod plugin_effects_app;
 use ilium_ipc::TextTriggerSettings;
 
 /// Rows scrolled per wheel notch over a terminal pane's own scrollback --
@@ -385,6 +389,12 @@ pub enum Mode {
     VoiceSettingPrompt(VoiceSettingField, TextPromptState),
     /// Edits the loopback HTTP API port from Settings.
     ApiSettingPrompt(TextPromptState),
+    /// Edits one typed setting row a plugin contributes (text, path, colour, number) from the
+    /// Settings plugin list.
+    PluginSettingPrompt(
+        crate::plugin_host::views::PluginSettingTarget,
+        TextPromptState,
+    ),
     /// Shared searchable choice list or exact numeric editor above a retained parent.
     ValueDialog(Box<crate::value_dialog_host::ValueDialogHost>),
     /// Edits one free-text Git worktree default from Settings.
@@ -2350,6 +2360,9 @@ pub struct App {
     /// walks this stack first so nested dialogs never erase their parents.
     pub(crate) modal_stack: Vec<Mode>,
     pub status_message: Option<String>,
+    /// The plugin and toast id whose toast the status line shows, so `dismiss-toast` can
+    /// clear exactly that toast.
+    pub(crate) plugin_toast: Option<(String, String)>,
     pub(crate) external_open: Option<crate::external_open::ExternalOpenService>,
     pub(crate) external_open_status_storage: Option<ilium_execution::Retention>,
     /// Clipboard ownership must outlive the copy action on Linux, where the
@@ -3138,6 +3151,7 @@ impl App {
             onboarding_voice_suspended: false,
             modal_stack: Vec::new(),
             status_message: None,
+            plugin_toast: None,
             external_open: None,
             external_open_status_storage: None,
             terminal_clipboard: None,
@@ -10011,19 +10025,27 @@ impl App {
                     let _ = self.queue_request(request);
                 }
                 crate::plugin_host::host::Output::Toast { plugin, toast_json } => {
-                    let text = serde_json::from_str::<serde_json::Value>(&toast_json)
-                        .ok()
-                        .and_then(|toast| {
-                            ["title", "message", "text"].iter().find_map(|key| {
-                                toast
-                                    .get(key)
-                                    .and_then(|value| value.as_str())
-                                    .map(str::to_owned)
-                            })
+                    let text = crate::plugin_host::effects::toast_text(&toast_json)
+                        .or_else(|| {
+                            serde_json::from_str::<serde_json::Value>(&toast_json)
+                                .ok()
+                                .and_then(|toast| {
+                                    ["title", "message", "text"].iter().find_map(|key| {
+                                        toast
+                                            .get(key)
+                                            .and_then(|value| value.as_str())
+                                            .map(str::to_owned)
+                                    })
+                                })
                         })
                         .unwrap_or_else(|| "notification".to_owned());
+                    self.plugin_toast = crate::plugin_host::effects::toast_id(&toast_json)
+                        .map(|id| (plugin.clone(), id));
                     self.status_message = Some(format!("{plugin}: {text}"));
                     needs_redraw = true;
+                }
+                crate::plugin_host::host::Output::Effect { plugin, effect } => {
+                    needs_redraw |= self.apply_plugin_effect(&plugin, effect);
                 }
                 crate::plugin_host::host::Output::Redraw => needs_redraw = true,
                 crate::plugin_host::host::Output::PopupOpened { plugin, popup } => {
@@ -15997,6 +16019,7 @@ impl App {
                 )
             })?;
         let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+        let detectors = self.plugin_link_detectors();
         let owner = self
             .terminal_context_preparation
             .as_mut()
@@ -16010,6 +16033,7 @@ impl App {
                 column: usize::from(position.x.saturating_sub(viewport.content_area.x)),
                 cwd: &self.session_cwd,
                 home: home.as_deref(),
+                detectors,
             },
         )?;
         let intent = crate::terminal_input::InputIntent::LinkProbe {
@@ -16115,6 +16139,9 @@ impl App {
             extra.push(TerminalContextAction::OpenExternally(target));
             blueprint.actions.splice(insert..insert, extra);
         }
+        blueprint
+            .actions
+            .extend(self.plugin_terminal_menu_actions());
         blueprint
             .actions
             .sort_by_key(TerminalContextAction::menu_order);
@@ -16386,6 +16413,9 @@ impl App {
             TerminalContextAction::OpenExternally(target) => self.open_target_externally(target),
             TerminalContextAction::OpenInEditor { path } => {
                 self.open_file_in_editor_from_context(menu.pane_id, path)
+            }
+            TerminalContextAction::Plugin { command, .. } => {
+                self.run_plugin_terminal_entry(&command, menu.pane_id)
             }
         }
     }
@@ -19330,6 +19360,10 @@ impl App {
         if self.focus != FocusTarget::Pane || !matches!(self.mode, Mode::Normal) {
             return None;
         }
+        // A shown plugin view takes the pane keys (`handle_pane_key`), so it takes the paste.
+        if self.shown_plugin_view().is_some() {
+            return None;
+        }
         self.active_pane_id()
             .filter(|pane_id| matches!(self.panes.get(pane_id), Some(PaneRuntime::Terminal(_))))
     }
@@ -20997,6 +21031,17 @@ impl App {
                         None => format!("Opening {}", path.display()),
                     });
                 }
+                crate::terminal_links::TerminalLink::Plugin {
+                    plugin,
+                    detector_id,
+                    command,
+                    text,
+                } => self.activate_plugin_link(&crate::plugin_host::links::LinkMatch {
+                    plugin,
+                    detector_id,
+                    command,
+                    text,
+                }),
             }
         } else {
             self.copy_terminal_text_to_clipboard(link.display(), "Link copied to clipboard");

@@ -230,6 +230,9 @@ fn io_failure(failure: &std::io::Error) -> PluginError {
         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
             error(ErrorCode::TimedOut, "request timed out")
         }
+        std::io::ErrorKind::InvalidData | std::io::ErrorKind::UnexpectedEof => {
+            error(ErrorCode::Network, "malformed http response")
+        }
         _ => error(ErrorCode::Network, "connection failed"),
     }
 }
@@ -297,8 +300,127 @@ impl Read for SocketBody {
     }
 }
 
+/// Longest chunk-size or trailer line of a chunked body.
+const MAX_CHUNK_LINE_BYTES: u64 = 4096;
+/// Most trailer fields a chunked body may end with.
+const MAX_TRAILER_LINES: usize = 64;
+
+fn malformed_body(message: &str) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, message.to_owned())
+}
+
+/// Decodes a `Transfer-Encoding: chunked` body (RFC 9112 section 7.1): chunk extensions are
+/// ignored, trailer fields are read and dropped, and a malformed size line or a body that ends
+/// inside a chunk is an `InvalidData` or `UnexpectedEof` error. The reader yields only the
+/// decoded bytes, so every size limit applies to the payload, not to the framing.
+struct ChunkedBody<R: Read> {
+    inner: std::io::BufReader<R>,
+    /// Bytes left in the current chunk.
+    remaining: u64,
+    done: bool,
+}
+
+impl<R: Read> ChunkedBody<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner: std::io::BufReader::new(inner),
+            remaining: 0,
+            done: false,
+        }
+    }
+
+    /// One CRLF-terminated line without its terminator.
+    fn line(&mut self) -> std::io::Result<Vec<u8>> {
+        use std::io::BufRead;
+        let mut line = Vec::new();
+        (&mut self.inner)
+            .take(MAX_CHUNK_LINE_BYTES)
+            .read_until(b'\n', &mut line)?;
+        if line.last() != Some(&b'\n') {
+            return Err(if line.len() as u64 >= MAX_CHUNK_LINE_BYTES {
+                malformed_body("chunk line is too long")
+            } else {
+                std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "chunked body ended early",
+                )
+            });
+        }
+        line.pop();
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        Ok(line)
+    }
+
+    /// The size of the next chunk, from a `<hex>[;extension]` line.
+    fn next_size(&mut self) -> std::io::Result<u64> {
+        let line = self.line()?;
+        let text =
+            std::str::from_utf8(&line).map_err(|_| malformed_body("chunk size is not text"))?;
+        let digits = text.split(';').next().unwrap_or_default().trim();
+        if digits.is_empty() || digits.len() > 16 {
+            return Err(malformed_body("chunk size is malformed"));
+        }
+        u64::from_str_radix(digits, 16).map_err(|_| malformed_body("chunk size is malformed"))
+    }
+
+    /// Reads the trailer section up to the blank line that ends the body.
+    fn skip_trailers(&mut self) -> std::io::Result<()> {
+        for _ in 0..=MAX_TRAILER_LINES {
+            if self.line()?.is_empty() {
+                return Ok(());
+            }
+        }
+        Err(malformed_body("too many trailer fields"))
+    }
+}
+
+impl<R: Read> Read for ChunkedBody<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.done || buffer.is_empty() {
+            return Ok(0);
+        }
+        if self.remaining == 0 {
+            let size = self.next_size()?;
+            if size == 0 {
+                self.skip_trailers()?;
+                self.done = true;
+                return Ok(0);
+            }
+            self.remaining = size;
+        }
+        let wanted = buffer
+            .len()
+            .min(usize::try_from(self.remaining).unwrap_or(usize::MAX));
+        let count = self.inner.read(&mut buffer[..wanted])?;
+        if count == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "chunked body ended inside a chunk",
+            ));
+        }
+        self.remaining -= count as u64;
+        if self.remaining == 0 && !self.line()?.is_empty() {
+            return Err(malformed_body("chunk data is longer than its size"));
+        }
+        Ok(count)
+    }
+}
+
+/// Whether a response head declares a chunked body.
+fn is_chunked(headers: &[Header]) -> bool {
+    headers.iter().any(|header| {
+        header.name.eq_ignore_ascii_case("transfer-encoding")
+            && header
+                .value
+                .split(',')
+                .any(|coding| coding.trim().eq_ignore_ascii_case("chunked"))
+    })
+}
+
 /// Speaks plain HTTP/1.1 (`Connection: close`) to a loopback server and returns once the response
-/// head has arrived.
+/// head has arrived. A chunked body is decoded.
 fn open_plain(
     parsed: &ParsedUrl,
     request: &HttpRequest,
@@ -358,10 +480,19 @@ fn open_plain(
             Err(failure) => return Err(io_failure(&failure)),
         }
     };
-    let (status, headers) = parse_head(&raw[..split])?;
+    let (status, mut headers) = parse_head(&raw[..split])?;
     reader.leftover = std::io::Cursor::new(raw[split + 4..].to_vec());
     if !whole_exchange_deadline {
         reader.deadline = None;
+    }
+    if is_chunked(&headers) {
+        // RFC 9112 section 6.3: the transfer coding wins over a Content-Length sent with it.
+        headers.retain(|header| !header.name.eq_ignore_ascii_case("content-length"));
+        return Ok(Opened {
+            status,
+            headers,
+            body: Box::new(ChunkedBody::new(reader)),
+        });
     }
     Ok(Opened {
         status,
@@ -927,6 +1058,120 @@ mod tests {
         match result {
             Err(error) => assert_eq!(error.code, expected, "message: {}", error.message),
             Ok(value) => panic!("expected {expected:?}, got Ok({value:?})"),
+        }
+    }
+
+    /// Accepts one connection, reads the request head and answers with `pieces`, pausing between
+    /// them so the client sees them in separate reads.
+    fn serve_in_pieces(
+        listener: TcpListener,
+        pieces: &'static [&'static [u8]],
+    ) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buffer = [0u8; 4096];
+                let _ = stream.read(&mut buffer);
+                for piece in pieces {
+                    let _ = stream.write_all(piece);
+                    let _ = stream.flush();
+                    thread::sleep(Duration::from_millis(20));
+                }
+            }
+        })
+    }
+
+    /// A reader that hands out one byte per call, so every boundary falls between reads.
+    struct ByteAtATime(std::io::Cursor<Vec<u8>>);
+
+    impl Read for ByteAtATime {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let end = buffer.len().min(1);
+            self.0.read(&mut buffer[..end])
+        }
+    }
+
+    fn decode_chunked(wire: &[u8]) -> std::io::Result<Vec<u8>> {
+        let mut decoded = Vec::new();
+        super::ChunkedBody::new(ByteAtATime(std::io::Cursor::new(wire.to_vec())))
+            .read_to_end(&mut decoded)?;
+        Ok(decoded)
+    }
+
+    #[test]
+    fn a_chunked_body_split_across_reads_is_decoded() {
+        let decoded =
+            decode_chunked(b"4\r\nWiki\r\n5\r\npedia\r\nE\r\n in\r\n\r\nchunks.\r\n0\r\n\r\n")
+                .expect("decoded");
+        assert_eq!(decoded, b"Wikipedia in\r\n\r\nchunks.".to_vec());
+    }
+
+    #[test]
+    fn chunk_extensions_and_trailers_are_dropped() {
+        let decoded = decode_chunked(
+            b"3;name=value\r\nabc\r\n0;last\r\nExpires: never\r\nX-Trace: 1\r\n\r\n",
+        )
+        .expect("decoded");
+        assert_eq!(decoded, b"abc".to_vec());
+    }
+
+    #[test]
+    fn a_malformed_chunk_size_is_invalid_data() {
+        let failure = decode_chunked(b"zz\r\nabc\r\n0\r\n\r\n").expect_err("malformed");
+        assert_eq!(failure.kind(), std::io::ErrorKind::InvalidData);
+        let too_long = decode_chunked(b"2\r\nabc\r\n0\r\n\r\n").expect_err("overlong chunk");
+        assert_eq!(too_long.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn a_chunked_body_cut_inside_a_chunk_is_unexpected_eof() {
+        let failure = decode_chunked(b"a\r\nabc").expect_err("truncated");
+        assert_eq!(failure.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn the_size_limit_counts_decoded_bytes() {
+        let mut decoded = Vec::new();
+        super::ChunkedBody::new(std::io::Cursor::new(
+            b"5\r\nhello\r\n5\r\nworld\r\n0\r\n\r\n".to_vec(),
+        ))
+        .take(7)
+        .read_to_end(&mut decoded)
+        .expect("decoded");
+        assert_eq!(decoded, b"hellowo".to_vec());
+    }
+
+    #[test]
+    fn fetch_decodes_a_chunked_response_from_the_network() {
+        let (listener, port) = bind_loopback();
+        let _responder = serve_in_pieces(
+            listener,
+            &[
+                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhel",
+                b"lo\r\n6;ext=1\r\n world\r",
+                b"\n0\r\nX-Trailer: yes\r\n\r\n",
+            ],
+        );
+        let mut fixture = fixture_granting(port, &[]);
+        let id = expect_ok(fixture.http().fetch(get(loopback_url(port, "/chunked"))));
+        let outcome = fixture.wait_outcome(id, COMPLETION_WAIT);
+        assert!(matches!(outcome, Some(Outcome::Ok)), "got {outcome:?}");
+        let response = fixture.http().take_response(id).expect("response");
+        assert_eq!(response.body, b"hello world".to_vec());
+    }
+
+    #[test]
+    fn fetch_fails_on_a_malformed_chunked_response() {
+        let (listener, port) = bind_loopback();
+        let _responder = serve_once(
+            listener,
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\nnot-hex\r\nabc\r\n0\r\n\r\n",
+        );
+        let mut fixture = fixture_granting(port, &[]);
+        let id = expect_ok(fixture.http().fetch(get(loopback_url(port, "/bad"))));
+        let outcome = fixture.wait_outcome(id, COMPLETION_WAIT);
+        match outcome {
+            Some(Outcome::Failed(failure)) => assert_eq!(failure.code, ErrorCode::Network),
+            other => panic!("expected failed(network), got {other:?}"),
         }
     }
 

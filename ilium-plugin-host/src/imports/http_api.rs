@@ -8,9 +8,8 @@
 use ilium_plugin_api::generated::host::http_api::HostHttpApi;
 use ilium_plugin_api::generated::types::errors::PluginError;
 
-use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// Longest response body `respond` accepts: 8 MiB.
 const MAX_RESPONSE_BODY_BYTES: usize = 8 * 1024 * 1024;
@@ -26,11 +25,6 @@ const HOP_BY_HOP_HEADERS: [&str; 8] = [
     "transfer-encoding",
     "upgrade",
 ];
-
-thread_local! {
-    /// Route calls the router delivered and the plugin has not yet answered.
-    static OPEN_CALLS: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
-}
 
 /// One answer a plugin gave to an open call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,13 +43,6 @@ pub trait HttpResponseSink: Send + Sync {
     /// call: it never existed, another plugin owns it, it was answered already, or the
     /// request timed out.
     fn complete(&self, plugin: &str, call: u64, response: HttpResponse) -> bool;
-}
-
-/// Registers `call` as an open request awaiting exactly one `respond` (called by the route dispatcher).
-pub fn open_http_api_call(call: u64) {
-    OPEN_CALLS.with(|open| {
-        open.borrow_mut().insert(call);
-    });
 }
 
 /// Builds an `invalid-argument` error with `message`.
@@ -99,9 +86,25 @@ fn unknown_call() -> PluginError {
     }
 }
 
-/// Host side of the `http-api` interface over the thread-local open-call set.
-#[derive(Debug)]
-pub struct HttpApiImport;
+/// Host side of the `http-api` interface over the open-call set of one plugin instance.
+/// Cloning shares the set, so the dispatcher that opens a call and the instance that answers it
+/// see the same calls.
+#[derive(Debug, Clone, Default)]
+pub struct HttpApiImport {
+    /// Route calls the router delivered and the plugin has not yet answered.
+    open_calls: Arc<Mutex<HashSet<u64>>>,
+}
+
+impl HttpApiImport {
+    /// Registers `call` as an open request awaiting exactly one `respond` (called by the route
+    /// dispatcher).
+    pub fn open_call(&self, call: u64) {
+        self.open_calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(call);
+    }
+}
 
 impl HostHttpApi for HttpApiImport {
     fn respond(
@@ -112,7 +115,11 @@ impl HostHttpApi for HttpApiImport {
         body: Vec<u8>,
     ) -> Result<(), PluginError> {
         validate_response(status, &headers, &body)?;
-        let was_open = OPEN_CALLS.with(|open| open.borrow_mut().remove(&call));
+        let was_open = self
+            .open_calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&call);
         if was_open {
             Ok(())
         } else {
@@ -199,10 +206,27 @@ mod tests {
         error_code_of(result) != Some(ErrorCode::InvalidArgument)
     }
 
+    #[test]
+    fn an_opened_call_is_answered_once_by_its_instance_only() {
+        let api = HttpApiImport::default();
+        api.open_call(7);
+        let mut other_instance = HttpApiImport::default();
+        assert_eq!(
+            error_code_of(other_instance.respond(7, 200, Vec::new(), Vec::new())),
+            Some(ErrorCode::NotFound)
+        );
+        let mut answering = api.clone();
+        assert_eq!(answering.respond(7, 200, Vec::new(), Vec::new()), Ok(()));
+        assert_eq!(
+            error_code_of(answering.respond(7, 200, Vec::new(), Vec::new())),
+            Some(ErrorCode::NotFound)
+        );
+    }
+
     /// Source: api-http-api.md "Surface" and reference-wit.md 5.24: each respond answers one open call; an unknown call gets not-found.
     #[test]
     fn respond_to_unknown_call_returns_not_found() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(UNKNOWN_CALL, 200, Vec::new(), Vec::new());
         assert_eq!(error_code_of(result), Some(ErrorCode::NotFound));
     }
@@ -210,7 +234,7 @@ mod tests {
     /// Source: reference-wit.md 5.24: `not-found` covers an unknown call id; a valid status must not be reported as invalid.
     #[test]
     fn respond_to_call_zero_without_open_request_returns_not_found() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(0, 204, Vec::new(), Vec::new());
         assert_eq!(error_code_of(result), Some(ErrorCode::NotFound));
     }
@@ -218,7 +242,7 @@ mod tests {
     /// Source: api-http-api.md "Limits": response status 100 to 599 is accepted (lower boundary 100).
     #[test]
     fn respond_status_100_lower_boundary_is_not_rejected() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(UNKNOWN_CALL, 100, Vec::new(), Vec::new());
         assert!(is_not_invalid_argument(result));
     }
@@ -226,7 +250,7 @@ mod tests {
     /// Source: api-http-api.md "Limits": response status 100 to 599 is accepted (upper boundary 599).
     #[test]
     fn respond_status_599_upper_boundary_is_not_rejected() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(UNKNOWN_CALL, 599, Vec::new(), Vec::new());
         assert!(is_not_invalid_argument(result));
     }
@@ -234,7 +258,7 @@ mod tests {
     /// Source: api-http-api.md "Limits": status 99 is below 100 and gives invalid-argument.
     #[test]
     fn respond_status_99_one_below_range_is_invalid_argument() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(UNKNOWN_CALL, 99, Vec::new(), Vec::new());
         assert_eq!(error_code_of(result), Some(ErrorCode::InvalidArgument));
     }
@@ -242,7 +266,7 @@ mod tests {
     /// Source: api-http-api.md "Limits": status 600 is above 599 and gives invalid-argument.
     #[test]
     fn respond_status_600_one_above_range_is_invalid_argument() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(UNKNOWN_CALL, 600, Vec::new(), Vec::new());
         assert_eq!(error_code_of(result), Some(ErrorCode::InvalidArgument));
     }
@@ -250,7 +274,7 @@ mod tests {
     /// Source: api-http-api.md "Limits": status 0 is outside 100 to 599 and gives invalid-argument.
     #[test]
     fn respond_status_zero_is_invalid_argument() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(UNKNOWN_CALL, 0, Vec::new(), Vec::new());
         assert_eq!(error_code_of(result), Some(ErrorCode::InvalidArgument));
     }
@@ -258,7 +282,7 @@ mod tests {
     /// Source: api-http-api.md "Limits": the largest u16 status is outside 100 to 599 and gives invalid-argument.
     #[test]
     fn respond_status_u16_max_is_invalid_argument() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(UNKNOWN_CALL, u16::MAX, Vec::new(), Vec::new());
         assert_eq!(error_code_of(result), Some(ErrorCode::InvalidArgument));
     }
@@ -266,7 +290,7 @@ mod tests {
     /// Source: api-http-api.md "Limits": response body is at most 8 MiB; exactly 8 MiB is within the limit.
     #[test]
     fn respond_body_exactly_8_mib_is_not_rejected() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let body = vec![0u8; MAX_RESPONSE_BODY_BYTES];
         let result = api.respond(UNKNOWN_CALL, 200, Vec::new(), body);
         assert!(is_not_invalid_argument(result));
@@ -275,7 +299,7 @@ mod tests {
     /// Source: api-http-api.md "Limits": a response body one byte over 8 MiB gives invalid-argument.
     #[test]
     fn respond_body_one_byte_over_8_mib_is_invalid_argument() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let body = vec![0u8; MAX_RESPONSE_BODY_BYTES + 1];
         let result = api.respond(UNKNOWN_CALL, 200, Vec::new(), body);
         assert_eq!(error_code_of(result), Some(ErrorCode::InvalidArgument));
@@ -285,7 +309,7 @@ mod tests {
     #[test]
     fn respond_each_hop_by_hop_header_is_invalid_argument() {
         for header_name in HOP_BY_HOP_HEADER_NAMES {
-            let mut api = HttpApiImport;
+            let mut api = HttpApiImport::default();
             let result = api.respond(UNKNOWN_CALL, 200, single_header(header_name), Vec::new());
             assert_eq!(
                 error_code_of(result),
@@ -298,7 +322,7 @@ mod tests {
     /// Source: capability-http-api-route.md "Limits": the hop-by-hop check ignores case.
     #[test]
     fn respond_hop_by_hop_header_name_in_upper_case_is_invalid_argument() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(
             UNKNOWN_CALL,
             200,
@@ -311,7 +335,7 @@ mod tests {
     /// Source: capability-http-api-route.md "Limits": a header that is not hop-by-hop, such as content-type, is accepted.
     #[test]
     fn respond_content_type_header_is_not_rejected() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(
             UNKNOWN_CALL,
             200,
@@ -324,7 +348,7 @@ mod tests {
     /// Source: api-http-api.md "Example": a 201 JSON reply with a content-type header is a valid response shape.
     #[test]
     fn respond_201_json_reply_is_not_rejected() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let headers = vec![("content-type".to_string(), "application/json".to_string())];
         let result = api.respond(UNKNOWN_CALL, 201, headers, br#"{"id":"n-0142"}"#.to_vec());
         assert!(is_not_invalid_argument(result));
@@ -333,7 +357,7 @@ mod tests {
     /// Source: api-http-api.md "Limits": empty headers and an empty body are valid input; the status alone decides.
     #[test]
     fn respond_empty_headers_and_empty_body_are_not_rejected() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(UNKNOWN_CALL, 404, Vec::new(), Vec::new());
         assert!(is_not_invalid_argument(result));
     }
@@ -341,7 +365,7 @@ mod tests {
     /// Source: reference-wit.md 5.24: a 404 reply with an empty body is valid for an open call; unknown call gives not-found.
     #[test]
     fn respond_404_with_empty_body_to_unknown_call_returns_not_found() {
-        let mut api = HttpApiImport;
+        let mut api = HttpApiImport::default();
         let result = api.respond(UNKNOWN_CALL, 404, Vec::new(), Vec::new());
         assert_eq!(error_code_of(result), Some(ErrorCode::NotFound));
     }

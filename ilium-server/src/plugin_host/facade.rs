@@ -44,6 +44,9 @@ use crate::ipc::handlers::handle_request;
 use crate::ipc::DirectEventSender;
 use crate::state::ServerState;
 
+#[path = "intent_routing.rs"]
+mod intent_routing;
+
 /// How long one translated request may take before the plugin sees `timed-out`. Pane creation
 /// includes spawning the process, so this is far above an ordinary tree change.
 const REQUEST_BUDGET: Duration = Duration::from_secs(30);
@@ -72,14 +75,20 @@ pub(crate) struct ServerFacade {
     next_envelope: Arc<AtomicU64>,
     project_dir: PathBuf,
     session_name: String,
-    /// What plugins keep on tree nodes, by plugin id and node id. Lives as long as the
-    /// server; an entry whose node is gone is dropped the next time the store is written.
-    node_metadata: Mutex<BTreeMap<(String, u64), Vec<u8>>>,
+    /// What plugins keep on tree nodes, by plugin id and node id: the server state's store,
+    /// which session snapshots persist. An entry whose node is gone is dropped the next time
+    /// the store is written.
+    node_metadata: Arc<crate::state::PluginNodeMetadata>,
     /// The kernel settings tables: the user's `config.toml` (contract section 20.3).
     settings: ilium_plugin_host::config_settings::ConfigFileSettings,
     /// Status segments and tree decorations server plugins set, waiting for the publisher
     /// (contract section 20.4). The publisher drains them after every runtime job.
     live_chrome: Mutex<Vec<ilium_plugin_host::contributions::ContributionOp>>,
+    /// Staged `send-input` writes still waiting for their delays. Owned here so a stopping
+    /// host aborts them with the facade (the set aborts its tasks when dropped).
+    input_stages: Mutex<tokio::task::JoinSet<()>>,
+    /// When each coalescing key of a plugin's `notify` last reached the desktop.
+    notify_coalescer: Mutex<intent_routing::NotifyCoalescer>,
 }
 
 /// Most nodes one plugin keeps metadata on.
@@ -253,6 +262,29 @@ pub(crate) fn tree_marks(tree: &Tree) -> BTreeMap<u64, u64> {
         .collect()
 }
 
+/// The plugin view of every node of a tree, by node id, for the events feed (gap G2).
+pub(crate) fn tree_views(tree: &Tree) -> BTreeMap<u64, TreeNode> {
+    tree.all_ids()
+        .filter_map(|id| node_view(tree, id))
+        .map(|view| (view.id.0, view))
+        .collect()
+}
+
+/// Where a pane's title came from: the user's own name, or one the kernel set (a terminal
+/// title or an inferred one; the tree does not tell those two apart).
+pub(crate) fn title_origin(
+    tree: &Tree,
+    id: NodeId,
+) -> ilium_plugin_api::generated::types::tree::TitleOrigin {
+    use ilium_plugin_api::generated::types::tree::TitleOrigin;
+    match tree.get(to_core(id)).map(|node| &node.kind) {
+        Some(NodeKind::Pane { title_source, .. }) if title_source.is_user_specified() => {
+            TitleOrigin::Manual
+        }
+        _ => TitleOrigin::Inferred,
+    }
+}
+
 /// What changed between two fingerprint maps: one `node-removed` per node that went away, then
 /// one `tree-changed` naming every node that is new or reads differently.
 pub(crate) fn tree_delta(known: &BTreeMap<u64, u64>, current: &BTreeMap<u64, u64>) -> Vec<Event> {
@@ -293,6 +325,60 @@ enum RequestEnd {
     TimedOut,
 }
 
+/// Runs one client request through the ordinary handler on the server's runtime and reads its
+/// direct replies. A reply that carries a failed result (an error, a refused restructure, a
+/// failed freeze or termination) ends the request as failed.
+async fn drive_request(
+    state: &Arc<ServerState>,
+    request: ClientRequest,
+    created: Option<u64>,
+) -> RequestEnd {
+    let Some(execution) = state.execution.get() else {
+        return RequestEnd::Failed("the server execution bank is not started".to_owned());
+    };
+    let (sender, mut receiver) =
+        DirectEventSender::admitted_channel(REPLY_CAPACITY, execution.client.clone());
+    let handler = async {
+        let sender = sender;
+        let _ = handle_request(state, request, &sender).await;
+        // Dropping the last sender ends the drain below for requests that reply inline.
+    };
+    let drain = async {
+        let mut end = RequestEnd::Done;
+        while let Some(queued) = receiver.recv_queued().await {
+            let failure = match queued.event {
+                ServerEvent::Error { message } => Some(message),
+                ServerEvent::ProjectRestructureRejected { message, .. } => Some(message),
+                ServerEvent::PaneFrozen {
+                    result: Err(message),
+                    ..
+                }
+                | ServerEvent::PaneProcessTerminated {
+                    result: Err(message),
+                    ..
+                } => Some(message),
+                ServerEvent::PaneCreateFinished { request_id, result }
+                    if Some(request_id) == created =>
+                {
+                    return match result {
+                        Ok(node) => RequestEnd::Created(node),
+                        Err(message) => RequestEnd::Failed(message),
+                    };
+                }
+                _ => None,
+            };
+            if let Some(message) = failure {
+                if matches!(end, RequestEnd::Done) {
+                    end = RequestEnd::Failed(message);
+                }
+            }
+        }
+        end
+    };
+    let ((), end) = tokio::join!(handler, drain);
+    end
+}
+
 impl ServerFacade {
     pub(crate) fn new(
         state: &Arc<ServerState>,
@@ -310,9 +396,11 @@ impl ServerFacade {
             next_envelope,
             project_dir: state.session_cwd.clone(),
             session_name: state.session_name.clone(),
-            node_metadata: Mutex::new(BTreeMap::new()),
+            node_metadata: Arc::clone(&state.plugin_node_metadata),
             settings: ilium_plugin_host::config_settings::ConfigFileSettings::of_user(),
             live_chrome: Mutex::new(Vec::new()),
+            input_stages: Mutex::new(tokio::task::JoinSet::new()),
+            notify_coalescer: Mutex::new(intent_routing::NotifyCoalescer::default()),
         }
     }
 
@@ -366,44 +454,10 @@ impl ServerFacade {
         let Some(state) = self.state.upgrade() else {
             return RequestEnd::Failed("the server is shutting down".to_owned());
         };
-        let Some(execution) = state.execution.get() else {
-            return RequestEnd::Failed("the server execution bank is not started".to_owned());
-        };
-        let (sender, mut receiver) =
-            DirectEventSender::admitted_channel(REPLY_CAPACITY, execution.client.clone());
-        let work = async {
-            let handler = async {
-                let sender = sender;
-                let _ = handle_request(&state, request, &sender).await;
-                // Dropping the last sender ends the drain below for requests that reply inline.
-            };
-            let drain = async {
-                let mut end = RequestEnd::Done;
-                while let Some(queued) = receiver.recv_queued().await {
-                    match queued.event {
-                        ServerEvent::Error { message } => {
-                            if matches!(end, RequestEnd::Done) {
-                                end = RequestEnd::Failed(message);
-                            }
-                        }
-                        ServerEvent::PaneCreateFinished { request_id, result }
-                            if Some(request_id) == created =>
-                        {
-                            return match result {
-                                Ok(node) => RequestEnd::Created(node),
-                                Err(message) => RequestEnd::Failed(message),
-                            };
-                        }
-                        _ => {}
-                    }
-                }
-                end
-            };
-            let ((), end) = tokio::join!(handler, drain);
-            end
-        };
         self.tokio.block_on(async {
-            match tokio::time::timeout(REQUEST_BUDGET, work).await {
+            match tokio::time::timeout(REQUEST_BUDGET, drive_request(&state, request, created))
+                .await
+            {
                 Ok(end) => end,
                 Err(_) => RequestEnd::TimedOut,
             }
@@ -425,12 +479,12 @@ impl ServerFacade {
     /// panel, settings page, onboarding step or popup (gap G3). A pane view belongs to the
     /// tree and is not forwarded.
     fn forward_view(&self, origin: &Origin, intent: &Intent) -> Outcome {
-        let Origin::Plugin { plugin, .. } = origin else {
+        if !matches!(origin, Origin::Plugin { .. }) {
             return refused(
                 ErrorCode::NotPermitted,
                 "only a plugin can ask for a view to open",
             );
-        };
+        }
         let target = match intent {
             Intent::OpenView(spec) => &spec.view,
             Intent::CloseView(view) => view,
@@ -439,30 +493,7 @@ impl ServerFacade {
         if matches!(target, ViewTarget::Pane(_)) {
             return unsupported("a pane view for a server plugin");
         }
-        let intent_json = match serde_json::to_vec(intent) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                return failed(
-                    ErrorCode::Internal,
-                    format!("the intent does not serialize: {error}"),
-                );
-            }
-        };
-        let Some(state) = self.state.upgrade() else {
-            return failed(ErrorCode::Internal, "the server is shutting down");
-        };
-        state.broadcast(ServerEvent::Plugin(ilium_ipc::plugin::PluginEnvelope {
-            plugin: plugin.0.clone(),
-            seq: self.next_envelope.fetch_add(1, Ordering::Relaxed),
-            body: ilium_ipc::plugin::EnvelopeBody::ForwardedIntent(
-                ilium_ipc::plugin::ForwardedIntent {
-                    plugin: plugin.0.clone(),
-                    target: ilium_ipc::plugin::ForwardTarget::AllClients,
-                    intent_json,
-                },
-            ),
-        }));
-        Outcome::Ok
+        self.forward_to_clients(origin, intent)
     }
 
     fn create_pane(&self, spec: CreatePaneSpec) -> Outcome {
@@ -692,6 +723,11 @@ impl TreeAnnotations for ServerFacade {
             ));
         }
         store.insert(key, bytes);
+        drop(store);
+        // The metadata is part of the session snapshot.
+        if let Some(state) = self.state.upgrade() {
+            state.request_snapshot_save();
+        }
         Ok(())
     }
 }
@@ -868,9 +904,8 @@ impl KernelFacade for ServerFacade {
             }
             // Views of a plugin's own client side open in the clients, not in the server.
             Intent::OpenView(_) | Intent::CloseView(_) => self.forward_view(origin, &intent),
-            // The remaining intents belong to features that are not ported yet; each port adds
-            // its arm here together with its handler (foundation contract section 12.4).
-            _ => unsupported("this intent"),
+            // Every other intent goes through the routes in `intent_routing`.
+            other => self.route_intent(origin, other),
         }
     }
 

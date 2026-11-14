@@ -1112,11 +1112,12 @@ async fn run_due_panes_with_hook(
                                 "detection signature settings exceed evidence admission",
                             ));
                         }
-                        (
-                            settings.revision,
-                            settings.detection,
-                            settings.custom_signatures.clone(),
-                        )
+                        // Plugin signatures follow the user's own (gap G6).
+                        let mut signatures = settings.custom_signatures.clone();
+                        if let Ok(contributed) = state.contributed_signatures.read() {
+                            signatures.extend(contributed.iter().cloned());
+                        }
+                        (settings.revision, settings.detection, signatures)
                     };
 
                     // Phase 2a: identify process trees with no lock held. Screen contents

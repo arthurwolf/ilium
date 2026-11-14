@@ -14,12 +14,21 @@ pub enum TerminalLink {
         line: Option<u32>,
         column: Option<u32>,
     },
+    /// Text a plugin's link detector matched (contract G5). Opening it sends `link-activated`
+    /// to `plugin` and runs `command` with the detector id and the text as arguments.
+    Plugin {
+        plugin: String,
+        detector_id: String,
+        command: String,
+        text: String,
+    },
 }
 
 impl TerminalLink {
     pub fn display(&self) -> String {
         match self {
             Self::Url(url) => url.clone(),
+            Self::Plugin { text, .. } => text.clone(),
             Self::File { path, line, column } => format!(
                 "{}{}{}",
                 path.display(),

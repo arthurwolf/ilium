@@ -1,11 +1,13 @@
 //! Host implementation of `ilium:host/kernel-settings`.
 //!
-//! Process-wide table of the 25 frozen kernel tabs. Secret values read as `"<redacted>"`.
+//! A table of the 25 frozen kernel tabs owned by the import value (shared by its clones, never
+//! process-wide). Secret values read as `"<redacted>"`. A real host equips the kernel-backed
+//! settings import instead.
 
 use ilium_plugin_api::generated::host::kernel_settings::HostKernelSettings;
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
-use serde_json::{Map, Value, json};
-use std::sync::{Mutex, PoisonError};
+use serde_json::{json, Map, Value};
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// The frozen kernel tab ids.
 const KERNEL_TAB_IDS: [&str; 25] = [
@@ -35,8 +37,6 @@ const KERNEL_TAB_IDS: [&str; 25] = [
     "about",
     "setup",
 ];
-
-static SETTINGS: Mutex<Option<Map<String, Value>>> = Mutex::new(None);
 
 fn refuse(code: ErrorCode, message: String) -> PluginError {
     PluginError {
@@ -68,14 +68,23 @@ fn is_secret_key(key: &str) -> bool {
         .any(|marker| key.contains(marker))
 }
 
-/// Host side of the `kernel-settings` interface.
-#[derive(Debug)]
-pub struct KernelSettingsImport;
+/// Host side of the `kernel-settings` interface over its own table.
+#[derive(Debug, Clone)]
+pub struct KernelSettingsImport {
+    settings: Arc<Mutex<Map<String, Value>>>,
+}
+
+impl Default for KernelSettingsImport {
+    fn default() -> Self {
+        Self {
+            settings: Arc::new(Mutex::new(default_table())),
+        }
+    }
+}
 
 impl HostKernelSettings for KernelSettingsImport {
     fn read(&mut self, tab: String) -> Result<String, PluginError> {
-        let guard = SETTINGS.lock().unwrap_or_else(PoisonError::into_inner);
-        let table = guard.as_ref().cloned().unwrap_or_else(default_table);
+        let table = self.settings.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(Value::Object(values)) = table.get(&tab) else {
             return Err(refuse(ErrorCode::NotFound, format!("unknown tab {tab:?}")));
         };
@@ -93,8 +102,7 @@ impl HostKernelSettings for KernelSettingsImport {
     }
 
     fn write(&mut self, tab: String, key: String, value: String) -> Result<(), PluginError> {
-        let mut guard = SETTINGS.lock().unwrap_or_else(PoisonError::into_inner);
-        let table = guard.get_or_insert_with(default_table);
+        let mut table = self.settings.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(Value::Object(values)) = table.get_mut(&tab) else {
             return Err(refuse(ErrorCode::NotFound, format!("unknown tab {tab:?}")));
         };
@@ -102,7 +110,10 @@ impl HostKernelSettings for KernelSettingsImport {
             return Err(refuse(ErrorCode::NotFound, format!("unknown key {key:?}")));
         };
         let parsed: Value = serde_json::from_str(&value).map_err(|error| {
-            refuse(ErrorCode::InvalidArgument, format!("value is not JSON: {error}"))
+            refuse(
+                ErrorCode::InvalidArgument,
+                format!("value is not JSON: {error}"),
+            )
         })?;
         if std::mem::discriminant(existing) != std::mem::discriminant(&parsed) {
             return Err(refuse(
@@ -169,7 +180,7 @@ mod tests {
     /// REQ: ABI-030
     #[test]
     fn read_known_tab_returns_a_json_object() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let text = expect_ok(import.read("terminal".to_string()));
         let values: serde_json::Value =
             serde_json::from_str(&text).expect("read result must be valid JSON");
@@ -181,7 +192,7 @@ mod tests {
 
     #[test]
     fn read_accepts_every_frozen_tab_id() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         for tab_id in KERNEL_TAB_IDS {
             let text = expect_ok(import.read(tab_id.to_string()));
             let values: serde_json::Value = serde_json::from_str(&text)
@@ -193,7 +204,7 @@ mod tests {
     /// REQ: SEC-244
     #[test]
     fn read_api_tab_replaces_secret_values_with_redacted_placeholder() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let text = expect_ok(import.read("api".to_string()));
         let values: serde_json::Value =
             serde_json::from_str(&text).expect("api tab read must be valid JSON");
@@ -211,28 +222,28 @@ mod tests {
 
     #[test]
     fn read_unknown_tab_is_not_found() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let code = error_code_of(import.read("no-such-tab".to_string()));
         assert_eq!(code, ErrorCode::NotFound);
     }
 
     #[test]
     fn read_empty_tab_id_is_not_found() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let code = error_code_of(import.read(String::new()));
         assert_eq!(code, ErrorCode::NotFound);
     }
 
     #[test]
     fn read_wildcard_tab_id_is_not_found() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let code = error_code_of(import.read("*".to_string()));
         assert_eq!(code, ErrorCode::NotFound);
     }
 
     #[test]
     fn read_tab_id_is_case_sensitive_kebab_case() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let code = error_code_of(import.read("Terminal".to_string()));
         assert_eq!(code, ErrorCode::NotFound);
     }
@@ -240,7 +251,7 @@ mod tests {
     /// REQ: ABI-030
     #[test]
     fn write_existing_key_of_known_tab_succeeds() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         expect_ok(import.write(
             "terminal".to_string(),
             "scrollback_budget_mib".to_string(),
@@ -250,7 +261,7 @@ mod tests {
 
     #[test]
     fn write_unknown_tab_is_not_found() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let code = error_code_of(import.write(
             "no-such-tab".to_string(),
             "scrollback_budget_mib".to_string(),
@@ -261,7 +272,7 @@ mod tests {
 
     #[test]
     fn write_unknown_key_is_not_found() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let code = error_code_of(import.write(
             "terminal".to_string(),
             "no_such_key".to_string(),
@@ -272,7 +283,7 @@ mod tests {
 
     #[test]
     fn write_empty_key_is_not_found() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let code =
             error_code_of(import.write("terminal".to_string(), String::new(), "32".to_string()));
         assert_eq!(code, ErrorCode::NotFound);
@@ -280,7 +291,7 @@ mod tests {
 
     #[test]
     fn write_value_of_wrong_json_type_is_invalid_argument() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let code = error_code_of(import.write(
             "terminal".to_string(),
             "scrollback_budget_mib".to_string(),
@@ -291,7 +302,7 @@ mod tests {
 
     #[test]
     fn write_malformed_json_value_is_invalid_argument() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let code = error_code_of(import.write(
             "terminal".to_string(),
             "scrollback_budget_mib".to_string(),
@@ -302,7 +313,7 @@ mod tests {
 
     #[test]
     fn write_empty_value_is_invalid_argument() {
-        let mut import = KernelSettingsImport;
+        let mut import = KernelSettingsImport::default();
         let code = error_code_of(import.write(
             "terminal".to_string(),
             "scrollback_budget_mib".to_string(),

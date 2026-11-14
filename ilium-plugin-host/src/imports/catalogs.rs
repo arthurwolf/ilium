@@ -3,8 +3,8 @@
 //! Written once by the skeleton lane from the generated `HostCatalogs` trait; hand-owned afterwards.
 
 use ilium_plugin_api::generated::host::catalogs::{CatalogPage, CatalogQuery, HostCatalogs};
-use std::cell::RefCell;
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::RequestId;
@@ -56,8 +56,13 @@ struct PendingQueries {
     pending: HashSet<u64>,
 }
 
-thread_local! {
-    static PENDING: RefCell<PendingQueries> = RefCell::new(PendingQueries { next_id: 1, pending: HashSet::new() });
+impl Default for PendingQueries {
+    fn default() -> Self {
+        Self {
+            next_id: 1,
+            pending: HashSet::new(),
+        }
+    }
 }
 
 /// Builds a refusal with the given code and a plain-text message.
@@ -77,7 +82,11 @@ fn palette_item(preset: &(&str, &str, &[&str])) -> CatalogItem {
         description: None,
         preview: None,
         group: None,
-        keywords: preset.2.iter().map(|keyword| (*keyword).to_owned()).collect(),
+        keywords: preset
+            .2
+            .iter()
+            .map(|keyword| (*keyword).to_owned())
+            .collect(),
         disabled_reason: None,
     }
 }
@@ -101,9 +110,12 @@ fn validate_limit(limit: u16) -> Result<(), PluginError> {
     Ok(())
 }
 
-/// Host side of the `catalogs` interface.
-#[derive(Debug)]
-pub struct CatalogsImport;
+/// Host side of the `catalogs` interface of one plugin instance. Cloning shares its pending
+/// queries; they end with the instance.
+#[derive(Debug, Clone, Default)]
+pub struct CatalogsImport {
+    pending: Arc<Mutex<PendingQueries>>,
+}
 
 impl HostCatalogs for CatalogsImport {
     fn query(&mut self, q: CatalogQuery) -> Result<CatalogPage, PluginError> {
@@ -165,16 +177,17 @@ impl HostCatalogs for CatalogsImport {
                 "reading another plugin's catalogue needs services.use",
             ));
         }
-        PENDING.with(|state| {
-            let mut state = state.borrow_mut();
-            if state.pending.len() >= MAX_PENDING {
-                return Err(refuse(ErrorCode::Busy, "too many pending catalogue queries"));
-            }
-            let id = state.next_id;
-            state.next_id += 1;
-            state.pending.insert(id);
-            Ok(RequestId(id))
-        })
+        let mut state = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.pending.len() >= MAX_PENDING {
+            return Err(refuse(
+                ErrorCode::Busy,
+                "too many pending catalogue queries",
+            ));
+        }
+        let id = state.next_id;
+        state.next_id += 1;
+        state.pending.insert(id);
+        Ok(RequestId(id))
     }
 
     fn take_page(&mut self, _request: RequestId) -> Option<CatalogPage> {
@@ -260,7 +273,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn query_host_catalogue_returns_page_within_limit() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let page = expect_page(import.query(query_of(HOST_CATALOGUE, "", 50)));
         assert!(
             page.items.len() <= 50,
@@ -276,7 +289,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn query_accepts_limit_one_boundary() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let page = expect_page(import.query(query_of(HOST_CATALOGUE, "", 1)));
         assert!(
             page.items.len() <= 1,
@@ -288,7 +301,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn query_accepts_limit_256_boundary() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let page = expect_page(import.query(query_of(HOST_CATALOGUE, "", 256)));
         assert!(
             page.items.len() <= 256,
@@ -300,7 +313,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn query_limit_zero_is_invalid_argument() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let code = page_error_code(import.query(query_of(HOST_CATALOGUE, "", 0)));
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
@@ -308,7 +321,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn query_limit_257_is_invalid_argument() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let code = page_error_code(import.query(query_of(HOST_CATALOGUE, "", 257)));
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
@@ -316,7 +329,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn query_unknown_catalogue_is_not_found() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let code = page_error_code(import.query(query_of(UNKNOWN_CATALOGUE, "", 20)));
         assert_eq!(code, ErrorCode::NotFound);
     }
@@ -324,7 +337,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn query_empty_catalogue_name_is_not_found() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let code = page_error_code(import.query(query_of("", "", 20)));
         assert_eq!(code, ErrorCode::NotFound);
     }
@@ -332,7 +345,7 @@ mod tests {
     /// REQ: API-004
     #[test]
     fn query_plugin_catalogue_is_not_permitted_because_sync_query_serves_host_catalogues_only() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let code = page_error_code(import.query(query_of(PLUGIN_CATALOGUE, "", 20)));
         assert_eq!(code, ErrorCode::NotPermitted);
     }
@@ -340,7 +353,7 @@ mod tests {
     /// REQ: API-004
     #[test]
     fn query_models_catalogue_without_inference_grant_is_not_permitted() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let code = page_error_code(import.query(query_of(MODELS_CATALOGUE, "", 20)));
         assert_eq!(code, ErrorCode::NotPermitted);
     }
@@ -348,7 +361,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn query_filter_is_case_insensitive_substring_over_title_id_and_keywords() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let page = expect_page(import.query(query_of(HOST_CATALOGUE, "SUN", 256)));
         assert!(
             !page.items.is_empty(),
@@ -372,7 +385,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn query_title_prefix_matches_rank_before_other_matches() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let page = expect_page(import.query(query_of(HOST_CATALOGUE, "su", 256)));
         let mut seen_non_prefix = false;
         for item in &page.items {
@@ -391,7 +404,7 @@ mod tests {
     /// REQ: API-002
     #[test]
     fn query_async_unknown_catalogue_is_not_found() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let code = request_error_code(import.query_async(query_of(UNKNOWN_CATALOGUE, "", 20)));
         assert_eq!(code, ErrorCode::NotFound);
     }
@@ -399,7 +412,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn query_async_limit_zero_is_invalid_argument() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let code = request_error_code(import.query_async(query_of(PLUGIN_CATALOGUE, "", 0)));
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
@@ -407,7 +420,7 @@ mod tests {
     /// REQ: API-061
     #[test]
     fn query_async_limit_257_is_invalid_argument() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let code = request_error_code(import.query_async(query_of(PLUGIN_CATALOGUE, "", 257)));
         assert_eq!(code, ErrorCode::InvalidArgument);
     }
@@ -415,7 +428,7 @@ mod tests {
     /// REQ: API-004
     #[test]
     fn query_async_other_plugin_catalogue_without_services_use_is_not_permitted() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let code = request_error_code(import.query_async(query_of("other.plugin/themes", "", 20)));
         assert_eq!(code, ErrorCode::NotPermitted);
     }
@@ -423,7 +436,7 @@ mod tests {
     /// REQ: API-005
     #[test]
     fn query_async_plugin_catalogue_returns_request_id() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let request = expect_request(import.query_async(query_of(PLUGIN_CATALOGUE, "", 20)));
         assert!(
             import.take_page(request).is_none(),
@@ -434,7 +447,7 @@ mod tests {
     /// REQ: API-073
     #[test]
     fn query_async_returns_busy_for_the_65th_pending_request() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         for index in 0..64 {
             let request = import.query_async(query_of(PLUGIN_CATALOGUE, "", 20));
             assert!(
@@ -449,14 +462,14 @@ mod tests {
     /// REQ: ABI-014
     #[test]
     fn take_page_unknown_request_returns_none() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         assert!(import.take_page(RequestId(u64::MAX)).is_none());
     }
 
     /// REQ: ABI-014
     #[test]
     fn take_page_before_completion_returns_none() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let request = expect_request(import.query_async(query_of(PLUGIN_CATALOGUE, "", 20)));
         assert!(import.take_page(request).is_none());
     }
@@ -464,7 +477,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn lookup_returns_item_for_an_id_from_a_query() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         let page = expect_page(import.query(query_of(HOST_CATALOGUE, "", 1)));
         let Some(first) = page.items.first() else {
             panic!("the palette catalogue returned no items to look up");
@@ -479,7 +492,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn lookup_unknown_id_returns_none() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         assert!(import
             .lookup(HOST_CATALOGUE.to_owned(), "no-such-item-id".to_owned())
             .is_none());
@@ -488,7 +501,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn lookup_unknown_catalogue_returns_none() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         assert!(import
             .lookup(UNKNOWN_CATALOGUE.to_owned(), "anything".to_owned())
             .is_none());
@@ -497,7 +510,7 @@ mod tests {
     /// REQ: API-001
     #[test]
     fn lookup_empty_catalogue_and_empty_id_return_none() {
-        let mut import = CatalogsImport;
+        let mut import = CatalogsImport::default();
         assert!(import.lookup(String::new(), String::new()).is_none());
         assert!(import
             .lookup(HOST_CATALOGUE.to_owned(), String::new())

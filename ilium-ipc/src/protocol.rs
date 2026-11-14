@@ -218,6 +218,9 @@ pub enum PromptSubmissionSource {
     /// A task-terminal or monitor-failure notification emitted by the progress
     /// lifecycle coordinator.
     ProgressResult,
+    /// A `send-input` intent of a plugin (`delivery: submitted`). Appended
+    /// last to preserve every earlier variant's bincode discriminant.
+    PluginIntent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1144,7 +1147,10 @@ pub enum ClientRequest {
     },
     /// Send a signal to the foreground process of a terminal pane (plugin `SignalPane` intent).
     /// Appended to preserve all prior request discriminants.
-    SignalPaneProcess { pane_id: NodeId, signal: PaneSignal },
+    SignalPaneProcess {
+        pane_id: NodeId,
+        signal: PaneSignal,
+    },
 }
 
 /// Which client path produced a stored recap.

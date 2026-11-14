@@ -3797,6 +3797,7 @@ dependencies = [
  "ed25519-dalek",
  "flate2",
  "ilium-execution",
+ "ilium-inference",
  "ilium-logging",
  "ilium-platform",
  "ilium-plugin-api",

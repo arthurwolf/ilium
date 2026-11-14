@@ -53,6 +53,8 @@ pub fn on_tick(
     let workspace_search_started = app.tick_workspace_search(now, search_workers);
     let chatroom_changed = app.tick_chatroom_projects(now);
     let attention_changed = app.tick_attention() | app.tick_attention_dialog();
+    // Focus and `config.toml` changes reach the plugins (gap G2); no redraw of its own.
+    app.tick_wasm_plugin_feed();
     let session_stats_changed = app.tick_session_stats(now);
     let session_models_changed = app.tick_session_models(now);
     let session_goals_changed = app.tick_session_goals(now);

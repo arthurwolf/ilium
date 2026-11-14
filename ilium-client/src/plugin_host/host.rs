@@ -29,11 +29,12 @@ use ilium_ipc::{ClientRequest, ServerEvent};
 use ilium_plugin_api::generated::host::log::Level;
 use ilium_plugin_api::generated::types::events::MessageEvent;
 use ilium_plugin_api::generated::types::tree::{
-    AgentActivity, AgentView, ContainerKind, NodeClass,
+    AgentActivity, AgentView, ContainerKind, NodeClass, TitleOrigin,
 };
 use ilium_plugin_api::generated::types::{
-    ActionKind, Area, CommandContext, CommandOrigin, ErrorCode, Event, Intent, NodeId,
-    OpenViewSpec, Outcome, PluginError, PluginId, PluginSide, Tone, UiAction, UiTree, ViewTarget,
+    ActionKind, Area, CommandContext, CommandOrigin, ErrorCode, Event, Intent, LinkActivatedEvent,
+    NodeId, OpenViewSpec, Outcome, PluginError, PluginId, PluginSide, SettingsChange,
+    SettingsOrigin, Tone, UiAction, UiTree, ViewTarget,
 };
 use ilium_plugin_api::kernel::{
     Cell, FacadeError, HelpCatalog, IntentResult, KernelFacade, KeyBinding, KeymapRead, Origin,
@@ -46,6 +47,7 @@ use ilium_plugin_host::engine::{EngineConfig, PluginEngine};
 use ilium_plugin_host::imports::backed::LogSink;
 use ilium_plugin_host::lifecycle::StartMode;
 use ilium_plugin_host::runtime::cross_side::{RemoteMessage, REMOTE_ENVELOPE_PLUGIN};
+use ilium_plugin_host::runtime::events_feed;
 use ilium_plugin_host::runtime::{
     CataloguePlugin, HostRuntime, RuntimeConfig, RuntimeError, RuntimeThread,
 };
@@ -74,6 +76,9 @@ pub struct ClientPluginStart {
     pub mode: StartMode,
     /// The help topics the plugins of the catalogue ship (contract section 20.2).
     pub help: Vec<PluginHelpTopic>,
+    /// The schema files of the services the catalogue provides: (service, file text). Every
+    /// service call is checked against them (gap G13).
+    pub schemas: Vec<(String, String)>,
 }
 
 /// One help topic a plugin ships. Its global id is `<plugin>/<id>`.
@@ -133,6 +138,12 @@ pub(crate) enum Output {
     /// A view of a plugin went away (closed by the plugin, failed to render, or the plugin
     /// was disabled).
     ViewClosed { plugin: String, view: ViewTarget },
+    /// A client-local intent of a plugin: focus, attention, an external open, a toast dismissal
+    /// (gap G3). The event loop carries it out (`effects_app`).
+    Effect {
+        plugin: String,
+        effect: super::effects::ClientEffect,
+    },
 }
 
 /// A panel, settings page or onboarding step a plugin has open, with the tree the plugin last
@@ -354,6 +365,8 @@ struct Shared {
     /// This record itself, so a job posted to the runtime can send what the runtime wants
     /// the server to hear (cross-side topics and service calls, gap G4) when it ends.
     me: std::sync::Weak<Shared>,
+    /// The key grabs of the runtime's plugins, shared with it once it runs (gap G1).
+    key_grabs: Mutex<Option<ilium_plugin_host::imports::keys::KeyGrabs>>,
 }
 
 impl Shared {
@@ -407,9 +420,65 @@ impl Shared {
         })
     }
 
-    /// Carries out an intent a server plugin forwarded: opens or closes one of its views.
-    /// Returns whether the screen changed.
+    /// Classifies a client-local intent (gap G3) and hands its effect to the event loop.
+    /// Gives the intent back (`Err`) when it is not client-local.
+    fn apply_client_effect(&self, plugin: &str, intent: Intent) -> Result<Outcome, Intent> {
+        let home_dir = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+        match super::effects::classify(
+            intent,
+            std::path::Path::new(&self.project_dir),
+            home_dir.as_deref(),
+        ) {
+            super::effects::Classified::Effect(effect) => {
+                // Client plugins hear about attention marks (gap G2).
+                let attention = match &effect {
+                    super::effects::ClientEffect::MarkAttention { node, reason } => {
+                        Some(events_feed::attention_event(
+                            to_plugin(*node),
+                            Some(reason.clone()),
+                            Some(plugin),
+                        ))
+                    }
+                    super::effects::ClientEffect::AckAttention(node) => Some(
+                        events_feed::attention_event(to_plugin(*node), None, Some(plugin)),
+                    ),
+                    _ => None,
+                };
+                self.push(Output::Effect {
+                    plugin: plugin.to_owned(),
+                    effect,
+                });
+                if let Some(event) = attention {
+                    self.post(move |runtime| {
+                        log_errors("event delivery", runtime.broadcast(&[event]));
+                    });
+                }
+                Ok(Outcome::Ok)
+            }
+            super::effects::Classified::Toast(toast_json) => {
+                self.push(Output::Toast {
+                    plugin: plugin.to_owned(),
+                    toast_json,
+                });
+                Ok(Outcome::Ok)
+            }
+            super::effects::Classified::Refused(outcome) => Ok(outcome),
+            super::effects::Classified::Server(intent) => Err(intent),
+        }
+    }
+
+    /// Carries out an intent a server plugin forwarded: opens or closes one of its views, or
+    /// carries out a client-local effect. Returns whether the screen changed.
     fn apply_forwarded(&self, plugin: &str, intent: Intent) -> bool {
+        let intent = match self.apply_client_effect(plugin, intent) {
+            Ok(outcome) => {
+                if let Outcome::Refused(error) | Outcome::Failed(error) = outcome {
+                    tracing::debug!("a forwarded plugin intent was refused: {}", error.message);
+                }
+                return false;
+            }
+            Err(intent) => intent,
+        };
         match intent {
             Intent::OpenView(OpenViewSpec {
                 view: ViewTarget::Popup(popup),
@@ -429,7 +498,7 @@ impl Shared {
                 self.close_view(plugin, &view)
             }
             other => {
-                tracing::debug!("a forwarded plugin intent is not a view intent: {other:?}");
+                tracing::debug!("a forwarded plugin intent is not client-local: {other:?}");
                 false
             }
         }
@@ -840,7 +909,12 @@ impl KernelFacade for ClientFacade {
                 self.shared.push(Output::Redraw);
                 Outcome::Ok
             }
-            other => self.submit(&plugin.0, &other),
+            // Attention, toasts, external opens and kernel commands are client-local (gap
+            // G3); everything else goes to the server.
+            other => match self.shared.apply_client_effect(&plugin.0, other) {
+                Ok(outcome) => outcome,
+                Err(intent) => self.submit(&plugin.0, &intent),
+            },
         }
     }
 
@@ -1212,6 +1286,35 @@ fn tree_delta(known: &BTreeMap<u64, u64>, current: &BTreeMap<u64, u64>) -> Vec<E
     batch
 }
 
+/// How often `config.toml` is looked at for kernel settings, theme and keymap changes.
+const CONFIG_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+
+/// `config.toml` as the plugins last heard of it (gap G2).
+struct KnownConfig {
+    path: PathBuf,
+    stamp: Option<(std::time::SystemTime, u64)>,
+    table: toml::Table,
+    checked: std::time::Instant,
+}
+
+/// The modification time and length of a file, `None` when it cannot be read.
+fn file_stamp(path: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.modified().ok()?, metadata.len()))
+}
+
+/// Where a pane's title came from: the user's own name, or one the kernel set.
+fn title_origin(tree: &Tree, id: NodeId) -> TitleOrigin {
+    match tree.get(ilium_core::NodeId(id.0)).map(|node| &node.kind) {
+        Some(ilium_core::NodeKind::Pane { title_source, .. })
+            if title_source.is_user_specified() =>
+        {
+            TitleOrigin::Manual
+        }
+        _ => TitleOrigin::Inferred,
+    }
+}
+
 /// The running plugin host of one client. Owned by the `App`; every method returns at once.
 pub(crate) struct ClientPlugins {
     shared: Arc<Shared>,
@@ -1223,8 +1326,18 @@ pub(crate) struct ClientPlugins {
     server_states: BTreeMap<String, String>,
     /// Node ids of the last mirrored tree, to tell plugins what was removed.
     known: BTreeMap<u64, u64>,
+    /// The plugin views of the last mirrored tree, for the pane and agent events (gap G2).
+    known_views: BTreeMap<u64, TreeNode>,
+    /// The focused pane plugins last heard of.
+    known_focus: Option<NodeId>,
+    /// `config.toml` as plugins last heard of it, with the stamp it was read at.
+    known_config: Option<KnownConfig>,
     /// The last refusal of an enable or disable request, for the plugin list.
     last_refusal: Option<String>,
+    /// Compiled link detectors of the enabled plugins (G5), rebuilt when that set changes.
+    link_cache: Mutex<super::links::DetectorCache>,
+    /// Parsed key bindings of the enabled plugins (G1), rebuilt when that set changes.
+    binding_cache: Mutex<super::keybindings::BindingCache>,
 }
 
 impl std::fmt::Debug for ClientPlugins {
@@ -1293,6 +1406,7 @@ impl ClientPlugins {
                 .collect(),
             disabled: Mutex::new(std::collections::BTreeSet::new()),
             settings: ilium_plugin_host::config_settings::ConfigFileSettings::of_user(),
+            key_grabs: Mutex::new(None),
         });
         let (disabled, warning) = wiring::disabled_at_start(&start.data_dir);
         if let Some(warning) = warning {
@@ -1312,12 +1426,24 @@ impl ClientPlugins {
             // Basic panes are a server primitive; the client links no backend for them.
             basic: None,
             log: Arc::clone(&log),
-            backends: wiring::wave_two::Backends::new(
+            backends: wiring::wave_two::Backends::client(
                 session_cwd.to_path_buf(),
                 start.data_dir.clone(),
+                wiring::wave_two::ClientBackendInputs {
+                    // `ilium:host/inference` answers through the provider selected in Settings.
+                    inference: Some(Arc::new(
+                        ilium_plugin_host::imports::inference_backend::SettingsInference::of_user(),
+                    )),
+                    audio: Some(Arc::new(super::audio_backend::ClientAudio)),
+                    // The kernel picker panel is not drawn yet, so `fs.pick` stays unsupported.
+                    picker: None,
+                    agent_scopes: directories::BaseDirs::new()
+                        .map(|dirs| wiring::wave_two::agent_scopes_in(dirs.home_dir()))
+                        .unwrap_or_default(),
+                },
             ),
         });
-        let runtime = HostRuntime::new(
+        let mut runtime = HostRuntime::new(
             engine,
             RuntimeConfig {
                 side: Side::Client,
@@ -1329,6 +1455,16 @@ impl ClientPlugins {
                 disabled,
             },
         );
+        // Durable timers survive a client restart as they do a server restart (gap G7).
+        runtime.set_durable_timer_file(wiring::durable_timers_path(&start.data_dir, "client"));
+        for (service, text) in &start.schemas {
+            if let Err(error) = runtime.install_schema(service, text) {
+                tracing::warn!(service, "service schema not installed: {error}");
+            }
+        }
+        if let Ok(mut slot) = shared.key_grabs.lock() {
+            *slot = Some(runtime.key_grabs());
+        }
         let thread = match RuntimeThread::spawn(runtime) {
             Ok(thread) => thread,
             Err(error) => {
@@ -1367,7 +1503,12 @@ impl ClientPlugins {
             server_entries: BTreeMap::new(),
             server_states: BTreeMap::new(),
             known: BTreeMap::new(),
+            known_views: BTreeMap::new(),
+            known_focus: None,
+            known_config: None,
             last_refusal: None,
+            link_cache: Mutex::new(super::links::DetectorCache::default()),
+            binding_cache: Mutex::new(super::keybindings::BindingCache::default()),
         })
     }
 
@@ -1400,13 +1541,83 @@ impl ClientPlugins {
             *slot = focused.map(to_plugin);
         }
         self.shared.epoch.fetch_add(1, Ordering::Relaxed);
-        let batch = tree_delta(&self.known, &current);
+        let mut batch = tree_delta(&self.known, &current);
         self.known = current;
+        // Pane, title and agent events from the same two readings (gap G2).
+        let views: BTreeMap<u64, TreeNode> = tree
+            .all_ids()
+            .filter_map(|id| node_view(tree, id))
+            .map(|view| (view.id.0, view))
+            .collect();
+        let focused = focused.map(to_plugin);
+        batch.extend(events_feed::node_events(
+            &self.known_views,
+            &views,
+            focused,
+            |id| title_origin(tree, id),
+        ));
+        self.known_views = views;
+        // A grab that names a pane ends when the pane closes.
+        if let Ok(grabs) = self.shared.key_grabs.lock() {
+            if let Some(grabs) = grabs.as_ref() {
+                grabs.forget_closed_panes(|pane| tree.get(ilium_core::NodeId(pane)).is_some());
+            }
+        }
+        batch.extend(events_feed::focus_event(self.known_focus, focused));
+        self.known_focus = focused;
         let shared = Arc::clone(&self.shared);
         self.shared.post(move |runtime| {
             log_errors("event delivery", runtime.broadcast(&batch));
             log_errors("pump", runtime.pump());
             shared.refresh_views(runtime);
+        });
+    }
+
+    /// Tells the plugins what changed outside a tree snapshot (gap G2): the focused pane and,
+    /// at most every two seconds, `config.toml` (kernel settings, theme and keymap). Cheap
+    /// when nothing changed; the event loop calls it on every tick.
+    pub(crate) fn observe(&mut self, focused: Option<ilium_core::NodeId>) {
+        let mut batch = Vec::new();
+        let focused = focused.map(to_plugin);
+        if let Some(event) = events_feed::focus_event(self.known_focus, focused) {
+            batch.push(event);
+            self.known_focus = focused;
+            if let Ok(mut slot) = self.shared.focused.lock() {
+                *slot = focused;
+            }
+        }
+        let now = std::time::Instant::now();
+        match &mut self.known_config {
+            None => {
+                if let Some(path) =
+                    ilium_platform::paths::config_dir().map(|dir| dir.join("config.toml"))
+                {
+                    self.known_config = Some(KnownConfig {
+                        stamp: file_stamp(&path),
+                        table: events_feed::read_config(&path),
+                        path,
+                        checked: now,
+                    });
+                }
+            }
+            Some(known) if now.duration_since(known.checked) >= CONFIG_CHECK_INTERVAL => {
+                known.checked = now;
+                let stamp = file_stamp(&known.path);
+                if stamp != known.stamp {
+                    known.stamp = stamp;
+                    let table = events_feed::read_config(&known.path);
+                    batch.extend(events_feed::config_events(&known.table, &table));
+                    known.table = table;
+                }
+            }
+            Some(_) => {}
+        }
+        if batch.is_empty() {
+            return;
+        }
+        self.shared.post(move |runtime| {
+            log_errors("event delivery", runtime.broadcast(&batch));
+            log_errors("pump", runtime.pump());
         });
     }
 
@@ -1605,6 +1816,84 @@ impl ClientPlugins {
         })
     }
 
+    /// The link detectors of the enabled plugins whose command resolves, compiled once per
+    /// set of enabled plugins. The terminal link job of every click matches against them.
+    pub(crate) fn link_detectors(&self) -> Arc<[super::links::LinkDetector]> {
+        let manifests = self.enabled_manifests();
+        match self.link_cache.lock() {
+            Ok(mut cache) => cache.detectors(manifests),
+            Err(_) => super::links::active_detectors(&manifests).into(),
+        }
+    }
+
+    /// Activates a link a plugin detector matched: `link-activated` reaches the owner, then
+    /// the detector's command runs with the detector id and the matched text as arguments.
+    pub(crate) fn activate_link(
+        &self,
+        found: &super::links::LinkMatch,
+        pane: Option<ilium_core::NodeId>,
+        screen: (u16, u16),
+    ) {
+        self.shared.set_screen(screen);
+        let shared = Arc::clone(&self.shared);
+        let owner = found.plugin.clone();
+        let command = found.command.clone();
+        let arguments_json = found.arguments_json();
+        let activated = Event::LinkActivated(LinkActivatedEvent {
+            node: pane.map(to_plugin).unwrap_or_default(),
+            detector_id: found.detector_id.clone(),
+            text: found.text.clone(),
+        });
+        self.shared.post(move |runtime| {
+            let context = CommandContext {
+                pane: pane.map(to_plugin),
+                ..CommandContext::default()
+            };
+            // The WIT has no link origin; a link opens on the Ctrl+O key, a key binding.
+            if let Err(error) = runtime.invoke_command(
+                &command,
+                &arguments_json,
+                CommandOrigin::Keybinding,
+                context,
+            ) {
+                let toast = serde_json::json!({
+                    "message": format!("{command} is not available: {error}"),
+                });
+                shared.push(Output::Toast {
+                    plugin: "plugins".to_owned(),
+                    toast_json: toast.to_string(),
+                });
+            }
+            // After the command, which activates a loaded owner, so the event reaches it.
+            if let Err(error) = runtime.deliver(&owner, vec![activated]) {
+                tracing::debug!("link-activated not delivered to {owner}: {error}");
+            }
+            log_errors("pump", runtime.pump());
+            shared.refresh_popup(runtime);
+            shared.refresh_views(runtime);
+        });
+    }
+
+    /// Tells the client side of a plugin that the user changed some of its settings in
+    /// Settings (`settings-changed`, origin `user`). A plugin that is not active reads the
+    /// stored values when it starts, so a refused delivery is only logged.
+    pub(crate) fn settings_changed(&self, plugin: &str, keys: Vec<String>) {
+        let owner = plugin.to_owned();
+        let shared = Arc::clone(&self.shared);
+        self.shared.post(move |runtime| {
+            let change = Event::SettingsChanged(SettingsChange {
+                keys,
+                origin: SettingsOrigin::User,
+                side: PluginSide::Client,
+            });
+            if let Err(error) = runtime.deliver(&owner, vec![change]) {
+                tracing::debug!("settings-changed not delivered to {owner}: {error}");
+            }
+            log_errors("pump", runtime.pump());
+            shared.refresh_views(runtime);
+        });
+    }
+
     /// The view the plugin last rendered for its open popup; `None` before the first one.
     pub(crate) fn popup_tree(&self, plugin: &str, popup: &str) -> Option<UiTree> {
         self.shared.popup.lock().ok().and_then(|slot| {
@@ -1614,13 +1903,19 @@ impl ClientPlugins {
         })
     }
 
-    /// Delivers one action of the open popup to its plugin and refreshes the view.
-    pub(crate) fn popup_action(&self, plugin: &str, action: UiAction, screen: (u16, u16)) {
+    /// Delivers actions of the open popup to its plugin, in order, in one batch (an input's
+    /// pending change always arrives before the button that acts on it), then refreshes the
+    /// view.
+    pub(crate) fn popup_actions(&self, plugin: &str, actions: Vec<UiAction>, screen: (u16, u16)) {
+        if actions.is_empty() {
+            return;
+        }
         self.shared.set_screen(screen);
         let shared = Arc::clone(&self.shared);
         let plugin = plugin.to_owned();
+        let events: Vec<Event> = actions.into_iter().map(Event::UiAction).collect();
         self.shared.post(move |runtime| {
-            if let Err(error) = runtime.deliver(&plugin, vec![Event::UiAction(action)]) {
+            if let Err(error) = runtime.deliver(&plugin, events) {
                 tracing::debug!("popup action not delivered to {plugin}: {error}");
             }
             log_errors("pump", runtime.pump());
@@ -1911,9 +2206,15 @@ impl ClientPlugins {
         wiring::plugin_rows(&self.catalogue, &disabled, &self.server_states)
     }
 
-    /// The command the first enabled plugin binds to a post-leader key, in catalogue order.
-    pub(crate) fn prefix_binding_command(&self, key: crate::keymap::BindingKey) -> Option<String> {
-        self.catalogue
+    /// The command the first enabled plugin binds to a chord in a mode `accepts`, in
+    /// catalogue order (gap G1).
+    pub(crate) fn binding_command(
+        &self,
+        chord: &ilium_plugin_host::imports::keys::Chord,
+        accepts: impl Fn(&super::keybindings::BindingMode) -> bool,
+    ) -> Option<String> {
+        let enabled = self
+            .catalogue
             .iter()
             .filter(|plugin| {
                 !self
@@ -1921,9 +2222,48 @@ impl ClientPlugins {
                     .get(&plugin.id)
                     .is_some_and(|state| wiring::is_disabled_state(state))
             })
-            .flat_map(|plugin| super::keybindings::prefix_bindings(&plugin.id, &plugin.manifest))
-            .find(|binding| binding.key == key)
-            .map(|binding| binding.command)
+            .map(|plugin| (plugin.id.as_str(), plugin.manifest.as_str()));
+        let bindings = match self.binding_cache.lock() {
+            Ok(mut cache) => cache.bindings(enabled),
+            Err(_) => enabled
+                .flat_map(|(id, manifest)| super::keybindings::plugin_bindings(id, manifest))
+                .collect::<Vec<_>>()
+                .into(),
+        };
+        super::keybindings::find_binding(&bindings, chord, accepts)
+            .map(|binding| binding.command.clone())
+    }
+
+    /// Offers a pressed key to the plugins' key grabs (gap G1). When a grab takes it, its
+    /// owner hears `key-pressed` and the method returns true: the key must not reach the pane.
+    pub(crate) fn route_grab(
+        &self,
+        chord: &ilium_plugin_host::imports::keys::Chord,
+        focused: Option<ilium_core::NodeId>,
+        repeat: bool,
+    ) -> bool {
+        let routed = self
+            .shared
+            .key_grabs
+            .lock()
+            .ok()
+            .and_then(|grabs| grabs.as_ref()?.route(chord, focused.map(|pane| pane.0)));
+        let Some(routed) = routed else {
+            return false;
+        };
+        let event = Event::KeyPressed(ilium_plugin_api::generated::types::events::KeyEvent {
+            grab: ilium_plugin_api::generated::types::GrabId(routed.grab),
+            pane: routed.pane.map(NodeId),
+            chord: routed.chord,
+            repeat,
+        });
+        let plugin = routed.plugin;
+        self.shared.post(move |runtime| {
+            if let Err(error) = runtime.deliver(&plugin, vec![event]) {
+                tracing::warn!("plugin host, key delivery: {error}");
+            }
+            log_errors("pump", runtime.pump());
+        })
     }
 
     /// The last refused enable or disable request, if the newest request was refused.

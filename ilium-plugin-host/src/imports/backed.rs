@@ -980,7 +980,7 @@ impl KernelTerminal {
     pub fn new(kernel: Arc<dyn KernelFacade>, granted: &[String]) -> Self {
         Self {
             kernel,
-            rest: super::terminal::TerminalImport,
+            rest: super::terminal::TerminalImport::default(),
             reads: (
                 holds(granted, "terminal.read-screen"),
                 holds(granted, "terminal.history"),

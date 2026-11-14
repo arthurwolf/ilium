@@ -207,6 +207,8 @@ impl App {
                 }
             }
         }
+        // A plugin's mark lasts while its node exists (gap G3).
+        self.prune_plugin_attention();
         self.attention.queue.reconcile_instant(&live, instant);
         self.attention.queue.expire(
             now_ms,

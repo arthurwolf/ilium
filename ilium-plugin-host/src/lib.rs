@@ -62,6 +62,7 @@ pub mod retention;
 pub mod review;
 pub mod runtime;
 pub mod scheduler;
+pub mod schemas;
 pub mod secrets;
 pub mod services;
 pub mod session;

@@ -75,6 +75,8 @@ struct Plugin {
     sides: Vec<String>,
     /// The help topics of the manifest whose file exists: (topic id, title, file path).
     help: Vec<(String, String, PathBuf)>,
+    /// The schema files of the provided services: (service name, file path).
+    schemas: Vec<(String, PathBuf)>,
 }
 
 fn main() -> ExitCode {
@@ -351,6 +353,7 @@ fn discover(core: &Path) -> Result<Vec<Plugin>, String> {
                 );
             }
         }
+        let schemas = service_schemas(&manifest, &directory, &name)?;
         plugins.push(Plugin {
             directory: name,
             package,
@@ -358,6 +361,7 @@ fn discover(core: &Path) -> Result<Vec<Plugin>, String> {
             manifest_path,
             sides,
             help,
+            schemas,
         });
     }
     Ok(plugins)
@@ -630,10 +634,56 @@ fn catalogue(
             );
         }
         let _ = writeln!(text, "        ],");
+        let _ = writeln!(text, "        schemas: &[");
+        for (service, path) in &plugin.schemas {
+            let _ = writeln!(
+                text,
+                "            ServiceSchema {{ service: {service:?}, text: include_str!({:?}) }},",
+                path.display().to_string()
+            );
+        }
+        let _ = writeln!(text, "        ],");
         let _ = writeln!(text, "    }},");
     }
     let _ = writeln!(text, "];");
     text
+}
+
+/// The schema files of the services a manifest provides (`contributes.services.provides[]`
+/// entries with a `schema`), checked to be JSON. A missing file is a warning, because porters
+/// still write their schemas; a file that is not JSON fails the build.
+fn service_schemas(
+    manifest: &serde_json::Value,
+    directory: &Path,
+    name: &str,
+) -> Result<Vec<(String, PathBuf)>, String> {
+    let provided = manifest
+        .get("contributes")
+        .and_then(|contributes| contributes.get("services"))
+        .and_then(|services| services.get("provides"))
+        .and_then(serde_json::Value::as_array);
+    let mut schemas = Vec::new();
+    for entry in provided.into_iter().flatten() {
+        let field = |key: &str| entry.get(key).and_then(serde_json::Value::as_str);
+        let (Some(service), Some(file)) = (field("name"), field("schema")) else {
+            continue;
+        };
+        let inside = Path::new(file)
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)));
+        let path = directory.join(file);
+        println!("cargo:rerun-if-changed={}", path.display());
+        if !inside || !path.is_file() {
+            println!(
+                "cargo:warning=plugins/core/{name}: service {service} names schema {file}, which is not a file of the plugin"
+            );
+            continue;
+        }
+        serde_json::from_str::<serde_json::Value>(&read(&path)?)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        schemas.push((service.to_owned(), path));
+    }
+    Ok(schemas)
 }
 
 fn pairs(entries: &[(String, String)]) -> String {

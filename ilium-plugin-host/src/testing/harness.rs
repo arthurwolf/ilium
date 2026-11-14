@@ -72,7 +72,7 @@ use crate::imports::clipboard::ClipboardImport;
 use crate::imports::editor::EditorImport;
 use crate::imports::geocode::GeocodeImport;
 use crate::imports::gpu::GpuImport;
-use crate::imports::help::HelpImport;
+use crate::imports::backed::KernelHelp;
 use crate::imports::http_api::HttpApiImport;
 use crate::imports::inference::InferenceImport;
 use crate::imports::kernel_settings::KernelSettingsImport;
@@ -914,9 +914,15 @@ pub struct HarnessHandle {
 struct HarnessImports {
     agent: AgentImport,
     audio: AudioImport,
+    catalogs: CatalogsImport,
+    client_requests: ClientRequestsImport,
+    geocode: GeocodeImport,
+    http_api: HttpApiImport,
     inference: InferenceImport,
+    kernel_settings: KernelSettingsImport,
     keys: KeysImport,
     sessions: SessionsImport,
+    terminal: TerminalImport,
 }
 
 impl std::fmt::Debug for HarnessHandle {
@@ -2108,7 +2114,7 @@ impl HarnessHandle {
 
     /// The `ilium:primitives/terminal` interface as the plugin sees it.
     pub fn terminal(&self) -> impl HostTerminal {
-        TerminalImport
+        self.imports.terminal.clone()
     }
 
     /// The `ilium:primitives/agent` interface as the plugin sees it.
@@ -2144,7 +2150,7 @@ impl HarnessHandle {
 
     /// The `ilium:host/catalogs` interface as the plugin sees it.
     pub fn catalogs(&self) -> impl HostCatalogs {
-        CatalogsImport
+        self.imports.catalogs.clone()
     }
 
     /// The `ilium:host/cli` interface as the plugin sees it.
@@ -2154,7 +2160,7 @@ impl HarnessHandle {
 
     /// The `ilium:host/client-requests` interface as the plugin sees it.
     pub fn client_requests(&self) -> impl HostClientRequests {
-        ClientRequestsImport
+        self.imports.client_requests.clone()
     }
 
     /// The `ilium:host/clipboard` interface as the plugin sees it.
@@ -2164,7 +2170,7 @@ impl HarnessHandle {
 
     /// The `ilium:host/geocode` interface as the plugin sees it.
     pub fn geocode(&self) -> impl HostGeocode {
-        GeocodeImport
+        self.imports.geocode.clone()
     }
 
     /// The `ilium:host/gpu` interface as the plugin sees it.
@@ -2174,12 +2180,16 @@ impl HarnessHandle {
 
     /// The `ilium:host/help` interface as the plugin sees it.
     pub fn help(&self) -> impl HostHelp {
-        HelpImport
+        let granted: Vec<String> = harness_lock(&self.admission.grants)
+            .iter()
+            .map(|grant| grant.as_str().to_owned())
+            .collect();
+        KernelHelp::new(self.kernel.clone(), &granted)
     }
 
     /// The `ilium:host/http-api` interface as the plugin sees it.
     pub fn http_api(&self) -> impl HostHttpApi {
-        HttpApiImport
+        self.imports.http_api.clone()
     }
 
     /// The `ilium:host/inference` interface as the plugin sees it.
@@ -2189,7 +2199,7 @@ impl HarnessHandle {
 
     /// The `ilium:host/kernel-settings` interface as the plugin sees it.
     pub fn kernel_settings(&self) -> impl HostKernelSettings {
-        KernelSettingsImport
+        self.imports.kernel_settings.clone()
     }
 
     /// The `ilium:host/keymap` interface as the plugin sees it.

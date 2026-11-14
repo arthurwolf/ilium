@@ -74,6 +74,7 @@ use crate::wasm_guest::WasmGuest;
 pub mod cli;
 pub mod cross_side;
 pub mod durable_timers;
+pub mod events_feed;
 mod hooks;
 mod jobs;
 pub mod pending_events;
@@ -282,6 +283,8 @@ pub struct HostRuntime {
     services: ServiceBroker,
     /// Hook chain breach counters and stops.
     hooks: hooks::HookState,
+    /// The schemas of the services this runtime's plugins provide (gap G13).
+    service_schemas: crate::schemas::ServiceSchemas,
     /// Topics and service calls that cross to the other side's runtime.
     cross_side: cross_side::CrossSideState,
     /// The running CLI invocations and what they printed.
@@ -339,6 +342,7 @@ impl HostRuntime {
             extension_book: ExtensionBook::with_ids(ids.clone()),
             services: Arc::new(Mutex::new(ServiceBrokerState::with_ids(ids.clone()))),
             hooks: hooks::HookState::default(),
+            service_schemas: crate::schemas::ServiceSchemas::default(),
             cross_side: cross_side::CrossSideState::default(),
             key_grabs: KeyGrabs::new(),
             journal: JournalBook::new(),
@@ -593,8 +597,15 @@ impl HostRuntime {
             ))),
             keys: Some(Box::new(KeysImport::new(self.key_grabs.clone(), plugin))),
             journal: Some(Box::new(JournalImport::new(self.journal.clone(), plugin))),
-            audio: Some(Box::new(AudioImport::new(self.ids.clone()))),
-            inference: Some(Box::new(InferenceImport::new(self.ids.clone()))),
+            audio: Some(Box::new(AudioImport::new(
+                ImportEnv::for_instance(&self.instance_context(plugin, record, instance)),
+                None,
+            ))),
+            // No provider until the composition root equips one (`wiring::wave_two`).
+            inference: Some(Box::new(InferenceImport::new(
+                ImportEnv::for_instance(&self.instance_context(plugin, record, instance)),
+                None,
+            ))),
             fonts: Some(Box::new(FontsImport::default())),
             codec: Some(Box::new(CodecImport)),
             sounds: Some(Box::new(SoundsImport)),
@@ -905,6 +916,24 @@ impl HostRuntime {
         failures
     }
 
+    /// The key grabs of this runtime's plugins. The clone shares the table, so the client's
+    /// key path can ask which grab takes a key without a round trip to the runtime thread.
+    pub fn key_grabs(&self) -> KeyGrabs {
+        self.key_grabs.clone()
+    }
+
+    /// Installs the schema file of a provided service (gap G13): from then on every call of
+    /// the service is checked against it before the provider sees it, and every immediate
+    /// reply before the caller does. A file that is not a schema file is refused.
+    pub fn install_schema(&mut self, service: &str, text: &str) -> Result<(), String> {
+        self.service_schemas.install(service, text)
+    }
+
+    /// The schema text of a service, when one was installed.
+    pub fn service_schema(&self, service: &str) -> Option<&str> {
+        self.service_schemas.text(service)
+    }
+
     /// Names the file that keeps durable timers across restarts and loads what it holds. A file
     /// that cannot be read gives an empty store and one log line. Call it before the first
     /// activation.
@@ -1105,6 +1134,22 @@ impl HostRuntime {
                 );
                 continue;
             }
+            // A request the service's schema refuses never reaches the provider (gap G13).
+            if let Err(violation) = self.service_schemas.check(
+                &call.service,
+                &call.method,
+                crate::schemas::Direction::Request,
+                &call.payload_json,
+            ) {
+                lock(&self.services).fail(
+                    &call,
+                    PluginError::new(
+                        ErrorCode::InvalidArgument,
+                        format!("the request does not match the service schema at {violation}"),
+                    ),
+                );
+                continue;
+            }
             let export = ExportCall::ServiceHandle(ServiceCall {
                 call: call.call,
                 service: call.service.clone(),
@@ -1114,7 +1159,23 @@ impl HostRuntime {
             });
             match self.call_export(&provider, export) {
                 Ok(ExportReply::ServiceReply(ServiceReply::Done(reply))) => {
-                    lock(&self.services).complete(&call, reply);
+                    match self.service_schemas.check(
+                        &call.service,
+                        &call.method,
+                        crate::schemas::Direction::Response,
+                        &reply,
+                    ) {
+                        Ok(()) => lock(&self.services).complete(&call, reply),
+                        Err(violation) => lock(&self.services).fail(
+                            &call,
+                            PluginError::new(
+                                ErrorCode::InvalidArgument,
+                                format!(
+                                    "the reply does not match the service schema at {violation}"
+                                ),
+                            ),
+                        ),
+                    }
                 }
                 Ok(ExportReply::ServiceReply(ServiceReply::Deferred)) => {
                     lock(&self.services).defer(&call, &provider);

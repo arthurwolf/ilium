@@ -146,6 +146,10 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
     // replayed through its existing key contract so enabling the host mode
     // cannot silently disable paste in names, paths, searches, or editors.
     if let Event::Paste(pasted) = &event {
+        // A shown plugin view with a focused text input takes the paste as one change (G8).
+        if matches!(app.mode, Mode::Normal) && app.handle_plugin_view_paste(pasted) {
+            return;
+        }
         if app.native_terminal_paste_destination().is_some() {
             app.handle_terminal_paste(pasted);
             return;
@@ -175,6 +179,9 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
             handle_voice_setting_prompt(app, field, state, &event)
         }
         Mode::ApiSettingPrompt(state) => handle_api_setting_prompt(app, state, &event),
+        Mode::PluginSettingPrompt(target, state) => {
+            handle_plugin_setting_prompt(app, target, state, &event)
+        }
         Mode::ValueDialog(host) => app.mode = Mode::ValueDialog(host),
         Mode::GitSettingPrompt(field, state) => {
             handle_git_setting_prompt(app, field, state, &event)
@@ -342,6 +349,14 @@ pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
     {
         return false;
     }
+    // A shown plugin view with the keyboard takes a paste as one change of its focused text
+    // input (`handle_plugin_view_paste`), not as replayed keys.
+    if matches!(app.mode, Mode::Normal)
+        && app.focus == crate::app::FocusTarget::Pane
+        && app.shown_plugin_view().is_some()
+    {
+        return false;
+    }
     !matches!(
         &app.mode,
         Mode::LeaderPending
@@ -355,6 +370,8 @@ pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
             | Mode::AnimationTextPrompt(_, _)
             | Mode::LocationPicker(_)
             | Mode::AgentSetupPrompt(_)
+            // A plugin popup's text input takes a paste as one change (G8).
+            | Mode::PluginPopup(_)
     )
 }
 
@@ -915,8 +932,12 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
                 }
             } else if !only_navigation_actions {
                 // A key no kernel or user binding holds may be bound by a plugin.
-                app.run_plugin_prefix_binding(binding_key);
+                app.run_plugin_prefix_binding(&key);
             }
+        } else if !only_navigation_actions {
+            // A chord with modifiers (`ctrl+w`) or a named key (`f5`) the kernel table cannot
+            // hold may still be a plugin's `prefix` binding (gap G1).
+            app.run_plugin_prefix_binding(&key);
         }
         // Actions that open a sub-mode (Rename/Move/Help/Explorer/...)
         // already moved `app.mode` on; only fall back to Normal if
@@ -937,6 +958,12 @@ fn handle_normal_or_leader(app: &mut App, event: Event) {
 
     if keymap::is_leader_key(&key, app.keyboard_settings.navigation_shortcut_base) {
         app.mode = Mode::NavigationLeaderPending;
+        return;
+    }
+
+    // After the kernel's own keys: a plugin key grab, then a plugin's `pane:<kind>` or
+    // `global` binding (gap G1). A key a plugin takes never reaches the pane.
+    if matches!(app.mode, Mode::Normal) && app.route_plugin_key(&key) {
         return;
     }
 
@@ -1516,6 +1543,29 @@ fn handle_api_setting_prompt(app: &mut App, mut state: TextPromptState, event: &
     }
 }
 
+fn handle_plugin_setting_prompt(
+    app: &mut App,
+    target: crate::plugin_host::views::PluginSettingTarget,
+    mut state: TextPromptState,
+    event: &Event,
+) {
+    let key = match event {
+        Event::Key(key) if is_press(key) => key,
+        _ => {
+            app.mode = Mode::PluginSettingPrompt(target, state);
+            return;
+        }
+    };
+    match text_prompt::handle_key(&mut state, key.code) {
+        PromptOutcome::Commit => {
+            app.settings_commit_plugin_setting(&target, &state.buf);
+            app.pop_modal();
+        }
+        PromptOutcome::Cancel => app.pop_modal(),
+        PromptOutcome::Continue => app.mode = Mode::PluginSettingPrompt(target, state),
+    }
+}
+
 fn handle_git_setting_prompt(
     app: &mut App,
     field: crate::app::GitTextField,
@@ -1937,7 +1987,8 @@ fn handle_plugin_popup_event(
     event: &Event,
 ) {
     match event {
-        Event::Key(key) if is_press(key) => app.plugin_popup_key(state, key.code),
+        Event::Key(key) if is_press(key) => app.plugin_popup_key(state, *key),
+        Event::Paste(pasted) => app.plugin_popup_paste(state, pasted),
         _ => app.mode = Mode::PluginPopup(state),
     }
 }
@@ -3912,11 +3963,20 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         | KeyCode::Char(' ')
             if state.tab == SettingsTab::Plugins =>
         {
-            if app.settings_activate_plugin_row(state.selected_row) {
+            let step = if matches!(key.code, KeyCode::Left | KeyCode::Char('h')) {
+                crate::plugin_host::settings_rows::Step::Previous
+            } else {
+                crate::plugin_host::settings_rows::Step::Next
+            };
+            let open_prompt = matches!(key.code, KeyCode::Enter | KeyCode::Char(' '));
+            let row = state.selected_row;
+            // Settings is put back first: a typed setting row opens its prompt over it.
+            app.mode = Mode::Settings(Box::new(state));
+            if app.settings_plugin_row_action(row, step, open_prompt) {
                 // The row opened a plugin view: Settings closes so the view is visible.
                 app.mode = Mode::Normal;
-                return;
             }
+            return;
         }
         KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Debug => {
             state.selected_row =

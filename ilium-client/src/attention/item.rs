@@ -43,6 +43,8 @@ impl AttentionKind {
 pub enum AttentionSource {
     Instant,
     Llm,
+    /// A plugin's `mark-attention` intent.
+    Plugin,
 }
 
 /// Longest briefing field kept, in characters.

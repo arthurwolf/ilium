@@ -1,10 +1,11 @@
-//! Host implementation of `ilium:host/client-requests` (skeleton: every body is a stub).
+//! Host implementation of `ilium:host/client-requests`.
 //!
-//! Written once by the skeleton lane from the generated `HostClientRequests` trait; hand-owned afterwards.
+//! The in-flight requests belong to the import value of one plugin instance (cloning shares
+//! them), so they end with the instance and no other instance or thread can see them.
 
 use ilium_plugin_api::generated::host::client_requests::HostClientRequests;
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
 use ilium_plugin_api::generated::types::ids::{ClientId, RequestId};
@@ -25,10 +26,8 @@ enum RequestState {
     Answered(String),
 }
 
-thread_local! {
-    /// In-flight requests by id, plus the next id to hand out.
-    static REQUESTS: RefCell<(u64, HashMap<u64, RequestState>)> = RefCell::new((1, HashMap::new()));
-}
+/// In-flight requests by id, plus the next id to hand out.
+type Requests = (u64, HashMap<u64, RequestState>);
 
 /// Builds a refusal with the given code and a plain-text message.
 fn refuse(code: ErrorCode, message: &str) -> PluginError {
@@ -39,9 +38,27 @@ fn refuse(code: ErrorCode, message: &str) -> PluginError {
     }
 }
 
-/// Host side of the `client-requests` interface.
-#[derive(Debug)]
-pub struct ClientRequestsImport;
+/// Host side of the `client-requests` interface of one plugin instance.
+#[derive(Debug, Clone)]
+pub struct ClientRequestsImport {
+    requests: Arc<Mutex<Requests>>,
+}
+
+impl Default for ClientRequestsImport {
+    fn default() -> Self {
+        Self {
+            requests: Arc::new(Mutex::new((1, HashMap::new()))),
+        }
+    }
+}
+
+impl ClientRequestsImport {
+    fn with_requests<R>(&self, action: impl FnOnce(&mut Requests) -> R) -> R {
+        // Every writer does one insert or remove, so the table is consistent after a panic.
+        let mut requests = self.requests.lock().unwrap_or_else(PoisonError::into_inner);
+        action(&mut requests)
+    }
+}
 
 impl HostClientRequests for ClientRequestsImport {
     fn request(
@@ -66,8 +83,7 @@ impl HostClientRequests for ClientRequestsImport {
                 "timeout-millis must be 1 to 30000",
             ));
         }
-        let id = REQUESTS.with(|requests| {
-            let mut requests = requests.borrow_mut();
+        let id = self.with_requests(|requests| {
             let id = requests.0;
             requests.0 += 1;
             requests.1.insert(id, RequestState::Pending);
@@ -77,8 +93,7 @@ impl HostClientRequests for ClientRequestsImport {
     }
 
     fn take_answer(&mut self, request: RequestId) -> Option<String> {
-        REQUESTS.with(|requests| {
-            let mut requests = requests.borrow_mut();
+        self.with_requests(|requests| {
             if !matches!(requests.1.get(&request.0), Some(RequestState::Answered(_))) {
                 return None;
             }
@@ -94,8 +109,7 @@ impl HostClientRequests for ClientRequestsImport {
         call: u64,
         outcome: Result<String, PluginError>,
     ) -> Result<(), PluginError> {
-        REQUESTS.with(|requests| {
-            let mut requests = requests.borrow_mut();
+        self.with_requests(|requests| {
             match requests.1.get(&call) {
                 Some(RequestState::Pending) => {}
                 _ => return Err(refuse(ErrorCode::NotFound, "no pending call with that id")),
@@ -125,7 +139,7 @@ mod tests {
     /// REQ: AUT-023
     #[test]
     fn request_to_unknown_client_returns_not_found() {
-        let mut import = ClientRequestsImport;
+        let mut import = ClientRequestsImport::default();
         let result = import.request(
             ClientId(u64::MAX),
             "terminal-size".to_string(),
@@ -141,7 +155,7 @@ mod tests {
     /// REQ: AUT-023
     #[test]
     fn request_with_empty_kind_returns_not_found() {
-        let mut import = ClientRequestsImport;
+        let mut import = ClientRequestsImport::default();
         let result = import.request(ClientId(1), String::new(), "{}".to_string(), 2_000);
         let error = result.expect_err("an empty kind is never declared and must be refused");
         assert_eq!(error.code, ErrorCode::NotFound);
@@ -152,7 +166,7 @@ mod tests {
     /// REQ: HST-499
     #[test]
     fn request_accepts_lower_timeout_bound_of_one_millisecond() {
-        let mut import = ClientRequestsImport;
+        let mut import = ClientRequestsImport::default();
         let result = import.request(
             ClientId(1),
             "terminal-size".to_string(),
@@ -170,7 +184,7 @@ mod tests {
     /// REQ: HST-499
     #[test]
     fn request_accepts_upper_timeout_bound_of_30000_milliseconds() {
-        let mut import = ClientRequestsImport;
+        let mut import = ClientRequestsImport::default();
         let result = import.request(
             ClientId(1),
             "terminal-size".to_string(),

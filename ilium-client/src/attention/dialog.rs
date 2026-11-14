@@ -899,6 +899,7 @@ fn source_tag(source: AttentionSource) -> &'static str {
     match source {
         AttentionSource::Instant => "\u{25c6} instant",
         AttentionSource::Llm => "\u{2726} AI",
+        AttentionSource::Plugin => "\u{25c7} plugin",
     }
 }
 

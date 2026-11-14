@@ -3,12 +3,10 @@
 //! Hand-owned. Two imports share one set of checks. [`PluginTopics`] is what the runtime gives
 //! a plugin instance: it knows its plugin and declared topics and queues each accepted message
 //! in the runtime's [`TopicOutbox`], which the runtime drains to the subscribers.
-//! [`TopicsImport`] checks only, against a per-thread context set with
-//! [`set_publisher_context`]; the test harness uses it.
+//! [`TopicsImport`] checks only, against the publisher it was built for, and delivers nothing.
 
 use ilium_plugin_api::generated::host::topics::HostTopics;
 use ilium_plugin_api::generated::types::errors::{ErrorCode, PluginError};
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -26,30 +24,21 @@ const PUBLISH_RATE_PER_SECOND: usize = 100;
 const KERNEL_NAMESPACE_PREFIX: &str = "ilium.";
 
 /// Who is publishing and what its manifest declares under `contributes.topics.publishes`.
+#[derive(Debug)]
 struct PublisherContext {
     plugin_id: String,
     declared_topics: Vec<String>,
     recent_publishes: VecDeque<Instant>,
 }
 
-thread_local! {
-    static PUBLISHER: RefCell<PublisherContext> = RefCell::new(PublisherContext {
-        plugin_id: "example.notes".to_string(),
-        declared_topics: vec!["example.notes/saved".to_string()],
-        recent_publishes: VecDeque::new(),
-    });
-}
-
-/// Installs the publishing plugin's id and declared topics for the current thread and resets its
-/// rate window.
-pub fn set_publisher_context(plugin_id: &str, declared_topics: Vec<String>) {
-    PUBLISHER.with(|cell| {
-        *cell.borrow_mut() = PublisherContext {
+impl PublisherContext {
+    fn new(plugin_id: &str, declared_topics: Vec<String>) -> Self {
+        Self {
             plugin_id: plugin_id.to_string(),
             declared_topics,
             recent_publishes: VecDeque::new(),
-        };
-    });
+        }
+    }
 }
 
 /// Builds a topics error with no retry delay.
@@ -110,11 +99,7 @@ impl PluginTopics {
     /// The import of `plugin_id`, which may publish `declared_topics` into `outbox`.
     pub fn new(plugin_id: &str, declared_topics: Vec<String>, outbox: TopicOutbox) -> Self {
         Self {
-            context: PublisherContext {
-                plugin_id: plugin_id.to_string(),
-                declared_topics,
-                recent_publishes: VecDeque::new(),
-            },
+            context: PublisherContext::new(plugin_id, declared_topics),
             outbox,
         }
     }
@@ -140,13 +125,29 @@ impl HostTopics for PluginTopics {
     }
 }
 
-/// Host side of the `topics` interface that checks a publish and delivers nothing.
-#[derive(Debug)]
-pub struct TopicsImport;
+/// Host side of the `topics` interface that checks a publish and delivers nothing. Cloning
+/// shares the publisher's rate window.
+#[derive(Debug, Clone)]
+pub struct TopicsImport {
+    context: Arc<Mutex<PublisherContext>>,
+}
+
+impl TopicsImport {
+    /// The checking import of `plugin_id`, which declares `declared_topics`.
+    pub fn new(plugin_id: &str, declared_topics: Vec<String>) -> Self {
+        Self {
+            context: Arc::new(Mutex::new(PublisherContext::new(
+                plugin_id,
+                declared_topics,
+            ))),
+        }
+    }
+}
 
 impl HostTopics for TopicsImport {
     fn publish(&mut self, topic: String, payload_json: String) -> Result<(), PluginError> {
-        PUBLISHER.with(|cell| check_publish(&mut cell.borrow_mut(), &topic, &payload_json))
+        let mut context = self.context.lock().unwrap_or_else(PoisonError::into_inner);
+        check_publish(&mut context, &topic, &payload_json)
     }
 }
 
@@ -238,9 +239,22 @@ mod tests {
     /// Successful publishes allowed per plugin per second (API-071, topics.publish 100 per second).
     const PUBLISH_RATE_PER_SECOND: usize = 100;
 
+    /// The import of the example plugin, which declares [`DECLARED_TOPIC`].
+    fn example_import() -> TopicsImport {
+        TopicsImport::new("example.notes", vec![DECLARED_TOPIC.to_string()])
+    }
+
     /// Calls `topics::publish` on a fresh import, as the plugin side does.
     fn publish(topic: &str, payload_json: &str) -> Result<(), PluginError> {
-        let mut topics = TopicsImport;
+        publish_on(&mut example_import(), topic, payload_json)
+    }
+
+    /// Calls `topics::publish` on `topics`, whose rate window persists across calls.
+    fn publish_on(
+        topics: &mut TopicsImport,
+        topic: &str,
+        payload_json: &str,
+    ) -> Result<(), PluginError> {
         topics.publish(topic.to_string(), payload_json.to_string())
     }
 
@@ -342,23 +356,33 @@ mod tests {
     /// REQ: SVC-023
     #[test]
     fn publish_beyond_100_per_second_is_rate_limited() {
+        let mut topics = example_import();
         for call in 0..PUBLISH_RATE_PER_SECOND {
             assert_eq!(
-                publish(DECLARED_TOPIC, "{}"),
+                publish_on(&mut topics, DECLARED_TOPIC, "{}"),
                 Ok(()),
                 "call {call} inside the rate must succeed"
             );
         }
-        expect_error(publish(DECLARED_TOPIC, "{}"), ErrorCode::RateLimited);
+        expect_error(
+            publish_on(&mut topics, DECLARED_TOPIC, "{}"),
+            ErrorCode::RateLimited,
+        );
+        // Another instance of the same plugin has a rate window of its own.
+        assert_eq!(publish(DECLARED_TOPIC, "{}"), Ok(()));
     }
 
     /// REQ: API-071
     #[test]
     fn rate_limited_publish_carries_retry_after_ms() {
+        let mut topics = example_import();
         for _ in 0..PUBLISH_RATE_PER_SECOND {
-            assert_eq!(publish(DECLARED_TOPIC, "{}"), Ok(()));
+            assert_eq!(publish_on(&mut topics, DECLARED_TOPIC, "{}"), Ok(()));
         }
-        let error = expect_error(publish(DECLARED_TOPIC, "{}"), ErrorCode::RateLimited);
+        let error = expect_error(
+            publish_on(&mut topics, DECLARED_TOPIC, "{}"),
+            ErrorCode::RateLimited,
+        );
         let retry_after_ms = error
             .retry_after_ms
             .expect("rate-limited must set retry-after-ms");

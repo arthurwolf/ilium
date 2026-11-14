@@ -26,6 +26,38 @@ use crate::theme;
 /// Longest status segment and decoration text, in characters.
 const SEGMENT_LIMIT: usize = 48;
 
+/// The terminal-menu actions of contributed menu entries: those that name `terminal` among
+/// their targets and run a command, in contribution order.
+fn terminal_menu_actions(
+    items: &[ChromeItem],
+) -> Vec<crate::terminal_context_menu::TerminalContextAction> {
+    items
+        .iter()
+        .filter(|item| {
+            item.target
+                .as_deref()
+                .is_some_and(|kinds| kinds.split(',').any(|kind| kind.trim() == "terminal"))
+        })
+        .filter_map(|item| {
+            Some(
+                crate::terminal_context_menu::TerminalContextAction::Plugin {
+                    title: sanitize_plugin_text(&item.title, SEGMENT_LIMIT),
+                    command: item.command.clone()?,
+                },
+            )
+        })
+        .collect()
+}
+
+/// The setting row a Settings text prompt edits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginSettingTarget {
+    pub plugin: String,
+    pub key: String,
+    /// The row title, shown as the prompt's title.
+    pub title: String,
+}
+
 /// One row of the Settings plugin list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PluginListRow {
@@ -183,6 +215,24 @@ impl App {
         self.invoke_plugin_command(command, arguments, origin);
     }
 
+    /// The terminal right-click menu entries enabled plugins contribute: `context_menu`
+    /// entries whose `target`/`applies_to` names `terminal` and that run a command (G6).
+    pub(crate) fn plugin_terminal_menu_actions(
+        &self,
+    ) -> Vec<crate::terminal_context_menu::TerminalContextAction> {
+        terminal_menu_actions(&self.plugin_chrome("context_menu"))
+    }
+
+    /// Runs a plugin's terminal menu entry with the pane the menu was opened on.
+    pub(crate) fn run_plugin_terminal_entry(&mut self, command: &str, pane: ilium_core::NodeId) {
+        let arguments = serde_json::json!({ "node": pane.0 }).to_string();
+        self.invoke_plugin_command(
+            command,
+            arguments,
+            ilium_plugin_api::generated::types::CommandOrigin::Menu,
+        );
+    }
+
     /// The rows of the Settings plugin list (contract section 20.6): one switch per plugin,
     /// then one row per contributed panel and onboarding step that opens it, then the
     /// settings rows plugins contribute. Drawing, row counting, keys and clicks all read
@@ -222,6 +272,20 @@ impl App {
     /// where a contributed setting is edited. Returns true when Settings must close, because
     /// the row opened a view in the right-hand area.
     pub(crate) fn settings_activate_plugin_row(&mut self, row: usize) -> bool {
+        self.settings_plugin_row_action(row, Step::Next, true)
+    }
+
+    /// A key on a row of the plugin list. `step` is the way a setting row moves (Left and `h`
+    /// step back). `open_prompt` is true for Enter and Space: a row whose value is typed (a
+    /// number) then opens a text prompt instead of stepping. Text, path, colour and free-choice
+    /// rows open their prompt on any key, since they do not step. Returns whether a plugin view
+    /// was opened.
+    pub(crate) fn settings_plugin_row_action(
+        &mut self,
+        row: usize,
+        step: Step,
+        open_prompt: bool,
+    ) -> bool {
         match self.plugin_list_rows().into_iter().nth(row) {
             Some(PluginListRow::Plugin(_)) => {
                 // Plugin rows come first, so the index is the plugin's own.
@@ -234,8 +298,22 @@ impl App {
                 self.show_plugin_view(&plugin, kind, &name);
                 true
             }
-            Some(PluginListRow::Setting(_)) => {
-                self.settings_step_plugin_row(row, Step::Next);
+            Some(PluginListRow::Setting(setting)) => {
+                let typed = self
+                    .plugin_setting_rows()
+                    .into_iter()
+                    .find(|candidate| {
+                        candidate.plugin == setting.plugin && candidate.key == setting.key
+                    })
+                    .filter(|candidate| {
+                        candidate.takes_text() && (open_prompt || !candidate.is_editable())
+                    });
+                match typed {
+                    Some(candidate) => self.open_plugin_setting_prompt(&candidate),
+                    None => {
+                        self.settings_step_plugin_row(row, step);
+                    }
+                }
                 false
             }
             None => false,
@@ -290,7 +368,66 @@ impl App {
             Some(reason) => format!("{}: {reason}", edited.title),
             None => format!("{} is now {}", edited.title, edited.display()),
         });
+        if changed {
+            self.notify_plugin_setting_changed(&edited);
+        }
         changed
+    }
+
+    /// Opens the text prompt of a typed setting row over Settings.
+    fn open_plugin_setting_prompt(&mut self, row: &SettingRow) {
+        let target = PluginSettingTarget {
+            plugin: row.plugin.clone(),
+            key: row.key.clone(),
+            title: sanitize_plugin_text(&row.title, SEGMENT_LIMIT),
+        };
+        self.push_modal(crate::app::Mode::PluginSettingPrompt(
+            target,
+            crate::text_prompt::TextPromptState::new(row.prompt_text()),
+        ));
+    }
+
+    /// Stores the text typed into a setting prompt. The value is checked against the row's
+    /// schema; a refusal is shown in the status line and nothing is stored. A change is told
+    /// to the client side of the plugin as `settings-changed`.
+    pub(crate) fn settings_commit_plugin_setting(
+        &mut self,
+        target: &PluginSettingTarget,
+        text: &str,
+    ) -> bool {
+        let Some(mut edited) = self
+            .plugin_setting_rows()
+            .into_iter()
+            .find(|candidate| candidate.plugin == target.plugin && candidate.key == target.key)
+        else {
+            self.status_message = Some(format!("{} is no longer offered", target.title));
+            return false;
+        };
+        let changed = match edited.typed(text) {
+            Ok(value) => {
+                let store = ilium_plugin_host::config_settings::PluginSettingsStore::of_user();
+                edited.commit(&store, value)
+            }
+            Err(reason) => {
+                edited.validation = Some(reason);
+                false
+            }
+        };
+        self.status_message = Some(match &edited.validation {
+            Some(reason) => format!("{}: {reason}", edited.title),
+            None => format!("{} is now {}", edited.title, edited.display()),
+        });
+        if changed {
+            self.notify_plugin_setting_changed(&edited);
+        }
+        changed
+    }
+
+    /// Tells the plugin that owns a row that the user changed it in Settings.
+    fn notify_plugin_setting_changed(&self, row: &SettingRow) {
+        if let Some(plugins) = self.wasm_plugins.as_ref() {
+            plugins.settings_changed(&row.plugin, vec![row.key.clone()]);
+        }
     }
 
     /// Shows a contributed view on the user's request (a menu entry, a key, the plugin list).
@@ -573,5 +710,31 @@ mod tests {
     fn a_view_keeps_a_margin_inside_its_frame() {
         assert_eq!(inner(Rect::new(10, 2, 40, 12)), Rect::new(12, 3, 36, 10));
         assert_eq!(inner(Rect::new(0, 0, 3, 1)).width, 0);
+    }
+
+    #[test]
+    fn only_terminal_menu_entries_with_a_command_reach_the_terminal_menu() {
+        let manifest = r#"{"contributes":{"context_menu":[
+            {"id":"explain","title":"Explain output","command":"explain","target":"terminal"},
+            {"id":"both","title":"Pin","command":"x.y/pin","applies_to":["pane","terminal"]},
+            {"id":"tree","title":"Tree only","command":"tree","target":"pane"},
+            {"id":"inert","title":"No command","target":"terminal"}
+        ]}}"#;
+        let items = super::super::host::chrome_items("example.plugin", manifest, "context_menu");
+        let actions = terminal_menu_actions(&items);
+        assert_eq!(
+            actions,
+            vec![
+                crate::terminal_context_menu::TerminalContextAction::Plugin {
+                    title: "Explain output".to_owned(),
+                    command: "example.plugin/explain".to_owned(),
+                },
+                crate::terminal_context_menu::TerminalContextAction::Plugin {
+                    title: "Pin".to_owned(),
+                    command: "x.y/pin".to_owned(),
+                },
+            ]
+        );
+        assert_eq!(actions[0].label(), "Explain output");
     }
 }

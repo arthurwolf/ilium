@@ -142,6 +142,11 @@ pub fn client_plugin_start() -> Option<ilium_client::plugin_host::host::ClientPl
                     })
             })
             .collect(),
+        schemas: ilium_plugin_bundle::plugins()
+            .iter()
+            .flat_map(|plugin| plugin.schemas)
+            .map(|schema| (schema.service.to_owned(), schema.text.to_owned()))
+            .collect(),
     })
 }
 

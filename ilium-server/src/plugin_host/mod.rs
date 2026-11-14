@@ -14,6 +14,7 @@ mod cli_bridge;
 mod facade;
 mod http_routes;
 mod remote;
+mod signatures;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -252,6 +253,8 @@ pub(crate) struct PluginHostHandle {
     cli_tasks: Mutex<JoinSet<()>>,
     /// The routes plugins registered on the loopback HTTP API and the requests they answer.
     http: Arc<HttpRoutes>,
+    /// The agent signatures of the catalogue plugins, republished on enable and disable.
+    signatures: Mutex<signatures::ContributedSignatures>,
 }
 
 fn log_errors(what: &str, errors: Vec<ilium_plugin_host::runtime::RuntimeError>) {
@@ -299,6 +302,15 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
     if let Some(warning) = warning {
         tracing::warn!("installed plugin registry unreadable, every plugin enabled: {warning}");
     }
+    // The detection loop matches the enabled plugins' agent signatures (gap G6).
+    let contributed = signatures::ContributedSignatures::new(
+        start
+            .catalogue
+            .iter()
+            .map(|plugin| (plugin.id.as_str(), plugin.manifest.as_str())),
+        disabled.clone(),
+    );
+    publish_signatures(state, &contributed);
     let log: Arc<dyn LogSink> = Arc::new(TracingLog);
     let http_calls = Arc::new(HttpCalls::default());
     let base_provider = wiring::import_provider(wiring::ProcessImports {
@@ -310,9 +322,18 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         },
         basic: Some(Arc::clone(&facade) as Arc<dyn BasicBackend>),
         log: Arc::clone(&log),
-        backends: wiring::wave_two::Backends::new(
+        backends: wiring::wave_two::Backends::server(
             state.session_cwd.clone(),
             start.data_dir.clone(),
+            wiring::wave_two::ServerBackendInputs {
+                // `ilium:host/inference` answers through the provider selected in Settings.
+                inference: Some(Arc::new(
+                    ilium_plugin_host::imports::inference_backend::SettingsInference::of_user(),
+                )),
+                agent_scopes: directories::BaseDirs::new()
+                    .map(|dirs| wiring::wave_two::agent_scopes_in(dirs.home_dir()))
+                    .unwrap_or_default(),
+            },
         ),
     });
     // A plugin that holds an `http-api.route` grant answers its requests through the server's
@@ -337,6 +358,20 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         },
     );
     runtime.set_durable_timer_file(wiring::durable_timers_path(&start.data_dir, "server"));
+    // Every service call is checked against the provider's schema file (gap G13).
+    for schema in start
+        .catalogue
+        .iter()
+        .filter_map(|plugin| ilium_plugin_bundle::find(&plugin.id))
+        .flat_map(|bundled| bundled.schemas)
+    {
+        if let Err(error) = runtime.install_schema(schema.service, schema.text) {
+            tracing::warn!(
+                service = schema.service,
+                "service schema not installed: {error}"
+            );
+        }
+    }
     let thread = match RuntimeThread::spawn(runtime) {
         Ok(thread) => thread,
         Err(error) => {
@@ -392,7 +427,15 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         cli,
         cli_tasks: Mutex::new(JoinSet::new()),
         http,
+        signatures: Mutex::new(contributed),
     }))
+}
+
+/// Hands the active plugin signatures to the detection loop.
+fn publish_signatures(state: &ServerState, contributed: &signatures::ContributedSignatures) {
+    if let Ok(mut slot) = state.contributed_signatures.write() {
+        *slot = contributed.active();
+    }
 }
 
 impl PluginHostHandle {
@@ -614,6 +657,7 @@ impl PluginHostHandle {
     /// Enables or disables a plugin now and for later starts. Returns the state name the
     /// plugin has afterwards, or `refused:<code>`.
     async fn set_enabled(&self, plugin: String, enabled: bool) -> String {
+        let plugin_id = plugin.clone();
         let Some(version) = self.versions.get(&plugin).cloned() else {
             return "refused:plugin.unknown".to_owned();
         };
@@ -648,10 +692,19 @@ impl PluginHostHandle {
         if !posted {
             return "refused:host.stopping".to_owned();
         }
-        match tokio::time::timeout(SUBMISSION_WAIT, result).await {
+        let name = match tokio::time::timeout(SUBMISSION_WAIT, result).await {
             Ok(Ok(name)) => name,
             _ => "refused:host.timeout".to_owned(),
+        };
+        if !name.starts_with("refused:") {
+            if let (Ok(mut contributed), Some(state)) =
+                (self.signatures.lock(), self.publisher.state.upgrade())
+            {
+                contributed.set_enabled(&plugin_id, enabled);
+                publish_signatures(&state, &contributed);
+            }
         }
+        name
     }
 
     /// Deactivates every plugin and joins the host thread. Called once, before the session
@@ -676,23 +729,75 @@ impl PluginHostHandle {
     }
 }
 
-/// Forwards tree changes to the plugins until the event bus closes or the task is aborted.
-/// Terminal output and every other high-rate event are dropped here, before the host.
+/// How often the server side looks at `config.toml` for kernel settings, theme and keymap
+/// changes (gap G2). A stat per tick; the file is read only when it changed.
+const CONFIG_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+
+/// The modification time and length of a file, `None` when it cannot be read.
+fn file_stamp(path: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.modified().ok()?, metadata.len()))
+}
+
+/// Forwards kernel changes to the plugins until the event bus closes or the task is aborted:
+/// tree changes with the pane, title and agent events derived from them, and the kernel
+/// settings, theme and keymap changes of `config.toml` (gap G2). Terminal output and every
+/// other high-rate event are dropped here, before the host.
 pub(crate) fn spawn_feed(
     state: Arc<ServerState>,
     host: Arc<PluginHostHandle>,
 ) -> tokio::task::JoinHandle<()> {
+    use ilium_plugin_host::runtime::events_feed;
     tokio::spawn(async move {
         // Subscribed before the first read so no change between the two is lost.
         let mut events = state.events.subscribe_shared();
-        let mut known = facade::tree_marks(&*state.tree.read().await);
+        let (mut known, mut views) = {
+            let tree = state.tree.read().await;
+            (facade::tree_marks(&tree), facade::tree_views(&tree))
+        };
+        let config_path = ilium_platform::paths::config_dir().map(|dir| dir.join("config.toml"));
+        let mut config_stamp = config_path.as_deref().and_then(file_stamp);
+        let mut config = config_path
+            .as_deref()
+            .map(events_feed::read_config)
+            .unwrap_or_default();
+        let mut config_check = tokio::time::interval(CONFIG_CHECK_INTERVAL);
+        config_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            let batch = match events.recv().await {
+            let received = tokio::select! {
+                received = events.recv() => received,
+                _ = config_check.tick() => {
+                    let Some(path) = config_path.as_deref() else {
+                        continue;
+                    };
+                    let stamp = file_stamp(path);
+                    if stamp == config_stamp {
+                        continue;
+                    }
+                    config_stamp = stamp;
+                    let current = events_feed::read_config(path);
+                    let batch = events_feed::config_events(&config, &current);
+                    config = current;
+                    if !batch.is_empty() {
+                        host.feed(batch);
+                    }
+                    continue;
+                }
+            };
+            let batch = match received {
                 Ok(event) => match &*event {
                     ServerEvent::TreeSnapshot(tree) => {
                         let current = facade::tree_marks(tree);
-                        let batch = facade::tree_delta(&known, &current);
+                        let mut batch = facade::tree_delta(&known, &current);
                         known = current;
+                        let current_views = facade::tree_views(tree);
+                        batch.extend(events_feed::node_events(
+                            &views,
+                            &current_views,
+                            None,
+                            |id| facade::title_origin(tree, id),
+                        ));
+                        views = current_views;
                         batch
                     }
                     ServerEvent::PaneNodeChanged(node) => {
@@ -704,7 +809,9 @@ pub(crate) fn spawn_feed(
                     _ => Vec::new(),
                 },
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    known = facade::tree_marks(&*state.tree.read().await);
+                    let tree = state.tree.read().await;
+                    known = facade::tree_marks(&tree);
+                    views = facade::tree_views(&tree);
                     vec![Event::TreeChanged(Vec::new())]
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -715,4 +822,35 @@ pub(crate) fn spawn_feed(
             }
         }
     })
+}
+
+/// A client attached to this session, as plugins see it: `client-attached` when made,
+/// `client-detached` when dropped with its connection (gap G2).
+pub(crate) struct ClientPresence {
+    host: Weak<PluginHostHandle>,
+    client: u64,
+}
+
+impl ClientPresence {
+    /// Announces the client; `None` when the session runs without plugins.
+    pub(crate) fn attach(state: &ServerState, client: u64) -> Option<Self> {
+        let host = state.plugins.get()?;
+        host.feed(vec![Event::ClientAttached(
+            ilium_plugin_api::generated::types::ClientId(client),
+        )]);
+        Some(Self {
+            host: Arc::downgrade(host),
+            client,
+        })
+    }
+}
+
+impl Drop for ClientPresence {
+    fn drop(&mut self) {
+        if let Some(host) = self.host.upgrade() {
+            host.feed(vec![Event::ClientDetached(
+                ilium_plugin_api::generated::types::ClientId(self.client),
+            )]);
+        }
+    }
 }

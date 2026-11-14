@@ -373,12 +373,14 @@ pub async fn run_with_plugins(
         Arc::clone(&state),
         workspace_git_requests,
     ));
-    let http_api_task =
-        AbortOnDropHandle::new(http_api::spawn(
-            Arc::clone(&state),
-            options.http_api,
-            options.socket_path.parent().map(std::path::Path::to_path_buf),
-        ));
+    let http_api_task = AbortOnDropHandle::new(http_api::spawn(
+        Arc::clone(&state),
+        options.http_api,
+        options
+            .socket_path
+            .parent()
+            .map(std::path::Path::to_path_buf),
+    ));
     let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
     let progress_watchdog_task =
         AbortOnDropHandle::new(progress_watchdog::spawn(Arc::clone(&state)));
@@ -705,6 +707,7 @@ async fn restore_snapshot_data(
     let persisted_progress_monitors = std::mem::take(&mut snapshot.progress_monitors);
     let persisted_close_preferences = std::mem::take(&mut snapshot.workspace_close_preferences);
     let persisted_recaps = std::mem::take(&mut snapshot.recaps);
+    let persisted_node_metadata = std::mem::take(&mut snapshot.plugin_node_metadata);
     state.agent_debug.restore(snapshot.agent_debug_logs).await;
     #[cfg(test)]
     state.recovery.notify_restore_prepublication();
@@ -743,6 +746,14 @@ async fn restore_snapshot_data(
             for recap in persisted_recaps {
                 if tree.get(recap.pane_id).is_some() {
                     recaps.insert(recap.pane_id, recap);
+                }
+            }
+        }
+        if let Ok(mut metadata) = state.plugin_node_metadata.lock() {
+            metadata.clear();
+            for entry in persisted_node_metadata {
+                if tree.get(entry.node_id).is_some() {
+                    metadata.insert((entry.plugin, entry.node_id.0), entry.bytes);
                 }
             }
         }
@@ -1230,6 +1241,7 @@ mod restore_tests {
                 progress_monitors: vec![persisted_monitor.clone()],
                 workspace_close_preferences: Vec::new(),
                 recaps: Vec::new(),
+                plugin_node_metadata: Vec::new(),
             },
         )
         .await;
@@ -1473,6 +1485,7 @@ mod restore_tests {
                 progress_monitors: Vec::new(),
                 workspace_close_preferences: Vec::new(),
                 recaps: Vec::new(),
+                plugin_node_metadata: Vec::new(),
             },
         )
         .await;
@@ -1693,6 +1706,7 @@ mod restore_tests {
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
             recaps: Vec::new(),
+            plugin_node_metadata: Vec::new(),
         };
         let json = serde_json::to_vec_pretty(&snapshot).expect("serialize snapshot fixture");
         tokio::fs::create_dir_all(snapshot_path.parent().expect("snapshot parent"))
@@ -1968,6 +1982,7 @@ mod restore_tests {
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
             recaps: Vec::new(),
+            plugin_node_metadata: Vec::new(),
         };
         restore_snapshot_data(&state, snapshot).await;
 
@@ -2080,6 +2095,7 @@ mod restore_tests {
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
             recaps: Vec::new(),
+            plugin_node_metadata: Vec::new(),
         };
         restore_snapshot_data(&state, snapshot).await;
 

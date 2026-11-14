@@ -55,6 +55,12 @@ pub enum TerminalContextAction {
     OpenInEditor {
         path: std::path::PathBuf,
     },
+    /// An entry a plugin contributes to the terminal menu (`contributes.context_menu` with
+    /// `target: "terminal"`, gap G6). Choosing it runs `command` with the pane as `node`.
+    Plugin {
+        title: String,
+        command: String,
+    },
 }
 
 impl TerminalContextAction {
@@ -74,6 +80,7 @@ impl TerminalContextAction {
             Self::PasteScreenInto { .. } => (3, 1),
             Self::ToggleAgentToolbar { .. } => (4, 0),
             Self::ShowAgentDebugLog => (4, 1),
+            Self::Plugin { .. } => (5, 0),
         }
     }
 
@@ -107,6 +114,7 @@ impl TerminalContextAction {
                 IconTarget::OpenExternal
             }
             Self::OpenInEditor { .. } => IconTarget::Editor,
+            Self::Plugin { .. } => IconTarget::Project,
         }
     }
 
@@ -143,6 +151,7 @@ impl TerminalContextAction {
             .to_string(),
             Self::OpenExternally(target) => target.menu_label().to_string(),
             Self::OpenInEditor { .. } => "Open in editor".to_string(),
+            Self::Plugin { title, .. } => title.clone(),
         }
     }
 }

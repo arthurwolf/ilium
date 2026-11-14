@@ -60,6 +60,8 @@ enum PendingKind {
     NeedsApproval,
     /// A monitored task's outcome, reported separately from the agent turn.
     Task(TaskOutcomeNotice),
+    /// A `notify` intent of a plugin: its own title and body, verbatim.
+    Plugin { title: String, body: Option<String> },
 }
 
 /// Presentation of a progress monitor's terminal outcome.
@@ -230,12 +232,29 @@ impl PendingNotification {
         }
     }
 
+    /// A plugin's `notify` intent. `plugin` names the sender in the body so a
+    /// user can always tell a plugin alert from a kernel alert.
+    pub fn for_plugin(
+        session_name: String,
+        plugin: String,
+        title: String,
+        body: Option<String>,
+    ) -> Self {
+        Self {
+            session_name,
+            pane_name: plugin,
+            agent_description: None,
+            kind: PendingKind::Plugin { title, body },
+        }
+    }
+
     /// Notification summary shown by the desktop shell. The pane title leads
     /// so the alert names its agent before anything else.
     fn summary(&self) -> String {
         match &self.kind {
             PendingKind::AgentFinished => format!("{} finished", self.pane_name),
             PendingKind::NeedsApproval => format!("{} needs approval", self.pane_name),
+            PendingKind::Plugin { title, .. } => title.clone(),
             PendingKind::Task(outcome) => {
                 let (what, qualifier) = match outcome.kind {
                     TaskOutcomeKind::Done => ("background task finished", "agent still working"),
@@ -257,6 +276,16 @@ impl PendingNotification {
     /// a second paragraph so the original completion text remains first.
     fn body(&self) -> String {
         let current_text = match &self.kind {
+            PendingKind::Plugin { body, .. } => {
+                let sender = format!(
+                    "Session \"{}\": from plugin {}.",
+                    self.session_name, self.pane_name
+                );
+                return match body {
+                    Some(body) if !body.is_empty() => format!("{body}\n\n{sender}"),
+                    _ => sender,
+                };
+            }
             PendingKind::Task(outcome) => {
                 let what = match outcome.kind {
                     TaskOutcomeKind::Done => "completed successfully",
@@ -313,6 +342,15 @@ impl PendingNotification {
 /// exists to keep out of the test suite.
 pub(crate) fn send(client: &crate::execution::ExecutionClient, pending: PendingNotification) {
     let _ = send_with(client, pending, deliver);
+}
+
+/// [`send`] for a caller that reports admission: `false` when the bounded
+/// I/O lane refused the job (the text is too large or the lane is full).
+pub(crate) fn send_admitted(
+    client: &crate::execution::ExecutionClient,
+    pending: PendingNotification,
+) -> bool {
+    send_with(client, pending, deliver)
 }
 
 fn deliver(summary: &str, body: &str) -> Result<(), &'static str> {
@@ -394,8 +432,16 @@ impl PendingNotification {
         if let Some(description) = &self.agent_description {
             bytes = bytes.saturating_add(description.capacity());
         }
-        if let PendingKind::Task(outcome) = &self.kind {
-            bytes = bytes.saturating_add(outcome.job_id.capacity());
+        match &self.kind {
+            PendingKind::Task(outcome) => {
+                bytes = bytes.saturating_add(outcome.job_id.capacity());
+            }
+            PendingKind::Plugin { title, body } => {
+                bytes = bytes
+                    .saturating_add(title.capacity())
+                    .saturating_add(body.as_ref().map_or(0, String::capacity));
+            }
+            PendingKind::AgentFinished | PendingKind::NeedsApproval => {}
         }
         bytes.saturating_add(std::mem::size_of::<Self>())
     }
@@ -412,6 +458,29 @@ mod tests {
     }
     fn idle() -> PaneStatus {
         PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None)
+    }
+
+    #[test]
+    fn a_plugin_notification_keeps_its_title_and_names_the_plugin() {
+        let pending = PendingNotification::for_plugin(
+            "work".into(),
+            "acme.alerts".into(),
+            "Build failed".into(),
+            Some("3 tests failed".into()),
+        );
+        assert_eq!(pending.summary(), "Build failed");
+        assert_eq!(
+            pending.body(),
+            "3 tests failed\n\nSession \"work\": from plugin acme.alerts."
+        );
+        let bare = PendingNotification::for_plugin(
+            "work".into(),
+            "acme.alerts".into(),
+            "Ping".into(),
+            None,
+        );
+        assert_eq!(bare.body(), "Session \"work\": from plugin acme.alerts.");
+        assert!(bare.retained_text_bytes() > "Ping".len());
     }
 
     #[tokio::test]

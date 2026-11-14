@@ -27,6 +27,7 @@ pub mod help;
 pub mod http;
 pub mod http_api;
 pub mod inference;
+pub mod inference_backend;
 pub mod intents_host;
 pub mod jobs;
 pub mod journal;

@@ -321,6 +321,9 @@ where
     // Connection-owned tasks are cancelled when the connection closes.
     let mut resource_snapshot = tokio::task::JoinSet::new();
     let mut screen_watches = tokio::task::JoinSet::new();
+    // Plugins hear `client-attached` once this connection attaches to the session and
+    // `client-detached` when the guard drops with the connection (gap G2).
+    let mut plugin_presence: Option<crate::plugin_host::ClientPresence> = None;
     loop {
         let decoded = tokio::select! {
             biased;
@@ -602,6 +605,9 @@ where
             // Switch phases before the handler awaits or snapshots replay so
             // output produced after the cutover cannot pass the direct batch.
             attach_phase_tx.send_replace(AttachPhase::Replaying);
+        }
+        if refresh_resources && plugin_presence.is_none() {
+            plugin_presence = crate::plugin_host::ClientPresence::attach(&state, connection_id);
         }
         // Deep mutation handlers need their own poll stack rather than the
         // connection reader/writer and retained-decoding frames below them.
