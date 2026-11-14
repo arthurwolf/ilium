@@ -164,10 +164,10 @@ fn manifest_050_server_grants_are_the_nine_fleet_grants_in_order() {
 
 /// REQ: COR-050, COR-030
 #[test]
-fn manifest_030_client_holds_ui_panels_and_the_api_tab_grant() {
+fn manifest_030_client_holds_the_panel_tree_and_chrome_grants() {
     assert_eq!(
         strings(&manifest()["capabilities"]["client"]),
-        ["ui.panels", "settings.write-kernel:api"]
+        ["ui.panels", "tree.read", "ui.chrome"]
     );
 }
 
@@ -201,7 +201,7 @@ fn manifest_030_no_other_core_page_lists_the_api_tab_as_owned() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_activation_triggers_are_the_five_lazy_ones() {
+fn manifest_050_activation_triggers_are_the_lazy_ones() {
     assert_eq!(
         strings(&manifest()["activation"]),
         [
@@ -209,7 +209,8 @@ fn manifest_050_activation_triggers_are_the_five_lazy_ones() {
             "cli:broadcast",
             "http:/create_agent",
             "service:broadcast",
-            "command:ilium.core.fleet/ask-for-update"
+            "command:ilium.core.fleet/ask-for-update",
+            "command:ilium.core.fleet/ask-for-update-status"
         ]
     );
 }
@@ -312,7 +313,10 @@ fn manifest_010_the_plugin_registers_only_the_create_agent_route() {
 fn manifest_113_ask_for_update_is_a_declared_command() {
     assert_eq!(
         manifest()["contributes"]["commands"],
-        json!([{"id": "ask-for-update", "title": "Ask for update"}])
+        json!([
+            {"id": "ask-for-update", "title": "Ask for update"},
+            {"id": "ask-for-update-status", "title": "Ask for status update"}
+        ])
     );
 }
 

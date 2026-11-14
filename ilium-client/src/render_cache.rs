@@ -637,60 +637,27 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         }
         ServerEvent::AgentDebugMenuChanged { enabled } => {
             app.ui_settings.agent_debug_menu_enabled = enabled;
-            let is_agent_debug_flow = matches!(
-                app.mode,
-                crate::app::Mode::AgentDebugLog(_) | crate::app::Mode::AgentDebugSavePath(..)
-            ) || app
-                .modal_stack
-                .iter()
-                .any(|mode| matches!(mode, crate::app::Mode::AgentDebugLog(_)));
             if !enabled {
+                app.pending_debug_log_viewer = None;
                 app.remove_agent_debug_action_from_terminal_menu();
-            }
-            if !enabled && is_agent_debug_flow {
-                app.close_modal_flow();
             }
             None
         }
         ServerEvent::PaneDebugLogSnapshot {
             pane_id,
-            through_sequence,
-            retained_from_sequence,
             dropped_entry_count,
             entries,
+            ..
         } => {
-            let cache = app.agent_debug_logs.entry(pane_id).or_default();
-            for entry in entries {
-                cache.log.merge_synced_entry(entry);
+            // The viewer is the Diagnostics plugin's: the kernel only fetches the retained
+            // history the user asked for and hands the snapshot over.
+            if app.pending_debug_log_viewer == Some(pane_id) {
+                app.pending_debug_log_viewer = None;
+                app.show_agent_debug_log(pane_id, dropped_entry_count, &entries);
             }
-            // `merge_synced_entry` already enforces the same
-            // count/byte-budget retention the server itself applies, but a
-            // reconciled snapshot also carries the server's authoritative
-            // `retained_from_sequence`, so apply it directly rather than
-            // trusting only the client's own approximate byte accounting.
-            // This goes through `retain_from_sequence` (not a direct filter
-            // on `entries`) so `retained_approximate_bytes` stays correct --
-            // otherwise a later live append's retention pass could try to
-            // evict from an already-empty vector and panic.
-            cache.log.retain_from_sequence(retained_from_sequence);
-            cache.through_sequence = cache.through_sequence.max(through_sequence);
-            cache.log.dropped_entry_count = cache.log.dropped_entry_count.max(dropped_entry_count);
-            cache.has_loaded_retained_history = true;
-            cache.is_loading = false;
             None
         }
-        ServerEvent::PaneDebugEntryAppended { pane_id, entry } => {
-            let cache = app.agent_debug_logs.entry(pane_id).or_default();
-            cache.through_sequence = cache.through_sequence.max(entry.sequence);
-            // `PaneDebugLog::merge_synced_entry` enforces the same
-            // `MAXIMUM_AGENT_DEBUG_ENTRIES`/`_BYTES` retention on this
-            // live-append path that the snapshot branch above enforces on
-            // replay, so a pane whose debug log the operator never opens
-            // still cannot accumulate broadcasts unbounded for the life of
-            // the pane.
-            cache.log.merge_synced_entry(entry);
-            None
-        }
+        ServerEvent::PaneDebugEntryAppended { .. } => None,
         ServerEvent::PaneDetectionEvidenceChanged { pane_id, evidence } => {
             if app.tree.get(pane_id).is_some_and(|node| {
                 matches!(&node.kind, NodeKind::Pane { status, .. } if status == &evidence.applied_status)
@@ -1028,8 +995,6 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .retain(|pane_id| live_pane_ids.contains(pane_id));
     app.pending_manual_retitles
         .retain(|pane_id| live_pane_ids.contains(pane_id));
-    app.agent_debug_logs
-        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.pane_detection_evidence
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     // Same idea as the pane-keyed caches above, but keyed by project Group
@@ -1049,15 +1014,17 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         // rather than leaving a stale "still loading" state behind.
         app.refresh_structure_loading();
     }
+    if app
+        .pending_debug_log_viewer
+        .is_some_and(|pane_id| !live_pane_ids.contains(&pane_id))
+    {
+        app.pending_debug_log_viewer = None;
+    }
     let debug_target_closed = match &app.mode {
         crate::app::Mode::TerminalPaneContextMenu(menu) => !live_pane_ids.contains(&menu.pane_id),
-        crate::app::Mode::AgentDebugLog(view) => !live_pane_ids.contains(&view.pane_id),
-        crate::app::Mode::AgentDebugSavePath(pane_id, _) => !live_pane_ids.contains(pane_id),
         _ => false,
     } || app.modal_stack.iter().any(|mode| match mode {
         crate::app::Mode::TerminalPaneContextMenu(menu) => !live_pane_ids.contains(&menu.pane_id),
-        crate::app::Mode::AgentDebugLog(view) => !live_pane_ids.contains(&view.pane_id),
-        crate::app::Mode::AgentDebugSavePath(pane_id, _) => !live_pane_ids.contains(pane_id),
         _ => false,
     });
     if debug_target_closed {
@@ -2023,106 +1990,48 @@ mod tests {
     }
 
     #[test]
-    fn debug_snapshot_and_live_events_merge_in_sequence_order_without_duplicates() {
+    fn debug_snapshot_for_the_requested_pane_is_handed_to_the_viewer_once() {
+        let mut app = app();
+        let pane_id = ilium_core::NodeId(7);
+        app.pending_debug_log_viewer = Some(pane_id);
+        let snapshot = |pane_id| ServerEvent::PaneDebugLogSnapshot {
+            pane_id,
+            through_sequence: 2,
+            retained_from_sequence: 1,
+            dropped_entry_count: 0,
+            entries: vec![debug_entry(1, "first"), debug_entry(2, "second")],
+        };
+
+        apply(&mut app, snapshot(ilium_core::NodeId(8)));
+        assert_eq!(app.pending_debug_log_viewer, Some(pane_id));
+
+        apply(&mut app, snapshot(pane_id));
+        assert_eq!(app.pending_debug_log_viewer, None);
+        // Without a running Diagnostics plugin the user is told why nothing opens.
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("ilium.core.diagnostics")));
+    }
+
+    #[test]
+    fn live_debug_appends_are_not_kept_by_the_client() {
         let mut app = app();
         let pane_id = ilium_core::NodeId(7);
 
         apply(
             &mut app,
-            ServerEvent::PaneDebugLogSnapshot {
-                pane_id,
-                through_sequence: 3,
-                retained_from_sequence: 1,
-                dropped_entry_count: 0,
-                entries: vec![debug_entry(1, "first"), debug_entry(3, "third")],
-            },
-        );
-        apply(
-            &mut app,
             ServerEvent::PaneDebugEntryAppended {
                 pane_id,
-                entry: debug_entry(2, "second"),
-            },
-        );
-        apply(
-            &mut app,
-            ServerEvent::PaneDebugEntryAppended {
-                pane_id,
-                entry: debug_entry(3, "third replay copy"),
+                entry: debug_entry(1, "event 1"),
             },
         );
 
-        let cache = app.agent_debug_logs.get(&pane_id).unwrap();
-        assert_eq!(
-            cache
-                .log
-                .entries
-                .iter()
-                .map(|entry| entry.sequence)
-                .collect::<Vec<_>>(),
-            vec![1, 2, 3]
-        );
-        assert_eq!(cache.log.entries[2].summary, "third replay copy");
-        assert_eq!(cache.through_sequence, 3);
-        assert!(!cache.is_loading);
-
-        apply(
-            &mut app,
-            ServerEvent::PaneDebugLogSnapshot {
-                pane_id,
-                through_sequence: 3,
-                retained_from_sequence: 3,
-                dropped_entry_count: 2,
-                entries: Vec::new(),
-            },
-        );
-        let cache = app.agent_debug_logs.get(&pane_id).unwrap();
-        assert_eq!(
-            cache
-                .log
-                .entries
-                .iter()
-                .map(|entry| entry.sequence)
-                .collect::<Vec<_>>(),
-            vec![3]
-        );
-        assert_eq!(cache.log.dropped_entry_count, 2);
-    }
-
-    /// Regression test: the server broadcasts `PaneDebugEntryAppended` to
-    /// every connected client for every recorded entry whenever the
-    /// agent-debug journal is enabled, whether or not that client ever
-    /// opened the debug view for that pane (which is the only path that
-    /// sends a `PaneDebugLogSnapshot`). Driving `apply()` with nothing but
-    /// live appends -- no snapshot ever received -- past
-    /// `MAXIMUM_AGENT_DEBUG_ENTRIES` proves the live-append arm alone keeps
-    /// this cache bounded, not just the on-demand replay path.
-    #[test]
-    fn live_appends_alone_stay_within_the_retention_cap_without_a_snapshot() {
-        let mut app = app();
-        let pane_id = ilium_core::NodeId(7);
-
-        for sequence in 1..=(ilium_agent_debug::MAXIMUM_AGENT_DEBUG_ENTRIES as u64 + 25) {
-            apply(
-                &mut app,
-                ServerEvent::PaneDebugEntryAppended {
-                    pane_id,
-                    entry: debug_entry(sequence, &format!("event {sequence}")),
-                },
-            );
-        }
-
-        let cache = app.agent_debug_logs.get(&pane_id).unwrap();
-        assert_eq!(
-            cache.log.entries.len(),
-            ilium_agent_debug::MAXIMUM_AGENT_DEBUG_ENTRIES
-        );
-        assert_eq!(cache.log.dropped_entry_count, 25);
-        assert!(cache.log.retained_from_sequence() > 1);
+        assert_eq!(app.pending_debug_log_viewer, None);
     }
 
     #[test]
-    fn closing_a_pane_closes_its_nested_debug_save_flow_and_cache() {
+    fn closing_a_pane_forgets_its_pending_debug_log_request() {
         let mut app = app();
         let mut tree = ilium_core::Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
@@ -2130,23 +2039,11 @@ mod tests {
             .add_pane(group, "agent", PaneContentKind::Terminal)
             .unwrap();
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
-        app.agent_debug_logs.insert(pane_id, Default::default());
-        app.modal_stack.push(crate::app::Mode::AgentDebugLog(
-            crate::app::AgentDebugLogViewState {
-                pane_id,
-                scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
-            },
-        ));
-        app.mode = crate::app::Mode::AgentDebugSavePath(
-            pane_id,
-            crate::text_prompt::TextPromptState::new("/tmp/agent.log"),
-        );
+        app.pending_debug_log_viewer = Some(pane_id);
 
         apply(&mut app, ServerEvent::TreeSnapshot(ilium_core::Tree::new()));
 
-        assert!(matches!(app.mode, crate::app::Mode::Normal));
-        assert!(app.modal_stack.is_empty());
-        assert!(!app.agent_debug_logs.contains_key(&pane_id));
+        assert_eq!(app.pending_debug_log_viewer, None);
     }
 
     #[test]
@@ -2471,7 +2368,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!(
             "ilium-existing-board-{}-{}.md",
             std::process::id(),
-            crate::scheduled_input::unix_millis_now()
+            crate::wall_clock::unix_millis_now()
         ));
         let original = "# General\n\n* [ ] Existing task\n";
         std::fs::write(&path, original).unwrap();

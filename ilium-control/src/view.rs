@@ -88,8 +88,6 @@ pub fn pane_detail(tree: &Tree, id: NodeId) -> Option<Value> {
         content,
         status,
         title_source,
-        scheduled_input,
-        prompt_queue,
         last_prompt,
         progress_monitors,
         launch_cwd,
@@ -131,8 +129,6 @@ pub fn pane_detail(tree: &Tree, id: NodeId) -> Option<Value> {
             .unwrap_or(Value::Null),
     );
     detail.insert("last_prompt".into(), json!(last_prompt));
-    detail.insert("scheduled_input".into(), to_value(scheduled_input));
-    detail.insert("prompt_queue".into(), to_value(prompt_queue));
     detail.insert("progress_monitors".into(), to_value(progress_monitors));
     detail.insert(
         "workspace".into(),

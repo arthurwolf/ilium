@@ -219,9 +219,16 @@ fn node_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
         class,
         content_kind,
         title: node.name.clone(),
-        cwd: tree
-            .pane_cwd(id)
-            .map(|path| path.to_string_lossy().into_owned()),
+        cwd: match &node.kind {
+            // A folder reads as its own directory, resolved against its project, so a plugin
+            // can tell which panes run inside it.
+            NodeKind::Folder { path, .. } if path.is_absolute() => Some(path.clone()),
+            NodeKind::Folder { path, .. } => tree
+                .project_path_for(id)
+                .map(|project| project.join(path)),
+            _ => tree.pane_cwd(id).map(std::path::Path::to_path_buf),
+        }
+        .map(|path| path.to_string_lossy().into_owned()),
         agent,
         // `None` for a pane, which has no closed state to lock.
         locked: node.is_locked_closed().unwrap_or(false),

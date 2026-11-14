@@ -22,6 +22,19 @@ pub(crate) const HELP_COMMAND: &str = "ilium.core.keys-and-help/show-keys";
 /// The Smart Copy plugin's command; it freezes the pane and opens the candidate picker.
 pub(crate) const SMART_COPY_COMMAND: &str = "ilium.core.smart-copy/smart-copy";
 
+/// The Diagnostics plugin's debug-log viewer; the kernel passes the retained history it fetched.
+pub(crate) const DEBUG_LOG_COMMAND: &str = "ilium.core.diagnostics/show-debug-log";
+
+/// The most bytes of entries the kernel hands to the viewer; the command arguments are capped at
+/// 64 KiB by the host, so the newest entries that fit are sent.
+const DEBUG_LOG_ARGUMENT_BUDGET_BYTES: usize = 56 * 1024;
+
+/// The Scheduler plugin's commands for a terminal pane; the kernel passes the pane and the
+/// plugin draws its own dialogs and keeps the schedules and queues.
+pub(crate) const SCHEDULE_INPUT_COMMAND: &str = "ilium.core.scheduler/schedule-input";
+pub(crate) const QUEUE_PROMPT_COMMAND: &str = "ilium.core.scheduler/queue-prompt";
+pub(crate) const CLEAR_PROMPT_QUEUE_COMMAND: &str = "ilium.core.scheduler/clear-prompt-queue";
+
 /// The Settings plugin's "Editor line display" command; it opens the clip or wrap choice.
 pub(crate) const EDITOR_LINE_DISPLAY_COMMAND: &str = "ilium.core.settings/editor-line-display";
 
@@ -78,6 +91,34 @@ impl App {
         self.invoke_plugin_command(EDITOR_LINE_DISPLAY_COMMAND, arguments, origin);
     }
 
+    /// Hands the retained debug history of an agent pane to the Diagnostics plugin, which draws
+    /// the viewer. The newest entries that fit the command argument limit are sent.
+    pub(crate) fn show_agent_debug_log(
+        &mut self,
+        pane_id: ilium_core::NodeId,
+        dropped_entry_count: u64,
+        entries: &[ilium_ipc::AgentDebugEntry],
+    ) {
+        let pane_name = self
+            .tree
+            .get(pane_id)
+            .map_or_else(|| "agent".to_string(), |node| node.name.clone());
+        let arguments = debug_log_arguments(pane_id, &pane_name, dropped_entry_count, entries);
+        self.invoke_plugin_command(DEBUG_LOG_COMMAND, arguments, CommandOrigin::Menu);
+    }
+
+    /// Runs one of the Scheduler plugin's pane commands (`SCHEDULE_INPUT_COMMAND` and its
+    /// siblings) for `pane`.
+    pub(crate) fn action_scheduler_command(
+        &mut self,
+        command: &str,
+        pane: ilium_core::NodeId,
+        origin: CommandOrigin,
+    ) {
+        let arguments = serde_json::json!({ "pane": pane.0 }).to_string();
+        self.invoke_plugin_command(command, arguments, origin);
+    }
+
     /// "Search the workspace" from the key binding, the tree toolbar or the context menu.
     pub(crate) fn action_open_search(&mut self, origin: CommandOrigin) {
         self.invoke_plugin_command(SEARCH_COMMAND, "{}".to_owned(), origin);
@@ -96,10 +137,98 @@ impl App {
     }
 }
 
+/// The arguments of `show-debug-log`: the pane, its name, how many older entries retention
+/// discarded, and the newest entries that fit the argument budget (oldest first).
+fn debug_log_arguments(
+    pane_id: ilium_core::NodeId,
+    pane_name: &str,
+    dropped_entry_count: u64,
+    entries: &[ilium_ipc::AgentDebugEntry],
+) -> String {
+    let mut used = 0usize;
+    let mut kept: Vec<serde_json::Value> = Vec::new();
+    for entry in entries.iter().rev() {
+        let Ok(value) = serde_json::to_value(entry) else {
+            continue;
+        };
+        let size = value.to_string().len().saturating_add(1);
+        if used.saturating_add(size) > DEBUG_LOG_ARGUMENT_BUDGET_BYTES {
+            break;
+        }
+        used += size;
+        kept.push(value);
+    }
+    let omitted = entries.len() - kept.len();
+    kept.reverse();
+    serde_json::json!({
+        "pane": pane_id.0,
+        "name": pane_name,
+        "dropped": dropped_entry_count.saturating_add(omitted as u64),
+        "entries": kept,
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ilium_core::ROOT_ID;
+
+    fn entry(sequence: u64, summary: &str) -> ilium_ipc::AgentDebugEntry {
+        ilium_ipc::AgentDebugEntry {
+            sequence,
+            occurred_at_unix_millis: 1_700_000_000_000,
+            severity: ilium_ipc::AgentDebugSeverity::Information,
+            source: ilium_ipc::AgentDebugSource::Detector,
+            kind: ilium_ipc::AgentDebugEventKind::DetectionCycle,
+            summary: summary.to_string(),
+            fields: Vec::new(),
+            correlation_id: None,
+            context: ilium_ipc::AgentDebugContext::default(),
+            metadata: Default::default(),
+        }
+    }
+
+    #[test]
+    fn debug_log_arguments_keep_the_newest_entries_that_fit_the_budget() {
+        let big = "x".repeat(8 * 1024);
+        let entries: Vec<_> = (1..=10).map(|sequence| entry(sequence, &big)).collect();
+
+        let arguments: serde_json::Value = serde_json::from_str(&debug_log_arguments(
+            ilium_core::NodeId(4),
+            "codex",
+            2,
+            &entries,
+        ))
+        .unwrap();
+
+        let sent = arguments["entries"].as_array().unwrap();
+        assert!(sent.len() < entries.len());
+        assert_eq!(sent.last().unwrap()["sequence"], 10);
+        assert_eq!(
+            arguments["dropped"].as_u64().unwrap(),
+            2 + (entries.len() - sent.len()) as u64
+        );
+        assert!(arguments.to_string().len() <= 64 * 1024);
+        assert_eq!(arguments["pane"], 4);
+    }
+
+    #[test]
+    fn debug_log_arguments_of_a_short_history_are_complete() {
+        let entries = vec![entry(1, "first"), entry(2, "second")];
+
+        let arguments: serde_json::Value = serde_json::from_str(&debug_log_arguments(
+            ilium_core::NodeId(4),
+            "codex",
+            0,
+            &entries,
+        ))
+        .unwrap();
+
+        assert_eq!(arguments["entries"].as_array().unwrap().len(), 2);
+        assert_eq!(arguments["entries"][0]["sequence"], 1);
+        assert_eq!(arguments["dropped"], 0);
+    }
 
     #[test]
     fn new_split_arguments_carry_the_selected_group() {

@@ -205,8 +205,14 @@ mod tests {
         assert_eq!(rows[1].id, "level");
         assert_eq!(settings.scene_key(), format!("{id}|"));
 
-        assert_eq!(settings.set_control("level", ControlValue::Number(5)), Ok(false));
-        assert_eq!(settings.set_control("level", ControlValue::Number(8)), Ok(true));
+        assert_eq!(
+            settings.set_control("level", ControlValue::Number(5)),
+            Ok(false)
+        );
+        assert_eq!(
+            settings.set_control("level", ControlValue::Number(8)),
+            Ok(true)
+        );
         assert_eq!(settings.controls()[1].value, ControlValue::Number(8));
         assert_ne!(settings.scene_key(), format!("{id}|"));
 
@@ -218,7 +224,10 @@ mod tests {
             scene: "gone.plugin.scene".to_owned(),
             ..PluginSceneSettings::default()
         };
-        assert!(unknown.selected().is_some(), "falls back to a registered scene");
+        assert!(
+            unknown.selected().is_some(),
+            "falls back to a registered scene"
+        );
         assert_eq!(
             unknown.set_control(SCENE_ROW_ID, ControlValue::Index(9999)),
             Err("Scene: option 9999 does not exist".to_owned())

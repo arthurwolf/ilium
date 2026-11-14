@@ -1,0 +1,17 @@
+//! Small procedural scenes: bounded geometry and elapsed-time motion, no assets. Moved here
+//! from the former built-in `ilium-ambient` scenes; the shared look stays the host's.
+
+pub mod almost_touching;
+pub mod aurora;
+pub mod crop_circles;
+pub mod delayed_reflection;
+pub mod fireflies;
+pub mod hidden_wheel;
+pub mod lighthouse;
+pub mod needle_threads;
+pub mod paper_fold;
+pub mod pollen;
+pub mod prime_constellations;
+pub mod unfinished_circle;
+pub mod wallpaper;
+pub mod window_sunlight;

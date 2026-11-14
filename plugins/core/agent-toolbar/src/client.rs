@@ -1,6 +1,6 @@
 //! The client side: banner, recover hint, model header, compact routing and debug history storage.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ilium_plugin_sdk::host::{HostClock, HostKernelSettings, HostTimers};
 use ilium_plugin_sdk::types::{
@@ -20,6 +20,12 @@ use crate::PLUGIN_ID;
 const BANNER_CHARS: usize = 120;
 /// The remote compaction command of `ilium.core.compaction`.
 const COMPACTION_COMMAND: &str = "ilium.core.compaction/compact";
+/// The command of the footer button that closes a finished agent's pane.
+pub(crate) const CLOSE_FINISHED_COMMAND: &str = "close-finished";
+/// The footer-row slot that carries the close button.
+const FINISHED_SLOT: &str = "finished";
+/// The text of the close button.
+const CLOSE_FINISHED_LABEL: &str = " \u{2715} Close finished agent ";
 /// How often the auto-freeze policy looks at the clock while agent panes exist.
 const FREEZE_CHECK_MILLIS: u32 = 30_000;
 
@@ -29,6 +35,8 @@ const FREEZE_CHECK_MILLIS: u32 = 30_000;
 pub struct AgentToolbarClient {
     /// Trimmed last prompt per pane.
     last_prompts: BTreeMap<u64, String>,
+    /// The panes whose finished-agent close button is showing.
+    finished: BTreeSet<u64>,
     /// Goal text per pane, remembered for the frame.
     goals: BTreeMap<u64, Option<String>>,
     /// Latest history reply received from the server side, kept for the popup.
@@ -53,6 +61,22 @@ fn set_slot(pane: NodeId, slot: &str, text: &str) -> Submission {
         pane,
         slot: slot.to_string(),
         content: plain(text),
+        icon: None,
+        tooltip: None,
+    }))
+}
+
+/// The close button of a finished agent: a footer span whose click runs the close command.
+fn close_finished_slot(pane: NodeId) -> Submission {
+    Submission::new(Intent::SetFrameSlot(SetFrameSlotSpec {
+        pane,
+        slot: FINISHED_SLOT.to_string(),
+        content: vec![RichSpan {
+            text: CLOSE_FINISHED_LABEL.to_string(),
+            style: Style::default(),
+            target: SpanTarget::Command(CLOSE_FINISHED_COMMAND.to_string()),
+            tooltip: None,
+        }],
         icon: None,
         tooltip: None,
     }))
@@ -98,6 +122,9 @@ impl AgentToolbarClient {
     }
 
     fn on_activity(&mut self, node: NodeId, current: AgentActivity, out: &mut Vec<Submission>) {
+        if !matches!(current, AgentActivity::Done) && self.finished.remove(&node.0) {
+            out.push(clear_slot(node, FINISHED_SLOT));
+        }
         if !matches!(current, AgentActivity::None | AgentActivity::Done) {
             return;
         }
@@ -109,9 +136,25 @@ impl AgentToolbarClient {
                 &format!("Stopped. Last prompt: {prompt}"),
             ));
         }
+        if matches!(current, AgentActivity::Done) && self.finished.insert(node.0) {
+            out.push(close_finished_slot(node));
+        }
     }
 
     fn on_command(&mut self, invoked: &CommandInvokedEvent, out: &mut Vec<Submission>) {
+        if invoked.command == CLOSE_FINISHED_COMMAND {
+            // The footer click names the pane it was made on; the focused pane may differ.
+            let clicked = serde_json::from_str::<serde_json::Value>(&invoked.arguments_json)
+                .ok()
+                .and_then(|arguments| arguments.get("node").and_then(serde_json::Value::as_u64));
+            if let Some(pane) = clicked.map(NodeId).or(invoked.context.pane) {
+                // A stale click after the agent resumed work closes nothing.
+                if self.finished.remove(&pane.0) {
+                    out.push(Submission::new(Intent::CloseNode(pane)));
+                }
+            }
+            return;
+        }
         let Some(pane) = invoked.context.pane else {
             return;
         };

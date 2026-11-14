@@ -315,6 +315,10 @@ pub struct SceneField {
     /// One `0xRRGGBB` value per terminal cell, row by row; only read when the program
     /// reports `uses_cell_colors`.
     pub cell_colors: Vec<u32>,
+    /// The glyph plane: terminal text the host draws in place of the Braille dots of a cell,
+    /// as `(column, row, character)`. Cleared before every frame; the component glue writes it
+    /// with `write-glyphs`. Colours come from `cell_colors`.
+    pub glyphs: Vec<(u16, u16, char)>,
 }
 
 impl SceneField {
@@ -344,11 +348,21 @@ impl SceneField {
         self.cell_colors.clear();
         self.cell_colors
             .resize(usize::from(columns) * usize::from(rows), 0x00ff_ffff);
+        self.glyphs.clear();
     }
 
-    /// Clears every pixel to no ink.
+    /// Clears every pixel to no ink and drops the glyph plane.
     pub fn clear(&mut self) {
         self.pixels.fill(0);
+        self.glyphs.clear();
+    }
+
+    /// Puts a character of the glyph plane into cell (`column`, `row`); a cell outside the
+    /// field is ignored.
+    pub fn put_glyph(&mut self, column: u16, row: u16, character: char) {
+        if column < self.columns && row < self.rows {
+            self.glyphs.push((column, row, character));
+        }
     }
 
     /// The Braille character of cell (`column`, `row`): a dot is raised where the pixel is
@@ -362,7 +376,11 @@ impl SceneField {
             for (sub_y, bit) in column_bits.iter().enumerate() {
                 let x = usize::from(column) * FIELD_PIXELS_PER_COLUMN as usize + sub_x;
                 let y = usize::from(row) * FIELD_PIXELS_PER_ROW as usize + sub_y;
-                if self.pixels.get(y * width + x).is_some_and(|ink| *ink >= 128) {
+                if self
+                    .pixels
+                    .get(y * width + x)
+                    .is_some_and(|ink| *ink >= 128)
+                {
                     bits |= bit;
                 }
             }
@@ -374,7 +392,8 @@ impl SceneField {
         }
     }
 
-    /// The field as native cells: `(Braille glyph, cell colour, 0)`.
+    /// The field as native cells: `(glyph, cell colour, 0)`, where the glyph is the glyph-plane
+    /// character of the cell when the program wrote one, else the Braille character.
     pub fn to_native_cells(&self) -> Vec<(char, u32, u32)> {
         let mut cells = Vec::with_capacity(usize::from(self.columns) * usize::from(self.rows));
         for row in 0..self.rows {
@@ -382,6 +401,12 @@ impl SceneField {
                 let index = usize::from(row) * usize::from(self.columns) + usize::from(column);
                 let colour = self.cell_colors.get(index).copied().unwrap_or(0x00ff_ffff);
                 cells.push((self.braille(column, row), colour, 0));
+            }
+        }
+        for (column, row, character) in &self.glyphs {
+            let index = usize::from(*row) * usize::from(self.columns) + usize::from(*column);
+            if let Some(cell) = cells.get_mut(index) {
+                cell.0 = *character;
             }
         }
         cells

@@ -199,9 +199,6 @@ pub struct TerminalCommand {
     pub text: Option<String>,
     pub key: Option<TerminalKey>,
     pub lines: Option<u16>,
-    pub delay_seconds: Option<u64>,
-    pub delivery: Option<PromptDeliveryChoice>,
-    pub runs: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -211,9 +208,6 @@ pub enum TerminalAction {
     ScrollUp,
     ScrollDown,
     ScrollToBottom,
-    ScheduleInput,
-    QueuePrompt,
-    ClearPromptQueue,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -238,14 +232,6 @@ pub enum TerminalKey {
     ControlD,
     ControlL,
     ControlZ,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PromptDeliveryChoice {
-    Once,
-    Times,
-    Forever,
 }
 
 #[derive(Debug, Clone, Deserialize)]

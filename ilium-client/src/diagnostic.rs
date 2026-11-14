@@ -164,7 +164,6 @@ fn contextual_text(app: &App) -> Option<String> {
         | Mode::ProjectFolderExplorer(state, _)
         | Mode::PluginFilePicker(state, _)
         | Mode::BoardPathPicker(state) => state.diagnostic_text().map(str::to_owned),
-        Mode::AgentMessageDialog(state) => state.error.clone(),
         Mode::ValueDialog(host) => match &host.dialog {
             ValueDialogState::Choice(state) => state.notice.clone(),
             ValueDialogState::Number(state) => state.notice.clone().or_else(|| state.error.clone()),

@@ -756,23 +756,9 @@ animation:
         use crate::background_animation::{AnimationKind, AnimationSettings};
 
         let kinds = [
-            AnimationKind::Aurora,
-            AnimationKind::Pollen,
-            AnimationKind::Fireflies,
-            AnimationKind::WindowSunlight,
             AnimationKind::Frost,
-            AnimationKind::Lighthouse,
-            AnimationKind::PaperFold,
             AnimationKind::Embroidery,
-            AnimationKind::PrimeConstellations,
-            AnimationKind::Wallpaper,
-            AnimationKind::UnfinishedCircle,
-            AnimationKind::NeedleThreads,
             AnimationKind::HesitatingInk,
-            AnimationKind::CropCircles,
-            AnimationKind::DelayedReflection,
-            AnimationKind::AlmostTouching,
-            AnimationKind::HiddenWheel,
         ];
         let project = tempfile::tempdir().unwrap();
         let mut settings = AnimationSettings {

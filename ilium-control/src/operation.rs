@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use ilium_core::AgentProvider as _;
 use ilium_core::{
-    BuiltinAgentProvider, ContainerKind, NodeId, NodeKind, PromptQueueDelivery, RestructurePlan,
-    Tree, TreeMoveDirection, ROOT_ID,
+    BuiltinAgentProvider, ContainerKind, NodeId, NodeKind, RestructurePlan, Tree,
+    TreeMoveDirection, ROOT_ID,
 };
 use ilium_ipc::{
     ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PromptSubmissionSource,
@@ -99,18 +99,6 @@ pub enum PaneLaunch {
         #[serde(default)]
         prompt: Option<String>,
     },
-}
-
-/// One queued prompt's delivery policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
-pub enum QueueDelivery {
-    #[default]
-    Once,
-    Times {
-        runs: u32,
-    },
-    Forever,
 }
 
 const fn default_true() -> bool {
@@ -221,23 +209,6 @@ pub enum Operation {
         #[serde(default)]
         modifiers: ilium_ipc::MouseModifiers,
     },
-    /// Type text into a pane after a delay.
-    Schedule {
-        pane: u64,
-        delay_seconds: u64,
-        text: String,
-        #[serde(default = "default_true")]
-        enter: bool,
-    },
-    /// Queue a prompt to send when the pane's agent next finishes.
-    Enqueue {
-        pane: u64,
-        text: String,
-        #[serde(default)]
-        delivery: QueueDelivery,
-    },
-    /// Drop every queued prompt of a pane.
-    ClearQueue { pane: u64 },
     /// Set or clear a node's sidebar bookmark.
     Bookmark { node: u64, on: bool },
     /// Expand or collapse a container or folder in the sidebar.
@@ -411,9 +382,6 @@ impl Operation {
             Self::SendText { .. } => "send_text",
             Self::SendKeys { .. } => "send_keys",
             Self::Mouse { .. } => "mouse",
-            Self::Schedule { .. } => "schedule",
-            Self::Enqueue { .. } => "enqueue",
-            Self::ClearQueue { .. } => "clear_queue",
             Self::Bookmark { .. } => "bookmark",
             Self::Expand { .. } => "expand",
             Self::LockClosed { .. } => "lock_closed",
@@ -717,41 +685,6 @@ impl Operation {
                     prompt_epoch: None,
                 }
             }
-            Self::Schedule {
-                pane,
-                delay_seconds,
-                text,
-                enter,
-            } => ClientRequest::SchedulePaneInput {
-                pane_id: require_pane(tree, *pane)?,
-                delay_seconds: *delay_seconds,
-                text: text.clone(),
-                send_enter: *enter,
-            },
-            Self::Enqueue {
-                pane,
-                text,
-                delivery,
-            } => {
-                let delivery = match delivery {
-                    QueueDelivery::Once => PromptQueueDelivery::Once,
-                    QueueDelivery::Times { runs } => PromptQueueDelivery::Times {
-                        remaining_runs: *runs,
-                    },
-                    QueueDelivery::Forever => PromptQueueDelivery::Forever,
-                };
-                if !delivery.is_valid() {
-                    return Err(OperationError::Invalid("runs must be at least 1".into()));
-                }
-                ClientRequest::EnqueuePrompt {
-                    pane_id: require_pane(tree, *pane)?,
-                    text: text.clone(),
-                    delivery,
-                }
-            }
-            Self::ClearQueue { pane } => ClientRequest::ClearPromptQueue {
-                pane_id: require_pane(tree, *pane)?,
-            },
             Self::Bookmark { node, on } => ClientRequest::SetNodeBookmarked {
                 node_id: require_existing(tree, *node)?,
                 is_bookmarked: *on,
@@ -796,9 +729,6 @@ impl Operation {
             Self::SendText { .. }
                 | Self::SendKeys { .. }
                 | Self::Mouse { .. }
-                | Self::Schedule { .. }
-                | Self::Enqueue { .. }
-                | Self::ClearQueue { .. }
                 | Self::Terminate { .. }
                 | Self::ReplaceCommand { .. }
                 | Self::Freeze { .. }
@@ -897,9 +827,6 @@ impl Operation {
             Self::SendText { .. }
             | Self::SendKeys { .. }
             | Self::Mouse { .. }
-            | Self::Schedule { .. }
-            | Self::Enqueue { .. }
-            | Self::ClearQueue { .. }
             | Self::Terminate { .. }
             | Self::ReplaceCommand { .. }
             | Self::Freeze { .. }
@@ -1001,18 +928,6 @@ pub fn examples() -> Vec<Operation> {
             pane: 12,
             keys: vec!["ctrl-c".into(), "enter".into()],
         },
-        Operation::Schedule {
-            pane: 12,
-            delay_seconds: 600,
-            text: "status?".into(),
-            enter: true,
-        },
-        Operation::Enqueue {
-            pane: 12,
-            text: "next step".into(),
-            delivery: QueueDelivery::Once,
-        },
-        Operation::ClearQueue { pane: 12 },
         Operation::Bookmark { node: 12, on: true },
         Operation::Expand {
             node: 5,

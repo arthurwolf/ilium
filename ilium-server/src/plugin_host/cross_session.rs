@@ -16,7 +16,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use ilium_core::{AgentTurn, NodeId, NodeKind, PaneStatus, PromptQueueDelivery, Tree};
+use ilium_core::{AgentTurn, NodeId, NodeKind, PaneStatus, Tree};
 use ilium_ipc::{read_frame, write_frame, ClientRequest, PromptSubmissionSource, ServerEvent};
 use ilium_plugin_api::kernel::LiveSessionInfo;
 use ilium_transport::{Liveness, SessionEndpoint, SessionReadHalf, SessionWriteHalf};
@@ -321,22 +321,17 @@ async fn deliver(
     queue: bool,
     timeout: Duration,
 ) -> Result<&'static str, String> {
-    let request = if queue {
-        ClientRequest::EnqueuePrompt {
-            pane_id,
-            text: message.to_owned(),
-            delivery: PromptQueueDelivery::Once,
-        }
-    } else {
-        // The client's "Send message to all" uses the same source: the text is the user's own
-        // message, typed on their behalf.
-        ClientRequest::SubmitTerminalText {
-            pane_id,
-            text: message.to_owned(),
-            source: PromptSubmissionSource::Keyboard,
-        }
+    if queue {
+        // The prompt queue belongs to the scheduler plugin; the kernel has none to enqueue into.
+        return Err("queued delivery is provided by the scheduler plugin".to_owned());
+    }
+    // The client's "Send message to all" uses the same source: the text is the user's own
+    // message, typed on their behalf.
+    let request = ClientRequest::SubmitTerminalText {
+        pane_id,
+        text: message.to_owned(),
+        source: PromptSubmissionSource::Keyboard,
     };
-    let already_queued = queued_copies(&attached.tree, pane_id, message);
     write_frame(&mut attached.write, &request)
         .await
         .map_err(|_| "the connection closed before the message was sent".to_owned())?;
@@ -347,13 +342,7 @@ async fn deliver(
                 Ok(ServerEvent::PanePromptSubmitted {
                     pane_id: submitted,
                     source: PromptSubmissionSource::Keyboard,
-                }) if !queue && submitted == pane_id => return Ok("delivered"),
-                Ok(
-                    ServerEvent::TreeSnapshot(tree)
-                    | ServerEvent::PaneStateSnapshot { tree, .. },
-                ) if queue && queued_copies(&tree, pane_id, message) > already_queued => {
-                    return Ok("queued");
-                }
+                }) if submitted == pane_id => return Ok("delivered"),
                 Ok(ServerEvent::Error { message }) => return Err(message),
                 Ok(_) => {}
                 Err(_) => {
@@ -369,17 +358,6 @@ async fn deliver(
             timeout.as_secs()
         ))
     })
-}
-
-/// How many copies of `message` wait in the pane's prompt queue.
-fn queued_copies(tree: &Tree, pane_id: NodeId, message: &str) -> usize {
-    match tree.get(pane_id).map(|node| &node.kind) {
-        Some(NodeKind::Pane { prompt_queue, .. }) => prompt_queue
-            .iter()
-            .filter(|queued| queued.text == message)
-            .count(),
-        _ => 0,
-    }
 }
 
 #[cfg(test)]

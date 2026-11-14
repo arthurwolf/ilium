@@ -328,7 +328,11 @@ mod tests {
             shift_percent: 0,
         };
         let mut scene = scenes
-            .create_scene("example.weather.rain", &env(palette.clone()), &SceneValues::new())
+            .create_scene(
+                "example.weather.rain",
+                &env(palette.clone()),
+                &SceneValues::new(),
+            )
             .unwrap();
         assert_eq!(seen.lock().unwrap().as_ref(), Some(&palette));
         // The scene drew red; the shared look moved it onto the blue-green palette.
@@ -396,9 +400,7 @@ mod tests {
         let mut scenes = ExternalScenes::default();
         scenes.register(factory("example.weather.rain").0).unwrap();
         let mut values = SceneValues::new();
-        assert!(scenes
-            .controls("example.weather.rain", &values)
-            .is_empty());
+        assert!(scenes.controls("example.weather.rain", &values).is_empty());
         assert_eq!(
             scenes.set_control(
                 "example.weather.rain",

@@ -197,7 +197,10 @@ fn body(
 /// The wit-bindgen `with` entries of the scene component: the interfaces the SDK already
 /// generated (lifecycle, the renderer's types and the frame surface with what it `use`s).
 const SCENE_WITH: &[(&str, &str)] = &[
-    ("ilium:anim/renderer-types@0.1.0", "ilium::anim::renderer_types"),
+    (
+        "ilium:anim/renderer-types@0.1.0",
+        "ilium::anim::renderer_types",
+    ),
     ("ilium:anim/surface@0.1.0", "ilium::anim::surface"),
     ("ilium:types/errors@0.1.0", "ilium::types::errors"),
     ("ilium:types/geo@0.1.0", "ilium::types::geo"),
@@ -356,6 +359,23 @@ fn scene_body(
                     && !field.cell_colors.is_empty()
                 {
                     let _ = surface.write_cell_colors(0, &field.cell_colors);
+                }
+                if !field.glyphs.is_empty() {
+                    let glyph_cells: ::std::vec::Vec<
+                        #krate::wasm::bindings::ilium::anim::surface::GlyphCell,
+                    > = field
+                        .glyphs
+                        .iter()
+                        .map(|(column, row, character)| {
+                            #krate::wasm::IntoWit::into_wit(#krate::generated::anim::surface::GlyphCell {
+                                column: *column,
+                                row: *row,
+                                text: ::std::string::ToString::to_string(character),
+                                ..::core::default::Default::default()
+                            })
+                        })
+                        .collect();
+                    let _ = surface.write_glyphs(&glyph_cells);
                 }
                 surface.present();
             }

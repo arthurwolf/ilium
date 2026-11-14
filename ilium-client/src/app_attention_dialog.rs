@@ -14,7 +14,7 @@ use super::{is_press, App, Mode};
 use crate::attention::dialog::{self, CardData, DialogAction, DialogState};
 
 fn unix_millis_now() -> u64 {
-    crate::scheduled_input::unix_millis_now()
+    crate::wall_clock::unix_millis_now()
 }
 
 impl App {

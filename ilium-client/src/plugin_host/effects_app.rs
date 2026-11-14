@@ -166,7 +166,7 @@ impl App {
             return false;
         };
         let title = found.name.clone();
-        let now_ms = crate::scheduled_input::unix_millis_now();
+        let now_ms = crate::wall_clock::unix_millis_now();
         let item = AttentionItem {
             pane_id: node,
             project_id: self.tree.project_ancestor(node),

@@ -105,6 +105,18 @@ impl PromptQueue {
         }
     }
 
+    /// Takes the attempt mark back when the write was refused before any byte could reach the
+    /// terminal, so the head is delivered after the next completion instead of staying blocked.
+    pub fn unmark_attempted(&mut self, expected: &QueuedPrompt) -> bool {
+        match self.prompts.first_mut() {
+            Some(head) if &*head == expected && head.attempted_delivery => {
+                head.attempted_delivery = false;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Acknowledges delivery only while the head is still the entry that was read. A one-shot
     /// entry (or `Times` on its last run) is removed; a recurring entry rotates to the tail so
     /// it can never block the entries behind it.

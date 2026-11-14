@@ -16,19 +16,11 @@ use crate::state::ServerState;
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct Requests {
     title_checks: u64,
-    completions: u64,
-    completion_epoch: u64,
 }
 
 impl Requests {
-    fn request(&mut self, check_title: bool, deliver_prompt: bool, completion_epoch: u64) {
-        if check_title {
-            self.title_checks = self.title_checks.wrapping_add(1);
-        }
-        if deliver_prompt {
-            self.completions = self.completions.wrapping_add(1);
-            self.completion_epoch = completion_epoch;
-        }
+    fn request(&mut self) {
+        self.title_checks = self.title_checks.wrapping_add(1);
     }
 }
 
@@ -108,12 +100,8 @@ impl DetectionEffects {
         !self.task.is_finished() && self.generation == generation && self.input.same_session(input)
     }
 
-    pub(crate) fn request(&self, check_title: bool, deliver_prompt: bool, completion_epoch: u64) {
-        if check_title || deliver_prompt {
-            self.requests.send_modify(|requests| {
-                requests.request(check_title, deliver_prompt, completion_epoch)
-            });
-        }
+    pub(crate) fn request(&self) {
+        self.requests.send_modify(Requests::request);
     }
 }
 
@@ -153,18 +141,6 @@ async fn run(
         if !still_current(&state, pane_id, generation, &input).await {
             return;
         }
-        if pending.completions != handled.completions {
-            crate::prompt_queue::deliver_detection_completion(
-                &state,
-                pane_id,
-                generation,
-                &input,
-                pending.completion_epoch,
-            )
-            .await;
-        }
-        // Prompt delivery may wait for persistence or input. Revalidate the
-        // invocation independently before another effect can mutate titles.
         if pending.title_checks != handled.title_checks {
             if !still_current(&state, pane_id, generation, &input).await {
                 return;
@@ -181,28 +157,22 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn busy_effect_mailbox_coalesces_both_request_kinds_without_losing_latest() {
+    async fn busy_effect_mailbox_coalesces_requests_without_losing_latest() {
         let (sender, mut receiver) = watch::channel(Requests::default());
-        sender.send_modify(|requests| requests.request(true, false, 7));
+        sender.send_modify(Requests::request);
         receiver.changed().await.expect("first request");
         let in_flight = *receiver.borrow_and_update();
         assert_eq!(in_flight.title_checks, 1);
-        assert_eq!(in_flight.completions, 0);
 
         // Model a blocked follow-up: the producer can write arbitrarily many
         // times without allocating requests or waiting for the consumer.
-        for _ in 0..10_000 {
-            sender.send_modify(|requests| requests.request(true, false, 7));
+        for _ in 0..10_001 {
+            sender.send_modify(Requests::request);
         }
-        sender.send_modify(|requests| requests.request(false, true, 7));
-        sender.send_modify(|requests| requests.request(true, false, 7));
         receiver.changed().await.expect("coalesced pending request");
         let pending = *receiver.borrow_and_update();
         assert_eq!(pending.title_checks, 10_002);
-        assert_eq!(pending.completions, 1);
-        assert_eq!(pending.completion_epoch, 7);
         assert_ne!(pending.title_checks, in_flight.title_checks);
-        assert_ne!(pending.completions, in_flight.completions);
         assert!(!receiver.has_changed().expect("sender remains alive"));
         drop(sender);
         assert!(receiver.changed().await.is_err());

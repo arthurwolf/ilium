@@ -492,6 +492,8 @@ pub struct ToolbarContext<'a> {
     /// The last-prompt banner is enabled but closed for this pane: offer a
     /// button that re-opens it.
     pub show_prompt_reopen: bool,
+    /// The Smart Copy plugin runs: without it the button has nothing to start and is not drawn.
+    pub show_smart_copy: bool,
     pub show_goal: bool,
 }
 
@@ -509,6 +511,7 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
         show_labels,
         selection_enabled,
         show_prompt_reopen,
+        show_smart_copy,
         show_goal: _,
     } = ctx;
     let mut buttons = vec![
@@ -529,14 +532,6 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
             ),
         },
         Button {
-            action: AgentToolbarAction::SmartCopy,
-            text: button_text(
-                icons.glyph(IconTarget::AgentToolbarSmartCopy),
-                AgentToolbarAction::SmartCopy,
-                true,
-            ),
-        },
-        Button {
             action: AgentToolbarAction::ToggleTextSelection,
             text: format!(
                 "{}{}",
@@ -545,6 +540,19 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
             ),
         },
     ];
+    if show_smart_copy {
+        buttons.insert(
+            2,
+            Button {
+                action: AgentToolbarAction::SmartCopy,
+                text: button_text(
+                    icons.glyph(IconTarget::AgentToolbarSmartCopy),
+                    AgentToolbarAction::SmartCopy,
+                    true,
+                ),
+            },
+        );
+    }
     if show_prompt_reopen {
         buttons.push(Button {
             action: AgentToolbarAction::ShowLastPrompt,
@@ -1036,6 +1044,7 @@ fn rendered_texts(
             show_labels,
             selection_enabled: true,
             show_prompt_reopen: false,
+            show_smart_copy: true,
             show_goal: false,
         },
     )
@@ -1062,6 +1071,7 @@ mod tests {
             show_labels,
             selection_enabled: true,
             show_prompt_reopen: false,
+            show_smart_copy: true,
             show_goal: false,
         }
     }

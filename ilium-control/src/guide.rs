@@ -43,8 +43,6 @@ first, then act on them.
    ilium ctl close 12                       close the pane
    ilium ctl close 12 --worktree remove     ...and remove its clean, merged worktree
    ilium ctl terminate 12                   stop the process, keep the pane
-   ilium ctl schedule 12 --in 600 'status?' send text in 10 minutes
-   ilium ctl queue 12 'next step'           send when the agent next finishes
 
 4. Arrange the tree
    ilium ctl move 12 --up                   swap with the previous sibling
@@ -93,7 +91,7 @@ Project selectors P: node id, absolute project path, directory name, or exact
 display name. A name that matches two projects is an error listing both ids.
 Pane object fields: id, parent, kind, name, short_name, is_bookmarked, and under
 \"pane\": content, status{kind, agent, state, goal}, cwd, launch_cwd, project_id,
-project_path, last_prompt, scheduled_input, prompt_queue, progress_monitors,
+project_path, last_prompt, progress_monitors,
 workspace{branch, base_ref, worktree_root}.
 Agent states: working, waiting_approval, waiting_subagents, settling, idle, done.
 ",
@@ -139,7 +137,7 @@ may push it again, so edit that file for a lasting change.
     },
     Topic {
         name: "controlling",
-        summary: "Send input, keys, scheduled and queued prompts; close, terminate.",
+        summary: "Send input and keys; close, terminate.",
         body: "\
 CONTROLLING PANES
 
@@ -147,9 +145,6 @@ ilium ctl send ID TEXT [--no-enter]      type text (Enter by default)
 ilium ctl keys ID KEY...                 keys: enter esc tab backspace space up down
                                          left right home end pageup pagedown delete
                                          ctrl-a..ctrl-z text:LITERAL
-ilium ctl schedule ID --in SECONDS TEXT [--no-enter]
-ilium ctl queue ID TEXT [--times N | --forever]
-ilium ctl queue-clear ID
 ilium ctl terminate ID                   stop the process, keep the pane
 ilium ctl close ID [--worktree keep|remove|remove-and-branch]
 ilium ctl wait ID [--state S,...] [--timeout SECONDS]
@@ -197,8 +192,8 @@ POST /v1/agents                          create an agent (optionally in a new wo
 POST /create_agent                       the original endpoint, unchanged
 
 Operations (the \"op\" values): rename close move_step reparent new_project
-new_group new_folder change_project_folder new_pane send_text send_keys schedule
-enqueue clear_queue bookmark expand lock_closed terminate apply_restructure
+new_group new_folder change_project_folder new_pane send_text send_keys
+bookmark expand lock_closed terminate apply_restructure
 revert_restructure revert_project_restructure kill_session. Fields match the CLI flags; ilium ctl ops lists them with examples.
 
 Errors: JSON {\"error\": \"...\"} with 400 (bad request or selector), 404 (no such

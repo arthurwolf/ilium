@@ -40,10 +40,6 @@
     "sha256": "a7877efbc0a5921dd802d6369585627decd79126083c6ceb5ffe15e8905f24d9"
   },
   {
-    "name": "agent/coordination-guidance",
-    "sha256": "de1123d4e73552c2aa1712d8b456a7743f619dc362451864b1a6d2264d772e95"
-  },
-  {
     "name": "agent/ask-for-update",
     "sha256": "5ec7738a9565da351bf4c9cd76251d480d753c2d644023d780bb588f67efdc9e"
   },
@@ -1098,34 +1094,6 @@
   {
     "name": "agent/goal-from-line",
     "sha256": "f3f4d083f0c2a7bff2cbd42a673f884820fee48204eb69114f9be125bc807001"
-  },
-  {
-    "name": "agent/chatroom-record-row",
-    "sha256": "153fc18682e3158b4f5c23fca52209f67c2b1a6f207db6ffec5f5d0ae37c7458"
-  },
-  {
-    "name": "agent/chatroom-empty-context",
-    "sha256": "115f37baafaf9124410a429def09280abcba385fd085ebe505d9faf300864305"
-  },
-  {
-    "name": "agent/chatroom-context",
-    "sha256": "caaf7d3b694223b5568c74c6f7adb072bfe95c6cb0bc0c10f6418f1c85c70a33"
-  },
-  {
-    "name": "agent/chatroom-context-row",
-    "sha256": "a25912a18ec27329a26e4b34d5a8aab2a601e8f7252e1fc764d279c384e3fbc7"
-  },
-  {
-    "name": "agent/chatroom-title",
-    "sha256": "fea286df95b63b8ac95faedd4b5da1b77f1fdce86fd8eb25adb7923849cadfd8"
-  },
-  {
-    "name": "agent/chatroom-header-guidance",
-    "sha256": "60333a727f1d27b28ced9369095cef3647142e7f7e565148507d5057b2063050"
-  },
-  {
-    "name": "agent/chatroom-messages-heading",
-    "sha256": "c8335e70f67279e96621753db3540135764227f3b1cc2d70e15dbfd1cc0d1c6c"
   },
   {
     "name": "agent/progress-done",

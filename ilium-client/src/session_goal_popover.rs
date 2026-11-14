@@ -52,6 +52,7 @@ impl App {
             show_labels: self.ui_settings.show_toolbar_labels,
             selection_enabled: self.ui_settings.terminal_text_selection_enabled,
             show_prompt_reopen: self.last_prompt_reopen_available(pane),
+            show_smart_copy: self.smart_copy_available(),
             show_goal: true,
         };
         agent_toolbar::button_rect_for(area, context, AgentToolbarAction::Goal)

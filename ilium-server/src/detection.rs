@@ -2236,7 +2236,6 @@ async fn run_due_panes_with_hook(
     if current_detection_settings.revision != detection_settings_revision {
         return Ok(());
     }
-    let mut completed_pane_ids = Vec::new();
     let mut pending_title_clears = Vec::new();
     let mut pending_empty_title_checks = Vec::new();
     let mut pending_activity_updates = Vec::new();
@@ -3072,14 +3071,6 @@ async fn run_due_panes_with_hook(
                 tracing::error!("detection loop: pane {pane_id:?} status update rejected: {error}");
                 continue;
             }
-            if previous_status
-                .as_ref()
-                .and_then(PaneStatus::agent_state)
-                .map(|agent| agent.turn)
-                != new_status.agent_state().map(|agent| agent.turn)
-            {
-                runtime.invalidate_detection_completion();
-            }
             runtime.detection_evidence = Some(detection_evidence.clone());
             match tree.record_node_activity(pane_id) {
                 Ok(update) => pending_activity_updates.push((pane_id, update)),
@@ -3088,9 +3079,6 @@ async fn run_due_panes_with_hook(
                 ),
             }
 
-            if is_agent_finished_transition(previous_status.as_ref(), &new_status) {
-                completed_pane_ids.push(pane_id);
-            }
             if matches!(
                 previous_status.as_ref().and_then(status_activity),
                 Some(AgentActivity::Working)
@@ -3153,19 +3141,9 @@ async fn run_due_panes_with_hook(
     // coalescing actor, cancelled with its agent/runtime ownership.
     {
         let mut panes = state.panes.write().await;
-        let effect_panes: std::collections::HashSet<_> = pending_empty_title_checks
-            .iter()
-            .chain(completed_pane_ids.iter())
-            .copied()
-            .collect();
-        for pane_id in effect_panes {
+        for pane_id in pending_empty_title_checks.iter().copied() {
             if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
-                runtime.request_detection_effects(
-                    state,
-                    pane_id,
-                    pending_empty_title_checks.contains(&pane_id),
-                    completed_pane_ids.contains(&pane_id),
-                );
+                runtime.request_detection_effects(state, pane_id);
             }
         }
     }
@@ -3569,17 +3547,6 @@ fn session_owner_is_stable(
         && !session_id.is_some_and(|session_id| ambiguous_session_ids.contains(session_id))
 }
 
-fn is_agent_finished_transition(previous: Option<&PaneStatus>, next: &PaneStatus) -> bool {
-    previous.is_some_and(|previous| {
-        previous.agent_state().is_some_and(|previous| {
-            previous.turn == AgentTurn::Working
-                && next
-                    .agent_state()
-                    .is_some_and(|next| next.turn == AgentTurn::Idle && next.completion_unread)
-        })
-    })
-}
-
 #[cfg(test)]
 mod stopped_agent_recovery_tests {
     use super::*;
@@ -3610,22 +3577,6 @@ mod stopped_agent_recovery_tests {
         assert_eq!(recovered.session_id.as_deref(), Some("session-a"));
         assert_eq!(recovered.last_prompt.as_deref(), Some("exact last prompt"));
         assert!(!recovered.last_known_state.completion_unread);
-    }
-}
-
-#[cfg(test)]
-mod prompt_queue_transition_tests {
-    use super::*;
-    use ilium_core::AgentClass;
-
-    #[test]
-    fn only_working_to_done_opens_the_prompt_queue_gate() {
-        let working = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
-        let done = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None);
-        let idle = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None);
-        assert!(is_agent_finished_transition(Some(&working), &done));
-        assert!(!is_agent_finished_transition(Some(&idle), &done));
-        assert!(!is_agent_finished_transition(Some(&working), &idle));
     }
 }
 

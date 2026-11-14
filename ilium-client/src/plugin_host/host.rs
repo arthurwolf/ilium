@@ -273,6 +273,9 @@ pub(crate) struct TreeDecoration {
     pub text: String,
     pub icon: Option<String>,
     pub sort_key: i64,
+    /// The command a click on the content runs: the first rich span of a frame slot that
+    /// targets a command, as a full `<plugin>/<command>` id. Decorations never carry one.
+    pub command: Option<String>,
 }
 
 /// One settings row a plugin contributes (contract section 20.6).
@@ -1069,6 +1072,7 @@ impl KernelFacade for ClientFacade {
                     text: spec.content.iter().map(|span| span.text.as_str()).collect(),
                     icon: spec.icon,
                     sort_key: spec.sort_key.unwrap_or(0),
+                    command: None,
                 };
                 if let Ok(mut decorations) = self.shared.decorations.lock() {
                     decorations.retain(|known| {
@@ -1106,6 +1110,16 @@ impl KernelFacade for ClientFacade {
                     text: spec.content.iter().map(|span| span.text.as_str()).collect(),
                     icon: spec.icon,
                     sort_key: 0,
+                    command: spec.content.iter().find_map(|span| match &span.target {
+                        ilium_plugin_api::generated::types::SpanTarget::Command(command) => {
+                            Some(if command.contains('/') {
+                                command.clone()
+                            } else {
+                                format!("{}/{command}", plugin.0)
+                            })
+                        }
+                        _ => None,
+                    }),
                 };
                 if let Ok(mut frame_slots) = self.shared.frame_slots.lock() {
                     frame_slots.retain(|known| {

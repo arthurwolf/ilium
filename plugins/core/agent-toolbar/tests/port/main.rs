@@ -11,7 +11,6 @@ mod antigravity_model_statusline;
 mod app;
 mod claude_model_statusline;
 mod common;
-mod completed_agent_action;
 mod goal_resume_link;
 mod icon_cycle;
 mod icon_settings;

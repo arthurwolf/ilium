@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use ilium_core::{
-    AgentProvider, BuiltinAgentProvider, PromptQueueDelivery, SplitOrientation, TreeMoveDirection,
+    AgentProvider, BuiltinAgentProvider, SplitOrientation, TreeMoveDirection,
     MAXIMUM_SPLIT_VIEW_PANES,
 };
 use ilium_ipc::{ClientRequest, PromptSubmissionSource, WorkspaceCreateSpec};
@@ -600,47 +600,6 @@ fn execute_terminal(app: &mut App, command: TerminalCommand) -> Result<Execution
                 ilium_prompts::voice::VOICE_EXECUTOR_RETURNED_TO_LIVE_TERMINAL_OUTPUT,
             ))
         }
-        TerminalAction::ScheduleInput => {
-            let text = command.text.unwrap_or_default();
-            let admitted = app.queue_request(ClientRequest::SchedulePaneInput {
-                pane_id,
-                delay_seconds: command.delay_seconds.unwrap_or(0),
-                text,
-                send_enter: true,
-            });
-            require_request_admission(app, admitted)?;
-            Ok(ExecutionReceipt::queued(
-                ilium_prompts::voice::VOICE_EXECUTOR_SCHEDULED_TERMINAL_INPUT,
-            ))
-        }
-        TerminalAction::QueuePrompt => {
-            let text = required_nonempty(command.text, "text")?;
-            let delivery = match command.delivery.unwrap_or(PromptDeliveryChoice::Once) {
-                PromptDeliveryChoice::Once => PromptQueueDelivery::Once,
-                PromptDeliveryChoice::Times => PromptQueueDelivery::Times {
-                    remaining_runs: command.runs.filter(|runs| *runs > 0).ok_or(
-                        ilium_prompts::voice::VOICE_POLICY_RUNS_IS_REQUIRED_AND_MUST_BE_POSITIVE,
-                    )?,
-                },
-                PromptDeliveryChoice::Forever => PromptQueueDelivery::Forever,
-            };
-            let admitted = app.queue_request(ClientRequest::EnqueuePrompt {
-                pane_id,
-                text,
-                delivery,
-            });
-            require_request_admission(app, admitted)?;
-            Ok(ExecutionReceipt::queued(
-                ilium_prompts::voice::VOICE_EXECUTOR_QUEUED_THE_PROMPT_FOR_THE_AGENT_S,
-            ))
-        }
-        TerminalAction::ClearPromptQueue => {
-            let admitted = app.queue_request(ClientRequest::ClearPromptQueue { pane_id });
-            require_request_admission(app, admitted)?;
-            Ok(ExecutionReceipt::queued(
-                ilium_prompts::voice::VOICE_EXECUTOR_CLEARING_THE_PANE_S_PROMPT_QUEUE,
-            ))
-        }
     }
 }
 
@@ -1079,12 +1038,7 @@ mod admission_tests {
                 .unwrap(),
         );
         assert!(app.queue_request(ClientRequest::UpdateDebugLogging { enabled: true }));
-        for action in [
-            "press_key",
-            "schedule_input",
-            "queue_prompt",
-            "clear_prompt_queue",
-        ] {
+        for action in ["press_key"] {
             let command:TerminalCommand=serde_json::from_value(json!({"action":action,"target":{"id":pane.0},"key":"enter","text":"original text"})).unwrap();
             let error = execute_terminal(&mut app, command)
                 .expect_err("no success receipt before actual admission");
@@ -1101,7 +1055,7 @@ mod admission_tests {
             vec![ClientRequest::UpdateDebugLogging { enabled: true }]
         );
         let command: TerminalCommand = serde_json::from_value(
-            json!({"action":"schedule_input","target":{"id":pane.0},"text":"original text"}),
+            json!({"action":"press_key","target":{"id":pane.0},"key":"enter"}),
         )
         .unwrap();
         assert_eq!(
@@ -1109,7 +1063,7 @@ mod admission_tests {
             "queued"
         );
         assert!(
-            matches!(app.take_outbound_requests().as_slice(),[ClientRequest::SchedulePaneInput{text,..}] if text=="original text")
+            matches!(app.take_outbound_requests().as_slice(),[ClientRequest::UserKeyInput{pane_id,..}] if *pane_id==pane)
         );
     }
 }

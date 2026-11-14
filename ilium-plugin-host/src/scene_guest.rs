@@ -84,6 +84,9 @@ pub struct PresentedFrame {
     pub pixels: Vec<u8>,
     /// One `0xRRGGBB` value per cell, row by row, when the scene wrote cell colours.
     pub cell_colors: Option<Vec<u32>>,
+    /// The glyph plane: one `(column, row, character)` per cell the scene wrote text into
+    /// (`write-glyphs`); the host draws the character in place of the Braille dots of the cell.
+    pub glyphs: Vec<(u16, u16, char)>,
 }
 
 /// The frame buffer behind `ilium:anim/surface`: one open frame at a time, lent to the guest
@@ -101,6 +104,8 @@ pub struct SceneSurface {
     pixels: Vec<u8>,
     colors: Vec<u32>,
     colors_written: bool,
+    /// Glyph plane of the open frame, in write order.
+    glyphs: Vec<(u16, u16, char)>,
     presented: Option<PresentedFrame>,
     /// Frames that ended without `present` since the last presented one.
     dropped: u32,
@@ -133,6 +138,7 @@ impl SceneSurface {
         self.colors
             .resize(columns as usize * rows as usize, 0x00ff_ffff);
         self.colors_written = false;
+        self.glyphs.clear();
         self.presented = None;
         Some(self.handle)
     }
@@ -328,6 +334,7 @@ impl HostSurface for SceneSurface {
             rows: self.rows,
             pixels: self.pixels.clone(),
             cell_colors: self.colors_written.then(|| self.colors.clone()),
+            glyphs: self.glyphs.clone(),
         });
         self.receipt = Some(FrameReceipt {
             frame: self.frame,
@@ -344,21 +351,30 @@ impl HostSurface for SceneSurface {
         cells: Vec<GlyphCell>,
     ) -> Result<(), PluginError> {
         self.stale(handle)?;
-        if cells.len() > MAX_GLYPH_CELLS {
+        if cells.len() > MAX_GLYPH_CELLS || self.glyphs.len() + cells.len() > MAX_GLYPH_CELLS {
             return Err(error(
                 ErrorCode::InvalidArgument,
                 "more than 131,072 glyph cells in one frame",
             ));
         }
-        Err(error(
-            ErrorCode::Unsupported,
-            "this host draws no glyph plane over scenes",
-        ))
+        for cell in cells {
+            // The host draws one character per cell; a cell outside the field or with no
+            // text is ignored, like rows past the height.
+            let Some(character) = cell.text.chars().next() else {
+                continue;
+            };
+            if u32::from(cell.column) >= self.columns || u32::from(cell.row) >= self.rows {
+                continue;
+            }
+            self.glyphs.push((cell.column, cell.row, character));
+        }
+        Ok(())
     }
 
-    fn frame_surface_clear_glyphs(&mut self, _handle: FrameSurfaceHandle) {
-        // No glyph plane is ever drawn (write-glyphs is unsupported), so there is nothing
-        // to clear.
+    fn frame_surface_clear_glyphs(&mut self, handle: FrameSurfaceHandle) {
+        if self.lent(handle) {
+            self.glyphs.clear();
+        }
     }
 
     fn frame_surface_set_owner_ids(
@@ -1024,8 +1040,38 @@ mod tests {
         assert_eq!(past.unwrap_err().code, ErrorCode::InvalidArgument);
         let colors = surface.frame_surface_write_cell_colors(handle, 1, vec![1]);
         assert_eq!(colors.unwrap_err().code, ErrorCode::InvalidArgument);
-        let glyphs = surface.frame_surface_write_glyphs(handle, Vec::new());
-        assert_eq!(glyphs.unwrap_err().code, ErrorCode::Unsupported);
+        let glyphs = surface
+            .frame_surface_write_glyphs(handle, vec![GlyphCell::default(); MAX_GLYPH_CELLS + 1]);
+        assert_eq!(glyphs.unwrap_err().code, ErrorCode::InvalidArgument);
+    }
+
+    #[test]
+    fn glyph_cells_reach_the_presented_frame_and_clear_between_frames() {
+        let (mut surface, handle) = opened(2, 1);
+        let cell = |column: u16, text: &str| GlyphCell {
+            column,
+            row: 0,
+            text: text.to_owned(),
+            ..GlyphCell::default()
+        };
+        // A cell past the field and a cell without text are dropped, the first character of
+        // longer text is kept.
+        surface
+            .frame_surface_write_glyphs(
+                handle,
+                vec![cell(0, "3"), cell(1, "ab"), cell(2, "x"), cell(0, "")],
+            )
+            .expect("glyphs are accepted");
+        surface.frame_surface_present(handle);
+        let presented = surface.finish().expect("presented");
+        assert_eq!(presented.glyphs, vec![(0, 0, '3'), (1, 0, 'a')]);
+        let next = FrameSurfaceHandle(surface.begin(2, 1).expect("next frame"));
+        surface
+            .frame_surface_write_glyphs(next, vec![cell(0, "9")])
+            .expect("glyphs are accepted");
+        surface.frame_surface_clear_glyphs(next);
+        surface.frame_surface_present(next);
+        assert!(surface.finish().expect("presented").glyphs.is_empty());
     }
 
     #[test]

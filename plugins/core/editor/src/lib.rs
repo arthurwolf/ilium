@@ -8,6 +8,7 @@ pub mod agent_from_line;
 pub mod buffers;
 pub mod close_dirty;
 pub mod lexer;
+pub mod line_path;
 pub mod open_target;
 mod template;
 

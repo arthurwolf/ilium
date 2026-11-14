@@ -1,9 +1,6 @@
 //! Storage ownership of original IPC allocations installed in UI projections.
 //! Keys replace only complete state; journal entries retain individual owners.
-use crate::{
-    app::{AgentDebugLogCache, App},
-    connection::EventRetention,
-};
+use crate::{app::App, connection::EventRetention};
 use ilium_core::{NodeId, Tree};
 use ilium_ipc::ServerEvent;
 use std::{collections::HashMap, mem::Discriminant};
@@ -389,7 +386,7 @@ impl ProjectionRetention {
             }
         }
     }
-    pub(crate) fn prune(&mut self, tree: &Tree, logs: &HashMap<NodeId, AgentDebugLogCache>) {
+    pub(crate) fn prune(&mut self, tree: &Tree) {
         self.owners.retain(|key, _| {
             let Some(pane_id) = key.scope else {
                 return true;
@@ -398,13 +395,9 @@ impl ProjectionRetention {
                 return false;
             }
             match key.slot {
-                Slot::Debug(sequence) => logs.get(&pane_id).is_some_and(|cache| {
-                    cache
-                        .log
-                        .entries
-                        .binary_search_by_key(&sequence, |entry| entry.sequence)
-                        .is_ok()
-                }),
+                // The client keeps no debug history: a snapshot is handed to the Diagnostics
+                // plugin when it arrives, so nothing owns a debug slot afterwards.
+                Slot::Debug(_) => false,
                 _ => true,
             }
         });

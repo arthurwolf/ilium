@@ -9,15 +9,39 @@
 //! `dithered_waves`). The other ids of the catalogue (`waves`, `clock`, `stars-overhead`) are
 //! still the tests-first skeleton: they follow the palette and draw nothing yet.
 
+pub mod atlantic_dusk;
+pub mod box_machine;
+pub mod cube_clock;
+pub mod dither_water;
 pub mod dithered_waves;
+pub mod dithr_patterns;
+pub mod fbm_clouds;
+pub mod galactic_empires;
+pub mod hex_expedition;
+pub mod kit;
+pub mod machine_screen;
+pub mod pi_digits;
+pub mod pipes;
+pub mod quiet;
+pub mod registry;
+pub mod scenes2;
+pub mod solar_system;
+
+// The kit modules at the crate root, so the scenes moved here keep their `crate::raster::...`
+// style paths.
+pub use kit::{control, debug, dither, raster, scene, style};
 
 use dithered_waves::{DitheredWaves, DitheredWavesSettings};
+use kit::raster::Raster;
+use kit::scene::{Frame, Scene, SceneEnv, SceneLocation};
+use kit::style::ScenePalette;
 use ilium_plugin_sdk::generated::anim::renderer_types::FrameInput;
 use ilium_plugin_sdk::plugin::NativeSurface;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Lifecycle, NativeRenderer, SceneField, SceneProgram};
 use serde_json::Value;
+use std::time::{Duration, UNIX_EPOCH};
 
 /// Id of the ported scene of this package.
 pub const DITHERED_WAVES_ID: &str = "dithered-waves";
@@ -32,6 +56,12 @@ pub struct ScenesScene {
     palette_rgb: Vec<u32>,
     /// What draws: the ported scene, or nothing for the skeleton ids.
     drawing: Drawing,
+    /// The spec the scene was built from, kept to rebuild a kit scene when its settings change.
+    spec: Value,
+    /// Scratch raster of a kit scene, reused between frames.
+    raster: Raster,
+    /// Scratch cell colours of a kit scene, reused between frames.
+    cell_colors: Vec<[u8; 3]>,
 }
 
 /// The drawing behind a scene id.
@@ -40,6 +70,8 @@ enum Drawing {
     Blank,
     /// The `dithered-waves` scene.
     DitheredWaves(Box<DitheredWaves>),
+    /// A scene of the shared scene kit (`registry::create`).
+    Kit(Box<dyn Scene>),
 }
 
 impl Default for ScenesScene {
@@ -48,6 +80,9 @@ impl Default for ScenesScene {
             scene_id: String::new(),
             palette_rgb: Vec::new(),
             drawing: Drawing::Blank,
+            spec: Value::Null,
+            raster: Raster::default(),
+            cell_colors: Vec::new(),
         }
     }
 }
@@ -86,15 +121,35 @@ impl ScenesScene {
                     .collect()
             })
             .unwrap_or_default();
-        let drawing = if scene_id == DITHERED_WAVES_ID {
-            Drawing::DitheredWaves(Box::new(DitheredWaves::from_spec(&spec)))
-        } else {
-            Drawing::Blank
-        };
+        let drawing = Self::build_drawing(&scene_id, &spec, &palette_rgb);
         Self {
             scene_id,
             palette_rgb,
             drawing,
+            spec,
+            raster: Raster::default(),
+            cell_colors: Vec::new(),
+        }
+    }
+
+    /// The drawing of scene `scene_id` for `spec`.
+    fn build_drawing(scene_id: &str, spec: &Value, palette_rgb: &[u32]) -> Drawing {
+        if scene_id == DITHERED_WAVES_ID {
+            return Drawing::DitheredWaves(Box::new(DitheredWaves::from_spec(spec)));
+        }
+        let env = SceneEnv::new(ScenePalette::from_rgb_words(palette_rgb))
+            .with_location(SceneLocation::from_spec(spec));
+        match registry::create(scene_id, spec, &env) {
+            Some(scene) => Drawing::Kit(scene),
+            None => Drawing::Blank,
+        }
+    }
+
+    /// The frame rate the drawing asks for.
+    fn rate(&self) -> u32 {
+        match &self.drawing {
+            Drawing::Kit(scene) => scene.frames_per_second().clamp(1, 30),
+            _ => frames_per_second_of(&self.scene_id),
         }
     }
 
@@ -110,8 +165,66 @@ impl ScenesScene {
     fn draw(&mut self, frame: &FrameInput, field: &mut SceneField) {
         let width = field.width();
         let height = field.height();
-        if let Drawing::DitheredWaves(waves) = &mut self.drawing {
-            waves.render(width, height, frame.time_millis, &mut field.pixels);
+        match &mut self.drawing {
+            Drawing::DitheredWaves(waves) => {
+                waves.render(width, height, frame.time_millis, &mut field.pixels);
+            }
+            Drawing::Kit(scene) => {
+                Self::draw_kit(
+                    scene.as_mut(),
+                    &mut self.raster,
+                    &mut self.cell_colors,
+                    frame,
+                    field,
+                );
+            }
+            Drawing::Blank => {}
+        }
+    }
+
+    /// Runs a kit scene for one frame: the scene draws into a dot raster (and, when it has
+    /// natural colours, per-cell colours), which becomes the field's grey pixels and colours.
+    fn draw_kit(
+        scene: &mut dyn Scene,
+        raster: &mut Raster,
+        cell_colors: &mut Vec<[u8; 3]>,
+        frame: &FrameInput,
+        field: &mut SceneField,
+    ) {
+        let (columns, rows) = (field.columns, field.rows);
+        raster.resize(field.width(), field.height());
+        let cell_count = usize::from(columns) * usize::from(rows);
+        cell_colors.clear();
+        cell_colors.resize(cell_count, [255, 255, 255]);
+        let time = Duration::from_millis(frame.time_millis);
+        {
+            let mut kit_frame = Frame {
+                raster,
+                cell_colors,
+                width: columns,
+                height: rows,
+                time,
+                wall: Duration::from_millis(frame.wall_millis),
+                now: UNIX_EPOCH + Duration::from_millis(frame.now_unix_millis),
+            };
+            scene.render(&mut kit_frame);
+        }
+        for (pixel, dot) in field.pixels.iter_mut().zip(&raster.dots) {
+            *pixel = (dot.clamp(0.0, 1.0) * 255.0).round() as u8;
+        }
+        if scene.uses_cell_colors() {
+            for (colour, rgb) in field.cell_colors.iter_mut().zip(cell_colors.iter()) {
+                *colour = (u32::from(rgb[0]) << 16) | (u32::from(rgb[1]) << 8) | u32::from(rgb[2]);
+            }
+        }
+        // The glyph plane: a scene that writes terminal text replaces the Braille dots of
+        // those cells (`Scene::native_glyph`).
+        for row in 0..rows {
+            for column in 0..columns {
+                if let Some(character) = scene.native_glyph(column, row) {
+                    field.put_glyph(column, row, character);
+                }
+            }
         }
     }
 
@@ -126,6 +239,13 @@ impl ScenesScene {
         if matches!(self.drawing, Drawing::DitheredWaves(_)) {
             let settings = DitheredWavesSettings::from_spec(&settings);
             self.drawing = Drawing::DitheredWaves(Box::new(DitheredWaves::new(&settings)));
+        } else if let Drawing::Kit(scene) = &mut self.drawing {
+            if !scene.reconfigure(&settings) {
+                if let Some(object) = self.spec.as_object_mut() {
+                    object.insert("settings".to_owned(), settings);
+                }
+                self.drawing = Self::build_drawing(&self.scene_id, &self.spec, &self.palette_rgb);
+            }
         }
         true
     }
@@ -152,11 +272,25 @@ impl SceneProgram for ScenesScene {
     }
 
     fn set_palette(&mut self, palette_rgb: Vec<u32>) {
+        if let Drawing::Kit(scene) = &mut self.drawing {
+            scene.set_palette(&ScenePalette::from_rgb_words(&palette_rgb));
+        }
         self.palette_rgb = palette_rgb;
     }
 
     fn frames_per_second(&self) -> u32 {
-        frames_per_second_of(&self.scene_id)
+        self.rate()
+    }
+
+    fn uses_cell_colors(&self) -> bool {
+        matches!(&self.drawing, Drawing::Kit(scene) if scene.uses_cell_colors())
+    }
+
+    fn status(&self) -> Option<String> {
+        match &self.drawing {
+            Drawing::Kit(scene) => scene.status(),
+            _ => None,
+        }
     }
 
     fn reconfigure(&mut self, settings_json: &str) -> bool {
@@ -188,11 +322,14 @@ impl NativeRenderer for ScenesScene {
     }
 
     fn set_palette(&mut self, palette_rgb: Vec<u32>) {
+        if let Drawing::Kit(scene) = &mut self.drawing {
+            scene.set_palette(&ScenePalette::from_rgb_words(&palette_rgb));
+        }
         self.palette_rgb = palette_rgb;
     }
 
     fn frames_per_second(&self) -> u32 {
-        frames_per_second_of(&self.scene_id)
+        self.rate()
     }
 }
 
@@ -236,10 +373,13 @@ mod spec_tests {
             .iter()
             .map(|scene| scene["id"].as_str().unwrap_or_default().to_string())
             .collect();
-        assert_eq!(
-            ids,
-            vec!["waves", "clock", "stars-overhead", "dithered-waves"]
-        );
+        // The skeleton scenes keep their place; every ported scene follows them.
+        assert_eq!(&ids[..3], ["waves", "clock", "stars-overhead"]);
+        assert!(ids.iter().any(|id| id == "dithered-waves"));
+        let mut unique = ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), ids.len(), "scene ids are unique");
     }
 
     /// REQ: COR-010
@@ -308,10 +448,15 @@ mod spec_tests {
             let properties = scene["settings_schema"]["properties"]
                 .as_object()
                 .expect("settings_schema.properties is an object");
-            if scene["id"] == "dithered-waves" {
+            let is_skeleton = matches!(
+                scene["id"].as_str(),
+                Some("waves" | "clock" | "stars-overhead")
+            );
+            if !is_skeleton {
                 assert!(
                     !properties.is_empty(),
-                    "dithered-waves has its own controls"
+                    "scene {} has its own controls",
+                    scene["id"]
                 );
             } else {
                 assert!(

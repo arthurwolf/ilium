@@ -1,0 +1,2 @@
+### Changed
+- The "Close finished agent" action moved out of the kernel into the `ilium.core.agent-toolbar` plugin. The plugin sets a clickable footer-row slot when an agent finishes and removes it when work resumes; a click on the footer row runs the span's command, and the plugin closes that pane. Frame slots now keep the first command target of their content (the documented `frame-slot` origin). Disabling the plugin removes the button. The button is now a footer row in the dim frame style instead of the full-width red bar.

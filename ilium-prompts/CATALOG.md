@@ -15,7 +15,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/agent_feature_setup.rs:22 CHATROOM_INSTRUCTION` | [agent/chatroom-instructions](templates/agent/chatroom-instructions.hbs) | `CHATROOM_INSTRUCTIONS` |
 | `ilium-client/src/agent_feature_setup.rs:24 PROGRESS_INSTRUCTION` | [agent/progress-instructions](templates/agent/progress-instructions.hbs) | `PROGRESS_INSTRUCTIONS` |
 | `ilium-server/src/workspace.rs worktree agent initial prompt` | [agent/worktree-wrap-up](templates/agent/worktree-wrap-up.hbs) | `WORKTREE_WRAP_UP_INSTRUCTIONS` |
-| `ilium-client/src/chatroom.rs:19 COORDINATION_POSTING_GUIDANCE` | [agent/coordination-guidance](templates/agent/coordination-guidance.hbs) | `COORDINATION_GUIDANCE` |
 | `ilium-client/src/app.rs:9785 ASK_FOR_UPDATE_PROMPT` | [agent/ask-for-update](templates/agent/ask-for-update.hbs) | `ASK_FOR_UPDATE` |
 | `ilium-remote-compaction/src/write_claude.rs:162 MISSING_RESULT` | [conversion/missing-result](templates/conversion/missing-result.hbs) | `MISSING_RESULT` |
 | `ilium-remote-compaction/src/write_claude.rs:163 EMPTY_RESULT` | [conversion/empty-result](templates/conversion/empty-result.hbs) | `EMPTY_RESULT` |
@@ -322,15 +321,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/control/settings.rs:903` | [voice/settings/vad-eagerness-must-be-auto-low-medium](templates/voice/settings/vad-eagerness-must-be-auto-low-medium.hbs) | `VOICE_SETTINGS_VAD_EAGERNESS_MUST_BE_AUTO_LOW_MEDIUM` |
 | `ilium-client/src/agent_feature_setup.rs:184` | [agent/managed-block](templates/agent/managed-block.hbs) | `MANAGED_BLOCK` |
 | `ilium-client/src/agent_from_line.rs:162` | [agent/goal-from-line](templates/agent/goal-from-line.hbs) | `GOAL_FROM_LINE` |
-| `ilium-client/src/chatroom.rs:119` | [agent/chatroom-record-row](templates/agent/chatroom-record-row.hbs) | `CHATROOM_RECORD_ROW` |
-| `ilium-client/src/chatroom.rs:148` | [agent/chatroom-empty-context](templates/agent/chatroom-empty-context.hbs) | `CHATROOM_EMPTY_CONTEXT` |
-| `ilium-client/src/chatroom.rs:152` | [agent/chatroom-context](templates/agent/chatroom-context.hbs) | `CHATROOM_CONTEXT` |
-| `ilium-client/src/chatroom.rs:156` | [agent/chatroom-context-row](templates/agent/chatroom-context-row.hbs) | `CHATROOM_CONTEXT_ROW` |
-| `ilium-client/src/chatroom.rs` (`unread_context`) | [agent/chatroom-unread-context](templates/agent/chatroom-unread-context.hbs) | `CHATROOM_UNREAD_CONTEXT` |
-| `ilium-client/src/chatroom.rs` (`render_capped`) | [agent/chatroom-omitted](templates/agent/chatroom-omitted.hbs) | `CHATROOM_OMITTED` |
-| `ilium-client/src/chatroom.rs:187` | [agent/chatroom-title](templates/agent/chatroom-title.hbs) | `CHATROOM_TITLE` |
-| `ilium-client/src/chatroom.rs:190` | [agent/chatroom-header-guidance](templates/agent/chatroom-header-guidance.hbs) | `CHATROOM_HEADER_GUIDANCE` |
-| `ilium-client/src/chatroom.rs:192` | [agent/chatroom-messages-heading](templates/agent/chatroom-messages-heading.hbs) | `CHATROOM_MESSAGES_HEADING` |
 | `ilium-server/src/agent_delivery.rs:137` | [agent/progress-done](templates/agent/progress-done.hbs) | `PROGRESS_DONE` |
 | `ilium-server/src/agent_delivery.rs:143` | [agent/progress-error](templates/agent/progress-error.hbs) | `PROGRESS_ERROR` |
 | `ilium-server/src/agent_delivery.rs:148` | [agent/progress-unspecified-error](templates/agent/progress-unspecified-error.hbs) | `PROGRESS_UNSPECIFIED_ERROR` |

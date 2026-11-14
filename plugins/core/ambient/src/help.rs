@@ -39,7 +39,9 @@ pub const STYLE_HELP_IDS: [(&str, &str); 22] = [
 ];
 
 /// Scenes with a catalog topic of their own, by scene id (snake_case; kebab-case is accepted).
-const NAMED_SCENE_TOPICS: [(&str, &str); 36] = [
+const NAMED_SCENE_TOPICS: [(&str, &str); 38] = [
+    ("box_machine", "AN-21"),
+    ("dithr_patterns", "AN-25"),
     ("galactic_empires", "AN-53"),
     ("wikipedia", "AN-54"),
     ("solar_system", "AN-49"),
@@ -49,7 +51,7 @@ const NAMED_SCENE_TOPICS: [(&str, &str); 36] = [
     ("topographic_maps", "AN-56"),
     ("open_street_map", "AN-55"),
     ("graph", "AN-57"),
-    ("pi", "AN-58"),
+    ("pi_digits", "AN-58"),
     ("earthquakes", "AN-59"),
     ("aircraft", "AN-60"),
     ("boats", "AN-61"),

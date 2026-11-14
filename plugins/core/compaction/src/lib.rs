@@ -1,23 +1,31 @@
 //! Core plugin `ilium.core.compaction` (manual page core-plugin-compaction.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
+//! Context compaction as a plugin: the server side runs the `compact` summariser job and the `scan` job of the
+//! optimizer (transcript statistics, replay and the trigger recommendation); the client side draws the optimizer
+//! panel. Both the Optimization and the Remote compaction settings tabs are contributed by the manifest.
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
+use ilium_plugin_sdk::host::HostJobs;
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::NodeId;
-use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, JobRunner, Lifecycle, Views};
+use ilium_plugin_sdk::types::{
+    ErrorCode, Intent, MessageSpec, MessageTarget, NodeId, Outcome, PluginError, PluginId,
+    PluginSide, RequestId,
+};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, HostApi, JobRunner, Lifecycle, Views};
 
 pub mod analysis;
+mod optimize;
+mod panel;
 mod redact;
 pub mod remote;
+mod remote_settings;
+mod report;
 mod runner;
+mod scan;
 
 /// The server side of `ilium.core.compaction` (core-plugin-compaction.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["job-runner"])]
@@ -25,6 +33,78 @@ mod runner;
 pub struct CompactionServer {
     /// The pane the user focused last; it decides which technique row the job runner uses.
     focused: Option<NodeId>,
+    /// The `scan` job in flight, if any; one scan at a time.
+    scan_job: Option<RequestId>,
+}
+
+impl CompactionServer {
+    fn to_client(channel: &str, payload: serde_json::Value) -> Submission {
+        Submission::new(Intent::Message(MessageSpec {
+            to: MessageTarget {
+                plugin: PluginId(panel::PLUGIN_ID.to_string()),
+                side: PluginSide::Client,
+                client: None,
+            },
+            channel: channel.to_string(),
+            payload: payload.to_string().into_bytes(),
+        }))
+    }
+
+    fn start_scan(&mut self, payload: &[u8], out: &mut Vec<Submission>) {
+        if self.scan_job.is_some() {
+            return;
+        }
+        let mut handle = host();
+        let api: &mut dyn HostApi = &mut *handle;
+        match HostJobs::start(api, "scan".to_string(), payload.to_vec()) {
+            Ok(job) => self.scan_job = Some(job),
+            Err(error) => out.push(Self::to_client(
+                "failed",
+                serde_json::json!({ "message": error.message }),
+            )),
+        }
+    }
+
+    fn finish_scan(&mut self, job: RequestId, outcome: Outcome, out: &mut Vec<Submission>) {
+        if self.scan_job != Some(job) {
+            return;
+        }
+        self.scan_job = None;
+        let mut handle = host();
+        let api: &mut dyn HostApi = &mut *handle;
+        match outcome {
+            Outcome::Failed(error) | Outcome::Refused(error) => {
+                let message = if error.code == ErrorCode::Cancelled {
+                    "The scan was cancelled.".to_string()
+                } else {
+                    error.message
+                };
+                out.push(Self::to_client(
+                    "failed",
+                    serde_json::json!({ "message": message }),
+                ));
+            }
+            other if !other.is_ok() => out.push(Self::to_client(
+                "failed",
+                serde_json::json!({ "message": "The scan did not finish." }),
+            )),
+            _ => match HostJobs::take_output(api, job) {
+                Some(bytes) => out.push(Submission::new(Intent::Message(MessageSpec {
+                    to: MessageTarget {
+                        plugin: PluginId(panel::PLUGIN_ID.to_string()),
+                        side: PluginSide::Client,
+                        client: None,
+                    },
+                    channel: "report".to_string(),
+                    payload: bytes,
+                }))),
+                None => out.push(Self::to_client(
+                    "failed",
+                    serde_json::json!({ "message": "The scan returned no result." }),
+                )),
+            },
+        }
+    }
 }
 
 impl Lifecycle for CompactionServer {
@@ -35,12 +115,22 @@ impl Lifecycle for CompactionServer {
 
 impl Handler for CompactionServer {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut out = Vec::new();
         for event in batch {
-            if let Event::PaneFocused(pane) = event {
-                self.focused = pane;
+            match event {
+                Event::PaneFocused(pane) => self.focused = pane,
+                Event::Message(message)
+                    if message.from_side == PluginSide::Client && message.channel == "scan" =>
+                {
+                    self.start_scan(&message.payload, &mut out);
+                }
+                Event::RequestCompleted(result) => {
+                    self.finish_scan(result.request, result.outcome, &mut out);
+                }
+                _ => {}
             }
         }
-        Vec::new()
+        out
     }
 }
 
@@ -48,6 +138,7 @@ impl JobRunner for CompactionServer {
     fn run(&mut self, kind: String, input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
         match kind.as_str() {
             "compact" => runner::run_compact(&input, self.focused),
+            "scan" => optimize::run_scan_job(&input),
             other => Err(PluginError::invalid_argument(format!(
                 "unknown job kind: {other}"
             ))),
@@ -67,18 +158,14 @@ impl Lifecycle for CompactionClient {
 }
 
 impl Handler for CompactionClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        batch.into_iter().flat_map(panel::on_event).collect()
     }
 }
 
 impl Views for CompactionClient {
-    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        UiTree {
-            version: 1,
-            nodes: Vec::new(),
-            root: 0,
-        }
+    fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
+        panel::render(&view, area)
     }
 }
 

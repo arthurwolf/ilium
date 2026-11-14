@@ -107,7 +107,7 @@ fn r08_ridge_loop_raw_bits_and_ready_ownership() {
     let mut frame = AnimationFrame::default(); // Start with no Ridge preparation.
     *frame.host_mut() = fake_host(&probe); // Install the supplied fake factory.
     let hosted = AnimationSettings {
-        kind: AnimationKind::Pipes,
+        kind: AnimationKind::Spectrum,
         ..Default::default()
     }; // Concrete hosted scene using the fake.
     frame.render(&hosted, 17, 9, Duration::ZERO); // Construct and render the fake host.

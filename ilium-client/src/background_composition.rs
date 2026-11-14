@@ -228,8 +228,9 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     };
     let (red, green, blue) = settings.foreground_rgb();
     let foreground = Color::Rgb(red, green, blue);
-    let black_backdrop = settings.source == crate::animation_plugins::AnimationSourceTab::Native
-        && settings.kind == crate::background_animation::AnimationKind::Aurora;
+    // No built-in scene asks for a black backdrop any more (the former `aurora` scene moved
+    // into the Scenes plugin and is composited like every other plugin scene).
+    let black_backdrop = false;
     if is_preview {
         let area = buffer.area;
         if presentation == FieldPresentation::Fresh {
@@ -327,9 +328,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         let Some(PaneRuntime::Terminal(terminal)) = app.panes.get(&viewport.pane_id) else {
             continue;
         };
-        let area = app
-            .completed_agent_close_action(viewport)
-            .map_or(viewport.content_area, |action| action.terminal_area);
+        let area = viewport.content_area;
         terminal.with_screen(|screen| {
             paint_region_with_field_receipt(
                 buffer,
@@ -435,9 +434,7 @@ fn screen_occupancy(
                 let Some(PaneRuntime::Terminal(terminal)) = app.panes.get(&viewport.pane_id) else {
                     continue;
                 };
-                let region = app
-                    .completed_agent_close_action(viewport)
-                    .map_or(viewport.content_area, |action| action.terminal_area);
+                let region = viewport.content_area;
                 terminal.with_screen(|screen| mark_free(region, visible_cursor(screen, region)));
             }
         }

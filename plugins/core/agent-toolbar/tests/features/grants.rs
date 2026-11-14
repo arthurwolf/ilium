@@ -31,7 +31,7 @@ fn f_033_without_ui_chrome_the_clear_and_recover_intents_are_refused_not_permitt
     host.deliver_one(activity(pane, AgentActivity::Working, AgentActivity::Done));
     host.settle();
     let outcomes = host.outcomes();
-    assert_eq!(outcomes.len(), 3, "{outcomes:?}");
+    assert_eq!(outcomes.len(), 4, "{outcomes:?}");
     assert!(
         outcomes.iter().all(is_refused_not_permitted),
         "{outcomes:?}"

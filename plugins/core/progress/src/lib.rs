@@ -5,13 +5,14 @@
 //! a minimal real implementation: it activates cleanly and acknowledges events without submissions until the host calls it needs exist.
 
 pub mod guard;
+pub mod guard_cli;
 pub mod timing;
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
+use ilium_plugin_sdk::types::{PluginError, RequestId, RequestRef};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle};
 
 /// The server side of `ilium.core.progress` (core-plugin-progress.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = [])]
@@ -25,7 +26,22 @@ impl Lifecycle for ProgressServer {
 }
 
 impl Handler for ProgressServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut api = host();
+        for event in batch {
+            match event {
+                Event::CliInvoked(invoked) if invoked.name == guard_cli::COMMAND_NAME => {
+                    guard_cli::on_invoked(&mut *api, invoked.invocation, &invoked.argv)
+                }
+                Event::CliCancelled(invocation) => guard_cli::on_cancelled(invocation),
+                Event::RequestCompleted(result) => {
+                    if let RequestRef::Call(RequestId(request)) = result.request {
+                        guard_cli::on_stdin_ready(&mut *api, request);
+                    }
+                }
+                _ => {}
+            }
+        }
         Vec::new()
     }
 }

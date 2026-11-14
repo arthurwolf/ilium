@@ -26,6 +26,7 @@
       "agent.read",
       "agent.read-prompts",
       "ui.chrome",
+      "tree.write",
       "settings.read-kernel:user-interface",
       "extensions.provide:ilium.core.agent-toolbar/toolbar-actions",
       "extensions.provide:ilium.core.agent-toolbar/banner-segments"
@@ -112,6 +113,10 @@
       {
         "id": "history",
         "title": "Show agent debug history"
+      },
+      {
+        "id": "close-finished",
+        "title": "Close finished agent"
       }
     ],
     "tree_toolbar": [
@@ -147,6 +152,11 @@
       },
       {
         "id": "recover",
+        "placement": "footer-row",
+        "applies_to": "agents"
+      },
+      {
+        "id": "finished",
         "placement": "footer-row",
         "applies_to": "agents"
       }

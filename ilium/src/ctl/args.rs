@@ -219,27 +219,6 @@ pub(crate) enum CtlCommand {
         #[arg(required = true)]
         keys: Vec<String>,
     },
-    /// Type text into a pane after a delay.
-    Schedule {
-        id: u64,
-        /// Delay in seconds.
-        #[arg(long = "in")]
-        delay_seconds: u64,
-        text: String,
-        #[arg(long)]
-        no_enter: bool,
-    },
-    /// Queue a prompt for when the pane's agent next finishes.
-    Queue {
-        id: u64,
-        text: String,
-        #[arg(long, conflicts_with = "forever")]
-        times: Option<u32>,
-        #[arg(long)]
-        forever: bool,
-    },
-    /// Drop every queued prompt of a pane.
-    QueueClear { id: u64 },
     /// Bookmark a node (pin it in the sidebar).
     Bookmark {
         id: u64,

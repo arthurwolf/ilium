@@ -1,18 +1,29 @@
-//! Core plugin `ilium.core.scheduler` (manual page core-plugin-scheduler.md).
+//! Core plugin `ilium.core.scheduler` (manual page core-plugin-scheduler.md): input that is sent
+//! to a pane later. Two features share the plugin.
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! a minimal real implementation: it activates cleanly and acknowledges events without submissions until the host calls it needs exist.
+//! - A countdown types text and/or Enter into one pane when a durable timer fires, even after
+//!   Ilium was stopped in between.
+//! - A prompt queue holds prompts per pane and sends one each time the agent in that pane
+//!   finishes a turn.
+//!
+//! The server side ([`server`]) owns the state in plugin storage and writes with `send-input`; the
+//! client side ([`client`]) owns the two dialogs and the queue panel. [`wire`] is the message and
+//! storage format between them; [`schedule`] and [`queue`] are the pure rules.
 
+pub mod client;
 pub mod effects;
 pub mod queue;
 pub mod schedule;
+pub mod server;
+pub mod wire;
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
-use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
+use ilium_plugin_sdk::types::{Activation, Area, PluginError, UiTree, ViewTarget};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, Views};
+
+/// The plugin id, also the target of the messages between its two sides.
+pub const PLUGIN_ID: &str = "ilium.core.scheduler";
 
 /// The server side of `ilium.core.scheduler` (core-plugin-scheduler.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = [])]
@@ -21,30 +32,43 @@ pub struct SchedulerServer;
 
 impl Lifecycle for SchedulerServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        let mut api = host();
+        server::start(&mut *api);
         Ok(())
     }
 }
 
 impl Handler for SchedulerServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut api = host();
+        batch
+            .into_iter()
+            .flat_map(|event| server::on_event(&mut *api, event))
+            .collect()
     }
 }
 
 /// The client side of `ilium.core.scheduler` (core-plugin-scheduler.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
 pub struct SchedulerClient;
 
 impl Lifecycle for SchedulerClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        client::reset();
         Ok(())
     }
 }
 
 impl Handler for SchedulerClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        batch.into_iter().flat_map(client::on_event).collect()
+    }
+}
+
+impl Views for SchedulerClient {
+    fn render(&mut self, view: ViewTarget, _area: Area) -> UiTree {
+        client::render(&view)
     }
 }
 

@@ -330,14 +330,6 @@ pub struct ServerState {
     pub(crate) contributed_signatures: std::sync::RwLock<Vec<AgentSignature>>,
     /// Keep applied logging transitions and their IPC broadcasts in one order.
     pub(crate) debug_logging_transaction: Mutex<()>,
-    /// Serializes schedule replacement with the executor's final freshness
-    /// check and PTY write. Lock ordering is this mutex, then `tree`, then
-    /// `panes`; no other workflow acquires it, so a replaced timer cannot fire
-    /// after its replacement was accepted.
-    pub scheduled_input_transaction: Mutex<()>,
-    /// Serializes enqueue/clear mutations with completion-driven delivery so
-    /// a successful PTY write advances exactly the FIFO head it observed.
-    pub prompt_queue_transaction: Mutex<()>,
     /// Finite menu-query admission, including discovery before a repository is known.
     pub(crate) repo_facts_admission: tokio::sync::Semaphore,
     pub(crate) repo_discovery_cache: crate::repo_facts_cache::FactsCache<ilium_git::Repository>,
@@ -394,11 +386,6 @@ pub struct ServerState {
     snapshot_writer_stopping: std::sync::atomic::AtomicBool,
     snapshot_writer_failed: std::sync::atomic::AtomicBool,
     snapshot_writer_stop_requested: Notify,
-    /// Wakes the single scheduled-input executor whenever the nearest
-    /// deadline may have changed (new schedule, replacement, or pane close).
-    /// One coalesced permit is sufficient because the executor always scans
-    /// the authoritative tree again before deciding what to wait for.
-    pub scheduled_input_changed: Notify,
     /// Wakes the deadline-driven detection loop when a new pane or a user
     /// interaction pulls a pane's next check earlier than its current sleep.
     pub detection_schedule_changed: Notify,
@@ -598,8 +585,6 @@ impl ServerState {
             plugins: std::sync::OnceLock::new(),
             contributed_signatures: std::sync::RwLock::new(Vec::new()),
             debug_logging_transaction: Mutex::new(()),
-            scheduled_input_transaction: Mutex::new(()),
-            prompt_queue_transaction: Mutex::new(()),
             repo_facts_admission: tokio::sync::Semaphore::new(32),
             repo_discovery_cache: Default::default(),
             repo_facts_cache: Default::default(),
@@ -620,7 +605,6 @@ impl ServerState {
             snapshot_writer_stopping: std::sync::atomic::AtomicBool::new(false),
             snapshot_writer_failed: std::sync::atomic::AtomicBool::new(false),
             snapshot_writer_stop_requested: Notify::new(),
-            scheduled_input_changed: Notify::new(),
             detection_schedule_changed: Notify::new(),
             events,
             terminal_subscription_counts: std::sync::Mutex::new(

@@ -64,7 +64,22 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
         "requires_server": true }
     ],
     "http_routes": [ { "method": "POST", "path": "/create_agent" } ],
-    "commands": [ { "id": "ask-for-update", "title": "Ask for update" } ]
+    "commands": [
+      { "id": "ask-for-update", "title": "Ask for update" },
+      { "id": "ask-for-update-status", "title": "Ask for status update" }
+    ],
+    "context_menu": [
+      { "id": "status-update", "title": "Ask for status update", "target": "tree-node",
+        "command": "ask-for-update-status",
+        "when": "node.kind == \"project\" || node.kind == \"group\" || node.kind == \"folder\" || (node.kind == \"pane\" && pane.primitive == \"agent\")" },
+      { "id": "message-to-all", "title": "Send message to all", "target": "tree-node",
+        "command": "ask-for-update",
+        "when": "node.kind == \"project\" || node.kind == \"group\" || node.kind == \"folder\"" }
+    ],
+    "row_actions": [
+      { "id": "ask-for-update", "icon": "bell", "label": "Ask for update",
+        "command": "ask-for-update", "applies_to": ["project"] }
+    ]
   },
   "capabilities": {
     "server": [
@@ -113,10 +128,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "services.use:ilium.core.cost/usage",
       "settings.write-kernel:api",
       "extensions.provide:ilium.core.fleet/selectors",
-      "extensions.provide:ilium.core.fleet/before-broadcast"
+      "extensions.provide:ilium.core.fleet/before-broadcast",
+      "notify.toast"
     ],
     "client": [
-      "ui.panels"
+      "ui.panels",
+      "tree.read",
+      "ui.chrome"
     ]
   },
   "activation": [
@@ -124,7 +142,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "cli:broadcast",
     "http:/create_agent",
     "service:broadcast",
-    "command:ilium.core.fleet/ask-for-update"
+    "command:ilium.core.fleet/ask-for-update",
+    "command:ilium.core.fleet/ask-for-update-status"
   ],
   "contributes": {
     "cli": [
@@ -161,6 +180,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       {
         "id": "ask-for-update",
         "title": "Ask for update"
+      },
+      {
+        "id": "ask-for-update-status",
+        "title": "Ask for status update"
       }
     ],
     "extension_points": [
@@ -234,6 +257,33 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "deadline_ms": 20,
         "max_handlers": 8,
         "version": "0.1.0"
+      }
+    ],
+    "context_menu": [
+      {
+        "id": "status-update",
+        "title": "Ask for status update",
+        "target": "tree-node",
+        "command": "ask-for-update-status",
+        "when": "node.kind == \"project\" || node.kind == \"group\" || node.kind == \"folder\" || (node.kind == \"pane\" && pane.primitive == \"agent\")"
+      },
+      {
+        "id": "message-to-all",
+        "title": "Send message to all",
+        "target": "tree-node",
+        "command": "ask-for-update",
+        "when": "node.kind == \"project\" || node.kind == \"group\" || node.kind == \"folder\""
+      }
+    ],
+    "row_actions": [
+      {
+        "id": "ask-for-update",
+        "icon": "bell",
+        "label": "Ask for update",
+        "command": "ask-for-update",
+        "applies_to": [
+          "project"
+        ]
       }
     ]
   },
@@ -460,6 +510,8 @@ export function broadcast(text: string): Submission[] {
 #### Ask for update
 
 A dialog sends a short request to one agent or to all of them. The dialog has no target field: the server component that receives the `ask-for-update` message sends the text to the agent pane that was focused when the dialog opened, or to every agent when no agent pane was focused. The client side shows a `dialog` ([layout and containers](/pages/widgets-layout-and-containers/)) with a `text-input` and buttons ([input widgets](/pages/widgets-input/)) under [ui.panels](/pages/capability-ui-panels/). On Send it submits a `message` to the server side ([messages and topics](/pages/api-messages-and-topics/)), which submits `send-input` to each target ([send-input](/pages/api-intent-send-input/)).
+
+A tree row can scope the ask. The tree context menu of a project, group, folder or agent pane offers "Ask for status update" (the command `ask-for-update-status`, no dialog) and, below a project, group or folder, "Send message to all" (the dialog, opened with `{"node": <id>}`); a project row also carries the `ask-for-update` hover action. A scoped dialog sends the channel `ask-for-update-scoped` with the JSON payload `{"node": <id>, "text": <string>}`; the status command omits `text`. The server side reaches every agent below a project or group, the agents of the project whose working directory lies inside a folder (compared by path components), or the pane itself, and submits the text to each with `send-input` and `delivery: submitted`. The fixed status request skips agents that are not idle, except below a group or folder.
 
 **Rust**
 

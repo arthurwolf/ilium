@@ -13,7 +13,7 @@ use super::App;
 use crate::attention::briefing::{self, BriefingButton, View};
 
 fn unix_millis_now() -> u64 {
-    crate::scheduled_input::unix_millis_now()
+    crate::wall_clock::unix_millis_now()
 }
 
 /// The turn of the agent in `pane_id`, when a known agent runs there.

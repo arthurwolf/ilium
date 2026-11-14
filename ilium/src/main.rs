@@ -376,16 +376,6 @@ fn main() -> ExitCode {
             }
         };
     }
-    // Runs before every Bash call of a hooked Claude Code session, so it skips
-    // the runtime and quota bootstrap below.
-    if matches!(
-        &cli.command,
-        Some(Command::Progress {
-            command: ProgressCommand::Guard
-        })
-    ) {
-        return ExitCode::from(ilium_client::progress_guard::run());
-    }
     if matches!(&cli.command, Some(Command::ClaudeModelStatusline)) {
         return match ilium_client::claude_model_statusline::run_statusline_helper() {
             Ok(()) => ExitCode::SUCCESS,
@@ -565,6 +555,9 @@ async fn dispatch(cli: Cli, explicit_cwd: bool) -> Result<(), CliError> {
             _ => new_pane(&session_name, &cmd, &cli.cwd, keep_open).await,
         },
         Some(Command::Resource(args)) => resource::run(args, &cli.cwd, explicit_cwd).await,
+        Some(Command::Progress {
+            command: ProgressCommand::Guard,
+        }) => progress_guard(&cli.cwd).await,
         Some(Command::Progress { command }) => progress(command).await,
         Some(Command::Wait { monitor_id }) => progress(ProgressCommand::Wait { monitor_id }).await,
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
@@ -648,10 +641,17 @@ enum ProgressResponse {
     },
 }
 
+/// `ilium progress guard`, the Claude Code `PreToolUse` hook command. The decision lives in the
+/// progress plugin (command `progress-guard`); with that plugin disabled nothing is refused.
+async fn progress_guard(cwd: &Path) -> Result<(), CliError> {
+    // The hook contract is exit status 0 always, and a disabled plugin is an unknown command.
+    let _ = ilium::plugin_cli::run(vec![std::ffi::OsString::from("progress-guard")], cwd).await;
+    Ok(())
+}
+
 async fn progress(command: ProgressCommand) -> Result<(), CliError> {
     if matches!(command, ProgressCommand::Guard) {
-        // `main` runs the guard before any runtime setup; reaching here means
-        // there is nothing to refuse.
+        // Served by `progress_guard`; reaching here means there is nothing to refuse.
         return Ok(());
     }
     let request_id = next_progress_request_id();

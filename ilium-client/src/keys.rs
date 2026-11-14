@@ -18,8 +18,6 @@ use crate::explorer_overlay::ExplorerOutcome;
 #[cfg(test)]
 use crate::icon_settings::IconTarget;
 use crate::keymap::{self, Action};
-use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
-use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 
 /// Identifies key and paste events whose destination is unambiguous while an
 /// editor pane is temporarily owned by save preparation. `None` means the
@@ -199,18 +197,8 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         Mode::TerminalPaneContextMenu(menu) => {
             handle_terminal_pane_context_menu_event(app, menu, &event)
         }
-        Mode::AgentDebugLog(state) => handle_agent_debug_log_event(app, state, &event),
         Mode::LastPromptDialog(state) => handle_last_prompt_dialog_event(app, state, &event),
-        Mode::AgentDebugSavePath(pane_id, state) => {
-            handle_agent_debug_save_path_event(app, pane_id, state, &event)
-        }
-        Mode::SchedulePaneInput(state) => handle_scheduled_input_event(app, state, &event),
-        Mode::QueuePrompt(state) => handle_prompt_queue_event(app, state, &event),
         Mode::TextTriggerDialog(state) => handle_text_trigger_dialog_event(app, state, &event),
-        Mode::AgentMessageDialog(mut state) => {
-            let outcome = state.handle_event(&event);
-            app.finish_agent_message_dialog(state, outcome);
-        }
         Mode::EditorLineContextMenu(menu) => {
             handle_editor_line_context_menu_event(app, menu, &event)
         }
@@ -353,9 +341,6 @@ pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
         &app.mode,
         Mode::LeaderPending
             | Mode::NavigationLeaderPending
-            | Mode::SchedulePaneInput(_)
-            | Mode::QueuePrompt(_)
-            | Mode::AgentMessageDialog(_)
             | Mode::CreateAgentWorkspace(_)
             | Mode::WorktreeManager(_)
             | Mode::AgentSetupPathPrompt(_, _)
@@ -509,77 +494,6 @@ fn handle_last_prompt_dialog_event(
             app.mode = Mode::LastPromptDialog(state);
         }
         _ => app.mode = Mode::LastPromptDialog(state),
-    }
-}
-
-fn handle_agent_debug_log_event(
-    app: &mut App,
-    mut state: crate::app::AgentDebugLogViewState,
-    event: &Event,
-) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::AgentDebugLog(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::AgentDebugLog(state);
-        return;
-    }
-    match key.code {
-        KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('q') => app.mode = Mode::Normal,
-        KeyCode::Char('s' | 'S') => app.open_agent_debug_save_path(state),
-        KeyCode::Char('r' | 'R') => {
-            app.toggle_agent_debug_tree_resize_filter();
-            app.mode = Mode::AgentDebugLog(state);
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            state.scroll_older(1);
-            app.mode = Mode::AgentDebugLog(state);
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            state.scroll_newer(1);
-            app.mode = Mode::AgentDebugLog(state);
-        }
-        KeyCode::PageUp => {
-            state.scroll_older(10);
-            app.mode = Mode::AgentDebugLog(state);
-        }
-        KeyCode::PageDown => {
-            state.scroll_newer(10);
-            app.mode = Mode::AgentDebugLog(state);
-        }
-        KeyCode::Home => {
-            state.show_oldest();
-            app.mode = Mode::AgentDebugLog(state);
-        }
-        KeyCode::End => {
-            state.follow_newest();
-            app.mode = Mode::AgentDebugLog(state);
-        }
-        _ => app.mode = Mode::AgentDebugLog(state),
-    }
-}
-
-fn handle_agent_debug_save_path_event(
-    app: &mut App,
-    pane_id: ilium_core::NodeId,
-    mut state: TextPromptState,
-    event: &Event,
-) {
-    let Event::Key(key) = event else {
-        app.mode = Mode::AgentDebugSavePath(pane_id, state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::AgentDebugSavePath(pane_id, state);
-        return;
-    }
-    match text_prompt::handle_key(&mut state, key.code) {
-        PromptOutcome::Commit if app.save_agent_debug_log(pane_id, &state.buf) => app.pop_modal(),
-        PromptOutcome::Commit | PromptOutcome::Continue => {
-            app.mode = Mode::AgentDebugSavePath(pane_id, state)
-        }
-        PromptOutcome::Cancel => app.pop_modal(),
     }
 }
 
@@ -2291,135 +2205,6 @@ fn handle_create_agent_workspace_event(
     app.mode = Mode::CreateAgentWorkspace(state);
 }
 
-/// Edits the six controls in the scheduled-input form. Tab order mirrors the
-/// visual order, Ctrl+Enter is a form-wide submit shortcut, and plain Enter
-/// advances until the explicit button is focused.
-fn handle_scheduled_input_event(
-    app: &mut App,
-    mut state: Box<ScheduledInputDialogState>,
-    event: &Event,
-) {
-    use crossterm::event::KeyModifiers;
-
-    if let Event::Paste(pasted) = event {
-        state.paste(pasted);
-        app.mode = Mode::SchedulePaneInput(state);
-        return;
-    }
-    let Event::Key(key) = event else {
-        app.mode = Mode::SchedulePaneInput(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::SchedulePaneInput(state);
-        return;
-    }
-    if key.code == KeyCode::Esc {
-        app.mode = Mode::Normal;
-        return;
-    }
-    if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
-        app.commit_scheduled_pane_input(state);
-        return;
-    }
-
-    match key.code {
-        KeyCode::Tab => state.focus = state.focus.next(),
-        KeyCode::BackTab => state.focus = state.focus.previous(),
-        KeyCode::Enter if state.focus == ScheduledInputFocus::SendEnter => {
-            state.send_enter = !state.send_enter;
-            state.focus = state.focus.next();
-        }
-        KeyCode::Char(' ') if state.focus == ScheduledInputFocus::SendEnter => {
-            state.send_enter = !state.send_enter;
-        }
-        KeyCode::Enter if state.focus == ScheduledInputFocus::ScheduleButton => {
-            app.commit_scheduled_pane_input(state);
-            return;
-        }
-        KeyCode::Enter => state.focus = state.focus.next(),
-        code if matches!(
-            state.focus,
-            ScheduledInputFocus::Hours
-                | ScheduledInputFocus::Minutes
-                | ScheduledInputFocus::Seconds
-        ) =>
-        {
-            state.handle_numeric_key(code);
-        }
-        code if state.focus == ScheduledInputFocus::Text => state.handle_text_key(code),
-        _ => {}
-    }
-    app.mode = Mode::SchedulePaneInput(state);
-}
-
-fn handle_prompt_queue_event(app: &mut App, mut state: Box<PromptQueueDialogState>, event: &Event) {
-    use crossterm::event::KeyModifiers;
-
-    if let Event::Paste(pasted) = event {
-        if state.focus == PromptQueueFocus::Text {
-            // CRLF/CR/LF each land as one newline, mirroring
-            // `replay_pasted_text_as_keys`: passing '\r' through as a plain
-            // character would embed literal carriage returns in the queued
-            // prompt whenever the clipboard uses Windows-style line endings.
-            let mut characters = pasted.chars().peekable();
-            while let Some(character) = characters.next() {
-                let code = match character {
-                    '\r' => {
-                        if characters.peek() == Some(&'\n') {
-                            characters.next();
-                        }
-                        KeyCode::Enter
-                    }
-                    '\n' => KeyCode::Enter,
-                    character => KeyCode::Char(character),
-                };
-                state.handle_text_key(code);
-            }
-        }
-        app.mode = Mode::QueuePrompt(state);
-        return;
-    }
-    let Event::Key(key) = event else {
-        app.mode = Mode::QueuePrompt(state);
-        return;
-    };
-    if !is_press(key) {
-        app.mode = Mode::QueuePrompt(state);
-        return;
-    }
-    if key.code == KeyCode::Esc {
-        app.mode = Mode::Normal;
-        return;
-    }
-    if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
-        app.commit_queued_prompt(state);
-        return;
-    }
-    if state.focus == PromptQueueFocus::Delivery
-        && matches!(key.code, KeyCode::Enter | KeyCode::Char('+'))
-    {
-        app.begin_queue_delivery_dialog(state);
-        return;
-    }
-    match key.code {
-        KeyCode::Tab => state.focus = state.focus.next(),
-        KeyCode::BackTab => state.focus = state.focus.previous(),
-        KeyCode::Left if state.focus == PromptQueueFocus::Delivery => state.cycle_delivery(-1),
-        KeyCode::Right if state.focus == PromptQueueFocus::Delivery => state.cycle_delivery(1),
-        KeyCode::Char(' ') if state.focus == PromptQueueFocus::Delivery => state.cycle_delivery(1),
-        KeyCode::Enter if state.focus == PromptQueueFocus::EnqueueButton => {
-            app.commit_queued_prompt(state);
-            return;
-        }
-        KeyCode::Enter if state.focus != PromptQueueFocus::Text => state.focus = state.focus.next(),
-        code if state.focus == PromptQueueFocus::Text => state.handle_text_key(code),
-        code if state.focus == PromptQueueFocus::Times => state.handle_times_key(code),
-        _ => {}
-    }
-    app.mode = Mode::QueuePrompt(state);
-}
-
 /// How many lines `PageUp`/`PageDown` scroll the settings screen's content
 /// panel per press -- a fixed step rather than a full page, since a page
 /// height varies wildly with terminal size and the content itself is short.
@@ -2560,13 +2345,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
     }
     if state.tab == SettingsTab::Padding && crate::padding_ui::handle_key(app, &mut state, *key) {
-        app.mode = Mode::Settings(Box::new(state));
-        return;
-    }
-
-    // The Optimization tab owns its keys (scroll, sub-tabs, scan/apply/revert)
-    // and, while its Apply confirmation is open, every key.
-    if state.tab == SettingsTab::Optimization && app.optimization_key(&mut state, *key) {
         app.mode = Mode::Settings(Box::new(state));
         return;
     }
@@ -4100,7 +3878,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     let max_scroll =
         crate::settings_ui::max_scroll(state.tab, app, state.selected_row, content_area);
     state.scroll = state.scroll.min(max_scroll);
-    app.optimization_sync_visibility(state.tab == SettingsTab::Optimization);
     app.remote_compaction_sync_native(state.tab == SettingsTab::RemoteCompaction);
     app.mode = Mode::Settings(Box::new(state));
 }
@@ -4296,82 +4073,6 @@ mod indent_outdent_tests {
                 crate::app::VoiceInteractionRequest::StartPushToTalk,
                 crate::app::VoiceInteractionRequest::StopPushToTalk,
             ]
-        );
-    }
-
-    #[test]
-    fn debug_log_s_key_opens_path_prompt_and_enter_saves_complete_report() {
-        let directory = tempfile::tempdir().expect("temporary project");
-        let mut app = App::new("test".to_string(), directory.path().to_path_buf());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "codex agent", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-        app.agent_debug_logs.insert(
-            pane_id,
-            crate::app::AgentDebugLogCache {
-                has_loaded_retained_history: true,
-                ..crate::app::AgentDebugLogCache::default()
-            },
-        );
-        app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
-            pane_id,
-            scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
-        });
-
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)),
-        );
-
-        let Mode::AgentDebugSavePath(target, prompt) = &app.mode else {
-            panic!("S should open the editable debug-log destination prompt");
-        };
-        assert_eq!(*target, pane_id);
-        assert!(prompt
-            .buf
-            .starts_with(&directory.path().display().to_string()));
-        assert!(prompt.buf.ends_with(".log"));
-
-        let export_path = directory.path().join("keyboard-export.log");
-        app.mode = Mode::AgentDebugSavePath(
-            pane_id,
-            TextPromptState::new(export_path.display().to_string()),
-        );
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        );
-
-        assert!(matches!(app.mode, Mode::AgentDebugLog(_)));
-        assert!(std::fs::read_to_string(export_path)
-            .unwrap()
-            .starts_with("ILIUM AGENT DEBUG LOG\n"));
-    }
-
-    #[test]
-    fn debug_log_r_key_reveals_panel_animation_resize_events() {
-        let mut app = App::new("test".to_string(), std::env::temp_dir());
-        let pane_id = ilium_core::NodeId(7);
-        app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
-            pane_id,
-            scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
-        });
-        assert!(
-            app.agent_debug_log_filter
-                .is_tree_panel_animation_resize_hidden
-        );
-
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
-        );
-
-        assert!(matches!(app.mode, Mode::AgentDebugLog(_)));
-        assert!(
-            !app.agent_debug_log_filter
-                .is_tree_panel_animation_resize_hidden
         );
     }
 
@@ -5537,93 +5238,6 @@ mod indent_outdent_tests {
     }
 
     #[test]
-    fn universal_review_scheduled_numeric_paste_rejects_without_sending_and_can_correct() {
-        for pasted in ["-1", "1.5", "1e2", "1s", "99999999999999999999999"] {
-            let mut app = App::new("schedule-paste".into(), std::env::temp_dir());
-            let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-            let pane_id = app
-                .tree
-                .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
-                .unwrap();
-            let mut state = ScheduledInputDialogState::new(pane_id);
-            state.focus = ScheduledInputFocus::Seconds;
-            state.seconds = TextPromptState::new("");
-            app.mode = Mode::SchedulePaneInput(Box::new(state));
-            handle_event(&mut app, Event::Paste(pasted.into()));
-            handle_event(
-                &mut app,
-                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
-            );
-            let Mode::SchedulePaneInput(state) = &app.mode else {
-                panic!("invalid paste submitted {pasted}")
-            };
-            assert_eq!(state.seconds.buf, pasted);
-            assert!(app.status_message.is_some());
-            assert!(app.take_outbound_requests().is_empty());
-            for _ in pasted.chars() {
-                handle_event(
-                    &mut app,
-                    Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
-                );
-            }
-            handle_event(&mut app, Event::Paste("17".into()));
-            handle_event(
-                &mut app,
-                Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
-            );
-            assert!(matches!(
-                app.take_outbound_requests().as_slice(),
-                [ClientRequest::SchedulePaneInput {
-                    delay_seconds: 17,
-                    ..
-                }]
-            ));
-            assert!(matches!(app.mode, Mode::Normal));
-        }
-    }
-
-    #[test]
-    fn scheduled_input_keyboard_edits_toggles_and_submits_the_form() {
-        let mut app = App::new("test".to_string(), std::env::temp_dir());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-        let mut state = ScheduledInputDialogState::new(pane_id);
-        state.focus = ScheduledInputFocus::Text;
-        app.mode = Mode::SchedulePaneInput(Box::new(state));
-
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
-        );
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
-        );
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE)),
-        );
-        handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
-        );
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::SchedulePaneInput {
-                pane_id,
-                delay_seconds: 30,
-                text: "x".to_string(),
-                send_enter: false,
-            }]
-        );
-        assert!(matches!(app.mode, Mode::Normal));
-    }
-
-    #[test]
     fn atomic_paste_reuses_existing_character_input_for_text_prompt_modes() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.mode = Mode::CommandPrompt(TextPromptState::new("before-"));
@@ -5666,29 +5280,6 @@ mod indent_outdent_tests {
             panic!("single-line paste with a trailing newline must not submit");
         };
         assert_eq!(state.buf, "/tmp/custom-CLAUDE.md");
-    }
-
-    #[test]
-    fn prompt_queue_paste_normalizes_crlf_to_single_newlines() {
-        let mut app = App::new("test".to_string(), std::env::temp_dir());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-        app.mode = Mode::QueuePrompt(Box::new(PromptQueueDialogState::new(pane_id)));
-
-        handle_event(
-            &mut app,
-            Event::Paste("one\r\ntwo\rthree\nfour".to_string()),
-        );
-
-        let Mode::QueuePrompt(state) = &app.mode else {
-            panic!("pasting text should keep the prompt-queue dialog open");
-        };
-        // Every line-ending flavor collapses to exactly one '\n' -- no
-        // literal carriage returns may survive into the queued prompt.
-        assert_eq!(state.text.buf, "one\ntwo\nthree\nfour");
     }
 
     #[test]

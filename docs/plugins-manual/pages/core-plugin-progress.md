@@ -101,7 +101,7 @@ The contract version is 0.1. The plugin declares one subcommand, `progress`, wit
     "server": ["cli.contribute", "process.run:sh", "process.long-lived", "http-api.route:/progress.json", "settings.read-kernel:agent-monitoring"],
     "client": ["ui.chrome", "settings.read-kernel:agent-monitoring"]
   },
-  "contributes": { "cli": [{ "name": "progress", "summary": "Progress monitors", "output": "jsonl", "requires_server": true, "aliases": ["wait"] }] }
+  "contributes": { "cli": [{ "name": "progress", "summary": "Progress monitors", "output": "jsonl", "requires_server": true, "aliases": ["wait"] }, { "name": "progress-guard", "summary": "Claude Code PreToolUse hook that refuses long foreground commands in a pane", "output": "jsonl", "stdin": "optional", "requires_server": false, "env": ["ILIUM_PANE_ID"] }] }
 }
 ```
 
@@ -151,6 +151,13 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "output": "jsonl",
       "requires_server": true,
       "aliases": ["wait"]
+    }, {
+      "name": "progress-guard",
+      "summary": "Claude Code PreToolUse hook that refuses long foreground commands in a pane",
+      "output": "jsonl",
+      "stdin": "optional",
+      "requires_server": false,
+      "env": ["ILIUM_PANE_ID"]
     }],
     "extension_points": [
       {

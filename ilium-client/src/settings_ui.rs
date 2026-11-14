@@ -625,9 +625,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             state.selected_row,
             state.scroll,
         ),
-        SettingsTab::Optimization => {
-            crate::compaction_ui::render(frame, layout.content_area, app, state.scroll);
-        }
         SettingsTab::RemoteCompaction => crate::remote_compaction_settings_ui::render(
             frame,
             layout.content_area,
@@ -689,10 +686,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         }
     }
     render_settings_help_anchors(frame, &layout, app, state);
-    if state.tab == SettingsTab::Optimization {
-        // The Apply confirmation covers the whole screen, help rail included.
-        crate::compaction_ui::render_modal(frame, area, app);
-    }
     if state.tab == SettingsTab::Animations {
         crate::animation_hover::render(
             frame,
@@ -809,18 +802,6 @@ pub fn settings_help_anchors(
             {
                 let selected = all_rows.get(state.selected_row) == Some(&row);
                 push_help_anchor(&mut anchors, layout, topic_id, line, state.scroll, selected);
-            }
-        }
-        SettingsTab::Optimization => {
-            // A pending Apply confirmation hides the page and its anchors.
-            if app.optimization.pending_apply.is_none() {
-                for (topic_id, row) in
-                    crate::compaction_ui::help_anchors(app, layout.content_area, state.scroll)
-                {
-                    // The sub-tab row is the tab's focus point.
-                    let selected = topic_id == "OPT-01";
-                    push_help_anchor(&mut anchors, layout, topic_id, row, 0, selected);
-                }
             }
         }
         SettingsTab::RemoteCompaction => {
@@ -1428,7 +1409,6 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Toolbar => "☷",
         SettingsTab::AgentMonitoring => "◉",
         SettingsTab::Cost => "¤",
-        SettingsTab::Optimization => "↗",
         SettingsTab::RemoteCompaction => "⇥",
         SettingsTab::Keyboard => "⌨",
         SettingsTab::Terminal => "❯",
@@ -1461,7 +1441,6 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
         SettingsTab::AgentMonitoring => "Agents",
         SettingsTab::Attention => "Queue",
         SettingsTab::Cost => "Cost",
-        SettingsTab::Optimization => "Optimize",
         SettingsTab::RemoteCompaction => "Remote",
         SettingsTab::KanbanBoard => "Kanban",
         SettingsTab::Animations => "Motion",
@@ -2297,9 +2276,6 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::Cost => {
             return crate::cost_settings_ui::max_scroll(app, selected_row, content_area);
         }
-        SettingsTab::Optimization => {
-            return crate::compaction_ui::max_scroll(app, content_area);
-        }
         SettingsTab::RemoteCompaction => {
             return crate::remote_compaction_settings_ui::max_scroll(
                 app,
@@ -2526,7 +2502,7 @@ pub(crate) fn render_live_tree_preview(
                 app.started_at.elapsed().as_millis()
             },
             terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
-            current_unix_millis: crate::scheduled_input::unix_millis_now(),
+            current_unix_millis: crate::wall_clock::unix_millis_now(),
             project_name: app.project_name.as_deref(),
             project_icon: app.project_icon.as_deref(),
             is_project_name_loading: app.is_project_name_loading,
@@ -5831,9 +5807,7 @@ mod terminal_pool_ui_regressions {
                 line.spans.iter().any(|span| {
                     matches!(
                         span.content.as_ref(),
-                        "Scrollback budget"
-                            | "New pane directory"
-                            | "Parser pool"
+                        "Scrollback budget" | "New pane directory" | "Parser pool"
                     )
                 })
             })
@@ -8572,10 +8546,6 @@ mod tests {
                                 .map(|anchor| anchor.topic_id),
                         );
                     }
-                }
-                SettingsTab::Optimization => {
-                    // Idle, scanning and report pages carry different topics.
-                    reachable.extend(crate::compaction_ui::tests::reachable_topics());
                 }
                 _ => {
                     let state = SettingsState {

@@ -414,7 +414,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     // for the case where focus arrives *after* completion and does clear it).
     // The later Working -> Done transition below must therefore still happen
     // on its own, and the later Done -> Idle transition must come from the
-    // queued prompt's delivery gate, not from this early focus call.
+    // typed prompt, not from this early focus call.
     write_frame(
         &mut client,
         &ClientRequest::SetPaneFocus {
@@ -424,22 +424,6 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     )
     .await
     .expect("focus the live fake agent pane");
-
-    write_frame(
-        &mut client,
-        &ClientRequest::EnqueuePrompt {
-            pane_id,
-            text: "queued-live-marker".to_string(),
-            delivery: ilium_core::PromptQueueDelivery::Once,
-        },
-    )
-    .await
-    .expect("enqueue prompt through live IPC");
-    let queued_tree = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(tree) if tree.prompt_queue_len(pane_id) == Some(1))
-    })
-    .await;
-    assert!(matches!(queued_tree, ServerEvent::TreeSnapshot(_)));
 
     // Structural assertion #1: the real detection loop, walking the real
     // `sysinfo` process tree, must identify the spawned process as a
@@ -522,9 +506,19 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         "expected a real Working -> Done transition while preserving its goal, got {status:?}"
     );
 
-    // Completion opens the queue gate. Its successful PTY write is fresh
+    // The user types a prompt after the completion. Its PTY write is fresh
     // input, so the same server-owned status immediately returns to Idle while
     // retaining the goal variant; later idle detection must not resurrect it.
+    write_frame(
+        &mut client,
+        &ClientRequest::SubmitTerminalText {
+            pane_id,
+            text: "live-input-marker".to_string(),
+            source: ilium_ipc::PromptSubmissionSource::Keyboard,
+        },
+    )
+    .await
+    .expect("submit a typed prompt after the completion");
     let acknowledged_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
         matches!(
             event,
@@ -552,7 +546,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
             event,
             ServerEvent::ScreenUpdate { pane_id: changed_id, bytes, .. }
                 if *changed_id == pane_id
-                    && String::from_utf8_lossy(bytes).contains("queued:<queued-live-marker>")
+                    && String::from_utf8_lossy(bytes).contains("queued:<live-input-marker>")
         )
     })
     .await;
@@ -624,9 +618,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     };
     for expected_kind in [
         AgentDebugEventKind::DetectionCycle,
-        AgentDebugEventKind::PromptQueued,
         AgentDebugEventKind::PromptSubmitted,
-        AgentDebugEventKind::QueuedPromptDelivered,
     ] {
         assert!(
             entries.iter().any(|entry| entry.kind == expected_kind),
@@ -688,9 +680,10 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     }));
     assert!(entries.iter().any(|entry| {
         entry.kind == AgentDebugEventKind::PromptSubmitted
-            && entry.fields.iter().any(|field| {
-                field.label == "submitted input" && field.value == "queued-live-marker"
-            })
+            && entry
+                .fields
+                .iter()
+                .any(|field| field.label == "submitted input" && field.value == "live-input-marker")
     }));
 
     tokio::time::sleep(Duration::from_millis(700)).await;

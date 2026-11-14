@@ -276,25 +276,6 @@ async fn recovery_after_unflushed_crash(
         )
     });
     let queued_marker = server.home_dir.join("queued-must-not-cross-crash.txt");
-    if nested_shell || interpreted_launcher {
-        // A real semantic producer is queued while the provider is still live.
-        // Error exit must neither masquerade as finished nor replay this head
-        // into the surviving interactive shell.
-        write_frame(
-            &mut client,
-            &ClientRequest::EnqueuePrompt {
-                pane_id,
-                text: format!("echo QUEUE_LEAK > \"{}\"", queued_marker.display()),
-                delivery: ilium_core::PromptQueueDelivery::Once,
-            },
-        )
-        .await
-        .expect("queue a semantic prompt before provider loss");
-        expect_event(&mut client, WAIT, |event| matches!(event,
-            ServerEvent::TreeSnapshot(tree) if tree.get(pane_id).is_some_and(|node|
-                matches!(&node.kind, NodeKind::Pane { prompt_queue, .. } if prompt_queue.len() == 1))
-        )).await;
-    }
     let prompt = format!(
         "{}\nUnicode café 日本語 🦀\nlast line  ",
         "authored work  ".repeat(600)
@@ -421,11 +402,7 @@ async fn recovery_after_unflushed_crash(
     );
     #[cfg(unix)]
     if let Some((native_key, _)) = &native_and_launcher_keys {
-        let NodeKind::Pane {
-            status,
-            prompt_queue,
-            ..
-        } = &tree.get(pane_id).expect("retained native pane").kind
+        let NodeKind::Pane { status, .. } = &tree.get(pane_id).expect("retained native pane").kind
         else {
             unreachable!()
         };
@@ -436,12 +413,6 @@ async fn recovery_after_unflushed_crash(
                 .process,
             native_key
         );
-        assert_eq!(
-            prompt_queue.len(),
-            1,
-            "launcher loss dispatched or discarded queued work"
-        );
-        assert!(!prompt_queue[0].attempted_delivery);
         write_frame(
             &mut client,
             &ClientRequest::KeyInput {
@@ -528,19 +499,6 @@ async fn recovery_after_unflushed_crash(
         .expect("read historical prompt after manual shell command");
         let (tree, _) = read_initial_state(&mut observer, WAIT).await;
         assert_recovery(&tree, pane_id, &class, &prompt);
-        let NodeKind::Pane { prompt_queue, .. } = &tree.get(pane_id).expect("retained pane").kind
-        else {
-            unreachable!("recovery assertion already checked pane kind");
-        };
-        assert_eq!(
-            prompt_queue.len(),
-            1,
-            "pending semantic prompt was discarded or dispatched"
-        );
-        assert!(
-            !prompt_queue[0].attempted_delivery,
-            "crash falsely attempted queued delivery"
-        );
     }
     #[cfg(unix)]
     if let Some((_, _, release)) = &launcher {
@@ -591,11 +549,7 @@ async fn recovery_after_unflushed_crash(
         .expect("same-connection snapshot barrier after shim exits zero");
         let (tree, events) = read_initial_state(&mut client, WAIT).await;
         assert_recovery(&tree, pane_id, &class, &prompt);
-        let NodeKind::Pane {
-            status,
-            prompt_queue,
-            ..
-        } = &tree
+        let NodeKind::Pane { status, .. } = &tree
             .get(pane_id)
             .expect("native recovery after shim exit")
             .kind
@@ -614,8 +568,6 @@ async fn recovery_after_unflushed_crash(
             ilium_core::AgentAvailability::Exited(ilium_core::AgentExitOutcome::ExitCode(0)),
             "shim exit0 was falsely credited as the native provider's exit cause"
         );
-        assert_eq!(prompt_queue.len(), 1);
-        assert!(!prompt_queue[0].attempted_delivery);
         assert!(!queued_marker.exists());
         assert!(events.iter().any(|event| matches!(event,
             ServerEvent::PaneSessionIdResolved { pane_id: changed, session_id, process_id: owner, .. }

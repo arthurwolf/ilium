@@ -92,7 +92,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "id": "ilium.core.scheduler",
   "capabilities": {
     "server": ["terminal.write", "terminal.raw-input", "terminal.input-lock",
-               "agent.read", "journal.read",
+               "agent.read", "journal.read", "tree.decorate", "notify.toast",
                "extensions.provide:ilium.core.scheduler/schedule-sources",
                "extensions.provide:ilium.core.scheduler/before-send-scheduled",
                "topics.subscribe:ilium.core.agent-detect/activity-changed"],
@@ -137,6 +137,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "terminal.input-lock",
       "agent.read",
       "journal.read",
+      "tree.decorate",
+      "notify.toast",
       "extensions.provide:ilium.core.scheduler/schedule-sources",
       "extensions.provide:ilium.core.scheduler/before-send-scheduled",
       "topics.subscribe:ilium.core.agent-detect/activity-changed"
@@ -197,6 +199,24 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "rows": [
           { "type": "toggle", "key": "scheduled_input", "title": "Scheduled input icon", "default": true }
         ]
+      }
+    ],
+    "commands": [
+      {
+        "id": "schedule-input",
+        "title": "Schedule input"
+      },
+      {
+        "id": "queue-prompt",
+        "title": "Queue prompt"
+      },
+      {
+        "id": "clear-prompt-queue",
+        "title": "Clear prompt queue"
+      },
+      {
+        "id": "cancel-scheduled-input",
+        "title": "Cancel scheduled input"
       }
     ],
     "panels": [

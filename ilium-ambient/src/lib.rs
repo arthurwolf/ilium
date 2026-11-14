@@ -15,7 +15,6 @@ pub mod live_chess;
 pub mod live_data;
 pub mod location;
 pub mod minecraft;
-pub mod pi_digits;
 pub mod plugin_scene;
 pub mod prepared_cache;
 pub mod raster;
@@ -39,13 +38,8 @@ pub use scenes::spectrum::{
 };
 
 pub use scenes::{
-    atlantic_dusk::AtlanticDuskSettings, box_machine::BoxMachineSettings, clouds::CloudsSettings,
-    cube_clock::CubeClockSettings, dither_water::DitherWaterSettings,
-    dithr_patterns::DithrPatternsSettings,
-    fbm_clouds::FbmCloudsSettings, hex_expedition::HexExpeditionSettings, images::ImagesSettings,
-    machine_screen::MachineScreenSettings, night_lights::NightLightsSettings, pipes::PipesSettings,
-    solar_system::SolarSystemSettings, spectrum::SpectrumSettings, stars::StarsSettings,
-    video::VideoSettings,
+    clouds::CloudsSettings, images::ImagesSettings, night_lights::NightLightsSettings,
+    spectrum::SpectrumSettings, stars::StarsSettings, video::VideoSettings,
 };
 
 pub use scenes::vector_td::VectorTdSettings;
@@ -53,7 +47,6 @@ pub use scenes::vector_td::VectorTdSettings;
 pub use scenes::voxel_landscape;
 pub use scenes::voxel_landscape::VoxelLandscapeSettings;
 
-pub use scenes::galactic_empires::GalacticEmpiresSettings;
 pub use scenes::topographic_maps::TopographicMapsSettings;
 
 pub use scenes::carpet::CarpetSettings;
@@ -65,21 +58,7 @@ pub use scenes::openstreetmap::{
 pub use scenes::wind::WindSettings;
 
 pub use scenes::quiet::{
-    almost_touching::AlmostTouchingSettings,
-    aurora::AuroraSettings,
-    crop_circles::{CropCirclesSettings, CropPattern},
-    delayed_reflection::DelayedReflectionSettings,
     embroidery::EmbroiderySettings,
-    fireflies::FirefliesSettings,
     frost::{FrostMode, FrostSettings},
     hesitating_ink::HesitatingInkSettings,
-    hidden_wheel::HiddenWheelSettings,
-    lighthouse::LighthouseSettings,
-    needle_threads::NeedleThreadsSettings,
-    paper_fold::PaperFoldSettings,
-    pollen::PollenSettings,
-    prime_constellations::PrimeConstellationsSettings,
-    unfinished_circle::UnfinishedCircleSettings,
-    wallpaper::WallpaperSettings,
-    window_sunlight::{WindowGrid, WindowSunlightSettings},
 };

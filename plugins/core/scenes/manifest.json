@@ -202,6 +202,2844 @@
             }
           }
         }
+      },
+      {
+        "id": "machine-screen",
+        "title": "Machine screen",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 12,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "seed": {
+              "type": "integer",
+              "order": 0,
+              "title": "Seed",
+              "help": "Selects the wave phases, the marquee bar pattern and where the dots blink.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 7
+            },
+            "gradient_speed": {
+              "type": "integer",
+              "order": 1,
+              "title": "Gradient speed",
+              "help": "How fast the two dithered waves drift across the panel.",
+              "minimum": 10,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 50
+            },
+            "panel_size": {
+              "type": "integer",
+              "order": 2,
+              "title": "Panel size",
+              "help": "Width and height of the screen as a share of the whole background.",
+              "minimum": 30,
+              "maximum": 90,
+              "step": 5,
+              "unit": "%",
+              "default": 60
+            },
+            "cell_scale": {
+              "type": "integer",
+              "order": 3,
+              "title": "Cell scale",
+              "help": "Dots per dither cell. Larger cells give a coarser, more retro texture.",
+              "minimum": 1,
+              "maximum": 4,
+              "step": 1,
+              "unit": " dots",
+              "default": 1
+            },
+            "marquee_speed": {
+              "type": "integer",
+              "order": 4,
+              "title": "Marquee speed",
+              "help": "Scroll speed of the bar band along the bottom. 0 holds it still.",
+              "minimum": 0,
+              "maximum": 12,
+              "step": 1,
+              "unit": " dots/s",
+              "default": 4
+            },
+            "intensity": {
+              "type": "integer",
+              "order": 5,
+              "title": "Intensity",
+              "help": "Dot intensity of the panel. The host dithers it further, so lower values give a sparser, quieter picture.",
+              "minimum": 5,
+              "maximum": 40,
+              "step": 5,
+              "unit": "%",
+              "default": 20
+            },
+            "show_frame": {
+              "type": "boolean",
+              "order": 6,
+              "title": "Frame",
+              "help": "Draw a thin bezel around the panel.",
+              "default": true
+            },
+            "blinking_dots": {
+              "type": "boolean",
+              "order": 7,
+              "title": "Blinking dots",
+              "help": "A few sparse dots inside the gradient switch on and off twice a second.",
+              "default": true
+            }
+          }
+        }
+      },
+      {
+        "id": "atlantic-dusk",
+        "title": "Atlantic dusk",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 12,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "time_of_day": {
+              "type": "string",
+              "order": 0,
+              "title": "Time of day",
+              "help": "Cycle animates the whole day. The other choices freeze the light at dawn, noon, dusk or night while clouds and waves keep moving.",
+              "enum": [
+                "cycle",
+                "dawn",
+                "noon",
+                "dusk",
+                "night"
+              ],
+              "enum_titles": [
+                "Cycle",
+                "Dawn",
+                "Noon",
+                "Dusk",
+                "Night"
+              ],
+              "default": "cycle"
+            },
+            "day_length_seconds": {
+              "type": "integer",
+              "order": 1,
+              "title": "Day length",
+              "help": "Seconds for one full day: day, dusk, night and dawn. Only used while Time of day is Cycle.",
+              "minimum": 30,
+              "maximum": 600,
+              "step": 10,
+              "unit": " s",
+              "default": 120
+            },
+            "cloud_coverage": {
+              "type": "integer",
+              "order": 2,
+              "title": "Cloud coverage",
+              "help": "How much of the sky is clouded. Clouds are brighter than the sky by day and darker at dusk.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 45
+            },
+            "cloud_speed": {
+              "type": "integer",
+              "order": 3,
+              "title": "Cloud speed",
+              "help": "How fast the clouds drift sideways. 0 freezes them.",
+              "minimum": 0,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "wave_speed": {
+              "type": "integer",
+              "order": 4,
+              "title": "Wave speed",
+              "help": "How fast the wave lines roll. 0 freezes the sea.",
+              "minimum": 0,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "wave_scale": {
+              "type": "integer",
+              "order": 5,
+              "title": "Wave spacing",
+              "help": "Distance between wave lines. Small values give a choppier, busier sea.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "star_density": {
+              "type": "integer",
+              "order": 6,
+              "title": "Stars",
+              "help": "How many stars appear at night, per thousand sky cells. 0 gives a starless night.",
+              "minimum": 0,
+              "maximum": 80,
+              "step": 5,
+              "unit": "‰",
+              "default": 30
+            },
+            "intensity": {
+              "type": "integer",
+              "order": 7,
+              "title": "Intensity",
+              "help": "Overall brightness of the picture. The default keeps it quiet enough for a background.",
+              "minimum": 20,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 55
+            },
+            "twinkle": {
+              "type": "boolean",
+              "order": 8,
+              "title": "Star twinkle",
+              "help": "Lets some single-dot stars blink out briefly, rarely and subtly.",
+              "default": true
+            },
+            "banding": {
+              "type": "string",
+              "order": 9,
+              "title": "Banding",
+              "help": "Soft hands smooth gradients to the shared dither. The Bayer options step the gradients in the scene itself for a Playdate-like look.",
+              "enum": [
+                "host",
+                "bayer8",
+                "bayer4"
+              ],
+              "enum_titles": [
+                "Soft",
+                "Bayer 8x8",
+                "Bayer 4x4"
+              ],
+              "default": "host"
+            },
+            "seed": {
+              "type": "integer",
+              "order": 10,
+              "title": "Seed",
+              "help": "Chooses the cloud pattern and star positions.",
+              "minimum": 0,
+              "maximum": 999,
+              "step": 1,
+              "default": 41
+            }
+          }
+        }
+      },
+      {
+        "id": "pipes",
+        "title": "Pipes",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 15,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "pipe_count": {
+              "type": "integer",
+              "order": 0,
+              "title": "Pipes",
+              "help": "How many pipes grow at the same time. A pipe that gets stuck restarts elsewhere.",
+              "minimum": 1,
+              "maximum": 16,
+              "step": 1,
+              "default": 5
+            },
+            "volume_size": {
+              "type": "integer",
+              "order": 1,
+              "title": "Grid size",
+              "help": "Cells per side of the cubic volume. Larger grids mean thinner-looking pipes and a longer build.",
+              "minimum": 4,
+              "maximum": 16,
+              "step": 1,
+              "unit": " cells",
+              "default": 8
+            },
+            "pipe_thickness": {
+              "type": "integer",
+              "order": 2,
+              "title": "Thickness",
+              "help": "Pipe diameter as a share of the grid spacing.",
+              "minimum": 10,
+              "maximum": 60,
+              "step": 5,
+              "unit": "%",
+              "default": 45
+            },
+            "turn_chance": {
+              "type": "integer",
+              "order": 3,
+              "title": "Turn chance",
+              "help": "Chance that a pipe turns at each grid point. 0% makes straight runs until a wall or another pipe.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 40
+            },
+            "growth_speed": {
+              "type": "integer",
+              "order": 4,
+              "title": "Growth speed",
+              "help": "How many grid cells each pipe grows per second.",
+              "minimum": 1,
+              "maximum": 30,
+              "step": 1,
+              "unit": " cells/s",
+              "default": 5
+            },
+            "orbit_speed": {
+              "type": "integer",
+              "order": 5,
+              "title": "Orbit speed",
+              "help": "How fast the camera circles the structure. 0% holds the camera still.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 25
+            },
+            "field_of_view": {
+              "type": "integer",
+              "order": 6,
+              "title": "Field of view",
+              "help": "Vertical viewing angle. Wide angles exaggerate perspective.",
+              "minimum": 20,
+              "maximum": 90,
+              "step": 5,
+              "unit": "°",
+              "default": 45
+            },
+            "joint_style": {
+              "type": "string",
+              "order": 7,
+              "title": "Joints",
+              "help": "Ball spheres at every turn and end, rounded elbows, or bare mitered corners.",
+              "enum": [
+                "ball",
+                "rounded",
+                "none"
+              ],
+              "enum_titles": [
+                "Ball",
+                "Rounded",
+                "None"
+              ],
+              "default": "ball"
+            },
+            "shading": {
+              "type": "string",
+              "order": 8,
+              "title": "Shading",
+              "help": "Soft lit gives smooth gradients, flat one tone per pipe, high contrast a bold halftone look.",
+              "enum": [
+                "soft_lit",
+                "flat",
+                "high_contrast"
+              ],
+              "enum_titles": [
+                "Soft lit",
+                "Flat",
+                "High contrast"
+              ],
+              "default": "soft_lit"
+            },
+            "pattern": {
+              "type": "string",
+              "order": 9,
+              "title": "Pattern",
+              "help": "Optional rings or checker tiles on the pipe surface.",
+              "enum": [
+                "plain",
+                "rings",
+                "checker"
+              ],
+              "enum_titles": [
+                "Plain",
+                "Rings",
+                "Checker"
+              ],
+              "default": "plain"
+            },
+            "reset_mode": {
+              "type": "string",
+              "order": 10,
+              "title": "Reset",
+              "help": "Start a new layout when the volume is full, or on a fixed period.",
+              "enum": [
+                "when_full",
+                "timed"
+              ],
+              "enum_titles": [
+                "When full",
+                "Every N seconds"
+              ],
+              "default": "when_full"
+            },
+            "reset_seconds": {
+              "type": "integer",
+              "order": 11,
+              "title": "Reset period",
+              "help": "Seconds between restarts, counted in animation time. Used with the Every N seconds reset.",
+              "minimum": 10,
+              "maximum": 600,
+              "step": 10,
+              "unit": " s",
+              "default": 90
+            },
+            "seed_mode": {
+              "type": "string",
+              "order": 12,
+              "title": "Random seed",
+              "help": "New each run picks different layouts every time; a fixed seed repeats the same sequence.",
+              "enum": [
+                "random",
+                "fixed"
+              ],
+              "enum_titles": [
+                "New each run",
+                "Fixed seed"
+              ],
+              "default": "random"
+            },
+            "seed": {
+              "type": "integer",
+              "order": 13,
+              "title": "Seed number",
+              "help": "The number that selects the sequence of layouts. Used with a fixed seed.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "hex-expedition",
+        "title": "Hex expedition",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 15,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "map": {
+              "type": "string",
+              "order": 0,
+              "title": "Map type",
+              "help": "Which kind of expedition map to draw. All in turn reveals each type in the next, hex by hex.",
+              "enum": [
+                "cycle",
+                "jungle",
+                "savanna",
+                "desert",
+                "arctic",
+                "volcanic"
+              ],
+              "enum_titles": [
+                "All in turn",
+                "Jungle",
+                "Savanna",
+                "Desert",
+                "Arctic",
+                "Volcanic"
+              ],
+              "default": "cycle"
+            },
+            "map_seconds": {
+              "type": "integer",
+              "order": 1,
+              "title": "Seconds per map",
+              "help": "How long each map type stays on screen before the next one is revealed.",
+              "minimum": 20,
+              "maximum": 300,
+              "step": 10,
+              "unit": " s",
+              "default": 60
+            },
+            "tile_size": {
+              "type": "integer",
+              "order": 2,
+              "title": "Hex size",
+              "help": "Radius of one hex in Braille dots. Small hexes show more map; large ones show more sprite detail.",
+              "minimum": 10,
+              "maximum": 40,
+              "step": 2,
+              "unit": " dots",
+              "default": 20
+            },
+            "pan_speed": {
+              "type": "integer",
+              "order": 3,
+              "title": "Pan speed",
+              "help": "How fast the camera travels over the map, on top of the global Speed setting. 0% holds it still.",
+              "minimum": 0,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "pan_style": {
+              "type": "string",
+              "order": 4,
+              "title": "Pan route",
+              "help": "A slowly curving expedition route, or a straight pan in one direction.",
+              "enum": [
+                "wander",
+                "east",
+                "north_east",
+                "south"
+              ],
+              "enum_titles": [
+                "Wandering route",
+                "East",
+                "North-east",
+                "South"
+              ],
+              "default": "wander"
+            },
+            "animation_speed": {
+              "type": "integer",
+              "order": 5,
+              "title": "Tile animation",
+              "help": "Speed of waves, swaying trees, smoke, lava and fires. 0% freezes the tiles.",
+              "minimum": 0,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "stepped": {
+              "type": "boolean",
+              "order": 6,
+              "title": "Stepped tile frames",
+              "help": "Plays tile animations as a few hand-drawn frames per second instead of smoothly. The camera stays smooth.",
+              "default": true
+            },
+            "landmarks": {
+              "type": "integer",
+              "order": 7,
+              "title": "Landmarks",
+              "help": "How many villages, camps, ruins, caves, mines and shrines are scattered over each island. Every island keeps its one ship and one goal while this is above 0%.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "weather": {
+              "type": "boolean",
+              "order": 8,
+              "title": "Weather",
+              "help": "Adds falling snow, rising embers, blown sand or fireflies, depending on the map type.",
+              "default": true
+            },
+            "cloud_shadows": {
+              "type": "boolean",
+              "order": 9,
+              "title": "Cloud shadows",
+              "help": "Lets the shadows of drifting clouds pass over the map.",
+              "default": true
+            },
+            "light": {
+              "type": "integer",
+              "order": 10,
+              "title": "Tile light",
+              "help": "Scales tile light before the shared look is applied.",
+              "minimum": 50,
+              "maximum": 150,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "tint": {
+              "type": "boolean",
+              "order": 11,
+              "title": "Biome colors",
+              "help": "Colours each tile by terrain. Off uses your global palette.",
+              "default": true
+            },
+            "seed": {
+              "type": "integer",
+              "order": 12,
+              "title": "Seed number",
+              "help": "Selects the world. The same seed always generates the same maps.",
+              "minimum": 0,
+              "maximum": 999,
+              "step": 1,
+              "default": 7
+            }
+          }
+        }
+      },
+      {
+        "id": "almost-touching",
+        "title": "Almost touching",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "minimum_gap": {
+              "order": 0,
+              "title": "Closest gap",
+              "type": "integer",
+              "help": "Minimum distance between tips, as a percentage of width.",
+              "minimum": 1,
+              "maximum": 20,
+              "step": 1,
+              "default": 4
+            },
+            "reach": {
+              "order": 1,
+              "title": "Arc reach",
+              "type": "integer",
+              "help": "How far the arc bodies curl away from their tips.",
+              "minimum": 20,
+              "maximum": 90,
+              "step": 1,
+              "default": 60
+            },
+            "cycle_seconds": {
+              "order": 2,
+              "title": "Approach cycle",
+              "type": "integer",
+              "help": "Seconds for approach, lingering and retreat.",
+              "minimum": 8,
+              "maximum": 100,
+              "step": 1,
+              "default": 26
+            },
+            "dwell": {
+              "order": 3,
+              "title": "Near-contact linger",
+              "type": "integer",
+              "help": "Higher values slow the tips near closest approach.",
+              "minimum": 0,
+              "maximum": 85,
+              "step": 1,
+              "default": 55
+            }
+          }
+        }
+      },
+      {
+        "id": "aurora",
+        "title": "Northern lights",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "horizon_height": {
+              "order": 0,
+              "title": "Ground height",
+              "type": "integer",
+              "help": "Ink-free ground measured upward from the lower edge.",
+              "minimum": 10,
+              "maximum": 65,
+              "step": 1,
+              "unit": "%",
+              "default": 28
+            },
+            "horizon_roughness": {
+              "order": 1,
+              "title": "Horizon roughness",
+              "type": "integer",
+              "help": "Seeded low hills; zero gives a level horizon.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 36
+            },
+            "curtain_count": {
+              "order": 2,
+              "title": "Curtains",
+              "type": "integer",
+              "help": "Overlapping bands with separate folds and crests.",
+              "minimum": 2,
+              "maximum": 10,
+              "step": 1,
+              "default": 6
+            },
+            "curtain_motion": {
+              "order": 3,
+              "title": "Curtain motion",
+              "type": "integer",
+              "help": "Slow folding; zero holds the same geometry at every time.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 38
+            },
+            "trees": {
+              "order": 4,
+              "title": "Tree silhouettes",
+              "type": "boolean",
+              "help": "Dark seeded trees rise just above the horizon without sky ink on them.",
+              "default": true
+            },
+            "tree_density": {
+              "order": 5,
+              "title": "Tree density",
+              "type": "integer",
+              "help": "Zero leaves the horizon clear, even when trees are enabled.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 55
+            },
+            "seed": {
+              "order": 6,
+              "title": "Seed",
+              "type": "integer",
+              "help": "Repeatable skyline and tree placement.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "crop-circles",
+        "title": "Crop circles",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "order": 0,
+              "title": "Pattern",
+              "type": "string",
+              "help": "A new arrangement or geometric adaptations of two documented formations.",
+              "enum": [
+                "procedural",
+                "milk-hill-six-arms",
+                "barbury-triangle"
+              ],
+              "enum_titles": [
+                "Procedural",
+                "Milk Hill six arms",
+                "Barbury triangle"
+              ],
+              "default": "procedural"
+            },
+            "seed": {
+              "order": 1,
+              "title": "Seed",
+              "type": "integer",
+              "help": "Changes the invented arrangement and small reference variations.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 1
+            },
+            "drawers": {
+              "order": 2,
+              "title": "Visible drawers",
+              "type": "integer",
+              "help": "Independent tips advance concurrently on different assigned strokes.",
+              "minimum": 2,
+              "maximum": 8,
+              "step": 1,
+              "default": 3
+            },
+            "drawing_speed": {
+              "order": 3,
+              "title": "Drawing speed",
+              "type": "integer",
+              "help": "Shortens or lengthens the shared drawing interval.",
+              "minimum": 10,
+              "maximum": 100,
+              "step": 1,
+              "unit": "%",
+              "default": 45
+            },
+            "scale": {
+              "order": 4,
+              "title": "Formation scale",
+              "type": "integer",
+              "help": "Fits circles to terminal aspect without stretching them.",
+              "minimum": 35,
+              "maximum": 100,
+              "step": 1,
+              "unit": "%",
+              "default": 78
+            }
+          }
+        }
+      },
+      {
+        "id": "delayed-reflection",
+        "title": "Delayed reflection",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "delay_seconds": {
+              "order": 0,
+              "title": "Reflection delay",
+              "type": "integer",
+              "help": "Seconds by which the lower ribbon follows the upper ribbon.",
+              "minimum": 0,
+              "maximum": 15,
+              "step": 1,
+              "default": 3
+            },
+            "boundary": {
+              "order": 1,
+              "title": "Waterline",
+              "type": "integer",
+              "help": "Vertical position of the reflecting boundary, in percent.",
+              "minimum": 35,
+              "maximum": 65,
+              "step": 1,
+              "default": 52
+            },
+            "distortion": {
+              "order": 2,
+              "title": "Ripple distortion",
+              "type": "integer",
+              "help": "Horizontal ripple amplitude of the reflected curve.",
+              "minimum": 0,
+              "maximum": 50,
+              "step": 1,
+              "default": 15
+            },
+            "sway_seconds": {
+              "order": 3,
+              "title": "Sway period",
+              "type": "integer",
+              "help": "Time for the original ribbon to sway once.",
+              "minimum": 6,
+              "maximum": 90,
+              "step": 1,
+              "default": 22
+            }
+          }
+        }
+      },
+      {
+        "id": "fireflies",
+        "title": "Fireflies finding a rhythm",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "order": 0,
+              "title": "Firefly count",
+              "type": "integer",
+              "help": "Bounded population of independent luminous dots.",
+              "minimum": 4,
+              "maximum": 128,
+              "step": 1,
+              "default": 36
+            },
+            "drift": {
+              "order": 1,
+              "title": "Drift",
+              "type": "integer",
+              "help": "Size of slow wandering paths; zero fixes positions.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 30
+            },
+            "pulse_period": {
+              "order": 2,
+              "title": "Pulse period",
+              "type": "integer",
+              "help": "Seconds between shared flashes.",
+              "minimum": 1,
+              "maximum": 12,
+              "step": 1,
+              "default": 4
+            },
+            "synchronization": {
+              "order": 3,
+              "title": "Synchronization",
+              "type": "integer",
+              "help": "Strength of the gradual gathering into a common rhythm and separation.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 80
+            },
+            "seed": {
+              "order": 4,
+              "title": "Seed",
+              "type": "integer",
+              "help": "Selects positions and individual pulse rhythms.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "hidden-wheel",
+        "title": "Hidden wheel",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "marks": {
+              "order": 0,
+              "title": "Rim marks",
+              "type": "integer",
+              "help": "Short orbiting dashes suggesting an invisible wheel.",
+              "minimum": 12,
+              "maximum": 96,
+              "step": 1,
+              "default": 40
+            },
+            "visible_arc": {
+              "order": 1,
+              "title": "Visible sector",
+              "type": "integer",
+              "help": "Percentage of the rim where marks can appear.",
+              "minimum": 20,
+              "maximum": 95,
+              "step": 1,
+              "default": 65
+            },
+            "turn_seconds": {
+              "order": 2,
+              "title": "Turn period",
+              "type": "integer",
+              "help": "Seconds for one wheel rotation.",
+              "minimum": 8,
+              "maximum": 120,
+              "step": 1,
+              "default": 32
+            },
+            "dash_length": {
+              "order": 3,
+              "title": "Dash length",
+              "type": "integer",
+              "help": "Percentage of each mark spacing occupied by ink.",
+              "minimum": 15,
+              "maximum": 90,
+              "step": 1,
+              "default": 55
+            }
+          }
+        }
+      },
+      {
+        "id": "lighthouse",
+        "title": "Distant lighthouse",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "horizon": {
+              "order": 0,
+              "title": "Horizon",
+              "type": "integer",
+              "help": "Sea horizon as a percentage from the top.",
+              "minimum": 25,
+              "maximum": 80,
+              "step": 1,
+              "default": 55
+            },
+            "location": {
+              "order": 1,
+              "title": "Lighthouse location",
+              "type": "integer",
+              "help": "Horizontal position of the simple coastal silhouette.",
+              "minimum": 5,
+              "maximum": 95,
+              "step": 1,
+              "default": 18
+            },
+            "beam_width": {
+              "order": 2,
+              "title": "Beam width",
+              "type": "integer",
+              "help": "Angular spread of the sweeping light in degrees.",
+              "minimum": 3,
+              "maximum": 40,
+              "step": 1,
+              "default": 12
+            },
+            "sweep": {
+              "order": 3,
+              "title": "Sweep range",
+              "type": "integer",
+              "help": "Maximum sweep above and below the horizon in degrees.",
+              "minimum": 10,
+              "maximum": 85,
+              "step": 1,
+              "default": 65
+            },
+            "speed": {
+              "order": 4,
+              "title": "Sweep speed",
+              "type": "integer",
+              "help": "Speed of the returning sweep.",
+              "minimum": 1,
+              "maximum": 100,
+              "step": 1,
+              "default": 20
+            },
+            "water_glints": {
+              "order": 5,
+              "title": "Water glints",
+              "type": "integer",
+              "help": "Strength of short reflected marks; zero hides them.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 55
+            },
+            "seed": {
+              "order": 6,
+              "title": "Seed",
+              "type": "integer",
+              "help": "Selects the repeatable water glint pattern.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "needle-threads",
+        "title": "Threads through a needle",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "threads": {
+              "order": 0,
+              "title": "Thread count",
+              "type": "integer",
+              "help": "Number of curves constrained through the shared eye.",
+              "minimum": 2,
+              "maximum": 24,
+              "step": 1,
+              "default": 9
+            },
+            "opening_x": {
+              "order": 1,
+              "title": "Eye position",
+              "type": "integer",
+              "help": "Horizontal position of the shared opening, in percent.",
+              "minimum": 20,
+              "maximum": 80,
+              "step": 1,
+              "default": 50
+            },
+            "spread": {
+              "order": 2,
+              "title": "Fan spread",
+              "type": "integer",
+              "help": "Vertical extent of the loose threads.",
+              "minimum": 10,
+              "maximum": 90,
+              "step": 1,
+              "default": 65
+            },
+            "sway_seconds": {
+              "order": 3,
+              "title": "Sway period",
+              "type": "integer",
+              "help": "Seconds for one gentle thread sway.",
+              "minimum": 6,
+              "maximum": 90,
+              "step": 1,
+              "default": 24
+            }
+          }
+        }
+      },
+      {
+        "id": "paper-fold",
+        "title": "Paper-fold trace",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "depth": {
+              "order": 0,
+              "title": "Fold depth",
+              "type": "integer",
+              "help": "Each additional fold doubles the path, up to 1024 segments.",
+              "minimum": 3,
+              "maximum": 10,
+              "step": 1,
+              "default": 8
+            },
+            "cycle_seconds": {
+              "order": 1,
+              "title": "Fold cycle",
+              "type": "integer",
+              "help": "Seconds for unfolding, resting, refolding and resting.",
+              "minimum": 12,
+              "maximum": 120,
+              "step": 1,
+              "default": 40
+            },
+            "scale": {
+              "order": 2,
+              "title": "Path size",
+              "type": "integer",
+              "help": "Percentage of available space used by the trace.",
+              "minimum": 30,
+              "maximum": 100,
+              "step": 1,
+              "default": 85
+            }
+          }
+        }
+      },
+      {
+        "id": "pollen",
+        "title": "Pollen in a sunbeam",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "order": 0,
+              "title": "Pollen count",
+              "type": "integer",
+              "help": "Small seeded population; zero leaves only the sunbeam.",
+              "minimum": 0,
+              "maximum": 128,
+              "step": 1,
+              "default": 40
+            },
+            "beam_angle": {
+              "order": 1,
+              "title": "Beam angle",
+              "type": "integer",
+              "help": "Tilt from vertical in degrees.",
+              "minimum": -80,
+              "maximum": 80,
+              "step": 1,
+              "default": 25
+            },
+            "beam_width": {
+              "order": 2,
+              "title": "Beam width",
+              "type": "integer",
+              "help": "Width of the shaft as a percentage of the field.",
+              "minimum": 5,
+              "maximum": 70,
+              "step": 1,
+              "default": 24
+            },
+            "beam_location": {
+              "order": 3,
+              "title": "Beam location",
+              "type": "integer",
+              "help": "Horizontal center of the beam.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 50
+            },
+            "beam_motion": {
+              "order": 4,
+              "title": "Beam motion",
+              "type": "integer",
+              "help": "Slow sideways sway; zero holds the beam still.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 15
+            },
+            "drift": {
+              "order": 5,
+              "title": "Drift",
+              "type": "integer",
+              "help": "Speed of drifting pollen; zero freezes particle positions.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 35
+            },
+            "seed": {
+              "order": 6,
+              "title": "Seed",
+              "type": "integer",
+              "help": "Selects repeatable pollen positions.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "prime-constellations",
+        "title": "Prime constellations",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "grid_size": {
+              "order": 0,
+              "title": "Spiral width",
+              "type": "integer",
+              "help": "Odd grid width; at most 4225 cached number positions.",
+              "minimum": 17,
+              "maximum": 65,
+              "step": 2,
+              "default": 35
+            },
+            "sweep_seconds": {
+              "order": 1,
+              "title": "Sweep period",
+              "type": "integer",
+              "help": "Time for diagonal illumination to cross the number spiral.",
+              "minimum": 5,
+              "maximum": 90,
+              "step": 1,
+              "default": 18
+            },
+            "background": {
+              "order": 2,
+              "title": "Faint dots",
+              "type": "integer",
+              "help": "Brightness of nonprime points, in percent.",
+              "minimum": 0,
+              "maximum": 40,
+              "step": 1,
+              "default": 12
+            }
+          }
+        }
+      },
+      {
+        "id": "unfinished-circle",
+        "title": "Unfinished circle",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "rings": {
+              "order": 0,
+              "title": "Ring count",
+              "type": "integer",
+              "help": "Concentric rings with independent drifting gaps.",
+              "minimum": 1,
+              "maximum": 12,
+              "step": 1,
+              "default": 5
+            },
+            "gap_degrees": {
+              "order": 1,
+              "title": "Gap width",
+              "type": "integer",
+              "help": "Angular width of each missing arc.",
+              "minimum": 15,
+              "maximum": 150,
+              "step": 1,
+              "default": 65
+            },
+            "wobble": {
+              "order": 2,
+              "title": "Imperfection",
+              "type": "integer",
+              "help": "Small radial ripples as a percentage of ring spacing.",
+              "minimum": 0,
+              "maximum": 40,
+              "step": 1,
+              "default": 12
+            },
+            "turn_seconds": {
+              "order": 3,
+              "title": "Gap orbit",
+              "type": "integer",
+              "help": "Seconds for the missing sections to orbit.",
+              "minimum": 8,
+              "maximum": 120,
+              "step": 1,
+              "default": 35
+            }
+          }
+        }
+      },
+      {
+        "id": "wallpaper",
+        "title": "Turning wallpaper",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "columns": {
+              "order": 0,
+              "title": "Repeat columns",
+              "type": "integer",
+              "help": "Number of repeating motifs across the viewport.",
+              "minimum": 3,
+              "maximum": 18,
+              "step": 1,
+              "default": 8
+            },
+            "rotation_seconds": {
+              "order": 1,
+              "title": "Rotation period",
+              "type": "integer",
+              "help": "Time for each tile motif to rotate once.",
+              "minimum": 8,
+              "maximum": 120,
+              "step": 1,
+              "default": 36
+            },
+            "motif": {
+              "order": 2,
+              "title": "Motif",
+              "type": "string",
+              "help": "Choose petals, diamonds or pinwheels.",
+              "enum": [
+                "petals",
+                "diamonds",
+                "pinwheels"
+              ],
+              "enum_titles": [
+                "Petals",
+                "Diamonds",
+                "Pinwheels"
+              ],
+              "default": "petals"
+            },
+            "symmetry": {
+              "order": 3,
+              "title": "Symmetry",
+              "type": "string",
+              "help": "Repeat identically, alternate mirror or alternate quarter turns.",
+              "enum": [
+                "repeat",
+                "mirror",
+                "quarter-turns"
+              ],
+              "enum_titles": [
+                "Repeat",
+                "Mirror",
+                "Quarter turns"
+              ],
+              "default": "mirror"
+            }
+          }
+        }
+      },
+      {
+        "id": "window-sunlight",
+        "title": "Window sunlight",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "window_count": {
+              "order": 0,
+              "title": "Windows",
+              "type": "integer",
+              "help": "Independent projections arranged across the field.",
+              "minimum": 1,
+              "maximum": 4,
+              "step": 1,
+              "default": 1
+            },
+            "size": {
+              "order": 1,
+              "title": "Window size",
+              "type": "integer",
+              "help": "Projection width within each window slot.",
+              "minimum": 15,
+              "maximum": 90,
+              "step": 1,
+              "default": 65
+            },
+            "height": {
+              "order": 2,
+              "title": "Window height",
+              "type": "integer",
+              "help": "Height of each projected window.",
+              "minimum": 15,
+              "maximum": 85,
+              "step": 1,
+              "default": 48
+            },
+            "gap": {
+              "order": 3,
+              "title": "Pane gap",
+              "type": "integer",
+              "help": "Dark separation between panes; pollen never lights in these gaps.",
+              "minimum": 3,
+              "maximum": 35,
+              "step": 1,
+              "default": 12
+            },
+            "location_x": {
+              "order": 4,
+              "title": "Horizontal location",
+              "type": "integer",
+              "help": "Moves the entire group of projections sideways.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 50
+            },
+            "location_y": {
+              "order": 5,
+              "title": "Vertical location",
+              "type": "integer",
+              "help": "Moves projections up or down.",
+              "minimum": 10,
+              "maximum": 90,
+              "step": 1,
+              "default": 50
+            },
+            "shear": {
+              "order": 6,
+              "title": "Projection slant",
+              "type": "integer",
+              "help": "Horizontal skew from the top to bottom of each projection.",
+              "minimum": -60,
+              "maximum": 60,
+              "step": 1,
+              "default": 20
+            },
+            "motion": {
+              "order": 7,
+              "title": "Sun motion",
+              "type": "integer",
+              "help": "Slow movement and stretching of the projections.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 20
+            },
+            "pollen_count": {
+              "order": 8,
+              "title": "Pollen count",
+              "type": "integer",
+              "help": "Small seeded population revealed only inside illuminated panes.",
+              "minimum": 0,
+              "maximum": 128,
+              "step": 1,
+              "default": 40
+            },
+            "seed": {
+              "order": 9,
+              "title": "Seed",
+              "type": "integer",
+              "help": "Selects pollen paths and subtle pane texture.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 1
+            },
+            "grid": {
+              "order": 10,
+              "title": "Pane grid",
+              "type": "string",
+              "help": "Two columns with two or three rows of separate light panes.",
+              "enum": [
+                "2-x-2",
+                "2-x-3"
+              ],
+              "enum_titles": [
+                "2 x 2",
+                "2 x 3"
+              ],
+              "default": "2-x-2"
+            },
+            "pollen": {
+              "order": 11,
+              "title": "Pollen",
+              "type": "boolean",
+              "help": "Reveal drifting pollen only within lit panes, preserving dark mullions.",
+              "default": false
+            }
+          }
+        }
+      },
+      {
+        "id": "cube-clock",
+        "title": "Cube clock",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 15,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "hour_format": {
+              "type": "string",
+              "order": 0,
+              "title": "Hour format",
+              "help": "24 hours shows 07:05. 12 hours drops the leading zero and marks PM with two small dots above the last digit (AM has one).",
+              "enum": [
+                "24h",
+                "12h"
+              ],
+              "enum_titles": [
+                "24 hours",
+                "12 hours"
+              ],
+              "default": "24h"
+            },
+            "show_seconds": {
+              "type": "boolean",
+              "order": 1,
+              "title": "Show seconds",
+              "help": "Append the seconds to the digital readout. The minute ring shows them either way.",
+              "default": false
+            },
+            "clock_position": {
+              "type": "string",
+              "order": 2,
+              "title": "Readout",
+              "help": "Where the small digital time is drawn. Hidden leaves only the cube and the minute ring.",
+              "enum": [
+                "below",
+                "inside",
+                "off"
+              ],
+              "enum_titles": [
+                "Below cube",
+                "In front",
+                "Hidden"
+              ],
+              "default": "below"
+            },
+            "cube_size": {
+              "type": "integer",
+              "order": 3,
+              "title": "Cube size",
+              "help": "Size of the cube relative to the smaller side of the pane. Large cubes can touch the readout.",
+              "minimum": 20,
+              "maximum": 60,
+              "step": 2,
+              "unit": "%",
+              "default": 42
+            },
+            "rotation_rate": {
+              "type": "integer",
+              "order": 4,
+              "title": "Rotation speed",
+              "help": "How fast the cube turns. 100% is one full turn about every 18 seconds; 0% freezes it.",
+              "minimum": 0,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "second_tick": {
+              "type": "boolean",
+              "order": 5,
+              "title": "Second tick",
+              "help": "Give the cube a small eased nudge at every real second, like a clock movement.",
+              "default": true
+            },
+            "minute_ring": {
+              "type": "boolean",
+              "order": 6,
+              "title": "Minute ring",
+              "help": "A ring of 60 faint dots behind the cube. The current second glows and leaves a short trail.",
+              "default": true
+            },
+            "face_shading": {
+              "type": "integer",
+              "order": 7,
+              "title": "Face shading",
+              "help": "Sparse dither on the faces turned towards you. 0% is a pure wireframe.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 50
+            },
+            "intensity": {
+              "type": "integer",
+              "order": 8,
+              "title": "Intensity",
+              "help": "Scales every dot of this scene. The defaults are deliberately dim for use behind text.",
+              "minimum": 30,
+              "maximum": 150,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "dust": {
+              "type": "boolean",
+              "order": 9,
+              "title": "Dust",
+              "help": "A few faint twinkling dots in the background.",
+              "default": true
+            },
+            "time_zone_from_location": {
+              "type": "boolean",
+              "order": 10,
+              "title": "Zone from location",
+              "help": "Estimate the time zone from the longitude of your location (15 degrees per hour, no daylight saving). Turn off to set the offset by hand.",
+              "default": true
+            },
+            "utc_offset_hours": {
+              "type": "integer",
+              "order": 11,
+              "title": "UTC offset",
+              "help": "Hours added to UTC. Only used when Zone from location is off.",
+              "minimum": -12,
+              "maximum": 14,
+              "step": 1,
+              "unit": " h",
+              "default": 0
+            }
+          }
+        }
+      },
+      {
+        "id": "pi-digits",
+        "title": "Digits of Pi",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "order": 0,
+              "title": "Pi rendering",
+              "help": "Native text uses the terminal font. Font Braille rasterizes the bundled Cascadia Code.",
+              "enum": [
+                "native-text",
+                "font-braille"
+              ],
+              "enum_titles": [
+                "Native text",
+                "Font Braille"
+              ],
+              "default": "native-text"
+            },
+            "font_size": {
+              "type": "integer",
+              "order": 1,
+              "title": "Font size",
+              "help": "Real-font height in Braille raster dots. Native text uses the terminal emulator's configured size.",
+              "minimum": 8,
+              "maximum": 48,
+              "step": 2,
+              "unit": " dots",
+              "default": 20
+            },
+            "digits_limit": {
+              "type": "integer",
+              "order": 2,
+              "title": "Exact digits",
+              "help": "Number of exact decimal digits, including the initial 3. The decimal separator is added for display; the sequence repeats after this prefix.",
+              "minimum": 1,
+              "maximum": 20000,
+              "step": 100,
+              "default": 4096
+            },
+            "scroll_speed": {
+              "type": "integer",
+              "order": 3,
+              "title": "Scroll speed",
+              "help": "Move through the exact digit sequence. Zero holds the prefix; global Speed also applies.",
+              "minimum": 0,
+              "maximum": 2000,
+              "step": 10,
+              "unit": " ×0.1 chars/s",
+              "default": 10
+            },
+            "colour_angle": {
+              "type": "integer",
+              "order": 4,
+              "title": "Pi colour angle",
+              "help": "Common colour of decimal digits when digit colours are disabled.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 180
+            },
+            "ink_level": {
+              "type": "integer",
+              "order": 5,
+              "title": "Pi ink level",
+              "help": "Zero hides both native and Braille text. Colour strength and dot coverage are independent.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 65
+            },
+            "digit_colors": {
+              "type": "boolean",
+              "order": 6,
+              "title": "Colors by digit",
+              "help": "Assign a separate colour angle to each decimal digit. The decimal separator keeps the common colour.",
+              "default": false
+            },
+            "digit_0_angle": {
+              "type": "integer",
+              "order": 7,
+              "title": "Digit 0 colour angle",
+              "help": "Colour angle assigned to this exact decimal digit; used when Colors by digit is on.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 0
+            },
+            "digit_1_angle": {
+              "type": "integer",
+              "order": 8,
+              "title": "Digit 1 colour angle",
+              "help": "Colour angle assigned to this exact decimal digit; used when Colors by digit is on.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 36
+            },
+            "digit_2_angle": {
+              "type": "integer",
+              "order": 9,
+              "title": "Digit 2 colour angle",
+              "help": "Colour angle assigned to this exact decimal digit; used when Colors by digit is on.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 72
+            },
+            "digit_3_angle": {
+              "type": "integer",
+              "order": 10,
+              "title": "Digit 3 colour angle",
+              "help": "Colour angle assigned to this exact decimal digit; used when Colors by digit is on.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 108
+            },
+            "digit_4_angle": {
+              "type": "integer",
+              "order": 11,
+              "title": "Digit 4 colour angle",
+              "help": "Colour angle assigned to this exact decimal digit; used when Colors by digit is on.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 144
+            },
+            "digit_5_angle": {
+              "type": "integer",
+              "order": 12,
+              "title": "Digit 5 colour angle",
+              "help": "Colour angle assigned to this exact decimal digit; used when Colors by digit is on.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 180
+            },
+            "digit_6_angle": {
+              "type": "integer",
+              "order": 13,
+              "title": "Digit 6 colour angle",
+              "help": "Colour angle assigned to this exact decimal digit; used when Colors by digit is on.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 216
+            },
+            "digit_7_angle": {
+              "type": "integer",
+              "order": 14,
+              "title": "Digit 7 colour angle",
+              "help": "Colour angle assigned to this exact decimal digit; used when Colors by digit is on.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 252
+            },
+            "digit_8_angle": {
+              "type": "integer",
+              "order": 15,
+              "title": "Digit 8 colour angle",
+              "help": "Colour angle assigned to this exact decimal digit; used when Colors by digit is on.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 288
+            },
+            "digit_9_angle": {
+              "type": "integer",
+              "order": 16,
+              "title": "Digit 9 colour angle",
+              "help": "Colour angle assigned to this exact decimal digit; used when Colors by digit is on.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 324
+            }
+          }
+        }
+      },
+      {
+        "id": "dither-water",
+        "title": "Dithered water",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 12,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "wave_scale": {
+              "type": "integer",
+              "order": 0,
+              "title": "Wave size",
+              "help": "Spatial frequency of the waves. Higher values give smaller, busier ripples.",
+              "minimum": 50,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "flow_speed": {
+              "type": "integer",
+              "order": 1,
+              "title": "Flow speed",
+              "help": "How fast the light bands drift and shimmer, on top of the global Speed setting.",
+              "minimum": 20,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "sharpness": {
+              "type": "integer",
+              "order": 2,
+              "title": "Sharpness",
+              "help": "Higher values narrow the bright caustic lines and leave more dark water between them.",
+              "minimum": 1,
+              "maximum": 6,
+              "step": 1,
+              "default": 3
+            },
+            "density": {
+              "type": "integer",
+              "order": 3,
+              "title": "Density",
+              "help": "Shifts the black and white balance. Positive values switch more dots on.",
+              "minimum": -30,
+              "maximum": 30,
+              "step": 2,
+              "unit": "%",
+              "default": 0
+            },
+            "intensity": {
+              "type": "integer",
+              "order": 4,
+              "title": "Intensity",
+              "help": "Below the default, lit dots thin out. Above it, the blue tint gets brighter. The default keeps the water a quiet background.",
+              "minimum": 15,
+              "maximum": 80,
+              "step": 5,
+              "unit": "%",
+              "default": 45
+            },
+            "perspective": {
+              "type": "integer",
+              "order": 5,
+              "title": "Perspective",
+              "help": "Squeezes the waves toward a horizon and fades the far water. 0% is a flat top-down surface.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 50
+            },
+            "pattern": {
+              "type": "string",
+              "order": 6,
+              "title": "Pattern",
+              "help": "Size of the fixed threshold matrix. Coarser matrices look chunkier.",
+              "enum": [
+                "bayer2",
+                "bayer4",
+                "bayer8"
+              ],
+              "enum_titles": [
+                "2x2 chunky",
+                "4x4 classic",
+                "8x8 fine"
+              ],
+              "default": "bayer4"
+            },
+            "ripples": {
+              "type": "boolean",
+              "order": 7,
+              "title": "Ripples",
+              "help": "Draws slowly expanding elliptical rings on top of the waves.",
+              "default": true
+            },
+            "stepped": {
+              "type": "boolean",
+              "order": 8,
+              "title": "Stepped motion",
+              "help": "Advances the water in eight steps per second for a hand-animated pixel-art stutter.",
+              "default": false
+            },
+            "tint": {
+              "type": "boolean",
+              "order": 9,
+              "title": "Blue tint",
+              "help": "Colours lit dots from deep blue to pale cyan. Off uses your global palette.",
+              "default": true
+            },
+            "seed": {
+              "type": "integer",
+              "order": 10,
+              "title": "Seed number",
+              "help": "Selects the wave phases and where ripples appear.",
+              "minimum": 0,
+              "maximum": 999,
+              "step": 1,
+              "default": 7
+            }
+          }
+        }
+      },
+      {
+        "id": "box-machine",
+        "title": "Box machine",
+        "family": "machines",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 10,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "seed": {
+              "order": 0,
+              "title": "Machine",
+              "type": "integer",
+              "help": "The number that selects the machine layout. Every number builds a different machine.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 7
+            },
+            "tile_size": {
+              "order": 1,
+              "title": "Tile size",
+              "type": "integer",
+              "help": "Edge of one machine tile. Smaller tiles make a denser machine with more loops.",
+              "minimum": 12,
+              "maximum": 28,
+              "step": 4,
+              "default": 20,
+              "unit": " dots"
+            },
+            "density": {
+              "order": 2,
+              "title": "Rail density",
+              "type": "integer",
+              "help": "How much of the floor carries rails. Low values leave large empty areas.",
+              "minimum": 5,
+              "maximum": 100,
+              "step": 5,
+              "default": 70,
+              "unit": "%"
+            },
+            "screens": {
+              "order": 3,
+              "title": "Screens",
+              "type": "integer",
+              "help": "Most little screens (dithered gradient and scrolling marquee) the machine may hold. 0 removes them.",
+              "minimum": 0,
+              "maximum": 6,
+              "step": 1,
+              "default": 2
+            },
+            "speed": {
+              "order": 4,
+              "title": "Box speed",
+              "type": "integer",
+              "help": "How fast boxes slide along the rails. Multiplied by the global Speed setting.",
+              "minimum": 1,
+              "maximum": 20,
+              "step": 1,
+              "default": 6,
+              "unit": " dots/s"
+            },
+            "spacing": {
+              "order": 5,
+              "title": "Box spacing",
+              "type": "integer",
+              "help": "Distance between boxes on one loop. Smaller values put more boxes on the rails.",
+              "minimum": 16,
+              "maximum": 48,
+              "step": 4,
+              "default": 28,
+              "unit": " dots"
+            },
+            "cube_size": {
+              "order": 6,
+              "title": "Box size",
+              "type": "integer",
+              "help": "Edge length of each box.",
+              "minimum": 3,
+              "maximum": 6,
+              "step": 1,
+              "default": 4,
+              "unit": " dots"
+            },
+            "rail_level": {
+              "order": 7,
+              "title": "Rail ink",
+              "type": "integer",
+              "help": "Ink level of the rails. 0% hides them so the boxes seem to float.",
+              "minimum": 0,
+              "maximum": 60,
+              "step": 2,
+              "default": 35,
+              "unit": "%"
+            },
+            "cube_level": {
+              "order": 8,
+              "title": "Box ink",
+              "type": "integer",
+              "help": "Ink level of the box outlines. Their centers are drawn at half of it.",
+              "minimum": 10,
+              "maximum": 100,
+              "step": 5,
+              "default": 80,
+              "unit": "%"
+            },
+            "rails_dashed": {
+              "order": 9,
+              "title": "Dotted rails",
+              "type": "boolean",
+              "help": "Draw rails as a dotted track instead of a solid line.",
+              "default": false
+            },
+            "reverse_alt": {
+              "order": 10,
+              "title": "Alternate directions",
+              "type": "boolean",
+              "help": "Loops take turns running clockwise and counterclockwise. Off sends every box the same way round.",
+              "default": true
+            }
+          }
+        }
+      },
+      {
+        "id": "fbm-clouds",
+        "title": "Dithered fBm clouds",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 8,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "scale": {
+              "type": "integer",
+              "order": 0,
+              "title": "Cloud scale",
+              "help": "Larger values pack in smaller, busier clouds; smaller values give a few huge banks.",
+              "minimum": 50,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "drift": {
+              "type": "integer",
+              "order": 1,
+              "title": "Fold speed",
+              "help": "How fast the cloud folds slowly morph into each other. 0% freezes the folding.",
+              "minimum": 0,
+              "maximum": 400,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "pan": {
+              "type": "integer",
+              "order": 2,
+              "title": "Pan",
+              "help": "Sideways drift of the whole sky. Negative values move it the other way, 0 holds it still.",
+              "minimum": -40,
+              "maximum": 40,
+              "step": 1,
+              "default": 5
+            },
+            "warp": {
+              "type": "integer",
+              "order": 3,
+              "title": "Warp",
+              "help": "How much clouds displace themselves. 0% gives plain fractal noise, 100% the swirling look.",
+              "minimum": 0,
+              "maximum": 150,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "octaves": {
+              "type": "integer",
+              "order": 4,
+              "title": "Detail",
+              "help": "Noise octaves. Fewer octaves are smoother and cheaper, more add fine wisps.",
+              "minimum": 2,
+              "maximum": 4,
+              "step": 1,
+              "default": 4
+            },
+            "tone_steepness": {
+              "type": "integer",
+              "order": 5,
+              "title": "Tone steepness",
+              "help": "Steepness of the dither response: lower is a softer, grainier sky.",
+              "minimum": 50,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 120
+            },
+            "block": {
+              "type": "integer",
+              "order": 6,
+              "title": "Pixel size",
+              "help": "Size of the chunky blocks the clouds are sampled at. Larger blocks are coarser and cheaper.",
+              "minimum": 1,
+              "maximum": 4,
+              "step": 1,
+              "unit": " dots",
+              "default": 2
+            },
+            "pattern": {
+              "type": "string",
+              "order": 7,
+              "title": "Pattern",
+              "help": "Pattern of the one-bit threshold: regular crosshatch, even grain or rough stipple.",
+              "enum": [
+                "bayer",
+                "gradient",
+                "white"
+              ],
+              "enum_titles": [
+                "Bayer 8x8",
+                "Gradient noise",
+                "White noise"
+              ],
+              "default": "bayer"
+            },
+            "intensity": {
+              "type": "integer",
+              "order": 8,
+              "title": "Intensity",
+              "help": "Intensity of lit dots. Keep it low for a quiet background.",
+              "minimum": 5,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 35
+            },
+            "invert": {
+              "type": "boolean",
+              "order": 9,
+              "title": "Invert",
+              "help": "Swap lit and dark: dark clouds on a dotted field.",
+              "default": false
+            },
+            "seed": {
+              "type": "integer",
+              "order": 10,
+              "title": "Seed",
+              "help": "Selects the cloud layout.",
+              "minimum": 0,
+              "maximum": 999,
+              "step": 1,
+              "default": 0
+            }
+          }
+        }
+      },
+      {
+        "id": "dithr-patterns",
+        "title": "Dithr patterns",
+        "family": "dithered",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 8,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "order": 0,
+              "title": "Pattern",
+              "type": "string",
+              "help": "The animated field that is turned into dots. Every pattern loops seamlessly.",
+              "enum": [
+                "caustics",
+                "cellular",
+                "halftone",
+                "starfield",
+                "moire",
+                "smoke",
+                "spiral",
+                "tunnel",
+                "plasma",
+                "ripples"
+              ],
+              "enum_titles": [
+                "Caustics",
+                "Cellular",
+                "Halftone",
+                "Starfield",
+                "Moire",
+                "Smoke",
+                "Spiral",
+                "Tunnel",
+                "Plasma",
+                "Ripples"
+              ],
+              "default": "caustics"
+            },
+            "grain": {
+              "order": 1,
+              "title": "Grain",
+              "type": "string",
+              "help": "Ordered is a regular screen, Floyd-Steinberg organic grain, random noise a slow twinkle, threshold flat shapes.",
+              "enum": [
+                "ordered-bayer",
+                "floyd-steinberg",
+                "random-noise",
+                "threshold"
+              ],
+              "enum_titles": [
+                "Ordered (Bayer)",
+                "Floyd-Steinberg",
+                "Random noise",
+                "Threshold"
+              ],
+              "default": "ordered-bayer"
+            },
+            "density": {
+              "order": 2,
+              "title": "Density",
+              "type": "integer",
+              "help": "Brightness bias. 50 is neutral; higher fills more dots, lower leaves only the brightest parts.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 54
+            },
+            "complexity": {
+              "order": 3,
+              "title": "Complexity",
+              "type": "integer",
+              "help": "Noise octaves, spiral arms, tunnel segments, star count or drop count, depending on the pattern.",
+              "minimum": 1,
+              "maximum": 8,
+              "step": 1,
+              "default": 5
+            },
+            "scale": {
+              "order": 4,
+              "title": "Scale",
+              "type": "integer",
+              "help": "Spatial frequency of the pattern. Higher means finer detail.",
+              "minimum": 20,
+              "maximum": 200,
+              "step": 2,
+              "default": 80,
+              "unit": "%"
+            },
+            "grain_amount": {
+              "order": 5,
+              "title": "Grain amount",
+              "type": "integer",
+              "help": "0% cuts the field at one level (banded); 100% applies the full grain texture.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "default": 70,
+              "unit": "%"
+            },
+            "loop_seconds": {
+              "order": 6,
+              "title": "Loop length",
+              "type": "integer",
+              "help": "Animation time after which the pattern repeats exactly. Shorter loops move faster.",
+              "minimum": 4,
+              "maximum": 60,
+              "step": 1,
+              "default": 12,
+              "unit": " s"
+            },
+            "dot_level": {
+              "order": 7,
+              "title": "Dot level",
+              "type": "integer",
+              "help": "Brightest dot intensity. Keep it low for quiet background art.",
+              "minimum": 10,
+              "maximum": 100,
+              "step": 5,
+              "default": 40,
+              "unit": "%"
+            },
+            "matrix": {
+              "order": 8,
+              "title": "Bayer matrix",
+              "type": "string",
+              "help": "Matrix size of the ordered grain; 4 x 4 is coarser, 8 x 8 smoother.",
+              "enum": [
+                "4-x-4",
+                "8-x-8"
+              ],
+              "enum_titles": [
+                "4 x 4",
+                "8 x 8"
+              ],
+              "default": "8-x-8"
+            },
+            "seed": {
+              "order": 9,
+              "title": "Seed",
+              "type": "integer",
+              "help": "Selects the noise layout, star positions and drop centres.",
+              "minimum": 0,
+              "maximum": 999,
+              "step": 1,
+              "default": 7
+            },
+            "invert": {
+              "order": 10,
+              "title": "Invert",
+              "type": "boolean",
+              "help": "Draw dots on the dark parts of the pattern instead of the bright parts.",
+              "default": false
+            }
+          }
+        }
+      },
+      {
+        "id": "galactic-empires",
+        "title": "Galactic empires",
+        "family": "strategy",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 12,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "simulation_speed": {
+              "order": 0,
+              "title": "Simulation speed",
+              "type": "integer",
+              "help": "Rate of economy, diplomacy and fleet ticks. Global Speed also applies; changing this keeps the current galaxy.",
+              "minimum": 25,
+              "maximum": 400,
+              "step": 25,
+              "unit": "%",
+              "default": 100
+            },
+            "camera_speed": {
+              "order": 1,
+              "title": "Camera speed",
+              "type": "integer",
+              "help": "Clockwise orbit multiplier; 0% holds the camera while empires keep moving.",
+              "minimum": 0,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "orbit_period_seconds": {
+              "order": 2,
+              "title": "Orbit period",
+              "type": "integer",
+              "help": "Seconds for one orbit at Camera speed 100% and Global Speed 1. Default: 900 s.",
+              "minimum": 60,
+              "maximum": 3600,
+              "step": 60,
+              "unit": "s",
+              "default": 900
+            },
+            "camera_zoom": {
+              "order": 3,
+              "title": "Camera zoom",
+              "type": "integer",
+              "help": "100% shows one quarter of the disk's area. Higher zoom shows a smaller field without changing the galaxy.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "star_count": {
+              "order": 4,
+              "title": "Star systems",
+              "type": "integer",
+              "help": "Size of the connected galaxy. Default: 480, 50% more than the previous 320. Changing this starts a new galaxy.",
+              "minimum": 120,
+              "maximum": 720,
+              "step": 20,
+              "default": 480
+            },
+            "empire_count": {
+              "order": 5,
+              "title": "Starting empires",
+              "type": "integer",
+              "help": "Separately founded civilizations; changing this starts a new galaxy.",
+              "minimum": 3,
+              "maximum": 12,
+              "step": 1,
+              "default": 8
+            },
+            "seed": {
+              "order": 6,
+              "title": "Galaxy seed",
+              "type": "integer",
+              "help": "0 chooses a fresh galaxy. A positive seed reproduces its initial map and simulation; changing it restarts.",
+              "minimum": 0,
+              "maximum": 999999,
+              "step": 1,
+              "default": 0
+            },
+            "spiral_arms": {
+              "order": 7,
+              "title": "Spiral arms",
+              "type": "integer",
+              "help": "Number of arms in the generated map. Changing the shape starts a new galaxy.",
+              "minimum": 2,
+              "maximum": 6,
+              "step": 1,
+              "default": 4
+            },
+            "arm_spread": {
+              "order": 8,
+              "title": "Arm spread",
+              "type": "integer",
+              "help": "Angular scatter around each arm; 100% retains the original shape.",
+              "minimum": 25,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "arm_twist": {
+              "order": 9,
+              "title": "Arm twist",
+              "type": "integer",
+              "help": "How much arms turn from center to rim; 100% retains the original twist.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "lane_links": {
+              "order": 10,
+              "title": "Extra hyperlane links",
+              "type": "integer",
+              "help": "Up to this many short extra links per star. Zero still keeps a connected backbone.",
+              "minimum": 0,
+              "maximum": 4,
+              "step": 1,
+              "default": 2
+            },
+            "territory_strength": {
+              "order": 11,
+              "title": "Territory shading",
+              "type": "integer",
+              "help": "Overall territory ink. Zero hides fills, borders and contact but leaves stars and lanes.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 35
+            },
+            "territory_radius": {
+              "order": 12,
+              "title": "Territory size",
+              "type": "integer",
+              "help": "Influence radius around each star; adjusting it rebuilds only the territory field.",
+              "minimum": 50,
+              "maximum": 150,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "territory_softness": {
+              "order": 13,
+              "title": "Territory softness",
+              "type": "integer",
+              "help": "Width of each soft edge. 100% retains the original rounded border.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "territory_border": {
+              "order": 14,
+              "title": "Border emphasis",
+              "type": "integer",
+              "help": "Strength of the territory contour. Zero removes the contour, not the fill.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "territory_contact": {
+              "order": 15,
+              "title": "Contact emphasis",
+              "type": "integer",
+              "help": "Brightness where opposing territories meet; wars pulse slightly.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "star_size": {
+              "order": 16,
+              "title": "Star size",
+              "type": "integer",
+              "help": "Radius of system markers; 100% retains the original size.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "star_glow": {
+              "order": 17,
+              "title": "Star glow",
+              "type": "integer",
+              "help": "System marker intensity. Zero hides markers without erasing territory or lanes.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "show_lanes": {
+              "order": 18,
+              "title": "Show hyperlanes",
+              "type": "boolean",
+              "help": "Draw the connection graph between systems. Hiding it does not disconnect the simulation.",
+              "default": true
+            },
+            "lane_width": {
+              "order": 19,
+              "title": "Hyperlane width",
+              "type": "integer",
+              "help": "Stroke radius of visible hyperlanes.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "lane_glow": {
+              "order": 20,
+              "title": "Hyperlane glow",
+              "type": "integer",
+              "help": "Visible lane intensity. Zero hides lane ink without changing fleet routes.",
+              "minimum": 0,
+              "maximum": 150,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "show_fleets": {
+              "order": 21,
+              "title": "Show fleets",
+              "type": "boolean",
+              "help": "Moving markers on hyperlanes; turning them off keeps the simulation running.",
+              "default": true
+            },
+            "fleet_size": {
+              "order": 22,
+              "title": "Fleet size",
+              "type": "integer",
+              "help": "Size of fleet heads and trails.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "fleet_glow": {
+              "order": 23,
+              "title": "Fleet glow",
+              "type": "integer",
+              "help": "Fleet marker intensity. Zero hides fleet ink without changing the simulation.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "fleet_trail_length": {
+              "order": 24,
+              "title": "Fleet trails",
+              "type": "integer",
+              "help": "Trail length behind moving fleet heads. Zero disables trails; 100% retains the original length.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 10,
+              "unit": "%",
+              "default": 100
+            },
+            "capture_flashes": {
+              "order": 25,
+              "title": "Capture flashes",
+              "type": "boolean",
+              "help": "Make freshly captured system markers briefly larger.",
+              "default": true
+            },
+            "victory_hold_seconds": {
+              "order": 26,
+              "title": "Victory pause",
+              "type": "integer",
+              "help": "Simulation seconds to show the winner before the next galaxy; Simulation speed and Global Speed scale wall time.",
+              "minimum": 10,
+              "maximum": 120,
+              "step": 5,
+              "unit": "s",
+              "default": 30
+            }
+          }
+        }
+      },
+      {
+        "id": "solar-system",
+        "title": "Solar system",
+        "family": "space",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "distance_realism": {
+              "order": 0,
+              "title": "Distance realism",
+              "type": "integer",
+              "help": "0% compresses orbital distances logarithmically; 100% preserves physical distance ratios. Inner planets become clustered near the Sun at realistic scale.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 0,
+              "unit": "%"
+            },
+            "size_realism": {
+              "order": 1,
+              "title": "Size realism",
+              "type": "integer",
+              "help": "0% exaggerates body sizes; 100% uses physical radii at the orbital scale. Sub-dot bodies retain a one-dot marker so they remain visible.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "default": 0,
+              "unit": "%"
+            },
+            "time_speed": {
+              "order": 2,
+              "title": "Simulation speed",
+              "type": "string",
+              "help": "Simulated time per animation second. Orbits follow approximate JPL elements, beginning at J2000; global animation speed also applies.",
+              "enum": [
+                "1-hour-s",
+                "1-day-s",
+                "10-days-s",
+                "30-days-s",
+                "1-year-s",
+                "10-years-s"
+              ],
+              "enum_titles": [
+                "1 hour/s",
+                "1 day/s",
+                "10 days/s",
+                "30 days/s",
+                "1 year/s",
+                "10 years/s"
+              ],
+              "default": "30-days-s"
+            },
+            "orbit_paths": {
+              "order": 3,
+              "title": "Orbit paths",
+              "type": "boolean",
+              "help": "Draw each visible planet's orbital path, including eccentricity and inclination, viewed from above the ecliptic.",
+              "default": true
+            },
+            "mercury": {
+              "order": 4,
+              "title": "Mercury",
+              "type": "boolean",
+              "help": "Show this planet and its orbital path. Hidden planets do not change the scale of the remaining solar system.",
+              "default": true
+            },
+            "venus": {
+              "order": 5,
+              "title": "Venus",
+              "type": "boolean",
+              "help": "Show this planet and its orbital path. Hidden planets do not change the scale of the remaining solar system.",
+              "default": true
+            },
+            "earth": {
+              "order": 6,
+              "title": "Earth",
+              "type": "boolean",
+              "help": "Show this planet and its orbital path. Hidden planets do not change the scale of the remaining solar system.",
+              "default": true
+            },
+            "mars": {
+              "order": 7,
+              "title": "Mars",
+              "type": "boolean",
+              "help": "Show this planet and its orbital path. Hidden planets do not change the scale of the remaining solar system.",
+              "default": true
+            },
+            "jupiter": {
+              "order": 8,
+              "title": "Jupiter",
+              "type": "boolean",
+              "help": "Show this planet and its orbital path. Hidden planets do not change the scale of the remaining solar system.",
+              "default": true
+            },
+            "saturn": {
+              "order": 9,
+              "title": "Saturn",
+              "type": "boolean",
+              "help": "Show this planet and its orbital path. Hidden planets do not change the scale of the remaining solar system.",
+              "default": true
+            },
+            "uranus": {
+              "order": 10,
+              "title": "Uranus",
+              "type": "boolean",
+              "help": "Show this planet and its orbital path. Hidden planets do not change the scale of the remaining solar system.",
+              "default": true
+            },
+            "neptune": {
+              "order": 11,
+              "title": "Neptune",
+              "type": "boolean",
+              "help": "Show this planet and its orbital path. Hidden planets do not change the scale of the remaining solar system.",
+              "default": true
+            }
+          }
+        }
       }
     ]
   },

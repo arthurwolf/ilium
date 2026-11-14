@@ -6,6 +6,7 @@
 //! selection lives in `pane_filter`, the cross-session pane lists in `scan`, and each running
 //! command line is a small state machine kept in `jobs`.
 
+pub mod ask_for_update;
 pub mod broadcast;
 pub mod delivery;
 pub mod pane_filter;
@@ -14,11 +15,20 @@ pub mod scan;
 
 mod jobs;
 
+use std::cell::RefCell;
+
+use ilium_plugin_sdk::generated::host::tree::HostTree;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
-use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle};
+use ilium_plugin_sdk::types::{
+    ActionKind, Activation, Area, Intent, NodeId, OpenViewSpec, PluginError, UiTree, ViewTarget,
+};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, Views};
+
+thread_local! {
+    /// The open "Ask for update" dialog of the client side.
+    static DIALOG: RefCell<Option<ask_for_update::Dialog>> = const { RefCell::new(None) };
+}
 
 /// The server side of `ilium.core.fleet` (core-plugin-fleet.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = [])]
@@ -47,6 +57,15 @@ impl Handler for FleetServer {
                 ),
                 Event::CliCancelled(invocation) => jobs::on_cancelled(invocation),
                 Event::RequestCompleted(result) => jobs::on_completed(&mut *api, &result, &mut out),
+                Event::Message(message) => match message.channel.as_str() {
+                    ask_for_update::CHANNEL => {
+                        out.extend(ask_for_update::handle_text(&mut *api, &message.payload));
+                    }
+                    ask_for_update::SCOPED_CHANNEL => {
+                        out.extend(ask_for_update::handle_scoped(&mut *api, &message.payload));
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -55,19 +74,105 @@ impl Handler for FleetServer {
 }
 
 /// The client side of `ilium.core.fleet` (core-plugin-fleet.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
 pub struct FleetClient;
 
 impl Lifecycle for FleetClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        DIALOG.with(|cell| *cell.borrow_mut() = None);
         Ok(())
     }
 }
 
+/// Opens the dialog for the row `node`, or for every idle agent when there is no row.
+fn open_dialog(node: Option<u64>) -> Submission {
+    let target = match node {
+        Some(id) => {
+            let mut api = host();
+            HostTree::get(&mut *api, NodeId(id))
+                .map(|view| view.title)
+                .filter(|title| !title.is_empty())
+                .unwrap_or_else(|| "the selected row".to_owned())
+        }
+        None => "All agents".to_owned(),
+    };
+    DIALOG.with(|cell| *cell.borrow_mut() = Some(ask_for_update::Dialog::new(node, target)));
+    Submission::new(Intent::OpenView(OpenViewSpec {
+        view: ask_for_update::view(),
+        focus: true,
+    }))
+}
+
+/// Applies one action of the dialog; a finished dialog is dropped and its popup closed.
+fn dialog_action(
+    key: &str,
+    action_id: &str,
+    kind: ActionKind,
+    value: Option<ilium_plugin_sdk::types::ActionValue>,
+) -> Vec<Submission> {
+    let step = DIALOG.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let step = slot
+            .as_mut()
+            .map(|dialog| dialog.act(key, action_id, kind, value));
+        if matches!(
+            step,
+            Some(ask_for_update::Step::Send { .. } | ask_for_update::Step::Cancel)
+        ) {
+            *slot = None;
+        }
+        step
+    });
+    let close = || Submission::new(Intent::CloseView(ask_for_update::view()));
+    match step {
+        Some(ask_for_update::Step::Send { channel, payload }) => {
+            vec![ask_for_update::message_to_server(channel, payload), close()]
+        }
+        // The kernel already removed a popup it closed itself.
+        Some(ask_for_update::Step::Cancel) if kind != ActionKind::Closed => vec![close()],
+        _ => Vec::new(),
+    }
+}
+
 impl Handler for FleetClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut out = Vec::new();
+        for event in batch {
+            match event {
+                Event::CommandInvoked(invoked) if invoked.command == ask_for_update::POPUP => {
+                    out.push(open_dialog(ask_for_update::node_argument(
+                        &invoked.arguments_json,
+                    )));
+                }
+                Event::CommandInvoked(invoked)
+                    if invoked.command == ask_for_update::STATUS_COMMAND =>
+                {
+                    out.push(ask_for_update::status_message(
+                        ask_for_update::node_argument(&invoked.arguments_json),
+                    ));
+                }
+                Event::UiAction(action) if action.view == ask_for_update::view() => {
+                    out.extend(dialog_action(
+                        &action.key,
+                        &action.action_id,
+                        action.kind,
+                        action.value,
+                    ));
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+}
+
+impl Views for FleetClient {
+    fn render(&mut self, view: ViewTarget, _area: Area) -> UiTree {
+        DIALOG.with(|cell| match cell.borrow().as_ref() {
+            Some(dialog) if view == ask_for_update::view() => dialog.render(),
+            _ => ask_for_update::Dialog::closed_view(),
+        })
     }
 }
 
@@ -158,6 +263,7 @@ mod spec_tests {
                 "http:/create_agent",
                 "service:broadcast",
                 "command:ilium.core.fleet/ask-for-update",
+                "command:ilium.core.fleet/ask-for-update-status",
             ]
         );
     }

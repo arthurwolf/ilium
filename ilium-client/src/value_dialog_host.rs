@@ -1,7 +1,6 @@
 //! Typed parent-draft targets for the shared value dialog.
-use crate::prompt_queue::PromptQueueDialogState;
 use crate::value_dialog::{ChoiceDialogState, ChoiceOption, ValueDialogState};
-use ilium_core::{AgentProvider, NodeId, PromptQueueDelivery};
+use ilium_core::{AgentProvider, NodeId};
 
 pub enum ValueTarget {
     OnboardingVoice {
@@ -56,9 +55,6 @@ pub enum ValueTarget {
         identity: std::sync::Arc<()>,
         revision: u64,
         directory: std::path::PathBuf,
-    },
-    QueueDelivery {
-        pane_id: NodeId,
     },
     Animation(crate::value_animation::AnimationControlTarget),
     Plugin(crate::value_plugin::PluginTarget),
@@ -622,56 +618,6 @@ impl ValueDialogHost {
         true
     }
 
-    pub fn queue_delivery(parent: &PromptQueueDialogState) -> Result<Self, String> {
-        let selected = match parent.delivery_choice {
-            PromptQueueDelivery::Once => "once",
-            PromptQueueDelivery::Times { .. } => "times",
-            PromptQueueDelivery::Forever => "forever",
-        };
-        let options = [
-            ("once", "Once"),
-            ("times", "Run X times"),
-            ("forever", "Enqueue forever (DANGER)"),
-        ]
-        .into_iter()
-        .map(|(id, label)| ChoiceOption {
-            id: id.into(),
-            label: label.into(),
-            disabled_reason: None,
-        })
-        .collect();
-        Ok(Self {
-            target: ValueTarget::QueueDelivery {
-                pane_id: parent.pane_id,
-            },
-            dialog: ValueDialogState::Choice(ChoiceDialogState::new(
-                "Prompt delivery",
-                options,
-                Some(selected.into()),
-            )?),
-            pending_save: None,
-        })
-    }
-    pub fn apply_queue_choice(
-        &self,
-        parent: &mut PromptQueueDialogState,
-        id: &str,
-    ) -> Result<(), String> {
-        let ValueTarget::QueueDelivery { pane_id } = &self.target else {
-            return Err("This dialog belongs to a different form".into());
-        };
-        if parent.pane_id != *pane_id {
-            return Err("The queued prompt destination changed; reopen its delivery list".into());
-        }
-        let choice = match id {
-            "once" => PromptQueueDelivery::Once,
-            "times" => PromptQueueDelivery::Times { remaining_runs: 2 },
-            "forever" => PromptQueueDelivery::Forever,
-            _ => return Err("This delivery option is no longer available".into()),
-        };
-        parent.delivery_choice = choice;
-        Ok(())
-    }
     pub fn reject(&mut self, error: String) {
         match &mut self.dialog {
             ValueDialogState::Choice(choice) => choice.notice = Some(error),
@@ -912,51 +858,6 @@ mod tests {
         assert_eq!(replacement.candidate().unwrap(), before);
     }
 
-    #[test]
-    fn full_delivery_list_keeps_current_and_updates_only_parent_choice() {
-        let mut parent = PromptQueueDialogState::new(NodeId(7));
-        parent.text = TextPromptState::new("authored prompt");
-        parent.times = TextPromptState::new("17");
-        parent.focus = crate::prompt_queue::PromptQueueFocus::Delivery;
-        let host = ValueDialogHost::queue_delivery(&parent).unwrap();
-        let ValueDialogState::Choice(choice) = &host.dialog else {
-            panic!("choice dialog");
-        };
-        assert_eq!(
-            choice
-                .options()
-                .iter()
-                .map(|option| option.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["once", "times", "forever"]
-        );
-        assert_eq!(choice.selected_id.as_deref(), Some("once"));
-        host.apply_queue_choice(&mut parent, "times").unwrap();
-        assert_eq!(parent.times.buf, "17");
-        assert_eq!(parent.text.buf, "authored prompt");
-        assert_eq!(
-            parent.focus,
-            crate::prompt_queue::PromptQueueFocus::Delivery
-        );
-        assert_eq!(
-            parent.validated_request().unwrap(),
-            (
-                "authored prompt".into(),
-                PromptQueueDelivery::Times { remaining_runs: 17 }
-            )
-        );
-    }
-    #[test]
-    fn changed_parent_and_unknown_choice_are_rejected_without_mutation() {
-        let original = PromptQueueDialogState::new(NodeId(7));
-        let host = ValueDialogHost::queue_delivery(&original).unwrap();
-        let mut changed = PromptQueueDialogState::new(NodeId(8));
-        assert!(host.apply_queue_choice(&mut changed, "forever").is_err());
-        assert_eq!(changed.delivery_choice, PromptQueueDelivery::Once);
-        let mut parent = PromptQueueDialogState::new(NodeId(7));
-        assert!(host.apply_queue_choice(&mut parent, "unknown").is_err());
-        assert_eq!(parent.delivery_choice, PromptQueueDelivery::Once);
-    }
     #[test]
     fn only_matching_receipt_releases_pending_exact_draft_for_retry() {
         let target = crate::value_animation::AnimationControlTarget::new(

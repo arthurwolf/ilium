@@ -33,11 +33,14 @@
       "settings.write-kernel:optimization",
       "settings.write-kernel:remote-compaction",
       "extensions.provide:ilium.core.compaction/techniques",
-      "extensions.provide:ilium.core.compaction/before-compact"
+      "extensions.provide:ilium.core.compaction/before-compact",
+      "fs.read:agent-sessions:claude",
+      "fs.read:agent-sessions:codex"
     ],
     "client": [
       "open-external",
-      "ui.panels"
+      "ui.panels",
+      "agent.read"
     ]
   },
   "activation": [
@@ -110,12 +113,21 @@
         "kind": "compact",
         "deadline_ms": 60000,
         "memory_mib": 256
+      },
+      {
+        "kind": "scan",
+        "deadline_ms": 600000,
+        "memory_mib": 512
       }
     ],
     "commands": [
       {
         "id": "compact",
         "title": "Compact this agent"
+      },
+      {
+        "id": "optimize",
+        "title": "Analyze compaction settings"
       }
     ],
     "panels": [

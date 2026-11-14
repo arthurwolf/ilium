@@ -24,7 +24,6 @@ use crate::app::{
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::icon_settings::IconTarget;
-use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::{
     editor_chrome, editor_toolbar, explorer_overlay, markdown, minimap, modal, terminal_selection,
     terminal_view, theme, tree_ui,
@@ -534,7 +533,7 @@ fn status_tooltip_content(
         if let Some(warning) = crate::status_icons::detection_freshness_warning(
             status,
             app.pane_detection_evidence.get(&node_id),
-            crate::scheduled_input::unix_millis_now(),
+            crate::wall_clock::unix_millis_now(),
         ) {
             let last_activity = now_explanation(signals.now).map_or(
                 "Not shown by the current monitoring preference",
@@ -862,7 +861,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
                 app.started_at.elapsed().as_millis()
             },
             terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
-            current_unix_millis: crate::scheduled_input::unix_millis_now(),
+            current_unix_millis: crate::wall_clock::unix_millis_now(),
             detection_evidence: Some(&app.pane_detection_evidence),
             project_name: app.project_name.as_deref(),
             project_icon: app.project_icon.as_deref(),
@@ -1092,22 +1091,7 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
             draw_terminal_pane_context_menu(frame, menu, &app.ui_settings)
         }
         Mode::AgentToolbarModelSubmenu(state) => draw_agent_toolbar_model_submenu(frame, state),
-        Mode::AgentDebugLog(_) => {}
         Mode::LastPromptDialog(state) => draw_last_prompt_dialog(frame, area, state),
-        Mode::AgentDebugSavePath(_, state) => {
-            cursor = modal::render_text_prompt_cursor(
-                frame,
-                area,
-                "Save agent debug log",
-                state,
-                "Save",
-            )
-            .or(cursor);
-        }
-        Mode::SchedulePaneInput(state) => {
-            cursor = draw_scheduled_input_dialog(frame, area, app, state).or(cursor);
-        }
-        Mode::QueuePrompt(state) => draw_prompt_queue_dialog(frame, area, app, state),
         Mode::ValueDialog(host) => {
             let ink = match app.ui_settings.color_scheme {
                 crate::theme::ColorScheme::Dark => Style::new().fg(Color::White).bg(Color::Black),
@@ -1126,7 +1110,6 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
             );
         }
         Mode::TextTriggerDialog(state) => draw_text_trigger_dialog(frame, area, state),
-        Mode::AgentMessageDialog(state) => crate::agent_message_dialog::draw(frame, area, state),
         Mode::EditorLineContextMenu(menu) => {
             draw_editor_line_context_menu(frame, menu, &app.ui_settings)
         }
@@ -1690,357 +1673,6 @@ fn draw_context_menu(frame: &mut Frame, menu: &ContextMenu, ui: &crate::config::
     frame.render_widget(widget, submenu.area);
 }
 
-/// Renders a deliberately spacious form: duration first, then payload, then
-/// the Enter policy and one explicit confirmation button. The same geometry
-/// drives `crate::mouse`, so every visible control has an exact hit target.
-fn draw_scheduled_duration_field(
-    frame: &mut Frame,
-    area: Rect,
-    label: &str,
-    state: &ScheduledInputDialogState,
-    focus: ScheduledInputFocus,
-) -> Option<Position> {
-    let focused = state.focus == focus;
-    let style = if focused {
-        Style::new().fg(Color::Cyan)
-    } else {
-        Style::new().add_modifier(Modifier::DIM)
-    };
-    frame.render_widget(
-        theme::block(focused).title(theme::chrome_title(label)),
-        area,
-    );
-    let control = state.duration_control(focus, area);
-    control.render(
-        frame,
-        crate::value_control::ControlStyles {
-            background: style,
-            label: style,
-            value: style,
-            button: style,
-            disabled: style.add_modifier(Modifier::DIM),
-        },
-    );
-    let geometry = control.geometry();
-    if !focused || geometry.value_slot.width == 0 || geometry.value_slot.height == 0 {
-        return None;
-    }
-    let cursor = match focus {
-        ScheduledInputFocus::Hours => state.hours.cursor,
-        ScheduledInputFocus::Minutes => state.minutes.cursor,
-        ScheduledInputFocus::Seconds => state.seconds.cursor,
-        _ => return None,
-    };
-    Some(Position::new(
-        geometry.value.x.saturating_add(
-            u16::try_from(cursor)
-                .unwrap_or(u16::MAX)
-                .min(geometry.value.width),
-        ),
-        geometry.value.y,
-    ))
-}
-
-fn draw_scheduled_input_dialog(
-    frame: &mut Frame,
-    screen_area: Rect,
-    app: &App,
-    state: &ScheduledInputDialogState,
-) -> Option<Position> {
-    let mut cursor = None;
-    let layout = crate::scheduled_input::dialog_layout(screen_area);
-    frame.render_widget(Clear, layout.popup);
-    frame.render_widget(
-        theme::block(true).title(theme::chrome_title("Schedule keystrokes")),
-        layout.popup,
-    );
-    let pane_name = app
-        .tree
-        .get(state.pane_id)
-        .map_or("terminal", |node| node.name.as_str());
-    frame.render_widget(
-        Paragraph::new(format!("Schedule input for {pane_name}"))
-            .style(Style::new().add_modifier(Modifier::DIM)),
-        layout.subtitle,
-    );
-    frame.render_widget(
-        Paragraph::new("WHEN").style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        layout.duration_label,
-    );
-    cursor = draw_scheduled_duration_field(
-        frame,
-        layout.hours,
-        "Hours",
-        state,
-        ScheduledInputFocus::Hours,
-    )
-    .or(cursor);
-    cursor = draw_scheduled_duration_field(
-        frame,
-        layout.minutes,
-        "Minutes",
-        state,
-        ScheduledInputFocus::Minutes,
-    )
-    .or(cursor);
-    cursor = draw_scheduled_duration_field(
-        frame,
-        layout.seconds,
-        "Seconds",
-        state,
-        ScheduledInputFocus::Seconds,
-    )
-    .or(cursor);
-    frame.render_widget(
-        Paragraph::new("WHAT TO HIT")
-            .style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        layout.payload_label,
-    );
-    cursor = draw_scheduled_input_field(
-        frame,
-        layout.text,
-        "Text (optional)",
-        &state.text,
-        state.focus == ScheduledInputFocus::Text,
-    )
-    .or(cursor);
-
-    let checkbox_style = if state.focus == ScheduledInputFocus::SendEnter {
-        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-    } else {
-        Style::new()
-    };
-    let checkbox = if state.send_enter { "[x]" } else { "[ ]" };
-    frame.render_widget(
-        Paragraph::new(format!("{checkbox} Send Enter after the text")).style(checkbox_style),
-        layout.send_enter,
-    );
-
-    let button_style = if state.focus == ScheduledInputFocus::ScheduleButton {
-        Style::new()
-            .fg(Color::Black)
-            .bg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-    };
-    frame.render_widget(
-        Paragraph::new("[ Schedule input ]")
-            .style(button_style)
-            .alignment(Alignment::Center),
-        layout.schedule_button,
-    );
-    frame.render_widget(
-        Paragraph::new("Tab field · Space toggle · Ctrl+Enter schedule · Esc cancel")
-            .style(Style::new().add_modifier(Modifier::DIM))
-            .alignment(Alignment::Center),
-        layout.hint,
-    );
-    cursor
-}
-
-/// Keep enough grapheme context for the viewport while retaining the original
-/// draft intact. Logical indices can be huge; local screen rows remain bounded.
-fn queued_prompt_view(text: &crate::text_prompt::TextPromptState, area: Rect) -> (&str, usize) {
-    let cursor_byte = text
-        .buf
-        .char_indices()
-        .nth(text.cursor)
-        .map_or(text.buf.len(), |(index, _)| index);
-    let context = usize::from(area.width.max(1))
-        .saturating_mul(usize::from(area.height.max(1)))
-        .saturating_mul(2)
-        .saturating_add(1);
-    let mut prior = std::collections::VecDeque::new();
-    let mut following = 0;
-    let mut end = text.buf.len();
-    for (index, _) in text.buf.grapheme_indices(true) {
-        if index <= cursor_byte {
-            prior.push_back(index);
-            if prior.len() > context {
-                prior.pop_front();
-            }
-        } else {
-            following += 1;
-            if following > context {
-                end = index;
-                break;
-            }
-        }
-    }
-    let start = prior.front().copied().unwrap_or(0);
-    (&text.buf[start..end], cursor_byte - start)
-}
-
-fn draw_prompt_queue_dialog(
-    frame: &mut Frame,
-    screen_area: Rect,
-    app: &App,
-    state: &crate::prompt_queue::PromptQueueDialogState,
-) {
-    use crate::prompt_queue::PromptQueueFocus;
-    use ilium_core::PromptQueueDelivery;
-
-    let layout = crate::prompt_queue::dialog_layout(screen_area);
-    frame.render_widget(Clear, layout.popup);
-    frame.render_widget(
-        theme::block(true).title(theme::chrome_title("Queue prompt after agent finishes")),
-        layout.popup,
-    );
-    let pane_name = app
-        .tree
-        .get(state.pane_id)
-        .map_or("terminal", |node| node.name.as_str());
-    frame.render_widget(
-        Paragraph::new(format!(
-            "The next detected bell for {pane_name} sends this prompt and Enter."
-        ))
-        .style(Style::new().add_modifier(Modifier::DIM)),
-        layout.subtitle,
-    );
-    frame.render_widget(
-        Paragraph::new("PROMPT").style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        layout.prompt_label,
-    );
-    let text_style = if state.focus == PromptQueueFocus::Text {
-        Style::new().fg(Color::Cyan)
-    } else {
-        Style::new().add_modifier(Modifier::DIM)
-    };
-    // The authoritative draft/cursor stay in TextPromptState. This temporary
-    // view follows that cursor, including drafts beyond the textarea's u16
-    // viewport range, without imposing a limit on queued input.
-    let (visible, cursor_byte) = queued_prompt_view(&state.text, layout.text);
-    let mut text_view =
-        ratatui_textarea::TextArea::from(visible[cursor_byte..].split('\n').map(str::to_owned));
-    // Constructor starts at (0, 0); insertion positions the view cursor using
-    // usize internally, avoiding CursorMove::Jump's narrowed row/column.
-    text_view.insert_str(&visible[..cursor_byte]);
-    text_view.set_wrap_mode(ratatui_textarea::WrapMode::WordOrGlyph);
-    text_view.set_style(text_style);
-    text_view.set_cursor_line_style(text_style);
-    text_view.set_cursor_style(if state.focus == PromptQueueFocus::Text {
-        text_style.add_modifier(Modifier::REVERSED)
-    } else {
-        text_style
-    });
-    text_view.set_block(
-        theme::block(state.focus == PromptQueueFocus::Text)
-            .title(theme::chrome_title("Multiline prompt")),
-    );
-    frame.render_widget(&text_view, layout.text);
-    frame.render_widget(
-        Paragraph::new("DELIVERY").style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        layout.delivery_label,
-    );
-    let delivery_style = if state.focus == PromptQueueFocus::Delivery {
-        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-    } else {
-        Style::new()
-    };
-    state.delivery_control(layout.delivery).render(
-        frame,
-        crate::value_control::ControlStyles {
-            background: delivery_style,
-            label: delivery_style,
-            value: delivery_style,
-            button: delivery_style,
-            disabled: delivery_style.add_modifier(Modifier::DIM),
-        },
-    );
-    let times_style = if state.focus == PromptQueueFocus::Times {
-        Style::new().fg(Color::Cyan)
-    } else {
-        Style::new().add_modifier(Modifier::DIM)
-    };
-    frame.render_widget(
-        theme::block(state.focus == PromptQueueFocus::Times)
-            .title(theme::chrome_title("Repeat count")),
-        layout.times,
-    );
-    let repeat_control = state.times_control(layout.times);
-    repeat_control.render(
-        frame,
-        crate::value_control::ControlStyles {
-            background: times_style,
-            label: times_style,
-            value: times_style,
-            button: times_style,
-            disabled: times_style.add_modifier(Modifier::DIM),
-        },
-    );
-    if state.focus == PromptQueueFocus::Times
-        && matches!(state.delivery_choice, PromptQueueDelivery::Times { .. })
-    {
-        let geometry = repeat_control.geometry();
-        if geometry.value_slot.width > 0 && geometry.value_slot.height > 0 {
-            frame.set_cursor_position(Position::new(
-                geometry.value.x.saturating_add(
-                    u16::try_from(state.times.cursor)
-                        .unwrap_or(u16::MAX)
-                        .min(geometry.value.width),
-                ),
-                geometry.value.y,
-            ));
-        }
-    }
-    let warning = match state.delivery_choice {
-        PromptQueueDelivery::Once if layout.warning.width < 35 => "Once after finish.",
-        PromptQueueDelivery::Times { .. } if layout.warning.width < 35 => {
-            "Counted sends after finish."
-        }
-        PromptQueueDelivery::Forever if layout.warning.width < 35 => "Forever; monitor closely.",
-        PromptQueueDelivery::Once if layout.warning.width < 84 => {
-            "Sends once after the agent finishes."
-        }
-        PromptQueueDelivery::Times { .. } if layout.warning.width < 84 => {
-            "One send per finish, up to count."
-        }
-        PromptQueueDelivery::Forever if layout.warning.width < 84 => {
-            "Repeats forever; monitor closely."
-        }
-        PromptQueueDelivery::Forever => {
-            "DANGER: this will re-send forever whenever the agent finishes. Do not run it unmonitored."
-        }
-        PromptQueueDelivery::Times { .. } => {
-            "The same prompt is sent once per future finish, until the selected count is exhausted."
-        }
-        PromptQueueDelivery::Once => {
-            "The prompt remains queued until the agent next finishes, then is sent once."
-        }
-    };
-    frame.render_widget(
-        Paragraph::new(warning).style(Style::new().fg(
-            if matches!(state.delivery_choice, PromptQueueDelivery::Forever) {
-                Color::Red
-            } else {
-                Color::Yellow
-            },
-        )),
-        layout.warning,
-    );
-    let button_style = if state.focus == PromptQueueFocus::EnqueueButton {
-        Style::new()
-            .fg(Color::Black)
-            .bg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-    };
-    frame.render_widget(
-        Paragraph::new("[ Enqueue ]")
-            .style(button_style)
-            .alignment(Alignment::Center),
-        layout.enqueue_button,
-    );
-    frame.render_widget(
-        Paragraph::new("Tab fields · ←/→ select delivery · Ctrl+Enter enqueue · Esc cancel")
-            .style(Style::new().add_modifier(Modifier::DIM))
-            .alignment(Alignment::Center),
-        layout.hint,
-    );
-}
-
 fn draw_scheduled_input_field(
     frame: &mut Frame,
     area: Rect,
@@ -2410,11 +2042,6 @@ fn draw_pane_sources(
     area: Rect,
     app: &App,
 ) -> Vec<(ilium_core::NodeId, terminal_view::PaintedTerminal)> {
-    let root_mode = app.modal_stack.first().unwrap_or(&app.mode);
-    if let Mode::AgentDebugLog(state) = root_mode {
-        crate::agent_debug_ui::render(frame, area, app, state);
-        return Vec::new();
-    }
     if matches!(app.right_panel_target, RightPanelTarget::Resource { .. }) {
         app.resource_detail(frame, area);
         return Vec::new();
@@ -2520,7 +2147,6 @@ fn draw_pane_runtime(
     if crate::plugin_host::plugin_panes::draw(frame, app, &viewport, pane_focused, &pane_title) {
         return;
     }
-    let completed_agent_close_action = app.completed_agent_close_action(viewport);
     let Some(runtime) = app.panes.get(&viewport.pane_id) else {
         let blocking_error = app
             .blocking_error_tooltip(viewport.pane_id)
@@ -2534,9 +2160,6 @@ fn draw_pane_runtime(
         .wrap(ratatui::widgets::Wrap { trim: true })
         .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
         frame.render_widget(placeholder, viewport.outer_area);
-        if let Some(action) = completed_agent_close_action {
-            draw_completed_agent_close_action(frame, action.button_area);
-        }
         return;
     };
 
@@ -2545,11 +2168,9 @@ fn draw_pane_runtime(
             let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
             frame.render_widget(block, viewport.outer_area);
             let frozen_dialog = app.frozen_dialog_layout(viewport);
-            let completed_terminal_area = completed_agent_close_action
-                .map_or(viewport.content_area, |action| action.terminal_area);
             let terminal_area = frozen_dialog
                 .as_ref()
-                .map_or(completed_terminal_area, |layout| layout.terminal_area);
+                .map_or(viewport.content_area, |layout| layout.terminal_area);
             if let Some(source) = app.frozen_screens.get(&viewport.pane_id) {
                 source.with_screen(|screen| {
                     terminal_view::render_frozen_screen(screen, terminal_area, frame.buffer_mut());
@@ -2744,6 +2365,7 @@ fn draw_pane_runtime(
                         show_labels: app.ui_settings.show_toolbar_labels,
                         selection_enabled: app.ui_settings.terminal_text_selection_enabled,
                         show_prompt_reopen: app.last_prompt_reopen_available(viewport.pane_id),
+                        show_smart_copy: app.smart_copy_available(),
                         show_goal: app.ui_settings.goal_toolbar_icon_enabled
                             && app.current_goal_phase(viewport.pane_id).is_some(),
                     },
@@ -2880,10 +2502,6 @@ fn draw_pane_runtime(
             );
         }
     }
-
-    if let Some(action) = completed_agent_close_action {
-        draw_completed_agent_close_action(frame, action.button_area);
-    }
 }
 
 /// Frame rules around the toolbar, prompt banner and progress footer. Each
@@ -2924,22 +2542,6 @@ fn draw_section_rules(
             crate::section_frame::render_rule(frame, rule, Some(&title), focused);
         }
     }
-}
-
-/// Renders the completed-agent acknowledgement as a full-width destructive
-/// action, visually distinct from ordinary terminal output and chrome.
-fn draw_completed_agent_close_action(frame: &mut Frame, area: Rect) {
-    let style = Style::new()
-        .fg(Color::White)
-        .bg(Color::Red)
-        .add_modifier(Modifier::BOLD);
-    let button = Paragraph::new(Span::styled(
-        crate::completed_agent_action::CLOSE_COMPLETED_AGENT_LABEL,
-        style,
-    ))
-    .alignment(Alignment::Center)
-    .style(style);
-    frame.render_widget(button, area);
 }
 
 /// Draws a vertical scrollbar merged into the terminal pane block's right
@@ -3279,14 +2881,9 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ContextMenu(..) => "TREE ACTIONS",
         Mode::TerminalPaneContextMenu(..) => "TERMINAL ACTIONS",
         Mode::AgentToolbarModelSubmenu(..) => "MODEL STRENGTH",
-        Mode::AgentDebugLog(..) => "AGENT DEBUG LOG",
         Mode::LastPromptDialog(..) => "LAST PROMPT",
-        Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
-        Mode::SchedulePaneInput(..) => "SCHEDULE INPUT",
-        Mode::QueuePrompt(..) => "QUEUE PROMPT",
         Mode::ValueDialog(..) => "VALUE OPTIONS",
         Mode::TextTriggerDialog(..) => "TEXT TRIGGER",
-        Mode::AgentMessageDialog(..) => "MESSAGE TO AGENTS",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
         Mode::CreateAgentFromLine(..) => "CREATE AGENT",
         Mode::CreateAgentWorkspace(..) => "CREATE AGENT WORKTREE",
@@ -3620,7 +3217,7 @@ mod tests {
             pane_id,
             ilium_ipc::PaneDetectionEvidence {
                 applied_status: status,
-                observed_at_unix_millis: crate::scheduled_input::unix_millis_now(),
+                observed_at_unix_millis: crate::wall_clock::unix_millis_now(),
                 stale_after_millis: 30_000,
                 identity: None,
                 activity: Some(ilium_ipc::DetectionReason {
@@ -4161,55 +3758,6 @@ mod tests {
     }
 
     #[test]
-    fn completed_agent_renders_a_full_width_red_close_action_at_the_panel_bottom() {
-        let mut app = App::new("test".to_owned(), std::env::temp_dir());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "Completed review", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                pane_id,
-                PaneStatus::from_activity(AgentClass::Codex, ilium_core::AgentActivity::Done, None),
-            )
-            .unwrap();
-        app.panes.insert(
-            pane_id,
-            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
-        );
-        app.right_panel_target = RightPanelTarget::Pane { pane_id };
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let action = app
-            .completed_agent_close_action(app.pane_viewport(pane_id).unwrap())
-            .expect("done agent should expose its close action");
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-
-        terminal
-            .draw(|frame| draw_pane(frame, app.layout.pane_area, &app))
-            .unwrap();
-
-        let button_cells = terminal
-            .backend()
-            .buffer()
-            .content()
-            .chunks(120)
-            .nth(usize::from(action.button_area.y))
-            .expect("button row is inside the test backend")
-            .get(usize::from(action.button_area.x)..usize::from(action.button_area.right()))
-            .expect("button spans the complete inner panel row");
-        assert!(button_cells.iter().all(|cell| cell.bg == Color::Red));
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-        assert!(rendered.contains("Close finished agent"));
-    }
-
-    #[test]
     fn rapid_terminal_switches_never_mix_the_previous_pane_into_the_right_panel() {
         let mut app = App::new("test".to_owned(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -4319,72 +3867,6 @@ mod tests {
         assert!(rendered.contains("Protected value"));
         assert!(rendered.contains("Keep existing"));
         assert!(rendered.contains("Replace"));
-    }
-
-    #[test]
-    fn agent_debug_mode_replaces_the_complete_right_panel_with_aerated_history() {
-        let mut app = App::new("test".to_owned(), std::env::temp_dir());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "codex", PaneContentKind::Terminal)
-            .unwrap();
-        let mut terminal_view = TerminalView::new(24, 80);
-        terminal_view.feed(b"NORMAL TERMINAL MUST BE HIDDEN");
-        app.panes
-            .insert(pane_id, PaneRuntime::Terminal(Box::new(terminal_view)));
-        app.right_panel_target = RightPanelTarget::Pane { pane_id };
-        app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
-            pane_id,
-            scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
-        });
-        app.agent_debug_logs.insert(
-            pane_id,
-            crate::app::AgentDebugLogCache {
-                through_sequence: 1,
-                log: ilium_ipc::PaneDebugLog {
-                    entries: vec![ilium_ipc::AgentDebugEntry {
-                        sequence: 1,
-                        occurred_at_unix_millis: 1_700_000_000_000,
-                        severity: ilium_ipc::AgentDebugSeverity::Success,
-                        source: ilium_ipc::AgentDebugSource::SessionDiscovery,
-                        kind: ilium_ipc::AgentDebugEventKind::SessionResolved,
-                        summary: "Project-verified agent session resolved".to_string(),
-                        fields: vec![ilium_ipc::AgentDebugField::sensitive(
-                            "session ID",
-                            "session-123",
-                        )],
-                        correlation_id: None,
-                        context: ilium_ipc::AgentDebugContext::default(),
-                        metadata: Default::default(),
-                    }],
-                    ..Default::default()
-                },
-                ..crate::app::AgentDebugLogCache::default()
-            },
-        );
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-
-        assert!(rendered.contains('🐞'));
-        assert!(rendered.contains("Agent debug log"));
-        assert!(rendered.contains("SESSION"));
-        assert!(rendered.contains("Project-verified agent session resolved"));
-        assert!(rendered.contains('🔒'));
-        assert!(rendered.contains("session ID: session-123"));
-        assert!(rendered.contains("← Back to agent"));
-        assert!(rendered.contains("Save log"));
-        assert!(rendered.contains("Panel resizes hidden"));
-        assert!(!rendered.contains("NORMAL TERMINAL MUST BE HIDDEN"));
     }
 
     #[test]
@@ -4527,39 +4009,6 @@ mod tests {
         let text_only = render(&app.ui_settings);
         assert!(!text_only.contains(app.ui_settings.icons.glyph(IconTarget::ToolbarSearch)));
         assert!(text_only.contains("Search workspace…"));
-    }
-
-    #[test]
-    fn scheduled_input_dialog_renders_all_aerated_controls() {
-        let mut app = App::new("test".to_string(), std::env::temp_dir());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "release shell", PaneContentKind::Terminal)
-            .unwrap();
-        app.mode = Mode::SchedulePaneInput(Box::new(
-            crate::scheduled_input::ScheduledInputDialogState::new(pane_id),
-        ));
-        app.set_screen_area(Rect::new(0, 0, 100, 30));
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-
-        assert!(rendered.contains("Schedule keystrokes"));
-        assert!(rendered.contains("Schedule input for release shell"));
-        assert!(rendered.contains("Hours"));
-        assert!(rendered.contains("Minutes"));
-        assert!(rendered.contains("Seconds"));
-        assert!(rendered.contains("Text (optional)"));
-        assert!(rendered.contains("[x] Send Enter after the text"));
-        assert!(rendered.contains("[ Schedule input ]"));
     }
 
     #[test]
@@ -5299,74 +4748,6 @@ mod context_menu_visual_tests {
             save_frame(
                 &format!("composed-terminal-menu-{width}x{height}-icons-{icon_preference}"),
                 &terminal,
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod prompt_queue_visual_tests {
-    use super::*;
-    use ratatui::{backend::TestBackend, Terminal};
-
-    #[test]
-    fn queued_view_preserves_large_middle_cursor_and_grapheme_boundaries() {
-        let draft = "界e\u{301}\n".repeat(70_000) + "TAIL";
-        let mut text = crate::text_prompt::TextPromptState::new(draft.clone());
-        text.cursor = 140_001;
-        let cursor = text.cursor;
-        let (view, local_cursor) = queued_prompt_view(&text, Rect::new(0, 0, 70, 6));
-        let prefix: String = text.buf.chars().take(cursor).collect();
-        assert!(prefix.ends_with(&view[..local_cursor]));
-        let start = prefix.len() - local_cursor;
-        assert!(text
-            .buf
-            .grapheme_indices(true)
-            .any(|(index, _)| index == start));
-        assert!(view.len() < text.buf.len());
-        let mut textarea =
-            ratatui_textarea::TextArea::from(view[local_cursor..].split('\n').map(str::to_owned));
-        textarea.insert_str(&view[..local_cursor]);
-        assert_eq!(textarea.lines().join("\n"), view);
-        assert_eq!(text.buf, draft);
-        assert_eq!(text.cursor, cursor);
-    }
-
-    #[test]
-    fn queue_prompt_long_draft_keeps_edited_tail_visible() {
-        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
-            let app = App::new(
-                "synthetic-queue-visibility".to_owned(),
-                std::path::PathBuf::from("/synthetic/ui-queue"),
-            );
-            let mut state = crate::prompt_queue::PromptQueueDialogState::new(ilium_core::ROOT_ID);
-            let mut draft = (0..60)
-                .map(|index| format!("Synthetic line {index:02}\n"))
-                .collect::<String>();
-            draft.push_str("EDITED-TAIL");
-            state.text = crate::text_prompt::TextPromptState::new(draft);
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal
-                .draw(|frame| draw_prompt_queue_dialog(frame, frame.area(), &app, &state))
-                .unwrap();
-            crate::ui_capture::save(&format!("queue-long-tail-{width}x{height}"), &terminal);
-            let layout = crate::prompt_queue::dialog_layout(Rect::new(0, 0, width, height));
-            let inner = theme::block(true).inner(layout.text);
-            assert!(
-                inner.width >= 11 && inner.height > 0,
-                "fixture must offer room for edited line at {width}x{height}"
-            );
-            let visible = (inner.y..inner.bottom())
-                .map(|y| {
-                    (inner.x..inner.right())
-                        .map(|x| terminal.backend().buffer()[(x, y)].symbol())
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            assert!(
-                visible.contains("EDITED-TAIL"),
-                "long draft hides current edit at {width}x{height}: {visible:?}"
             );
         }
     }

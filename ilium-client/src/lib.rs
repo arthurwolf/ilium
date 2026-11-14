@@ -30,8 +30,6 @@
 //! data came from a local `Tree` or a render-cache mirror of one.
 
 pub mod agent_config_writer;
-pub mod agent_debug_export;
-pub mod agent_debug_ui;
 pub mod agent_feature_setup;
 pub mod agent_from_line;
 pub mod agent_history_path;
@@ -56,11 +54,6 @@ mod blocking_errors;
 pub mod board;
 pub mod board_ui;
 pub mod claude_model_statusline;
-pub mod compaction_app;
-pub mod compaction_report;
-pub mod compaction_scan;
-pub mod compaction_ui;
-pub mod completed_agent_action;
 pub mod config;
 pub mod connection;
 mod connection_health;
@@ -77,12 +70,12 @@ pub mod custom_agent_editor;
 mod custom_agent_settings;
 pub(crate) mod custom_status_live;
 pub mod debug_logging;
+pub(crate) mod diagnostic;
 pub mod document_preparation;
 mod editor_capture_budget;
 pub mod editor_chrome;
 pub mod editor_highlight;
 mod editor_input_backlog;
-pub mod editor_line_path;
 pub mod editor_pane;
 pub mod editor_toolbar;
 pub mod error;
@@ -90,10 +83,12 @@ pub mod execution;
 pub mod explorer_overlay;
 mod external_open;
 pub mod filesystem;
+pub mod goal_resume_link;
 pub mod icon_search_workers;
 pub mod icon_settings;
 mod incoming_projection;
 pub mod inference_test;
+mod input_backlog;
 mod instruction_settings;
 mod ipc_preparation;
 pub mod keymap;
@@ -119,18 +114,18 @@ pub mod padding_app;
 pub mod padding_dialog;
 pub mod padding_ui;
 pub mod pane_title;
+mod paste_cursor;
 pub mod paths;
 pub mod plugin_host;
 pub mod popover;
 pub mod presentation;
 pub mod progress_bar;
 pub mod progress_display;
-pub mod progress_guard;
 pub mod progress_popover;
 pub mod progress_time;
 pub mod project_config;
 pub mod project_naming;
-pub mod prompt_queue;
+
 mod provider_admission; // Bounded IO preflight retains original request ownership.
 mod proxy_database;
 pub mod recap;
@@ -151,7 +146,7 @@ pub mod render_cache;
 pub mod reset_planning;
 pub mod resource_queue;
 pub mod restructure;
-pub mod scheduled_input;
+pub mod wall_clock;
 pub mod screen_transfer;
 pub mod section_frame;
 pub mod selectable_cards;
@@ -172,17 +167,6 @@ pub mod session_stats_ui;
 pub mod settings_help;
 pub mod settings_ui;
 pub mod setup_prompt;
-mod startup_dialog;
-pub mod status_demo;
-pub mod status_rule_visual;
-pub mod status_rules_editor;
-pub(crate) mod status_rules_save;
-pub mod status_screen_observations;
-pub mod agent_message_dialog;
-pub(crate) mod diagnostic;
-pub mod goal_resume_link;
-mod input_backlog;
-mod paste_cursor;
 mod shutdown_requests;
 mod source_line_facts;
 mod source_stream;
@@ -192,7 +176,13 @@ mod source_window_syntax;
 mod source_windows;
 pub mod split_layout;
 mod startup_audio;
+mod startup_dialog;
+pub mod status_demo;
 pub mod status_icons;
+pub mod status_rule_visual;
+pub mod status_rules_editor;
+pub(crate) mod status_rules_save;
+pub mod status_screen_observations;
 pub mod syntax;
 pub mod terminal_activity;
 pub mod terminal_clipboard;
@@ -420,17 +410,17 @@ fn server_event_damage(app: &App, event: &ilium_ipc::ServerEvent) -> ServerEvent
                 needs_immediate_redraw: false,
             }
         }
-        ServerEvent::PaneDebugLogSnapshot { pane_id, .. }
-        | ServerEvent::PaneDebugEntryAppended { pane_id, .. } => {
-            let is_visible = matches!(
-                &app.mode,
-                crate::app::Mode::AgentDebugLog(state) if state.pane_id == *pane_id
-            );
+        ServerEvent::PaneDebugLogSnapshot { pane_id, .. } => {
+            let is_requested = app.pending_debug_log_viewer == Some(*pane_id);
             ServerEventDamage {
-                needs_redraw: is_visible,
-                needs_immediate_redraw: is_visible,
+                needs_redraw: is_requested,
+                needs_immediate_redraw: is_requested,
             }
         }
+        ServerEvent::PaneDebugEntryAppended { .. } => ServerEventDamage {
+            needs_redraw: false,
+            needs_immediate_redraw: false,
+        },
         ServerEvent::TerminalReplay { pane_id, .. }
         | ServerEvent::TerminalSnapshot { pane_id, .. }
         | ServerEvent::TerminalHistory { pane_id, .. }
@@ -946,8 +936,6 @@ async fn run_inner(
         .configure_execution(statistics_client.clone());
     app.claude_goals
         .configure_execution(statistics_client.clone());
-    app.compaction_optimizer
-        .configure_execution(statistics_client.clone());
     app.cost_tracker.configure_execution(statistics_client);
     let editor_files = crate::filesystem::editors::EditorFiles::new(filesystem_client.clone());
     let filesystem_notification = editor_files.notification();
@@ -1356,7 +1344,7 @@ async fn run_inner(
     let mut needs_redraw = true;
     let mut needs_immediate_redraw = true;
     let mut redraw_schedule = redraw_schedule::RedrawSchedule::new(Instant::now());
-    let mut detection_freshness_checked_at = crate::scheduled_input::unix_millis_now();
+    let mut detection_freshness_checked_at = crate::wall_clock::unix_millis_now();
     let mut last_animation_frame_bucket = None;
     let mut last_onboarding_animation_active = false;
     let mut last_recorded_status_message = None;
@@ -1805,7 +1793,7 @@ async fn run_inner(
         // Continuous IPC/input can starve the sleep branch. Presentation
         // expiry must advance on every pass, including those busy passes.
         needs_redraw |=
-            app.tick_completed_progress_display(crate::scheduled_input::unix_millis_now());
+            app.tick_completed_progress_display(crate::wall_clock::unix_millis_now());
 
         if *reset_settings_tx.borrow() != app.reset_planning_settings {
             let _ = reset_settings_tx.send(app.reset_planning_settings.clone());
@@ -2019,7 +2007,7 @@ async fn run_inner(
         if animation_frame_bucket != last_animation_frame_bucket {
             needs_redraw = true;
         }
-        let freshness_now = crate::scheduled_input::unix_millis_now();
+        let freshness_now = crate::wall_clock::unix_millis_now();
         needs_redraw |= crate::status_icons::detection_freshness_expired_since(
             &app.pane_detection_evidence,
             detection_freshness_checked_at,
@@ -4197,8 +4185,7 @@ fn apply_server_events(
             app.status_message = None;
         }
         if needs_projection_prune {
-            app.incoming_projection
-                .prune(&app.tree, &app.agent_debug_logs);
+            app.incoming_projection.prune(&app.tree);
         }
         if !app.pending_terminal_events.is_empty() {
             break;

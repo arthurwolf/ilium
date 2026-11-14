@@ -28,10 +28,13 @@
       "services.use:ilium.core.cost/usage",
       "settings.write-kernel:api",
       "extensions.provide:ilium.core.fleet/selectors",
-      "extensions.provide:ilium.core.fleet/before-broadcast"
+      "extensions.provide:ilium.core.fleet/before-broadcast",
+      "notify.toast"
     ],
     "client": [
-      "ui.panels"
+      "ui.panels",
+      "tree.read",
+      "ui.chrome"
     ]
   },
   "activation": [
@@ -39,7 +42,8 @@
     "cli:broadcast",
     "http:/create_agent",
     "service:broadcast",
-    "command:ilium.core.fleet/ask-for-update"
+    "command:ilium.core.fleet/ask-for-update",
+    "command:ilium.core.fleet/ask-for-update-status"
   ],
   "contributes": {
     "cli": [
@@ -76,6 +80,10 @@
       {
         "id": "ask-for-update",
         "title": "Ask for update"
+      },
+      {
+        "id": "ask-for-update-status",
+        "title": "Ask for status update"
       }
     ],
     "extension_points": [
@@ -149,6 +157,33 @@
         "deadline_ms": 20,
         "max_handlers": 8,
         "version": "0.1.0"
+      }
+    ],
+    "context_menu": [
+      {
+        "id": "status-update",
+        "title": "Ask for status update",
+        "target": "tree-node",
+        "command": "ask-for-update-status",
+        "when": "node.kind == \"project\" || node.kind == \"group\" || node.kind == \"folder\" || (node.kind == \"pane\" && pane.primitive == \"agent\")"
+      },
+      {
+        "id": "message-to-all",
+        "title": "Send message to all",
+        "target": "tree-node",
+        "command": "ask-for-update",
+        "when": "node.kind == \"project\" || node.kind == \"group\" || node.kind == \"folder\""
+      }
+    ],
+    "row_actions": [
+      {
+        "id": "ask-for-update",
+        "icon": "bell",
+        "label": "Ask for update",
+        "command": "ask-for-update",
+        "applies_to": [
+          "project"
+        ]
       }
     ]
   },

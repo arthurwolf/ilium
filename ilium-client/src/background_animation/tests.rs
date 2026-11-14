@@ -111,7 +111,7 @@ fn hosted_scene_renders_scene_time_wall_time_and_speed_through_the_host() {
     let mut frame = AnimationFrame::default();
     *frame.host_mut() = fake_host(&probe);
     let settings = AnimationSettings {
-        kind: AnimationKind::Pipes,
+        kind: AnimationKind::Spectrum,
         speed_percent: 200,
         ..Default::default()
     };
@@ -131,7 +131,7 @@ fn hosted_frame_reuses_the_render_inside_one_bucket_and_repacks_for_density() {
     let mut frame = AnimationFrame::default();
     *frame.host_mut() = fake_host(&probe);
     let settings = AnimationSettings {
-        kind: AnimationKind::Pipes,
+        kind: AnimationKind::Spectrum,
         ..Default::default()
     };
     let time = Duration::from_secs(1);
@@ -191,30 +191,18 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
         "cloudlets",
         "two_ripples",
         "quiet_pond",
-        "pipes",
         "stars",
         "night_lights",
         "clouds",
         "video",
         "spectrum",
         "images",
-        "dither_water",
-        "atlantic_dusk",
-        "cube_clock",
-        "box_machine",
-        "machine_screen",
-        "fbm_clouds",
         "plugin_scene",
-        "dithr_patterns",
-        "hex_expedition",
         "vector_td",
         "wikipedia",
-        "galactic_empires",
         "voxel_landscape",
-        "solar_system",
         "topographic_maps",
         "graph",
-        "pi",
         "earthquakes",
         "aircraft",
         "boats",
@@ -224,23 +212,9 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
         "wind",
         "growth",
         "semantic",
-        "aurora",
-        "pollen",
-        "fireflies",
-        "window_sunlight",
         "frost",
-        "lighthouse",
-        "paper_fold",
         "embroidery",
-        "prime_constellations",
-        "wallpaper",
-        "unfinished_circle",
-        "needle_threads",
         "hesitating_ink",
-        "crop_circles",
-        "delayed_reflection",
-        "almost_touching",
-        "hidden_wheel",
     ];
     assert_eq!(expected.len(), AnimationKind::ALL.len());
     for (kind, id) in AnimationKind::ALL.into_iter().zip(expected) {
@@ -494,18 +468,20 @@ fn settings_enabled(settings: &AnimationSettings) -> bool {
 #[test]
 fn hosted_controls_route_through_the_crate_and_report_errors() {
     let mut settings = AnimationSettings {
-        kind: AnimationKind::Pipes,
+        kind: AnimationKind::Spectrum,
         ..Default::default()
     };
     assert_eq!(
         settings.scene_controls(),
-        settings.ambient.controls(ilium_ambient::AmbientKind::Pipes)
+        settings
+            .ambient
+            .controls(ilium_ambient::AmbientKind::Spectrum)
     );
     // Unknown ids are not an error; the crate decides what is.
     assert_eq!(
         settings.set_scene_control("definitely_not_a_control", ControlValue::Number(1)),
         settings.ambient.clone().set_control(
-            ilium_ambient::AmbientKind::Pipes,
+            ilium_ambient::AmbientKind::Spectrum,
             "definitely_not_a_control",
             ControlValue::Number(1)
         )
@@ -1319,12 +1295,12 @@ fn hosted_scene_takes_new_settings_in_place_or_is_rebuilt() {
                 applied: factory_applied.clone(),
             })
         }));
-        let kind = ilium_ambient::AmbientKind::DitherWater;
+        let kind = ilium_ambient::AmbientKind::Carpet;
         let mut settings = ilium_ambient::AmbientSettings::default();
         let first = host.sync(kind, &settings, Duration::ZERO);
         // The same settings change nothing.
         assert_eq!(host.sync(kind, &settings, Duration::from_secs(1)), first);
-        settings.dither_water.seed += 1;
+        settings.carpet.seed += 1;
         let second = host.sync(kind, &settings, Duration::from_secs(5));
         assert_ne!(
             first, second,
@@ -1344,7 +1320,7 @@ fn hosted_scene_takes_new_settings_in_place_or_is_rebuilt() {
         );
         // A scene of another kind is never reconfigured with foreign settings.
         host.sync(
-            ilium_ambient::AmbientKind::Pipes,
+            ilium_ambient::AmbientKind::Spectrum,
             &settings,
             Duration::from_secs(6),
         );

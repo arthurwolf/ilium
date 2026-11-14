@@ -990,33 +990,6 @@ mod tests {
         assert!(app.take_outbound_requests().is_empty());
     }
 
-    #[test]
-    fn scheduled_voice_text_always_requests_enter_submission() {
-        let (mut app, pane_id) = active_terminal_app();
-        let mut plane = ControlPlane::default();
-
-        let output = plane.execute_invocation(
-            &mut app,
-            VoiceToolInvocation {
-                call_id: "schedule-next".to_owned(),
-                name: tools::TERMINAL_TOOL_NAME.to_owned(),
-                arguments_json:
-                    r#"{"action":"schedule_input","text":"continue","delay_seconds":5}"#.to_owned(),
-            },
-        );
-
-        assert_eq!(output.result["status"], "queued");
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ilium_ipc::ClientRequest::SchedulePaneInput {
-                pane_id,
-                delay_seconds: 5,
-                text: "continue".to_owned(),
-                send_enter: true,
-            }]
-        );
-    }
-
     fn active_terminal_app() -> (App, ilium_core::NodeId) {
         let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
         let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();

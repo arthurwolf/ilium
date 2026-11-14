@@ -19,8 +19,8 @@ use ilium_agent_debug::{
 };
 use ilium_core::{
     AgentProcessKey, AgentProvider, AgentRecovery, BuiltinAgentProvider, NodeId, NodeKind,
-    PaneContentKind, PaneStatus, PaneTitleSource, PromptQueueDelivery, QueuedPrompt,
-    RestructurePlan, ScheduledPaneInput, SessionIdentityTransitionRule, Tree, TreeError,
+    PaneContentKind, PaneStatus, PaneTitleSource, RestructurePlan, SessionIdentityTransitionRule,
+    Tree, TreeError,
 };
 use ilium_ipc::{
     ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PaneTitleObservation,
@@ -125,9 +125,6 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
         ClientRequest::ChangeProjectFolder { project_id, .. } => Some(*project_id),
         ClientRequest::NewBoard { parent_group, .. } => Some(*parent_group),
         ClientRequest::CreateSplitView { parent_group, .. } => Some(*parent_group),
-        ClientRequest::SchedulePaneInput { pane_id, .. } => Some(*pane_id),
-        ClientRequest::EnqueuePrompt { pane_id, .. } => Some(*pane_id),
-        ClientRequest::ClearPromptQueue { pane_id, .. } => Some(*pane_id),
         ClientRequest::SetSessionPaneTitle { pane_id, .. } => Some(*pane_id),
         ClientRequest::ApplyProjectRestructurePlan { project_id, .. } => Some(*project_id),
         ClientRequest::RevertProjectRestructure { project_id, .. } => Some(*project_id),
@@ -1100,28 +1097,6 @@ async fn handle_scoped_request(
             .await;
             false
         }
-        ClientRequest::SchedulePaneInput {
-            pane_id,
-            delay_seconds,
-            text,
-            send_enter,
-        } => {
-            handle_schedule_pane_input(state, pane_id, delay_seconds, text, send_enter, direct_tx)
-                .await;
-            false
-        }
-        ClientRequest::EnqueuePrompt {
-            pane_id,
-            text,
-            delivery,
-        } => {
-            handle_enqueue_prompt(state, pane_id, text, delivery, direct_tx).await;
-            false
-        }
-        ClientRequest::ClearPromptQueue { pane_id } => {
-            handle_clear_prompt_queue(state, pane_id, direct_tx).await;
-            false
-        }
         ClientRequest::ApplyRestructurePlan {
             plan,
             title_observations,
@@ -1566,163 +1541,6 @@ fn recent_activity_replay(state: &ServerState, tree: &Tree) -> Vec<ServerEvent> 
                 .min(u64::MAX as u128) as u64,
         })
         .collect()
-}
-
-/// Validates and persists one timer before waking the detached executor. The
-/// absolute deadline is server-derived so all clients and crash recovery share
-/// one clock instead of trusting whichever UI happened to create the action.
-async fn handle_schedule_pane_input(
-    state: &Arc<ServerState>,
-    pane_id: NodeId,
-    delay_seconds: u64,
-    text: String,
-    send_enter: bool,
-    direct_tx: &DirectEventSender,
-) {
-    let execute_at_unix_millis = match crate::scheduled_input::deadline_from_delay(delay_seconds) {
-        Ok(deadline) => deadline,
-        Err(message) => {
-            send_direct_error(direct_tx, message).await;
-            return;
-        }
-    };
-    // Replacement and the executor's final check/write are one transaction,
-    // so accepting this schedule guarantees an older action cannot fire later.
-    let transaction = state.scheduled_input_transaction.lock().await;
-    let event_text = text.clone();
-    let result = {
-        let mut tree = state.tree.write().await;
-        let was_replacement = tree
-            .scheduled_pane_inputs()
-            .any(|(candidate_id, _)| candidate_id == pane_id);
-        tree.schedule_pane_input(
-            pane_id,
-            ScheduledPaneInput {
-                execute_at_unix_millis,
-                text,
-                send_enter,
-            },
-        )
-        .map(|()| was_replacement)
-    };
-    // The authoritative replacement is now visible; snapshots and client
-    // broadcasts do not need to delay the executor's next freshness check.
-    drop(transaction);
-    let was_replacement = match result {
-        Ok(was_replacement) => was_replacement,
-        Err(error) => {
-            send_direct_error(direct_tx, format!("failed to schedule pane input: {error}")).await;
-            return;
-        }
-    };
-    broadcast_and_persist(state).await;
-    let _ = crate::agent_debug::record(
-        state,
-        pane_id,
-        AgentDebugSource::Server,
-        AgentDebugEventDraft::information(
-            if was_replacement {
-                AgentDebugEventKind::ScheduledInputReplaced
-            } else {
-                AgentDebugEventKind::ScheduledInputCreated
-            },
-            if was_replacement {
-                "Scheduled input replaced"
-            } else {
-                "Scheduled input created"
-            },
-        )
-        .with_fields(vec![
-            AgentDebugField::plain("delay seconds", delay_seconds.to_string()),
-            AgentDebugField::plain("execute at", execute_at_unix_millis.to_string()),
-            AgentDebugField::plain("sends Enter", send_enter.to_string()),
-            AgentDebugField::sensitive("input", event_text),
-        ]),
-    )
-    .await;
-    state.scheduled_input_changed.notify_one();
-}
-
-async fn handle_enqueue_prompt(
-    state: &Arc<ServerState>,
-    pane_id: NodeId,
-    text: String,
-    delivery: PromptQueueDelivery,
-    direct_tx: &DirectEventSender,
-) {
-    let event_text = text.clone();
-    let event_delivery = format!("{delivery:?}");
-    let _transaction = state.prompt_queue_transaction.lock().await;
-    let result = state.tree.write().await.enqueue_prompt(
-        pane_id,
-        QueuedPrompt {
-            text,
-            delivery,
-            attempted_delivery: false,
-        },
-    );
-    drop(_transaction);
-    if let Err(error) = result {
-        send_direct_error(direct_tx, format!("failed to enqueue prompt: {error}")).await;
-        return;
-    }
-    broadcast_and_persist(state).await;
-    let _ = crate::agent_debug::record(
-        state,
-        pane_id,
-        AgentDebugSource::Server,
-        AgentDebugEventDraft::information(
-            AgentDebugEventKind::PromptQueued,
-            "Prompt added to the completion queue",
-        )
-        .with_fields(vec![
-            AgentDebugField::plain("delivery", event_delivery),
-            AgentDebugField::sensitive("prompt", event_text),
-        ]),
-    )
-    .await;
-}
-
-async fn handle_clear_prompt_queue(
-    state: &Arc<ServerState>,
-    pane_id: NodeId,
-    direct_tx: &DirectEventSender,
-) {
-    let _transaction = state.prompt_queue_transaction.lock().await;
-    let result = {
-        let mut tree = state.tree.write().await;
-        let cleared_count = tree
-            .get(pane_id)
-            .and_then(|node| match &node.kind {
-                NodeKind::Pane { prompt_queue, .. } => Some(prompt_queue.len()),
-                _ => None,
-            })
-            .unwrap_or(0);
-        tree.clear_prompt_queue(pane_id).map(|()| cleared_count)
-    };
-    drop(_transaction);
-    let cleared_count = match result {
-        Ok(cleared_count) => cleared_count,
-        Err(error) => {
-            send_direct_error(direct_tx, format!("failed to clear prompt queue: {error}")).await;
-            return;
-        }
-    };
-    broadcast_and_persist(state).await;
-    let _ = crate::agent_debug::record(
-        state,
-        pane_id,
-        AgentDebugSource::Server,
-        AgentDebugEventDraft::information(
-            AgentDebugEventKind::PromptQueueCleared,
-            "Prompt queue cleared",
-        )
-        .with_fields(vec![AgentDebugField::plain(
-            "removed prompts",
-            cleared_count.to_string(),
-        )]),
-    )
-    .await;
 }
 
 async fn handle_attach(
@@ -7382,7 +7200,6 @@ async fn handle_close_pane_with_spawn_guard(
     drop(workspace_git_statuses);
 
     broadcast_and_persist(state).await;
-    state.scheduled_input_changed.notify_one();
 }
 
 async fn start_retained_workspace_prune(
@@ -8017,25 +7834,6 @@ pub(crate) async fn submit_terminal_text_locked(
 ) -> Result<(), String> {
     submit_terminal_text_with_completion_locked(state, pane_id, text, source, input_gate, None)
         .await
-}
-
-pub(crate) async fn submit_detection_completion_text_locked(
-    state: &ServerState,
-    pane_id: NodeId,
-    text: &str,
-    input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
-    generation: u64,
-    epoch: u64,
-) -> Result<(), String> {
-    submit_terminal_text_with_completion_locked(
-        state,
-        pane_id,
-        text,
-        PromptSubmissionSource::QueuedPrompt,
-        input_gate,
-        Some((generation, epoch)),
-    )
-    .await
 }
 
 async fn submit_terminal_text_with_completion_locked(

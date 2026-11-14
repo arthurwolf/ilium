@@ -1777,7 +1777,6 @@ mod tests {
                 "smoothing_percent",
             ],
             AnimationKind::Graph => &["falling_hue", "rising_hue"],
-            AnimationKind::HexExpedition => &["map_seconds"],
             AnimationKind::Images => &[
                 "builtin_image",
                 "display_seconds",
@@ -1796,20 +1795,6 @@ mod tests {
             AnimationKind::OpenStreetMap => {
                 &["destination", "dwell_seconds", "place", "selection", "tour"]
             }
-            AnimationKind::Pi => &[
-                "digit_0_hue",
-                "digit_1_hue",
-                "digit_2_hue",
-                "digit_3_hue",
-                "digit_4_hue",
-                "digit_5_hue",
-                "digit_6_hue",
-                "digit_7_hue",
-                "digit_8_hue",
-                "digit_9_hue",
-                "font_size",
-            ],
-            AnimationKind::Pipes => &["reset_seconds", "seed"],
             AnimationKind::Shoreline => &[
                 "shoreline_backwash",
                 "shoreline_big_wave_every",
@@ -4274,10 +4259,10 @@ mod tests {
     #[test]
     fn inspired_by_credit_shows_bottom_right_in_the_demo_only_for_credited_scenes() {
         let (mut app, _probe, _project) = settings_app(120, 36);
-        app.animation_settings.kind = AnimationKind::DitherWater;
+        app.animation_settings.kind = AnimationKind::VoxelLandscape;
         let windowed = draw(&mut app, 120, 36);
         let credit = credit_row(&windowed, 120, 36).expect("credit is drawn in the demo");
-        assert!(credit.contains("\u{ab}inspired by https://www.reddit.com/"));
+        assert!(credit.contains("\u{ab}inspired by https://www.minecraft.net/"));
         let panel = layout(content_area(&app)).panel;
         let model = app.animation_row_model();
         assert!(
@@ -4292,9 +4277,8 @@ mod tests {
         key(&mut app, KeyCode::Char('f'));
         let full = draw(&mut app, 120, 36);
         assert!(
-            credit_row(&full, 120, 36).is_some_and(|row| row.trim_end().ends_with(
-                "https://www.reddit.com/r/PixelArt/comments/1sqw4hf/1bit_water_animation/\u{bb}"
-            )),
+            credit_row(&full, 120, 36)
+                .is_some_and(|row| row.trim_end().ends_with("https://www.minecraft.net/\u{bb}")),
             "the whole URL fits full screen"
         );
         // Scenes with no recorded inspiration show no credit.
@@ -4306,13 +4290,7 @@ mod tests {
     #[test]
     fn game_inspired_scenes_credit_their_game_in_the_demo() {
         let (mut app, _probe, _project) = settings_app(160, 36);
-        for (kind, url) in [
-            (
-                AnimationKind::HexExpedition,
-                "https://store.steampowered.com/app/358130/The_Curious_Expedition/",
-            ),
-            (AnimationKind::VoxelLandscape, "https://www.minecraft.net/"),
-        ] {
+        for (kind, url) in [(AnimationKind::VoxelLandscape, "https://www.minecraft.net/")] {
             app.animation_settings.kind = kind;
             let drawn = draw(&mut app, 160, 36);
             let credit = credit_row(&drawn, 160, 36).unwrap_or_else(|| {
@@ -4328,7 +4306,7 @@ mod tests {
     #[test]
     fn inspired_by_credit_never_appears_outside_the_settings_demo() {
         let (mut app, _probe, _project) = settings_app(120, 36);
-        app.animation_settings.kind = AnimationKind::DitherWater;
+        app.animation_settings.kind = AnimationKind::VoxelLandscape;
         app.mode = Mode::Normal;
         let terminal = draw(&mut app, 120, 36);
         for y in 0..36 {
@@ -4795,12 +4773,12 @@ mod tests {
         let (mut app, _probe, _project) = settings_app(80, 24);
         let target = AnimationKind::ALL
             .iter()
-            .position(|kind| *kind == AnimationKind::AtlanticDusk)
+            .position(|kind| *kind == AnimationKind::VoxelLandscape)
             .unwrap();
         for _ in 0..target {
             key(&mut app, KeyCode::Down);
         }
-        assert_eq!(app.animation_settings.kind, AnimationKind::AtlanticDusk);
+        assert_eq!(app.animation_settings.kind, AnimationKind::VoxelLandscape);
         assert_eq!(state_of(&app).selected_row, target);
         let terminal = draw(&mut app, 80, 24);
         let area = content_area(&app);
@@ -4808,7 +4786,7 @@ mod tests {
         let row = row_y(area, &model, target, state_of(&app).scrolls())
             .expect("the acknowledged scene must remain inside its list window");
         assert!(
-            screen_text(&terminal)[usize::from(row)].contains("Atlantic dusk"),
+            screen_text(&terminal)[usize::from(row)].contains("Voxel landscape"),
             "the selected scene must be rendered in the list, not only in the heading"
         );
     }

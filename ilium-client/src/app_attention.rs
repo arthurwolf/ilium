@@ -57,7 +57,7 @@ pub(super) struct AttentionRequest {
 }
 
 fn unix_millis_now() -> u64 {
-    crate::scheduled_input::unix_millis_now()
+    crate::wall_clock::unix_millis_now()
 }
 
 /// The last `count` non-empty lines of `text`, joined, trailing space trimmed.

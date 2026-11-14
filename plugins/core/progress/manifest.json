@@ -37,6 +37,13 @@
       "output": "jsonl",
       "requires_server": true,
       "aliases": ["wait"]
+    }, {
+      "name": "progress-guard",
+      "summary": "Claude Code PreToolUse hook that refuses long foreground commands in a pane",
+      "output": "jsonl",
+      "stdin": "optional",
+      "requires_server": false,
+      "env": ["ILIUM_PANE_ID"]
     }]
   },
   "limits_tier": "first-party"

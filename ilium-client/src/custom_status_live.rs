@@ -169,7 +169,7 @@ pub(crate) fn with_pane_facts<T>(
         context_fill: pane_cost.and_then(|cost| cost.context_fill),
         focused_pane_id: app.focused_pane_id(),
         detection_evidence: app.pane_detection_evidence.get(&node_id),
-        current_unix_millis: crate::scheduled_input::unix_millis_now(),
+        current_unix_millis: crate::wall_clock::unix_millis_now(),
         blocking_error: Some(app.pane_has_blocking_error(node_id)),
         session_error: Some(app.session_has_blocking_error()),
         view: Some(PaneViewFacts::from_app(app)),

@@ -425,7 +425,6 @@ fn capture_and_renderer_selection_are_not_semantic_parameters() {
     );
     for raw in [
         proposal(AnimationKind::Spectrum, vec![("input", Index(0))]),
-        proposal(AnimationKind::FbmClouds, vec![("render_backend", Index(1))]),
         proposal(AnimationKind::Images, vec![("recursive", Bool(true))]),
         proposal(
             AnimationKind::VoxelLandscape,

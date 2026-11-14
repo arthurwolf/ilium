@@ -120,14 +120,11 @@ pub fn definitions() -> Vec<VoiceToolDefinition> {
             json!({
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "enum": ["press_key", "scroll_up", "scroll_down", "scroll_to_bottom", "schedule_input", "queue_prompt", "clear_prompt_queue"] },
+                    "action": { "type": "string", "enum": ["press_key", "scroll_up", "scroll_down", "scroll_to_bottom"] },
                     "target": target_schema(),
                     "text": { "type": "string" },
                     "key": { "type": "string", "enum": ["enter", "escape", "tab", "backtab", "up", "down", "left", "right", "home", "end", "page_up", "page_down", "backspace", "delete", "space", "control_c", "control_d", "control_l", "control_z"] },
                     "lines": { "type": "integer", "minimum": 1, "maximum": 10000 },
-                    "delay_seconds": { "type": "integer", "minimum": 0 },
-                    "delivery": { "type": "string", "enum": ["once", "times", "forever"] },
-                    "runs": { "type": "integer", "minimum": 1 },
                 },
                 "required": ["action"],
                 "additionalProperties": false,

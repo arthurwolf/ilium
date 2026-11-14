@@ -30,10 +30,10 @@ pub fn page_text() -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
-/// A prompt template of the baseline (`ilium-prompts/templates/agent/<name>.hbs`), byte for byte.
+/// A prompt template of the plugin (`plugins/core/chatroom/templates/<name>.hbs`), byte for byte.
 pub fn template(name: &str) -> String {
     let path = workspace_root()
-        .join("ilium-prompts/templates/agent")
+        .join("plugins/core/chatroom/templates")
         .join(format!("{name}.hbs"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("template {path:?}: {error}"))
 }

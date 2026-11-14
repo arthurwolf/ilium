@@ -35,25 +35,33 @@
       "ui.panels",
       "fs.pick",
       "notify.toast",
-      "help.read"
+      "help.read",
+      "clipboard.write"
     ]
   },
   "activation": [
     "startup",
-    "view:ilium.core.diagnostics/warnings"
+    "view:ilium.core.diagnostics/warnings",
+    "command:ilium.core.diagnostics/show-debug-log"
   ],
   "replaceable": true,
   "surface": [
     "services:report",
     "points:log-sinks",
     "points:report-sections",
-    "commands:build-report"
+    "commands:build-report",
+    "commands:show-debug-log"
   ],
   "contributes": {
     "commands": [
       {
         "id": "build-report",
         "title": "Build diagnostics report",
+        "category": "Help"
+      },
+      {
+        "id": "show-debug-log",
+        "title": "Show agent debug log",
         "category": "Help"
       }
     ],

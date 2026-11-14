@@ -1009,6 +1009,22 @@ impl App {
         frame_row_text(&slots, &contents)
     }
 
+    /// The command a click on the footer row of pane `node` runs: the command target of the
+    /// first footer-row slot (in slot order) that shows text and whose content carries one.
+    /// `None` when the row is absent or nothing on it is clickable.
+    pub(crate) fn plugin_footer_command(&self, node: ilium_core::NodeId) -> Option<String> {
+        let (slots, contents) = self.frame_slots_with_contents(node, |slot| {
+            slot.placement.as_deref() == Some(FrameRowPlacement::FooterRow.manifest_name())
+        })?;
+        slots.iter().find_map(|slot| {
+            contents
+                .iter()
+                .find(|content| content.plugin == slot.plugin && content.slot == slot.id)
+                .filter(|content| !content.text.trim().is_empty())
+                .and_then(|content| content.command.clone())
+        })
+    }
+
     /// The `pane_frame_slots` entries `keep` selects that apply to pane `node`, with what
     /// plugins set on the pane. `None` when no plugin has frame content or no slot fits.
     fn frame_slots_with_contents(
@@ -1363,6 +1379,7 @@ mod tests {
                 text: text.to_owned(),
                 icon: icon.map(str::to_owned),
                 sort_key: 0,
+                command: None,
             };
         let decorations = [
             decoration("branch", "main", None),
@@ -1393,6 +1410,7 @@ mod tests {
                 text: text.to_owned(),
                 icon: icon.map(str::to_owned),
                 sort_key: 0,
+                command: None,
             };
         let contents = [
             content("hint", "press r", None),

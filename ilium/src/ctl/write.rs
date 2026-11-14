@@ -4,7 +4,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use ilium_control::operation::{AgentProvider, PaneLaunch, QueueDelivery, StepDirection};
+use ilium_control::operation::{AgentProvider, PaneLaunch, StepDirection};
 use ilium_control::{resolve_project, Operation, SelectError};
 use ilium_core::{NodeId, RestructurePlan, ROOT_ID};
 use ilium_ipc::{ClientRequest, ServerEvent, WorkspaceCreateSpec};
@@ -160,32 +160,6 @@ fn to_operation(command: CtlCommand, link: &Link) -> Result<Operation, CtlFailur
             enter: !no_enter,
         },
         CtlCommand::Keys { id, keys } => Operation::SendKeys { pane: id, keys },
-        CtlCommand::Schedule {
-            id,
-            delay_seconds,
-            text,
-            no_enter,
-        } => Operation::Schedule {
-            pane: id,
-            delay_seconds,
-            text,
-            enter: !no_enter,
-        },
-        CtlCommand::Queue {
-            id,
-            text,
-            times,
-            forever,
-        } => Operation::Enqueue {
-            pane: id,
-            text,
-            delivery: match (times, forever) {
-                (_, true) => QueueDelivery::Forever,
-                (Some(runs), _) => QueueDelivery::Times { runs },
-                _ => QueueDelivery::Once,
-            },
-        },
-        CtlCommand::QueueClear { id } => Operation::ClearQueue { pane: id },
         CtlCommand::Bookmark { id, off } => Operation::Bookmark { node: id, on: !off },
         CtlCommand::Expand { id } => Operation::Expand {
             node: id,

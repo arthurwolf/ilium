@@ -109,22 +109,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ),
             ("context-menu", ilium_client::app::Mode::Normal),
             (
-                "schedule-pane-input",
-                ilium_client::app::Mode::SchedulePaneInput(Box::new({
-                    let mut state =
-                        ilium_client::scheduled_input::ScheduledInputDialogState::new(
-                            ilium_core::ROOT_ID,
-                        );
-                    state.hours = ilium_client::text_prompt::TextPromptState::new("0");
-                    state.minutes = ilium_client::text_prompt::TextPromptState::new("1");
-                    state.seconds = ilium_client::text_prompt::TextPromptState::new("30");
-                    state.text = ilium_client::text_prompt::TextPromptState::new(
-                        "Synthetic delayed input",
-                    );
-                    state
-                })),
-            ),
-            (
                 "create-agent-from-line",
                 ilium_client::app::Mode::CreateAgentFromLine(Box::new(
                     ilium_client::agent_from_line::CreateAgentFromLineState::new(
@@ -223,9 +207,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ("voice-prompt-overflow", ilium_client::app::Mode::VoicePromptEditor(Box::new(ilium_client::voice_settings::VoicePromptEditorState::new(&"Synthetic voice instructions: preserve readable spacing and Unicode 界.\n".repeat(80))))),
             ("stats-hover-preview", ilium_client::app::Mode::Normal),
             ("stats-pinned", ilium_client::app::Mode::Normal),
-            ("queue-prompt-short", ilium_client::app::Mode::Normal),
-            ("queue-prompt-long-tail", ilium_client::app::Mode::Normal),
-            ("queue-prompt-long-middle", ilium_client::app::Mode::Normal),
             (
                 "onboarding-keyboard-editor",
                 ilium_client::app::Mode::Normal,
@@ -282,14 +263,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 ilium_client::app::Mode::RemoteCompaction,
             ),
             (
-                "agent-debug-history-oldest",
-                ilium_client::app::Mode::Normal,
-            ),
-            (
-                "agent-debug-history-newest",
-                ilium_client::app::Mode::Normal,
-            ),
-            (
                 "command-prompt",
                 ilium_client::app::Mode::CommandPrompt(
                     ilium_client::text_prompt::TextPromptState::new("synthetic-command --example"),
@@ -306,15 +279,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 ilium_client::app::Mode::SaveAs(
                     ilium_core::ROOT_ID,
                     ilium_client::text_prompt::TextPromptState::new("/synthetic/notes/example.md"),
-                ),
-            ),
-            (
-                "debug-log-path-prompt",
-                ilium_client::app::Mode::AgentDebugSavePath(
-                    ilium_core::ROOT_ID,
-                    ilium_client::text_prompt::TextPromptState::new(
-                        "/synthetic/logs/agent-debug.txt",
-                    ),
                 ),
             ),
             (
@@ -336,8 +300,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 "close-workspace-confirm",
                 ilium_client::app::Mode::ConfirmClose(ilium_core::ROOT_ID),
             ),
-            ("agent-message-empty", synthetic_agent_message(0)),
-            ("agent-message-overflow", synthetic_agent_message(40)),
             (
                 "board-card-prompt",
                 ilium_client::app::Mode::BoardCardPrompt(
@@ -531,22 +493,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     name == "stats-pinned",
                     std::time::Instant::now(),
                 ));
-            } else if name.starts_with("queue-prompt-") {
-                let mut state =
-                    ilium_client::prompt_queue::PromptQueueDialogState::new(ilium_core::ROOT_ID);
-                let text = if name == "queue-prompt-short" {
-                    "Review the changes and report the remaining checks.".to_owned()
-                } else {
-                    (0..60)
-                        .map(|row| format!("Synthetic draft line {row:02} — readable UTF-8 text\n"))
-                        .collect::<String>()
-                        + "EDITED-TAIL"
-                };
-                state.text = ilium_client::text_prompt::TextPromptState::new(text);
-                if name == "queue-prompt-long-middle" {
-                    state.text.cursor = state.text.buf.chars().count() / 2;
-                }
-                app.mode = ilium_client::app::Mode::QueuePrompt(Box::new(state));
             } else if name.starts_with("onboarding-") {
                 use ilium_client::onboarding::state::{
                     AiChoice, KeyboardChoice, SoundChoice, Step,
@@ -596,8 +542,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 configure_synthetic_terminals(&mut app, name, width, height)?;
             } else if name.starts_with("remote-compaction-") {
                 configure_synthetic_remote_compaction(&mut app, name == "remote-compaction-failed");
-            } else if name.starts_with("agent-debug-history-") {
-                configure_synthetic_debug_history(&mut app, name == "agent-debug-history-oldest")?;
             } else if name.starts_with("inference-") {
                 app.mode = ilium_client::app::Mode::Settings(SettingsState {
                     tab: SettingsTab::Inference,
@@ -655,17 +599,13 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     "Synthetic voice instruction editor; no saving, provider request, microphone, audio or live input is performed",
                 name if name.starts_with("stats-") =>
                     "Synthetic pane and empty cached stats presentation; no transcript loading, stats worker, server request, font or live input is tested",
-                name if name.starts_with("queue-prompt-") =>
-                    "Synthetic queued draft and cursor; no enqueue, bell detection or terminal submission is performed",
                 name if name.starts_with("onboarding-") =>
                     "Synthetic cached onboarding step; no provider requests, saves, audio, voice or practice actions; no actual audio playback or live keyboard input is tested",
                 "board-populated-first" | "board-populated-last" | "board-details-title" | "board-details-notes" =>
                     "Synthetic Markdown board loaded from new fixture input; no board saves, server requests, font or live input are tested",
                 "remote-compaction-running" | "remote-compaction-failed" =>
                     "Synthetic compaction presentation only; no worker, provider request, transcript or process operation; font and live input are not tested",
-                "agent-debug-history-oldest" | "agent-debug-history-newest" =>
-                    "Synthetic cached debug events and tree-only pane; server journal, terminal font and live input are not tested",
-                "save-as-prompt" | "debug-log-path-prompt" =>
+                "save-as-prompt" =>
                     "Synthetic prompt without a real pane or populated parent; terminal font and live input are not tested",
                 "worktree-close-waiting" | "worktree-close-no-workspace" |
                 "worktree-remove-no-workspace" | "close-workspace-confirm" =>
@@ -853,31 +793,6 @@ fn synthetic_board(storage_kind: ilium_client::app::BoardStorageKind) -> ilium_c
     })
 }
 
-fn synthetic_agent_message(count: u64) -> ilium_client::app::Mode {
-    use ilium_client::agent_message_dialog::{
-        AgentMessageDialog, Focus, Recipient, RecipientState,
-    };
-    let recipients = (0..count)
-        .map(|index| Recipient {
-            pane_id: ilium_core::NodeId(index + 1),
-            label: format!("Synthetic agent {index:02}"),
-            checked: true,
-            state: RecipientState::Pending,
-        })
-        .collect();
-    let mut dialog = AgentMessageDialog::new(
-        ilium_core::ROOT_ID,
-        "Synthetic project".to_owned(),
-        recipients,
-    );
-    dialog
-        .message
-        .insert_str("Synthetic message preview; no message will be sent.");
-    dialog.focus = Focus::Recipients;
-    dialog.selected = count.saturating_sub(1) as usize;
-    ilium_client::app::Mode::AgentMessageDialog(Box::new(dialog))
-}
-
 /// The dispatcher retrieves every hashed file under its target directory.
 /// Keep captures outside source so rendering cannot invalidate source receipts.
 fn service_output_directory() -> Result<PathBuf, Box<dyn Error>> {
@@ -895,55 +810,6 @@ fn service_output_directory() -> Result<PathBuf, Box<dyn Error>> {
         return Err("capture target must belong to the identified ni-build remote job".into());
     }
     Ok(target.join("ui-chrome-captures"))
-}
-
-/// Populate presentation data only; no terminal process or server journal exists.
-fn configure_synthetic_debug_history(app: &mut App, oldest: bool) -> Result<(), Box<dyn Error>> {
-    use ilium_client::app::{
-        AgentDebugLogCache, AgentDebugLogScrollPosition, AgentDebugLogViewState, Mode,
-    };
-    let group = app
-        .tree
-        .add_group(ilium_core::ROOT_ID, "Synthetic debug history")?;
-    let pane_id = app.tree.add_pane(
-        group,
-        "Synthetic agent",
-        ilium_core::PaneContentKind::Terminal,
-    )?;
-    let entries = (1..=80).map(|sequence| ilium_ipc::AgentDebugEntry {
-        sequence,
-        occurred_at_unix_millis: 1_700_000_000_000 + (sequence as i64) * 1000,
-        severity: ilium_ipc::AgentDebugSeverity::Success,
-        source: ilium_ipc::AgentDebugSource::SessionDiscovery,
-        kind: ilium_ipc::AgentDebugEventKind::SessionResolved,
-        summary: format!("Synthetic event {sequence:02}: project session discovery completed with a long explanatory message"),
-        fields: vec![ilium_ipc::AgentDebugField::sensitive("session ID", "synthetic-session")],
-        correlation_id: None,
-        context: ilium_ipc::AgentDebugContext::default(),
-        metadata: Default::default(),
-    }).collect();
-    app.agent_debug_logs.insert(
-        pane_id,
-        AgentDebugLogCache {
-            through_sequence: 80,
-            has_loaded_retained_history: true,
-            log: ilium_ipc::PaneDebugLog {
-                entries,
-                next_sequence: 81,
-                ..Default::default()
-            },
-            ..AgentDebugLogCache::default()
-        },
-    );
-    app.mode = Mode::AgentDebugLog(AgentDebugLogViewState {
-        pane_id,
-        scroll_position: if oldest {
-            AgentDebugLogScrollPosition::FromOldest(0)
-        } else {
-            AgentDebugLogScrollPosition::FromNewest(0)
-        },
-    });
-    Ok(())
 }
 
 /// Exercise the composed dialog without submitting a compaction worker job.

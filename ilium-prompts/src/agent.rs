@@ -22,10 +22,6 @@ pub const WORKTREE_WRAP_UP_INSTRUCTIONS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/agent/worktree-wrap-up.hbs"
 ));
-pub const COORDINATION_GUIDANCE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/coordination-guidance.hbs"
-));
 pub const ASK_FOR_UPDATE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/agent/ask-for-update.hbs"
@@ -38,42 +34,6 @@ pub const MANAGED_BLOCK: &str = include_str!(concat!(
 pub const GOAL_FROM_LINE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/agent/goal-from-line.hbs"
-));
-pub const CHATROOM_RECORD_ROW: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/chatroom-record-row.hbs"
-));
-pub const CHATROOM_EMPTY_CONTEXT: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/chatroom-empty-context.hbs"
-));
-pub const CHATROOM_CONTEXT: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/chatroom-context.hbs"
-));
-pub const CHATROOM_UNREAD_CONTEXT: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/chatroom-unread-context.hbs"
-));
-pub const CHATROOM_OMITTED: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/chatroom-omitted.hbs"
-));
-pub const CHATROOM_CONTEXT_ROW: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/chatroom-context-row.hbs"
-));
-pub const CHATROOM_TITLE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/chatroom-title.hbs"
-));
-pub const CHATROOM_HEADER_GUIDANCE: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/chatroom-header-guidance.hbs"
-));
-pub const CHATROOM_MESSAGES_HEADING: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/templates/agent/chatroom-messages-heading.hbs"
 ));
 pub const PROGRESS_DONE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -121,19 +81,9 @@ pub const TEMPLATES: &[(&str, &str)] = &[
         COMPACT_PROGRESS_INSTRUCTIONS,
     ),
     ("agent/worktree-wrap-up", WORKTREE_WRAP_UP_INSTRUCTIONS),
-    ("agent/coordination-guidance", COORDINATION_GUIDANCE),
     ("agent/ask-for-update", ASK_FOR_UPDATE),
     ("agent/managed-block", MANAGED_BLOCK),
     ("agent/goal-from-line", GOAL_FROM_LINE),
-    ("agent/chatroom-record-row", CHATROOM_RECORD_ROW),
-    ("agent/chatroom-empty-context", CHATROOM_EMPTY_CONTEXT),
-    ("agent/chatroom-context", CHATROOM_CONTEXT),
-    ("agent/chatroom-unread-context", CHATROOM_UNREAD_CONTEXT),
-    ("agent/chatroom-omitted", CHATROOM_OMITTED),
-    ("agent/chatroom-context-row", CHATROOM_CONTEXT_ROW),
-    ("agent/chatroom-title", CHATROOM_TITLE),
-    ("agent/chatroom-header-guidance", CHATROOM_HEADER_GUIDANCE),
-    ("agent/chatroom-messages-heading", CHATROOM_MESSAGES_HEADING),
     ("agent/progress-done", PROGRESS_DONE),
     ("agent/progress-error", PROGRESS_ERROR),
     (

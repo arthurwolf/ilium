@@ -75,10 +75,16 @@ fn cor_050_server_capabilities_are_exactly_the_eight_of_the_page() {
 
 /// REQ: COR-050
 #[test]
-fn cor_050_client_capabilities_are_exactly_the_four_of_the_page() {
+fn cor_050_client_capabilities_are_exactly_the_five_of_the_page() {
     assert_eq!(
         strings(&manifest_json()["capabilities"]["client"]),
-        ["ui.panels", "fs.pick", "notify.toast", "help.read"]
+        [
+            "ui.panels",
+            "fs.pick",
+            "notify.toast",
+            "help.read",
+            "clipboard.write"
+        ]
     );
 }
 
@@ -104,10 +110,14 @@ fn cor_050_the_log_folder_grant_is_a_literal_path_not_a_scope_pattern() {
 
 /// REQ: COR-050
 #[test]
-fn cor_050_activation_triggers_are_startup_and_the_warnings_view() {
+fn cor_050_activation_triggers_are_startup_the_warnings_view_and_the_debug_log_command() {
     assert_eq!(
         strings(&manifest_json()["activation"]),
-        ["startup", "view:ilium.core.diagnostics/warnings"]
+        [
+            "startup",
+            "view:ilium.core.diagnostics/warnings",
+            "command:ilium.core.diagnostics/show-debug-log"
+        ]
     );
 }
 
@@ -126,17 +136,21 @@ fn cor_050_surface_lists_the_service_both_points_and_the_command() {
             "services:report",
             "points:log-sinks",
             "points:report-sections",
-            "commands:build-report"
+            "commands:build-report",
+            "commands:show-debug-log"
         ]
     );
 }
 
 /// REQ: COR-050
 #[test]
-fn cor_050_contributes_exactly_one_command_build_report_in_the_help_category() {
+fn cor_050_contributes_the_build_report_and_show_debug_log_commands_in_the_help_category() {
     assert_eq!(
         manifest_json()["contributes"]["commands"],
-        json!([{ "id": "build-report", "title": "Build diagnostics report", "category": "Help" }])
+        json!([
+            { "id": "build-report", "title": "Build diagnostics report", "category": "Help" },
+            { "id": "show-debug-log", "title": "Show agent debug log", "category": "Help" }
+        ])
     );
 }
 

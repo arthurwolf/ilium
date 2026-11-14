@@ -19,8 +19,6 @@ use crate::agent_from_line::{CreateAgentFocus, CreateAgentFromLineState, EditorL
 use crate::agent_toolbar::AgentToolbarAction;
 use crate::app::{AgentToolbarModelSubmenuState, App, ContextMenu, Mode, RightPanelTarget};
 use crate::explorer_overlay::{ExplorerOutcome, ExplorerOverlay};
-use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
-use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::tree_ui::{self, TreeRowAction, TreeToolbarAction};
 
 /// The pointer route can depend on overlays, gestures and the last emitted
@@ -202,15 +200,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     let position = Position::new(mouse.column, mouse.row);
     app.set_terminal_focused(true);
     app.set_pointer_position(Some(position));
-    if matches!(app.mode, Mode::AgentMessageDialog(_)) {
-        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            unreachable!("matched message dialog");
-        };
-        let outcome = state.handle_mouse(app.layout.screen_area, mouse);
-        app.finish_agent_message_dialog(state, outcome);
-        return;
-    }
     if !app.layout.tree_area.contains(position) {
         app.update_agent_popover_pointer(position, Instant::now());
     }
@@ -331,26 +320,8 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         handle_terminal_pane_context_menu_mouse(app, menu, mouse);
         return;
     }
-    if matches!(app.mode, Mode::AgentDebugLog(_)) {
-        handle_agent_debug_log_mouse(app, mouse, position);
-        return;
-    }
     if matches!(app.mode, Mode::LastPromptDialog(_)) {
         handle_last_prompt_dialog_mouse(app, mouse, position);
-        return;
-    }
-    if matches!(app.mode, Mode::SchedulePaneInput(_)) {
-        let Mode::SchedulePaneInput(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            unreachable!("just matched Mode::SchedulePaneInput above");
-        };
-        handle_scheduled_input_mouse(app, state, mouse);
-        return;
-    }
-    if matches!(app.mode, Mode::QueuePrompt(_)) {
-        let Mode::QueuePrompt(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            unreachable!("just matched Mode::QueuePrompt above");
-        };
-        handle_prompt_queue_mouse(app, state, mouse);
         return;
     }
     if matches!(app.mode, Mode::EditorLineContextMenu(_)) {
@@ -627,7 +598,6 @@ fn is_shared_action_dialog(mode: &Mode) -> bool {
             | Mode::AgentSetupPathPrompt(_, _)
             | Mode::VoicePromptEditor(_)
             | Mode::SaveAs(..)
-            | Mode::AgentDebugSavePath(..)
             | Mode::ConfirmClose(_)
             | Mode::ConfirmWorkspaceCloseOffer(_)
             | Mode::ConfirmRemoveWorkspace(_)
@@ -701,7 +671,6 @@ fn handle_shared_action_dialog_mouse(app: &mut App, mouse: MouseEvent) {
         | Mode::AnimationTextPrompt(_, state)
         | Mode::AgentSetupPathPrompt(_, state)
         | Mode::SaveAs(_, state)
-        | Mode::AgentDebugSavePath(_, state)
         | Mode::BoardCardPrompt(_, state)
         | Mode::BoardColumnPrompt(_, state)
         | Mode::BoardRenamePrompt(_, _, state) => state,
@@ -887,37 +856,6 @@ fn handle_last_prompt_dialog_mouse(app: &mut App, mouse: MouseEvent, position: P
             {
                 app.mode = Mode::Normal;
             }
-        }
-        _ => {}
-    }
-}
-
-fn handle_agent_debug_log_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
-    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-        && crate::agent_debug_ui::resize_filter_button_area(app.layout.pane_area).contains(position)
-    {
-        app.toggle_agent_debug_tree_resize_filter();
-        return;
-    }
-    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-        && crate::agent_debug_ui::save_button_area(app.layout.pane_area).contains(position)
-    {
-        let Mode::AgentDebugLog(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            return;
-        };
-        app.open_agent_debug_save_path(state);
-        return;
-    }
-    let Mode::AgentDebugLog(state) = &mut app.mode else {
-        return;
-    };
-    match mouse.kind {
-        MouseEventKind::ScrollUp => state.scroll_older(3),
-        MouseEventKind::ScrollDown => state.scroll_newer(3),
-        MouseEventKind::Down(MouseButton::Left)
-            if crate::agent_debug_ui::back_button_area(app.layout.pane_area).contains(position) =>
-        {
-            app.mode = Mode::Normal;
         }
         _ => {}
     }
@@ -1287,7 +1225,6 @@ fn handle_tree_row_action(app: &mut App, id: ilium_core::NodeId, action: TreeRow
             app.action_request_recap(id);
         }
         TreeRowAction::ProjectRestructure => app.action_request_project_restructure(id),
-        TreeRowAction::AskForUpdate => app.action_ask_for_update(id),
     }
 }
 
@@ -1930,135 +1867,6 @@ fn handle_create_agent_workspace_mouse(
     app.mode = Mode::CreateAgentWorkspace(state);
 }
 
-/// Gives every visible form control a direct mouse target. Clicking outside
-/// follows ilium's other creation dialogs and cancels; clicking a field moves
-/// its cursor close to the selected cell before keyboard input resumes.
-fn handle_scheduled_input_mouse(
-    app: &mut App,
-    mut state: Box<ScheduledInputDialogState>,
-    mouse: MouseEvent,
-) {
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        app.mode = Mode::SchedulePaneInput(state);
-        return;
-    }
-    let position = Position::new(mouse.column, mouse.row);
-    let layout = crate::scheduled_input::dialog_layout(app.layout.screen_area);
-    if !layout.popup.contains(position) {
-        app.mode = Mode::Normal;
-        return;
-    }
-    if layout.hours.contains(position) {
-        let error = state
-            .duration_control(ScheduledInputFocus::Hours, layout.hours)
-            .hit(position, crate::value_control::PointerButton::Left)
-            .and_then(|action| {
-                state
-                    .apply_duration_control(ScheduledInputFocus::Hours, action)
-                    .err()
-            });
-        if let Some(message) = error {
-            app.status_message = Some(message);
-        }
-    } else if layout.minutes.contains(position) {
-        let error = state
-            .duration_control(ScheduledInputFocus::Minutes, layout.minutes)
-            .hit(position, crate::value_control::PointerButton::Left)
-            .and_then(|action| {
-                state
-                    .apply_duration_control(ScheduledInputFocus::Minutes, action)
-                    .err()
-            });
-        if let Some(message) = error {
-            app.status_message = Some(message);
-        }
-    } else if layout.seconds.contains(position) {
-        let error = state
-            .duration_control(ScheduledInputFocus::Seconds, layout.seconds)
-            .hit(position, crate::value_control::PointerButton::Left)
-            .and_then(|action| {
-                state
-                    .apply_duration_control(ScheduledInputFocus::Seconds, action)
-                    .err()
-            });
-        if let Some(message) = error {
-            app.status_message = Some(message);
-        }
-    } else if layout.text.contains(position) {
-        state.focus = ScheduledInputFocus::Text;
-        place_prompt_cursor(&mut state.text, layout.text, position);
-    } else if layout.send_enter.contains(position) {
-        state.focus = ScheduledInputFocus::SendEnter;
-        state.send_enter = !state.send_enter;
-    } else if layout.schedule_button.contains(position) {
-        state.focus = ScheduledInputFocus::ScheduleButton;
-        app.commit_scheduled_pane_input(state);
-        return;
-    }
-    app.mode = Mode::SchedulePaneInput(state);
-}
-
-fn handle_prompt_queue_mouse(
-    app: &mut App,
-    mut state: Box<PromptQueueDialogState>,
-    mouse: MouseEvent,
-) {
-    let position = Position::new(mouse.column, mouse.row);
-    let layout = crate::prompt_queue::dialog_layout(app.layout.screen_area);
-    if matches!(
-        mouse.kind,
-        MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
-    ) && layout.delivery.contains(position)
-    {
-        let button = if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
-            crate::value_control::PointerButton::Right
-        } else {
-            crate::value_control::PointerButton::Left
-        };
-        if let Some(action) = state
-            .delivery_control(layout.delivery)
-            .hit(position, button)
-        {
-            state.focus = PromptQueueFocus::Delivery;
-            match action {
-                crate::value_control::ControlAction::PreviousChoice => state.cycle_delivery(-1),
-                crate::value_control::ControlAction::NextChoice => state.cycle_delivery(1),
-                crate::value_control::ControlAction::OpenChoices => {
-                    app.begin_queue_delivery_dialog(state);
-                    return;
-                }
-                _ => {}
-            }
-        }
-        app.mode = Mode::QueuePrompt(state);
-        return;
-    }
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        app.mode = Mode::QueuePrompt(state);
-        return;
-    }
-    if !layout.popup.contains(position) {
-        app.mode = Mode::Normal;
-        return;
-    }
-    if layout.text.contains(position) {
-        state.focus = PromptQueueFocus::Text;
-    } else if layout.times.contains(position) {
-        let error = state
-            .times_control(layout.times)
-            .hit(position, crate::value_control::PointerButton::Left)
-            .and_then(|action| state.apply_times_control(action).err());
-        if let Some(message) = error {
-            app.status_message = Some(message);
-        }
-    } else if layout.enqueue_button.contains(position) {
-        state.focus = PromptQueueFocus::EnqueueButton;
-        app.commit_queued_prompt(state);
-        return;
-    }
-    app.mode = Mode::QueuePrompt(state);
-}
-
 fn place_prompt_cursor(
     prompt: &mut crate::text_prompt::TextPromptState,
     field_area: Rect,
@@ -2664,14 +2472,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
     {
         app.clear_plugin_issue_hover();
     }
-    // An open Apply confirmation owns the pointer: everything under it is inert.
-    if state.tab == crate::app::SettingsTab::Optimization
-        && app.optimization.pending_apply.is_some()
-    {
-        app.optimization_modal_mouse(mouse, app.layout.screen_area);
-        app.mode = Mode::Settings(Box::new(state));
-        return;
-    }
     if mouse.kind == MouseEventKind::Down(MouseButton::Left)
         && crate::settings_ui::onboarding_button_area(layout.header_area).contains(position)
     {
@@ -2742,11 +2542,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         }
     }
 
-    let scrollable_area = if state.tab == crate::app::SettingsTab::Optimization {
-        crate::compaction_ui::body_area(layout.content_area)
-    } else {
-        layout.content_area
-    };
+    let scrollable_area = layout.content_area;
     let content_scrollbar_area = Rect {
         y: scrollable_area.y,
         height: scrollable_area.height,
@@ -3743,8 +3539,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     }
                     return;
                 }
-            } else if state.tab == crate::app::SettingsTab::Optimization {
-                app.optimization_click(&mut state, layout.content_area, position);
             } else if state.tab == crate::app::SettingsTab::RemoteCompaction {
                 let pointer_button = match mouse.kind {
                     MouseEventKind::Down(MouseButton::Right) => {
@@ -4094,7 +3888,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         crate::settings_ui::max_scroll(state.tab, app, state.selected_row, layout.content_area)
     };
     state.scroll = state.scroll.min(max_scroll);
-    app.optimization_sync_visibility(state.tab == crate::app::SettingsTab::Optimization);
     app.remote_compaction_sync_native(state.tab == crate::app::SettingsTab::RemoteCompaction);
     app.mode = Mode::Settings(Box::new(state));
 }
@@ -4571,135 +4364,6 @@ mod agent_from_line_mouse_tests {
 }
 
 #[cfg(test)]
-mod scheduled_input_mouse_tests {
-    use super::*;
-    use crossterm::event::KeyModifiers;
-
-    fn click(app: &mut App, area: Rect) {
-        handle_mouse_event(
-            app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: area.x + area.width.saturating_sub(1) / 2,
-                row: area.y,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-    }
-
-    #[test]
-    fn scheduled_input_checkbox_and_button_have_real_mouse_targets() {
-        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
-        app.set_screen_area(Rect::new(0, 0, 100, 30));
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-        app.mode = Mode::SchedulePaneInput(Box::new(ScheduledInputDialogState::new(pane_id)));
-        let layout = crate::scheduled_input::dialog_layout(app.layout.screen_area);
-
-        click(&mut app, layout.send_enter);
-
-        let Mode::SchedulePaneInput(state) = &mut app.mode else {
-            panic!("checkbox click should keep the form open");
-        };
-        assert!(!state.send_enter);
-        assert_eq!(state.focus, ScheduledInputFocus::SendEnter);
-        state.text = crate::text_prompt::TextPromptState::new("status");
-
-        click(&mut app, layout.schedule_button);
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ilium_ipc::ClientRequest::SchedulePaneInput {
-                pane_id,
-                delay_seconds: 30,
-                text: "status".to_string(),
-                send_enter: false,
-            }]
-        );
-    }
-}
-
-#[cfg(test)]
-mod agent_debug_mouse_tests {
-    use super::*;
-    use crossterm::event::KeyModifiers;
-
-    #[test]
-    fn clicking_the_top_save_button_opens_the_destination_path_prompt() {
-        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "codex", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-        app.agent_debug_logs.insert(
-            pane_id,
-            crate::app::AgentDebugLogCache {
-                has_loaded_retained_history: true,
-                ..crate::app::AgentDebugLogCache::default()
-            },
-        );
-        app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
-            pane_id,
-            scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
-        });
-        let button = crate::agent_debug_ui::save_button_area(app.layout.pane_area);
-
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: button.x,
-                row: button.y,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-
-        assert!(matches!(
-            app.mode,
-            Mode::AgentDebugSavePath(target, _) if target == pane_id
-        ));
-        assert!(matches!(
-            app.modal_stack.as_slice(),
-            [Mode::AgentDebugLog(crate::app::AgentDebugLogViewState { pane_id: parent, .. })]
-                if *parent == pane_id
-        ));
-    }
-
-    #[test]
-    fn clicking_the_top_resize_filter_switch_reveals_animation_resizes() {
-        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let pane_id = ilium_core::NodeId(7);
-        app.mode = Mode::AgentDebugLog(crate::app::AgentDebugLogViewState {
-            pane_id,
-            scroll_position: crate::app::AgentDebugLogScrollPosition::FromNewest(0),
-        });
-        let button = crate::agent_debug_ui::resize_filter_button_area(app.layout.pane_area);
-
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: button.x,
-                row: button.y,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-
-        assert!(matches!(app.mode, Mode::AgentDebugLog(_)));
-        assert!(
-            !app.agent_debug_log_filter
-                .is_tree_panel_animation_resize_hidden
-        );
-    }
-}
-
-#[cfg(test)]
 mod tree_order_context_mouse_tests {
     use super::*;
     use crossterm::event::KeyModifiers;
@@ -4984,7 +4648,7 @@ mod markdown_board_context_mouse_tests {
         let path = std::env::temp_dir().join(format!(
             "ilium-board-mouse-{}-{}.md",
             std::process::id(),
-            crate::scheduled_input::unix_millis_now()
+            crate::wall_clock::unix_millis_now()
         ));
         std::fs::write(&path, "# Work\n\n* [ ] Mouse task\n").unwrap();
         // Canonicalized through the same helper the app uses: `%TEMP%` hands
@@ -5551,7 +5215,7 @@ mod shared_dialog_mouse_tests {
         let project_path = std::env::temp_dir().join(format!(
             "ilium-board-dialog-mouse-{}-{}",
             std::process::id(),
-            crate::scheduled_input::unix_millis_now()
+            crate::wall_clock::unix_millis_now()
         ));
         std::fs::create_dir_all(&project_path).unwrap();
         let mut app = App::new("dialog-mouse-test".to_owned(), project_path.clone());

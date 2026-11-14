@@ -3,16 +3,23 @@
 //! The pure agent-debug journal, report text, recorder state and report service live in the modules below;
 //! the two sides are thin ServiceProvider/Views shells over them.
 
+use std::cell::RefCell;
+
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
+use ilium_plugin_sdk::generated::host::{HostClipboard, HostClock};
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
+use ilium_plugin_sdk::types::{
+    Alignment, BlockSpec, BlockTitle, BorderType, Borders, Intent, NodeFlags, OpenViewSpec,
+    Padding, ParagraphSpec, PluginError, RichSpan, SetStatusSegmentSpec, Span, SpanTarget, Style,
+    TitlePosition, UiNode, Widget,
+};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 
 pub mod export;
 pub mod logging;
@@ -21,6 +28,7 @@ pub mod report;
 pub mod server_debug;
 pub mod service;
 pub mod view;
+pub mod viewer;
 pub mod warnings;
 
 /// The server side of `ilium.core.diagnostics` (core-plugin-diagnostics.md, world `ilium:server/base@0.1.0`).
@@ -57,7 +65,10 @@ impl ServiceProvider for DiagnosticsServer {
 /// The client side of `ilium.core.diagnostics` (core-plugin-diagnostics.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
-pub struct DiagnosticsClient;
+pub struct DiagnosticsClient {
+    /// Entry rows of the popup at its last draw: what PageUp and PageDown move by.
+    page_rows: usize,
+}
 
 impl Lifecycle for DiagnosticsClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
@@ -65,19 +76,182 @@ impl Lifecycle for DiagnosticsClient {
     }
 }
 
+thread_local! {
+    /// The debug log viewer while its popup is open.
+    static VIEWER: RefCell<Option<viewer::DebugViewer>> = const { RefCell::new(None) };
+}
+
+/// The status bar segment that reports a copy of the debug report.
+const STATUS_SEGMENT: &str = "diagnostics";
+
+fn debug_log_popup() -> ViewTarget {
+    ViewTarget::Popup(viewer::SHOW_COMMAND.to_string())
+}
+
+fn status(text: String) -> Submission {
+    Submission::new(Intent::SetStatusSegment(SetStatusSegmentSpec {
+        segment: STATUS_SEGMENT.to_string(),
+        content: vec![RichSpan {
+            text,
+            style: Style::default(),
+            target: SpanTarget::None,
+            tooltip: None,
+        }],
+        tooltip: None,
+        tone: None,
+    }))
+}
+
+/// `show-debug-log`: the kernel hands over the retained history of one agent pane.
+fn open_debug_log(arguments_json: &str) -> Vec<Submission> {
+    let Ok(arguments) = serde_json::from_str::<viewer::ShowArguments>(arguments_json) else {
+        return vec![status("The debug history could not be read".to_string())];
+    };
+    let already_open = VIEWER.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let was_open = slot.is_some();
+        *slot = Some(viewer::DebugViewer::from_arguments(arguments));
+        was_open
+    });
+    if already_open {
+        return Vec::new();
+    }
+    vec![Submission::new(Intent::OpenView(OpenViewSpec {
+        view: debug_log_popup(),
+        focus: true,
+    }))]
+}
+
+/// A key while the viewer is open.
+fn press_debug_log(chord: &str, page: usize) -> Vec<Submission> {
+    VIEWER.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let Some(viewer) = slot.as_mut() else {
+            return Vec::new();
+        };
+        let now = {
+            let mut api = host();
+            HostClock::now_unix_millis(&mut *api)
+        };
+        match viewer.press(chord, page, i64::try_from(now).unwrap_or(i64::MAX)) {
+            viewer::KeyOutcome::Ignored | viewer::KeyOutcome::Redraw => Vec::new(),
+            viewer::KeyOutcome::Close => {
+                *slot = None;
+                vec![Submission::new(Intent::CloseView(debug_log_popup()))]
+            }
+            viewer::KeyOutcome::Copy(report) => {
+                let written = {
+                    let mut api = host();
+                    HostClipboard::write_text(&mut *api, report)
+                };
+                match written {
+                    Ok(()) => vec![status("Debug report copied".to_string())],
+                    Err(error) => vec![status(format!("Copy failed: {}", error.message))],
+                }
+            }
+        }
+    })
+}
+
 impl Handler for DiagnosticsClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut submissions = Vec::new();
+        for event in batch {
+            match event {
+                Event::CommandInvoked(command) if command.command == viewer::SHOW_COMMAND => {
+                    submissions.extend(open_debug_log(&command.arguments_json));
+                }
+                Event::KeyPressed(key) => {
+                    submissions.extend(press_debug_log(&key.chord, self.page_rows));
+                }
+                _ => {}
+            }
+        }
+        submissions
+    }
+}
+
+fn node(widget: Widget, children: Vec<u32>) -> UiNode {
+    UiNode {
+        key: None,
+        widget,
+        children,
+        flags: NodeFlags::default(),
+        tooltip: None,
+        tab_index: None,
+        disabled_reason: None,
+    }
+}
+
+fn text_line(text: String) -> Vec<Span> {
+    vec![Span {
+        text,
+        style: Style::default(),
+    }]
+}
+
+/// The viewer popup: a framed list of the newest entries, a count line and the key hint.
+fn debug_log_tree(viewer: &viewer::DebugViewer, area: Area) -> UiTree {
+    let entry_rows = viewer::DebugViewer::entry_rows(usize::from(area.rows));
+    let mut lines: Vec<Vec<Span>> = viewer
+        .window(entry_rows)
+        .into_iter()
+        .map(text_line)
+        .collect();
+    lines.push(Vec::new());
+    lines.push(text_line(viewer.status_line()));
+    lines.push(text_line(viewer::DebugViewer::hint_line().to_string()));
+    let paragraph = ParagraphSpec {
+        lines,
+        rich: None,
+        wrap: Some(false),
+        alignment: Alignment::Left,
+        style: Style::default(),
+        scrollable: false,
+    };
+    let block = BlockSpec {
+        borders: Borders::ALL,
+        border_type: BorderType::Rounded,
+        titles: vec![BlockTitle {
+            text: text_line(viewer.title()),
+            position: TitlePosition::Top,
+            alignment: Alignment::Left,
+        }],
+        padding: Padding {
+            left: 1,
+            right: 1,
+            top: 0,
+            bottom: 0,
+        },
+        style: Style::default(),
+        border_style: Style::default(),
+    };
+    UiTree {
+        version: 1,
+        nodes: vec![
+            node(Widget::Block(block), vec![1]),
+            node(Widget::Paragraph(paragraph), Vec::new()),
+        ],
+        root: 0,
     }
 }
 
 impl Views for DiagnosticsClient {
-    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        UiTree {
-            version: 1,
-            nodes: Vec::new(),
-            root: 0,
-        }
+    fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
+        VIEWER.with(|cell| {
+            let slot = cell.borrow();
+            match slot.as_ref() {
+                Some(viewer) if view == debug_log_popup() => {
+                    self.page_rows = viewer::DebugViewer::entry_rows(usize::from(area.rows));
+                    debug_log_tree(viewer, area)
+                }
+                _ => UiTree {
+                    version: 1,
+                    nodes: Vec::new(),
+                    root: 0,
+                },
+            }
+        })
     }
 }
 
@@ -152,7 +326,7 @@ mod spec_tests {
         assert_eq!(string_list(&manifest["client"]["exports"]), vec!["views"]);
 
         let _server = DiagnosticsServer::default();
-        let _client = DiagnosticsClient;
+        let _client = DiagnosticsClient::default();
     }
 
     /// REQ: COR-050
@@ -315,6 +489,10 @@ mod spec_tests {
         let command = &manifest["contributes"]["commands"][0];
         assert_eq!(command["id"], "build-report");
         assert_eq!(command["category"], "Help");
+        assert_eq!(
+            manifest["contributes"]["commands"][1]["id"],
+            "show-debug-log"
+        );
         let surface = string_list(&manifest["surface"]);
         assert!(surface.iter().any(|entry| entry == "services:report"));
         assert!(surface.iter().any(|entry| entry == "commands:build-report"));

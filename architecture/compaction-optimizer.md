@@ -1,3 +1,5 @@
+> The optimizer now lives in the `ilium.core.compaction` plugin (`plugins/core/compaction/src/{scan,report,optimize,panel}`): the scan runs as the plugin's `scan` job over the host `fs` import (scopes `agent-sessions:*`), the report is a pure view-model and the panel is drawn by the plugin client. The kernel has no `compaction_scan`, `compaction_report`, `compaction_ui` or `compaction_app` modules and no Optimization settings tab; the module descriptions below are historical.
+
 ## Compaction optimizer
 
 Settings → Optimization recommends the auto-compaction threshold that minimizes weighted token cost on the user's own transcripts, and can write it to the agent's configuration. Three layers keep the pieces testable:

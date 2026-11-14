@@ -669,7 +669,7 @@ Global options: `--session NAME` (session of the `--cwd` project), `--socket PAT
 | `ctl replace-command ID COMMAND` | Replace the process of a pane with a shell command line. |
 | `ctl new-board NAME PATH [--markdown]`, `freeze ID RESUME`, `unfreeze ID` | Open a kanban board pane; park a pane as a frozen placeholder and restart it. |
 | `ctl rename ID TITLE`, `close ID [--worktree keep\|remove\|remove-and-branch]`, `move ID (--up \| --down \| --to PARENT [--index N])` | Rename, close and arrange. |
-| `ctl send ID TEXT [--no-enter]`, `keys ID KEY...`, `schedule ID --in S TEXT`, `queue ID TEXT [--times N \| --forever]`, `queue-clear ID`, `terminate ID` | Drive a pane. |
+| `ctl send ID TEXT [--no-enter]`, `keys ID KEY...`, `terminate ID` | Drive a pane. |
 | `ctl bookmark ID [--off]`, `expand ID`, `collapse ID`, `lock-closed ID [--off]` | Sidebar state. |
 | `ctl restructure PLAN.json [--project P]`, `ctl revert-restructure [--project P]` | Apply or undo a restructure plan (planning stays in the interface). |
 | `ctl kill-session` | End the session. |

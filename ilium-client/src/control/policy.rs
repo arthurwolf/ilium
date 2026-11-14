@@ -3,9 +3,9 @@
 use crate::app::{App, PaneRuntime};
 
 use super::command::{
-    BoardAction, BoardCommand, ControlCommand, EditorAction, NodeTarget, PromptDeliveryChoice,
-    SessionAction, TerminalAction, TerminalCommand, TerminalKey, TerminalSubmissionCommand,
-    TerminalTypingCommand, TreeAction, TreeCommand,
+    BoardAction, BoardCommand, ControlCommand, EditorAction, NodeTarget, SessionAction,
+    TerminalAction, TerminalCommand, TerminalKey, TerminalSubmissionCommand, TerminalTypingCommand,
+    TreeAction, TreeCommand,
 };
 use super::resolver::resolve_node;
 
@@ -58,31 +58,6 @@ pub fn confirmation_plan(
                 TerminalAction::PressKey if matches!(command.key, Some(TerminalKey::Enter)) => {
                     Some(ilium_prompts::voice::VOICE_POLICY_PRESS_ENTER_AND_SUBMIT_WHAT_YOU_SEE.to_owned())
                 }
-                TerminalAction::ScheduleInput => {
-                    Some(ilium_prompts::voice::VOICE_POLICY_SCHEDULE_THIS_TERMINAL_INPUT_FOR_AUTOMATIC_SUBMISSION.to_owned())
-                }
-                // Queuing a prompt is at least as consequential as scheduling one:
-                // `Forever`/`Times` delivery keeps auto-submitting into the pane
-                // long after this call returns, so it must be guarded the same way.
-                TerminalAction::QueuePrompt => Some(match command.delivery {
-                    Some(PromptDeliveryChoice::Forever) => {
-                        ilium_prompts::voice::VOICE_POLICY_QUEUE_THIS_PROMPT_TO_BE_SUBMITTED_AUTOMATICALLY_2.to_owned()
-                    }
-                    Some(PromptDeliveryChoice::Times) => {
-                        // Mirror the executor's own validation (see
-                        // control/executor.rs's QueuePrompt/Times handling)
-                        // so the confirmation question never promises a run
-                        // count the execution step will then reject.
-                        let runs = command.runs.filter(|runs| *runs > 0).ok_or_else(|| {
-                            ilium_prompts::voice::VOICE_POLICY_RUNS_IS_REQUIRED_AND_MUST_BE_POSITIVE
-                                .to_owned()
-                        })?;
-                        ilium_prompts::render_value("voice/policy/queue-this-prompt-to-be-submitted-automatically", &serde_json::json!({"v0": (runs).to_string()}))
-                    }
-                    Some(PromptDeliveryChoice::Once) | None => {
-                        ilium_prompts::voice::VOICE_POLICY_QUEUE_THIS_PROMPT_FOR_AUTOMATIC_SUBMISSION_AFTER.to_owned()
-                    }
-                }),
                 _ => None,
             }
         }
@@ -233,9 +208,6 @@ fn staged_terminal_submission_plan(
             text: None,
             key: Some(TerminalKey::Enter),
             lines: None,
-            delay_seconds: None,
-            delivery: None,
-            runs: None,
         }),
         cancellation_message:
             ilium_prompts::voice::VOICE_POLICY_LEFT_THE_STAGED_TERMINAL_TEXT_VISIBLE_AND.to_owned(),
@@ -373,32 +345,6 @@ mod tests {
                 ..
             }) if id == pane_id.0
         ));
-    }
-
-    #[test]
-    fn enabled_terminal_confirmation_guards_forever_queued_prompts() {
-        let (mut app, pane_id, _) = terminal_submission_fixture();
-        app.voice_settings.confirm_terminal_submissions = true;
-        let command = ControlCommand::Terminal(TerminalCommand {
-            action: TerminalAction::QueuePrompt,
-            target: NodeTarget {
-                id: Some(pane_id.0),
-                name: None,
-                path: None,
-            },
-            text: Some("keep going".to_owned()),
-            key: None,
-            lines: None,
-            delay_seconds: None,
-            delivery: Some(PromptDeliveryChoice::Forever),
-            runs: None,
-        });
-
-        let plan = confirmation_plan(&app, &command)
-            .expect("policy should resolve")
-            .expect("an indefinitely-repeating queued prompt must be guarded");
-
-        assert!(plan.question.contains("indefinitely"));
     }
 
     #[test]

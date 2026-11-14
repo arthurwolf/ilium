@@ -31,7 +31,6 @@ use crate::agent_from_line::{
 };
 use crate::agent_toolbar::{AgentToolbarAction, EffortLevel};
 use crate::board::BoardPane;
-use crate::completed_agent_action::{self, CompletedAgentCloseAction};
 use crate::config::{
     AgentSetupSettings, ApiSettings, DebugSettings, EditorSettings, GitSettings,
     KanbanBoardSettings, KeyboardSettings, LeftPanelSizingMode, SessionSettings, TerminalSettings,
@@ -45,10 +44,8 @@ use crate::keymap::{self, Action, KeyBinding, KeymapPreset};
 use crate::layout::{TreeWidthAnimation, UiLayout};
 use crate::naming_workers::TitleTrigger;
 use crate::popover::AgentPopover;
-use crate::prompt_queue::PromptQueueDialogState;
 use crate::reset_planning::{ResetMonitorState, ResetPlanningSettings, ResetTimeStyle};
 use crate::restructure::LeafContext;
-use crate::scheduled_input::ScheduledInputDialogState;
 use crate::screen_transfer::ScreenTransfer;
 use crate::split_layout::{self, PaneViewport};
 use crate::terminal_activity::{
@@ -210,38 +207,6 @@ fn normalize_path_lexically(path: &Path) -> PathBuf {
         }
     }
     normalized
-}
-
-/// Produces a readable, filesystem-safe default without changing the user's
-/// eventual path: the Save prompt remains fully editable before any write.
-fn agent_debug_log_file_name(
-    pane_name: &str,
-    timestamp: chrono::DateTime<chrono::Local>,
-) -> String {
-    let mut slug = String::new();
-    let mut previous_was_separator = false;
-    for character in pane_name.chars() {
-        if character.is_alphanumeric() {
-            slug.extend(character.to_lowercase());
-            previous_was_separator = false;
-        } else if !previous_was_separator && !slug.is_empty() {
-            slug.push('-');
-            previous_was_separator = true;
-        }
-        if slug.chars().count() >= 48 {
-            break;
-        }
-    }
-    while slug.ends_with('-') {
-        slug.pop();
-    }
-    if slug.is_empty() {
-        slug.push_str("agent");
-    }
-    format!(
-        "ilium-{slug}-debug-{}.log",
-        timestamp.format("%Y-%m-%d-%H%M%S")
-    )
 }
 
 fn selected_inference_model(settings: &InferenceSettings) -> String {
@@ -410,18 +375,11 @@ pub enum Mode {
     TerminalPaneContextMenu(TerminalPaneContextMenu),
     /// The agent toolbar's Codex Sol/Astra/Luna reasoning-strength submenu.
     AgentToolbarModelSubmenu(AgentToolbarModelSubmenuState),
-    /// Full right-panel semantic history for one exact agent pane.
-    AgentDebugLog(AgentDebugLogViewState),
     /// Full, untruncated text of a pane's displayed last prompt.
     LastPromptDialog(crate::last_prompt_toolbar::LastPromptDialogState),
-    /// Destination path prompt layered over its exact debug-log view state.
-    AgentDebugSavePath(NodeId, TextPromptState),
     /// Form for one server-owned terminal input countdown.
-    SchedulePaneInput(Box<ScheduledInputDialogState>),
     /// Multiline prompt collected for the server-owned completion queue.
-    QueuePrompt(Box<PromptQueueDialogState>),
     TextTriggerDialog(Box<crate::text_trigger_dialog::TextTriggerDialogState>),
-    AgentMessageDialog(Box<crate::agent_message_dialog::AgentMessageDialog>),
     /// A mouse-anchored action menu for one physical editor source line.
     EditorLineContextMenu(EditorLineContextMenu),
     /// Agent selector and editable task prompt opened from an editor line.
@@ -564,9 +522,6 @@ pub enum SettingsTab {
     Attention,
     /// Agent spend indicators and how "expensive" is decided.
     Cost,
-    /// Scans agent transcripts and recommends the auto-compaction threshold
-    /// (see `crate::compaction_ui`).
-    Optimization,
     /// Summarizing a session through the Inference model (the Remote
     /// compaction tab).
     RemoteCompaction,
@@ -733,7 +688,7 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 30] = [
+    pub const ALL: [SettingsTab; 29] = [
         Self::Appearance,
         Self::Padding,
         Self::Icons,
@@ -741,7 +696,6 @@ impl SettingsTab {
         Self::AgentMonitoring,
         Self::Attention,
         Self::Cost,
-        Self::Optimization,
         Self::RemoteCompaction,
         Self::Keyboard,
         Self::Terminal,
@@ -792,7 +746,6 @@ impl SettingsTab {
             Self::AgentMonitoring => "Agent Monitoring",
             Self::Attention => "Attention",
             Self::Cost => "Agent Cost",
-            Self::Optimization => "Optimization",
             Self::RemoteCompaction => "Remote compaction",
             Self::Debug => "Debug",
             Self::Api => "API",
@@ -1445,12 +1398,6 @@ pub enum ContextMenuAction {
     SchedulePaneInput,
     QueuePrompt,
     ClearPromptQueue,
-    /// Sends the rendered status-check prompt
-    /// to every idle/done agent pane under the menu's target -- a single
-    /// pane, every such pane in a project, or every such pane in the whole
-    /// tree from `ROOT_ID`.
-    AskForUpdate,
-    SendMessageToAll,
     Freeze,
     Unfreeze,
     ShowSplitView,
@@ -1519,8 +1466,6 @@ impl ContextMenuAction {
             Self::FocusPane | Self::ShowSplitView => (0, 0),
             Self::ToggleGroup => (0, 1),
             Self::CreateBoardFromMarkdown => (0, 2),
-            Self::AskForUpdate => (1, 0),
-            Self::SendMessageToAll => (1, 0),
             Self::QueuePrompt => (1, 1),
             Self::SchedulePaneInput => (1, 2),
             Self::ClearPromptQueue => (1, 3),
@@ -1586,8 +1531,6 @@ impl ContextMenuAction {
             Self::SchedulePaneInput => IconTarget::WaitingBackground,
             Self::QueuePrompt => IconTarget::GoalActive,
             Self::ClearPromptQueue | Self::Close => IconTarget::RowClose,
-            Self::AskForUpdate => IconTarget::AskForUpdate,
-            Self::SendMessageToAll => IconTarget::AskForUpdate,
             Self::Freeze => IconTarget::Lock,
             Self::Unfreeze => IconTarget::FrozenAgent,
             Self::ShowSplitView | Self::NewSplitView => IconTarget::SplitVertical,
@@ -1631,8 +1574,6 @@ impl ContextMenuAction {
             Self::SchedulePaneInput => "Schedule keystrokes…".to_string(),
             Self::QueuePrompt => "Queue prompt…".to_string(),
             Self::ClearPromptQueue => "Clear prompt queue".to_string(),
-            Self::AskForUpdate => "Ask for status update".to_string(),
-            Self::SendMessageToAll => "Send message to all".to_string(),
             Self::Freeze => "Freeze agent".to_string(),
             Self::Unfreeze => "Unfreeze agent".to_string(),
             Self::ShowSplitView => "Show split view".to_string(),
@@ -1846,112 +1787,6 @@ impl ContextMenu {
             self.row_offset,
         )
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentDebugLogViewState {
-    pub pane_id: NodeId,
-    /// Explicit anchoring keeps Home/PageDown navigable without encoding the
-    /// oldest position as an oversized offset from the newest event.
-    pub scroll_position: AgentDebugLogScrollPosition,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentDebugLogScrollPosition {
-    FromNewest(usize),
-    FromOldest(usize),
-}
-
-impl AgentDebugLogViewState {
-    pub fn scroll_older(&mut self, line_count: usize) {
-        self.scroll_position = match self.scroll_position {
-            AgentDebugLogScrollPosition::FromNewest(offset) => {
-                AgentDebugLogScrollPosition::FromNewest(offset.saturating_add(line_count))
-            }
-            AgentDebugLogScrollPosition::FromOldest(offset) => {
-                AgentDebugLogScrollPosition::FromOldest(offset.saturating_sub(line_count))
-            }
-        };
-    }
-
-    pub fn scroll_newer(&mut self, line_count: usize) {
-        self.scroll_position = match self.scroll_position {
-            AgentDebugLogScrollPosition::FromNewest(offset) => {
-                AgentDebugLogScrollPosition::FromNewest(offset.saturating_sub(line_count))
-            }
-            AgentDebugLogScrollPosition::FromOldest(offset) => {
-                AgentDebugLogScrollPosition::FromOldest(offset.saturating_add(line_count))
-            }
-        };
-    }
-
-    pub fn show_oldest(&mut self) {
-        self.scroll_position = AgentDebugLogScrollPosition::FromOldest(0);
-    }
-
-    pub fn follow_newest(&mut self) {
-        self.scroll_position = AgentDebugLogScrollPosition::FromNewest(0);
-    }
-}
-
-/// Ephemeral viewer/export policy. The retained server journal stays complete;
-/// operators can reveal animation evidence without restarting or recapturing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AgentDebugLogFilter {
-    pub is_tree_panel_animation_resize_hidden: bool,
-}
-
-impl Default for AgentDebugLogFilter {
-    fn default() -> Self {
-        Self {
-            is_tree_panel_animation_resize_hidden: true,
-        }
-    }
-}
-
-impl AgentDebugLogFilter {
-    pub fn includes(self, entry: &ilium_ipc::AgentDebugEntry) -> bool {
-        !self.is_tree_panel_animation_resize_hidden || !entry.is_tree_panel_animation_resize()
-    }
-
-    pub fn visible_entry_count(self, cache: &AgentDebugLogCache) -> usize {
-        cache
-            .log
-            .entries
-            .iter()
-            .filter(|entry| self.includes(entry))
-            .count()
-    }
-
-    pub fn hidden_entry_count(self, cache: &AgentDebugLogCache) -> usize {
-        cache
-            .log
-            .entries
-            .len()
-            .saturating_sub(self.visible_entry_count(cache))
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AgentDebugLogCache {
-    /// Bounded, sequence-ordered mirror of the server-owned per-pane debug
-    /// journal (`ilium_ipc::PaneDebugLog`, the exact schema and retention
-    /// policy the server's own on-disk journal uses). Delegating to it here,
-    /// instead of a raw `Vec`, means every insertion path -- the initial
-    /// retained-history snapshot fetched via `GetPaneDebugLog`, and every
-    /// subsequent `PaneDebugEntryAppended` broadcast for as long as the pane
-    /// stays open -- is capped by the same `MAXIMUM_AGENT_DEBUG_ENTRIES` /
-    /// `MAXIMUM_AGENT_DEBUG_BYTES` budget the server enforces, so a pane held
-    /// open for the life of a long-running client session cannot grow this
-    /// cache without bound (see `render_cache::apply`'s
-    /// `PaneDebugEntryAppended` and `PaneDebugLogSnapshot` arms).
-    pub log: ilium_ipc::PaneDebugLog,
-    pub through_sequence: u64,
-    /// Live broadcasts may populate the cache before the operator first opens
-    /// the log. Only a replay snapshot proves that the retained prefix was
-    /// fetched, so those broadcasts must not be mistaken for complete history.
-    pub has_loaded_retained_history: bool,
-    pub is_loading: bool,
 }
 
 pub struct ExplorerFileMenu {
@@ -2253,16 +2088,13 @@ pub struct App {
     pub resources: crate::resource_queue::ResourceUi,
     /// Deadline of the next integration-status refresh (agent-setup guidance files).
     next_integration_maintenance_at: Option<Instant>,
-    /// On-demand history caches are separate from the render tree so normal
-    /// structural snapshots never carry or clone the retained journal.
-    pub agent_debug_logs: HashMap<NodeId, AgentDebugLogCache>,
+    /// The pane whose retained debug history the user asked to see; the snapshot reply is handed
+    /// to the Diagnostics plugin, which draws the viewer.
+    pub pending_debug_log_viewer: Option<NodeId>,
     /// Latest server-applied detector evidence, independent of the optional
     /// agent debug journal. Hover text uses it only when its status matches
     /// the tree state currently being rendered.
     pub pane_detection_evidence: HashMap<NodeId, ilium_ipc::PaneDetectionEvidence>,
-    /// One client-wide toolbar policy keeps display and export consistent
-    /// across panes while defaulting every newly attached client to low noise.
-    pub agent_debug_log_filter: AgentDebugLogFilter,
     /// `ClientRequest`s produced by input handling this tick, drained and
     /// sent by the connection task after each event is dispatched (see
     /// `crate::run`). Keeping this a plain outbox instead of giving `App`
@@ -2821,13 +2653,6 @@ pub struct App {
     pub pending_remote_compaction_cancel: bool,
     /// Cooldown and failure bookkeeping of the automatic trigger.
     pub remote_compaction_monitor: crate::remote_compaction_flow::RemoteCompactionMonitor,
-    /// Settings > Optimization: the transcript scans of the compaction
-    /// optimizer (see `crate::compaction_scan`).
-    pub compaction_optimizer: crate::compaction_scan::CompactionOptimizer,
-    /// Settings > Optimization: selected sub-tab, current agent settings, the
-    /// pending Apply confirmation and the last outcome (see
-    /// `crate::compaction_app`).
-    pub optimization: crate::compaction_app::OptimizationState,
     /// Position of a pane being swapped for its converted replacement, and
     /// whether the user was looking at it, so the replacement can take over.
     pub pending_replacement_focus: Option<crate::remote_compaction_flow::ReplacementFocus>,
@@ -3020,9 +2845,8 @@ impl App {
             // The first authoritative tree snapshot installs this deadline.
             // Until then an empty client has no project to inspect.
             next_integration_maintenance_at: None,
-            agent_debug_logs: HashMap::new(),
+            pending_debug_log_viewer: None,
             pane_detection_evidence: HashMap::new(),
-            agent_debug_log_filter: AgentDebugLogFilter::default(),
             outbox: Vec::new(),
             antigravity_statusline_generation: initial_statusline_generation(),
             antigravity_disable_pending_generation: None,
@@ -3113,7 +2937,7 @@ impl App {
             custom_status_rules_editor: None,
             custom_status_rules_save_deadline: None,
             custom_status_rules_write_error: None,
-            progress_display_now_unix_millis: crate::scheduled_input::unix_millis_now(),
+            progress_display_now_unix_millis: crate::wall_clock::unix_millis_now(),
             keyboard_settings: KeyboardSettings::default(),
             keybindings: keymap::LEADER_BINDINGS.to_vec(),
             kanban_board_settings: KanbanBoardSettings::default(),
@@ -3438,8 +3262,6 @@ impl App {
             pending_remote_compaction_cancel: false,
             remote_compaction_monitor:
                 crate::remote_compaction_flow::RemoteCompactionMonitor::default(),
-            compaction_optimizer: crate::compaction_scan::CompactionOptimizer::new(),
-            optimization: crate::compaction_app::OptimizationState::default(),
             pending_replacement_focus: None,
             agent_process_ids: HashMap::new(),
             agent_process_identity_inode: HashMap::new(),
@@ -3486,19 +3308,6 @@ impl App {
     pub fn push_modal_over(&mut self, parent: Mode, modal: Mode) {
         self.mode = parent;
         self.push_modal(modal);
-    }
-
-    pub(crate) fn begin_queue_delivery_dialog(&mut self, parent: Box<PromptQueueDialogState>) {
-        match crate::value_dialog_host::ValueDialogHost::queue_delivery(&parent) {
-            Ok(dialog) => self.push_modal_over(
-                Mode::QueuePrompt(parent),
-                Mode::ValueDialog(Box::new(dialog)),
-            ),
-            Err(error) => {
-                self.status_message = Some(error);
-                self.mode = Mode::QueuePrompt(parent);
-            }
-        }
     }
 
     pub(crate) fn finish_value_dialog(
@@ -3576,7 +3385,6 @@ impl App {
                         Some(Mode::WorktreeManager(parent)) => {
                             host.apply_prune_branch_choice(parent, &id)
                         }
-                        Some(Mode::QueuePrompt(parent)) => host.apply_queue_choice(parent, &id),
                         Some(Mode::CreateBoard(parent)) => {
                             host.apply_board_storage_choice(parent, &id)
                         }
@@ -4559,20 +4367,6 @@ impl App {
         })
     }
 
-    /// Queues one paste without Enter. The server chooses the paste framing
-    /// from the pane's live terminal modes, which this client only knows for
-    /// panes it has rendered.
-    pub(crate) fn send_terminal_paste(
-        &mut self,
-        pane_id: NodeId,
-        text: String,
-    ) -> Result<(), Box<ClientRequest>> {
-        if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
-            view.scroll_to_bottom();
-        }
-        self.try_queue_terminal_request(ClientRequest::PasteTerminalText { pane_id, text })
-    }
-
     /// Reports one successful editor/board mutation to the server-owned
     /// revision stream. The server response, not this optimistic request,
     /// advances the durable tree revision for every attached client.
@@ -5259,6 +5053,14 @@ impl App {
             })
     }
 
+    /// Whether the Smart Copy plugin runs, so the agent toolbar offers its button. Without a
+    /// plugin host, or with the plugin disabled, the button is not drawn.
+    pub(crate) fn smart_copy_available(&self) -> bool {
+        self.wasm_plugins
+            .as_ref()
+            .is_some_and(|plugins| plugins.runs_plugin("ilium.core.smart-copy"))
+    }
+
     /// Whether the agent toolbar offers a button re-opening the banner:
     /// enabled in Settings but closed for this agent.
     pub(crate) fn last_prompt_reopen_available(&self, pane_id: NodeId) -> bool {
@@ -5715,17 +5517,6 @@ impl App {
         matches!(self.panes.get(&pane_id), Some(PaneRuntime::Terminal(_)))
     }
 
-    /// Returns the bottom-row close action for a pane whose detected agent
-    /// has reached the durable `Done` state (the same state shown as a bell).
-    pub(crate) fn completed_agent_close_action(
-        &self,
-        viewport: PaneViewport,
-    ) -> Option<CompletedAgentCloseAction> {
-        self.is_completed_agent_pane(viewport.pane_id)
-            .then(|| completed_agent_action::layout(viewport))
-            .flatten()
-    }
-
     pub(crate) fn frozen_dialog_layout(
         &self,
         viewport: PaneViewport,
@@ -5733,9 +5524,7 @@ impl App {
         self.frozen_screens
             .contains_key(&viewport.pane_id)
             .then(|| {
-                let terminal_area = self
-                    .completed_agent_close_action(viewport)
-                    .map_or(viewport.content_area, |action| action.terminal_area);
+                let terminal_area = viewport.content_area;
                 let dialog_width = terminal_area.width.min(52);
                 let dialog_height = terminal_area.height.min(7);
                 let dialog_area = Rect {
@@ -5773,19 +5562,6 @@ impl App {
 
     pub(crate) fn frozen_unfreeze_button(&self, viewport: PaneViewport) -> Option<Rect> {
         self.frozen_dialog_layout(viewport)?.button_area
-    }
-
-    /// Whether `pane_id` is a terminal agent that has finished its current
-    /// turn and still needs acknowledgement rather than merely being idle.
-    pub(crate) fn is_completed_agent_pane(&self, pane_id: NodeId) -> bool {
-        matches!(
-            self.tree.get(pane_id).map(|node| &node.kind),
-            Some(NodeKind::Pane {
-                content: PaneContentKind::Terminal,
-                status: PaneStatus::Agent(agent),
-                ..
-            }) if agent.completion_unread
-        )
     }
 
     pub fn reconcile_right_panel_target(&mut self) {
@@ -5947,21 +5723,7 @@ impl App {
             crate::claude_model_statusline::reset_app_generation();
         }
         if !ui.agent_debug_menu_enabled {
-            if matches!(
-                self.mode,
-                Mode::AgentDebugLog(_) | Mode::AgentDebugSavePath(..)
-            ) {
-                self.mode = Mode::Normal;
-            }
-            // The save-path prompt stacks over its debug-log parent via
-            // `push_modal_over`, and `ui::draw` renders every suspended
-            // `modal_stack` layer (and treats its first entry as the root
-            // mode). Resetting only `self.mode` would leave that suspended
-            // `AgentDebugLog` painted behind everything with no input path
-            // left to pop it, so the stack must drop those layers too.
-            self.modal_stack.retain(|mode| {
-                !matches!(mode, Mode::AgentDebugLog(_) | Mode::AgentDebugSavePath(..))
-            });
+            self.pending_debug_log_viewer = None;
             self.remove_agent_debug_action_from_terminal_menu();
         }
         self.ui_settings = ui.clone();
@@ -11029,7 +10791,7 @@ impl App {
             }
         }
 
-        let scheduled_input_now = crate::scheduled_input::unix_millis_now();
+        let scheduled_input_now = crate::wall_clock::unix_millis_now();
         for node in self.tree.panes() {
             let NodeKind::Pane {
                 status,
@@ -15086,116 +14848,22 @@ impl App {
             .min(menu.actions.len().saturating_sub(1));
     }
 
+    /// "Show debug log" on an agent pane. The kernel asks the server for the retained history of
+    /// the pane; the snapshot reply is handed to the Diagnostics plugin
+    /// (`ilium.core.diagnostics/show-debug-log`), which draws the viewer.
     pub fn open_agent_debug_log(&mut self, pane_id: NodeId) {
+        self.mode = Mode::Normal;
         if !self.ui_settings.agent_debug_menu_enabled || !self.is_known_agent_pane(pane_id) {
-            self.mode = Mode::Normal;
             self.status_message =
                 Some("Debug history is available only for known agent panes".to_string());
             return;
         }
-        let after_sequence = self
-            .agent_debug_logs
-            .get(&pane_id)
-            .filter(|cache| cache.has_loaded_retained_history)
-            .map(|cache| cache.through_sequence)
-            .filter(|sequence| *sequence > 0);
-        self.agent_debug_logs.entry(pane_id).or_default().is_loading = true;
+        self.pending_debug_log_viewer = Some(pane_id);
         self.queue_request(ClientRequest::GetPaneDebugLog {
             pane_id,
-            after_sequence,
+            after_sequence: None,
         });
-        self.mode = Mode::AgentDebugLog(AgentDebugLogViewState {
-            pane_id,
-            scroll_position: AgentDebugLogScrollPosition::FromNewest(0),
-        });
-    }
-
-    pub fn toggle_agent_debug_tree_resize_filter(&mut self) {
-        let is_hidden = &mut self
-            .agent_debug_log_filter
-            .is_tree_panel_animation_resize_hidden;
-        *is_hidden = !*is_hidden;
-    }
-
-    /// Opens an editable absolute-path prompt only after the initial retained
-    /// replay completed, so Save can never silently export a partial cache.
-    pub fn open_agent_debug_save_path(&mut self, state: AgentDebugLogViewState) {
-        let is_complete = self
-            .agent_debug_logs
-            .get(&state.pane_id)
-            .is_some_and(|cache| cache.has_loaded_retained_history && !cache.is_loading);
-        if !is_complete {
-            self.mode = Mode::AgentDebugLog(state);
-            self.status_message =
-                Some("Wait for the complete retained debug history before saving".to_string());
-            return;
-        }
-
-        let pane_name = self
-            .tree
-            .get(state.pane_id)
-            .map_or("agent", |node| node.name.as_str());
-        let default_path = self
-            .session_cwd
-            .join(agent_debug_log_file_name(pane_name, chrono::Local::now()));
-        let pane_id = state.pane_id;
-        self.push_modal_over(
-            Mode::AgentDebugLog(state),
-            Mode::AgentDebugSavePath(
-                pane_id,
-                TextPromptState::new(default_path.display().to_string()),
-            ),
-        );
-    }
-
-    /// Writes the exact complete cache selected by the prompt. Relative paths
-    /// are resolved against the canonical launch directory, matching editor
-    /// Save As behavior elsewhere in the client.
-    pub fn save_agent_debug_log(&mut self, pane_id: NodeId, destination: &str) -> bool {
-        let destination = destination.trim();
-        if destination.is_empty() {
-            self.status_message = Some("Save debug log: no destination path given".to_string());
-            return false;
-        }
-        let path = PathBuf::from(destination);
-        let path = if path.is_absolute() {
-            path
-        } else {
-            self.session_cwd.join(path)
-        };
-        let Some(cache) = self.agent_debug_logs.get(&pane_id) else {
-            self.status_message = Some("Save debug log failed: history is unavailable".to_string());
-            return false;
-        };
-        if cache.is_loading || !cache.has_loaded_retained_history {
-            self.status_message =
-                Some("Save debug log failed: retained history is still loading".to_string());
-            return false;
-        }
-        let pane_name = self
-            .tree
-            .get(pane_id)
-            .map_or("closed pane", |node| node.name.as_str());
-        let report = crate::agent_debug_export::render_report(
-            pane_name,
-            pane_id,
-            cache,
-            self.agent_debug_log_filter,
-            chrono::Local::now().timestamp_millis(),
-        );
-        match crate::agent_debug_export::write_report(&path, &report) {
-            Ok(()) => {
-                self.status_message = Some(format!("Saved agent debug log to {}", path.display()));
-                true
-            }
-            Err(error) => {
-                self.status_message = Some(format!(
-                    "Save agent debug log failed for {}: {error}",
-                    path.display()
-                ));
-                false
-            }
-        }
+        self.status_message = Some("Loading the retained debug history".to_string());
     }
 
     /// The "Order by" submenu: the manual order, then the tree orderings enabled plugins
@@ -15978,9 +15646,6 @@ impl App {
                 ContextMenuAction::NewFolder,
             ];
             actions.extend(ContextMenuAction::new_agent_actions());
-            if !self.tree.panes_eligible_for_update(ROOT_ID).is_empty() {
-                actions.push(ContextMenuAction::AskForUpdate);
-            }
             actions.extend(ContextMenuAction::GLOBAL_ACTIONS);
             return ContextMenuAction::ordered(actions);
         }
@@ -16006,21 +15671,13 @@ impl App {
                 actions.insert(0, ContextMenuAction::ShowSplitView);
             }
             Some(node) if node.is_project() => {
-                actions.push(ContextMenuAction::SendMessageToAll);
                 actions.insert(0, ContextMenuAction::NewResource);
                 actions.insert(0, ContextMenuAction::LinkResource);
                 actions.insert(0, ContextMenuAction::ChangeProjectFolder);
                 self.insert_lock_actions(&mut actions, target, 0);
-                if !self.tree.panes_eligible_for_update(target).is_empty() {
-                    actions.insert(0, ContextMenuAction::AskForUpdate);
-                }
             }
             Some(node) if node.is_group() => {
                 self.insert_lock_actions(&mut actions, target, 0);
-                actions.extend([
-                    ContextMenuAction::AskForUpdate,
-                    ContextMenuAction::SendMessageToAll,
-                ]);
             }
             Some(Node {
                 kind:
@@ -16033,14 +15690,7 @@ impl App {
                 actions.insert(0, ContextMenuAction::FocusPane);
                 actions.insert(1, ContextMenuAction::SchedulePaneInput);
                 actions.insert(2, ContextMenuAction::QueuePrompt);
-                let mut insert_at = 3;
-                if self.tree.prompt_queue_len(target).unwrap_or(0) > 0 {
-                    actions.insert(insert_at, ContextMenuAction::ClearPromptQueue);
-                    insert_at += 1;
-                }
-                if self.tree.is_agent_pane_idle_for_update(target) {
-                    actions.insert(insert_at, ContextMenuAction::AskForUpdate);
-                }
+                actions.insert(3, ContextMenuAction::ClearPromptQueue);
                 if self.frozen_panes.contains(&target) {
                     actions.insert(0, ContextMenuAction::Unfreeze);
                 } else if self.agent_session_ids.contains_key(&target) {
@@ -16070,10 +15720,6 @@ impl App {
             Some(node) if node.is_pane() => actions.insert(0, ContextMenuAction::FocusPane),
             Some(node) if node.is_folder() => {
                 self.insert_lock_actions(&mut actions, target, 0);
-                actions.extend([
-                    ContextMenuAction::AskForUpdate,
-                    ContextMenuAction::SendMessageToAll,
-                ]);
             }
             Some(_) => {
                 return ContextMenuAction::ordered(ContextMenuAction::GLOBAL_ACTIONS.to_vec());
@@ -16150,19 +15796,21 @@ impl App {
             ContextMenuAction::CreateBoardFromMarkdown => {
                 self.request_board_from_markdown_editor(target)
             }
-            ContextMenuAction::SchedulePaneInput => {
-                self.mode =
-                    Mode::SchedulePaneInput(Box::new(ScheduledInputDialogState::new(target)));
-            }
-            ContextMenuAction::QueuePrompt => {
-                self.mode = Mode::QueuePrompt(Box::new(PromptQueueDialogState::new(target)));
-            }
-            ContextMenuAction::ClearPromptQueue => {
-                self.queue_request(ClientRequest::ClearPromptQueue { pane_id: target });
-                self.status_message = Some("Prompt queue cleared".to_string());
-            }
-            ContextMenuAction::AskForUpdate => self.action_ask_for_update(target),
-            ContextMenuAction::SendMessageToAll => self.open_agent_message_dialog(target),
+            ContextMenuAction::SchedulePaneInput => self.action_scheduler_command(
+                crate::plugin_host::commands::SCHEDULE_INPUT_COMMAND,
+                target,
+                ilium_plugin_api::generated::types::CommandOrigin::Menu,
+            ),
+            ContextMenuAction::QueuePrompt => self.action_scheduler_command(
+                crate::plugin_host::commands::QUEUE_PROMPT_COMMAND,
+                target,
+                ilium_plugin_api::generated::types::CommandOrigin::Menu,
+            ),
+            ContextMenuAction::ClearPromptQueue => self.action_scheduler_command(
+                crate::plugin_host::commands::CLEAR_PROMPT_QUEUE_COMMAND,
+                target,
+                ilium_plugin_api::generated::types::CommandOrigin::Menu,
+            ),
             ContextMenuAction::Freeze => self.action_freeze_agent(target),
             ContextMenuAction::Unfreeze => self.action_unfreeze_agent(target),
             ContextMenuAction::ShowSplitView => self.show_split_view(target),
@@ -16376,227 +16024,6 @@ impl App {
         // Carry focus across the server's new pane ID at the same tree slot.
         self.remember_replacement_focus(pane_id);
         self.status_message = Some(UNFREEZING_AGENT_STATUS.to_string());
-    }
-
-    /// Sends the rendered status-check prompt followed by Enter to every eligible pane
-    /// under `target` -- see `Tree::panes_eligible_for_update`. `target` may be a
-    /// single pane, a project/group (every eligible pane inside it), or
-    /// `ROOT_ID` (every eligible pane in the whole tree).
-    pub fn action_ask_for_update(&mut self, target: NodeId) {
-        let is_folder = self
-            .tree
-            .get(target)
-            .is_some_and(|node| node.is_group() || node.is_folder());
-        let pane_ids = if is_folder {
-            match crate::agent_message_dialog::Scope::capture(&self.tree, target) {
-                Ok(scope) => scope.recipients(&self.tree),
-                Err(error) => {
-                    self.status_message = Some(error);
-                    return;
-                }
-            }
-        } else {
-            self.tree.panes_eligible_for_update(target)
-        };
-        if pane_ids.is_empty() {
-            self.status_message = Some(
-                if is_folder {
-                    "No agent in this folder"
-                } else {
-                    "No idle agent to ask for an update"
-                }
-                .to_string(),
-            );
-            return;
-        }
-        let mut pane_count = 0;
-        for pane_id in pane_ids {
-            if self.send_terminal_submission(
-                pane_id,
-                ilium_prompts::render_value("agent/ask-for-update", &serde_json::json!({"custom_instructions": self.inference_settings.instructions.ask_for_update.trim()})),
-                PromptSubmissionSource::AskForUpdate,
-            ).is_ok() { pane_count += 1; }
-        }
-        self.status_message = Some(if pane_count == 0 {
-            "No update requests admitted: terminal input queue is full".to_string()
-        } else if pane_count == 1 {
-            "Asked for an update".to_string()
-        } else {
-            format!("Asked {pane_count} agents for an update")
-        });
-    }
-
-    pub fn open_agent_message_dialog(&mut self, target: NodeId) {
-        use crate::agent_message_dialog::{AgentMessageDialog, Recipient, RecipientState, Scope};
-        let scope = match Scope::capture(&self.tree, target) {
-            Ok(scope) => scope,
-            Err(error) => {
-                self.status_message = Some(error);
-                return;
-            }
-        };
-        let recipients = scope
-            .recipients(&self.tree)
-            .into_iter()
-            .filter_map(|pane_id| {
-                let node = self.tree.get(pane_id)?;
-                let NodeKind::Pane {
-                    status: PaneStatus::Agent(agent),
-                    ..
-                } = &node.kind
-                else {
-                    return None;
-                };
-                Some(Recipient {
-                    pane_id,
-                    label: format!("{} · {:?}", node.name, agent.turn),
-                    checked: true,
-                    state: RecipientState::Pending,
-                })
-            })
-            .collect();
-        let title = self
-            .tree
-            .get(target)
-            .map(|node| node.name.clone())
-            .unwrap_or_default();
-        let mut state = AgentMessageDialog::new(target, title, recipients);
-        state.scope = Some(scope);
-        self.mode = Mode::AgentMessageDialog(Box::new(state));
-    }
-
-    /// Queue admission is distinct from delivery. Keep successful admissions
-    /// recorded so ordinary retries cannot duplicate input in those panes.
-    pub fn finish_agent_message_dialog(
-        &mut self,
-        mut state: Box<crate::agent_message_dialog::AgentMessageDialog>,
-        outcome: crate::agent_message_dialog::Outcome,
-    ) {
-        use crate::agent_message_dialog::{Outcome, RecipientState, Scope};
-        if outcome == Outcome::Cancel {
-            self.mode = Mode::Normal;
-            return;
-        }
-        if outcome == Outcome::Continue {
-            self.mode = Mode::AgentMessageDialog(state);
-            return;
-        }
-        let text = state.text();
-        let selected = state.selected_ids();
-        let error = if text.trim().is_empty() {
-            Some("Enter a message")
-        } else if selected.is_empty() {
-            Some("Select at least one agent that has not already been queued")
-        } else {
-            None
-        };
-        if let Some(error) = error {
-            state.error = Some(error.into());
-            self.mode = Mode::AgentMessageDialog(state);
-            return;
-        }
-        let current_scope = Scope::capture(&self.tree, state.target);
-        if current_scope.as_ref().ok() != state.scope.as_ref() {
-            state.error =
-                Some("The project or folder scope changed. Cancel and reopen the dialog.".into());
-            self.mode = Mode::AgentMessageDialog(state);
-            return;
-        }
-        // No client-side paste-mode check: this client only knows the terminal
-        // modes of panes it has rendered. The server frames each message from
-        // the pane's live screen and reports a pane that cannot take it.
-        let scope = current_scope.expect("scope validated above");
-        let mut queued = 0;
-        let mut failed = 0;
-        let mut unavailable = 0;
-        for pane_id in selected {
-            let recipient = state
-                .recipients
-                .iter_mut()
-                .find(|recipient| recipient.pane_id == pane_id)
-                .expect("selected snapshot recipient");
-            if !scope.recipients(&self.tree).contains(&pane_id) {
-                recipient.checked = false;
-                recipient.state = RecipientState::Unavailable(
-                    "Agent removed, changed, or moved outside this folder".into(),
-                );
-                unavailable += 1;
-                continue;
-            }
-            let admitted = if state.press_enter {
-                self.send_terminal_submission(
-                    pane_id,
-                    text.clone(),
-                    PromptSubmissionSource::Keyboard,
-                )
-                .is_ok()
-            } else {
-                self.send_terminal_paste(pane_id, text.clone()).is_ok()
-            };
-            if admitted {
-                recipient.checked = false;
-                recipient.state = RecipientState::Queued;
-                queued += 1;
-            } else {
-                failed += 1;
-            }
-        }
-        let report = format!(
-            "Queued for {queued} agents (delivery unconfirmed); {failed} not queued; {unavailable} unavailable"
-        );
-        self.status_message = Some(report.clone());
-        if failed > 0 || unavailable > 0 {
-            state.error = Some(report);
-            self.mode = Mode::AgentMessageDialog(state);
-        } else {
-            self.mode = Mode::Normal;
-        }
-    }
-
-    /// Validates the complete form before queueing one atomic request. An
-    /// invalid field keeps the dialog open and surfaces its exact correction
-    /// in the status bar instead of silently normalizing user input.
-    pub fn commit_scheduled_pane_input(&mut self, state: Box<ScheduledInputDialogState>) {
-        let (delay_seconds, text, send_enter) = match state.validated_request() {
-            Ok(request) => request,
-            Err(message) => {
-                self.status_message = Some(message);
-                self.mode = Mode::SchedulePaneInput(state);
-                return;
-            }
-        };
-        if !self.queue_request(ClientRequest::SchedulePaneInput {
-            pane_id: state.pane_id,
-            delay_seconds,
-            text,
-            send_enter,
-        }) {
-            self.mode = Mode::SchedulePaneInput(state);
-            return;
-        }
-        self.status_message = Some("Scheduled pane input".to_string());
-        self.mode = Mode::Normal;
-    }
-
-    pub fn commit_queued_prompt(&mut self, state: Box<PromptQueueDialogState>) {
-        let (text, delivery) = match state.validated_request() {
-            Ok(request) => request,
-            Err(message) => {
-                self.status_message = Some(message);
-                self.mode = Mode::QueuePrompt(state);
-                return;
-            }
-        };
-        if !self.queue_request(ClientRequest::EnqueuePrompt {
-            pane_id: state.pane_id,
-            text,
-            delivery,
-        }) {
-            self.mode = Mode::QueuePrompt(state);
-            return;
-        }
-        self.status_message = Some("Prompt queued for the next agent completion".to_string());
-        self.mode = Mode::Normal;
     }
 
     /// Creates a plain shell pane under the currently targeted group and
@@ -16848,15 +16275,6 @@ impl App {
         match self.close_confirmation_message(id) {
             Some(_) => self.mode = Mode::ConfirmClose(id),
             None => self.request_interactive_close(id),
-        }
-    }
-
-    /// Closes exactly the completed agent selected by its right-panel action.
-    /// Rechecking the durable tree status prevents a stale mouse event from
-    /// closing a pane after detection has observed resumed work.
-    pub(crate) fn action_close_completed_agent(&mut self, pane_id: NodeId) {
-        if self.is_completed_agent_pane(pane_id) {
-            self.action_close(pane_id);
         }
     }
 
@@ -18929,17 +18347,23 @@ impl App {
         if self.handle_briefing_mouse(id, viewport.briefing_area, mouse, position) {
             return;
         }
-        if self
-            .completed_agent_close_action(viewport)
-            .is_some_and(|action| action.button_area.contains(position))
+        if viewport
+            .plugin_footer_area
+            .is_some_and(|area| area.contains(position))
         {
-            if matches!(
-                mouse.kind,
-                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
-            ) {
-                self.action_close_completed_agent(id);
+            if let Some(command) = self.plugin_footer_command(id) {
+                if matches!(
+                    mouse.kind,
+                    crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+                ) {
+                    self.invoke_plugin_command(
+                        &command,
+                        serde_json::json!({ "node": id.0 }).to_string(),
+                        ilium_plugin_api::generated::types::CommandOrigin::FrameSlot,
+                    );
+                }
+                return;
             }
-            return;
         }
         if matches!(
             mouse.kind,
@@ -18981,6 +18405,7 @@ impl App {
                     show_labels: self.ui_settings.show_toolbar_labels,
                     selection_enabled: self.ui_settings.terminal_text_selection_enabled,
                     show_prompt_reopen: self.last_prompt_reopen_available(id),
+                    show_smart_copy: self.smart_copy_available(),
                     show_goal: self.ui_settings.goal_toolbar_icon_enabled
                         && self.current_goal_phase(id).is_some(),
                 };
@@ -20385,7 +19810,7 @@ mod tests {
         app.animation_frame.render(
             &crate::background_animation::AnimationSettings {
                 enabled: true,
-                kind: crate::background_animation::AnimationKind::Pipes,
+                kind: crate::background_animation::AnimationKind::Shoreline,
                 ..Default::default()
             },
             80,
@@ -23307,7 +22732,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!(
             "ilium-board-context-{}-{}.markdown",
             std::process::id(),
-            crate::scheduled_input::unix_millis_now()
+            crate::wall_clock::unix_millis_now()
         ));
         std::fs::write(&path, "# Work\n\n* [ ] Keep this task\n").unwrap();
         // Canonicalized through the same helper the app uses: `%TEMP%` hands
@@ -23348,7 +22773,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!(
             "ilium-board-context-{}-{}.txt",
             std::process::id(),
-            crate::scheduled_input::unix_millis_now()
+            crate::wall_clock::unix_millis_now()
         ));
         std::fs::write(&path, "not markdown").unwrap();
 
@@ -23647,629 +23072,6 @@ mod tests {
     }
 
     #[test]
-    fn folder_agent_message_menu_offers_status_and_send_to_all() {
-        let mut app = app();
-        let project = app
-            .tree
-            .add_project(std::path::PathBuf::from("/tmp/message-menu"))
-            .unwrap();
-        let folder = app.tree.add_group(project, "folder").unwrap();
-        let pane = app
-            .tree
-            .add_pane(folder, "agent", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                pane,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
-            )
-            .unwrap();
-        for target in [project, folder] {
-            let actions = app.context_actions_for(target);
-            assert!(
-                actions.contains(&ContextMenuAction::AskForUpdate),
-                "folder must offer status update"
-            );
-            assert!(
-                actions
-                    .iter()
-                    .any(|action| action.label() == "Send message to all"),
-                "container must offer message dialog"
-            );
-        }
-    }
-
-    #[test]
-    fn agent_message_dialog_sends_selected_snapshot_agents_and_preserves_message() {
-        use crate::agent_message_dialog::Outcome;
-        let (mut execution, client) = native_paste_bank();
-        let mut app = app();
-        app.outbound_admission = Some(client.clone());
-        let project = app
-            .tree
-            .add_project(PathBuf::from("/tmp/message-send"))
-            .unwrap();
-        let group = app.tree.add_group(project, "folder").unwrap();
-        let first = app
-            .tree
-            .add_pane(group, "first", PaneContentKind::Terminal)
-            .unwrap();
-        let second = app
-            .tree
-            .add_pane(group, "second", PaneContentKind::Terminal)
-            .unwrap();
-        for pane in [first, second] {
-            app.tree
-                .set_pane_status(
-                    pane,
-                    PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
-                )
-                .unwrap();
-        }
-        app.open_agent_message_dialog(group);
-        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("message dialog missing");
-        };
-        assert_eq!(state.selected_ids(), vec![first, second]);
-        state.recipients[1].checked = false;
-        state.message.insert_str("  first\n\nsecond  ");
-        let mut first_terminal = TerminalView::new(24, 80);
-        first_terminal.feed(b"\x1b[?2004h");
-        app.panes
-            .insert(first, PaneRuntime::Terminal(Box::new(first_terminal)));
-        let late = app
-            .tree
-            .add_pane(group, "late", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                late,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
-            )
-            .unwrap();
-        app.finish_agent_message_dialog(state, Outcome::Send);
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::SubmitTerminalText {
-                pane_id: first,
-                text: "  first\n\nsecond  ".into(),
-                source: PromptSubmissionSource::Keyboard
-            }]
-        );
-        app.action_ask_for_update(group);
-        let requests = app.take_outbound_requests();
-        assert_eq!(
-            requests.len(),
-            3,
-            "folder status includes busy agents and uses fresh membership"
-        );
-        for request in requests {
-            assert!(matches!(
-                request,
-                ClientRequest::SubmitTerminalText {
-                    source: PromptSubmissionSource::AskForUpdate,
-                    ..
-                }
-            ));
-        }
-        app.outbound_admission = None;
-        drop(app);
-        drop(client);
-        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
-        let report = execution
-            .join_until_background(Instant::now() + Duration::from_secs(5))
-            .unwrap();
-        assert!(report.shutdown_complete);
-    }
-
-    #[test]
-    fn agent_message_dialog_marks_removed_snapshot_recipient_unavailable() {
-        use crate::agent_message_dialog::{Outcome, RecipientState};
-        let mut app = app();
-        let project = app
-            .tree
-            .add_project(PathBuf::from("/tmp/message-removed-recipient"))
-            .unwrap();
-        let group = app.tree.add_group(project, "agents").unwrap();
-        let retained = app
-            .tree
-            .add_pane(group, "retained", PaneContentKind::Terminal)
-            .unwrap();
-        let removed = app
-            .tree
-            .add_pane(group, "removed", PaneContentKind::Terminal)
-            .unwrap();
-        for pane in [retained, removed] {
-            app.tree
-                .set_pane_status(
-                    pane,
-                    PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
-                )
-                .unwrap();
-        }
-
-        app.open_agent_message_dialog(group);
-        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("message dialog missing");
-        };
-        assert_eq!(state.selected_ids(), vec![retained, removed]);
-        state.message.insert_str("deliver to the retained agent");
-
-        app.panes.insert(
-            retained,
-            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
-        );
-        app.tree.remove_node(removed).unwrap();
-        app.finish_agent_message_dialog(state, Outcome::Send);
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::SubmitTerminalText {
-                pane_id: retained,
-                text: "deliver to the retained agent".into(),
-                source: PromptSubmissionSource::Keyboard,
-            }]
-        );
-        let Mode::AgentMessageDialog(state) = app.mode else {
-            panic!("dialog must remain open to report the removed recipient");
-        };
-        let removed_row = state
-            .recipients
-            .iter()
-            .find(|row| row.pane_id == removed)
-            .unwrap();
-        assert!(!removed_row.checked);
-        assert!(matches!(removed_row.state, RecipientState::Unavailable(_)));
-        let retained_row = state
-            .recipients
-            .iter()
-            .find(|row| row.pane_id == retained)
-            .unwrap();
-        assert!(!retained_row.checked);
-        assert_eq!(retained_row.state, RecipientState::Queued);
-        assert!(state.selected_ids().is_empty());
-    }
-
-    #[test]
-    fn agent_message_dialog_marks_moved_snapshot_recipient_unavailable() {
-        use crate::agent_message_dialog::{Outcome, RecipientState};
-        let mut app = app();
-        let project = app
-            .tree
-            .add_project(PathBuf::from("/tmp/message-moved-recipient"))
-            .unwrap();
-        let group = app.tree.add_group(project, "selected agents").unwrap();
-        let outside_group = app.tree.add_group(project, "other agents").unwrap();
-        let retained = app
-            .tree
-            .add_pane(group, "retained", PaneContentKind::Terminal)
-            .unwrap();
-        let moved = app
-            .tree
-            .add_pane(group, "moved", PaneContentKind::Terminal)
-            .unwrap();
-        for pane in [retained, moved] {
-            app.tree
-                .set_pane_status(
-                    pane,
-                    PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
-                )
-                .unwrap();
-        }
-
-        app.open_agent_message_dialog(group);
-        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("message dialog missing");
-        };
-        assert_eq!(state.selected_ids(), vec![retained, moved]);
-        state
-            .message
-            .insert_str("deliver only to the retained agent");
-
-        app.panes.insert(
-            retained,
-            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
-        );
-        app.tree.move_node(moved, outside_group, None).unwrap();
-        app.finish_agent_message_dialog(state, Outcome::Send);
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::SubmitTerminalText {
-                pane_id: retained,
-                text: "deliver only to the retained agent".into(),
-                source: PromptSubmissionSource::Keyboard,
-            }]
-        );
-        let Mode::AgentMessageDialog(state) = app.mode else {
-            panic!("dialog must remain open to report the moved recipient");
-        };
-        let moved_row = state
-            .recipients
-            .iter()
-            .find(|row| row.pane_id == moved)
-            .unwrap();
-        assert!(!moved_row.checked);
-        assert!(matches!(moved_row.state, RecipientState::Unavailable(_)));
-        let retained_row = state
-            .recipients
-            .iter()
-            .find(|row| row.pane_id == retained)
-            .unwrap();
-        assert!(!retained_row.checked);
-        assert_eq!(retained_row.state, RecipientState::Queued);
-        assert!(state.selected_ids().is_empty());
-    }
-
-    #[test]
-    fn agent_message_dialog_without_enter_sends_message_bytes_without_newline() {
-        use crate::agent_message_dialog::Outcome;
-        let mut app = app();
-        let project = app
-            .tree
-            .add_project(PathBuf::from("/tmp/message-without-enter"))
-            .unwrap();
-        let pane = app
-            .tree
-            .add_pane(project, "agent", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                pane,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
-            )
-            .unwrap();
-        let mut terminal = TerminalView::new(24, 80);
-        terminal.feed(b"\x1b[?2004l");
-        app.panes
-            .insert(pane, PaneRuntime::Terminal(Box::new(terminal)));
-
-        app.open_agent_message_dialog(project);
-        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("message dialog missing");
-        };
-        state.press_enter = false;
-        state.message.insert_str("hello agent");
-        app.finish_agent_message_dialog(state, Outcome::Send);
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::PasteTerminalText {
-                pane_id: pane,
-                text: "hello agent".to_owned(),
-            }],
-            "disabling Enter asks the server to paste only the message text"
-        );
-    }
-
-    /// The client's copy of a pane's paste mode is stale or missing for panes
-    /// it never rendered, so multiline text goes to the server, which frames it
-    /// from the live screen. A stale "paste off" must not block delivery.
-    #[test]
-    fn agent_message_dialog_leaves_multiline_paste_mode_to_the_server() {
-        use crate::agent_message_dialog::Outcome;
-        for press_enter in [true, false] {
-            let mut app = app();
-            let project = app
-                .tree
-                .add_project(PathBuf::from("/tmp/message-paste-mode"))
-                .unwrap();
-            let first = app
-                .tree
-                .add_pane(project, "paste-ready", PaneContentKind::Terminal)
-                .unwrap();
-            let second = app
-                .tree
-                .add_pane(project, "never-rendered", PaneContentKind::Terminal)
-                .unwrap();
-            for pane in [first, second] {
-                app.tree
-                    .set_pane_status(
-                        pane,
-                        PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
-                    )
-                    .unwrap();
-            }
-            let mut paste_ready = TerminalView::new(24, 80);
-            paste_ready.feed(b"\x1b[?2004h");
-            app.panes
-                .insert(first, PaneRuntime::Terminal(Box::new(paste_ready)));
-            let mut stale_terminal = TerminalView::new(24, 80);
-            stale_terminal.feed(b"\x1b[?2004l");
-            app.panes
-                .insert(second, PaneRuntime::Terminal(Box::new(stale_terminal)));
-
-            app.open_agent_message_dialog(project);
-            let Mode::AgentMessageDialog(mut state) =
-                std::mem::replace(&mut app.mode, Mode::Normal)
-            else {
-                panic!("message dialog missing");
-            };
-            state.press_enter = press_enter;
-            state.message.insert_str("first line\nsecond line");
-            app.finish_agent_message_dialog(state, Outcome::Send);
-
-            if let Mode::AgentMessageDialog(state) = &app.mode {
-                panic!(
-                    "the dialog must close once every recipient is queued: {:?}",
-                    state.error
-                );
-            }
-            let requests = app.take_outbound_requests();
-            assert_eq!(requests.len(), 2, "both recipients queue");
-            for request in requests {
-                let delivered = match request {
-                    ClientRequest::SubmitTerminalText {
-                        pane_id,
-                        text,
-                        source: PromptSubmissionSource::Keyboard,
-                    } if press_enter => (pane_id, text),
-                    ClientRequest::PasteTerminalText { pane_id, text } if !press_enter => {
-                        (pane_id, text)
-                    }
-                    other => panic!("unexpected request {other:?}"),
-                };
-                assert!([first, second].contains(&delivered.0));
-                assert_eq!(
-                    delivered.1, "first line\nsecond line",
-                    "the server receives literal text and chooses the framing"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn agent_message_dialog_rejects_blank_or_unselected_input_without_requests() {
-        use crate::agent_message_dialog::Outcome;
-        let mut app = app();
-        let project = app
-            .tree
-            .add_project(PathBuf::from("/tmp/message-empty"))
-            .unwrap();
-        let pane = app
-            .tree
-            .add_pane(project, "agent", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                pane,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
-            )
-            .unwrap();
-        app.open_agent_message_dialog(project);
-        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("message dialog missing");
-        };
-        state.message.insert_str(" \n ");
-        app.finish_agent_message_dialog(state, Outcome::Send);
-        assert!(app.take_outbound_requests().is_empty());
-        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("invalid form was discarded");
-        };
-        state.message.insert_str("message");
-        state.recipients[0].checked = false;
-        app.finish_agent_message_dialog(state, Outcome::Send);
-        assert!(app.take_outbound_requests().is_empty());
-    }
-
-    #[test]
-    fn ask_for_update_menu_entry_only_appears_where_an_eligible_pane_exists() {
-        let mut app = app();
-        let project = app
-            .tree
-            .add_project(std::path::PathBuf::from("/tmp/ask-for-update-menu"))
-            .unwrap();
-        let idle_pane = app
-            .tree
-            .add_pane(project, "agent", PaneContentKind::Terminal)
-            .unwrap();
-
-        // No pane is idle/done yet: the entry is offered nowhere.
-        app.tree
-            .set_pane_status(
-                idle_pane,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
-            )
-            .unwrap();
-        for target in [ROOT_ID, project, idle_pane] {
-            assert!(!app
-                .context_actions_for(target)
-                .contains(&ContextMenuAction::AskForUpdate));
-        }
-
-        // Once idle, the entry appears for the pane itself, its project, and
-        // the whole-tree root. Empty folders offer their own action and
-        // explain the empty recipient scope when invoked.
-        app.tree
-            .set_pane_status(
-                idle_pane,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
-            )
-            .unwrap();
-        let unrelated_group = app.tree.add_group(ROOT_ID, "empty").unwrap();
-        for target in [ROOT_ID, project, idle_pane] {
-            assert!(app
-                .context_actions_for(target)
-                .contains(&ContextMenuAction::AskForUpdate));
-        }
-        assert!(app
-            .context_actions_for(unrelated_group)
-            .contains(&ContextMenuAction::AskForUpdate));
-    }
-
-    #[test]
-    fn ask_for_update_sends_the_fixed_prompt_to_every_idle_agent_pane_only() {
-        let mut app = app();
-        let project = app
-            .tree
-            .add_project(std::path::PathBuf::from("/tmp/ask-for-update-send"))
-            .unwrap();
-        let idle_pane = app
-            .tree
-            .add_pane(project, "idle-agent", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                idle_pane,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
-            )
-            .unwrap();
-        let done_pane = app
-            .tree
-            .add_pane(project, "done-agent", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                done_pane,
-                PaneStatus::from_activity(
-                    AgentClass::Codex,
-                    AgentActivity::Done,
-                    Some(ilium_core::GoalState::Active),
-                ),
-            )
-            .unwrap();
-        let working_pane = app
-            .tree
-            .add_pane(project, "working-agent", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                working_pane,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
-            )
-            .unwrap();
-        // A plain shell is never a candidate, even when technically idle.
-        app.tree
-            .add_pane(project, "shell", PaneContentKind::Terminal)
-            .unwrap();
-
-        app.execute_context_action(ContextMenuAction::AskForUpdate, project);
-
-        let requests = app.take_outbound_requests();
-        assert_eq!(requests.len(), 2, "only the idle and done panes are asked");
-        for (pane_id, request) in [idle_pane, done_pane].into_iter().zip(requests) {
-            assert_eq!(
-                request,
-                ClientRequest::SubmitTerminalText {
-                    pane_id,
-                    text: ilium_prompts::render_value(
-                        "agent/ask-for-update",
-                        &serde_json::json!({})
-                    ),
-                    source: PromptSubmissionSource::AskForUpdate,
-                }
-            );
-        }
-    }
-
-    #[test]
-    fn agent_message_filesystem_folder_status_update_reaches_agents_within_folder_path() {
-        let mut app = app();
-        // Absolute on every platform (`/tmp/...` is relative on Windows).
-        let project_path = std::env::temp_dir().join("ask-for-update-folder-scope");
-        let project = app.tree.add_project(project_path.clone()).unwrap();
-        let group = app.tree.add_group(project, "agents").unwrap();
-        let folder_path = project_path.join("src");
-        let folder = app.tree.add_folder(group, folder_path).unwrap();
-
-        let in_folder = app
-            .tree
-            .add_pane(group, "working-in-folder", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                in_folder,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
-            )
-            .unwrap();
-        app.tree
-            .set_pane_launch_cwd(in_folder, project_path.join("src/nested"))
-            .unwrap();
-
-        let outside_folder = app
-            .tree
-            .add_pane(group, "working-outside-folder", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                outside_folder,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
-            )
-            .unwrap();
-        app.tree
-            .set_pane_launch_cwd(outside_folder, project_path.join("tests"))
-            .unwrap();
-
-        let folder_actions = app.context_actions_for(folder);
-        assert!(folder_actions.contains(&ContextMenuAction::AskForUpdate));
-        assert!(folder_actions.contains(&ContextMenuAction::SendMessageToAll));
-        app.open_agent_message_dialog(folder);
-        let Mode::AgentMessageDialog(state) = &app.mode else {
-            panic!("filesystem folder did not open the message dialog");
-        };
-        assert_eq!(state.selected_ids(), vec![in_folder]);
-        app.execute_context_action(ContextMenuAction::AskForUpdate, folder);
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::SubmitTerminalText {
-                pane_id: in_folder,
-                text: "please remind me, in a very compact way, what you were doing, what I asked you to do, how it went, etc, remind me what's going on"
-                    .into(),
-                source: PromptSubmissionSource::AskForUpdate,
-            }],
-            "folder updates include working agents inside the path and exclude agents outside it"
-        );
-    }
-
-    #[test]
-    fn ask_for_update_includes_literal_custom_instructions() {
-        let mut app = app();
-        app.inference_settings.instructions.ask_for_update =
-            "Brief French update {{literal}} & 🦀".into();
-        let project = app
-            .tree
-            .add_project(std::path::PathBuf::from("/tmp/ask-for-update-custom"))
-            .unwrap();
-        let pane = app
-            .tree
-            .add_pane(project, "agent", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                pane,
-                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
-            )
-            .unwrap();
-        app.action_ask_for_update(pane);
-        let requests = app.take_outbound_requests();
-        let ClientRequest::SubmitTerminalText { text, .. } = &requests[0] else {
-            panic!("submission missing")
-        };
-        assert!(text.contains("Brief French update {{literal}} & 🦀"));
-        assert!(text.starts_with(&ilium_prompts::render_value(
-            "agent/ask-for-update",
-            &serde_json::json!({})
-        )));
-        app.inference_settings.instructions.ask_for_update = " \n\t".into();
-        app.action_ask_for_update(pane);
-        let requests = app.take_outbound_requests();
-        let ClientRequest::SubmitTerminalText { text, .. } = &requests[0] else {
-            panic!("submission missing")
-        };
-        assert_eq!(
-            text,
-            &ilium_prompts::render_value("agent/ask-for-update", &serde_json::json!({}))
-        );
-    }
-
-    #[test]
     fn manual_move_and_reparent_restore_and_persist_manual_tree_order() {
         let config_dir = std::env::temp_dir()
             .join("ilium-app-tree-order-tests")
@@ -24359,135 +23161,30 @@ mod tests {
     }
 
     #[test]
-    fn scheduled_input_dialog_commit_queues_the_complete_request() {
+    fn scheduler_menu_actions_without_a_plugin_host_name_the_scheduler_plugin() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let terminal = app
             .tree
             .add_pane(group, "shell", PaneContentKind::Terminal)
             .unwrap();
-        app.execute_context_action(ContextMenuAction::SchedulePaneInput, terminal);
-        let Mode::SchedulePaneInput(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("scheduled input action should open its dialog");
-        };
-        state.hours = TextPromptState::new("1");
-        state.minutes = TextPromptState::new("2");
-        state.seconds = TextPromptState::new("3");
-        state.text = TextPromptState::new("cargo test");
-        state.send_enter = true;
-
-        app.commit_scheduled_pane_input(state);
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::SchedulePaneInput {
-                pane_id: terminal,
-                delay_seconds: 3723,
-                text: "cargo test".to_string(),
-                send_enter: true,
-            }]
-        );
-        assert!(matches!(app.mode, Mode::Normal));
-    }
-
-    #[test]
-    fn queue_prompt_dialog_commits_multiline_repeating_request_and_exposes_clear() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = app
-            .tree
-            .add_pane(group, "agent", PaneContentKind::Terminal)
-            .unwrap();
-        app.execute_context_action(ContextMenuAction::QueuePrompt, terminal);
-        let Mode::QueuePrompt(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("queue action should open its dialog");
-        };
-        state.text = TextPromptState::new("first line\nsecond line");
-        state.delivery_choice = ilium_core::PromptQueueDelivery::Times { remaining_runs: 2 };
-        state.times = TextPromptState::new("3");
-        app.commit_queued_prompt(state);
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::EnqueuePrompt {
-                pane_id: terminal,
-                text: "first line\nsecond line".to_string(),
-                delivery: ilium_core::PromptQueueDelivery::Times { remaining_runs: 3 },
-            }]
-        );
-        app.tree
-            .enqueue_prompt(
-                terminal,
-                ilium_core::QueuedPrompt {
-                    text: "pending".to_string(),
-                    delivery: ilium_core::PromptQueueDelivery::Once,
-                    attempted_delivery: false,
-                },
-            )
-            .unwrap();
+        for action in [
+            ContextMenuAction::SchedulePaneInput,
+            ContextMenuAction::QueuePrompt,
+            ContextMenuAction::ClearPromptQueue,
+        ] {
+            app.status_message = None;
+            app.execute_context_action(action, terminal);
+            assert_eq!(
+                app.status_message.as_deref(),
+                Some("ilium.core.scheduler is not running, so this action is unavailable")
+            );
+            assert!(matches!(app.mode, Mode::Normal));
+            assert!(app.take_outbound_requests().is_empty());
+        }
         assert!(app
             .context_actions_for(terminal)
             .contains(&ContextMenuAction::ClearPromptQueue));
-    }
-
-    #[test]
-    fn full_outbound_credit_keeps_original_scheduled_and_prompt_forms_for_retry() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = app
-            .tree
-            .add_pane(group, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        let mut limits = crate::ipc_preparation::request_limits();
-        limits.jobs = 1;
-        app.outbound_admission = Some(
-            app.outbound_admission
-                .as_ref()
-                .unwrap()
-                .child(limits)
-                .unwrap(),
-        );
-        assert!(app.queue_request(ClientRequest::UpdateDebugLogging { enabled: true }));
-        app.execute_context_action(ContextMenuAction::SchedulePaneInput, terminal);
-        let Mode::SchedulePaneInput(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("schedule form")
-        };
-        state.seconds = TextPromptState::new("3");
-        state.text = TextPromptState::new("retain unicode λ\nsecond line");
-        app.commit_scheduled_pane_input(state);
-        let Mode::SchedulePaneInput(state) = &app.mode else {
-            panic!("full credit must retain original form")
-        };
-        assert_eq!(state.text.buf, "retain unicode λ\nsecond line");
-        assert!(!app
-            .status_message
-            .as_deref()
-            .unwrap()
-            .contains("Scheduled pane input"));
-        app.mode = Mode::Normal;
-        app.execute_context_action(ContextMenuAction::QueuePrompt, terminal);
-        let Mode::QueuePrompt(mut state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("prompt form")
-        };
-        state.text = TextPromptState::new("original queued prompt");
-        app.commit_queued_prompt(state);
-        let Mode::QueuePrompt(state) = &app.mode else {
-            panic!("full credit must retain original prompt")
-        };
-        assert_eq!(state.text.buf, "original queued prompt");
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::UpdateDebugLogging { enabled: true }]
-        );
-        let Mode::QueuePrompt(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("retained form")
-        };
-        app.commit_queued_prompt(state);
-        assert!(
-            matches!(app.take_outbound_requests().as_slice(),[ClientRequest::EnqueuePrompt{text,..}] if text=="original queued prompt")
-        );
-        assert!(matches!(app.mode, Mode::Normal));
     }
 
     #[test]
@@ -24633,7 +23330,7 @@ mod tests {
         let project_path = std::env::temp_dir().join(format!(
             "ilium-board-defaults-{}-{}",
             std::process::id(),
-            crate::scheduled_input::unix_millis_now()
+            crate::wall_clock::unix_millis_now()
         ));
         let board_directory = project_path.join(".ilium").join("boards");
         std::fs::create_dir_all(&board_directory).unwrap();
@@ -24668,7 +23365,7 @@ mod tests {
         let project_path = std::env::temp_dir().join(format!(
             "ilium-board-relative-{}-{}",
             std::process::id(),
-            crate::scheduled_input::unix_millis_now()
+            crate::wall_clock::unix_millis_now()
         ));
         std::fs::create_dir_all(&project_path).unwrap();
         let mut app = App::new("test".to_string(), project_path.clone());
@@ -24706,7 +23403,7 @@ mod tests {
         let project_path = std::env::temp_dir().join(format!(
             "ilium-board-invalid-{}-{}",
             std::process::id(),
-            crate::scheduled_input::unix_millis_now()
+            crate::wall_clock::unix_millis_now()
         ));
         let directory_path = project_path.join("not-a-markdown-file");
         std::fs::create_dir_all(&directory_path).unwrap();
@@ -26216,61 +24913,6 @@ mod tests {
             app.visible_pane_stream_order(),
             [Some(second), Some(first), None, None]
         );
-    }
-
-    #[test]
-    fn completed_agent_close_action_queues_close_without_forwarding_a_terminal_click() {
-        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "codex", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                pane_id,
-                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
-            )
-            .unwrap();
-        app.panes.insert(
-            pane_id,
-            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
-        );
-        app.right_panel_target = RightPanelTarget::Pane { pane_id };
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.ui_settings.auto_remove_empty_groups = false;
-        app.take_outbound_requests();
-        let action = app
-            .completed_agent_close_action(app.pane_viewport(pane_id).unwrap())
-            .expect("done agent exposes a close action");
-        let position = Position::new(action.button_area.x, action.button_area.y);
-
-        app.handle_pane_mouse(
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: position.x,
-                row: position.y,
-                modifiers: KeyModifiers::NONE,
-            },
-            position,
-        );
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::ClosePane { pane_id }]
-        );
-
-        app.tree
-            .set_pane_status(
-                pane_id,
-                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
-            )
-            .unwrap();
-        assert!(app
-            .completed_agent_close_action(app.pane_viewport(pane_id).unwrap())
-            .is_none());
     }
 
     #[test]
@@ -27790,6 +26432,7 @@ mod tests {
             show_labels: app.ui_settings.show_toolbar_labels,
             selection_enabled: app.ui_settings.terminal_text_selection_enabled,
             show_prompt_reopen: false,
+            show_smart_copy: true,
             show_goal: false,
         };
         let sol_rect = crate::agent_toolbar::button_rect_for(
@@ -28234,7 +26877,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_debug_log_fetches_retained_history_before_using_incremental_replay() {
+    fn opening_debug_log_asks_the_server_for_the_retained_history_and_waits_for_the_snapshot() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
@@ -28252,23 +26895,11 @@ mod tests {
             )
             .unwrap();
         app.ui_settings.agent_debug_menu_enabled = true;
-        app.agent_debug_logs.insert(
-            pane_id,
-            AgentDebugLogCache {
-                through_sequence: 41,
-                ..AgentDebugLogCache::default()
-            },
-        );
 
         app.open_agent_debug_log(pane_id);
 
-        assert!(matches!(
-            app.mode,
-            Mode::AgentDebugLog(AgentDebugLogViewState {
-                pane_id: target,
-                scroll_position: AgentDebugLogScrollPosition::FromNewest(0),
-            }) if target == pane_id
-        ));
+        assert!(matches!(app.mode, Mode::Normal));
+        assert_eq!(app.pending_debug_log_viewer, Some(pane_id));
         assert_eq!(
             app.take_outbound_requests(),
             vec![ClientRequest::GetPaneDebugLog {
@@ -28276,112 +26907,6 @@ mod tests {
                 after_sequence: None,
             }]
         );
-
-        app.agent_debug_logs
-            .get_mut(&pane_id)
-            .unwrap()
-            .has_loaded_retained_history = true;
-        app.open_agent_debug_log(pane_id);
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::GetPaneDebugLog {
-                pane_id,
-                after_sequence: Some(41),
-            }]
-        );
-    }
-
-    #[test]
-    fn debug_log_save_prompt_uses_an_editable_absolute_path_only_after_full_replay() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "Codex: payment audit", PaneContentKind::Terminal)
-            .unwrap();
-        let view = AgentDebugLogViewState {
-            pane_id,
-            scroll_position: AgentDebugLogScrollPosition::FromNewest(0),
-        };
-        app.agent_debug_logs.insert(
-            pane_id,
-            AgentDebugLogCache {
-                has_loaded_retained_history: true,
-                ..AgentDebugLogCache::default()
-            },
-        );
-
-        app.open_agent_debug_save_path(view);
-
-        let Mode::AgentDebugSavePath(target, prompt) = &app.mode else {
-            panic!("complete history should open the destination prompt");
-        };
-        assert_eq!(*target, pane_id);
-        assert!(Path::new(&prompt.buf).is_absolute());
-        assert!(prompt.buf.contains("ilium-codex-payment-audit-debug-"));
-        assert!(prompt.buf.ends_with(".log"));
-        assert!(matches!(
-            app.modal_stack.as_slice(),
-            [Mode::AgentDebugLog(AgentDebugLogViewState { pane_id: parent, .. })]
-                if *parent == pane_id
-        ));
-    }
-
-    #[test]
-    fn saving_agent_debug_log_resolves_relative_path_and_writes_the_complete_report() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new("test".to_string(), directory.path().to_path_buf());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "Codex audit", PaneContentKind::Terminal)
-            .unwrap();
-        app.agent_debug_logs.insert(
-            pane_id,
-            AgentDebugLogCache {
-                log: ilium_ipc::PaneDebugLog {
-                    entries: vec![ilium_ipc::AgentDebugEntry {
-                        sequence: 1,
-                        occurred_at_unix_millis: 1_700_000_000_000,
-                        severity: ilium_ipc::AgentDebugSeverity::Information,
-                        source: ilium_ipc::AgentDebugSource::Detector,
-                        kind: ilium_ipc::AgentDebugEventKind::DetectionCycle,
-                        summary: "Detected Codex and classified it as working".to_string(),
-                        fields: vec![ilium_ipc::AgentDebugField::plain(
-                            "Activity decision",
-                            "Working because a live status marker was visible.",
-                        )],
-                        correlation_id: None,
-                        context: ilium_ipc::AgentDebugContext::default(),
-                        metadata: Default::default(),
-                    }],
-                    ..Default::default()
-                },
-                through_sequence: 1,
-                is_loading: false,
-                has_loaded_retained_history: true,
-            },
-        );
-
-        assert!(!app.save_agent_debug_log(pane_id, "exports/codex.log"));
-        // Asserts the failure names its target rather than quoting an errno
-        // string: "No such file or directory" is the Unix wording, and Windows
-        // says "The system cannot find the path specified" for the same cause.
-        assert!(app.status_message.as_deref().is_some_and(|message| {
-            message.starts_with("Save agent debug log failed for") && message.contains("codex.log")
-        }));
-
-        std::fs::create_dir(directory.path().join("exports")).unwrap();
-        assert!(app.save_agent_debug_log(pane_id, "exports/codex.log"));
-        assert!(app
-            .status_message
-            .as_deref()
-            .is_some_and(|message| { message.starts_with("Saved agent debug log to") }));
-        let saved = std::fs::read_to_string(directory.path().join("exports/codex.log")).unwrap();
-        assert!(saved.contains("ILIUM AGENT DEBUG LOG"));
-        assert!(saved.contains("Pane: Codex audit"));
-        assert!(saved.contains("Activity decision: Working because"));
     }
 
     #[test]
@@ -28427,22 +26952,6 @@ mod tests {
         );
 
         assert!(app.take_outbound_requests().is_empty());
-    }
-
-    #[test]
-    fn oldest_debug_log_anchor_can_page_toward_newer_events() {
-        let mut state = AgentDebugLogViewState {
-            pane_id: NodeId(7),
-            scroll_position: AgentDebugLogScrollPosition::FromNewest(28),
-        };
-
-        state.show_oldest();
-        state.scroll_newer(10);
-
-        assert_eq!(
-            state.scroll_position,
-            AgentDebugLogScrollPosition::FromOldest(10)
-        );
     }
 
     #[test]
@@ -28739,21 +27248,13 @@ mod tests {
         assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Attention);
         assert_eq!(SettingsTab::Attention.next(), SettingsTab::Cost);
         assert_eq!(SettingsTab::Cost.previous(), SettingsTab::Attention);
-        assert_eq!(SettingsTab::Cost.next(), SettingsTab::Optimization);
-        assert_eq!(
-            SettingsTab::Optimization.next(),
-            SettingsTab::RemoteCompaction
-        );
+        assert_eq!(SettingsTab::Cost.next(), SettingsTab::RemoteCompaction);
         assert_eq!(SettingsTab::RemoteCompaction.next(), SettingsTab::Keyboard);
         assert_eq!(
             SettingsTab::Keyboard.previous(),
             SettingsTab::RemoteCompaction
         );
-        assert_eq!(
-            SettingsTab::RemoteCompaction.previous(),
-            SettingsTab::Optimization
-        );
-        assert_eq!(SettingsTab::Optimization.previous(), SettingsTab::Cost);
+        assert_eq!(SettingsTab::RemoteCompaction.previous(), SettingsTab::Cost);
         assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);
         assert_eq!(SettingsTab::Terminal.next(), SettingsTab::Editor);
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);

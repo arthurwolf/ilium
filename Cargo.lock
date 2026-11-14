@@ -3155,7 +3155,6 @@ version = "0.1.1"
 dependencies = [
  "cap-std",
  "chrono",
- "cosmic-text",
  "cpal",
  "directories",
  "fdeflate",
@@ -3657,7 +3656,9 @@ version = "0.1.1"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
+ "serde",
  "serde_json",
+ "swash",
 ]
 
 [[package]]

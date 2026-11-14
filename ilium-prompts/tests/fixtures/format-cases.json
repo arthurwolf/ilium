@@ -575,45 +575,6 @@
     "sha256": "5749f771885b2a49866af62d8ae092e131f155e66269c505fa07e1bf0c503b48"
   },
   {
-    "name": "agent/chatroom-record-row",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
-      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
-      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "83635eb73115fd1a1961db7960032b5c172b247f00ad52aebb71363a24ae7532"
-  },
-  {
-    "name": "agent/chatroom-empty-context",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "74b8b7db642f014e0e34e87d7f57cffb3bae65ac075d3338f34316f0a29cb805"
-  },
-  {
-    "name": "agent/chatroom-context",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "7db10b3fd638ee397872a1fc534a23189bcbf416c62fc6ff8de0b504e05c38b9"
-  },
-  {
-    "name": "agent/chatroom-context-row",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
-      "v1": "sample \"value\" {{literal}} <tag>& 🦀\nnext",
-      "v2": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "9145df4136b308a21dc549dab650b425b03319b0d7a14f50b94eda2e0f647611"
-  },
-  {
-    "name": "agent/chatroom-header-guidance",
-    "context": {
-      "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext"
-    },
-    "sha256": "003f8e52b61e4d1f4b74a6317580dbf4fa48ad13aba0fe8b9a89a819fb77191e"
-  },
-  {
     "name": "agent/progress-done",
     "context": {
       "v0": "sample \"value\" {{literal}} <tag>& 🦀\nnext",

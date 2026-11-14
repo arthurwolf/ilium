@@ -153,9 +153,10 @@ pub fn decode_bounded_frame_with_storage<T: crate::BoundedMessage>(
 // Resource commands, the inserted ScreenPreview event and the status
 // screen-watch request/events (`SetStatusScreenWatches` /
 // `StatusScreenObserved` / `StatusScreenWatchesRejected`) require matching
-// peers. Reject older enum layouts before decoding any payload, so a
+// peers; removing the scheduled-input and prompt-queue requests shifted the request discriminants.
+// Reject older enum layouts before decoding any payload, so a
 // mismatch fails at attach instead of on the first new message. The tag must occupy only bits in FRAME_SCHEMA_MASK.
-const FRAME_SCHEMA_TAG: u32 = 0xD800_0000;
+const FRAME_SCHEMA_TAG: u32 = 0xE000_0000;
 const FRAME_SCHEMA_MASK: u32 = 0xF800_0000;
 fn frame_length_word(length: u32) -> u32 {
     FRAME_SCHEMA_TAG | length
@@ -884,6 +885,13 @@ mod prompt_attempt_wire_tests {
         assert!(frame_payload_length(0xD000_0000 | 16).is_err());
         assert_eq!(frame_payload_length(frame_length_word(16)).unwrap(), 16);
         assert_eq!(FRAME_SCHEMA_TAG & FRAME_SCHEMA_MASK, FRAME_SCHEMA_TAG);
+    }
+    #[test]
+    fn pre_scheduler_plugin_schema_is_rejected_before_decoding() {
+        // The scheduled-input and prompt-queue requests moved into the scheduler plugin, which
+        // shifted the discriminants after them; peers with the old layout are refused at attach.
+        assert!(frame_payload_length(0xD800_0000 | 16).is_err());
+        assert_eq!(frame_payload_length(frame_length_word(16)).unwrap(), 16);
     }
     #[test]
     fn declared_encoded_capacity_covers_real_growth_at_floor_and_doubling_boundaries() {

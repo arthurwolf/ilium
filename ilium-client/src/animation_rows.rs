@@ -728,16 +728,12 @@ impl AnimationRow {
     /// numbered topics instead of needing their own catalog entry.
     pub fn help_id(&self, scene_controls: &[Control]) -> String {
         match self {
-            Self::Scene(AnimationKind::GalacticEmpires) => "AN-53".to_owned(),
             Self::Scene(AnimationKind::Wikipedia) => "AN-54".to_owned(),
-            Self::Scene(AnimationKind::SolarSystem) => "AN-49".to_owned(),
-            Self::Scene(AnimationKind::HexExpedition) => "AN-50".to_owned(),
             Self::Scene(AnimationKind::VectorTd) => "AN-51".to_owned(),
             Self::Scene(AnimationKind::VoxelLandscape) => "AN-52".to_owned(),
             Self::Scene(AnimationKind::TopographicMaps) => "AN-56".to_owned(),
             Self::Scene(AnimationKind::OpenStreetMap) => "AN-55".to_owned(),
             Self::Scene(AnimationKind::Graph) => "AN-57".to_owned(),
-            Self::Scene(AnimationKind::Pi) => "AN-58".to_owned(),
             Self::Scene(AnimationKind::Earthquakes) => "AN-59".to_owned(),
             Self::Scene(AnimationKind::Aircraft) => "AN-60".to_owned(),
             Self::Scene(AnimationKind::Boats) => "AN-61".to_owned(),
@@ -745,24 +741,19 @@ impl AnimationRow {
             Self::Scene(AnimationKind::Carpet) => "AN-63".to_owned(),
             Self::Scene(AnimationKind::Semantic) => "AN-64".to_owned(),
             Self::Scene(AnimationKind::Wind) => "AN-66".to_owned(),
-            Self::Scene(AnimationKind::Aurora) => "AN-67".to_owned(),
-            Self::Scene(AnimationKind::Pollen) => "AN-68".to_owned(),
-            Self::Scene(AnimationKind::Fireflies) => "AN-69".to_owned(),
-            Self::Scene(AnimationKind::WindowSunlight) => "AN-70".to_owned(),
             Self::Scene(AnimationKind::Frost) => "AN-71".to_owned(),
-            Self::Scene(AnimationKind::Lighthouse) => "AN-72".to_owned(),
-            Self::Scene(AnimationKind::PaperFold) => "AN-73".to_owned(),
             Self::Scene(AnimationKind::Embroidery) => "AN-74".to_owned(),
-            Self::Scene(AnimationKind::PrimeConstellations) => "AN-75".to_owned(),
-            Self::Scene(AnimationKind::Wallpaper) => "AN-76".to_owned(),
-            Self::Scene(AnimationKind::UnfinishedCircle) => "AN-77".to_owned(),
-            Self::Scene(AnimationKind::NeedleThreads) => "AN-78".to_owned(),
             Self::Scene(AnimationKind::HesitatingInk) => "AN-79".to_owned(),
-            Self::Scene(AnimationKind::CropCircles) => "AN-80".to_owned(),
-            Self::Scene(AnimationKind::DelayedReflection) => "AN-81".to_owned(),
-            Self::Scene(AnimationKind::AlmostTouching) => "AN-82".to_owned(),
-            Self::Scene(AnimationKind::HiddenWheel) => "AN-83".to_owned(),
             Self::Scene(AnimationKind::Growth) => "AN-84".to_owned(),
+            // The scenes after the ones that moved into the Scenes plugin (3D pipes, Atlantic
+            // dusk, Machine screen, Hex expedition) keep the topic numbers they had.
+            Self::Scene(AnimationKind::Stars) => "AN-12".to_owned(),
+            Self::Scene(AnimationKind::NightLights) => "AN-13".to_owned(),
+            Self::Scene(AnimationKind::Clouds) => "AN-14".to_owned(),
+            Self::Scene(AnimationKind::Video) => "AN-15".to_owned(),
+            Self::Scene(AnimationKind::Spectrum) => "AN-16".to_owned(),
+            Self::Scene(AnimationKind::Images) => "AN-17".to_owned(),
+            Self::Scene(AnimationKind::PluginScene) => "AN-24".to_owned(),
             Self::Scene(kind) => {
                 let index = AnimationKind::ALL
                     .iter()

@@ -103,11 +103,19 @@ fn manifest_050_server_grants_are_the_five_agent_grants_in_order() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_client_grants_are_read_read_prompts_and_ui_chrome() {
+fn manifest_050_client_grants_are_agent_reads_chrome_tree_write_and_the_extension_provides() {
     let manifest = manifest();
     assert_eq!(
         strings(&manifest["capabilities"]["client"]),
-        ["agent.read", "agent.read-prompts", "ui.chrome"]
+        [
+            "agent.read",
+            "agent.read-prompts",
+            "ui.chrome",
+            "tree.write",
+            "settings.read-kernel:user-interface",
+            "extensions.provide:ilium.core.agent-toolbar/toolbar-actions",
+            "extensions.provide:ilium.core.agent-toolbar/banner-segments"
+        ]
     );
 }
 
@@ -128,12 +136,13 @@ fn manifest_050_runs_with_first_party_limits() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_commands_are_compact_and_history_with_their_titles() {
+fn manifest_050_commands_are_compact_history_and_close_finished_with_their_titles() {
     assert_eq!(
         manifest()["contributes"]["commands"],
         json!([
             {"id": "compact", "title": "Compact agent context"},
-            {"id": "history", "title": "Show agent debug history"}
+            {"id": "history", "title": "Show agent debug history"},
+            {"id": "close-finished", "title": "Close finished agent"}
         ])
     );
 }
@@ -164,7 +173,8 @@ fn manifest_050_frame_slots_are_prompt_banner_model_header_text_and_recover_foot
         json!([
             {"id": "prompt", "placement": "banner", "applies_to": "agents"},
             {"id": "model", "placement": "header-text", "applies_to": "agents"},
-            {"id": "recover", "placement": "footer-row", "applies_to": "agents"}
+            {"id": "recover", "placement": "footer-row", "applies_to": "agents"},
+            {"id": "finished", "placement": "footer-row", "applies_to": "agents"}
         ])
     );
 }
@@ -243,7 +253,15 @@ fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
     );
     assert_eq!(
         strings(&manifest["capabilities"]["client"]),
-        ["agent.read", "agent.read-prompts", "ui.chrome"]
+        [
+            "agent.read",
+            "agent.read-prompts",
+            "ui.chrome",
+            "tree.write",
+            "settings.read-kernel:user-interface",
+            "extensions.provide:ilium.core.agent-toolbar/toolbar-actions",
+            "extensions.provide:ilium.core.agent-toolbar/banner-segments"
+        ]
     );
     assert_eq!(manifest["capabilities"], page["capabilities"]);
 }

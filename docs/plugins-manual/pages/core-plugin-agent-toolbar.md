@@ -58,7 +58,8 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
   "contributes": {
     "commands": [
       { "id": "compact", "title": "Compact agent context" },
-      { "id": "history", "title": "Show agent debug history" }
+      { "id": "history", "title": "Show agent debug history" },
+      { "id": "close-finished", "title": "Close finished agent" }
     ],
     "tree_toolbar": [
       { "id": "compact", "icon": "arrows-minimize", "label": "Compact",
@@ -71,13 +72,14 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     "pane_frame_slots": [
       { "id": "prompt", "placement": "banner", "applies_to": "agents" },
       { "id": "model", "placement": "header-text", "applies_to": "agents" },
-      { "id": "recover", "placement": "footer-row", "applies_to": "agents" }
+      { "id": "recover", "placement": "footer-row", "applies_to": "agents" },
+      { "id": "finished", "placement": "footer-row", "applies_to": "agents" }
     ]
   },
   "capabilities": {
     "server": ["agent.read", "agent.read-prompts", "agent.transcript",
                "agent.control", "journal.read"],
-    "client": ["agent.read", "agent.read-prompts", "ui.chrome"]
+    "client": ["agent.read", "agent.read-prompts", "ui.chrome", "tree.write"]
   }
 }
 ```
@@ -115,6 +117,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "agent.read",
       "agent.read-prompts",
       "ui.chrome",
+      "tree.write",
       "settings.read-kernel:user-interface",
       "extensions.provide:ilium.core.agent-toolbar/toolbar-actions",
       "extensions.provide:ilium.core.agent-toolbar/banner-segments"
@@ -201,6 +204,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       {
         "id": "history",
         "title": "Show agent debug history"
+      },
+      {
+        "id": "close-finished",
+        "title": "Close finished agent"
       }
     ],
     "tree_toolbar": [
@@ -236,6 +243,11 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       },
       {
         "id": "recover",
+        "placement": "footer-row",
+        "applies_to": "agents"
+      },
+      {
+        "id": "finished",
         "placement": "footer-row",
         "applies_to": "agents"
       }

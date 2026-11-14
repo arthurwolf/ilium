@@ -19,8 +19,6 @@ mod agent_delivery;
 mod agent_identity_guard;
 mod agent_prompt;
 mod antigravity_statusline_delivery;
-mod cache_wait_evidence;
-mod cache_wait_observation;
 pub mod config;
 mod config_refresh;
 pub mod custom_agent_config;
@@ -45,13 +43,11 @@ mod persistence;
 pub mod plugin_host;
 mod progress_monitor;
 mod progress_watchdog;
-mod prompt_queue;
 mod ready_log;
 mod recent_activity;
 mod recovery;
 mod repo_facts_cache;
 pub mod resources;
-mod scheduled_input;
 mod session_backups;
 mod session_id;
 mod shell_title;
@@ -380,7 +376,6 @@ pub async fn run_with_plugins(
             .parent()
             .map(std::path::Path::to_path_buf),
     ));
-    let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
     let progress_watchdog_task =
         AbortOnDropHandle::new(progress_watchdog::spawn(Arc::clone(&state)));
     let mut snapshot_writer_task =
@@ -404,7 +399,6 @@ pub async fn run_with_plugins(
     detection_task.abort();
     git_status_task.abort();
     http_api_task.abort();
-    scheduled_input_task.abort();
     progress_watchdog_task.abort();
     if let Some(task) = sound_config_watcher_task {
         task.abort();
@@ -919,16 +913,6 @@ async fn restore_snapshot_data(
         );
     }
 
-    // The replaced tree may carry scheduled pane inputs restored from disk.
-    // `scheduled_input::run` only rescans its nearest deadline on this
-    // signal or its own timer firing; a restore reached through
-    // `handle_session_recovery_resolution` (after the executor already
-    // started against an empty tree under `AskBeforeRestore`) would
-    // otherwise leave every restored countdown parked forever. Deferred
-    // until every pane above has finished (attempting) respawn so an
-    // already-due schedule cannot race the executor into finding no
-    // registered pane to write to yet.
-    state.scheduled_input_changed.notify_one();
     if let Some(phase) = &startup {
         phase.finish().await;
     }

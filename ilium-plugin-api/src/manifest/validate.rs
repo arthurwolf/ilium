@@ -1184,7 +1184,7 @@ const MANIFEST_SCHEMA: &str = r###"{
             },
             "required": ["id", "title"]
           },
-          "maxItems": 16
+          "maxItems": 256
         },
         "signatures": {
           "type": "array",

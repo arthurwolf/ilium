@@ -286,10 +286,9 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
             count.add(bytes.capacity());
             count.optional_string(prompt_epoch);
         }
-        R::SubmitTerminalText { text, .. }
-        | R::PasteTerminalText { text, .. }
-        | R::SchedulePaneInput { text, .. }
-        | R::EnqueuePrompt { text, .. } => count.string(text),
+        R::SubmitTerminalText { text, .. } | R::PasteTerminalText { text, .. } => {
+            count.string(text)
+        }
         R::RenameNode {
             title,
             short_title,
@@ -569,7 +568,6 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::ReparentNode { .. }
         | R::SetPaneFocus { .. }
         | R::RestartServer
-        | R::ClearPromptQueue { .. }
         | R::RevertLastRestructure
         | R::RevertProjectRestructure { .. }
         | R::ResolveSessionRecovery { .. }

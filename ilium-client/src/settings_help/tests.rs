@@ -197,8 +197,6 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
     for (index, kind) in AnimationKind::ALL.into_iter().enumerate() {
         let id = if kind == AnimationKind::VoxelLandscape {
             "AN-52".to_owned()
-        } else if kind == AnimationKind::GalacticEmpires {
-            "AN-53".to_owned()
         } else if kind == AnimationKind::Wikipedia {
             "AN-54".to_owned()
         } else if kind == AnimationKind::OpenStreetMap {
@@ -207,8 +205,6 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-56".to_owned()
         } else if kind == AnimationKind::Graph {
             "AN-57".to_owned()
-        } else if kind == AnimationKind::Pi {
-            "AN-58".to_owned()
         } else if kind == AnimationKind::Earthquakes {
             "AN-59".to_owned()
         } else if kind == AnimationKind::Aircraft {
@@ -221,50 +217,32 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-63".to_owned()
         } else if kind == AnimationKind::Wind {
             "AN-66".to_owned()
-        } else if kind == AnimationKind::Aurora {
-            "AN-67".to_owned()
-        } else if kind == AnimationKind::Pollen {
-            "AN-68".to_owned()
-        } else if kind == AnimationKind::Fireflies {
-            "AN-69".to_owned()
-        } else if kind == AnimationKind::WindowSunlight {
-            "AN-70".to_owned()
         } else if kind == AnimationKind::Frost {
             "AN-71".to_owned()
-        } else if kind == AnimationKind::Lighthouse {
-            "AN-72".to_owned()
-        } else if kind == AnimationKind::PaperFold {
-            "AN-73".to_owned()
         } else if kind == AnimationKind::Embroidery {
             "AN-74".to_owned()
-        } else if kind == AnimationKind::PrimeConstellations {
-            "AN-75".to_owned()
-        } else if kind == AnimationKind::Wallpaper {
-            "AN-76".to_owned()
-        } else if kind == AnimationKind::UnfinishedCircle {
-            "AN-77".to_owned()
-        } else if kind == AnimationKind::NeedleThreads {
-            "AN-78".to_owned()
         } else if kind == AnimationKind::HesitatingInk {
             "AN-79".to_owned()
-        } else if kind == AnimationKind::CropCircles {
-            "AN-80".to_owned()
-        } else if kind == AnimationKind::DelayedReflection {
-            "AN-81".to_owned()
-        } else if kind == AnimationKind::AlmostTouching {
-            "AN-82".to_owned()
         } else if kind == AnimationKind::Growth {
             "AN-84".to_owned()
-        } else if kind == AnimationKind::HiddenWheel {
-            "AN-83".to_owned()
         } else if kind == AnimationKind::Semantic {
             "AN-64".to_owned()
-        } else if kind == AnimationKind::SolarSystem {
-            "AN-49".to_owned()
-        } else if kind == AnimationKind::HexExpedition {
-            "AN-50".to_owned()
         } else if kind == AnimationKind::VectorTd {
             "AN-51".to_owned()
+        } else if kind == AnimationKind::Stars {
+            "AN-12".to_owned()
+        } else if kind == AnimationKind::NightLights {
+            "AN-13".to_owned()
+        } else if kind == AnimationKind::Clouds {
+            "AN-14".to_owned()
+        } else if kind == AnimationKind::Video {
+            "AN-15".to_owned()
+        } else if kind == AnimationKind::Spectrum {
+            "AN-16".to_owned()
+        } else if kind == AnimationKind::Images {
+            "AN-17".to_owned()
+        } else if kind == AnimationKind::PluginScene {
+            "AN-24".to_owned()
         } else {
             format!("AN-{:02}", index + 1)
         };

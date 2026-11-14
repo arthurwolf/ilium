@@ -91,7 +91,7 @@ mod tests {
     use ilium_core::{
         status_rule_expression::{ScreenPattern, ScreenRegion},
         AgentActivity, AgentClass, BoardStorage, BuiltinAgentProvider, NodeId, PaneStatus,
-        PromptQueueDelivery, SplitOrientation, Tree, TreeMoveDirection, ROOT_ID,
+        SplitOrientation, Tree, TreeMoveDirection, ROOT_ID,
     };
     use ilium_sound::{SoundSettings, SoundSourceKind};
     use serde::{Deserialize, Serialize};
@@ -345,12 +345,6 @@ mod tests {
                     ..SoundSettings::default()
                 },
             },
-            ClientRequest::SchedulePaneInput {
-                pane_id: NodeId(2),
-                delay_seconds: 3661,
-                text: "cargo test".to_string(),
-                send_enter: true,
-            },
             ClientRequest::SubmitTerminalText {
                 pane_id: NodeId(2),
                 text: "Explain this codebase".to_string(),
@@ -366,22 +360,6 @@ mod tests {
                 text: "Run the checks".to_string(),
                 source: PromptSubmissionSource::PluginIntent,
             },
-            ClientRequest::EnqueuePrompt {
-                pane_id: NodeId(2),
-                text: "cargo test".to_string(),
-                delivery: PromptQueueDelivery::Once,
-            },
-            ClientRequest::EnqueuePrompt {
-                pane_id: NodeId(2),
-                text: "cargo test".to_string(),
-                delivery: PromptQueueDelivery::Times { remaining_runs: 3 },
-            },
-            ClientRequest::EnqueuePrompt {
-                pane_id: NodeId(2),
-                text: "cargo test".to_string(),
-                delivery: PromptQueueDelivery::Forever,
-            },
-            ClientRequest::ClearPromptQueue { pane_id: NodeId(2) },
             ClientRequest::SetSessionPaneTitle {
                 pane_id: NodeId(2),
                 expected_session_id: "95fd0645-3331-408b-a7e5-36e6007bfb78".to_string(),

@@ -16,10 +16,13 @@
 //! (`palette`) and in every `frame-input`, and later changes through `set-palette`; a plugin
 //! scene with natural colours must follow it.
 //!
+//! A scene may also write the glyph plane (`write-glyphs`): the character it names replaces the
+//! Braille dots of its cell, and [`Scene::native_glyph`] hands it to the client host.
+//!
 //! What scenes cannot use yet: host imports other than the frame surface (a scene's `log`,
-//! `http`, `media` ... calls trap with `host.engine-error`), the glyph plane and owner ids.
+//! `http`, `media` ... calls trap with `host.engine-error`) and owner ids.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -27,7 +30,7 @@ use ilium_ambient::control::{Control, ControlValue};
 use ilium_ambient::external::{external_scenes, ExternalSceneFactory, ExternalScenes, SceneValues};
 use ilium_ambient::scene::SceneReadiness;
 use ilium_ambient::style::ScenePalette;
-use ilium_ambient::{Frame, OccupancyMask, Scene, SceneEnv};
+use ilium_ambient::{Frame, GeoLocation, OccupancyMask, Scene, SceneEnv};
 use ilium_plugin_api::generated::anim::surface::{OccupancyGrid, ScenePointer};
 use ilium_plugin_api::generated::anim::Readiness;
 use ilium_plugin_host::calls::ResolvedLimits;
@@ -211,12 +214,18 @@ pub(crate) struct PluginSceneFactory {
 impl PluginSceneFactory {
     /// Instantiates the component for one scene. A component that fails to start becomes a
     /// scene that draws nothing and says why in its status line.
-    fn build(&self, palette: &ScenePalette, values: &SceneValues) -> PluginScene {
+    fn build(
+        &self,
+        palette: &ScenePalette,
+        location: &GeoLocation,
+        values: &SceneValues,
+    ) -> PluginScene {
         let palette_rgb = palette_rgb(palette);
         let spec = json!({
             "scene": self.declaration.id,
             "settings": self.declaration.controls.settings_json(values),
             "palette": palette_rgb,
+            "location": {"latitude": location.latitude, "longitude": location.longitude},
             "mode": "live",
         })
         .to_string();
@@ -260,7 +269,7 @@ impl ExternalSceneFactory for PluginSceneFactory {
     }
 
     fn create(&self, env: &SceneEnv, values: &SceneValues) -> Box<dyn Scene> {
-        Box::new(self.build(&env.palette, values))
+        Box::new(self.build(&env.palette, &env.location, values))
     }
 }
 
@@ -286,6 +295,8 @@ pub(crate) struct PluginScene {
     frame_rate_cap: u32,
     palette_rgb: Vec<u32>,
     last: Option<PresentedFrame>,
+    /// The glyph plane of `last`, by (column, row).
+    glyphs: HashMap<(u16, u16), char>,
     status: Option<String>,
     frames_since_status: u32,
     pointer: Option<[f32; 2]>,
@@ -318,6 +329,7 @@ impl PluginScene {
             frame_rate_cap,
             palette_rgb,
             last: None,
+            glyphs: HashMap::new(),
             status: None,
             frames_since_status: 0,
             pointer: None,
@@ -410,7 +422,14 @@ impl Scene for PluginScene {
                 palette_rgb: self.palette_rgb.clone(),
             };
             match guest.render(&input) {
-                Ok(Some(presented)) => self.last = Some(presented),
+                Ok(Some(presented)) => {
+                    self.glyphs = presented
+                        .glyphs
+                        .iter()
+                        .map(|(column, row, character)| ((*column, *row), *character))
+                        .collect();
+                    self.last = Some(presented);
+                }
                 // No present: the previous frame stays.
                 Ok(None) => {}
                 Err(trap) => self.fail(&trap),
@@ -485,6 +504,10 @@ impl Scene for PluginScene {
 
     fn uses_cell_colors(&self) -> bool {
         self.traits.uses_cell_colors
+    }
+
+    fn native_glyph(&self, x: u16, y: u16) -> Option<char> {
+        self.glyphs.get(&(x, y)).copied()
     }
 
     fn frames_per_second(&self) -> u32 {
@@ -618,7 +641,11 @@ mod tests {
             compiled,
             granted: Vec::new(),
         };
-        let mut scene = factory.build(&ScenePalette::default(), &SceneValues::new());
+        let mut scene = factory.build(
+            &ScenePalette::default(),
+            &GeoLocation::default(),
+            &SceneValues::new(),
+        );
         assert_eq!(scene.status(), None);
         assert_eq!(scene.readiness(), SceneReadiness::Ready);
         // The guest asks for 7 frames per second, the manifest allows 5.
@@ -651,7 +678,11 @@ mod tests {
             compiled,
             granted: Vec::new(),
         };
-        let mut scene = factory.build(&ScenePalette::default(), &SceneValues::new());
+        let mut scene = factory.build(
+            &ScenePalette::default(),
+            &GeoLocation::default(),
+            &SceneValues::new(),
+        );
         assert!(scene.status().is_some());
         assert!(matches!(scene.readiness(), SceneReadiness::Unavailable(_)));
         let (raster, _) = draw(&mut scene, 2, 1);

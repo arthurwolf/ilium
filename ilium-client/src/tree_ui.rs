@@ -327,23 +327,18 @@ pub enum TreeRowAction {
     Retitle,
     /// Restructures exactly one project with a separate AI call.
     ProjectRestructure,
-    /// Project-row shortcut for `App::execute_context_action`'s
-    /// `ContextMenuAction::AskForUpdate` fan-out: sends the fixed
-    /// status-check prompt to every idle/done agent pane in this project.
-    AskForUpdate,
 }
 
 impl TreeRowAction {
     /// Ordered set used for both rendering and hit testing -- left to right.
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; 6] = [
         Self::Rename,
         Self::MoveUp,
         Self::MoveDown,
         Self::Close,
         Self::Retitle,
         Self::ProjectRestructure,
-        Self::AskForUpdate,
     ];
 
     /// The default, expressive UTF-8 icon for this action. These remain the
@@ -357,7 +352,6 @@ impl TreeRowAction {
             Self::Close => IconTarget::RowClose,
             Self::Retitle => IconTarget::RowRetitle,
             Self::ProjectRestructure => IconTarget::RowProjectRestructure,
-            Self::AskForUpdate => IconTarget::AskForUpdate,
         }
     }
 
@@ -3154,11 +3148,8 @@ fn applicable_row_actions(
 ) -> &'static [TreeRowAction] {
     const HIDDEN_PANE: [TreeRowAction; 2] = [TreeRowAction::Close, TreeRowAction::Retitle];
     const HIDDEN_BASIC: [TreeRowAction; 1] = [TreeRowAction::Close];
-    const HIDDEN_PROJECT: [TreeRowAction; 3] = [
-        TreeRowAction::Close,
-        TreeRowAction::ProjectRestructure,
-        TreeRowAction::AskForUpdate,
-    ];
+    const HIDDEN_PROJECT: [TreeRowAction; 2] =
+        [TreeRowAction::Close, TreeRowAction::ProjectRestructure];
     const MANAGEMENT_BASIC: [TreeRowAction; 4] = [
         TreeRowAction::Rename,
         TreeRowAction::MoveUp,
@@ -3172,13 +3163,12 @@ fn applicable_row_actions(
         TreeRowAction::Close,
         TreeRowAction::Retitle,
     ];
-    const MANAGEMENT_PROJECT: [TreeRowAction; 6] = [
+    const MANAGEMENT_PROJECT: [TreeRowAction; 5] = [
         TreeRowAction::Rename,
         TreeRowAction::MoveUp,
         TreeRowAction::MoveDown,
         TreeRowAction::Close,
         TreeRowAction::ProjectRestructure,
-        TreeRowAction::AskForUpdate,
     ];
     if tree.get(id).is_some_and(Node::is_worktree) {
         return &[];
@@ -8592,34 +8582,6 @@ mod tests {
             None,
             "nothing is clickable left of the two-slot strip"
         );
-    }
-
-    #[test]
-    fn ask_for_update_row_action_is_offered_only_for_project_rows() {
-        let mut tree = Tree::new();
-        let project = tree
-            .add_project(std::path::PathBuf::from("/tmp/ask-for-update-row"))
-            .unwrap();
-        let group = tree.add_group(ROOT_ID, "group").unwrap();
-        let shell = tree
-            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-
-        for show_management_actions in [false, true] {
-            assert!(
-                applicable_row_actions(&tree, project, show_management_actions)
-                    .contains(&TreeRowAction::AskForUpdate),
-                "a project row always offers the shortcut, management toggle notwithstanding"
-            );
-            assert!(
-                !applicable_row_actions(&tree, group, show_management_actions)
-                    .contains(&TreeRowAction::AskForUpdate)
-            );
-            assert!(
-                !applicable_row_actions(&tree, shell, show_management_actions)
-                    .contains(&TreeRowAction::AskForUpdate)
-            );
-        }
     }
 
     #[test]

@@ -21,6 +21,8 @@
       "terminal.input-lock",
       "agent.read",
       "journal.read",
+      "tree.decorate",
+      "notify.toast",
       "extensions.provide:ilium.core.scheduler/schedule-sources",
       "extensions.provide:ilium.core.scheduler/before-send-scheduled",
       "topics.subscribe:ilium.core.agent-detect/activity-changed"
@@ -109,6 +111,24 @@
             "default": true
           }
         ]
+      }
+    ],
+    "commands": [
+      {
+        "id": "schedule-input",
+        "title": "Schedule input"
+      },
+      {
+        "id": "queue-prompt",
+        "title": "Queue prompt"
+      },
+      {
+        "id": "clear-prompt-queue",
+        "title": "Clear prompt queue"
+      },
+      {
+        "id": "cancel-scheduled-input",
+        "title": "Cancel scheduled input"
       }
     ],
     "panels": [
