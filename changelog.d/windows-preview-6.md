@@ -2,6 +2,7 @@
 - Windows x86_64 preview downloads in prerelease v0.1.1-preview.6: per-user setup EXE, MSI and ZIP, built and installer-tested natively on GitHub Actions. They are unsigned, so SmartScreen warns. The release also carries the Linux files of v0.1.1-linux.3 and the macOS files of v0.1.1-preview.5 unchanged.
 
 ### Fixed
+- Uninstalling the Windows MSI now restores the user PATH exactly as it was, including a trailing `;` that the previous WiX Environment entry dropped. The MSI records the original value at install time, as the setup EXE already did.
 - On Windows, connecting to a busy session server now keeps retrying for up to 5 seconds instead of giving up after 20 attempts (about half a second), so a client connecting while the server is still restoring panes no longer fails with "every named pipe instance stayed busy".
 - Restarting the client from the right-click menu on Windows no longer crashes the terminal input thread: its console read now stops cooperatively at the next 100 ms poll instead of being aborted with `CancelSynchronousIo`, which made crossterm panic on `ERROR_OPERATION_ABORTED`.
 - A panic that the client caught and survived, such as a failing animation scene, no longer prints its message and backtrace over the full-screen UI. While the UI owns the terminal, panic reports go to the client log; a panic on the UI thread itself is printed after the terminal is restored.
