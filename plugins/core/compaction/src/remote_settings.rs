@@ -623,7 +623,10 @@ mod tests {
         }
         .sanitized();
         let bound = serde_json::to_vec(&settings).map(|bytes| bytes.len());
-        assert!(bound.is_ok_and(|bytes| bytes < 64 * 1024), "{bound:?}");
+        assert!(
+            bound.as_ref().is_ok_and(|bytes| bytes < 64 * 1024),
+            "{bound:?}"
+        );
         assert!(settings.custom_prompt.len() < CUSTOM_PROMPT_MAX_CHARS);
     }
 

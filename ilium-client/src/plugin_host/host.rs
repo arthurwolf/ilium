@@ -2666,6 +2666,7 @@ impl ClientPlugins {
                     text: spec.content.iter().map(|span| span.text.as_str()).collect(),
                     icon: spec.icon,
                     sort_key: spec.sort_key.unwrap_or(0),
+                    command: None,
                 })
             })
     }

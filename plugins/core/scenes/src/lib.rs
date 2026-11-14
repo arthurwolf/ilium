@@ -32,14 +32,14 @@ pub mod solar_system;
 pub use kit::{control, debug, dither, raster, scene, style};
 
 use dithered_waves::{DitheredWaves, DitheredWavesSettings};
-use kit::raster::Raster;
-use kit::scene::{Frame, Scene, SceneEnv, SceneLocation};
-use kit::style::ScenePalette;
 use ilium_plugin_sdk::generated::anim::renderer_types::FrameInput;
 use ilium_plugin_sdk::plugin::NativeSurface;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Lifecycle, NativeRenderer, SceneField, SceneProgram};
+use kit::raster::Raster;
+use kit::scene::{Frame, Scene, SceneEnv, SceneLocation};
+use kit::style::ScenePalette;
 use serde_json::Value;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -111,7 +111,7 @@ impl ScenesScene {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let palette_rgb = spec
+        let palette_rgb: Vec<u32> = spec
             .get("palette")
             .and_then(Value::as_array)
             .map(|entries| {

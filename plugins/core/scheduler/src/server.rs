@@ -19,7 +19,7 @@ use ilium_plugin_sdk::types::{
 };
 use ilium_plugin_sdk::HostApi;
 
-use crate::queue::{next_send, Activity, QueueError, QueuedPrompt, Turn};
+use crate::queue::{next_send, Activity, CompletionEpoch, QueueError, QueuedPrompt, Turn};
 use crate::schedule::{deadline_from_delay, remaining_seconds, ScheduledInput};
 use crate::wire::{
     decode_stored, encode_stored, pane_from_payload, state_payload, EnqueueRequest,
@@ -110,7 +110,11 @@ pub fn start(api: &mut dyn HostApi) {
         .map(|bytes| decode_stored(&bytes))
         .unwrap_or_default();
     for (pane, input) in &stored.schedules {
-        let _ = HostTimers::at(api, EpochMs(input.execute_at_unix_millis), timer_name(*pane));
+        let _ = HostTimers::at(
+            api,
+            EpochMs(input.execute_at_unix_millis),
+            timer_name(*pane),
+        );
     }
     let kick = HostTimers::set(api, KICK_MILLIS, None).ok();
     with_state(|state| {
@@ -277,10 +281,7 @@ fn schedule(
         send_enter: request.send_enter,
     };
     if !input.has_input() {
-        return vec![notice(
-            "Enter text, enable Send Enter, or use both",
-            client,
-        )];
+        return vec![notice("Enter text, enable Send Enter, or use both", client)];
     }
     let now = HostClock::now_unix_millis(api);
     let deadline = match deadline_from_delay(now, request.delay_seconds) {
@@ -434,7 +435,12 @@ pub fn on_activity(
             .queues
             .get(&pane)
             .and_then(|queue| {
-                next_send(queue, Some(Activity { turn: Turn::Idle }), &snapshot, expected)
+                next_send(
+                    queue,
+                    Some(Activity { turn: Turn::Idle }),
+                    &snapshot,
+                    expected,
+                )
             })
             .cloned()?;
         if !state.epochs.entry(pane).or_default().claim(expected) {
@@ -564,7 +570,9 @@ pub fn on_event(api: &mut dyn HostApi, event: Event) -> Vec<Submission> {
         Event::AgentActivityChanged(change) => {
             on_activity(api, change.node, change.previous, change.current)
         }
-        Event::RequestCompleted(result) => on_request_completed(api, result.request, result.outcome),
+        Event::RequestCompleted(result) => {
+            on_request_completed(api, result.request, result.outcome)
+        }
         Event::NodeRemoved(node) => on_node_removed(api, node),
         _ => Vec::new(),
     }

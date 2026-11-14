@@ -1589,7 +1589,6 @@ async fn run_inner(
                 needs_redraw |= app.session_stats.drain_events();
                 needs_redraw |= app.tick_session_models(Instant::now());
                 needs_redraw |= app.tick_cost(Instant::now());
-                needs_redraw |= app.tick_compaction(Instant::now());
             }
             _ = terminal_notification.notified() => { needs_redraw = true; }
             _ = filesystem_notification.notified() => { needs_redraw |= app.collect_editor_files(); }

@@ -16490,7 +16490,6 @@ impl App {
             .chain(self.remote_compaction_save_deadline)
             .chain(self.custom_status_rules_save_deadline)
             .chain(self.next_integration_maintenance_at)
-            .chain(self.compaction_next_poll(now))
             .min();
 
         let ordinary_delay = next_deadline

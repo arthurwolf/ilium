@@ -22,6 +22,7 @@ swash = "0.2.9"
 ilium-plugin-sdk = { version = "0.1.1", path = "../../../ilium-plugin-sdk", features = ["testing"] }
 serde_json = "1.0.151"
 proptest = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [features]
 # Component builds (wasm32-wasip2): `#[ilium_plugin]` emits the component glue of one side.

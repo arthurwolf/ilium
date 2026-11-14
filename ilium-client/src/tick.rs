@@ -61,7 +61,6 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
     }
     let remote_compaction_started = app.tick_remote_compaction_monitor(now);
     let cost_changed = app.tick_cost(now);
-    let compaction_changed = app.tick_compaction(now);
     let model_catalog_changed = app.collect_model_catalog_preparation();
     let context_menu_hover_changed = app.tick_context_menu_hover(now);
     let agent_popover_changed = app.tick_agent_popover(now);
@@ -96,7 +95,6 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         || goal_geometry_changed
         || remote_compaction_started
         || cost_changed
-        || compaction_changed
         || model_catalog_changed
         || context_menu_hover_changed
         || agent_popover_changed

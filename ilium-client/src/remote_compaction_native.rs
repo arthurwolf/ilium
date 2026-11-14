@@ -276,7 +276,10 @@ impl App {
 
     pub fn refresh_remote_compaction_native(&mut self) {
         let environment = |name: &str| std::env::var(name).ok();
-        self.remote_compaction_native.triggers = match self.optimization_config_paths() {
+        self.remote_compaction_native.triggers = match ConfigPaths::system().map(|mut paths| {
+            paths.project_dirs = self.agent_setup_project_roots();
+            paths
+        }) {
             Ok(paths) => [
                 AgentConfigTarget::ClaudeAutoCompactWindow,
                 AgentConfigTarget::CodexAutoCompactTokenLimit,

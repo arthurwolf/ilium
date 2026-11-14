@@ -13,7 +13,7 @@ use ilium_plugin_sdk::host::HostJobs;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::{
     ErrorCode, Intent, MessageSpec, MessageTarget, NodeId, Outcome, PluginError, PluginId,
-    PluginSide, RequestId,
+    PluginSide, RequestId, RequestRef,
 };
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, HostApi, JobRunner, Lifecycle, Views};
 
@@ -125,7 +125,9 @@ impl Handler for CompactionServer {
                     self.start_scan(&message.payload, &mut out);
                 }
                 Event::RequestCompleted(result) => {
-                    self.finish_scan(result.request, result.outcome, &mut out);
+                    if let RequestRef::Call(request) = result.request {
+                        self.finish_scan(request, result.outcome, &mut out);
+                    }
                 }
                 _ => {}
             }
