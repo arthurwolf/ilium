@@ -3,7 +3,7 @@ use crate::app::{
     AgentMonitoringRow, App, AppearanceRow, AttentionRow, EditorRow, Mode, SettingsTab, TerminalRow,
 };
 use crate::config::{
-    AgentIdentifierMode, LineDisplay, MotionLevel, NewPaneDirectory, SidebarDensity, TreeOrder,
+    AgentIdentifierMode, LineDisplay, MotionLevel, NewPaneDirectory, SidebarDensity,
 };
 use crate::remote_compaction_settings::TechniqueTarget;
 use crate::theme::ColorScheme;
@@ -45,7 +45,6 @@ pub enum SettingsChoice {
     GitBranchLine,
     GitClosePolicy,
     SessionRecovery,
-    SmartCopyModifier,
     RemoteTechnique(TechniqueTarget),
     AttentionMode,
     AttentionPressSorts,
@@ -167,7 +166,7 @@ fn catalog<T: Copy + std::fmt::Debug + PartialEq>(
         })
         .collect();
     if !values.contains(&current) {
-        // Cost sorting is a managed current TreeOrder outside its cyclic registry.
+        // A value another setting manages (for example the cost sort) stays listed but locked.
         options.push(ChoiceOption {
             id: selected.clone(),
             label: label(current),
@@ -176,6 +175,52 @@ fn catalog<T: Copy + std::fmt::Debug + PartialEq>(
             ),
         });
     }
+    (options, selected)
+}
+
+const MANUAL_TREE_ORDER_ID: &str = "manual";
+/// Identity of the Agent Cost tab's sort switch, which owns the tree order while it is on.
+const COST_TREE_ORDER_ID: &str = "cost";
+
+fn tree_ordering_option_id(ordering: &crate::plugin_host::host::ChromeItem) -> String {
+    format!("{}/{}", ordering.plugin, ordering.id)
+}
+
+/// The tree-order choices: the stored manual order plus every ordering an enabled plugin
+/// contributes. While the Agent Cost sort switch is on it owns the order, so it is listed as
+/// the managed current value that this setting cannot change.
+fn tree_order_catalog(app: &App) -> (Vec<ChoiceOption>, String) {
+    let mut options = vec![ChoiceOption {
+        id: MANUAL_TREE_ORDER_ID.into(),
+        label: "Manual order".into(),
+        disabled_reason: None,
+    }];
+    let orderings = app.plugin_tree_orderings();
+    options.extend(orderings.iter().map(|ordering| ChoiceOption {
+        id: tree_ordering_option_id(ordering),
+        label: ordering.title.clone(),
+        disabled_reason: None,
+    }));
+    let selected = if app.cost_settings.sort_by_cost {
+        options.push(ChoiceOption {
+            id: COST_TREE_ORDER_ID.into(),
+            label: "Cost, most expensive first".into(),
+            disabled_reason: Some(
+                "Managed by another setting; choose a listed option to change this value".into(),
+            ),
+        });
+        COST_TREE_ORDER_ID.to_string()
+    } else {
+        orderings
+            .iter()
+            .find(|ordering| {
+                app.ui_settings
+                    .plugin_tree_ordering
+                    .as_ref()
+                    .is_some_and(|choice| choice.names(&ordering.plugin, &ordering.id))
+            })
+            .map_or_else(|| MANUAL_TREE_ORDER_ID.to_string(), tree_ordering_option_id)
+    };
     (options, selected)
 }
 
@@ -215,7 +260,6 @@ impl SettingsChoice {
         Self::GitBranchLine,
         Self::GitClosePolicy,
         Self::SessionRecovery,
-        Self::SmartCopyModifier,
         Self::RemoteTechnique(TechniqueTarget::Claude),
         Self::RemoteTechnique(TechniqueTarget::Codex),
         Self::RemoteTechnique(TechniqueTarget::Other),
@@ -252,11 +296,6 @@ impl SettingsChoice {
                     == Some(&crate::app::SessionRow::RecoveryPolicy) =>
             {
                 Some(Self::SessionRecovery)
-            }
-            SettingsTab::Terminal
-                if TerminalRow::ALL.get(row) == Some(&TerminalRow::SmartCopyLightKey) =>
-            {
-                Some(Self::SmartCopyModifier)
             }
             SettingsTab::Inference => {
                 match crate::settings_ui::inference_rows(&app.inference_settings).get(row) {
@@ -349,7 +388,6 @@ impl SettingsChoice {
             Self::GitBranchLine => "Branch line",
             Self::GitClosePolicy => "Close policy",
             Self::SessionRecovery => "Recovery policy",
-            Self::SmartCopyModifier => "Smart Copy modifier",
             Self::ProgressFillStyle => "Progress fill style",
             Self::InferenceProvider => "Provider",
             Self::KiloModel => "Kilo model",
@@ -415,11 +453,6 @@ impl SettingsChoice {
             Self::SessionRecovery => catalog(
                 &crate::config::SessionRecoveryPolicy::ALL,
                 app.session_settings.recovery_policy,
-                |value| value.label().into(),
-            ),
-            Self::SmartCopyModifier => catalog(
-                &crate::config::SmartCopyLightKey::ALL,
-                app.terminal_settings.smart_copy_light_key,
                 |value| value.label().into(),
             ),
             Self::ProgressFillStyle => {
@@ -604,9 +637,7 @@ impl SettingsChoice {
                 app.editor_settings.markdown_rendered_by_default,
                 |value| if value { "Rendered" } else { "Source" }.into(),
             ),
-            Self::TreeOrder => catalog(&TreeOrder::ALL, app.ui_settings.tree_order, |value| {
-                value.label().into()
-            }),
+            Self::TreeOrder => tree_order_catalog(app),
             Self::AgentIdentifier => catalog(
                 &AgentIdentifierMode::ALL,
                 app.ui_settings.agent_identifiers.mode,
@@ -948,10 +979,6 @@ impl App {
             SettingsChoice::SessionRecovery => {
                 return Err("Session choice was not dispatched".into());
             }
-            SettingsChoice::SmartCopyModifier => select!(
-                crate::config::SmartCopyLightKey::ALL,
-                terminal.smart_copy_light_key
-            ),
             SettingsChoice::InferenceProvider
             | SettingsChoice::TitleStyle
             | SettingsChoice::CodexThreadNames
@@ -1051,7 +1078,19 @@ impl App {
                 select!([false, true], editor.markdown_rendered_by_default);
             }
             SettingsChoice::TreeOrder => {
-                select!(TreeOrder::ALL, ui.tree_order);
+                ui.plugin_tree_ordering = if id == MANUAL_TREE_ORDER_ID {
+                    None
+                } else {
+                    let ordering = self
+                        .plugin_tree_orderings()
+                        .into_iter()
+                        .find(|ordering| tree_ordering_option_id(ordering) == id)
+                        .ok_or("This ordering is no longer available")?;
+                    Some(crate::config::PluginTreeOrderingChoice {
+                        plugin: ordering.plugin,
+                        ordering: ordering.id,
+                    })
+                };
             }
             SettingsChoice::AgentIdentifier => {
                 select!(AgentIdentifierMode::ALL, ui.agent_identifiers.mode);
@@ -1172,7 +1211,7 @@ impl App {
                 )?;
                 self.apply_remote_compaction_settings(remote_compaction);
             }
-            SettingsChoice::TerminalDirectory | SettingsChoice::SmartCopyModifier => {
+            SettingsChoice::TerminalDirectory => {
                 self.enqueue_configuration(
                     directory,
                     ConfigurationChange::Terminal(terminal),
@@ -1832,7 +1871,6 @@ mod tests {
             crate::config::GitBranchLine::ALL.len(),
             crate::config::GitClosePolicy::ALL.len(),
             crate::config::SessionRecoveryPolicy::ALL.len(),
-            crate::config::SmartCopyLightKey::ALL.len(),
             ilium_remote_compaction::Technique::ALL.len(),
             ilium_remote_compaction::Technique::ALL.len(),
             ilium_remote_compaction::Technique::ALL.len(),
@@ -2146,10 +2184,11 @@ mod tests {
     #[test]
     fn managed_tree_sort_is_visible_but_cannot_bypass_its_owner() {
         let mut app = App::new("choice-catalog".into(), std::env::temp_dir());
-        app.ui_settings.tree_order = TreeOrder::CostDescending;
+        app.cost_settings.sort_by_cost = true;
         let (options, selected) = SettingsChoice::TreeOrder.options(&app);
-        assert_eq!(options.len(), TreeOrder::ALL.len() + 1);
-        assert_eq!(selected, "CostDescending");
+        // No plugin contributes an ordering here: manual order plus the managed cost entry.
+        assert_eq!(options.len(), 2);
+        assert_eq!(selected, "cost");
         assert!(options.last().unwrap().disabled_reason.is_some());
         let attempts = app.configuration_admission.attempts;
         assert!(app
@@ -2168,7 +2207,7 @@ mod tests {
                 None
             )
             .is_err());
-        assert_eq!(app.ui_settings.tree_order, TreeOrder::CostDescending);
+        assert_eq!(app.ui_settings.plugin_tree_ordering, None);
         assert_eq!(app.configuration_admission.attempts, attempts);
     }
 
@@ -2215,7 +2254,7 @@ mod tests {
         assert_eq!(config.terminal.scrollback_budget_mib, 17);
     }
     #[test]
-    fn git_session_and_modifier_catalogs_keep_authored_fields_and_persist_every_option() {
+    fn git_and_session_catalogs_keep_authored_fields_and_persist_every_option() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new(
             "synthetic-remaining-settings".into(),
@@ -2227,7 +2266,6 @@ mod tests {
         app.git_settings.setup_command = "printf authored".into();
         let authored = app.git_settings.clone();
         app.terminal_settings.scrollback_budget_mib = 37;
-        app.terminal_settings.smart_copy_light = true;
         crate::config::save_terminal_settings(directory.path(), &app.terminal_settings).unwrap();
         for field in [
             SettingsChoice::GitDefaultWhere,
@@ -2235,7 +2273,6 @@ mod tests {
             SettingsChoice::GitBranchLine,
             SettingsChoice::GitClosePolicy,
             SettingsChoice::SessionRecovery,
-            SettingsChoice::SmartCopyModifier,
         ] {
             let (options, selected) = field.options(&app);
             assert!(options.len() >= 2);
@@ -2255,7 +2292,6 @@ mod tests {
                 );
                 assert_eq!(disk.git.setup_command, authored.setup_command);
                 assert_eq!(disk.terminal.scrollback_budget_mib, 37);
-                assert!(disk.terminal.smart_copy_light);
                 let expected = match field {
                     SettingsChoice::GitDefaultWhere => format!("{:?}", disk.git.default_where),
                     SettingsChoice::GitDefaultBase => format!("{:?}", disk.git.default_base),
@@ -2265,9 +2301,6 @@ mod tests {
                     }
                     SettingsChoice::SessionRecovery => {
                         format!("{:?}", disk.session.recovery_policy)
-                    }
-                    SettingsChoice::SmartCopyModifier => {
-                        format!("{:?}", disk.terminal.smart_copy_light_key)
                     }
                     _ => unreachable!(),
                 };
@@ -2396,16 +2429,6 @@ mod tests {
             )
             .is_err());
         assert_eq!(app.session_settings, original);
-        let original = app.terminal_settings;
-        assert!(app
-            .save_settings_choice(
-                SettingsChoice::SmartCopyModifier,
-                "Alt",
-                directory.path().into(),
-                None
-            )
-            .is_err());
-        assert_eq!(app.terminal_settings, original);
     }
     #[test]
     fn lost_session_receipt_keeps_matching_child_and_obsolete_token_cannot_finish_reopen() {

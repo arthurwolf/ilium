@@ -598,12 +598,12 @@
   },
   {
     "id": "AN-24",
-    "title": "Dithered waves",
-    "explanation": "Layered wave shader rendered on the CPU with ordered dithering, slow-motion by default. A GPU choice is offered for future acceleration. Adjust wave amplitude, frequency, speed, dither and brightness. Changes save immediately to this project.",
-    "specimen": "Dithered waves\n\n● Selected scene → live full-screen preview",
+    "title": "Plugin scene",
+    "explanation": "A scene supplied by an enabled plugin, such as Dithered waves from the Scenes plugin. The Scene row picks which scene is drawn and the rows below it are that scene's own settings. Colour, dithering and display use the shared rows. Disabling the plugin removes its scenes from the list. Changes save immediately to this project.",
+    "specimen": "Plugin scene\n\n● Selected scene → live full-screen preview",
     "states": "Use Up/Down to select a scene. Press Enter to jump to its controls; the active scene stays selected while you adjust. Each scene retains its own saved values when another scene is selected. Shared speed, density and dithering apply to every scene; the color rows hide for a scene that paints its own colors. The live preview fills the whole screen behind the controls and remains visible when the background is disabled. A failed save retains the previous effective setting and displays an error.",
     "frames": [
-      "Dithered waves\n\n● Selected scene → live full-screen preview"
+      "Plugin scene\n\n● Selected scene → live full-screen preview"
     ],
     "motion": "The explicitly opened demo stays live even with Motion Off. Ambient scenes freeze with Motion Off.",
     "caveat": "Animation is decoration only: it never changes terminal history or Ilium copy sources. Outer terminal selection can include decorative Braille. Live only. The demo credits the design inspiration at the bottom right; real use never shows it."

@@ -95,7 +95,6 @@ Ilium is a Cargo workspace with one crate per architectural layer. The layering 
 | `ilium-transport` | Where IPC bytes travel: Unix sockets or Windows named pipes. |
 | `ilium-platform` | Every operating-system-specific decision in one place. |
 | `ilium-agent-session` | Verifies agent session transcripts and identities. |
-| `ilium-session-convert` | Converts a session between Claude Code and Codex. |
 | `ilium-agent-debug` | Schema and retention policy for per-pane agent debug history. |
 | `ilium-ambient` | Ambient animation scene engines (no terminal types). |
 | `ilium-animation-js` | V8 runtime and sandboxed helper for JavaScript `.iliumanim` packages. |

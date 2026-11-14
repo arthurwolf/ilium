@@ -467,22 +467,23 @@ Shown as **Dithered fBm clouds** (`fbm_clouds`). Domain-warped noise clouds thre
 
 ### Dithered waves
 
-Shown as **Dithered waves** (`dithered_waves`). A layered wave shader rendered on the CPU with ordered dithering, slow-motion by default.
+Shown as **Dithered waves** when the **Plugin scene** animation is selected and its Scene row is set to Dithered waves (it was the `dithered_waves` animation before it became a plugin scene; saved settings that name `dithered_waves` open it there). It is a wave field cut into a fixed dot lattice, drawn on the CPU in slow motion by default. The scene comes from the Scenes core plugin: disable the plugin and the scene leaves the list. Colour, palette, the shared dither and display settings come from the shared rows.
 
 | Control | Id | Range or options | Default | What it does |
 | --- | --- | --- | --- | --- |
 | Wave frequency | `wave_frequency` | 100 to 800%, step 25 | 300% | How many wave crests fit on screen. Higher values give narrower, busier bands. |
-| Wave amplitude | `wave_amplitude` | 0 to 100%, step 5 | 30% | How strongly noise bends the bands. 0% gives smooth parallel swells, 100% churning silk. |
+| Wave warp | `wave_amplitude` | 0 to 100%, step 5 | 30% | How strongly noise bends the bands. 0% gives smooth parallel swells, 100% churning silk. |
 | Wave speed | `wave_speed` | 0 to 200%, step 5 | 50% | How fast the waves drift, on top of the global Speed setting. 0% freezes them. |
-| Dither pattern | `dither_matrix` | Bayer 2x2, Bayer 4x4, Bayer 8x8, Noise | Bayer 4x4 | The fixed dot lattice the waves are cut into. Bayer 8x8 is finest, Noise looks like grain. |
+| Pattern | `pattern` | Coarse (2x2), Crosshatch (4x4), Fine (8x8), Stipple | Crosshatch (4x4) | The fixed dot lattice the waves are cut into. Fine is the finest, Stipple looks like grain. |
 | Gray levels | `levels` | 2 to 6, step 1 | 2 | Number of intensity steps. 2 gives pure on/off dots; more steps soften the bands. |
-| Dither pixel | `pixel_size` | 1 to 4 dots, step 1 | 1 | Edge length of one dither pixel in Braille dots. Larger values look chunkier. |
-| Brightness | `brightness` | 10 to 100%, step 5 | 35% | Peak dot intensity. The default keeps the background quiet behind text. |
-| Contrast | `contrast` | 50 to 300%, step 10 | 150% | Sharpness of the bands: low values fill the screen with soft dots, high values isolate crests. |
-| Dot bias | `bias` | -30 to 30%, step 2 | 0% | Shifts the dither threshold. Positive values add dots everywhere, negative values thin them out. |
+| Pixel size | `pixel_size` | 1 to 4 dots, step 1 | 1 | Edge length of one dot block in Braille dots. Larger values look chunkier. |
+| Ink strength | `intensity` | 10 to 100%, step 5 | 35% | Peak dot intensity. The default keeps the background quiet behind text. |
+| Band sharpness | `band_sharpness` | 50 to 300%, step 10 | 150% | Sharpness of the bands: low values fill the screen with soft dots, high values isolate crests. |
+| Dot bias | `bias` | -30 to 30%, step 5 | 0% | Shifts the cut-off. Positive values add dots everywhere, negative values thin them out. |
 | Ripple | `ripple` | on / off | off | A faint ring pattern that spreads from a slowly wandering point. |
-| Layout seed | `seed` | 0 to 9999, step 1 | 1 | Picks a different wave layout. The same seed always draws the same waves. |
-| Renderer | `render_backend` | Software (slow-mo), GPU | Software (slow-mo) | Software runs on the CPU in gentle slow motion; GPU uses the graphics card when usable. |
+| Layout | `seed` | 0 to 9999, step 1 | 1 | Picks a different wave layout. The same value always draws the same waves. |
+
+The GPU renderer option of the built-in version is gone; the scene always draws on the CPU.
 
 ### Dithr patterns
 

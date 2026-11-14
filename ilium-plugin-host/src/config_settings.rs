@@ -152,6 +152,116 @@ impl ConfigFileSettings {
 /// Distinguishes the temporary files of concurrent writes of one process.
 static TEMPORARY_SERIAL: AtomicU64 = AtomicU64::new(0);
 
+impl ConfigFileSettings {
+    /// The value at a dotted `path` inside the table of kernel tab `tab` (for example
+    /// `openai.model` inside `inference`). `None` when the tab is unknown or the path holds
+    /// nothing. This is how a tab owner's rows read the kernel's own values.
+    pub fn get_path(&self, tab: &str, path: &str) -> Option<serde_json::Value> {
+        let table = table_of_tab(tab)?;
+        let document = self
+            .path
+            .as_deref()
+            .and_then(|file| Self::read_document(file).ok())
+            .unwrap_or_default();
+        let mut current = document.get(table)?;
+        for part in path.split('.') {
+            current = current.as_table()?.get(part)?;
+        }
+        serde_json::to_value(current).ok()
+    }
+
+    /// Writes the value at a dotted `path` inside the table of kernel tab `tab`, creating the
+    /// nested tables on the way. `None` removes the key, so the kernel falls back to its
+    /// default. The file lock, the size bound and the owner-only atomic replace are the ones of
+    /// [`KernelSettings::set`].
+    pub fn set_path(
+        &self,
+        tab: &str,
+        path: &str,
+        value: Option<&serde_json::Value>,
+    ) -> Result<(), FacadeError> {
+        let table = table_of_tab(tab)
+            .ok_or_else(|| FacadeError::new(ErrorCode::NotFound, format!("unknown tab {tab:?}")))?;
+        let parts: Vec<&str> = path.split('.').collect();
+        if parts.iter().any(|part| part.is_empty()) {
+            return Err(FacadeError::new(
+                ErrorCode::InvalidArgument,
+                "the path names nested keys separated by dots",
+            ));
+        }
+        let converted = match value {
+            Some(value) => Some(json_to_toml(value).ok_or_else(|| {
+                FacadeError::new(
+                    ErrorCode::InvalidArgument,
+                    "the value has no config.toml form",
+                )
+            })?),
+            None => None,
+        };
+        let file = self.path.as_deref().ok_or_else(|| {
+            FacadeError::new(ErrorCode::Unsupported, "no configuration directory")
+        })?;
+        let parent = file.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(parent).map_err(|error| {
+            FacadeError::new(
+                ErrorCode::Internal,
+                format!("the configuration directory is not writable: {error}"),
+            )
+        })?;
+        let _lock =
+            ExclusiveFileLock::acquire(&parent.join(CONFIG_LOCK_FILE)).map_err(|error| {
+                FacadeError::new(
+                    ErrorCode::Internal,
+                    format!("config.toml is not lockable: {error}"),
+                )
+            })?;
+        let mut document = Self::read_document(file)?;
+        let entry = document
+            .entry(table.to_owned())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        let mut current = match entry {
+            toml::Value::Table(values) => values,
+            _ => {
+                return Err(FacadeError::new(
+                    ErrorCode::Internal,
+                    format!("[{table}] of config.toml is not a table"),
+                ))
+            }
+        };
+        let Some((last, parents)) = parts.split_last() else {
+            return Err(FacadeError::new(
+                ErrorCode::InvalidArgument,
+                "the path is empty",
+            ));
+        };
+        for part in parents {
+            let next = current
+                .entry((*part).to_owned())
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+            current = match next {
+                toml::Value::Table(values) => values,
+                _ => {
+                    return Err(FacadeError::new(
+                        ErrorCode::Internal,
+                        format!("[{table}.{part}] of config.toml is not a table"),
+                    ))
+                }
+            };
+        }
+        match converted {
+            Some(converted) => {
+                current.insert((*last).to_owned(), converted);
+            }
+            None => {
+                current.remove(*last);
+            }
+        }
+        Self::write_document(file, &document)?;
+        self.revision.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+}
+
 /// A JSON value as the TOML value `config.toml` stores. TOML has no null.
 fn json_to_toml(value: &serde_json::Value) -> Option<toml::Value> {
     Some(match value {
@@ -292,6 +402,22 @@ pub struct PluginSettingsStore {
 }
 
 impl PluginSettingsStore {
+    /// The value at a dotted path of a kernel tab's table; see [`ConfigFileSettings::get_path`].
+    pub fn kernel_get(&self, tab: &str, path: &str) -> Option<serde_json::Value> {
+        self.file.get_path(tab, path)
+    }
+
+    /// Writes (or with `None` removes) the value at a dotted path of a kernel tab's table; see
+    /// [`ConfigFileSettings::set_path`]. The caller has checked the value against the row.
+    pub fn kernel_set(
+        &self,
+        tab: &str,
+        path: &str,
+        value: Option<&serde_json::Value>,
+    ) -> Result<(), FacadeError> {
+        self.file.set_path(tab, path, value)
+    }
+
     /// The store of the user's own `config.toml` (honours `ILIUM_CONFIG_DIR`).
     pub fn of_user() -> Self {
         Self {
@@ -549,6 +675,61 @@ mod tests {
         let terminal: serde_json::Value =
             serde_json::from_str(&settings.get("terminal").expect("terminal tab")).expect("json");
         assert!(terminal.get("notifications").is_none());
+    }
+
+    #[test]
+    fn a_dotted_path_reads_and_writes_a_nested_key_of_a_tab_table() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[inference]\nselected_provider = \"ollama\"\n[inference.openai]\nmodel = \"old\"\napi_key = \"keep\"\n",
+        )
+        .expect("config written");
+        let settings = ConfigFileSettings::at(path);
+        assert_eq!(
+            settings.get_path("inference", "openai.model"),
+            Some(serde_json::json!("old"))
+        );
+        assert_eq!(settings.get_path("inference", "anthropic.model"), None);
+        settings
+            .set_path("inference", "openai.model", Some(&serde_json::json!("new")))
+            .expect("nested write");
+        settings
+            .set_path(
+                "inference",
+                "anthropic.base_url",
+                Some(&serde_json::json!("https://example.test")),
+            )
+            .expect("write creates the nested table");
+        assert_eq!(
+            settings.get_path("inference", "openai.model"),
+            Some(serde_json::json!("new"))
+        );
+        assert_eq!(
+            settings.get_path("inference", "openai.api_key"),
+            Some(serde_json::json!("keep"))
+        );
+        assert_eq!(
+            settings.get_path("inference", "anthropic.base_url"),
+            Some(serde_json::json!("https://example.test"))
+        );
+        assert_eq!(
+            settings.get_path("inference", "selected_provider"),
+            Some(serde_json::json!("ollama"))
+        );
+        settings
+            .set_path("inference", "openai.model", None)
+            .expect("removal");
+        assert_eq!(settings.get_path("inference", "openai.model"), None);
+        let bad = settings
+            .set_path("inference", "openai..model", Some(&serde_json::json!(1)))
+            .expect_err("an empty path part");
+        assert_eq!(bad.code, ErrorCode::InvalidArgument);
+        let unknown = settings
+            .set_path("nope", "a", Some(&serde_json::json!(1)))
+            .expect_err("unknown tab");
+        assert_eq!(unknown.code, ErrorCode::NotFound);
     }
 
     #[test]

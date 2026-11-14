@@ -3,14 +3,16 @@
 //! The pure conversion core lives in the modules below (`rollout` parses a Codex rollout, `claude_writer` maps its
 //! items to Claude content, `transcript` assembles the Claude Code lines, `verify` checks them, `convert` ties the
 //! three together, `paths` names the Claude project directory, `error` holds the one-line failure texts).
-//! The server side runs the `codex-to-claude` job on them: it reads the rollout through the host `fs` import,
-//! converts it, verifies the result and returns it as the job output. Writing the transcript into the Claude
-//! project directory (`propose-agent-config`), the `codex app-server` import and the ledger are host work that
-//! still has no consumer, so the event handler answers batches with no submissions.
+//! The server side (`flow`) owns a conversion: it checks the pane, freezes it, stops its agent and then runs the
+//! `codex-to-claude` job (read the rollout through the host `fs` import, convert, verify, propose the transcript
+//! to the Claude Code folder, read it back and open the new pane) or a private `codex app-server` (the importer
+//! of Codex). The client side (`client`) offers the menu entry and draws the modal progress dialog.
 
 pub mod claude_writer;
+pub mod client;
 pub mod convert;
 pub mod error;
+pub mod flow;
 pub mod lenient_json;
 pub mod paths;
 pub mod prompts;
@@ -31,13 +33,14 @@ use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
-use ilium_plugin_sdk::host::{HostClock, HostFs, HostJobs};
+use ilium_plugin_sdk::host::{HostClock, HostFs, HostIntentsHost, HostJobs};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::{ErrorCode, FsPath, PluginError};
 use ilium_plugin_sdk::{
     host, ilium_plugin, Handler, HostApi, JobRunner, Lifecycle, MenuProvider, ServiceProvider,
     Views,
 };
+use serde_json::{json, Value};
 
 use crate::convert::{convert_rollout, ConvertInput, PROGRESS_EVERY_LINES};
 use crate::error::ConvertError;
@@ -142,21 +145,25 @@ fn run_codex_to_claude(input: &[u8]) -> Result<Vec<u8>, PluginError> {
 /// The server side of `ilium.core.session-convert` (core-plugin-session-convert.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["job-runner", "service-provider"])]
 #[derive(Default)]
-pub struct SessionConvertServer {
-    activated: bool,
-}
+pub struct SessionConvertServer;
 
 impl Lifecycle for SessionConvertServer {
-    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
-        let _ = &context;
-        self.activated = true;
+    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        // What a previous run left in the durable state is cleaned up by its watchdog timer.
+        flow::reset();
         Ok(())
     }
 }
 
 impl Handler for SessionConvertServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut handle = host();
+        let api: &mut dyn HostApi = &mut *handle;
+        let mut submissions = Vec::new();
+        for event in batch {
+            flow::on_event(api, event, &mut submissions);
+        }
+        submissions
     }
 }
 
@@ -172,59 +179,71 @@ impl JobRunner for SessionConvertServer {
     }
 }
 
+/// The answer of a refused service call, in the form the host turns back into an error.
+fn service_error(code: ErrorCode, message: &str) -> ServiceReply {
+    ServiceReply::Done(json!({"error": code.as_str(), "message": message}).to_string())
+}
+
 impl ServiceProvider for SessionConvertServer {
     fn handle(&mut self, call: ServiceCall) -> ServiceReply {
-        let target_ok =
-            call.payload_json.contains("\"codex\"") || call.payload_json.contains("\"claude\"");
-        if call.method != "start" || !target_ok || call.payload_json.contains("antigravity") {
-            return ServiceReply::Done("{\"error\":\"invalid-argument\"}".to_string());
+        if call.method != "start" {
+            return service_error(ErrorCode::InvalidArgument, "the only method is start");
         }
-        ServiceReply::Deferred
+        let Ok(request) = serde_json::from_str::<Value>(&call.payload_json) else {
+            return service_error(ErrorCode::InvalidArgument, "the request is not JSON");
+        };
+        let Some(pane) = request.get("pane").and_then(Value::as_u64) else {
+            return service_error(ErrorCode::InvalidArgument, "pane must be a node id");
+        };
+        let target = match request.get("target").and_then(Value::as_str) {
+            Some(target @ ("codex" | "claude")) => target,
+            _ => {
+                return service_error(ErrorCode::InvalidArgument, "target must be codex or claude")
+            }
+        };
+        let mut handle = host();
+        let api: &mut dyn HostApi = &mut *handle;
+        let mut submissions = Vec::new();
+        if let Err(refused) = flow::begin(api, pane, target, false, &mut submissions) {
+            return service_error(refused.code, &refused.message);
+        }
+        for submission in submissions {
+            if let Err(error) = HostIntentsHost::submit(&mut *api, submission) {
+                return service_error(error.code, &error.message);
+            }
+        }
+        let now = HostClock::now_unix_millis(&mut *api);
+        ServiceReply::Done(json!({"conversion": format!("{pane}-{now}")}).to_string())
     }
 }
 
 /// The client side of `ilium.core.session-convert` (core-plugin-session-convert.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views", "menu-provider"])]
 #[derive(Default)]
-pub struct SessionConvertClient {
-    activated: bool,
-}
+pub struct SessionConvertClient;
 
 impl Lifecycle for SessionConvertClient {
-    fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
-        let _ = &context;
-        self.activated = true;
+    fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        client::reset();
         Ok(())
     }
 }
 
 impl Handler for SessionConvertClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        batch.into_iter().flat_map(client::on_event).collect()
     }
 }
 
 impl Views for SessionConvertClient {
-    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        UiTree::default()
+    fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
+        client::render(&view, area)
     }
 }
 
 impl MenuProvider for SessionConvertClient {
-    fn menu_items(&mut self, _context: MenuContext) -> Vec<MenuEntry> {
-        vec![MenuEntry {
-            id: "pane-convert".to_string(),
-            label: "Convert session".to_string(),
-            icon: None,
-            shortcut: None,
-            parent: None,
-            is_submenu: false,
-            separator_before: false,
-            checked: None,
-            disabled_reason: None,
-            tooltip: None,
-            danger: false,
-        }]
+    fn menu_items(&mut self, context: MenuContext) -> Vec<MenuEntry> {
+        client::menu_items(&context)
     }
 }
 
@@ -327,6 +346,7 @@ mod spec_tests {
             "process.long-lived",
             "process.run:codex",
             "services.provide:ilium.core.session-convert/convert",
+            "tree.read",
             "tree.write",
         ];
         expected_server_grants.sort();
@@ -334,7 +354,10 @@ mod spec_tests {
 
         let mut client_grants = string_list(&manifest_value["capabilities"]["client"]);
         client_grants.sort();
-        assert_eq!(client_grants, vec!["agent.read", "ui.panels"]);
+        assert_eq!(
+            client_grants,
+            vec!["agent.read", "keys.intercept", "tree.read", "ui.panels"]
+        );
     }
 
     /// Manual: the plugin holds no write grant on Claude's folders; it proposes the transcript

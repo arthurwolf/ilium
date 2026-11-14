@@ -11,9 +11,9 @@ use serde_json::Value;
 use crate::app::{AppearanceRow, EditorRow, SessionRow, SoundRow, TerminalRow};
 use crate::config::{
     AgentIdentifierMode, GitBranchLine, GitClosePolicy, GitDefaultBase, GitDefaultWhere,
-    LeftPanelSizingMode, MotionLevel, NewPaneDirectory, SessionRecoveryPolicy, SidebarDensity,
-    TreeOrder, MAX_BOARD_COLUMN_WIDTH, MAX_CARD_PREVIEW_LINES, MIN_BOARD_COLUMN_WIDTH,
-    MIN_CARD_PREVIEW_LINES,
+    LeftPanelSizingMode, MotionLevel, NewPaneDirectory, PluginTreeOrderingChoice,
+    SessionRecoveryPolicy, SidebarDensity, MAX_BOARD_COLUMN_WIDTH, MAX_CARD_PREVIEW_LINES,
+    MIN_BOARD_COLUMN_WIDTH, MIN_CARD_PREVIEW_LINES,
 };
 use crate::icon_settings::IconTarget;
 use crate::theme::ColorScheme;
@@ -166,9 +166,10 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             }
             app.settings_set_minimum_terminal_width(target);
         }
-        "ui.tree_order" => {
-            app.settings_set_tree_order(parse_tree_order(string(&value)?)?);
-        }
+        "ui.tree_order" => match parse_tree_order(string(&value)?)? {
+            None => app.settings_set_manual_tree_order(),
+            Some(choice) => app.settings_set_plugin_tree_ordering(choice.plugin, choice.ordering),
+        },
         "ui.tree_row_management_controls" => {
             if app.ui_settings.show_tree_row_management_controls != boolean(&value)? {
                 app.settings_toggle_tree_row_management_controls();
@@ -330,32 +331,6 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 app.settings_adjust_terminal_row(TerminalRow::NewPaneDirectory, 1);
             }
             ensure_reached(app.terminal_settings.new_pane_directory == target)?;
-        }
-        "terminal.smart_copy_light" => {
-            let target = boolean(&value)?;
-            if app.terminal_settings.smart_copy_light != target {
-                app.settings_adjust_terminal_row(TerminalRow::SmartCopyLight, 1);
-            }
-            ensure_reached(app.terminal_settings.smart_copy_light == target)?;
-        }
-        "terminal.smart_copy_light_key" => {
-            let target = match string(&value)?.to_ascii_lowercase().as_str() {
-                "ctrl" | "control" => crate::config::SmartCopyLightKey::Control,
-                "alt" | "option" => crate::config::SmartCopyLightKey::Alt,
-                "shift" => crate::config::SmartCopyLightKey::Shift,
-                other => {
-                    return Err(format!(
-                        "terminal.smart_copy_light_key {other:?} must be ctrl, alt or shift"
-                    ));
-                }
-            };
-            for _ in 0..crate::config::SmartCopyLightKey::ALL.len() {
-                if app.terminal_settings.smart_copy_light_key == target {
-                    break;
-                }
-                app.settings_adjust_terminal_row(TerminalRow::SmartCopyLightKey, 1);
-            }
-            ensure_reached(app.terminal_settings.smart_copy_light_key == target)?;
         }
         "editor.line_numbers" => set_editor_toggle(
             app,
@@ -871,12 +846,6 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "terminal.new_pane_directory" => {
             app.settings_adjust_terminal_row(TerminalRow::NewPaneDirectory, direction)
         }
-        "terminal.smart_copy_light" => {
-            app.settings_adjust_terminal_row(TerminalRow::SmartCopyLight, direction)
-        }
-        "terminal.smart_copy_light_key" => {
-            app.settings_adjust_terminal_row(TerminalRow::SmartCopyLightKey, direction)
-        }
         "editor.autosave_delay_ms" => {
             app.settings_adjust_editor_row(EditorRow::AutosaveDelay, direction)
         }
@@ -1107,16 +1076,21 @@ fn parse_left_panel_sizing_mode(value: &str) -> Result<LeftPanelSizingMode, Stri
     }
 }
 
-fn parse_tree_order(value: &str) -> Result<TreeOrder, String> {
-    match normalized(value).as_str() {
-        "manual" => Ok(TreeOrder::Manual),
-        "type" => Ok(TreeOrder::Type),
-        "age_ascending" => Ok(TreeOrder::AgeAscending),
-        "age_descending" => Ok(TreeOrder::AgeDescending),
-        "name_ascending" | "name_a_z" => Ok(TreeOrder::NameAscending),
-        "name_descending" | "name_z_a" => Ok(TreeOrder::NameDescending),
-        _ => Err(ilium_prompts::voice::VOICE_SETTINGS_INVALID_TREE_ORDER.to_owned()),
+/// `manual`, a plugin ordering as `<plugin>/<ordering>`, or one of the older built-in names
+/// (`type`, `age_ascending`, ...), which now name the tree plugin's orderings.
+fn parse_tree_order(value: &str) -> Result<Option<PluginTreeOrderingChoice>, String> {
+    if let Some(choice) = PluginTreeOrderingChoice::parse(value) {
+        return Ok(Some(choice));
     }
+    let name = match normalized(value).as_str() {
+        "manual" => return Ok(None),
+        "name_a_z" => "name_ascending".to_owned(),
+        "name_z_a" => "name_descending".to_owned(),
+        other => other.to_owned(),
+    };
+    PluginTreeOrderingChoice::from_legacy_tree_order(&name)
+        .map(Some)
+        .ok_or_else(|| ilium_prompts::voice::VOICE_SETTINGS_INVALID_TREE_ORDER.to_owned())
 }
 
 fn parse_agent_identifier_mode(value: &str) -> Result<AgentIdentifierMode, String> {

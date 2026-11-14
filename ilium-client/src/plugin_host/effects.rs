@@ -19,6 +19,9 @@ use ilium_plugin_api::generated::types::{ErrorCode, Intent, Outcome, PluginError
 
 /// The kernel command that focuses a node (`{"node": <id>}` or a bare id).
 pub(crate) const FOCUS_NODE_COMMAND: &str = "kernel.focus-node";
+/// The kernel command that freezes an agent pane (`{"node": <id>}` or a bare id). It keeps the
+/// painted screen and queues the server's freeze, exactly like the pane's Freeze action.
+pub(crate) const FREEZE_AGENT_COMMAND: &str = "kernel.freeze-agent";
 /// Longest attention reason (reference-wit.md section 4.12).
 const MAXIMUM_ATTENTION_REASON_CHARACTERS: usize = 80;
 /// Longest toast title (reference-wit.md section 4.12).
@@ -59,6 +62,8 @@ pub(crate) enum ClientEffect {
         pane: Option<ilium_core::NodeId>,
         option: EditorOption,
     },
+    /// Freeze an agent pane (`kernel.freeze-agent`): stop its process and keep its screen.
+    FreezeAgent(ilium_core::NodeId),
 }
 
 /// The kernel command that sets an option of an editor pane:
@@ -184,6 +189,13 @@ fn kernel_command(spec: &InvokeCommandSpec) -> Classified {
             None => refused(
                 ErrorCode::InvalidArgument,
                 "kernel.focus-node takes {\"node\": <id>}",
+            ),
+        },
+        FREEZE_AGENT_COMMAND => match focus_node_argument(&spec.arguments_json) {
+            Some(node) => Classified::Effect(ClientEffect::FreezeAgent(node)),
+            None => refused(
+                ErrorCode::InvalidArgument,
+                "kernel.freeze-agent takes {\"node\": <id>}",
             ),
         },
         SET_EDITOR_OPTION_COMMAND => match editor_option_argument(&spec.arguments_json) {
@@ -359,6 +371,21 @@ mod tests {
             classify_here(intent),
             Classified::Effect(ClientEffect::FocusNode(ilium_core::NodeId(3)))
         ));
+    }
+
+    #[test]
+    fn freeze_agent_names_a_node() {
+        let freeze = |arguments_json: &str| {
+            classify_here(Intent::InvokeCommand(InvokeCommandSpec {
+                command: FREEZE_AGENT_COMMAND.to_owned(),
+                arguments_json: arguments_json.to_owned(),
+            }))
+        };
+        assert!(matches!(
+            freeze("{\"node\": 4}"),
+            Classified::Effect(ClientEffect::FreezeAgent(ilium_core::NodeId(4)))
+        ));
+        assert!(matches!(freeze("{}"), Classified::Refused(_)));
     }
 
     fn set_editor_option(arguments_json: &str) -> Classified {

@@ -407,6 +407,42 @@ fn uses_inherited_pane_server(
     !(explicit_project || explicit_session || explicit_cwd)
 }
 
+/// The text an urgent resource notice sends to the agents of the project.
+const URGENT_RESOURCE_NOTICE: &str = "Urgent shared-resource instruction update: read the managed resource block before using shared hardware. Reserve exclusively, wait once if queued, verify ownership and explicitly release after use; estimates never clear ownership. This notice is from Ilium, not the user; no reply or acknowledgement is needed.";
+
+/// An explicit urgent resource notice goes through the fleet plugin's guarded `broadcast`: only
+/// the agents of exactly this project receive it, and busy agents get it queued instead of
+/// mid-turn input.
+async fn urgent_resource_notice(project: &Path, cwd: &Path) -> Result<(), CliError> {
+    let project = ilium_platform::paths::canonicalize(project).map_err(|failure| {
+        println!(
+            "{}",
+            json!({"type":"error","command":"resource_notify_urgent","code":"invalid-project","message":failure.to_string()})
+        );
+        CliError::ExitStatus(2)
+    })?;
+    let words: Vec<std::ffi::OsString> = vec![
+        "broadcast".into(),
+        "--when-idle".into(),
+        "--exact-project".into(),
+        project.into_os_string(),
+        URGENT_RESOURCE_NOTICE.into(),
+    ];
+    match ilium::plugin_cli::run(words, cwd).await {
+        ilium::plugin_cli::Ran::Exit(0) => Ok(()),
+        ilium::plugin_cli::Ran::Exit(code) => {
+            Err(CliError::ExitStatus(u8::try_from(code).unwrap_or(1)))
+        }
+        ilium::plugin_cli::Ran::Unknown(_) => Err(error(
+            "resource_notify_urgent",
+            "",
+            "broadcast-unavailable",
+            "the broadcast command is contributed by the ilium.core.fleet plugin, which is not enabled",
+            1,
+        )),
+    }
+}
+
 pub(crate) async fn run(
     args: ResourceArgs,
     cwd: &Path,
@@ -416,8 +452,7 @@ pub(crate) async fn run(
         if args.session.is_some() || args.agent.is_some() || args.request_id.is_some() {
             return Err(error("resource_notify_urgent", "", "invalid_input", "Urgent resource notices target the project; session, agent and request-id selectors are not supported", 2));
         }
-        return crate::broadcast::urgent_resource_notice(args.project.as_deref().unwrap_or(cwd))
-            .await;
+        return urgent_resource_notice(args.project.as_deref().unwrap_or(cwd), cwd).await;
     }
     let key = args.request_id.clone().unwrap_or_else(request_key);
     let operation = match &args.command {

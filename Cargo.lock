@@ -3230,7 +3230,6 @@ dependencies = [
  "ilium-prompts",
  "ilium-remote-compaction",
  "ilium-server",
- "ilium-session-convert",
  "ilium-sound",
  "ilium-transport",
  "ilium-voice",
@@ -3712,6 +3711,7 @@ version = "0.1.1"
 dependencies = [
  "ilium-plugin-sdk",
  "proptest",
+ "regex",
  "serde_json",
 ]
 
@@ -3963,22 +3963,6 @@ dependencies = [
  "uuid",
  "vt100",
  "walkdir",
-]
-
-[[package]]
-name = "ilium-session-convert"
-version = "0.1.1"
-dependencies = [
- "chrono",
- "ilium-agent-session",
- "ilium-core",
- "ilium-platform",
- "ilium-prompts",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "uuid",
 ]
 
 [[package]]

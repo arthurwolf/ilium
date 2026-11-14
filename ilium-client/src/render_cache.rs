@@ -192,8 +192,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             None
         }
         ServerEvent::PaneProcessTerminated { pane_id, result } => {
-            app.apply_remote_pane_process_terminated(pane_id, result.clone());
-            app.apply_pane_process_terminated(pane_id, result);
+            app.apply_remote_pane_process_terminated(pane_id, result);
             None
         }
         ServerEvent::SoundPreviewCompleted { succeeded } => {
@@ -413,7 +412,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                             view.synchronize_visible_text_fingerprint();
                         }
                     }
-                    // Type ordering distinguishes agents from plain shells;
+                    // A plugin's item-type ordering ranks agents apart from plain shells;
                     // invalidate structural hit testing when detection changes
                     // that visible rank even though no TreeSnapshot follows.
                     app.bump_tree_version();
@@ -494,6 +493,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 }
             }
             let previous_session_id = app.agent_session_ids.insert(pane_id, session_id);
+            app.sync_wasm_agent_sessions();
             if changed {
                 // A `/resume` can replace the agent session inside the same
                 // terminal pane. The old title describes another transcript.
@@ -553,6 +553,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 app.title_inference_attempts
                     .remove(&(pane_id, previous_session_id));
             }
+            app.sync_wasm_agent_sessions();
             app.inferred_title_session_ids.remove(&pane_id);
             app.titles_loading.remove(&pane_id);
             if prompt_was_visible != app.shows_last_prompt_banner(pane_id) {
@@ -952,7 +953,7 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
                 replacement_index.unwrap_or_else(|| state.selected_row.min(last_row));
         }
     }
-    app.request_chatroom_reconcile();
+    app.request_integration_maintenance();
     app.restore_expanded_groups();
     app.reconcile_selected_tree_path();
     app.bump_tree_version();
@@ -967,8 +968,6 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
     app.custom_agent_panes
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.frozen_screens
-        .retain(|pane_id, _| live_pane_ids.contains(pane_id));
-    app.auto_freeze_since
         .retain(|pane_id, _| live_pane_ids.contains(pane_id));
     app.apply_pending_replacement_focus();
     app.terminal_activity.retain_panes(&live_pane_ids);
@@ -1075,14 +1074,6 @@ fn apply_tree_snapshot(app: &mut App, tree: ilium_core::Tree) {
         .is_some_and(|(pane_id, _)| !live_pane_ids.contains(&pane_id))
     {
         app.hovered_agent_toolbar_action = None;
-    }
-    if app
-        .smart_copy_session
-        .as_ref()
-        .is_some_and(|session| !live_pane_ids.contains(&session.pane_id))
-    {
-        app.exit_smart_copy();
-        app.status_message = Some("Smart Copy stopped because its pane closed".to_string());
     }
 
     let (rows, cols) = app.last_known_pane_size;
@@ -2159,44 +2150,6 @@ mod tests {
     }
 
     #[test]
-    fn type_order_hit_testing_rebuilds_when_a_shell_becomes_an_agent() {
-        let mut app = app();
-        app.set_screen_area(Rect::new(0, 0, 100, 30));
-        app.ui_settings.tree_order = crate::config::TreeOrder::Type;
-        let mut tree = ilium_core::Tree::new();
-        let group = tree.add_group(ROOT_ID, "work").unwrap();
-        let shell = tree
-            .add_pane(group, "a-shell", PaneContentKind::Terminal)
-            .unwrap();
-        let agent = tree
-            .add_pane(group, "z-agent", PaneContentKind::Terminal)
-            .unwrap();
-        apply(&mut app, ServerEvent::TreeSnapshot(tree));
-        app.tree_state.open(vec![group]);
-        let list = crate::tree_ui::list_area(app.layout.tree_area);
-
-        assert_eq!(
-            app.tree_node_at(Position::new(list.x, list.y + 1))
-                .map(|hit| hit.id),
-            Some(shell)
-        );
-
-        apply(
-            &mut app,
-            ServerEvent::PaneStatusChanged {
-                pane_id: agent,
-                status: PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
-            },
-        );
-
-        assert_eq!(
-            app.tree_node_at(Position::new(list.x, list.y + 1))
-                .map(|hit| hit.id),
-            Some(agent)
-        );
-    }
-
-    #[test]
     fn detection_and_prompt_updates_resize_when_prompt_appears() {
         // Regression test: the toolbar must not depend on a full
         // `TreeSnapshot` following detection -- the server's actual
@@ -2413,15 +2366,15 @@ mod tests {
     }
 
     #[test]
-    fn removed_selection_successor_follows_the_configured_sidebar_order() {
+    fn removed_selection_successor_follows_the_stored_sidebar_order() {
         let mut app = app();
-        app.ui_settings.tree_order = crate::config::TreeOrder::NameAscending;
         let mut tree = ilium_core::Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
         let beta = tree
             .add_pane(group, "beta", PaneContentKind::Terminal)
             .unwrap();
-        tree.add_pane(group, "zulu", PaneContentKind::Terminal)
+        let zulu = tree
+            .add_pane(group, "zulu", PaneContentKind::Terminal)
             .unwrap();
         let alpha = tree
             .add_pane(group, "alpha", PaneContentKind::Terminal)
@@ -2433,8 +2386,9 @@ mod tests {
         tree.remove_node(alpha).unwrap();
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
 
-        assert_eq!(app.selected_node_id(), Some(beta));
-        assert_eq!(app.active_pane_id(), Some(beta));
+        // `alpha` was the last row in the stored order, so the row above it is next.
+        assert_eq!(app.selected_node_id(), Some(zulu));
+        assert_eq!(app.active_pane_id(), Some(zulu));
     }
 
     #[test]

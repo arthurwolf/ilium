@@ -66,19 +66,6 @@
   },
   {
     "id": "LLM-06",
-    "title": "Smart Copy instructions",
-    "explanation": "Which exact-source copy targets to prioritize. The feature-specific tab and LLM Instructions edit the same saved value.",
-    "specimen": "Synthetic example:\nAdditional instructions: Prefer French.\n\nEnter opens the multiline editor. Ctrl+S or Apply saves. Escape cancels. Delete clears the selected field.",
-    "states": "Empty uses built-in behavior. Non-empty adds literal instructions to the corresponding prompt.",
-    "motion": "None.",
-    "caveat": "Additional instructions do not replace the built-in prompt or required output contract.",
-    "frames": [
-      "Empty: built-in behavior",
-      "Custom: built-in behavior + your instructions"
-    ]
-  },
-  {
-    "id": "LLM-07",
     "title": "Ask for update instructions",
     "explanation": "What agents should emphasize when asked for a status update. The feature-specific tab and LLM Instructions edit the same saved value.",
     "specimen": "Synthetic example:\nAdditional instructions: Prefer French.\n\nEnter opens the multiline editor. Ctrl+S or Apply saves. Escape cancels. Delete clears the selected field.",

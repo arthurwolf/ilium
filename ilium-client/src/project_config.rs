@@ -1,6 +1,6 @@
 //! Persistent, project-scoped Ilium settings stored in `.ilium/config.yaml`.
 //!
-//! This deliberately owns a different file from `workspace_file`: workspace
+//! This deliberately owns a different file from the session snapshots: those
 //! snapshots are volatile session recovery state, while this configuration
 //! contains durable project metadata that must survive a fresh session.
 
@@ -243,8 +243,8 @@ fn save_unlocked(cwd: &Path, config: &ProjectConfig) -> anyhow::Result<()> {
     // rather than failing on an existing file, their writes could interleave
     // and corrupt the temp file's contents before either side gets to
     // rename it -- defeating the atomicity this write-then-rename dance
-    // exists for. A process-wide counter (matching `workspace_file::save`'s
-    // fix for the identical bug) makes every call's temp path distinct
+    // exists for. A process-wide counter (the same fix as the session snapshot
+    // writer) makes every call's temp path distinct
     // regardless of which thread or task it runs on.
     static SAVE_CALL_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let call_id = SAVE_CALL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

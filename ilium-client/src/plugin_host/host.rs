@@ -60,6 +60,8 @@ const OUTCOME_WAIT: Duration = Duration::from_secs(2);
 const SHUTDOWN_BUDGET: Duration = Duration::from_secs(2);
 /// How long the client waits for the host thread to hand back its shutdown report.
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(3);
+/// How long opening a context menu waits for a plugin's dynamic entries.
+const MENU_WAIT: Duration = Duration::from_millis(250);
 /// Outputs the event loop has not collected yet; beyond this the oldest are dropped.
 const OUTBOX_LIMIT: usize = 1024;
 /// The epoch tick of the client engine in milliseconds.
@@ -371,6 +373,11 @@ pub(crate) struct ChromeItem {
     /// The short text a tree toolbar button shows beside its icon when the sidebar is wide
     /// (`caption`, at most 12 cells), if it gives one.
     pub caption: Option<String>,
+    /// A `context_menu` entry marked `dynamic`: the plugin's `menu-provider` supplies the
+    /// actual entries when the menu opens (see `ClientPlugins::menu_entries`).
+    pub dynamic: bool,
+    /// For an entry the menu provider supplied: its id, passed to the command as `item`.
+    pub menu_item: Option<String>,
 }
 
 /// The entries of one contribution kind in a manifest. A manifest that does not parse, or an
@@ -431,6 +438,11 @@ pub(crate) fn chrome_items(plugin: &str, manifest: &str, kind: &str) -> Vec<Chro
                 placement: text(entry, "placement"),
                 when: text(entry, "when"),
                 caption: text(entry, "caption"),
+                dynamic: entry
+                    .get("dynamic")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+                menu_item: None,
                 id,
             })
         })
@@ -449,6 +461,9 @@ struct PopupSlot {
 /// and never across a call into the runtime.
 struct Shared {
     nodes: Mutex<Vec<TreeNode>>,
+    /// The `session-ref` JSON of each agent pane whose session the server verified, as the
+    /// event loop last mirrored it.
+    agent_sessions: Mutex<BTreeMap<u64, String>>,
     focused: Mutex<Option<NodeId>>,
     epoch: AtomicU64,
     outbox: Mutex<VecDeque<Output>>,
@@ -1139,6 +1154,10 @@ impl KernelFacade for ClientFacade {
         Some(self)
     }
 
+    fn agents(&self) -> Option<&dyn ilium_plugin_api::kernel::AgentRead> {
+        Some(self)
+    }
+
     fn ui(&self) -> Option<&dyn UiSink> {
         Some(self)
     }
@@ -1216,6 +1235,17 @@ impl HelpCatalog for ClientFacade {
                 .map(|(id, _)| id.clone()),
         );
         ids
+    }
+}
+
+impl ilium_plugin_api::kernel::AgentRead for ClientFacade {
+    fn session_json(&self, pane: NodeId) -> Option<String> {
+        self.shared
+            .agent_sessions
+            .lock()
+            .ok()?
+            .get(&pane.0)
+            .cloned()
     }
 }
 
@@ -1332,6 +1362,63 @@ const PANE_VIEW_RETRY: Duration = Duration::from_secs(5);
 
 fn to_plugin(node: ilium_core::NodeId) -> NodeId {
     NodeId(node.0)
+}
+
+/// The `signal-changed` name that carries the kernel's full activity of an agent pane.
+pub(crate) const ACTIVITY_DETAIL_SIGNAL: &str = "activity-detail";
+
+/// The kernel activity as a signal value. The plugin API's six activities fold the two
+/// background states into `working`; the signal keeps them apart.
+pub(crate) fn activity_detail_label(activity: ilium_core::AgentActivity) -> &'static str {
+    use ilium_core::AgentActivity;
+    match activity {
+        AgentActivity::Working => "working",
+        AgentActivity::WaitingBackground => "waiting-background",
+        AgentActivity::BackgroundTaskStillRunning => "background-task-still-running",
+        AgentActivity::WaitingApproval => "waiting-approval",
+        AgentActivity::Done => "done",
+        AgentActivity::Idle => "idle",
+    }
+}
+
+/// The agent activity of every terminal agent pane, by node id.
+fn activity_details(tree: &Tree) -> BTreeMap<u64, &'static str> {
+    tree.panes()
+        .filter_map(|node| match &node.kind {
+            NodeKind::Pane {
+                status: ilium_core::PaneStatus::Agent(state),
+                ..
+            } => Some((node.id.0, activity_detail_label(state.activity()))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// One `signal-changed` per agent pane whose detailed activity differs between two readings;
+/// an empty value tells the plugin the pane no longer runs an agent.
+fn activity_detail_events(
+    before: &BTreeMap<u64, &'static str>,
+    after: &BTreeMap<u64, &'static str>,
+) -> Vec<Event> {
+    let signal = |pane: u64, value: &str| {
+        Event::SignalChanged(ilium_plugin_api::generated::types::SignalChangedEvent {
+            pane: NodeId(pane),
+            signal: ACTIVITY_DETAIL_SIGNAL.to_owned(),
+            value: value.to_owned(),
+        })
+    };
+    let mut events: Vec<Event> = after
+        .iter()
+        .filter(|(pane, label)| before.get(*pane) != Some(*label))
+        .map(|(pane, label)| signal(*pane, label))
+        .collect();
+    events.extend(
+        before
+            .keys()
+            .filter(|pane| !after.contains_key(*pane))
+            .map(|pane| signal(*pane, "")),
+    );
+    events
 }
 
 /// The agent of a pane as a plugin sees it. The signature is the provider's lower-case name;
@@ -1578,6 +1665,11 @@ pub(crate) struct ClientPlugins {
     shared: Arc<Shared>,
     /// Manifests of the catalogue, for the plugin list.
     catalogue: Vec<CataloguePlugin>,
+    /// The engine that compiles scene components, kept so a plugin enabled later gets its
+    /// scenes registered (a disabled plugin's scenes are forgotten at once).
+    scene_engine: Arc<PluginEngine>,
+    /// The scene-side catalogue (`ClientPluginStart::scenes`) behind the same re-registration.
+    scene_catalogue: Vec<CataloguePlugin>,
     /// Contributions of the server sides, as the server last reported them.
     server_entries: BTreeMap<String, Entry>,
     /// Plugin states as the server last reported them.
@@ -1586,6 +1678,8 @@ pub(crate) struct ClientPlugins {
     known: BTreeMap<u64, u64>,
     /// The plugin views of the last mirrored tree, for the pane and agent events (gap G2).
     known_views: BTreeMap<u64, TreeNode>,
+    /// The detailed agent activity per pane plugins last heard of (`activity-detail` signal).
+    known_activity_details: BTreeMap<u64, &'static str>,
     /// The focused pane plugins last heard of.
     known_focus: Option<NodeId>,
     /// `config.toml` as plugins last heard of it, with the stamp it was read at.
@@ -1652,6 +1746,7 @@ impl ClientPlugins {
         let shared = Arc::new_cyclic(|me| Shared {
             me: me.clone(),
             nodes: Mutex::new(Vec::new()),
+            agent_sessions: Mutex::new(BTreeMap::new()),
             focused: Mutex::new(None),
             epoch: AtomicU64::new(1),
             outbox: Mutex::new(VecDeque::new()),
@@ -1694,6 +1789,8 @@ impl ClientPlugins {
         }
         let scenes = super::plugin_scenes::register_bundled(&engine, &start.scenes, &disabled);
         tracing::info!("{scenes} plugin scenes registered");
+        let scene_engine = Arc::clone(&engine);
+        let scene_catalogue = start.scenes;
         let log: Arc<dyn LogSink> = Arc::new(TracingLog);
         let port = OutputPort {
             shared: Arc::downgrade(&shared),
@@ -1791,10 +1888,13 @@ impl ClientPlugins {
         Some(Self {
             shared,
             catalogue: manifests,
+            scene_engine,
+            scene_catalogue,
             server_entries: BTreeMap::new(),
             server_states: BTreeMap::new(),
             known: BTreeMap::new(),
             known_views: BTreeMap::new(),
+            known_activity_details: BTreeMap::new(),
             known_focus: None,
             known_config: None,
             last_refusal: None,
@@ -1850,6 +1950,12 @@ impl ClientPlugins {
             |id| title_origin(tree, id),
         ));
         self.known_views = views;
+        let details = activity_details(tree);
+        batch.extend(activity_detail_events(
+            &self.known_activity_details,
+            &details,
+        ));
+        self.known_activity_details = details;
         // A grab that names a pane ends when the pane closes.
         if let Ok(grabs) = self.shared.key_grabs.lock() {
             if let Some(grabs) = grabs.as_ref() {
@@ -2042,6 +2148,13 @@ impl ClientPlugins {
                         // Nothing of a disabled plugin stays on screen (COR-218).
                         self.shared.forget_plugin(&target);
                     }
+                    // Its background scenes appear in or leave the animation list at once.
+                    super::plugin_scenes::set_plugin_enabled(
+                        &self.scene_engine,
+                        &self.scene_catalogue,
+                        &target,
+                        enabled,
+                    );
                     // The client side of a plugin follows its server side.
                     self.shared.post(move |runtime| {
                         if let Err(error) = runtime.set_enabled(&target, enabled) {
@@ -2250,6 +2363,33 @@ impl ClientPlugins {
         });
     }
 
+    /// Replaces the verified agent sessions plugins read: each pane with its agent signature,
+    /// session id and the transcript path the server reported.
+    pub(crate) fn sync_agent_sessions(
+        &self,
+        sessions: impl IntoIterator<Item = (u64, &'static str, String, Option<PathBuf>)>,
+    ) {
+        let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+        let mirrored: BTreeMap<u64, String> = sessions
+            .into_iter()
+            .filter_map(|(pane, agent, session_id, transcript)| {
+                let home = home.as_deref()?;
+                let text = ilium_plugin_host::wiring::wave_two::session_ref_json(
+                    home,
+                    agent,
+                    &session_id,
+                    transcript.as_deref(),
+                )?;
+                Some((pane, text))
+            })
+            .collect();
+        if let Ok(mut slot) = self.shared.agent_sessions.lock() {
+            if *slot != mirrored {
+                *slot = mirrored;
+            }
+        }
+    }
+
     /// Replaces the key map plugins read. Cheap when nothing changed.
     pub(crate) fn sync_keymap(&self, bindings: Vec<KeyBinding>) {
         if let Ok(mut keymap) = self.shared.keymap.lock() {
@@ -2345,6 +2485,46 @@ impl ClientPlugins {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The entries the plugin's `menu-provider` returns for a context menu opened on `node`.
+    /// The call runs on the runtime thread and the caller waits at most `MENU_WAIT`; a plugin
+    /// that is not running, fails or answers late contributes no entries.
+    pub(crate) fn menu_entries(
+        &self,
+        plugin: &str,
+        menu: &str,
+        node: NodeId,
+    ) -> Vec<ilium_plugin_api::generated::exports::menu_provider::MenuEntry> {
+        use ilium_plugin_api::generated::exports::menu_provider::MenuContext;
+        use ilium_plugin_host::instance::{ExportCall, ExportReply};
+        let (reply, answer) = mpsc::channel();
+        let owner = plugin.to_owned();
+        let context = MenuContext {
+            menu: menu.to_owned(),
+            node: Some(node),
+            pane: Some(node),
+            ..MenuContext::default()
+        };
+        let posted = self.shared.post(move |runtime| {
+            let entries = match runtime
+                .activate(&owner)
+                .and_then(|()| runtime.call_export(&owner, ExportCall::MenuItems(context)))
+            {
+                Ok(ExportReply::MenuEntries(entries)) => entries,
+                Ok(_) => Vec::new(),
+                Err(error) => {
+                    tracing::debug!("{owner} gave no menu entries: {error}");
+                    Vec::new()
+                }
+            };
+            // The caller may have given up; nothing is waiting then.
+            let _ = reply.send(entries);
+        });
+        if !posted {
+            return Vec::new();
+        }
+        answer.recv_timeout(MENU_WAIT).unwrap_or_default()
     }
 
     /// Whether `plugin` is in the catalogue and enabled, so it can draw its plugin panes.
@@ -2788,6 +2968,31 @@ impl ClientPlugins {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activity_detail_signals_name_changes_and_departures() {
+        let before = BTreeMap::from([(1, "working"), (2, "done")]);
+        let after = BTreeMap::from([(1, "waiting-background"), (3, "idle")]);
+        let events = activity_detail_events(&before, &after);
+        let values: Vec<(u64, String)> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::SignalChanged(signal) if signal.signal == ACTIVITY_DETAIL_SIGNAL => {
+                    Some((signal.pane.0, signal.value.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            values,
+            vec![
+                (1, "waiting-background".to_owned()),
+                (3, "idle".to_owned()),
+                (2, String::new()),
+            ]
+        );
+        assert!(activity_detail_events(&after, &after).is_empty());
+    }
 
     #[test]
     fn the_chrome_of_a_manifest_is_read_with_full_command_ids() {

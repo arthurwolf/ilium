@@ -1,5 +1,5 @@
-//! F-077: the Claude Code transcript is written with an atomic write that must not replace a file, read back
-//! with its revision and checked by line count before the session is registered (page sample "Write the
+//! F-077: the Claude Code transcript is proposed as a new file of the Claude Code folder (the host writes it
+//! only when no file of that name exists), read back and checked by line count before the session is registered (page sample "Write the
 //! Claude Code transcript and verify it").
 
 use ilium_plugin_sdk::testing::FakeHost;
@@ -107,7 +107,7 @@ fn f_077_the_written_transcript_is_the_converted_output_byte_for_byte() {
         .expect("file");
     assert_eq!(
         String::from_utf8(written).unwrap(),
-        expected["claude_jsonl"].as_str().unwrap()
+        format!("{}\n", expected["claude_jsonl"].as_str().unwrap())
     );
 }
 
@@ -117,7 +117,7 @@ fn f_077_a_write_that_finds_an_existing_file_completes_as_failed_conflict() {
     let (mut host, pane) = codex_host();
     let request = run_until_job(&mut host, pane);
     host.inject_failure(
-        "fs.write-atomic",
+        "fs.propose-agent-config",
         PluginError {
             code: ErrorCode::Conflict,
             message: "exists".into(),
@@ -138,7 +138,7 @@ fn f_077_a_clash_never_replaces_the_existing_transcript() {
     let (mut host, pane) = codex_host();
     let request = run_until_job(&mut host, pane);
     host.inject_failure(
-        "fs.write-atomic",
+        "fs.propose-agent-config",
         PluginError {
             code: ErrorCode::Conflict,
             message: "exists".into(),

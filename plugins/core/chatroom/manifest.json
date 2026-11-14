@@ -22,6 +22,8 @@
   },
   "capabilities": {
     "server": [
+      "tree.read",
+      "terminal.write",
       "tree.decorate",
       "tree.write",
       "fs.read:project",
@@ -49,8 +51,14 @@
         "name": "chat",
         "summary": "Project chatroom: init, send, context, tail",
         "output": "text",
-        "stdin": "none",
-        "requires_server": false
+        "stdin": "optional",
+        "requires_server": false,
+        "env": [
+          "AGENT_NAME",
+          "ILIUM_CHATROOM_AUTHOR",
+          "ILIUM_PANE_ID"
+        ],
+        "project_marker": "CHATROOM.md"
       }
     ],
     "extension_points": [
@@ -121,6 +129,43 @@
         "max_entries": 64,
         "dynamic": false,
         "version": "0.1.0"
+      }
+    ],
+    "commands": [
+      {
+        "id": "open",
+        "title": "Open the chatroom",
+        "category": "Chatroom"
+      },
+      {
+        "id": "add",
+        "title": "Add chatroom to project",
+        "category": "Chatroom"
+      }
+    ],
+    "context_menu": [
+      {
+        "id": "open-chatroom",
+        "title": "Open chatroom",
+        "target": "tree-node",
+        "when": "node.kind == \"project\"",
+        "command": "open"
+      },
+      {
+        "id": "add-chatroom",
+        "title": "Add chatroom to project",
+        "target": "tree-node",
+        "when": "node.kind == \"project\"",
+        "command": "add"
+      }
+    ],
+    "panels": [
+      {
+        "id": "chatroom",
+        "title": "Chatroom",
+        "placement": "right",
+        "modal": false,
+        "wants_keys": true
       }
     ]
   }

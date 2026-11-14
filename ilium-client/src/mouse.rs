@@ -262,20 +262,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
-    // Holding the Smart Copy light key over a terminal starts the model-free
-    // selection mode; the triggering event is consumed.
-    if app.try_start_smart_copy_light(&mouse, position) {
-        return;
-    }
-
-    // Smart Copy owns mouse events for the frozen pane, including releases
-    // from a pre-existing tree/chatroom drag gesture. Route it before any
-    // other stateful mouse owner can swallow the selection click.
-    if matches!(app.mode, Mode::SmartCopy) {
-        handle_smart_copy_mouse(app, mouse, position);
-        return;
-    }
-
     // A settings slider retains its gesture through release, including when
     // the pointer crosses another globally interactive surface.
     if matches!(&app.mode, Mode::Settings(state)
@@ -289,19 +275,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
             unreachable!("just matched owned Animations slider gesture above");
         };
         handle_settings_mouse(app, *state, mouse);
-        return;
-    }
-
-    // An active scrollbar drag retains ownership even when the pointer leaves
-    // the chatroom panel, so releasing over the tree or status row cannot
-    // leave the drag latched or route the same gesture into another surface.
-    if app.is_chatroom_scrollbar_dragging()
-        && matches!(
-            mouse.kind,
-            MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
-        )
-    {
-        app.handle_chatroom_mouse(mouse, position);
         return;
     }
 
@@ -581,12 +554,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
-    // The conversion dialog is keyboard-only; pointer events must not reach
-    // the frozen pane or the tree while it runs.
-    if matches!(app.mode, Mode::ConvertSession) {
-        return;
-    }
-
     // The remote-compaction dialog is keyboard-only except for the privacy
     // banner's close button; every other pointer event is swallowed.
     if matches!(app.mode, Mode::RemoteCompaction) {
@@ -627,9 +594,7 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     }
 
     if app.layout.pane_area.contains(position) {
-        if matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. }) {
-            app.handle_chatroom_mouse(mouse, position);
-        } else if matches!(app.right_panel_target, RightPanelTarget::Attention) {
+        if matches!(app.right_panel_target, RightPanelTarget::Attention) {
             app.handle_attention_mouse(mouse, position);
         } else if matches!(app.right_panel_target, RightPanelTarget::PluginView { .. }) {
             app.handle_plugin_view_mouse(mouse, position);
@@ -645,54 +610,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     // A drag released outside the tree is a cancelled tree move.
     if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
         app.clear_tree_drag();
-    }
-}
-
-fn handle_smart_copy_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
-    if let Some(light_key) = app.smart_copy_light_key() {
-        // Terminals report held modifiers on mouse events but not the key
-        // release itself, so an event without the modifier means "released".
-        if !mouse.modifiers.contains(light_key.modifier()) {
-            app.finish_smart_copy_light();
-            return;
-        }
-        app.note_smart_copy_light_key_held(Instant::now());
-        if app.smart_copy_session.is_none() {
-            // The frame is still being captured; nothing to hover yet.
-            return;
-        }
-    }
-    let Some(pane_id) = app
-        .smart_copy_session
-        .as_ref()
-        .map(|session| session.pane_id)
-    else {
-        app.mode = Mode::Normal;
-        return;
-    };
-    let Some(viewport) = app.pane_viewport(pane_id) else {
-        app.exit_smart_copy();
-        return;
-    };
-    let content_area = app
-        .smart_copy_terminal_area(pane_id)
-        .unwrap_or(viewport.content_area);
-    if viewport
-        .toolbar_area
-        .is_some_and(|area| crate::smart_copy::exit_button_rect(area).contains(position))
-        && matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left))
-    {
-        app.exit_smart_copy();
-        return;
-    }
-    app.smart_copy_set_hover(position);
-    match mouse.kind {
-        MouseEventKind::ScrollUp => app.smart_copy_cycle_overlap(-1),
-        MouseEventKind::ScrollDown => app.smart_copy_cycle_overlap(1),
-        MouseEventKind::Up(MouseButton::Left) if content_area.contains(position) => {
-            app.smart_copy_copy_current();
-        }
-        _ => {}
     }
 }
 
@@ -1178,9 +1095,7 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
                 app.open_context_menu(target, mouse.column, mouse.row);
                 return;
             }
-            let target =
-                tree_ui::chatroom_project(&app.tree, selected_target, &app.chatroom_projects)
-                    .unwrap_or(selected_target);
+            let target = selected_target;
             app.select_node(target);
             app.open_context_menu(target, mouse.column, mouse.row);
         }
@@ -1188,13 +1103,6 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
             if let Some(hit) = app.tree_node_at(position) {
                 if let Some(target) = app.resources.rows.targets.get(&hit.id).cloned() {
                     app.resource_select_target(hit.id, target);
-                    return;
-                }
-                if let Some(project_id) =
-                    tree_ui::chatroom_project(&app.tree, hit.id, &app.chatroom_projects)
-                {
-                    app.last_tree_click = None;
-                    app.show_chatroom(project_id);
                     return;
                 }
                 if let Some(entry) = tree_ui::folder_entry(&app.tree, hit.id, &app.sidebar_snapshot)
@@ -4817,6 +4725,10 @@ mod tree_order_context_mouse_tests {
             .tree
             .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
             .unwrap();
+        app.ui_settings.plugin_tree_ordering = Some(crate::config::PluginTreeOrderingChoice {
+            plugin: "ilium.core.tree".to_string(),
+            ordering: "name-az".to_string(),
+        });
         app.open_context_menu(pane, 2, 2);
         let (order_column, order_row) = match &mut app.mode {
             Mode::ContextMenu(menu) => {
@@ -4841,10 +4753,8 @@ mod tree_order_context_mouse_tests {
                     .submenu
                     .as_ref()
                     .expect("Order by click should open its submenu");
-                let index = crate::config::TreeOrder::ALL
-                    .iter()
-                    .position(|tree_order| *tree_order == crate::config::TreeOrder::NameAscending)
-                    .unwrap();
+                // No plugin runs in this app, so the manual order is the one row.
+                let index = 0;
                 (
                     submenu.area.x + 1,
                     submenu.area.y + 1 + submenu.layout().row_for_action(index).unwrap(),
@@ -4855,10 +4765,7 @@ mod tree_order_context_mouse_tests {
 
         click(&mut app, submenu_column, submenu_row);
 
-        assert_eq!(
-            app.ui_settings.tree_order,
-            crate::config::TreeOrder::NameAscending
-        );
+        assert_eq!(app.ui_settings.plugin_tree_ordering, None);
         assert!(matches!(app.mode, Mode::Normal));
     }
 
@@ -5155,94 +5062,6 @@ mod markdown_board_context_mouse_tests {
             "{requests:?}"
         );
         let _ = std::fs::remove_file(path);
-    }
-}
-
-#[cfg(test)]
-mod chatroom_scroll_mouse_tests {
-    use super::*;
-    use crate::app::{ChatroomViewState, RightPanelTarget};
-    use crate::chatroom::ChatMessage;
-    use crossterm::event::KeyModifiers;
-    use std::path::PathBuf;
-
-    fn mouse(kind: MouseEventKind, position: Position) -> MouseEvent {
-        MouseEvent {
-            kind,
-            column: position.x,
-            row: position.y,
-            modifiers: KeyModifiers::NONE,
-        }
-    }
-
-    #[test]
-    fn wheel_and_scrollbar_drag_route_through_the_virtual_chatroom_view() {
-        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
-        let project_id = app
-            .tree
-            .add_project(PathBuf::from("/tmp/chatroom-scroll-mouse"))
-            .unwrap();
-        app.chatrooms.insert(
-            project_id,
-            ChatroomViewState {
-                messages: (0..30)
-                    .map(|index| ChatMessage {
-                        timestamp: format!("2026-07-26 14:{index:02}:00 +02:00"),
-                        author: "agent:codex".to_string(),
-                        content: format!("mouse history message {index:02}"),
-                    })
-                    .collect(),
-                ..ChatroomViewState::default()
-            },
-        );
-        app.right_panel_target = RightPanelTarget::Chatroom { project_id };
-        app.set_screen_area(Rect::new(0, 0, 100, 18));
-        let room_layout = crate::chatroom_ui::layout(app.layout.pane_area);
-        let content_position = Position::new(
-            room_layout.message_content_area.x,
-            room_layout.message_content_area.y,
-        );
-
-        handle_mouse_event(&mut app, mouse(MouseEventKind::ScrollUp, content_position));
-        assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 3);
-
-        handle_mouse_event(
-            &mut app,
-            mouse(MouseEventKind::ScrollDown, content_position),
-        );
-        assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 0);
-
-        let top_of_scrollbar =
-            Position::new(room_layout.scrollbar_area.x, room_layout.scrollbar_area.y);
-        handle_mouse_event(
-            &mut app,
-            mouse(MouseEventKind::Down(MouseButton::Left), top_of_scrollbar),
-        );
-        let oldest_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
-        assert_eq!(oldest_metrics.top, 0);
-        assert!(app.is_chatroom_scrollbar_dragging());
-
-        let bottom_row = room_layout.scrollbar_area.bottom().saturating_sub(1);
-        let outside_pane_horizontally = Position::new(app.layout.tree_area.x, bottom_row);
-        handle_mouse_event(
-            &mut app,
-            mouse(
-                MouseEventKind::Drag(MouseButton::Left),
-                outside_pane_horizontally,
-            ),
-        );
-        let newest_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
-        assert_eq!(newest_metrics.top, newest_metrics.maximum_top);
-        assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 0);
-
-        handle_mouse_event(
-            &mut app,
-            mouse(
-                MouseEventKind::Up(MouseButton::Left),
-                outside_pane_horizontally,
-            ),
-        );
-        assert!(!app.is_chatroom_scrollbar_dragging());
     }
 }
 
@@ -5780,353 +5599,6 @@ mod shared_dialog_mouse_tests {
             }] if *parent_group == group_id && name == "Planning" && path == &canonical_board_path
         ));
         std::fs::remove_dir_all(project_path).unwrap();
-    }
-}
-
-#[cfg(test)]
-mod smart_copy_mouse_tests {
-    use super::*;
-    use crate::agent_toolbar::AgentToolbarAction;
-    use crate::app::{App, FocusTarget, PaneRuntime, RightPanelTarget};
-    use crate::terminal_view::TerminalView;
-    use crossterm::event::KeyModifiers;
-    use ilium_core::{AgentActivity, AgentClass, PaneContentKind, ROOT_ID};
-
-    fn app_with_candidate() -> (App, NodeId) {
-        let mut app = App::new("smart-copy-mouse-test".to_owned(), std::env::temp_dir());
-        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group_id, "codex", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                pane_id,
-                ilium_core::PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
-            )
-            .unwrap();
-        let mut view = TerminalView::new(4, 40);
-        view.feed(b"curl https://example.test/api\r\n");
-        app.panes
-            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
-        app.right_panel_target = RightPanelTarget::Pane { pane_id };
-        app.focus = FocusTarget::Pane;
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::SmartCopy);
-        let request = app.take_pending_smart_copy_request().unwrap();
-        app.apply_smart_copy_worker_event(crate::smart_copy_workers::SmartCopyWorkerEvent {
-            retention: None,
-            generation: request.generation,
-            pane_id,
-            update: crate::smart_copy_workers::SmartCopyWorkerUpdate::JsonLine(
-                r#"{"label":"url","kind":"url","parts":[{"lines":[1]}]}"#.to_owned(),
-            ),
-        });
-        (app, pane_id)
-    }
-
-    fn candidate_position(app: &App, pane_id: NodeId) -> Position {
-        let area = app.smart_copy_terminal_area(pane_id).unwrap();
-        let candidate = app
-            .smart_copy_session
-            .as_ref()
-            .unwrap()
-            .candidates
-            .iter()
-            .find(|candidate| candidate.kind == "url")
-            .expect("the pre-scan should provide a URL candidate");
-        let span = candidate.spans[0];
-        Position::new(
-            area.x.saturating_add(span.start_column),
-            area.y.saturating_add(span.row),
-        )
-    }
-
-    fn mouse(kind: MouseEventKind, position: Position) -> MouseEvent {
-        MouseEvent {
-            kind,
-            column: position.x,
-            row: position.y,
-            modifiers: KeyModifiers::NONE,
-        }
-    }
-
-    fn app_with_plain_terminal() -> (App, NodeId) {
-        let mut app = App::new("smart-copy-light-test".to_owned(), std::env::temp_dir());
-        let group_id = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group_id, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        let mut view = TerminalView::new(4, 40);
-        view.feed(b"curl https://example.test/api\r\n");
-        app.panes
-            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
-        app.right_panel_target = RightPanelTarget::Pane { pane_id };
-        app.focus = FocusTarget::Pane;
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.terminal_clipboard = Some(crate::terminal_clipboard::ClipboardService::fixture_queue(
-            crate::execution::test_client(),
-        ));
-        (app, pane_id)
-    }
-
-    fn assert_failed_light_copy_restores_exact_existing_selection(app: &mut App) {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while app.light_copy_retry_generation.is_none() {
-            app.collect_light_copy_selection();
-            if let Some(reply) = app
-                .terminal_clipboard
-                .as_ref()
-                .unwrap()
-                .fixture_process_next(|_| Err("fixture native unavailable".into()))
-            {
-                app.accept_clipboard_completion(reply);
-            }
-            assert!(
-                Instant::now() < deadline,
-                "owned original restitution deadline"
-            );
-            std::thread::yield_now();
-        }
-        assert!(matches!(app.mode, Mode::SmartCopy));
-        assert!(
-            app.smart_copy_preview.is_none(),
-            "native failure cannot claim copied preview"
-        );
-        let original = app.smart_copy_session.as_ref().unwrap();
-        assert_eq!(original.selected_count(), 1);
-        assert_eq!(
-            original.selected_parts().collect::<Vec<_>>(),
-            ["https://example.test/api"]
-        );
-        assert!(app
-            .status_message
-            .as_ref()
-            .unwrap()
-            .contains("Enter retries"));
-    }
-
-    fn modified(kind: MouseEventKind, position: Position, modifiers: KeyModifiers) -> MouseEvent {
-        MouseEvent {
-            kind,
-            column: position.x,
-            row: position.y,
-            modifiers,
-        }
-    }
-
-    fn inside_pane(app: &App, pane_id: NodeId) -> Position {
-        let area = app.pane_viewport(pane_id).unwrap().content_area;
-        Position::new(area.x + 1, area.y)
-    }
-
-    #[test]
-    fn holding_the_light_key_selects_clicks_and_copies_on_release() {
-        let (mut app, pane_id) = app_with_plain_terminal();
-        let inside = inside_pane(&app, pane_id);
-        handle_mouse_event(
-            &mut app,
-            modified(MouseEventKind::Moved, inside, KeyModifiers::CONTROL),
-        );
-        assert!(matches!(app.mode, Mode::SmartCopy));
-        assert!(app.smart_copy_light.is_some());
-        let session = app.smart_copy_session.as_ref().expect("session");
-        assert!(session.is_light);
-        assert!(
-            app.take_pending_smart_copy_request().is_none(),
-            "no model call"
-        );
-
-        let url = candidate_position(&app, pane_id);
-        handle_mouse_event(
-            &mut app,
-            modified(MouseEventKind::Moved, url, KeyModifiers::CONTROL),
-        );
-        handle_mouse_event(
-            &mut app,
-            modified(
-                MouseEventKind::Up(MouseButton::Left),
-                url,
-                KeyModifiers::CONTROL,
-            ),
-        );
-        assert_eq!(app.smart_copy_session.as_ref().unwrap().selected_count(), 1);
-        assert!(
-            app.smart_copy_preview.is_none(),
-            "nothing is copied before release"
-        );
-
-        handle_mouse_event(
-            &mut app,
-            modified(MouseEventKind::Moved, url, KeyModifiers::NONE),
-        );
-        assert!(matches!(app.mode, Mode::Normal));
-        assert!(app.smart_copy_light.is_none());
-        assert_failed_light_copy_restores_exact_existing_selection(&mut app);
-    }
-
-    #[test]
-    fn light_mode_respects_the_setting_and_the_configured_key() {
-        let (mut app, pane_id) = app_with_plain_terminal();
-        let position = inside_pane(&app, pane_id);
-        let mut settings = app.terminal_settings;
-        settings.smart_copy_light = false;
-        app.apply_terminal_settings(settings);
-        handle_mouse_event(
-            &mut app,
-            modified(MouseEventKind::Moved, position, KeyModifiers::CONTROL),
-        );
-        assert!(matches!(app.mode, Mode::Normal));
-
-        settings.smart_copy_light = true;
-        settings.smart_copy_light_key = crate::config::SmartCopyLightKey::Alt;
-        app.apply_terminal_settings(settings);
-        handle_mouse_event(
-            &mut app,
-            modified(MouseEventKind::Moved, position, KeyModifiers::CONTROL),
-        );
-        assert!(
-            matches!(app.mode, Mode::Normal),
-            "Ctrl is not the configured key"
-        );
-        handle_mouse_event(
-            &mut app,
-            modified(MouseEventKind::Moved, position, KeyModifiers::ALT),
-        );
-        assert!(matches!(app.mode, Mode::SmartCopy));
-    }
-
-    #[test]
-    fn the_wheel_with_the_modifier_does_not_start_light_mode() {
-        let (mut app, pane_id) = app_with_plain_terminal();
-        let position = inside_pane(&app, pane_id);
-        handle_mouse_event(
-            &mut app,
-            modified(MouseEventKind::ScrollUp, position, KeyModifiers::CONTROL),
-        );
-        assert!(matches!(app.mode, Mode::Normal));
-    }
-
-    #[test]
-    fn key_release_event_escape_and_idle_grace_end_light_mode() {
-        use crossterm::event::{
-            Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, ModifierKeyCode,
-        };
-        let start = |app: &mut App, pane_id: NodeId| {
-            let inside = inside_pane(app, pane_id);
-            handle_mouse_event(
-                app,
-                modified(MouseEventKind::Moved, inside, KeyModifiers::CONTROL),
-            );
-            let url = candidate_position(app, pane_id);
-            handle_mouse_event(
-                app,
-                modified(MouseEventKind::Moved, url, KeyModifiers::CONTROL),
-            );
-            handle_mouse_event(
-                app,
-                modified(
-                    MouseEventKind::Up(MouseButton::Left),
-                    url,
-                    KeyModifiers::CONTROL,
-                ),
-            );
-        };
-
-        let (mut app, pane_id) = app_with_plain_terminal();
-        start(&mut app, pane_id);
-        crate::keys::handle_event(
-            &mut app,
-            Event::Key(KeyEvent {
-                code: KeyCode::Modifier(ModifierKeyCode::LeftControl),
-                modifiers: KeyModifiers::NONE,
-                kind: KeyEventKind::Release,
-                state: KeyEventState::NONE,
-            }),
-        );
-        assert!(matches!(app.mode, Mode::Normal));
-        assert_failed_light_copy_restores_exact_existing_selection(&mut app);
-
-        let (mut app, pane_id) = app_with_plain_terminal();
-        start(&mut app, pane_id);
-        crate::keys::handle_event(
-            &mut app,
-            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-        );
-        assert!(matches!(app.mode, Mode::Normal));
-        assert!(app.smart_copy_preview.is_none(), "Escape copies nothing");
-
-        let (mut app, pane_id) = app_with_plain_terminal();
-        start(&mut app, pane_id);
-        let now = Instant::now();
-        assert!(!app.tick_smart_copy_light(now) || app.smart_copy_light.is_some());
-        assert!(
-            app.smart_copy_light.is_some(),
-            "still held within the grace period"
-        );
-        app.tick_smart_copy_light(
-            now + crate::smart_copy_light::RELEASE_IDLE_GRACE + Duration::from_millis(10),
-        );
-        assert!(app.smart_copy_light.is_none());
-        assert_failed_light_copy_restores_exact_existing_selection(&mut app);
-    }
-
-    #[test]
-    fn preview_disappears_after_a_second() {
-        let (mut app, _pane_id) = app_with_plain_terminal();
-        let now = Instant::now();
-        app.smart_copy_preview = Some(crate::smart_copy_light::SmartCopyPreview::new(
-            "text".into(),
-            1,
-            true,
-            now,
-        ));
-        assert!(app.tick_smart_copy_light(now + Duration::from_millis(500)));
-        assert!(app.smart_copy_preview.is_some());
-        app.tick_smart_copy_light(now + Duration::from_millis(1001));
-        assert!(app.smart_copy_preview.is_none());
-    }
-
-    #[test]
-    fn smart_copy_release_is_not_lost_to_stale_tree_drag() {
-        let (mut app, pane_id) = app_with_candidate();
-        let position = candidate_position(&app, pane_id);
-        app.begin_tree_drag(pane_id);
-
-        handle_mouse_event(&mut app, mouse(MouseEventKind::Moved, position));
-        assert_eq!(
-            app.smart_copy_session
-                .as_ref()
-                .and_then(|session| session.current_candidate())
-                .map(|candidate| candidate.kind.as_str()),
-            Some("url")
-        );
-        app.status_message = None;
-        handle_mouse_event(
-            &mut app,
-            mouse(MouseEventKind::Up(MouseButton::Left), position),
-        );
-        assert_ne!(
-            app.status_message.as_deref(),
-            Some("Move over a highlighted Smart Copy selection")
-        );
-    }
-
-    #[test]
-    fn smart_copy_release_only_hosts_still_copy_the_hovered_candidate() {
-        let (mut app, pane_id) = app_with_candidate();
-        let position = candidate_position(&app, pane_id);
-        handle_mouse_event(&mut app, mouse(MouseEventKind::Moved, position));
-        app.status_message = None;
-        handle_mouse_event(
-            &mut app,
-            mouse(MouseEventKind::Up(MouseButton::Left), position),
-        );
-        assert_ne!(
-            app.status_message.as_deref(),
-            Some("Move over a highlighted Smart Copy selection")
-        );
     }
 }
 

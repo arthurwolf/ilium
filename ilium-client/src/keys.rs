@@ -217,7 +217,6 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         Mode::AgentToolbarModelSubmenu(state) => {
             handle_agent_toolbar_model_submenu_event(app, state, &event)
         }
-        Mode::SmartCopy => handle_smart_copy_event(app, &event),
         Mode::CreateAgentFromLine(state) => handle_create_agent_from_line_event(app, state, &event),
         Mode::CreateAgentWorkspace(state) => {
             handle_create_agent_workspace_event(app, state, &event)
@@ -285,14 +284,6 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
             app.mode = Mode::AttentionOverview;
             if let Event::Key(key) = &event {
                 app.handle_attention_overview_key(*key);
-            }
-        }
-        Mode::ConvertSession => {
-            app.mode = Mode::ConvertSession;
-            if let Event::Key(key) = &event {
-                if is_press(key) {
-                    app.handle_conversion_key(key.code);
-                }
             }
         }
         Mode::ConfirmRemoveWorkspace(target) => {
@@ -433,34 +424,6 @@ mod bounded_normal_paste_tests {
             requires_bounded_key_paste_replay(&app),
             "path prompt pastes need bounded validation before atomic character replay"
         );
-    }
-}
-
-fn handle_smart_copy_event(app: &mut App, event: &Event) {
-    app.mode = Mode::SmartCopy;
-    if let Some(light_key) = app.smart_copy_light_key() {
-        let released = matches!(
-            event,
-            Event::Key(key)
-                if key.kind == KeyEventKind::Release && light_key.matches_modifier_key(key.code)
-        );
-        if released || matches!(event, Event::FocusLost) {
-            app.finish_smart_copy_light();
-            return;
-        }
-    }
-    let Event::Key(key) = event else {
-        return;
-    };
-    if !is_press(key) {
-        return;
-    }
-    match key.code {
-        KeyCode::Esc | KeyCode::Char('q') => app.exit_smart_copy(),
-        KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => app.smart_copy_cycle_overlap(1),
-        KeyCode::BackTab | KeyCode::Up | KeyCode::Char('k') => app.smart_copy_cycle_overlap(-1),
-        KeyCode::Enter => app.smart_copy_copy_current(),
-        _ => {}
     }
 }
 
@@ -5495,6 +5458,12 @@ mod indent_outdent_tests {
             .tree
             .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
             .unwrap();
+        // A remembered plugin ordering whose plugin is not running: choosing the manual order
+        // in the submenu forgets it.
+        app.ui_settings.plugin_tree_ordering = Some(crate::config::PluginTreeOrderingChoice {
+            plugin: "ilium.core.tree".to_string(),
+            ordering: "type".to_string(),
+        });
         app.open_context_menu(pane, 2, 2);
         let Mode::ContextMenu(menu) = &mut app.mode else {
             panic!("context menu should be open");
@@ -5526,7 +5495,7 @@ mod indent_outdent_tests {
             Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
 
-        assert_eq!(app.ui_settings.tree_order, crate::config::TreeOrder::Type);
+        assert_eq!(app.ui_settings.plugin_tree_ordering, None);
         assert!(matches!(app.mode, Mode::Normal));
     }
 

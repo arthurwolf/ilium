@@ -19,6 +19,12 @@ pub(crate) const SEARCH_COMMAND: &str = "ilium.core.search/open";
 /// The Keys and help plugin's "Show the key reference" command; it opens the `keys` panel.
 pub(crate) const HELP_COMMAND: &str = "ilium.core.keys-and-help/show-keys";
 
+/// The Smart Copy plugin's command; it freezes the pane and opens the candidate picker.
+pub(crate) const SMART_COPY_COMMAND: &str = "ilium.core.smart-copy/smart-copy";
+
+/// The Settings plugin's "Editor line display" command; it opens the clip or wrap choice.
+pub(crate) const EDITOR_LINE_DISPLAY_COMMAND: &str = "ilium.core.settings/editor-line-display";
+
 impl App {
     /// Runs a plugin command. Tells the user when no plugin host is running; a command that
     /// no enabled plugin contributes is reported by the host as a toast.
@@ -45,6 +51,31 @@ impl App {
     pub(crate) fn action_new_split_view(&mut self, origin: CommandOrigin) {
         let arguments = self.new_split_arguments();
         self.invoke_plugin_command(NEW_SPLIT_COMMAND, arguments, origin);
+    }
+
+    /// The editor toolbar's "Editor line display" chooser. The kernel passes the pane and the mode
+    /// it shows now; the Settings plugin draws the choice and sets the mode through
+    /// `kernel.set-editor-option`.
+    pub(crate) fn action_editor_line_display(
+        &mut self,
+        pane: ilium_core::NodeId,
+        origin: CommandOrigin,
+    ) {
+        if !matches!(self.mode, crate::app::Mode::Normal) {
+            return;
+        }
+        let Some(crate::app::PaneRuntime::Editor(editor)) = self.panes.get(&pane) else {
+            return;
+        };
+        let arguments = serde_json::json!({
+            "pane": pane.0,
+            "line_display": match editor.line_display {
+                crate::config::LineDisplay::Clip => "clip",
+                crate::config::LineDisplay::Wrap => "wrap",
+            },
+        })
+        .to_string();
+        self.invoke_plugin_command(EDITOR_LINE_DISPLAY_COMMAND, arguments, origin);
     }
 
     /// "Search the workspace" from the key binding, the tree toolbar or the context menu.

@@ -572,10 +572,13 @@ impl HostRuntime {
                 Arc::clone(&self.kernel),
                 &record.granted,
             ))),
-            sessions: Some(Box::new(KernelSessions::new(
-                Arc::clone(&self.kernel),
-                &record.granted,
-            ))),
+            sessions: Some(Box::new(
+                KernelSessions::new(Arc::clone(&self.kernel), &record.granted).with_requests(
+                    plugin,
+                    Arc::clone(&self.results),
+                    self.ids.clone(),
+                ),
+            )),
             agent: Some(Box::new(KernelAgent::new(
                 Arc::clone(&self.kernel),
                 &record.granted,

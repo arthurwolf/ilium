@@ -73,14 +73,15 @@ impl App {
         changed
     }
     /// The tree order actually applied: cost ordering when the Agent Cost
-    /// tab's sort switch is on, otherwise the User Interface tab's choice.
+    /// tab's sort switch is on, then the plugin ordering the user chose when its plugin still
+    /// contributes it, otherwise the stored manual order.
     pub(crate) fn effective_tree_order(&self) -> crate::config::TreeOrder {
         if self.cost_settings.sort_by_cost {
             crate::config::TreeOrder::CostDescending
         } else if self.plugin_tree_ordering_in_effect() {
             crate::config::TreeOrder::PluginKey
         } else {
-            self.ui_settings.tree_order
+            crate::config::TreeOrder::Manual
         }
     }
 }

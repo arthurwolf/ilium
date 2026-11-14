@@ -182,6 +182,10 @@ impl DeliveryState {
                     // touching host audio. No other unfinished effect is reported as successful.
                     self.played_sounds.push(name.clone());
                     Outcome::Ok
+                } else if matches!(&item.submission.intent, Intent::SendInput(_)) {
+                    // The input is recorded in the submission history; the fake has no PTY to
+                    // write it to, so accepting it is the whole effect.
+                    Outcome::Ok
                 } else {
                     Outcome::Failed(PluginError::new(
                         ErrorCode::Unsupported,

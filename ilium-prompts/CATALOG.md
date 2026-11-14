@@ -17,9 +17,9 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-server/src/workspace.rs worktree agent initial prompt` | [agent/worktree-wrap-up](templates/agent/worktree-wrap-up.hbs) | `WORKTREE_WRAP_UP_INSTRUCTIONS` |
 | `ilium-client/src/chatroom.rs:19 COORDINATION_POSTING_GUIDANCE` | [agent/coordination-guidance](templates/agent/coordination-guidance.hbs) | `COORDINATION_GUIDANCE` |
 | `ilium-client/src/app.rs:9785 ASK_FOR_UPDATE_PROMPT` | [agent/ask-for-update](templates/agent/ask-for-update.hbs) | `ASK_FOR_UPDATE` |
-| `ilium-session-convert/src/claude_writer.rs:26 MISSING_RESULT_TEXT` | [conversion/missing-result](templates/conversion/missing-result.hbs) | `MISSING_RESULT` |
-| `ilium-session-convert/src/claude_writer.rs:27 EMPTY_RESULT_TEXT` | [conversion/empty-result](templates/conversion/empty-result.hbs) | `EMPTY_RESULT` |
-| `ilium-session-convert/src/claude_writer.rs:28 SYNTHETIC_FIRST_PROMPT` | [conversion/synthetic-first-prompt](templates/conversion/synthetic-first-prompt.hbs) | `SYNTHETIC_FIRST_PROMPT` |
+| `ilium-remote-compaction/src/write_claude.rs:162 MISSING_RESULT` | [conversion/missing-result](templates/conversion/missing-result.hbs) | `MISSING_RESULT` |
+| `ilium-remote-compaction/src/write_claude.rs:163 EMPTY_RESULT` | [conversion/empty-result](templates/conversion/empty-result.hbs) | `EMPTY_RESULT` |
+| `plugins/core/session-convert/src/prompts.rs:6 SYNTHETIC_FIRST_PROMPT` | [conversion/synthetic-first-prompt](templates/conversion/synthetic-first-prompt.hbs) | `SYNTHETIC_FIRST_PROMPT` |
 | `ilium-client/src/session_naming.rs:279` | [naming/session-label-example](templates/naming/session-label-example.hbs) | `SESSION_LABEL_EXAMPLE` |
 | `ilium-client/src/session_naming.rs:280` | [naming/session-summary-example](templates/naming/session-summary-example.hbs) | `SESSION_SUMMARY_EXAMPLE` |
 | `ilium-client/src/session_naming.rs:300` | [naming/unavailable-process](templates/naming/unavailable-process.hbs) | `UNAVAILABLE_PROCESS` |
@@ -33,7 +33,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/restructure.rs:693` | [naming/content-omission-marker](templates/naming/content-omission-marker.hbs) | `CONTENT_OMISSION_MARKER` |
 | `ilium-client/src/restructure.rs:2316` | [naming/unavailable-transcript](templates/naming/unavailable-transcript.hbs) | `UNAVAILABLE_TRANSCRIPT` |
 | `ilium-inference/src/lib.rs:299; restructure.rs:176` | [naming/json-only](templates/naming/json-only.hbs) | `JSON_ONLY` |
-| `ilium-client/src/smart_copy.rs:1403` | [naming/smart-copy-system](templates/naming/smart-copy-system.hbs) | `SMART_COPY_SYSTEM` |
 | `ilium-client/src/naming.rs:129` | [naming/naming/v0-v1-characters-omitted](templates/naming/naming/v0-v1-characters-omitted.hbs) | `NAMING_NAMING_V0_V1_CHARACTERS_OMITTED` |
 | `ilium-client/src/naming.rs:278` | [naming/naming/v0](templates/naming/naming/v0.hbs) | `NAMING_NAMING_V0` |
 | `ilium-client/src/naming.rs:341` | [naming/naming/context-label-response-missing-string-field-field](templates/naming/naming/context-label-response-missing-string-field-field.hbs) | `NAMING_NAMING_CONTEXT_LABEL_RESPONSE_MISSING_STRING_FIELD_FIELD` |
@@ -94,55 +93,6 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/transcript_context.rs:375` | [naming/transcript_context/agents-md-instructions-for](templates/naming/transcript_context/agents-md-instructions-for.hbs) | `NAMING_TRANSCRIPT_CONTEXT_AGENTS_MD_INSTRUCTIONS_FOR` |
 | `ilium-client/src/transcript_context.rs:377` | [naming/transcript_context/codex-internal-context](templates/naming/transcript_context/codex-internal-context.hbs) | `NAMING_TRANSCRIPT_CONTEXT_CODEX_INTERNAL_CONTEXT` |
 | `ilium-client/src/transcript_context.rs:379` | [naming/transcript_context/ilium-progress-monitor](templates/naming/transcript_context/ilium-progress-monitor.hbs) | `NAMING_TRANSCRIPT_CONTEXT_ILIUM_PROGRESS_MONITOR` |
-| `ilium-client/src/smart_copy.rs:1446` | [naming/smart_copy/frozen-terminal-and-program-detected-selections-follow-as-json-data-cell-columns-in-a](templates/naming/smart_copy/frozen-terminal-and-program-detected-selections-follow-as-json-data-cell-columns-in-a.hbs) | `NAMING_SMART_COPY_FROZEN_TERMINAL_AND_PROGRAM_DETECTED_SELECTIONS_FOLLOW_AS_JSON_DATA_CELL_COLUMNS_IN_A` |
-| `ilium-client/src/smart_copy.rs:195` | [naming/smart_copy/line-v0-is-outside-the-snapshot](templates/naming/smart_copy/line-v0-is-outside-the-snapshot.hbs) | `NAMING_SMART_COPY_LINE_V0_IS_OUTSIDE_THE_SNAPSHOT` |
-| `ilium-client/src/smart_copy.rs:197` | [naming/smart_copy/line-v0-is-blank](templates/naming/smart_copy/line-v0-is-blank.hbs) | `NAMING_SMART_COPY_LINE_V0_IS_BLANK` |
-| `ilium-client/src/smart_copy.rs:220` | [naming/smart_copy/line-v0-is-outside-the-snapshot](templates/naming/smart_copy/line-v0-is-outside-the-snapshot.hbs) | `NAMING_SMART_COPY_LINE_V0_IS_OUTSIDE_THE_SNAPSHOT` |
-| `ilium-client/src/smart_copy.rs:228` | [naming/smart_copy/invalid-word-range-on-line](templates/naming/smart_copy/invalid-word-range-on-line.hbs) | `NAMING_SMART_COPY_INVALID_WORD_RANGE_ON_LINE` |
-| `ilium-client/src/smart_copy.rs:231` | [naming/smart_copy/unknown-starting-word-on-line](templates/naming/smart_copy/unknown-starting-word-on-line.hbs) | `NAMING_SMART_COPY_UNKNOWN_STARTING_WORD_ON_LINE` |
-| `ilium-client/src/smart_copy.rs:234` | [naming/smart_copy/unknown-ending-word-on-line](templates/naming/smart_copy/unknown-ending-word-on-line.hbs) | `NAMING_SMART_COPY_UNKNOWN_ENDING_WORD_ON_LINE` |
-| `ilium-client/src/smart_copy.rs:409` | [naming/smart_copy/v0-visible-excerpt](templates/naming/smart_copy/v0-visible-excerpt.hbs) | `NAMING_SMART_COPY_V0_VISIBLE_EXCERPT` |
-| `ilium-client/src/smart_copy.rs:697` | [naming/smart_copy/visible-fenced-block-l](templates/naming/smart_copy/visible-fenced-block-l.hbs) | `NAMING_SMART_COPY_VISIBLE_FENCED_BLOCK_L` |
-| `ilium-client/src/smart_copy.rs:708` | [naming/smart_copy/code-contents-l](templates/naming/smart_copy/code-contents-l.hbs) | `NAMING_SMART_COPY_CODE_CONTENTS_L` |
-| `ilium-client/src/smart_copy.rs:747` | [naming/smart_copy/visible-table-l](templates/naming/smart_copy/visible-table-l.hbs) | `NAMING_SMART_COPY_VISIBLE_TABLE_L` |
-| `ilium-client/src/smart_copy.rs:756` | [naming/smart_copy/table-cell-l-v0-c](templates/naming/smart_copy/table-cell-l-v0-c.hbs) | `NAMING_SMART_COPY_TABLE_CELL_L_V0_C` |
-| `ilium-client/src/smart_copy.rs:799` | [naming/smart_copy/visible-terminal-frame-l](templates/naming/smart_copy/visible-terminal-frame-l.hbs) | `NAMING_SMART_COPY_VISIBLE_TERMINAL_FRAME_L` |
-| `ilium-client/src/smart_copy.rs:809` | [naming/smart_copy/frame-contents-l](templates/naming/smart_copy/frame-contents-l.hbs) | `NAMING_SMART_COPY_FRAME_CONTENTS_L` |
-| `ilium-client/src/smart_copy.rs:845` | [naming/smart_copy/visible-diff-l](templates/naming/smart_copy/visible-diff-l.hbs) | `NAMING_SMART_COPY_VISIBLE_DIFF_L` |
-| `ilium-client/src/smart_copy.rs:879` | [naming/smart_copy/visible-diagnostic-l](templates/naming/smart_copy/visible-diagnostic-l.hbs) | `NAMING_SMART_COPY_VISIBLE_DIAGNOSTIC_L` |
-| `ilium-client/src/smart_copy.rs:918` | [naming/smart_copy/visible-tree-l](templates/naming/smart_copy/visible-tree-l.hbs) | `NAMING_SMART_COPY_VISIBLE_TREE_L` |
-| `ilium-client/src/smart_copy.rs:950` | [naming/smart_copy/visible-indented-code-l](templates/naming/smart_copy/visible-indented-code-l.hbs) | `NAMING_SMART_COPY_VISIBLE_INDENTED_CODE_L` |
-| `ilium-client/src/smart_copy.rs:972` | [naming/smart_copy/heading-l](templates/naming/smart_copy/heading-l.hbs) | `NAMING_SMART_COPY_HEADING_L` |
-| `ilium-client/src/smart_copy.rs:986` | [naming/smart_copy/heading-l](templates/naming/smart_copy/heading-l.hbs) | `NAMING_SMART_COPY_HEADING_L` |
-| `ilium-client/src/smart_copy.rs:1010` | [naming/smart_copy/visible-section-l](templates/naming/smart_copy/visible-section-l.hbs) | `NAMING_SMART_COPY_VISIBLE_SECTION_L` |
-| `ilium-client/src/smart_copy.rs:1029` | [naming/smart_copy/prompt-line-l](templates/naming/smart_copy/prompt-line-l.hbs) | `NAMING_SMART_COPY_PROMPT_LINE_L` |
-| `ilium-client/src/smart_copy.rs:1064` | [naming/smart_copy/visible-v0-l](templates/naming/smart_copy/visible-v0-l.hbs) | `NAMING_SMART_COPY_VISIBLE_V0_L` |
-| `ilium-client/src/smart_copy.rs:1088` | [naming/smart_copy/visible-paragraph-l](templates/naming/smart_copy/visible-paragraph-l.hbs) | `NAMING_SMART_COPY_VISIBLE_PARAGRAPH_L` |
-| `ilium-client/src/smart_copy.rs:1112` | [naming/smart_copy/inline-code-l](templates/naming/smart_copy/inline-code-l.hbs) | `NAMING_SMART_COPY_INLINE_CODE_L` |
-| `ilium-client/src/smart_copy.rs:1144` | [naming/smart_copy/url-l](templates/naming/smart_copy/url-l.hbs) | `NAMING_SMART_COPY_URL_L` |
-| `ilium-client/src/smart_copy.rs:1326` | [naming/smart_copy/invalid-jsonl-candidate](templates/naming/smart_copy/invalid-jsonl-candidate.hbs) | `NAMING_SMART_COPY_INVALID_JSONL_CANDIDATE` |
-| `ilium-client/src/smart_copy.rs:134` | [naming/smart_copy/candidate-label-is-invalid](templates/naming/smart_copy/candidate-label-is-invalid.hbs) | `NAMING_SMART_COPY_CANDIDATE_LABEL_IS_INVALID` |
-| `ilium-client/src/smart_copy.rs:140` | [naming/smart_copy/candidate-kind-is-invalid](templates/naming/smart_copy/candidate-kind-is-invalid.hbs) | `NAMING_SMART_COPY_CANDIDATE_KIND_IS_INVALID` |
-| `ilium-client/src/smart_copy.rs:143` | [naming/smart_copy/candidate-has-an-invalid-part-count](templates/naming/smart_copy/candidate-has-an-invalid-part-count.hbs) | `NAMING_SMART_COPY_CANDIDATE_HAS_AN_INVALID_PART_COUNT` |
-| `ilium-client/src/smart_copy.rs:150` | [naming/smart_copy/line-list-is-empty](templates/naming/smart_copy/line-list-is-empty.hbs) | `NAMING_SMART_COPY_LINE_LIST_IS_EMPTY` |
-| `ilium-client/src/smart_copy.rs:173` | [naming/smart_copy/candidate-resolves-only-to-whitespace](templates/naming/smart_copy/candidate-resolves-only-to-whitespace.hbs) | `NAMING_SMART_COPY_CANDIDATE_RESOLVES_ONLY_TO_WHITESPACE` |
-| `ilium-client/src/smart_copy.rs:192` | [naming/smart_copy/line-ids-start-at-1](templates/naming/smart_copy/line-ids-start-at-1.hbs) | `NAMING_SMART_COPY_LINE_IDS_START_AT_1` |
-| `ilium-client/src/smart_copy.rs:216` | [naming/smart_copy/line-ids-start-at-1](templates/naming/smart_copy/line-ids-start-at-1.hbs) | `NAMING_SMART_COPY_LINE_IDS_START_AT_1` |
-| `ilium-client/src/smart_copy.rs:618` | [naming/smart_copy/ps](templates/naming/smart_copy/ps.hbs) | `NAMING_SMART_COPY_PS` |
-| `ilium-client/src/smart_copy.rs:618` | [naming/smart_copy/c](templates/naming/smart_copy/c.hbs) | `NAMING_SMART_COPY_C` |
-| `ilium-client/src/smart_copy.rs:627` | [naming/smart_copy/diff-git](templates/naming/smart_copy/diff-git.hbs) | `NAMING_SMART_COPY_DIFF_GIT` |
-| `ilium-client/src/smart_copy.rs:629` | [naming/smart_copy/a](templates/naming/smart_copy/a.hbs) | `NAMING_SMART_COPY_A` |
-| `ilium-client/src/smart_copy.rs:630` | [naming/smart_copy/begin-patch](templates/naming/smart_copy/begin-patch.hbs) | `NAMING_SMART_COPY_BEGIN_PATCH` |
-| `ilium-client/src/smart_copy.rs:639` | [naming/smart_copy/traceback](templates/naming/smart_copy/traceback.hbs) | `NAMING_SMART_COPY_TRACEBACK` |
-| `ilium-client/src/smart_copy.rs:641` | [naming/smart_copy/caused-by](templates/naming/smart_copy/caused-by.hbs) | `NAMING_SMART_COPY_CAUSED_BY` |
-| `ilium-client/src/smart_copy.rs:642` | [naming/smart_copy/thread](templates/naming/smart_copy/thread.hbs) | `NAMING_SMART_COPY_THREAD` |
-| `ilium-client/src/smart_copy.rs:830` | [naming/smart_copy/diff](templates/naming/smart_copy/diff.hbs) | `NAMING_SMART_COPY_DIFF` |
-| `ilium-client/src/smart_copy.rs:831` | [naming/smart_copy/index](templates/naming/smart_copy/index.hbs) | `NAMING_SMART_COPY_INDEX` |
-| `ilium-client/src/smart_copy.rs:832` | [naming/smart_copy/new-file](templates/naming/smart_copy/new-file.hbs) | `NAMING_SMART_COPY_NEW_FILE` |
-| `ilium-client/src/smart_copy.rs:833` | [naming/smart_copy/deleted-file](templates/naming/smart_copy/deleted-file.hbs) | `NAMING_SMART_COPY_DELETED_FILE` |
-| `ilium-client/src/smart_copy.rs:865` | [naming/smart_copy/at](templates/naming/smart_copy/at.hbs) | `NAMING_SMART_COPY_AT` |
-| `ilium-client/src/smart_copy.rs:865` | [naming/smart_copy/caused-by](templates/naming/smart_copy/caused-by.hbs) | `NAMING_SMART_COPY_CAUSED_BY` |
-| `ilium-client/src/smart_copy.rs:1322` | [naming/smart_copy/jsonl-record-exceeds-64-kib](templates/naming/smart_copy/jsonl-record-exceeds-64-kib.hbs) | `NAMING_SMART_COPY_JSONL_RECORD_EXCEEDS_64_KIB` |
 | `ilium-client/src/control/mod.rs:278` | [voice/mod/system-instructions](templates/voice/mod/system-instructions.hbs) | `VOICE_MOD_SYSTEM_INSTRUCTIONS` |
 | `ilium-client/src/control/mod.rs:366` | [voice/mod/unknown-ilium-tool](templates/voice/mod/unknown-ilium-tool.hbs) | `VOICE_MOD_UNKNOWN_ILIUM_TOOL` |
 | `ilium-client/src/control/mod.rs:371` | [voice/mod/invalid-tool-arguments](templates/voice/mod/invalid-tool-arguments.hbs) | `VOICE_MOD_INVALID_TOOL_ARGUMENTS` |
@@ -387,9 +337,9 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-server/src/agent_delivery.rs:151` | [agent/progress-unknown](templates/agent/progress-unknown.hbs) | `PROGRESS_UNKNOWN` |
 | `ilium-server/src/agent_delivery.rs:162` | [agent/progress-monitor-failure](templates/agent/progress-monitor-failure.hbs) | `PROGRESS_MONITOR_FAILURE` |
 | `ilium-server/src/agent_delivery.rs:399` | [agent/progress-empty-status](templates/agent/progress-empty-status.hbs) | `PROGRESS_EMPTY_STATUS` |
-| `ilium-session-convert/src/claude_writer.rs:317` | [conversion/truncated-result](templates/conversion/truncated-result.hbs) | `TRUNCATED_RESULT` |
-| `ilium-session-convert/src/claude_writer.rs:373` | [conversion/bash-description-workdir](templates/conversion/bash-description-workdir.hbs) | `BASH_DESCRIPTION_WORKDIR` |
-| `ilium-session-convert/src/claude_writer.rs:374` | [conversion/bash-description](templates/conversion/bash-description.hbs) | `BASH_DESCRIPTION` |
+| `plugins/core/session-convert/src/prompts.rs:8 TRUNCATED_RESULT` | [conversion/truncated-result](templates/conversion/truncated-result.hbs) | `TRUNCATED_RESULT` |
+| `plugins/core/session-convert/src/prompts.rs:7 BASH_DESCRIPTION_WORKDIR` | [conversion/bash-description-workdir](templates/conversion/bash-description-workdir.hbs) | `BASH_DESCRIPTION_WORKDIR` |
+| `plugins/core/session-convert/src/prompts.rs:3 BASH_DESCRIPTION` | [conversion/bash-description](templates/conversion/bash-description.hbs) | `BASH_DESCRIPTION` |
 | `ilium-client/src/app.rs close_confirmation_message` | [naming/close-container](templates/naming/close-container.hbs) | `render by name` |
 | `ilium-client/src/app.rs close_confirmation_message` | [naming/close-dirty-editor](templates/naming/close-dirty-editor.hbs) | `render by name` |
 | `ilium-server/src/ipc/handlers.rs` | [naming/progress-restoration-failure](templates/naming/progress-restoration-failure.hbs) | `render by name` |

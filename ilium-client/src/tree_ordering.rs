@@ -1,35 +1,36 @@
-//! Pure ordering policy for the left-panel tree.
+//! The kernel's mechanism for presenting the left-panel tree in an order other than the manual one.
 //!
-//! The detached server owns one durable manual child vector per container.
-//! This module derives a client-local presentation order from that vector
-//! without mutating it. Only normal groups are sorted: split-view child order
-//! also determines right-panel placement and must remain structural.
+//! The detached server owns one durable manual child vector per container. This module derives a
+//! client-local presentation order from that vector without mutating it, by sorting siblings
+//! with a rank map. It knows no ordering policy: the item-type, age and name orders are
+//! `contributes.tree_orderings` of the tree plugin (`ilium.core.tree`), which publishes one sort
+//! key per node; the cost order is the Agent Cost tab's rank map. Only normal groups are sorted:
+//! split-view child order also determines right-panel placement and must remain structural.
 
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
-#[cfg(test)]
-use ilium_core::AgentClass;
-use ilium_core::{Node, NodeId, NodeKind, PaneContentKind, PaneStatus, Tree};
+use ilium_core::{Node, NodeId, Tree};
 
 use crate::config::TreeOrder;
 
 /// Returns `parent`'s children in the requested presentation order.
 /// Missing/non-container parents fail soft to an empty list, matching the
 /// tree renderer's existing recursive-walk contract.
+#[cfg(test)]
 pub fn ordered_children(tree: &Tree, parent: NodeId, tree_order: TreeOrder) -> Cow<'_, [NodeId]> {
     ordered_children_ranked(tree, parent, tree_order, &HashMap::new())
 }
 
-/// [`ordered_children`] with the per-node spend that `CostDescending` sorts
-/// by. A node missing from `cost_ranks` ranks as free, so it sinks below
-/// every agent that has spent something; ties keep the manual order.
+/// [`ordered_children`] with the per-node ranks the non-manual modes sort by: the spend for
+/// `CostDescending` (most expensive first, a node without one ranks as free) and the plugin's
+/// sort keys for `PluginKey` (ascending, a node without one sinks below every keyed one). Ties
+/// keep the manual order because the sort is stable.
 pub fn ordered_children_ranked<'a>(
     tree: &'a Tree,
     parent: NodeId,
     tree_order: TreeOrder,
-    cost_ranks: &HashMap<NodeId, f64>,
+    ranks: &HashMap<NodeId, f64>,
 ) -> Cow<'a, [NodeId]> {
     let Ok(children) = tree.children_of(parent) else {
         return Cow::Borrowed(&[]);
@@ -46,134 +47,25 @@ pub fn ordered_children_ranked<'a>(
         return Cow::Borrowed(children);
     }
 
-    // Lowercase each name once per sort instead of twice per comparison: the
-    // sidebar re-sorts every frame, and with hundreds of panes the comparison
-    // allocations dominated the ordering cost.
-    let lowered_names: HashMap<NodeId, String> = if uses_names(tree_order) {
-        children
-            .iter()
-            .filter_map(|id| tree.get(*id).map(|node| (*id, node.name.to_lowercase())))
-            .collect()
-    } else {
-        HashMap::new()
-    };
     let mut ordered = children.to_vec();
-    ordered.sort_by(|left_id, right_id| {
-        compare_nodes(
-            tree,
-            *left_id,
-            *right_id,
-            tree_order,
-            cost_ranks,
-            &lowered_names,
-        )
-    });
-    Cow::Owned(ordered)
-}
-
-/// Total comparator for two valid siblings. A missing node sorts last rather
-/// than panicking if a malformed snapshot ever references a stale child id.
-fn uses_names(tree_order: TreeOrder) -> bool {
-    matches!(
-        tree_order,
-        TreeOrder::Type | TreeOrder::NameAscending | TreeOrder::NameDescending
-    )
-}
-
-fn compare_nodes(
-    tree: &Tree,
-    left_id: NodeId,
-    right_id: NodeId,
-    tree_order: TreeOrder,
-    cost_ranks: &HashMap<NodeId, f64>,
-    lowered_names: &HashMap<NodeId, String>,
-) -> Ordering {
-    let (left, right) = match (tree.get(left_id), tree.get(right_id)) {
-        (Some(left), Some(right)) => (left, right),
-        // Both stale: equal rather than an order-dependent Greater/Less, so
-        // the comparator stays antisymmetric even with multiple bad ids.
-        (None, None) => return Ordering::Equal,
-        (None, Some(_)) => return Ordering::Greater,
-        (Some(_), None) => return Ordering::Less,
-    };
-
     match tree_order {
-        TreeOrder::Manual => Ordering::Equal,
-        TreeOrder::Type => type_rank(left)
-            .cmp(&type_rank(right))
-            .then_with(|| compare_names(left, right, lowered_names)),
-        // Node ids are allocated monotonically and never reused, so the
-        // largest id is the youngest node and therefore has the least age.
-        TreeOrder::AgeAscending => right.id.cmp(&left.id),
-        TreeOrder::AgeDescending => left.id.cmp(&right.id),
-        TreeOrder::NameAscending => compare_names(left, right, lowered_names),
-        TreeOrder::NameDescending => compare_names(right, left, lowered_names),
+        TreeOrder::Manual => {}
         TreeOrder::CostDescending => {
-            let rank = |id: NodeId| cost_ranks.get(&id).copied().unwrap_or(0.0);
-            // `sort_by` is stable, so equal spend keeps the manual order.
-            rank(right_id).total_cmp(&rank(left_id))
+            let rank = |id: NodeId| ranks.get(&id).copied().unwrap_or(0.0);
+            ordered.sort_by(|left, right| rank(*right).total_cmp(&rank(*left)));
         }
         TreeOrder::PluginKey => {
-            // Ascending sort keys; a node the plugin gave no key sinks below every keyed
-            // one, and `sort_by` is stable, so ties keep the manual order.
-            let rank = |id: NodeId| cost_ranks.get(&id).copied().unwrap_or(f64::INFINITY);
-            rank(left_id).total_cmp(&rank(right_id))
+            let rank = |id: NodeId| ranks.get(&id).copied().unwrap_or(f64::INFINITY);
+            ordered.sort_by(|left, right| rank(*left).total_cmp(&rank(*right)));
         }
     }
-}
-
-/// Case-insensitive display-name ordering with an id tie-breaker so names
-/// differing only by case still render deterministically.
-fn compare_names(left: &Node, right: &Node, lowered_names: &HashMap<NodeId, String>) -> Ordering {
-    let lowered = |node: &Node| {
-        lowered_names.get(&node.id).map_or_else(
-            || Cow::Owned(node.name.to_lowercase()),
-            |name| Cow::Borrowed(name.as_str()),
-        )
-    };
-    lowered(left)
-        .cmp(&lowered(right))
-        .then_with(|| left.name.cmp(&right.name))
-        .then_with(|| left.id.cmp(&right.id))
-}
-
-/// Groups related rows by the kind of icon/concept the user sees. Agent
-/// terminals have their own ranks because Claude, Codex, and plain shells
-/// are visibly distinct things in the sidebar.
-fn type_rank(node: &Node) -> u8 {
-    match &node.kind {
-        NodeKind::Container(container) if container.is_group() => 0,
-        NodeKind::Container(_) => 1,
-        NodeKind::Folder { .. } => 2,
-        NodeKind::Pane {
-            content: PaneContentKind::Terminal,
-            status: PaneStatus::Agent(agent),
-            ..
-        } => agent.class.type_sort_rank(),
-        NodeKind::Pane {
-            content: PaneContentKind::Terminal,
-            ..
-        } => 7,
-        NodeKind::Pane {
-            content: PaneContentKind::Editor,
-            ..
-        } => 8,
-        NodeKind::Pane {
-            content: PaneContentKind::Board,
-            ..
-        } => 9,
-        NodeKind::Pane {
-            content: PaneContentKind::Plugin,
-            ..
-        } => 10,
-    }
+    Cow::Owned(ordered)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ilium_core::{AgentActivity, BoardStorage, SplitOrientation, ROOT_ID};
-    use std::path::PathBuf;
+    use ilium_core::{PaneContentKind, SplitOrientation, ROOT_ID};
 
     fn names(tree: &Tree, ids: &[NodeId]) -> Vec<String> {
         ids.iter()
@@ -210,14 +102,12 @@ mod tests {
         let cheap = tree
             .add_pane(group, "cheap", PaneContentKind::Terminal)
             .unwrap();
-        let free_first = tree
-            .add_pane(group, "free-a", PaneContentKind::Terminal)
+        tree.add_pane(group, "free-a", PaneContentKind::Terminal)
             .unwrap();
         let pricey = tree
             .add_pane(group, "pricey", PaneContentKind::Terminal)
             .unwrap();
-        let free_second = tree
-            .add_pane(group, "free-b", PaneContentKind::Terminal)
+        tree.add_pane(group, "free-b", PaneContentKind::Terminal)
             .unwrap();
         let ranks = HashMap::from([(cheap, 1.5), (pricey, 40.0)]);
 
@@ -227,7 +117,6 @@ mod tests {
             ["pricey", "cheap", "free-a", "free-b"],
             "unranked nodes keep their manual order after every ranked one"
         );
-        let _ = (free_first, free_second);
         // Without ranks the mode degrades to the manual order.
         assert_eq!(
             names(
@@ -239,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn manual_and_age_modes_preserve_or_reverse_creation_order() {
+    fn manual_order_is_the_stored_order() {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
         tree.add_pane(group, "old", PaneContentKind::Terminal)
@@ -253,74 +142,31 @@ mod tests {
             names(&tree, &ordered_children(&tree, group, TreeOrder::Manual)),
             ["old", "middle", "new"]
         );
-        assert_eq!(
-            names(
-                &tree,
-                &ordered_children(&tree, group, TreeOrder::AgeAscending)
-            ),
-            ["new", "middle", "old"]
-        );
-        assert_eq!(
-            names(
-                &tree,
-                &ordered_children(&tree, group, TreeOrder::AgeDescending)
-            ),
-            ["old", "middle", "new"]
-        );
     }
 
     #[test]
-    fn type_mode_groups_every_visible_node_kind_then_orders_names() {
+    fn a_project_sorts_its_direct_children_too() {
         let mut tree = Tree::new();
-        let parent = tree.add_group(ROOT_ID, "work").unwrap();
-        tree.add_board(
-            parent,
-            "roadmap".to_string(),
-            BoardStorage::MarkdownFile {
-                path: PathBuf::from("roadmap.md"),
-            },
-        )
-        .unwrap();
+        let project = tree
+            .add_project(std::path::PathBuf::from("/tmp/project"))
+            .unwrap();
         let shell = tree
-            .add_pane(parent, "shell", PaneContentKind::Terminal)
+            .add_pane(project, "shell", PaneContentKind::Terminal)
             .unwrap();
-        let codex = tree
-            .add_pane(parent, "codex", PaneContentKind::Terminal)
-            .unwrap();
-        tree.set_pane_status(
-            codex,
-            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
-        )
-        .unwrap();
-        tree.add_pane(parent, "editor", PaneContentKind::Editor)
-            .unwrap();
-        tree.add_folder(parent, PathBuf::from("assets")).unwrap();
-        tree.create_split_view(parent, "split", SplitOrientation::Vertical, &[shell])
-            .unwrap();
-        tree.add_group(parent, "nested").unwrap();
+        let nested = tree.add_group(project, "nested").unwrap();
+        let ranks = HashMap::from([(nested, 0.0), (shell, 1.0)]);
 
         assert_eq!(
-            names(&tree, &ordered_children(&tree, parent, TreeOrder::Type)),
-            ["nested", "split", "assets", "codex", "editor", "roadmap"]
-        );
-    }
-
-    #[test]
-    fn type_mode_also_sorts_a_projects_direct_children() {
-        let mut tree = Tree::new();
-        let project = tree.add_project(PathBuf::from("/tmp/project")).unwrap();
-        tree.add_pane(project, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        tree.add_group(project, "nested").unwrap();
-
-        assert_eq!(
-            names(&tree, &ordered_children(&tree, project, TreeOrder::Type)),
+            names(
+                &tree,
+                &ordered_children_ranked(&tree, project, TreeOrder::PluginKey, &ranks)
+            ),
             ["nested", "shell"]
         );
     }
 
     #[test]
-    fn name_modes_apply_inside_each_group_but_never_reorder_split_members() {
+    fn ranks_apply_inside_each_group_but_never_reorder_split_members() {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
         let zebra = tree
@@ -332,18 +178,19 @@ mod tests {
         let split = tree
             .create_split_view(group, "split", SplitOrientation::Vertical, &[zebra, alpha])
             .unwrap();
+        let ranks = HashMap::from([(alpha, 0.0), (zebra, 1.0)]);
 
         assert_eq!(
             names(
                 &tree,
-                &ordered_children(&tree, split, TreeOrder::NameAscending)
+                &ordered_children_ranked(&tree, split, TreeOrder::PluginKey, &ranks)
             ),
             ["Zebra", "alpha"]
         );
         assert_eq!(
             names(
                 &tree,
-                &ordered_children(&tree, group, TreeOrder::NameDescending)
+                &ordered_children_ranked(&tree, group, TreeOrder::PluginKey, &ranks)
             ),
             ["split"]
         );

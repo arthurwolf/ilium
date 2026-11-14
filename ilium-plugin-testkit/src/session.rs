@@ -109,10 +109,7 @@ impl FakeSession {
     }
 
     /// Like `install` but returns the failure and the installed id.
-    pub fn try_install(
-        &mut self,
-        package_dir: impl AsRef<Path>,
-    ) -> Result<PluginId, HarnessError> {
+    pub fn try_install(&mut self, package_dir: impl AsRef<Path>) -> Result<PluginId, HarnessError> {
         let dir = package_dir.as_ref();
         let server = FakeHost::for_manifest(dir)?;
         let client = FakeHost::for_manifest(dir)?.side("client");
@@ -130,7 +127,11 @@ impl FakeSession {
             .get("server")
             .and_then(|server| server.get("exports"))
             .and_then(Value::as_array)
-            .map(|exports| exports.iter().any(|name| name.as_str() == Some("hook-handler")))
+            .map(|exports| {
+                exports
+                    .iter()
+                    .any(|name| name.as_str() == Some("hook-handler"))
+            })
             .unwrap_or(false);
         let services = manifest
             .get("contributes")
@@ -170,7 +171,10 @@ impl FakeSession {
             qualified.as_str()
         };
         let Some(stub) = core_stubs::find(name) else {
-            session_fail(codes::CORE_UNKNOWN, &format!("{name} is not a bundled core plugin"));
+            session_fail(
+                codes::CORE_UNKNOWN,
+                &format!("{name} is not a bundled core plugin"),
+            );
         };
         self.plugins.retain(|plugin| plugin.id != name);
         self.plugins.push(SessionPlugin {
@@ -246,7 +250,11 @@ impl FakeSession {
     ) -> Result<ServiceReply, PluginError> {
         let caller = caller_id.into_plugin_id().0;
         let is_installed = self.plugins.iter().any(|plugin| plugin.id == caller);
-        if !is_installed && !self.service_grants.contains(&(caller.clone(), name.to_string())) {
+        if !is_installed
+            && !self
+                .service_grants
+                .contains(&(caller.clone(), name.to_string()))
+        {
             return Err(PluginError::new(
                 ErrorCode::NotPermitted,
                 format!("{caller} has no services.use:{name} grant"),
@@ -255,9 +263,10 @@ impl FakeSession {
         let Some(provider) = self.plugins.iter().find(|plugin| {
             plugin.active
                 && !plugin.disabled
-                && plugin.services.iter().any(|service| {
-                    service == name || name == format!("{}/{service}", plugin.id)
-                })
+                && plugin
+                    .services
+                    .iter()
+                    .any(|service| service == name || name == format!("{}/{service}", plugin.id))
         }) else {
             return Err(PluginError::new(
                 ErrorCode::NotFound,
@@ -279,9 +288,13 @@ impl FakeSession {
             .map(|(_, reply)| reply.clone());
         if stub.is_none() {
             let provider_id = key.0.clone();
-            if let Some(provider) = self.plugins.iter_mut().find(|plugin| plugin.id == provider_id) {
+            if let Some(provider) = self
+                .plugins
+                .iter_mut()
+                .find(|plugin| plugin.id == provider_id)
+            {
                 if let Some(reply) = provider.server.dispatch_service(name, "call", request_json) {
-                    return Ok(reply);
+                    return error_reply(reply);
                 }
             }
         }
@@ -368,8 +381,10 @@ impl FakeSession {
         reply: Result<String, PluginError>,
     ) {
         self.ensure_service(plugin, service);
-        self.stubs
-            .insert((plugin.to_string(), service.to_string(), method.to_string()), reply);
+        self.stubs.insert(
+            (plugin.to_string(), service.to_string(), method.to_string()),
+            reply,
+        );
     }
 
     /// A service of a stub plugin that never answers (lane hook, see manual_gaps_fakes.md; DEV-483).
@@ -388,8 +403,9 @@ impl FakeSession {
         priority: i32,
         entry: serde_json::Value,
     ) {
-        self.contributions
-            .retain(|existing| !(existing.plugin == plugin && existing.point == point && existing.id == id));
+        self.contributions.retain(|existing| {
+            !(existing.plugin == plugin && existing.point == point && existing.id == id)
+        });
         self.contributions.push(Contribution {
             plugin: plugin.to_string(),
             point: point.to_string(),
@@ -412,7 +428,10 @@ impl FakeSession {
                 .then_with(|| left.plugin.cmp(&right.plugin))
                 .then_with(|| left.id.cmp(&right.id))
         });
-        found.into_iter().map(|contribution| contribution.entry.clone()).collect()
+        found
+            .into_iter()
+            .map(|contribution| contribution.entry.clone())
+            .collect()
     }
 
     /// Runs a hook or collect point of the owner with this payload; the replies as JSON text (lane hook, see manual_gaps_fakes.md).
@@ -496,6 +515,39 @@ impl FakeSession {
     pub fn disabled_notice(&self, tab: &str) -> String {
         format!("The plugin {tab} is disabled.")
     }
+}
+
+/// A provider answers a refused call with `{"error": "<error-code>", "message": "<text>"}` (the
+/// service reply has no error case); the caller sees the refusal as `Err`.
+fn error_reply(reply: ServiceReply) -> Result<ServiceReply, PluginError> {
+    let ServiceReply::Done(text) = &reply else {
+        return Ok(reply);
+    };
+    let Ok(serde_json::Value::Object(object)) = serde_json::from_str::<serde_json::Value>(text)
+    else {
+        return Ok(reply);
+    };
+    let Some(code_name) = object.get("error").and_then(serde_json::Value::as_str) else {
+        return Ok(reply);
+    };
+    let Some(code) = [
+        ErrorCode::NotPermitted,
+        ErrorCode::NotFound,
+        ErrorCode::InvalidArgument,
+        ErrorCode::Conflict,
+        ErrorCode::Busy,
+        ErrorCode::Unsupported,
+        ErrorCode::Internal,
+    ]
+    .into_iter()
+    .find(|code| code.as_str() == code_name) else {
+        return Ok(reply);
+    };
+    let message = object
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(code_name);
+    Err(PluginError::new(code, message))
 }
 
 #[cfg(test)]

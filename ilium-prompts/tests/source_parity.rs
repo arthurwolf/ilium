@@ -118,7 +118,6 @@ Track the actual job identity and its final exit/result record, not merely a loc
             &["entry_naming", "naming_and_organization"]
         }
         "naming/restructure" => &["entry_naming", "organization", "naming_and_organization"],
-        "naming/smart-copy-system" => &["smart_copy"],
         _ => &[],
     };
     let mut baseline = source.to_owned();

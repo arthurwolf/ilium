@@ -239,6 +239,75 @@ fn compare_names(left: &Entry, right: &Entry, lowered: &HashMap<u64, String>) ->
         .then_with(|| left.id.cmp(&right.id))
 }
 
+/// One ordering the plugin contributes to the kernel's "Order by" menu
+/// (`contributes.tree_orderings`): the kernel sorts siblings by the keys this plugin sets with
+/// decorations in `slot`, ascending, and a node without a key sinks below every keyed one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PluginOrdering {
+    /// The `tree_orderings` id, kebab-case.
+    pub id: &'static str,
+    /// The menu title (at most 32 characters).
+    pub title: &'static str,
+    /// The decoration slot that carries each node's key.
+    pub slot: &'static str,
+    /// The comparison the keys encode.
+    pub order: TreeOrder,
+}
+
+/// The five orderings the plugin contributes, in menu order. The manifest repeats the
+/// `id`/`title`/`slot` of each; a test keeps the two in step.
+pub const PLUGIN_ORDERINGS: [PluginOrdering; 5] = [
+    PluginOrdering {
+        id: "type",
+        title: "Item type",
+        slot: "order-type",
+        order: TreeOrder::Type,
+    },
+    PluginOrdering {
+        id: "age-newest",
+        title: "Newest first",
+        slot: "order-age-newest",
+        order: TreeOrder::AgeAscending,
+    },
+    PluginOrdering {
+        id: "age-oldest",
+        title: "Oldest first",
+        slot: "order-age-oldest",
+        order: TreeOrder::AgeDescending,
+    },
+    PluginOrdering {
+        id: "name-az",
+        title: "Name (A\u{2013}Z)",
+        slot: "order-name-az",
+        order: TreeOrder::NameAscending,
+    },
+    PluginOrdering {
+        id: "name-za",
+        title: "Name (Z\u{2013}A)",
+        slot: "order-name-za",
+        order: TreeOrder::NameDescending,
+    },
+];
+
+/// The sort keys of one sibling list: `(node, index into PLUGIN_ORDERINGS, key)` for every child
+/// and every ordering. A key is the position the child takes among its siblings in that
+/// ordering, so the kernel's ascending sort reproduces [`ordered`] exactly, ties and all.
+/// `sortable` is whether the parent accepts normal children; a split view's children keep
+/// their structural positions in every ordering.
+pub fn sibling_keys(children: &[Entry], sortable: bool) -> Vec<(u64, usize, i64)> {
+    let no_costs = HashMap::new();
+    let mut keys = Vec::with_capacity(children.len() * PLUGIN_ORDERINGS.len());
+    for (index, ordering) in PLUGIN_ORDERINGS.iter().enumerate() {
+        for (position, id) in ordered(children, sortable, ordering.order, &no_costs)
+            .into_iter()
+            .enumerate()
+        {
+            keys.push((id, index, position as i64));
+        }
+    }
+    keys
+}
+
 /// The four-byte sort key of the `order` decoration (page sample "Order the tree"): the first four
 /// bytes of the lower-case title, base 256.
 pub fn sort_key(title: &str) -> i64 {

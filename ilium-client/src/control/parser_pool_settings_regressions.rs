@@ -13,8 +13,6 @@ fn parser_pool_control_app() -> (
         engine_memory_budget_mib: 4096,
         scrollback_budget_mib: 16, // Preserve the independent scrollback budget.
         new_pane_directory: crate::config::NewPaneDirectory::FocusedTerminal,
-        smart_copy_light: false,
-        smart_copy_light_key: crate::config::SmartCopyLightKey::Alt,
     };
     crate::config::save_terminal_settings(directory.path(), &settings).unwrap();
     let mut app = App::new("parser-pool-control".into(), directory.path().into());

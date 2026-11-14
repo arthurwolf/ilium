@@ -79,6 +79,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "entry": "server.wasm",
     "world": "ilium:server/base@0.1.0"
   },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
   "capabilities": {
     "server": [
       "inference.provide",
@@ -220,6 +224,239 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "max_entries": 64,
         "dynamic": false,
         "version": "0.1.0"
+      }
+    ],
+    "commands": [
+      {
+        "id": "test-provider",
+        "title": "Test the inference provider",
+        "category": "Inference"
+      }
+    ],
+    "settings": [
+      {
+        "kind": "tab",
+        "id": "inference",
+        "title": "Inference",
+        "sections": [
+          {
+            "id": "provider",
+            "title": "Provider",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "choice",
+                "key": "selected_provider",
+                "title": "Provider",
+                "default": "kilo_gateway",
+                "kernel_tab": "inference",
+                "kernel_key": "selected_provider",
+                "options": [
+                  {
+                    "value": "kilo_gateway",
+                    "title": "Kilo Gateway"
+                  },
+                  {
+                    "value": "ollama",
+                    "title": "Ollama (local)"
+                  },
+                  {
+                    "value": "open_ai",
+                    "title": "OpenAI-compatible"
+                  },
+                  {
+                    "value": "anthropic",
+                    "title": "Anthropic"
+                  },
+                  {
+                    "value": "open_router",
+                    "title": "OpenRouter"
+                  }
+                ]
+              },
+              {
+                "type": "choice",
+                "key": "title_style",
+                "title": "Title style",
+                "default": "labeling",
+                "kernel_tab": "inference",
+                "kernel_key": "title_style",
+                "options": [
+                  {
+                    "value": "labeling",
+                    "title": "Labeling"
+                  },
+                  {
+                    "value": "summarization",
+                    "title": "Summarization"
+                  }
+                ]
+              },
+              {
+                "type": "toggle",
+                "key": "codex_official_thread_names",
+                "title": "Codex official thread names",
+                "default": false,
+                "kernel_tab": "inference",
+                "kernel_key": "codex_official_thread_names"
+              },
+              {
+                "type": "number",
+                "key": "restructure_prompt_token_limit",
+                "title": "Restructure token budget",
+                "default": 200000,
+                "minimum": 1000,
+                "maximum": 10000000,
+                "step": 10000,
+                "kernel_tab": "inference",
+                "kernel_key": "restructure_prompt_token_limit"
+              }
+            ]
+          },
+          {
+            "id": "kilo-gateway",
+            "title": "Kilo Gateway",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "text",
+                "key": "kilo_gateway_model",
+                "title": "Model",
+                "default": "dots-studio/dots-3-note-preview:free",
+                "kernel_tab": "inference",
+                "kernel_key": "kilo_gateway.model"
+              }
+            ]
+          },
+          {
+            "id": "ollama",
+            "title": "Ollama (local)",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "text",
+                "key": "ollama_base_url",
+                "title": "Endpoint",
+                "default": "http://127.0.0.1:11434",
+                "kernel_tab": "inference",
+                "kernel_key": "ollama.base_url"
+              },
+              {
+                "type": "text",
+                "key": "ollama_model",
+                "title": "Model",
+                "default": "",
+                "kernel_tab": "inference",
+                "kernel_key": "ollama.model"
+              }
+            ]
+          },
+          {
+            "id": "openai",
+            "title": "OpenAI-compatible",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "text",
+                "key": "openai_base_url",
+                "title": "Endpoint",
+                "default": "https://api.openai.com/v1",
+                "kernel_tab": "inference",
+                "kernel_key": "openai.base_url"
+              },
+              {
+                "type": "text",
+                "key": "openai_api_key",
+                "title": "API key",
+                "default": "",
+                "kernel_tab": "inference",
+                "kernel_key": "openai.api_key"
+              },
+              {
+                "type": "text",
+                "key": "openai_model",
+                "title": "Model",
+                "default": "",
+                "kernel_tab": "inference",
+                "kernel_key": "openai.model"
+              }
+            ]
+          },
+          {
+            "id": "anthropic",
+            "title": "Anthropic",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "text",
+                "key": "anthropic_base_url",
+                "title": "Endpoint",
+                "default": "https://api.anthropic.com",
+                "kernel_tab": "inference",
+                "kernel_key": "anthropic.base_url"
+              },
+              {
+                "type": "text",
+                "key": "anthropic_api_key",
+                "title": "API key",
+                "default": "",
+                "kernel_tab": "inference",
+                "kernel_key": "anthropic.api_key"
+              },
+              {
+                "type": "text",
+                "key": "anthropic_model",
+                "title": "Model",
+                "default": "",
+                "kernel_tab": "inference",
+                "kernel_key": "anthropic.model"
+              }
+            ]
+          },
+          {
+            "id": "openrouter",
+            "title": "OpenRouter",
+            "scope": "client",
+            "rows": [
+              {
+                "type": "text",
+                "key": "openrouter_api_key",
+                "title": "API key",
+                "default": "",
+                "kernel_tab": "inference",
+                "kernel_key": "openrouter.api_key"
+              },
+              {
+                "type": "text",
+                "key": "openrouter_model",
+                "title": "Model",
+                "default": "openrouter/free",
+                "kernel_tab": "inference",
+                "kernel_key": "openrouter.model"
+              }
+            ]
+          },
+          {
+            "id": "test",
+            "title": "Test provider",
+            "scope": "server",
+            "rows": [
+              {
+                "type": "button",
+                "id": "test",
+                "label": "Run test",
+                "command": "test-provider"
+              },
+              {
+                "type": "info",
+                "id": "last_test",
+                "title": "Last test",
+                "text": "Not run yet",
+                "live": true
+              }
+            ]
+          }
+        ]
       }
     ]
   },

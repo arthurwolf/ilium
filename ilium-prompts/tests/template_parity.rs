@@ -70,7 +70,6 @@ fn custom_guidance_is_literal_and_isolated_to_its_template() {
             "naming/restructure",
             vec!["entry_naming", "organization", "naming_and_organization"],
         ),
-        ("naming/smart-copy-system", vec!["smart_copy"]),
     ] {
         let baseline = ilium_prompts::render(name, &serde_json::json!({})).unwrap();
         let mut context = serde_json::json!({});

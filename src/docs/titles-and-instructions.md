@@ -110,10 +110,9 @@ Instructions are added to new requests and saved globally (not per project). Emp
 | Organization | Inference | Tree restructure | Grouping and ordering rules |
 | Shared naming and organization context | Inference | Entry names, project names and tree organization | Vocabulary and preferences common to all three |
 | Project naming | Inference | Project name and icon | Preferred language and abbreviations |
-| Smart Copy | Inference | Smart Copy suggestions | Which exact-source copy targets to prioritise |
 | Ask for update | Agent Monitoring | The "Ask for update" request sent to an agent | What a status update should emphasise |
 
-Storage: the six non-voice inputs live under `[inference.instructions]` (`entry_naming`, `organization`, `naming_and_organization`, `project_naming`, `smart_copy`, `ask_for_update`); the voice input is `[voice].custom_prompt`.
+Storage: the five non-voice inputs live under `[inference.instructions]` (`entry_naming`, `organization`, `naming_and_organization`, `project_naming`, `ask_for_update`); the voice input is `[voice].custom_prompt`.
 
 ## Editing instructions step by step
 

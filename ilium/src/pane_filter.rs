@@ -163,17 +163,6 @@ impl PaneKind {
             PaneStatus::Plugin { .. } => Self::Plugin,
         }
     }
-
-    pub(crate) const fn name(self) -> &'static str {
-        match self {
-            Self::Agent => "agent",
-            Self::Shell => "shell",
-            Self::Editor => "editor",
-            Self::Board => "board",
-            Self::UnavailableAgent => "unavailable-agent",
-            Self::Plugin => "plugin",
-        }
-    }
 }
 
 /// A live agent's current state.
@@ -188,17 +177,6 @@ pub(crate) enum AgentStateName {
 }
 
 impl AgentStateName {
-    pub(crate) const fn name(self) -> &'static str {
-        match self {
-            Self::Working => "working",
-            Self::WaitingApproval => "waiting-approval",
-            Self::WaitingSubagents => "waiting-subagents",
-            Self::Settling => "settling",
-            Self::Idle => "idle",
-            Self::Done => "done",
-        }
-    }
-
     /// Idle and done agents have no turn in progress: input reaches an empty
     /// composer instead of interrupting or queueing behind work.
     pub(crate) const fn is_idle(self) -> bool {
@@ -257,20 +235,6 @@ impl PaneFacts {
     /// or the launch directory for a pane outside any project.
     fn project_or_cwd(&self) -> Option<&Path> {
         self.project.as_deref().or(self.cwd.as_deref())
-    }
-
-    pub(crate) fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "session": self.session_name,
-            "pane_id": self.pane_id.0,
-            "name": self.name,
-            "kind": self.kind.name(),
-            "agent": self.agent,
-            "state": self.state.map(AgentStateName::name),
-            "project": self.project.as_ref().map(|path| path.to_string_lossy()),
-            "cwd": self.cwd.as_ref().map(|path| path.to_string_lossy()),
-            "is_self": self.is_self,
-        })
     }
 }
 
@@ -900,10 +864,8 @@ mod tests {
         assert_eq!(agent_facts.agent.as_deref(), Some("Codex"));
         assert_eq!(agent_facts.state, Some(AgentStateName::Done));
         assert_eq!(agent_facts.project.as_deref(), Some(Path::new("/w/proj")));
-        assert_eq!(agent_facts.to_json()["state"], "done");
         let shell_facts = facts.iter().find(|pane| pane.pane_id == shell).unwrap();
         assert_eq!(shell_facts.kind, PaneKind::Shell);
         assert_eq!(shell_facts.state, None);
-        assert_eq!(shell_facts.to_json()["kind"], "shell");
     }
 }

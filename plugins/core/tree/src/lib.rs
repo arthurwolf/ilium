@@ -66,6 +66,9 @@ pub struct TreeServer {
     parents: HashMap<u64, u64>,
     /// The last `order` key submitted per node.
     keys: HashMap<u64, i64>,
+    /// The last sibling-rank key submitted per node and ordering (an index into
+    /// `ordering::PLUGIN_ORDERINGS`).
+    ranks: HashMap<(u64, usize), i64>,
     /// Intents of a service call that the host refused to take directly; sent with the next batch.
     pending: Vec<Submission>,
 }
@@ -88,31 +91,84 @@ impl TreeServer {
         }
     }
 
-    /// Reads each changed node, publishes the change and refreshes its `order` key.
+    /// Reads each changed node, publishes the change, refreshes its `order` key and re-ranks the
+    /// sibling lists the change touched (the new parent, and the old one when it moved).
     fn observe(&mut self, nodes: Vec<NodeId>, submissions: &mut Vec<Submission>) {
-        let mut api = host();
-        for node in nodes {
-            let Some(view) = HostTree::get(&mut *api, node) else {
-                continue;
-            };
-            match view.parent {
-                Some(parent) => {
-                    self.parents.insert(node.0, parent.0);
+        let mut touched: Vec<Option<u64>> = Vec::new();
+        {
+            let mut api = host();
+            for node in nodes {
+                let Some(view) = HostTree::get(&mut *api, node) else {
+                    continue;
+                };
+                let parent = view.parent.map(|parent| parent.0);
+                let previous = match parent {
+                    Some(parent) => self.parents.insert(node.0, parent),
+                    None => self.parents.remove(&node.0),
+                };
+                for list in [previous.map(Some), Some(parent)].into_iter().flatten() {
+                    if !touched.contains(&list) {
+                        touched.push(list);
+                    }
                 }
-                None => {
-                    self.parents.remove(&node.0);
-                }
+                self.publish_and_key(node, &view, submissions);
             }
-            let change = if self.known.insert(node.0) {
-                "added"
-            } else {
-                "updated"
+        }
+        for list in touched {
+            self.rank_siblings(list, submissions);
+        }
+    }
+
+    /// Publishes the change of one node and refreshes its `order` key.
+    fn publish_and_key(
+        &mut self,
+        node: NodeId,
+        view: &ilium_plugin_sdk::types::NodeView,
+        submissions: &mut Vec<Submission>,
+    ) {
+        let change = if self.known.insert(node.0) {
+            "added"
+        } else {
+            "updated"
+        };
+        Self::publish_change(node.0, change);
+        let key = ordering::sort_key(&view.title);
+        if self.keys.insert(node.0, key) != Some(key) {
+            submissions.push(Submission::new(Intent::SetDecoration(slot_decoration(
+                node, ORDER_SLOT, key,
+            ))));
+        }
+    }
+
+    /// Re-ranks one sibling list (`None` is the top level) in every ordering the plugin
+    /// contributes and submits the keys that changed. The kernel sorts a parent's children by
+    /// the keys of the ordering in effect, so a title, an agent or a membership change anywhere
+    /// in the list can move any sibling.
+    fn rank_siblings(&mut self, parent: Option<u64>, submissions: &mut Vec<Submission>) {
+        let (entries, sortable) = {
+            let mut api = host();
+            let children = match parent {
+                Some(parent) => HostTree::children(&mut *api, NodeId(parent)),
+                None => HostTree::roots(&mut *api),
             };
-            Self::publish_change(node.0, change);
-            let key = ordering::sort_key(&view.title);
-            if self.keys.insert(node.0, key) != Some(key) {
-                submissions.push(Submission::new(Intent::SetDecoration(order_decoration(
-                    node, key,
+            let entries: Vec<ordering::Entry> = children
+                .into_iter()
+                .filter_map(|child| HostTree::get(&mut *api, child))
+                .map(|view| ordering::Entry::from_view(&view))
+                .collect();
+            let sortable = match parent {
+                Some(parent) => HostTree::get(&mut *api, NodeId(parent))
+                    .is_some_and(|view| ordering::accepts_normal_children(view.container)),
+                None => true,
+            };
+            (entries, sortable)
+        };
+        for (node, which, key) in ordering::sibling_keys(&entries, sortable) {
+            if self.ranks.insert((node, which), key) != Some(key) {
+                submissions.push(Submission::new(Intent::SetDecoration(slot_decoration(
+                    NodeId(node),
+                    ordering::PLUGIN_ORDERINGS[which].slot,
+                    key,
                 ))));
             }
         }
@@ -122,12 +178,17 @@ impl TreeServer {
     fn removed(&mut self, node: u64, submissions: &mut Vec<Submission>) {
         let was_known = self.known.remove(&node);
         self.keys.remove(&node);
+        self.ranks.retain(|(id, _), _| *id != node);
         if was_known {
             Self::publish_change(node, "removed");
         }
         let Some(parent) = self.parents.remove(&node) else {
             return;
         };
+        // The siblings that stay close ranks behind the removed one.
+        if self.known.contains(&parent) {
+            self.rank_siblings(Some(parent), submissions);
+        }
         if !ui_flag("ui.auto_remove_empty_groups", true) {
             return;
         }
@@ -275,11 +336,11 @@ fn error_payload(message: &str) -> String {
     json!({ "error": message }).to_string()
 }
 
-/// The `order` decoration of a node: a key and no visible text, never persisted.
-fn order_decoration(node: NodeId, key: i64) -> SetDecorationSpec {
+/// A sort-key decoration of a node in `slot`: a key and no visible text, never persisted.
+fn slot_decoration(node: NodeId, slot: &str, key: i64) -> SetDecorationSpec {
     SetDecorationSpec {
         node,
-        slot: ORDER_SLOT.to_string(),
+        slot: slot.to_string(),
         content: Vec::new(),
         icon: None,
         sort_key: Some(key),
@@ -301,6 +362,16 @@ impl Handler for TreeServer {
             match event {
                 Event::TreeChanged(nodes) => self.observe(nodes, &mut submissions),
                 Event::NodeRemoved(node) => self.removed(node.0, &mut submissions),
+                // An agent that appears or disappears changes the node's rank in the item-type
+                // ordering.
+                Event::AgentIdentified(identified) => {
+                    let node = identified.node.0;
+                    if let Some(parent) = self.parents.get(&node).copied() {
+                        self.rank_siblings(Some(parent), &mut submissions);
+                    } else if self.known.contains(&node) {
+                        self.rank_siblings(None, &mut submissions);
+                    }
+                }
                 Event::CommandInvoked(command) => {
                     submissions.extend(Self::command(&command));
                 }

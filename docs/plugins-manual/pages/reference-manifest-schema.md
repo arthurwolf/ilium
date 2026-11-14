@@ -716,7 +716,7 @@ The schema describes a source manifest and a packed manifest. In a source manife
             },
             "required": ["id", "title", "slot"]
           },
-          "maxItems": 4
+          "maxItems": 8
         },
         "status_segments": {
           "type": "array",

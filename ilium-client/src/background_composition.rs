@@ -57,13 +57,11 @@ pub fn elapsed_bucket(elapsed: Duration, frames_per_second: u32) -> u128 {
 }
 
 /// Ambient composition owns only the ordinary workspace. Suspended settings,
-/// full-screen modes, and modal stacks remain opaque, including Smart Copy's
-/// immutable inspection surface.
+/// full-screen modes, and modal stacks remain opaque.
 pub fn ambient_is_visible(app: &App) -> bool {
     app.animation_settings.enabled
         && app.modal_stack.is_empty()
         && matches!(app.mode, Mode::Normal)
-        && app.smart_copy_session.is_none()
         && !app.layout.screen_area.is_empty()
 }
 
@@ -301,8 +299,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     if !settings.panels.shows_right()
         || matches!(
             app.right_panel_target,
-            RightPanelTarget::Chatroom { .. }
-                | RightPanelTarget::Resource { .. }
+            RightPanelTarget::Resource { .. }
                 | RightPanelTarget::Attention
                 | RightPanelTarget::PluginView { .. }
         )
@@ -313,7 +310,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     let viewports = app.pane_viewports();
     if viewports.is_empty() {
         // This is draw_pane's known empty/loading placeholder, not an unknown
-        // editor, board, search, settings, or chatroom surface.
+        // editor, board, search, or settings surface.
         paint_region_with_field_receipt(
             buffer,
             panel_inner(app.layout.pane_area),
@@ -425,8 +422,7 @@ fn screen_occupancy(
         if settings.panels.shows_right()
             && !matches!(
                 app.right_panel_target,
-                RightPanelTarget::Chatroom { .. }
-                    | RightPanelTarget::Resource { .. }
+                RightPanelTarget::Resource { .. }
                     | RightPanelTarget::Attention
                     | RightPanelTarget::PluginView { .. }
             )

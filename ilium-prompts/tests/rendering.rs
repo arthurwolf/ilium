@@ -60,7 +60,6 @@ fn instruction_templates_ignore_preferences_for_other_tasks() {
         "organization": "ORG_ONLY",
         "naming_and_organization": "SHARED_ONLY",
         "project_naming": "PROJECT_ONLY",
-        "smart_copy": "COPY_ONLY",
         "custom_instructions": "UPDATE_ONLY",
     });
     for (name, expected) in [
@@ -71,7 +70,6 @@ fn instruction_templates_ignore_preferences_for_other_tasks() {
             "naming/restructure",
             vec!["ENTRY_ONLY", "ORG_ONLY", "SHARED_ONLY"],
         ),
-        ("naming/smart-copy-system", vec!["COPY_ONLY"]),
         ("agent/ask-for-update", vec!["UPDATE_ONLY"]),
     ] {
         let prompt = render(name, &all).unwrap();
@@ -80,7 +78,6 @@ fn instruction_templates_ignore_preferences_for_other_tasks() {
             "ORG_ONLY",
             "SHARED_ONLY",
             "PROJECT_ONLY",
-            "COPY_ONLY",
             "UPDATE_ONLY",
         ] {
             assert_eq!(

@@ -18,7 +18,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::host::ChromeItem;
-use super::settings_rows::{rows_for, SettingRow, Step};
+use super::settings_rows::{rows_with_kernel, SettingRow, Step};
 use super::view;
 use crate::app::{App, FocusTarget, RightPanelTarget};
 use crate::theme;
@@ -214,6 +214,37 @@ impl App {
             .flat_map(|kind| self.plugin_chrome(kind))
             .filter(|item| self.plugin_item_applies(item, target))
             .filter(|item| super::when::shows(item.when.as_deref(), &context))
+            .flat_map(|item| self.expand_dynamic_menu_item(item, target))
+            .collect()
+    }
+
+    /// A `dynamic` menu entry becomes the entries its plugin's menu provider returns for
+    /// `target`; an entry the provider reports as disabled is not offered. Any other entry is
+    /// returned unchanged.
+    fn expand_dynamic_menu_item(
+        &self,
+        item: ChromeItem,
+        target: ilium_core::NodeId,
+    ) -> Vec<ChromeItem> {
+        if !item.dynamic {
+            return vec![item];
+        }
+        let Some(plugins) = self.wasm_plugins.as_ref() else {
+            return Vec::new();
+        };
+        let node = ilium_plugin_api::generated::types::NodeId(target.0);
+        plugins
+            .menu_entries(&item.plugin, "pane", node)
+            .into_iter()
+            .filter(|entry| !entry.is_submenu && entry.disabled_reason.is_none())
+            .map(|entry| ChromeItem {
+                id: format!("{}/{}", item.id, entry.id),
+                title: entry.label,
+                icon: entry.icon,
+                dynamic: false,
+                menu_item: Some(entry.id),
+                ..item.clone()
+            })
             .collect()
     }
 
@@ -334,6 +365,7 @@ impl App {
         let is_project = node.is_some_and(ilium_core::Node::is_project);
         kinds.split(',').map(str::trim).any(|kind| match kind {
             "all" => true,
+            "tree-node" => node.is_some(),
             "pane" | "panes" => is_pane,
             "agent" | "agents" => is_agent,
             "group" | "folder" => node.is_some() && !is_pane && target != ilium_core::ROOT_ID,
@@ -354,9 +386,12 @@ impl App {
         let Some(command) = item.command.as_deref() else {
             return;
         };
-        let arguments = match node {
-            Some(node) => serde_json::json!({ "node": node.0 }).to_string(),
-            None => "{}".to_owned(),
+        let arguments = match (node, item.menu_item.as_deref()) {
+            (Some(node), Some(entry)) => {
+                serde_json::json!({ "node": node.0, "item": entry }).to_string()
+            }
+            (Some(node), None) => serde_json::json!({ "node": node.0 }).to_string(),
+            (None, _) => "{}".to_owned(),
         };
         self.invoke_plugin_command(command, arguments, origin);
     }
@@ -597,7 +632,12 @@ impl App {
                 continue;
             };
             let stored = store.read(&setting.plugin).unwrap_or_default();
-            rows.extend(rows_for(&setting.plugin, &manifest, &stored));
+            rows.extend(rows_with_kernel(
+                &setting.plugin,
+                &manifest,
+                &stored,
+                &store,
+            ));
         }
         rows
     }
@@ -679,9 +719,32 @@ impl App {
         changed
     }
 
+    /// A kernel-bound row of a tab's owner plugin wrote the built-in table of `tab` in
+    /// `config.toml`: the client state that mirrors that table is reloaded from the file, so
+    /// the workers that read it (titles, restructure, onboarding) see the new value at once.
+    fn kernel_setting_changed(&mut self, tab: &str) {
+        if tab != "inference" {
+            return;
+        }
+        let Some(directory) = self.config_dir.clone() else {
+            return;
+        };
+        match crate::config::load(&directory) {
+            Ok(config) => self.apply_inference_settings_locally(config.inference),
+            Err(error) => {
+                self.status_message = Some(format!(
+                    "The inference settings were saved but not reloaded: {error}"
+                ));
+            }
+        }
+    }
+
     /// Tells the plugin that owns a row that the user changed it in Settings.
     /// Both halves hear it: the client side directly, the server side through the server.
     fn notify_plugin_setting_changed(&mut self, row: &SettingRow) {
+        if let Some(binding) = &row.kernel {
+            self.kernel_setting_changed(&binding.tab);
+        }
         let Some(plugins) = self.wasm_plugins.as_ref() else {
             return;
         };
@@ -1208,6 +1271,8 @@ mod tests {
             placement: None,
             when: None,
             caption: None,
+            dynamic: false,
+            menu_item: None,
         }
     }
 

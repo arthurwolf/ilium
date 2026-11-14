@@ -108,7 +108,7 @@ fn all_concrete_ids_and_descriptions_are_present_once_without_aliases() {
     let mut count = 0;
     for kind in AnimationKind::ALL {
         let id = canonical_id(kind).unwrap();
-        if id == "semantic" {
+        if id == "semantic" || kind == AnimationKind::PluginScene {
             continue;
         }
         count += 1;
@@ -122,7 +122,7 @@ fn all_concrete_ids_and_descriptions_are_present_once_without_aliases() {
         assert_eq!(kind_for(&id).unwrap(), kind);
     }
     assert_eq!(
-        count, 59,
+        count, 58,
         "Review the frozen inventory when concrete scenes change"
     );
     assert!(
@@ -131,6 +131,7 @@ fn all_concrete_ids_and_descriptions_are_present_once_without_aliases() {
     );
     assert!(!text.contains("semantic | "));
     assert!(kind_for("semantic").is_err());
+    assert!(kind_for("plugin_scene").is_err());
     assert!(kind_for("breathing_mountain").is_err());
     assert!(kind_for("not_a_scene").is_err());
 }

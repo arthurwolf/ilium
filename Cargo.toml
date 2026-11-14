@@ -27,7 +27,6 @@ members = [
     "ilium-test-fixtures",
     "ilium-transport",
     "ilium-server",
-    "ilium-session-convert",
     "ilium-sound",
     "ilium-voice",
     "ilium",

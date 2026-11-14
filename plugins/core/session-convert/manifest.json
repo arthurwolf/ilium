@@ -32,6 +32,7 @@
       "panes.create",
       "panes.create-command:codex",
       "panes.create-command:claude",
+      "tree.read",
       "tree.write",
       "agent.read",
       "fs.read:agent-sessions:claude",
@@ -48,7 +49,9 @@
     ],
     "client": [
       "agent.read",
-      "ui.panels"
+      "tree.read",
+      "ui.panels",
+      "keys.intercept"
     ]
   },
   "activation": [

@@ -59,7 +59,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
       { "name": "panes", "summary": "List panes in every session", "output": "jsonl",
         "requires_server": true },
       { "name": "broadcast", "summary": "Send a line to agents", "output": "jsonl",
-        "requires_server": true, "argument_groups": ["pane-selector"] },
+        "requires_server": true, "stdin": "optional", "argument_groups": ["pane-selector"] },
       { "name": "new-pane", "summary": "Create a pane", "output": "mixed",
         "requires_server": true }
     ],
@@ -103,6 +103,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "server": [
       "cli.contribute",
       "sessions.cross",
+      "fs.read:project",
       "http-api.route:/create_agent",
       "terminal.write",
       "panes.create",
@@ -138,6 +139,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "summary": "Send a line to agents",
         "output": "jsonl",
         "requires_server": true,
+        "stdin": "optional",
         "argument_groups": [
           "pane-selector"
         ]

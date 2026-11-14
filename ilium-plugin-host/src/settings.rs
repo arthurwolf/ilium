@@ -132,6 +132,7 @@ fn validate_schema(schema: &Value, pointer: &str, depth: usize, errors: &mut Vec
         "additionalProperties",
         "enum",
         "enum_titles",
+        "order",
         "items",
         "maxItems",
         "title",
@@ -539,6 +540,30 @@ pub struct SettingsRow {
     pub scope: String,
     /// The compiled schema of the row (its property in the plugin's schema).
     pub schema: Value,
+    /// Where the value lives when the row edits a built-in tab's own table instead of the
+    /// plugin's: the owner of a kernel tab (`settings.write-kernel:<tab>`) lists its rows with
+    /// `kernel_tab` (a frozen tab id) and `kernel_key` (a dotted path such as `openai.model`).
+    pub kernel: Option<KernelBinding>,
+}
+
+/// The `config.toml` value a row of a kernel tab's owner reads and writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KernelBinding {
+    /// A frozen kernel tab id (see [`kernel_tab_ids`]).
+    pub tab: String,
+    /// The dotted key path inside the tab's table.
+    pub key: String,
+}
+
+/// The kernel binding a row declares; `None` unless both fields are present and the tab id is
+/// one of the frozen kernel tabs.
+fn kernel_binding(row: &Value) -> Option<KernelBinding> {
+    let tab = text_of(row, "kernel_tab")?;
+    let key = text_of(row, "kernel_key")?;
+    (kernel_tab_ids().contains(&tab.as_str())
+        && !key.is_empty()
+        && key.split('.').all(|part| !part.is_empty()))
+    .then_some(KernelBinding { tab, key })
 }
 
 /// Every value row a manifest contributes, in declaration order.
@@ -613,6 +638,7 @@ fn collect_rows(
             tab: tab.to_owned(),
             section: section.map(str::to_owned),
             scope: scope.to_owned(),
+            kernel: kernel_binding(row),
             kind,
             key,
             schema,
@@ -885,6 +911,37 @@ mod tests {
             Ok(()) => panic!("value {value_json} must be rejected"),
             Err(diagnostics) => diagnostics,
         }
+    }
+
+    #[test]
+    fn a_row_binds_to_a_kernel_table_only_with_a_real_tab_and_a_clean_path() {
+        let manifest = serde_json::json!({"contributes":{"settings":[{"kind":"tab","id":"t",
+          "title":"T","sections":[{"title":"S","rows":[
+            {"type":"text","key":"a","title":"A","kernel_tab":"inference","kernel_key":"openai.model"},
+            {"type":"text","key":"b","title":"B","kernel_tab":"nope","kernel_key":"x"},
+            {"type":"text","key":"c","title":"C","kernel_tab":"inference","kernel_key":"a..b"},
+            {"type":"text","key":"d","title":"D","kernel_tab":"inference"},
+            {"type":"text","key":"e","title":"E"}]}]}]}});
+        let rows = super::manifest_rows(&manifest);
+        let bound: Vec<_> = rows
+            .iter()
+            .map(|row| {
+                (
+                    row.key.as_str(),
+                    row.kernel.as_ref().map(|k| k.key.as_str()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            bound,
+            vec![
+                ("a", Some("openai.model")),
+                ("b", None),
+                ("c", None),
+                ("d", None),
+                ("e", None)
+            ]
+        );
     }
 
     #[test]

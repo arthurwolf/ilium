@@ -592,7 +592,7 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 | Pre-rendered scene loop | 30 fps, 3,600 frames, 128 MiB | `manifest.scene-prerender` |
 | Video from bytes | 16 MiB | `invalid-argument` |
 | Font asset | 4 MiB | `quota-exceeded`, `manifest.asset-size` |
-| `status_segments`, `pane_frame_slots`, `tree_toolbar`, `row_actions`, `tree_orderings`, `display_modes` | 2, 4, 4, 4, 4, 2 | `manifest.contribution-limit` |
+| `status_segments`, `pane_frame_slots`, `tree_toolbar`, `row_actions`, `tree_orderings`, `display_modes` | 2, 4, 4, 4, 8, 2 | `manifest.contribution-limit` |
 | Geocode results returned | 8 | clamped |
 | Popup stack per view | 4 | `quota-exceeded` |
 | Widget `debounce-ms`; settings row `debounce_ms` | 0 to 2,000 ms; 300 to 2,000 ms | clamped to the nearest bound |

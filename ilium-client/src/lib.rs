@@ -25,7 +25,7 @@
 //! `settings_ui`, `text_prompt`, `explorer_overlay`, `editor_pane` and its
 //! chrome/highlight/toolbar/syntax/minimap helpers, `markdown`, `keymap`,
 //! `session_naming`, `project_naming`, `transcript_context`,
-//! `project_config`, `workspace_file`, `naming`, `restructure`) is
+//! `project_config`, `naming`, `restructure`) is
 //! presentation or local-file-I/O logic that doesn't care whether its
 //! data came from a local `Tree` or a render-cache mirror of one.
 
@@ -33,7 +33,6 @@ pub mod agent_config_writer;
 pub mod agent_debug_export;
 pub mod agent_debug_ui;
 pub mod agent_feature_setup;
-pub mod agent_freeze;
 pub mod agent_from_line;
 pub mod agent_history_path;
 pub mod agent_monitoring;
@@ -56,9 +55,6 @@ pub mod background_composition;
 mod blocking_errors;
 pub mod board;
 pub mod board_ui;
-pub mod chatroom;
-pub mod chatroom_root;
-pub mod chatroom_ui;
 pub mod claude_model_statusline;
 pub mod compaction_app;
 pub mod compaction_report;
@@ -160,7 +156,6 @@ pub mod screen_transfer;
 pub mod section_frame;
 pub mod selectable_cards;
 mod semantic_animation;
-pub mod session_conversion;
 mod session_goal_claude;
 mod session_goal_codex;
 mod session_goal_custody;
@@ -177,27 +172,18 @@ pub mod session_stats_ui;
 pub mod settings_help;
 pub mod settings_ui;
 pub mod setup_prompt;
-pub mod smart_copy;
-pub mod smart_copy_light;
-mod smart_copy_selection;
 mod startup_dialog;
 pub mod status_demo;
 pub mod status_rule_visual;
 pub mod status_rules_editor;
 pub(crate) mod status_rules_save;
 pub mod status_screen_observations;
-/// Typed source custody returned when light-copy shutdown cannot finish.
-pub use smart_copy_selection::{
-    RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
-};
 pub mod agent_message_dialog;
 pub(crate) mod diagnostic;
 pub mod goal_resume_link;
 mod input_backlog;
 mod paste_cursor;
 mod shutdown_requests;
-pub mod smart_copy_tokens;
-pub mod smart_copy_workers;
 mod source_line_facts;
 mod source_stream;
 mod source_window_preparation;
@@ -243,7 +229,6 @@ pub mod value_cost;
 pub mod value_detection;
 pub mod value_dialog;
 pub mod value_dialog_host;
-pub mod value_editor;
 pub mod value_effort;
 pub mod value_icon;
 pub mod value_inference;
@@ -260,7 +245,6 @@ mod voice_preparation;
 mod voice_presentation;
 mod voice_retirement;
 pub mod voice_settings;
-pub mod workspace_file;
 pub mod worktree_dialog;
 pub mod worktree_manager;
 
@@ -287,7 +271,6 @@ use crate::connection::Connection;
 use crate::error::ClientError;
 use crate::icon_search_workers::IconSearchWorkers;
 use crate::naming_workers::{NamingWorkerEvent, NamingWorkers};
-use crate::smart_copy_workers::{SmartCopyWorkerUpdate, SmartCopyWorkers};
 use crate::terminal_guard::TerminalGuard;
 use crate::trigger_execution_lease::TriggerExecutionLease;
 
@@ -911,17 +894,6 @@ async fn run_inner(
         .map_err(ClientError::TerminalSetup)?;
     let clipboard_notification = clipboard.notification();
     app.terminal_clipboard = Some(clipboard);
-    let selection_client = execution
-        .client_when_ready(crate::smart_copy_selection::limits())
-        .await
-        .map_err(|error| {
-            ClientError::TerminalSetup(std::io::Error::other(format!(
-                "Light selection admission: {error:?}"
-            )))
-        })?;
-    let selection = crate::smart_copy_selection::SelectionOwner::new(selection_client);
-    let selection_notification = selection.notification();
-    app.light_copy_selection = Some(selection);
     let parsing = crate::terminal_parsing::TerminalParsing::start_with_storage(
         crate::execution::retry_startup_busy(|| execution.terminal_parser())
             .await
@@ -1050,10 +1022,6 @@ async fn run_inner(
             )))
         })?;
     naming_workers.configure_execution(provider_client.clone());
-    let (smart_copy_events_tx, mut smart_copy_events_rx) = mpsc::channel(64);
-    let mut smart_copy_workers = SmartCopyWorkers::new(smart_copy_events_tx);
-    smart_copy_workers.configure_execution(provider_client.clone());
-    smart_copy_workers.set_completion_notification(std::sync::Arc::clone(&provider_notification));
     let media_owner =
         crate::media_control::MediaOwner::start().map_err(ClientError::TerminalSetup)?;
     let mut icon_search_workers = IconSearchWorkers::new();
@@ -1257,25 +1225,6 @@ async fn run_inner(
     naming_workers.set_automatic_ai_decision(
         app.onboarding_revision,
         app.onboarding.is_none() && app.onboarding_progress.automatic_ai_allowed(),
-    );
-    let conversion_notification = std::sync::Arc::new(tokio::sync::Notify::new());
-    let conversion_wake = std::sync::Arc::clone(&conversion_notification);
-    let conversion_client = execution
-        .client_when_ready(ilium_execution::ClientLimits {
-            jobs: 1,
-            service_jobs: 0,
-            input_bytes: crate::session_conversion::CONVERSION_WORKING_BYTES,
-            result_bytes: crate::session_conversion::CONVERSION_RESULT_BYTES,
-        }).await
-        .map_err(|error| {
-            ClientError::TerminalSetup(std::io::Error::other(format!(
-                "session conversion worker startup: {error:?}"
-            )))
-        })?
-        .with_completion_wake(move || conversion_wake.notify_one());
-    let mut conversion_workers = crate::session_conversion::ConversionWorkers::new(
-        conversion_client,
-        conversion_notification.clone(),
     );
     let compaction_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let remote_compaction_wake = std::sync::Arc::clone(&compaction_notification);
@@ -1580,7 +1529,7 @@ async fn run_inner(
         if let Some(delay) = app.voice_preparation.retry_delay(now) {
             tick_delay = tick_delay.min(delay);
         }
-        for delay in [naming_workers.retry_delay(now), smart_copy_workers.retry_delay(now)].into_iter().flatten() {
+        if let Some(delay) = naming_workers.retry_delay(now) {
             tick_delay = tick_delay.min(delay);
         }
         if onboarding_voice.pending_work() || app.voice_preparation.is_pending() || app.normal_voice_commands.is_pending()
@@ -1599,8 +1548,6 @@ async fn run_inner(
         if let Some(delay) = app.source_window_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if let Some(delay) = app.text_trigger_preview_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if let Some(delay) = app.sound_studio_preview_retry_delay(now) { tick_delay = tick_delay.min(delay); }
-        if let Some(delay) = app.light_copy_selection.as_ref().and_then(|owner| owner.retry_delay()) { tick_delay = tick_delay.min(delay); }
-        if !app.light_copy_recovery.is_empty() || !app.light_copy_restored.is_empty() { tick_delay = tick_delay.min(Duration::from_millis(100)); }
         if crate::onboarding::integration::is_animating(&app) || last_onboarding_animation_active {
             tick_delay = tick_delay.min(Duration::from_millis(33));
         }
@@ -1642,7 +1589,6 @@ async fn run_inner(
             }
             _ = control_notification.notified() => { needs_redraw = true; }
             _ = clipboard_notification.notified() => {needs_redraw=true;}
-            _ = selection_notification.notified() => {needs_redraw=true;}
 
             _ = context_notification.notified() => { needs_redraw=true; }
             _ = external_open_notification.notified() => { needs_redraw |= app.collect_external_open(); }
@@ -1667,7 +1613,7 @@ async fn run_inner(
                 app.projection_admission_wake = None;
                 app.projection_busy_retry_at = None;
             }
-            _ = filesystem_admission_notification.notified() => {needs_redraw |= app.collect_editor_files(); naming_workers.collect(); smart_copy_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation(); needs_redraw |= app.reconcile_text_trigger_preview(); needs_redraw |= app.reconcile_sound_studio_preview();}
+            _ = filesystem_admission_notification.notified() => {needs_redraw |= app.collect_editor_files(); naming_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation(); needs_redraw |= app.reconcile_text_trigger_preview(); needs_redraw |= app.reconcile_sound_studio_preview();}
             completion = app.debug_logging.next_completion() => {
                 apply_debug_logging_completion(&mut app, completion);
                 needs_redraw = true;
@@ -1751,12 +1697,6 @@ async fn run_inner(
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
-            _ = conversion_notification.notified() => {
-                let collected = conversion_workers
-                    .collect(|event| app.apply_conversion_worker_event(event));
-                needs_redraw |= collected;
-                needs_immediate_redraw |= collected;
-            }
             _ = compaction_notification.notified() => {
                 let collected = remote_compaction_workers
                     .as_mut()
@@ -1765,17 +1705,7 @@ async fn run_inner(
                 needs_redraw |= collected;
                 needs_immediate_redraw |= collected;
             }
-            _=provider_notification.notified()=>{naming_workers.collect(); smart_copy_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation();},
-            Some(smart_copy_event) = smart_copy_events_rx.recv() => {
-                let generation = smart_copy_event.generation;
-                let is_terminal = matches!(smart_copy_event.update, SmartCopyWorkerUpdate::Finished | SmartCopyWorkerUpdate::Failed(_));
-                app.apply_smart_copy_worker_event(smart_copy_event);
-                if is_terminal {
-                    smart_copy_workers.finish(generation);
-                }
-                needs_redraw = true;
-                needs_immediate_redraw = true;
-            }
+            _=provider_notification.notified()=>{naming_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation();},
             _ = icon_search_notification.notified() => {
                 if let Some(event) = icon_search_workers.poll() {
                     app.apply_icon_semantic_search_event(event);
@@ -1889,8 +1819,6 @@ async fn run_inner(
             &mut icon_search_workers,
             home_dir.as_deref(),
         );
-        dispatch_pending_smart_copy_work(&mut app, &mut smart_copy_workers); // Cancellation precedes the dated App-original retry gate.
-        smart_copy_workers.collect();
         needs_redraw |= app.collect_terminal_parsing();
         if let Some(event)=take_pending_server_event(&mut app) {
             let damage=apply_server_events(&mut app,&mut connection.events,event,&mut naming_workers,&mut icon_search_workers,&mut trigger_execution_lease,home_dir.as_deref());
@@ -1899,9 +1827,7 @@ async fn run_inner(
         needs_redraw |= app.collect_document_preparation();
         needs_redraw |= app.collect_terminal_context_preparation();
         needs_redraw |= app.collect_external_open();
-        needs_redraw |= app.collect_emitted_smart_copy_capture();
         needs_redraw |= app.collect_clipboard();
-        needs_redraw |= app.collect_light_copy_selection();
         needs_redraw |= app.collect_editor_files();
         reconcile_debug_logging(&mut app);
         reconcile_debug_logging_server(&mut app);
@@ -1965,16 +1891,6 @@ async fn run_inner(
                 last_streamed_pane_order = Some(streamed_pane_order);
         }
 
-        if let Some(job) = app.take_pending_conversion_start() {
-            if let Err(event) = conversion_workers.spawn(job) {
-                app.apply_conversion_worker_event(event);
-                needs_redraw = true;
-                needs_immediate_redraw = true;
-            }
-        }
-        if app.take_pending_conversion_cancel() {
-            conversion_workers.cancel();
-        }
         if app.take_pending_remote_compaction_cancel() {
             remote_compaction_workers
                 .as_mut()
@@ -2198,7 +2114,6 @@ async fn run_inner(
 
     app.model_catalog_preparation.close();
     naming_workers.close_finite();
-    smart_copy_workers.cancel();
     app.prepare_terminal_shutdown();
     app.cancel_source_windows();
     connection.request_read_shutdown();
@@ -2225,7 +2140,6 @@ async fn run_inner(
             }
             app.collect_terminal_context_preparation();
             app.collect_clipboard();
-            app.collect_light_copy_selection();
             app.collect_terminal_baselines();
             dispatch_pending_app_work(&mut app, &mut naming_workers, &mut icon_search_workers, home_dir.as_deref());
             if let Some(reason) = app.projection_admission_failure {
@@ -2259,7 +2173,6 @@ async fn run_inner(
                 // cleared, including a barrier which can produce more input.
                 app.collect_terminal_parsing();
                 app.collect_clipboard();
-            app.collect_light_copy_selection();
                 app.collect_terminal_baselines();
                 if app.terminal_pending_work() == (0, 0, Some((0, 0))) && !naming_workers.has_pending_exact_delivery() && naming_events_rx.is_empty() && !app.has_pending_exact_prompt_reports() && !app.terminal_clipboard.as_ref().is_some_and(|clipboard|clipboard.pending()) && app.terminal_baselines.as_ref().is_none_or(|files| !files.pending()) {
                     break;
@@ -2487,7 +2400,6 @@ async fn run_inner(
             "Published exact transcript evidence has no final outbound flush acknowledgement; delivery is uncertain"
         );
     }
-    smart_copy_workers.cancel();
     // This runs on every Result exit, including connection and output errors.
     // Restore raw/alternate-screen state only after output has stopped.
     let normal_shutdown_result =
@@ -2510,34 +2422,7 @@ async fn run_inner(
     // only after its original display message is destroyed.
     app.status_message = None;
     app.external_open_status_storage = None;
-    app.light_copy_shutdown = true;
     app.startup_progress.close();
-    if let Some(selection) = &mut app.light_copy_selection {
-        selection.close_admission();
-    }
-    // Bound the normal drain: a blocked native child must reach its existing
-    // shutdown/kill path instead of keeping this coordination loop forever.
-    let selection_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while app
-        .light_copy_selection
-        .as_ref()
-        .is_some_and(|selection| selection.pending())
-        && tokio::time::Instant::now() < selection_deadline
-    {
-        app.collect_clipboard();
-        app.collect_light_copy_selection();
-        if app
-            .light_copy_selection
-            .as_ref()
-            .is_some_and(|selection| selection.pending())
-        {
-            tokio::select! {
-                _ = selection_notification.notified() => {},
-                _ = clipboard_notification.notified() => {},
-                _ = tokio::time::sleep(Duration::from_millis(100)) => {},
-            }
-        }
-    }
     let clipboard_shutdown_result = match app.terminal_clipboard.take() {
         Some(clipboard) => {
             let (result, acknowledgements) = clipboard.shutdown_with_acknowledgements().await;
@@ -2547,78 +2432,6 @@ async fn run_inner(
             result.map_err(ClientError::TerminalSetup)
         }
         None => Ok(()),
-    };
-    if let Some(selection) = &mut app.light_copy_selection {
-        selection.native_closed();
-    }
-    // CPU is still alive. Missing native replies are already marked unknown.
-    let recovery_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while app
-        .light_copy_selection
-        .as_ref()
-        .is_some_and(|selection| selection.pending())
-        && tokio::time::Instant::now() < recovery_deadline
-    {
-        app.collect_light_copy_selection();
-        if app
-            .light_copy_selection
-            .as_ref()
-            .is_some_and(|selection| selection.pending())
-        {
-            tokio::select! {
-                _ = selection_notification.notified() => {},
-                _ = tokio::time::sleep(Duration::from_millis(100)) => {},
-            }
-        }
-    }
-    let selection_shutdown_result = if app
-        .light_copy_selection
-        .as_ref()
-        .is_some_and(|selection| selection.pending())
-    {
-        match app.light_copy_selection.take() {
-            Some(owner) => Err(ClientError::TerminalSetup(std::io::Error::other(
-                crate::smart_copy_selection::SelectionShutdownCustody::new(
-                    owner,
-                    std::mem::take(&mut app.light_copy_recovery),
-                    app.smart_copy_preview.take(),
-                    std::mem::take(&mut app.light_copy_restored),
-                    if app
-                        .smart_copy_session
-                        .as_ref()
-                        .is_some_and(|session| session.is_light)
-                    {
-                        app.smart_copy_session.take()
-                    } else {
-                        None
-                    },
-                ),
-            ))),
-            None => Err(ClientError::TerminalSetup(std::io::Error::other(
-                "Selection custody disappeared",
-            ))),
-        }
-    } else {
-        let result = if app.light_copy_recovery.is_empty() && app.light_copy_restored.is_empty() {
-            Ok(())
-        } else {
-            Err(ClientError::TerminalSetup(std::io::Error::other(
-                "Selection preparation failed; originals retired during shutdown, no copy success claimed",
-            )))
-        };
-        app.light_copy_recovery.clear(); // Queues entire original disposal on still-live CPU.
-        app.light_copy_restored.clear(); // Returned Sessions have their original self-retirement permits.
-        if app
-            .smart_copy_session
-            .as_ref()
-            .is_some_and(|session| session.is_light)
-        {
-            app.smart_copy_session = None;
-        }
-        app.light_copy_retry_generation = None;
-        app.smart_copy_preview = None; // Drop original shared leaves before retirement join.
-        app.light_copy_selection = None;
-        result
     };
     let logging_result = tokio::time::timeout(Duration::from_secs(5), app.debug_logging.drain())
         .await
@@ -2802,13 +2615,6 @@ async fn run_inner(
         Ok(()) => result,
         Err(shutdown) => Err(crate::error::preserve_execution_shutdown_error(
             shutdown,
-            result.err(),
-        )),
-    };
-    let result = match selection_shutdown_result {
-        Ok(()) => result,
-        Err(selection) => Err(crate::smart_copy_selection::preserve_shutdown_error(
-            selection,
             result.err(),
         )),
     };
@@ -5131,43 +4937,6 @@ fn handle_exact_prompt_admission(
         }
     }
 }
-fn dispatch_pending_smart_copy_work(app: &mut App, workers: &mut SmartCopyWorkers) {
-    // Keep refused App requests intact until their owner permits another attempt.
-    if app.take_smart_copy_cancel_requested() {
-        workers.cancel();
-    } // Revocation must not wait for the admission deadline.
-    if !workers.begin_retry_turn(Instant::now()) {
-        return;
-    } // Unrelated input or release wakes never accelerate a refused original.
-    let Some(request) = app.take_pending_smart_copy_request() else {
-        return;
-    }; // Move the exact captured request only when eligible.
-    let Err(rejected) = workers.start(request) else {
-        return;
-    }; // Successful custody is now entirely in the worker owner.
-    let reason = rejected.reason; // Classify coordinator admission, never provider response text.
-    use ilium_execution::RejectReason; // Match the worker's actual refusal clock policy.
-    if matches!(
-        reason,
-        RejectReason::Busy
-            | RejectReason::QueueFull
-            | RejectReason::JobLimit
-            | RejectReason::InputBytes
-            | RejectReason::ResultBytes
-            | RejectReason::WorkerBytes
-    ) {
-        // Only bounded resource contention retries.
-        app.retry_pending_smart_copy_request(rejected.value); // Preserve the original strings, settings, generation, and source guard.
-        app.status_message = Some(format!("Smart Copy admission deferred: {reason:?}")); // Keep refusal visible without reconstructing the request.
-        return; // The worker already armed the next admissible attempt time.
-    } // Closed, invalid, or corrupted admission terminates this original.
-    app.apply_smart_copy_worker_event(crate::smart_copy_workers::SmartCopyWorkerEvent {
-        generation: rejected.value.generation,
-        pane_id: rejected.value.pane_id,
-        update: SmartCopyWorkerUpdate::Failed(format!("Smart Copy admission failed: {reason:?}")),
-        retention: None,
-    }); // Preserve the existing terminal UI disposition.
-} // Streaming results never flow back through this pre-submission retry path.
 fn dispatch_pending_app_work(
     app: &mut App,
     naming_workers: &mut NamingWorkers,

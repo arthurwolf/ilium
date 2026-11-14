@@ -258,7 +258,7 @@ export function onRowAction(invoked: CommandInvokedEvent): Submission[] {
 
 ### Tree orderings and display modes
 
-`tree_orderings` adds a choice to the tree's Order By list. Siblings sort by the `sort-key` of the plugin's decoration in the named slot, ascending. Nodes without a key keep their manual order, after the keyed ones. At most 4.
+`tree_orderings` adds a choice to the tree's Order By list. Siblings sort by the `sort-key` of the plugin's decoration in the named slot, ascending. Nodes without a key keep their manual order, after the keyed ones. At most 8.
 
 `display_modes` adds a mode next to Normal and Attention. In the mode, the tree shows the decorations of the slot first, and with `hide_unmarked: true` it hides panes that have none. At most 2. The host sends `display-mode-changed` (payload: the mode's global id, or none for Normal) to the plugin that owns the mode.
 
@@ -488,7 +488,7 @@ export function showModel(pane: bigint, model: string): Submission {
 
 | Situation | Result |
 |---|---|
-| A contribution key over its cap (`status_segments` 2, `pane_frame_slots` 4, `tree_toolbar` 4, `row_actions` 4, `tree_orderings` 4, `display_modes` 2) | Install refused with `manifest.contribution-limit` |
+| A contribution key over its cap (`status_segments` 2, `pane_frame_slots` 4, `tree_toolbar` 4, `row_actions` 4, `tree_orderings` 8, `display_modes` 2) | Install refused with `manifest.contribution-limit` |
 | `applies_to` or `slot` names an unknown target or another plugin's slot | `manifest.contribution-target` |
 | Unknown `when` key | `manifest.when-key` |
 | Intent without `ui.chrome` or `tree.decorate` | `not-permitted` |

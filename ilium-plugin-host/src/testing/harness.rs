@@ -1730,6 +1730,8 @@ impl SubmissionAdmission for HarnessAdmission {
             Intent::PlaySound(_) => "sound.play",
             Intent::Notify(_) => "notify.desktop",
             Intent::OpenView(_) | Intent::CloseView(_) => "ui.panels",
+            // The client carries out the `kernel.*` commands itself; they need no grant.
+            Intent::InvokeCommand(spec) if spec.command.starts_with("kernel.") => return Ok(()),
             Intent::InvokeCommand(_) => "commands.invoke",
             Intent::Message(_) => "messages.peer",
             Intent::EditorApplyEdits(_) | Intent::EditorOpen(_) => "editor.edit",

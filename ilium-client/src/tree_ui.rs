@@ -1090,7 +1090,6 @@ pub struct TreeRenderOptions<'a> {
     /// filename) -- see `pane_label`'s Editor arms for how the two are
     /// composed.
     pub sidebar_files: &'a crate::filesystem::sidebar::SidebarSnapshot,
-    pub chatroom_projects: &'a HashSet<NodeId>,
     pub resources: Option<&'a crate::resource_queue::ResourceUi>,
     pub panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
     pub frozen_panes: &'a HashSet<NodeId>,
@@ -1203,7 +1202,6 @@ struct TreeItemBuildContext<'a> {
     /// never becomes render work merely because another row animates.
     opened_paths: &'a HashSet<Vec<NodeId>>,
     sidebar_files: &'a crate::filesystem::sidebar::SidebarSnapshot,
-    chatroom_projects: &'a HashSet<NodeId>,
     resources: Option<&'a crate::resource_queue::ResourceUi>,
     panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
     frozen_panes: &'a HashSet<NodeId>,
@@ -1259,7 +1257,7 @@ pub(crate) fn visible_tree_node_ids_ranked(
 }
 
 /// Walks only authoritative nodes along currently expanded paths. Virtual
-/// folder/chatroom rows are not durable nodes and therefore never enter this
+/// folder rows are not durable nodes and therefore never enter this
 /// result; constructing their labels or reading directories would be wasted
 /// work for close/restructure operations that only consume real [`NodeId`]s.
 fn collect_visible_tree_node_ids(
@@ -1538,27 +1536,6 @@ fn build_item(
                         resource_items.append(&mut children);
                         children = resource_items;
                     }
-                }
-                if context.chatroom_projects.contains(&node.id) {
-                    children.insert(
-                        0,
-                        TreeItem::new_leaf(
-                            chatroom_node_id(node.id),
-                            apply_sidebar_density(
-                                layout_tree_row(
-                                    node_label(
-                                        Span::styled("💬", Style::new().fg(Color::Cyan)),
-                                        None,
-                                        Span::styled("Chatroom", Style::new().fg(Color::Cyan)),
-                                    ),
-                                    chatroom_node_id(node.id),
-                                    identifier_path.len(),
-                                    context,
-                                ),
-                                context.sidebar_density,
-                            ),
-                        ),
-                    );
                 }
             }
             let icon = match &container.kind {
@@ -2059,24 +2036,6 @@ pub(crate) fn virtual_folder_node_id(root: NodeId, path: &Path) -> NodeId {
     root.hash(&mut hasher);
     path.hash(&mut hasher);
     NodeId((1_u64 << 63) | (hasher.finish() & !(1_u64 << 63)))
-}
-
-/// Synthetic child identifier for a project's file-backed chatroom. This
-/// independent high range cannot collide with a real monotonically allocated
-/// `NodeId` or the folder-browser hash range above it.
-pub fn chatroom_node_id(project_id: NodeId) -> NodeId {
-    NodeId((1_u64 << 62) | project_id.0)
-}
-
-/// Resolves a virtual chatroom row to its real owning project. The file check
-/// makes delayed mouse/key input safe when another process removed the room
-/// after the last render.
-pub fn chatroom_project(tree: &Tree, id: NodeId, available: &HashSet<NodeId>) -> Option<NodeId> {
-    tree.project_ids().into_iter().find(|project_id| {
-        *project_id != ROOT_ID
-            && chatroom_node_id(*project_id) == id
-            && available.contains(project_id)
-    })
 }
 
 fn folder_children(
@@ -2654,7 +2613,7 @@ fn human_readable_countdown(remaining_millis: u64) -> String {
     "now".to_string()
 }
 
-/// Builds a non-pane row (container, folder, chatroom) with the same fixed
+/// Builds a non-pane row (container, folder) with the same fixed
 /// columns as a pane row, both state slots blank, so every title in the
 /// sidebar starts at the same column.
 fn node_label(
@@ -3394,7 +3353,7 @@ impl TreeItemCache {
             tree_order,
             opened_paths,
             (&HashMap::new(), 0),
-            (&Default::default(), &HashSet::new(), None, None),
+            (&Default::default(), None, None),
         )
     }
 
@@ -3409,13 +3368,12 @@ impl TreeItemCache {
         cost: (&HashMap<NodeId, f64>, u64),
         filesystem: (
             &crate::filesystem::sidebar::SidebarSnapshot,
-            &HashSet<NodeId>,
             Option<&crate::resource_queue::ResourceUi>,
             Option<&HashSet<NodeId>>,
         ),
     ) -> &[TreeItem<'static, NodeId>] {
         let (cost_ranks, cost_epoch) = cost;
-        let (sidebar_files, chatroom_projects, resources, visibility) = filesystem;
+        let (sidebar_files, resources, visibility) = filesystem;
         if self.version != Some(version)
             || self.tree_order != Some(tree_order)
             || self.cost_epoch != cost_epoch
@@ -3463,7 +3421,6 @@ impl TreeItemCache {
                     panel_width: 0,
                     opened_paths,
                     sidebar_files,
-                    chatroom_projects,
                     resources,
                     panes: &HashMap::new(),
                 },
@@ -3578,7 +3535,6 @@ pub(crate) fn render(
             panel_width: list_area(area).width.saturating_add(2),
             opened_paths: state.opened(),
             sidebar_files: options.sidebar_files,
-            chatroom_projects: options.chatroom_projects,
             resources: options.resources,
             panes: options.panes,
             frozen_panes: options.frozen_panes,
@@ -3658,7 +3614,6 @@ pub(crate) fn render(
                 panel_width: list_area(area).width.saturating_add(2),
                 opened_paths: state.opened(),
                 sidebar_files: options.sidebar_files,
-                chatroom_projects: options.chatroom_projects,
                 resources: options.resources,
                 panes: options.panes,
             },
@@ -5492,7 +5447,6 @@ mod tests {
                         cost: None,
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
-                        chatroom_projects: &HashSet::new(),
                         resources: None,
                         panes: &HashMap::new(),
                     },
@@ -6779,7 +6733,6 @@ mod tests {
                         cost: None,
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
-                        chatroom_projects: &HashSet::new(),
                         resources: None,
                         panes: &HashMap::new(),
                     },
@@ -6858,7 +6811,6 @@ mod tests {
                             ..TreeHoverState::default()
                         },
                         sidebar_files: &Default::default(),
-                        chatroom_projects: &HashSet::new(),
                         resources: None,
                         panes: &HashMap::new(),
                     },
@@ -6949,7 +6901,6 @@ mod tests {
                         cost: None,
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
-                        chatroom_projects: &HashSet::new(),
                         resources: None,
                         panes: &HashMap::new(),
                     },
@@ -7799,7 +7750,6 @@ mod tests {
                 panel_width: area.width,
                 opened_paths: state.opened(),
                 sidebar_files: &Default::default(),
-                chatroom_projects: &HashSet::new(),
                 resources: None,
                 panes: &HashMap::new(),
             },
@@ -7970,7 +7920,6 @@ mod tests {
                 opened_paths: &opened_paths,
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
                     .view(),
-                chatroom_projects: &HashSet::new(),
                 resources: None,
                 panes: &HashMap::new(),
             },
@@ -8021,7 +7970,6 @@ mod tests {
                 opened_paths: &opened_paths,
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
                     .view(),
-                chatroom_projects: &HashSet::new(),
                 resources: None,
                 panes: &HashMap::new(),
             },
@@ -8072,7 +8020,6 @@ mod tests {
                 opened_paths: &opened_paths,
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
                     .view(),
-                chatroom_projects: &HashSet::new(),
                 resources: None,
                 panes: &HashMap::new(),
             },
@@ -8145,7 +8092,6 @@ mod tests {
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
-                chatroom_projects: &HashSet::new(),
                 resources: None,
                 panes: &HashMap::new(),
             },
@@ -8418,7 +8364,6 @@ mod tests {
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
-                chatroom_projects: &HashSet::new(),
                 resources: None,
                 panes: &HashMap::new(),
             },
@@ -8728,7 +8673,6 @@ mod tests {
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
-                chatroom_projects: &HashSet::new(),
                 resources: None,
                 panes: &HashMap::new(),
             },
@@ -8819,14 +8763,22 @@ mod tests {
             .iter()
             .map(|item| *item.identifier())
             .collect();
-        let alphabetical_ids: Vec<NodeId> = cache
-            .get_or_build(&tree, 1, TreeOrder::NameAscending, &opened_paths)
+        let ranks = HashMap::from([(alpha, 9.0)]);
+        let ranked_ids: Vec<NodeId> = cache
+            .get_or_build_ranked(
+                &tree,
+                1,
+                TreeOrder::CostDescending,
+                &opened_paths,
+                (&ranks, 1),
+                (&Default::default(), None, None),
+            )
             .iter()
             .map(|item| *item.identifier())
             .collect();
 
         assert_eq!(manual_ids, [zebra, alpha]);
-        assert_eq!(alphabetical_ids, [alpha, zebra]);
+        assert_eq!(ranked_ids, [alpha, zebra]);
     }
 
     #[test]
@@ -9003,7 +8955,6 @@ mod cost_indicator_tests {
                         cost,
                         hover,
                         sidebar_files: &Default::default(),
-                        chatroom_projects: &HashSet::new(),
                         resources: None,
                         panes: &HashMap::new(),
                     },
@@ -9332,40 +9283,6 @@ mod attention_button_tests {
         assert_eq!(list_area(area).bottom(), button.y);
         set_attention_button_large(false);
         set_attention_button_reserved(false);
-    }
-
-    #[test]
-    fn activity_filter_keeps_chatroom_for_an_active_project() {
-        let mut tree = Tree::new();
-        let project = tree
-            .add_project(std::path::PathBuf::from("/activity-test"))
-            .unwrap();
-        let pane = tree
-            .add_pane(project, "active", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-        let visible = crate::tree_activity_projection::visible_nodes(&tree, &HashSet::from([pane]));
-        let opened = HashSet::from([vec![project]]);
-        let ranks = HashMap::new();
-        let sidebar = Default::default();
-        let chatrooms = HashSet::from([project]);
-        let mut cache = TreeItemCache::default();
-        let items = cache.get_or_build_ranked(
-            &tree,
-            1,
-            TreeOrder::Manual,
-            &opened,
-            (&ranks, 0),
-            (&sidebar, &chatrooms, None, Some(&visible)),
-        );
-        assert_eq!(items.len(), 1);
-        assert!(items[0]
-            .children()
-            .iter()
-            .any(|child| *child.identifier() == chatroom_node_id(project)));
-        assert!(items[0]
-            .children()
-            .iter()
-            .any(|child| *child.identifier() == pane));
     }
 
     #[test]

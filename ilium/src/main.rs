@@ -22,12 +22,10 @@
 
 use ilium::session;
 
-mod broadcast;
 mod close_pane;
 mod ctl;
 mod pane_filter;
 mod pane_scan;
-mod panes;
 mod progress_wait;
 mod recap;
 mod resource;
@@ -168,11 +166,6 @@ enum Command {
         #[arg(last = true, required = true, value_name = "CMD")]
         cmd: Vec<String>,
     },
-    /// Read, initialize, or post to this project's file-backed agent room.
-    Chat {
-        #[command(subcommand)]
-        command: ChatCommand,
-    },
     /// Reports (or clears) a long-running task's progress from inside the
     /// pane running it. Unlike every other subcommand here, this one is
     /// meant to be run by an agent CLI (or a script it wrote) from *inside*
@@ -197,20 +190,10 @@ enum Command {
         #[command(subcommand)]
         command: voice::VoiceCommand,
     },
-    /// List the panes of every running Ilium session on this machine, across
-    /// all projects, that pass the pane selection options. Shows exactly
-    /// which panes `broadcast` would address. Output is JSONL.
-    Panes(panes::PanesArgs),
     /// Factual short and long recaps of selected agent and shell panes.
     /// Agent recaps read only the transcript bound to the pane's session;
     /// shell recaps read bounded screen text. Output is JSONL by default.
     Recap(recap::RecapArgs),
-    /// Send a message to every running agent, across all projects and
-    /// sessions on this machine, that passes the pane selection options.
-    /// The message is typed into each agent and submitted, as the client's
-    /// "Send message to all" does. The pane running this command is skipped
-    /// unless --include-self is given. Output is JSONL.
-    Broadcast(broadcast::BroadcastArgs),
     /// Close a pane of this session, by default the pane this command runs
     /// in. `--worktree remove` also removes the pane's Ilium-created Git
     /// worktree when it is clean, merged and unused. Output is JSONL.
@@ -219,43 +202,6 @@ enum Command {
     /// the tree, project or pane as JSON/YAML/Markdown; create, rename, move,
     /// close and drive panes; manage worktrees. Start with `ilium ctl guide`.
     Ctl(ctl::CtlArgs),
-}
-
-/// Local chatroom operations intentionally avoid the detached server: agents
-/// can coordinate through the project file even when no TUI is attached.
-#[derive(Subcommand, Debug)]
-enum ChatCommand {
-    /// Create CHATROOM.md and install the project guidance/hook bridge.
-    Init,
-    /// Post one message as the calling agent. The author defaults to
-    /// ILIUM_CHATROOM_AUTHOR, then AGENT_NAME, then `agent`.
-    Send {
-        #[arg(long)]
-        message: String,
-        #[arg(long)]
-        author: Option<String>,
-    },
-    /// Print the recent room tail in a form that lifecycle hooks inject into an agent turn.
-    Context {
-        #[arg(long, default_value_t = 40)]
-        limit: usize,
-        /// Print only records this reader has not seen yet (nothing when none
-        /// are new). The reader is `--reader`, else `ILIUM_PANE_ID`, else the
-        /// hook's `session_id` read from standard input.
-        #[arg(long)]
-        since_last_read: bool,
-        /// Cap the printed context at this many bytes; newer records win.
-        #[arg(long)]
-        max_bytes: Option<usize>,
-        /// Explicit reader identity for `--since-last-read`.
-        #[arg(long)]
-        reader: Option<String>,
-    },
-    /// Print the most recent room records for direct terminal inspection.
-    Tail {
-        #[arg(long, default_value_t = 100)]
-        limit: usize,
-    },
 }
 
 /// Agent-facing lifecycle operations for one pane's server-owned long-task
@@ -619,172 +565,13 @@ async fn dispatch(cli: Cli, explicit_cwd: bool) -> Result<(), CliError> {
             _ => new_pane(&session_name, &cmd, &cli.cwd, keep_open).await,
         },
         Some(Command::Resource(args)) => resource::run(args, &cli.cwd, explicit_cwd).await,
-        Some(Command::Chat { command }) => chat(command, &cli.cwd),
         Some(Command::Progress { command }) => progress(command).await,
         Some(Command::Wait { monitor_id }) => progress(ProgressCommand::Wait { monitor_id }).await,
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
-        Some(Command::Panes(args)) => panes::panes(args, &cli.cwd).await,
         Some(Command::Recap(args)) => recap::recap(args, &cli.cwd).await,
-        Some(Command::Broadcast(args)) => broadcast::broadcast(args, &cli.cwd).await,
         Some(Command::ClosePane(args)) => close_pane::close_pane(args).await,
         Some(Command::Ctl(args)) => ctl::ctl(args, &cli.cwd).await,
     }
-}
-
-/// The parts of an agent lifecycle hook's JSON standard input that chat
-/// context uses. Both Claude Code and Codex send `session_id` and
-/// `hook_event_name`.
-#[derive(Default)]
-struct HookInput {
-    session_id: Option<String>,
-    is_session_start: bool,
-}
-
-/// Bound on hook standard input; real hook payloads are a few kilobytes.
-const HOOK_INPUT_LIMIT_BYTES: u64 = 1024 * 1024;
-/// A hook closes standard input right after writing it. Anything else (an
-/// interactive shell, an inherited open pipe) must not stall the command.
-const HOOK_INPUT_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
-
-fn read_hook_input() -> HookInput {
-    use std::io::{IsTerminal, Read};
-    if std::io::stdin().is_terminal() {
-        return HookInput::default();
-    }
-    let (sender, receiver) = std::sync::mpsc::channel();
-    // Detached on purpose: if standard input never reaches end of file, the
-    // reader stays blocked until this short-lived CLI process exits.
-    std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let result = std::io::stdin()
-            .take(HOOK_INPUT_LIMIT_BYTES)
-            .read_to_end(&mut bytes);
-        let _ = sender.send(result.map(|_| bytes));
-    });
-    let Ok(Ok(bytes)) = receiver.recv_timeout(HOOK_INPUT_WAIT) else {
-        return HookInput::default();
-    };
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        return HookInput::default();
-    };
-    HookInput {
-        session_id: value
-            .get("session_id")
-            .and_then(serde_json::Value::as_str)
-            .filter(|id| !id.is_empty())
-            .map(str::to_string),
-        is_session_start: value
-            .get("hook_event_name")
-            .and_then(serde_json::Value::as_str)
-            == Some("SessionStart"),
-    }
-}
-
-fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
-    let pane_worktree = std::env::var_os(ilium_ipc::pane_env::WORKTREE)
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from);
-    chat_with_pane_worktree(command, cwd, pane_worktree.as_deref())
-}
-
-/// `chat` with the pane's worktree passed in, so tests need not mutate the
-/// process environment.
-fn chat_with_pane_worktree(
-    command: ChatCommand,
-    cwd: &Path,
-    pane_worktree: Option<&Path>,
-) -> Result<(), CliError> {
-    // `paths::canonicalize` strips Windows' extended-length `\\?\` prefix:
-    // this value is printed straight to the user below ("chatroom ready at
-    // ...") and written into `CHATROOM.md`, neither of which should show it.
-    let cwd = paths::canonicalize(cwd).map_err(|_| CliError::InvalidCwd(cwd.to_path_buf()))?;
-    if !cwd.is_dir() {
-        return Err(CliError::InvalidCwd(cwd.to_path_buf()));
-    }
-    match command {
-        ChatCommand::Init => {
-            ilium_client::chatroom::initialize(&cwd)?;
-            println!("chatroom ready at {}", cwd.join("CHATROOM.md").display());
-            Ok(())
-        }
-        ChatCommand::Send { message, author } => {
-            let project_root = chatroom_project_root(&cwd, pane_worktree);
-            let author = author.unwrap_or_else(default_chatroom_author);
-            ilium_client::chatroom::append_message(&project_root, &author, &message)?;
-            println!("chatroom message sent");
-            Ok(())
-        }
-        ChatCommand::Context {
-            limit,
-            since_last_read,
-            max_bytes,
-            reader,
-        } => {
-            let project_root = chatroom_project_root(&cwd, pane_worktree);
-            let hook_input = if since_last_read {
-                read_hook_input()
-            } else {
-                HookInput::default()
-            };
-            let reader_key = reader
-                .or_else(|| {
-                    std::env::var("ILIUM_PANE_ID")
-                        .ok()
-                        .filter(|key| !key.is_empty())
-                })
-                .or(hook_input.session_id);
-            let max_bytes = max_bytes.unwrap_or(usize::MAX);
-            let output = match reader_key.as_deref() {
-                Some(key) if since_last_read => ilium_client::chatroom::unread_context(
-                    &project_root,
-                    limit,
-                    max_bytes,
-                    &ilium_client::chatroom::UnreadReader {
-                        key,
-                        is_session_start: hook_input.is_session_start,
-                    },
-                )?,
-                _ => ilium_client::chatroom::capped_context(&project_root, limit, max_bytes)?,
-            };
-            if !output.is_empty() {
-                println!("{output}");
-            }
-            Ok(())
-        }
-        ChatCommand::Tail { limit } => {
-            let project_root = chatroom_project_root(&cwd, pane_worktree);
-            // Unlike the hook-driven `context`, `tail` is run on purpose, so a
-            // directory with no room is an error rather than empty output.
-            ilium_client::chatroom::require_room(&project_root)?;
-            for message in ilium_client::chatroom::read_messages(&project_root, limit)? {
-                println!(
-                    "{} | {} | {}",
-                    message.timestamp, message.author, message.content
-                );
-            }
-            Ok(())
-        }
-    }
-}
-
-/// Finds the owning room so a provider hook also works when an agent starts in
-/// a project subdirectory, in a linked worktree (the room is git-ignored and
-/// lives only in the main checkout), or in a shell that left its pane's
-/// worktree. See `ilium_client::chatroom_root` for the lookup order.
-fn chatroom_project_root(cwd: &Path, pane_worktree: Option<&Path>) -> PathBuf {
-    ilium_client::chatroom_root::resolve_project_root(cwd, pane_worktree)
-}
-
-fn default_chatroom_author() -> String {
-    std::env::var("ILIUM_CHATROOM_AUTHOR")
-        .ok()
-        .filter(|author| !author.trim().is_empty())
-        .or_else(|| {
-            std::env::var("AGENT_NAME")
-                .ok()
-                .filter(|author| !author.trim().is_empty())
-        })
-        .unwrap_or_else(|| "agent".to_string())
 }
 
 /// This pane's identity, as injected by `ilium-server` at spawn time (see
@@ -2289,10 +2076,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        chat_with_pane_worktree, chatroom_project_root, client_restart_args,
-        default_workspace_path, join_for_shell, json_string, pane_identity_from_values,
-        pane_progress_json, progress_report_json, session, shell_join, workspace_provider,
-        ChatCommand, Cli, Command, ProgressCommand,
+        client_restart_args, default_workspace_path, join_for_shell, json_string,
+        pane_identity_from_values, pane_progress_json, progress_report_json, session, shell_join,
+        workspace_provider, Cli, Command, ProgressCommand,
     };
     use clap::{CommandFactory, Parser};
 
@@ -2546,50 +2332,6 @@ mod tests {
             join_for_shell(&["echo".to_string(), "it's here".to_string()], false),
             "echo 'it'\\''s here'"
         );
-    }
-
-    #[test]
-    fn chatroom_lookup_uses_the_nearest_parent_room() {
-        let project = tempfile::tempdir().unwrap();
-        let nested = project.path().join("src/deep");
-        std::fs::create_dir_all(&nested).unwrap();
-        ilium_client::chatroom::initialize(project.path()).unwrap();
-
-        assert_eq!(chatroom_project_root(&nested, None), project.path());
-    }
-
-    #[test]
-    fn tail_and_send_report_a_missing_room_but_context_stays_silent() {
-        let project = tempfile::tempdir().unwrap();
-
-        let tail = chat_with_pane_worktree(ChatCommand::Tail { limit: 5 }, project.path(), None)
-            .unwrap_err();
-        assert!(tail
-            .to_string()
-            .ends_with(ilium_client::chatroom_root::NO_CHATROOM_MESSAGE));
-        let send = chat_with_pane_worktree(
-            ChatCommand::Send {
-                message: "hello".to_string(),
-                author: Some("test".to_string()),
-            },
-            project.path(),
-            None,
-        )
-        .unwrap_err();
-        assert_eq!(send.to_string(), tail.to_string());
-        // Lifecycle hooks run in every project, including ones without a room.
-        chat_with_pane_worktree(
-            ChatCommand::Context {
-                limit: 5,
-                since_last_read: false,
-                max_bytes: None,
-                reader: None,
-            },
-            project.path(),
-            None,
-        )
-        .unwrap();
-        assert!(!project.path().join("CHATROOM.md").exists());
     }
 
     /// `ilium progress` only works run from inside a pane ilium itself

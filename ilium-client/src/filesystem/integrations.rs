@@ -1,7 +1,6 @@
 //! Typed ordered integration mutations and replaceable maintenance admission.
 use super::ordered::{OrderedWriter, WriteCompletion, WriteId};
 use crate::agent_feature_setup::{AgentFeature, FeatureSetupStatus};
-use ilium_core::NodeId;
 use ilium_execution::{Client, Job, JobContext, JobCost};
 use std::{path::PathBuf, sync::Arc};
 
@@ -12,20 +11,13 @@ pub(crate) struct FeatureTarget {
     pub project: Option<PathBuf>,
 }
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct RoomTarget {
-    pub id: NodeId,
-    pub path: PathBuf,
-}
-#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Maintenance {
     pub targets: Vec<FeatureTarget>,
-    pub rooms: Vec<RoomTarget>,
-    pub visible: Option<NodeId>,
     pub automatic: bool,
 }
 impl Maintenance {
     pub fn checked(&self) -> Result<(), String> {
-        if self.targets.capacity() > 256 || self.rooms.capacity() > 256 {
+        if self.targets.capacity() > 256 {
             return Err("Integration target limit exceeded (256); status remains pending".into());
         }
         let mut bytes = 0_usize;
@@ -40,12 +32,6 @@ impl Maintenance {
             }
             bytes += target.path.capacity() + target.project.as_ref().map_or(0, PathBuf::capacity);
         }
-        for room in &self.rooms {
-            if room.path.capacity() > 64 * 1024 {
-                return Err("Chatroom path exceeds retained limit".into());
-            }
-            bytes += room.path.capacity();
-        }
         if bytes > 2 * 1024 * 1024 {
             return Err("Integration snapshot exceeds 2 MiB retained limit".into());
         }
@@ -54,19 +40,10 @@ impl Maintenance {
 }
 pub(crate) enum IntegrationJob {
     Maintain(Maintenance),
-    CheckRoom(RoomTarget),
-    Append { room: RoomTarget, message: String },
-    AddRoom { room: RoomTarget },
     Install { targets: Vec<FeatureTarget> },
-}
-pub(crate) struct RoomResult {
-    pub room: RoomTarget,
-    pub stamp: Option<(std::time::SystemTime, u64)>,
-    pub result: Result<(bool, Option<Vec<crate::chatroom::ChatMessage>>), String>,
 }
 pub(crate) struct IntegrationResult {
     pub statuses: Vec<(FeatureTarget, Result<FeatureSetupStatus, String>)>,
-    pub rooms: Vec<RoomResult>,
     pub failures: Vec<String>,
 }
 fn bounded_error(error: impl std::fmt::Display) -> String {
@@ -93,50 +70,16 @@ fn install(target: &FeatureTarget) -> Result<(), String> {
                 .display()
         )));
     }
-    // Fresh status precedes mutation. A future managed contract, or an
-    // unreadable instruction file, cannot create adjacent room artifacts.
+    // Fresh status precedes mutation, so a future managed contract is never overwritten.
     let status =
         crate::agent_feature_setup::status(&target.path, target.feature).map_err(bounded_error)?;
     if status == FeatureSetupStatus::ManagedFuture {
         return Ok(());
     }
-    if let Some(project) = &target.project {
-        if target.feature == AgentFeature::Chatroom {
-            crate::chatroom::initialize(project).map_err(bounded_error)?;
-        }
-    }
     crate::agent_feature_setup::install(&target.path, target.feature).map_err(bounded_error)?;
     Ok(())
 }
 
-fn room_result(room: RoomTarget, visible: bool, repair: bool) -> RoomResult {
-    // Capture before reading. If another process appends after this point, the
-    // next fingerprint check sees the changed stamp even if this read raced it.
-    let stamp = visible.then(|| room_file_stamp(&room.path)).flatten();
-    let result = (|| -> Result<_, String> {
-        let exists = if repair {
-            crate::chatroom::ensure_integrations(&room.path).map_err(bounded_error)?
-        } else {
-            crate::chatroom::exists(&room.path)
-        };
-        let messages = if exists && visible {
-            Some(crate::chatroom::read_messages_bounded(&room.path, 200).map_err(bounded_error)?)
-        } else {
-            None
-        };
-        Ok((exists, messages))
-    })();
-    RoomResult {
-        room,
-        stamp,
-        result,
-    }
-}
-fn room_file_stamp(project: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
-    std::fs::metadata(crate::chatroom::path_for_project(project))
-        .ok()
-        .and_then(|metadata| Some((metadata.modified().ok()?, metadata.len())))
-}
 impl IntegrationJob {
     pub const COST: JobCost = JobCost {
         input_bytes: 32 * 1024 * 1024,
@@ -144,18 +87,7 @@ impl IntegrationJob {
     };
 
     fn cost(&self) -> JobCost {
-        match self {
-            // The executor refuses a submit whose declared bytes are below the
-            // job or output type size, so CheckRoom must cover the full
-            // IntegrationJob/IntegrationResult types, not only the room payload.
-            Self::CheckRoom(room) => JobCost {
-                input_bytes: std::mem::size_of::<Self>().saturating_add(room.path.capacity()),
-                result_bytes: std::mem::size_of::<IntegrationResult>()
-                    .max(std::mem::size_of::<String>())
-                    .saturating_add(std::mem::size_of::<RoomResult>()),
-            },
-            _ => Self::COST,
-        }
+        Self::COST
     }
 }
 impl Job for IntegrationJob {
@@ -165,7 +97,6 @@ impl Job for IntegrationJob {
         // An admitted mutation is never cancelled or replayed automatically.
         let mut result = IntegrationResult {
             statuses: Vec::new(),
-            rooms: Vec::new(),
             failures: Vec::new(),
         };
         match self {
@@ -193,38 +124,6 @@ impl Job for IntegrationJob {
                         .map_err(bounded_error);
                     result.statuses.push((target, status));
                 }
-                for room in snapshot.rooms {
-                    let visible = Some(room.id) == snapshot.visible;
-                    result.rooms.push(room_result(room, visible, true));
-                }
-            }
-            Self::CheckRoom(room) => {
-                let stamp = room_file_stamp(&room.path);
-                result.rooms.push(RoomResult {
-                    room,
-                    result: Ok((stamp.is_some(), None)),
-                    stamp,
-                });
-            }
-            Self::Append { room, message } => {
-                crate::chatroom::append_message(&room.path, "user", &message)
-                    .map_err(bounded_error)?;
-                result.rooms.push(room_result(room, true, false));
-            }
-            Self::AddRoom { room } => {
-                crate::chatroom::initialize(&room.path).map_err(bounded_error)?;
-                let target = FeatureTarget {
-                    feature: AgentFeature::Chatroom,
-                    path: room.path.join("CLAUDE.md"),
-                    project: Some(room.path.clone()),
-                };
-                install(&target)?;
-                result.statuses.push((
-                    target.clone(),
-                    crate::agent_feature_setup::status(&target.path, target.feature)
-                        .map_err(bounded_error),
-                ));
-                result.rooms.push(room_result(room, true, false));
             }
             Self::Install { targets } => {
                 for target in targets {
@@ -249,12 +148,6 @@ impl Job for IntegrationJob {
 #[derive(Clone)]
 pub(crate) enum IntegrationIntent {
     Maintenance(Maintenance),
-    CheckRoom(RoomTarget),
-    Append {
-        room: RoomTarget,
-        draft: String,
-    },
-    AddRoom(RoomTarget),
     Install {
         targets: Vec<FeatureTarget>,
         prompt: Option<crate::setup_prompt::SetupPromptState>,
@@ -299,7 +192,7 @@ impl IntegrationFiles {
         if self.closing {
             return Err("Integration maintenance admission closed".into());
         }
-        if self.intents.iter().any(|(_,intent)|matches!(intent,IntegrationIntent::Maintenance(current) if current.targets==snapshot.targets && current.rooms==snapshot.rooms && current.visible==snapshot.visible && (!snapshot.automatic || current.automatic))){return Ok(());}
+        if self.intents.iter().any(|(_,intent)|matches!(intent,IntegrationIntent::Maintenance(current) if current.targets==snapshot.targets && (!snapshot.automatic || current.automatic))){return Ok(());}
         if let Some(desired) = &self.desired {
             snapshot.automatic |= desired.automatic;
         }
@@ -309,21 +202,6 @@ impl IntegrationFiles {
     pub fn enqueue(&mut self, intent: IntegrationIntent) -> Result<(), String> {
         if self.closing {
             return Err("Integration writer admission closed".into());
-        }
-        match &intent {
-            IntegrationIntent::CheckRoom(room)
-            | IntegrationIntent::Append { room, .. }
-            | IntegrationIntent::AddRoom(room)
-                if room.path.capacity() > 64 * 1024 =>
-            {
-                return Err("Chatroom target exceeds retained path limit".into());
-            }
-            _ => {}
-        }
-
-        if matches!(&intent,IntegrationIntent::Append{draft,..} if draft.capacity()>16*1024 || draft.chars().count()>4000)
-        {
-            return Err("Chatroom messages are limited to 4000 characters".into());
         }
         if self
             .intents
@@ -337,17 +215,9 @@ impl IntegrationFiles {
                 snapshot.checked()?;
                 IntegrationJob::Maintain(snapshot.clone())
             }
-            IntegrationIntent::CheckRoom(room) => IntegrationJob::CheckRoom(room.clone()),
-            IntegrationIntent::Append { room, draft } => IntegrationJob::Append {
-                room: room.clone(),
-                message: draft.clone(),
-            },
-            IntegrationIntent::AddRoom(room) => IntegrationJob::AddRoom { room: room.clone() },
             IntegrationIntent::Install { targets, .. } => {
                 Maintenance {
                     targets: targets.clone(),
-                    rooms: Vec::new(),
-                    visible: None,
                     automatic: false,
                 }
                 .checked()?;
@@ -398,18 +268,6 @@ impl IntegrationFiles {
 }
 fn same_explicit(first: &IntegrationIntent, second: &IntegrationIntent) -> bool {
     match (first, second) {
-        (IntegrationIntent::CheckRoom(a), IntegrationIntent::CheckRoom(b)) => a == b,
-        (
-            IntegrationIntent::Append {
-                room: a,
-                draft: a_draft,
-            },
-            IntegrationIntent::Append {
-                room: b,
-                draft: b_draft,
-            },
-        ) => a == b && a_draft == b_draft,
-        (IntegrationIntent::AddRoom(a), IntegrationIntent::AddRoom(b)) => a == b,
         (
             IntegrationIntent::Install {
                 targets: a,

@@ -464,14 +464,14 @@ impl EditorPane {
     /// was written to.
     ///
     /// Writes to a temp file in the same directory and renames it into
-    /// place, mirroring `workspace_file::save`'s identical reasoning: a
+    /// place, the same reasoning as the session snapshot write: a
     /// disk-full or killed-mid-write failure must never leave `path`
     /// truncated to a partial file on disk -- the rename is atomic, so the
     /// file at `path` is always either the previous complete contents or
     /// the new ones, never a half-written mix of both. Any failure after
     /// the temp file was created (a failed write, a failed fsync, or a
     /// failed rename) still cleans it up below, the same as
-    /// `workspace_file::save`, rather than leaving a stray
+    /// the session snapshot write, rather than leaving a stray
     /// `.<file>.tmp-<pid>` behind forever on an error path.
     pub fn save_to(&mut self, path: &Path) -> anyhow::Result<()> {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));

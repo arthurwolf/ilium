@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use ilium_plugin_sdk_core::generated::host::{ProcessExit, ProcessSpec};
+use ilium_plugin_sdk_core::generated::host::{ProcessExit, ProcessSpec, SpawnSpec};
 use ilium_plugin_sdk_core::types::PluginError;
 
 /// What a matching run produces.
@@ -91,7 +91,10 @@ impl FakeProcess {
     pub fn expect(&mut self, program: &str, arguments: &[&str]) -> ProcessExpectation {
         ProcessExpectation {
             program: program.to_string(),
-            arguments: arguments.iter().map(|argument| argument.to_string()).collect(),
+            arguments: arguments
+                .iter()
+                .map(|argument| argument.to_string())
+                .collect(),
             rules: Rc::clone(&self.rules),
         }
     }
@@ -111,6 +114,44 @@ impl FakeProcess {
         self.children.clone()
     }
 
+    /// Records a long-running child; ids count from 1.
+    pub(crate) fn spawn(&mut self, spec: &SpawnSpec) -> u64 {
+        let id = self.children.len() as u64 + 1;
+        self.children.push(ChildRecord {
+            id,
+            program: spec.process.program.clone(),
+            arguments: spec.process.arguments.clone(),
+            stdin_lines: Vec::new(),
+            signals: Vec::new(),
+            stdin_open: spec.stdin_open,
+            line_mode: spec.line_mode,
+        });
+        id
+    }
+
+    /// Records what the plugin wrote to a child's stdin, one entry per line.
+    pub(crate) fn write_stdin(&mut self, id: u64, bytes: &[u8]) -> bool {
+        let Some(child) = self.children.iter_mut().find(|child| child.id == id) else {
+            return false;
+        };
+        let text = String::from_utf8_lossy(bytes);
+        child.stdin_lines.extend(
+            text.split('\n')
+                .filter(|line| !line.is_empty())
+                .map(str::to_owned),
+        );
+        true
+    }
+
+    /// Records a signal sent to a child.
+    pub(crate) fn signal(&mut self, id: u64, signal: &str) -> bool {
+        let Some(child) = self.children.iter_mut().find(|child| child.id == id) else {
+            return false;
+        };
+        child.signals.push(signal.to_owned());
+        true
+    }
+
     /// The exit of every run no other rule matches (lane hook, see manual_gaps_fakes.md; DEV-464).
     pub fn default_exit(&mut self, exit: ProcessExit) {
         self.rules.borrow_mut().default_exit = Some(exit);
@@ -119,7 +160,10 @@ impl FakeProcess {
     /// The exit of every run whose arguments equal `arguments`, whatever the program (lane hook, see manual_gaps_fakes.md).
     pub fn on_args(&mut self, arguments: &[&str], exit: ProcessExit) {
         self.rules.borrow_mut().by_args.push((
-            arguments.iter().map(|argument| argument.to_string()).collect(),
+            arguments
+                .iter()
+                .map(|argument| argument.to_string())
+                .collect(),
             exit,
         ));
     }
@@ -164,13 +208,21 @@ impl FakeProcess {
                 Reply::Fail(error) => Err(error),
             };
         }
-        if let Some((_, reply)) = rules.by_program.iter().find(|(name, _)| *name == spec.program) {
+        if let Some((_, reply)) = rules
+            .by_program
+            .iter()
+            .find(|(name, _)| *name == spec.program)
+        {
             return match reply.clone() {
                 Reply::Exit(exit) => Ok(exit),
                 Reply::Fail(error) => Err(error),
             };
         }
-        if let Some((_, exit)) = rules.by_args.iter().find(|(args, _)| *args == spec.arguments) {
+        if let Some((_, exit)) = rules
+            .by_args
+            .iter()
+            .find(|(args, _)| *args == spec.arguments)
+        {
             return Ok(exit.clone());
         }
         if let Some(exit) = &rules.default_exit {
@@ -220,7 +272,10 @@ mod spec_tests {
             .returns(exit_with_stdout(b"pushed"));
         let spec = |arguments: &[&str]| ProcessSpec {
             program: "git".to_string(),
-            arguments: arguments.iter().map(|argument| argument.to_string()).collect(),
+            arguments: arguments
+                .iter()
+                .map(|argument| argument.to_string())
+                .collect(),
             cwd: None,
             stdin: None,
             environment: Vec::new(),

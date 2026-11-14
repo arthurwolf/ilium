@@ -26,6 +26,10 @@ pub(super) struct BridgeState {
     completions: BTreeMap<u64, Completion>,
     exits: BTreeMap<u64, ProcessExit>,
     replies: BTreeMap<u64, String>,
+    proposals: BTreeMap<u64, ProposalResult>,
+    /// Submissions the plugin made through `intents-host.submit` outside a batch, admitted by the
+    /// fake host when the call that made them returns.
+    pub(super) queued_submissions: Vec<Submission>,
     transcripts: BTreeMap<u64, Vec<TranscriptTurn>>,
     /// Topics the plugin published, as `(topic, payload JSON)` in publish order.
     pub(super) published: Vec<(String, String)>,
@@ -582,17 +586,57 @@ impl HostFs for NativeBridge {
         title: String,
         changes: Vec<ConfigChange>,
     ) -> Result<RequestId, PluginError> {
-        let _ = agent;
-        let _ = title;
-        let _ = changes;
-        Err(PluginError::new(
-            ErrorCode::Unsupported,
-            "the fake host does not model this call",
-        ))
+        let granted = format!("agent-config.propose:{agent}");
+        if !self.host().granted.contains(&granted) {
+            return Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                format!("{granted} is not granted"),
+            ));
+        }
+        if changes.is_empty() {
+            return Err(PluginError::new(
+                ErrorCode::InvalidArgument,
+                "a proposal needs at least one change",
+            ));
+        }
+        let id = self.next_id();
+        let injected = self
+            .host()
+            .injected_failures
+            .iter()
+            .position(|(import, _)| import == "fs.propose-agent-config");
+        if let Some(position) = injected {
+            let (_, error) = self.host().injected_failures.remove(position);
+            self.complete(id, Outcome::Failed(error));
+            return Ok(RequestId(id));
+        }
+        // The fake applies the way the real host does: a whole new file is created and an existing
+        // file is a conflict.
+        let scope = format!("agent-config:{agent}");
+        let mut result = ProposalResult {
+            applied: Vec::new(),
+            rejected: Vec::new(),
+            history: format!("{title}\n"),
+        };
+        for change in changes {
+            let target = FsPath {
+                scope: scope.clone(),
+                path: change.path.clone(),
+            };
+            match (&change.content, &change.revision) {
+                (Some(content), None) if self.host().fs.read(target.clone()).is_none() => {
+                    self.host().fs.write(target, content);
+                    result.applied.push(change.path);
+                }
+                _ => result.rejected.push(change.path),
+            }
+        }
+        self.host().bridge.proposals.insert(id, result);
+        self.complete(id, Outcome::Ok);
+        Ok(RequestId(id))
     }
     fn take_proposal(&mut self, request: RequestId) -> Option<ProposalResult> {
-        let _ = request;
-        Default::default()
+        self.host().bridge.proposals.remove(&request.0)
     }
     fn take_bytes(&mut self, request: RequestId) -> Option<Vec<u8>> {
         self.host().bridge.bytes.remove(&request.0)
@@ -725,42 +769,45 @@ impl HostProcess for NativeBridge {
         self.host().bridge.exits.remove(&request.0)
     }
     fn spawn(&mut self, spec: SpawnSpec) -> Result<ChildHandle, PluginError> {
-        let _ = spec;
-        Err(PluginError::new(
-            ErrorCode::Unsupported,
-            "the fake host does not model this call",
-        ))
+        let program = spec.process.program.clone();
+        if !self.host().granted.contains("process.run")
+            && !self.permit_scoped("process.run", &program)
+        {
+            return Err(PluginError::new(
+                ErrorCode::NotPermitted,
+                format!("process.run:{program} is not granted"),
+            ));
+        }
+        self.permit("process.long-lived")?;
+        let id = self.host().process.spawn(&spec);
+        Ok(ChildHandle(id as u32))
     }
     fn child_pid_hint(&mut self, handle: ChildHandle) -> u32 {
-        let _ = handle;
-        Default::default()
+        handle.0
     }
     fn child_write_stdin(
         &mut self,
         handle: ChildHandle,
         bytes: Vec<u8>,
     ) -> Result<(), PluginError> {
-        let _ = handle;
-        let _ = bytes;
-        Err(PluginError::new(
-            ErrorCode::Unsupported,
-            "the fake host does not model this call",
-        ))
+        if self.host().process.write_stdin(u64::from(handle.0), &bytes) {
+            Ok(())
+        } else {
+            Err(PluginError::new(ErrorCode::NotFound, "no such child"))
+        }
     }
     fn child_close_stdin(&mut self, handle: ChildHandle) {
         let _ = handle;
     }
     fn child_signal(&mut self, handle: ChildHandle, signal: String) -> Result<(), PluginError> {
-        let _ = handle;
-        let _ = signal;
-        Err(PluginError::new(
-            ErrorCode::Unsupported,
-            "the fake host does not model this call",
-        ))
+        if self.host().process.signal(u64::from(handle.0), &signal) {
+            Ok(())
+        } else {
+            Err(PluginError::new(ErrorCode::NotFound, "no such child"))
+        }
     }
     fn child_id(&mut self, handle: ChildHandle) -> ChildId {
-        let _ = handle;
-        Default::default()
+        ChildId(u64::from(handle.0))
     }
 }
 
@@ -821,28 +868,67 @@ impl HostCli for NativeBridge {
         self.host().cli.finish(invocation, exit_code);
     }
     fn read_stdin(&mut self, invocation: u64, max_bytes: u32) -> Result<u64, PluginError> {
-        let _ = invocation;
-        let _ = max_bytes;
-        Err(PluginError::new(
-            ErrorCode::Unsupported,
-            "the fake host does not model this call",
-        ))
+        let Some(mut bytes) = self.host().cli.stdin_of(invocation) else {
+            return Err(PluginError::new(
+                ErrorCode::NotFound,
+                format!("no command invocation {invocation} is running"),
+            ));
+        };
+        bytes.truncate(max_bytes as usize);
+        let id = self.next_id();
+        self.host().bridge.bytes.insert(id, bytes);
+        self.complete(id, Outcome::Ok);
+        Ok(id)
     }
     fn take_stdin(&mut self, request: u64) -> Option<Vec<u8>> {
-        let _ = request;
-        Default::default()
+        self.host().bridge.bytes.remove(&request)
     }
     fn is_tty(&mut self, invocation: u64) -> (bool, bool) {
         let _ = invocation;
         Default::default()
     }
     fn caller_pane(&mut self, invocation: u64) -> Option<NodeId> {
-        let _ = invocation;
-        Default::default()
+        self.host().cli.caller_pane_of(invocation).map(NodeId)
     }
     fn selected_panes(&mut self, invocation: u64) -> Option<PaneSelection> {
         let _ = invocation;
         Default::default()
+    }
+}
+
+impl HostSessions for NativeBridge {
+    fn list_live(&mut self) -> Vec<LiveSession> {
+        if self.permit("sessions.cross").is_err() {
+            return Vec::new();
+        }
+        self.host().sessions.listed()
+    }
+    fn send(&mut self, request: CrossRequest) -> Result<RequestId, PluginError> {
+        self.permit("sessions.cross")?;
+        if !self
+            .host()
+            .sessions
+            .listed()
+            .iter()
+            .any(|session| session.socket_id == request.session)
+        {
+            return Err(PluginError::new(
+                ErrorCode::NotFound,
+                "no live session has that identity",
+            ));
+        }
+        let id = self.next_id();
+        let reply = self.host().sessions.answer(
+            &request.session,
+            &request.command,
+            &request.arguments_json,
+        );
+        self.host().bridge.replies.insert(id, reply);
+        self.complete(id, Outcome::Ok);
+        Ok(RequestId(id))
+    }
+    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+        self.host().bridge.replies.remove(&request.0)
     }
 }
 
@@ -1258,5 +1344,13 @@ impl HostJournal for NativeBridge {
             rows.drain(..rows.len() - cap);
         }
         rows
+    }
+}
+
+impl HostIntentsHost for NativeBridge {
+    fn submit(&mut self, submission: Submission) -> Result<RequestId, PluginError> {
+        let correlation = submission.correlation;
+        self.host().bridge.queued_submissions.push(submission);
+        Ok(RequestId(correlation))
     }
 }

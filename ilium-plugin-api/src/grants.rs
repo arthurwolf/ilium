@@ -1386,6 +1386,10 @@ pub fn required_by_intent(
         Intent::PlaySound(_) => vec!["sound.play".into()],
         Intent::Notify(_) => vec!["notify.desktop".into()],
         Intent::OpenView(_) | Intent::CloseView(_) => vec!["ui.panels".into()],
+        // A `kernel.<name>` command is one of the few commands the client itself carries out
+        // (`kernel.focus-node`, `kernel.set-editor-option`); the client names them and refuses
+        // every other one, so they need no grant of their own.
+        Intent::InvokeCommand(spec) if spec.command.starts_with("kernel.") => Vec::new(),
         Intent::InvokeCommand(spec) => vec![format!("commands.invoke:{}", spec.command)],
         Intent::Message(spec) if spec.to.plugin.0 == origin_plugin => Vec::new(),
         Intent::Message(spec) => vec![format!("messages.peer:{}", spec.to.plugin.0)],

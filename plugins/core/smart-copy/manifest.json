@@ -18,7 +18,9 @@
     "server": [
       "terminal.read-cells",
       "terminal.read-screen",
-      "inference"
+      "inference",
+      "extensions.provide:ilium.core.smart-copy/recognisers",
+      "extensions.provide:ilium.core.smart-copy/after-copy"
     ],
     "client": [
       "terminal.read-screen",
@@ -39,6 +41,83 @@
         "target": "terminal"
       }
     ],
+    "extension_points": [
+      {
+        "id": "recognisers",
+        "kind": "collect",
+        "title": "Teach Smart Copy a new kind of structure to select",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "regex": {
+              "type": "string"
+            },
+            "multiline": {
+              "type": "boolean"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "regex",
+            "multiline",
+            "label"
+          ]
+        },
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "after-copy",
+        "kind": "hook",
+        "mode": "transform",
+        "title": "Change the copied text before it reaches the clipboard",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "pane": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "kind",
+            "pane"
+          ]
+        },
+        "reply_schema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ],
     "commands": [
       {
         "id": "smart-copy",
@@ -46,5 +125,12 @@
       }
     ]
   },
+  "replaceable": true,
+  "surface": [
+    "points:recognisers",
+    "points:after-copy",
+    "topics:copied",
+    "commands:smart-copy"
+  ],
   "limits_tier": "first-party"
 }

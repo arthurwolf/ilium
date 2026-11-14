@@ -253,4 +253,59 @@ mod tests {
         assert!(serde_json::from_str::<ConvertInput>("{").is_err());
         assert!(serde_json::from_str::<ConvertInput>("{}").is_err());
     }
+
+    /// A rollout recorded from a real Codex session shape (harness blocks, reasoning, five tool
+    /// calls, an out-of-order output, an unpaired call). Moved from `ilium-session-convert`.
+    const FIXTURE: &str = include_str!("../tests/fixtures/codex_rollout_sample.jsonl");
+
+    #[test]
+    fn the_recorded_rollout_converts_into_a_chained_transcript() {
+        let text = FIXTURE.replace("__CWD__", "/work");
+        let output = convert(&text).expect("converts");
+        let lines: Vec<Value> = output
+            .claude_jsonl
+            .split('\n')
+            .map(|line| serde_json::from_str(line).expect("each line is JSON"))
+            .collect();
+        assert_eq!(lines.len(), output.kept);
+        assert_eq!(
+            lines[0]["message"]["content"],
+            "List the files and remember the codeword PINEAPPLE."
+        );
+        assert_eq!(lines[0]["parentUuid"], Value::Null);
+        for pair in lines.windows(2) {
+            assert_eq!(pair[1]["parentUuid"], pair[0]["uuid"]);
+        }
+        for line in &lines {
+            assert_eq!(line["sessionId"], output.session_id.as_str());
+            assert_eq!(line["cwd"], "/work");
+        }
+        // Every tool call is answered by the very next line with the same id.
+        let mut calls = 0;
+        for (index, line) in lines.iter().enumerate() {
+            let block = &line["message"]["content"][0];
+            if block["type"] != "tool_use" {
+                continue;
+            }
+            calls += 1;
+            let answer = &lines[index + 1]["message"]["content"][0];
+            assert_eq!(answer["type"], "tool_result");
+            assert_eq!(answer["tool_use_id"], block["id"]);
+        }
+        assert_eq!(calls, 5);
+        for banned in [
+            "gAAAAAB",
+            "AGENTS.md instructions",
+            "environment_context",
+            "permissions instructions",
+            "nobody asked",
+            "web_search",
+            "ghost",
+        ] {
+            assert!(
+                !output.claude_jsonl.contains(banned),
+                "`{banned}` leaked into the transcript"
+            );
+        }
+    }
 }

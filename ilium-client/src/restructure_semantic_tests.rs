@@ -53,7 +53,6 @@ fn semantic_contract_prompt_includes_every_concrete_animation() {
         "box_machine",
         "machine_screen",
         "fbm_clouds",
-        "dithered_waves",
         "dithr_patterns",
         "hex_expedition",
         "vector_td",

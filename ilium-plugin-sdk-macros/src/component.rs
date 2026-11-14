@@ -1,5 +1,9 @@
 //! wasm32 component glue of `#[ilium_plugin]`.
 //!
+//! A scene plugin's glue is `scene_body` (below): the lifecycle export plus the `renderer`
+//! export, whose `scene-renderer` resource wraps one value of the plugin type that implements
+//! `SceneProgram` and draws into the host's frame surface.
+//!
 //! For a server or client plugin the macro emits one module, compiled only on wasm32 (and, in
 //! a crate that declares the `component-<side>` features, only with that feature). The module holds the wit-bindgen bindings of the export
 //! interfaces the plugin declares (import interfaces are shared with the SDK through `with`),
@@ -23,16 +27,17 @@ use crate::generated_glue::{
 /// Exports every server and client component has, declared or not (the host requires both).
 const REQUIRED_EXPORTS: &[&str] = &["lifecycle", "handler"];
 
-/// The glue module of one plugin struct; empty for a scene plugin.
+/// The glue module of one plugin struct.
 pub(crate) fn glue(side: &str, exports: &[String], krate: &syn::Path, name: &Ident) -> TokenStream {
-    if side == "scene" {
-        return TokenStream::new();
-    }
     let feature = format!("component-{side}");
     let module = format_ident!("__ilium_component_{}", side);
     let manifest_directory = std::env::var("CARGO_MANIFEST_DIR").map(PathBuf::from).ok();
     let body = match &manifest_directory {
-        Some(directory) => match body(side, exports, krate, name, directory) {
+        Some(directory) => match if side == "scene" {
+            scene_body(exports, krate, name, directory)
+        } else {
+            body(side, exports, krate, name, directory)
+        } {
             Ok(tokens) => tokens,
             Err(message) => quote!(::core::compile_error!(#message);),
         },
@@ -184,6 +189,195 @@ fn body(
         #(#host_macros)*
 
         #(#export_macros)*
+
+        bindings::export!(__IliumGlue with_types_in bindings);
+    })
+}
+
+/// The wit-bindgen `with` entries of the scene component: the interfaces the SDK already
+/// generated (lifecycle, the renderer's types and the frame surface with what it `use`s).
+const SCENE_WITH: &[(&str, &str)] = &[
+    ("ilium:anim/renderer-types@0.1.0", "ilium::anim::renderer_types"),
+    ("ilium:anim/surface@0.1.0", "ilium::anim::surface"),
+    ("ilium:types/errors@0.1.0", "ilium::types::errors"),
+    ("ilium:types/geo@0.1.0", "ilium::types::geo"),
+    ("ilium:types/ids@0.1.0", "ilium::types::ids"),
+    ("ilium:types/layout@0.1.0", "ilium::types::layout"),
+    ("ilium:types/lifecycle@0.1.0", "ilium::types::lifecycle"),
+    ("ilium:types/paths@0.1.0", "ilium::types::paths"),
+    ("ilium:types/text@0.1.0", "ilium::types::text"),
+    ("ilium:types/ui@0.1.0", "ilium::types::ui"),
+];
+
+/// The body of the scene component module: lifecycle (shared glue macro) and the renderer
+/// resource. The plugin type implements `SceneProgram` (one value per `scene-renderer`) and
+/// `Default` + `Lifecycle` (the instance behind `activate`).
+fn scene_body(
+    exports: &[String],
+    krate: &syn::Path,
+    name: &Ident,
+    manifest_directory: &Path,
+) -> Result<TokenStream, String> {
+    if let Some(other) = exports.first() {
+        return Err(format!(
+            "ilium_plugin: a scene component exports only lifecycle and renderer, not `{other}`"
+        ));
+    }
+    let wit_root = wit_root(manifest_directory)?;
+    let krate_text = quote!(#krate).to_string().replace(' ', "");
+    let world = "package ilium:plugin-glue@0.1.0;\n\nworld component {\n    export ilium:exports/lifecycle@0.1.0;\n    export ilium:exports/renderer@0.1.0;\n}\n";
+    let paths: Vec<String> = WIT_DIRECTORIES
+        .iter()
+        .map(|directory| wit_root.join(directory).to_string_lossy().into_owned())
+        .collect();
+    let with_keys = SCENE_WITH.iter().map(|(key, _)| *key);
+    let with_paths = SCENE_WITH
+        .iter()
+        .map(|(_, suffix)| {
+            syn::parse_str::<syn::Path>(&format!("{krate_text}::wasm::bindings::{suffix}"))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("ilium_plugin: bindings path does not parse: {error}"))?;
+    let runtime_path = format!("{krate_text}::wasm::wit_bindgen::rt");
+    let manifest_path = manifest_directory.join("manifest.json");
+    let track_manifest = if manifest_path.is_file() {
+        let text = manifest_path.to_string_lossy().into_owned();
+        quote!(
+            const _: &str = ::core::include_str!(#text);
+        )
+    } else {
+        TokenStream::new()
+    };
+    Ok(quote! {
+        use super::#name as __IliumPlugin;
+
+        #track_manifest
+
+        /// Implements the `Guest` trait of the lifecycle and renderer exports.
+        struct __IliumGlue;
+
+        // wit-bindgen output: generated code, not held to the workspace lints.
+        #[allow(clippy::all, dead_code, unused, missing_docs)]
+        mod bindings {
+            #krate::wasm::wit_bindgen::generate!({
+                inline: #world,
+                path: [#(#paths),*],
+                with: { #(#with_keys: #with_paths),* },
+                runtime_path: #runtime_path,
+            });
+        }
+
+        ::std::thread_local! {
+            // A component instance is single-threaded; this value only serves `activate`.
+            static __ILIUM_INSTANCE: ::core::cell::RefCell<::core::option::Option<__IliumPlugin>> =
+                const { ::core::cell::RefCell::new(::core::option::Option::None) };
+        }
+
+        fn __ilium_with<R>(call: impl ::core::ops::FnOnce(&mut __IliumPlugin) -> R) -> R {
+            __ILIUM_INSTANCE.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                call(slot.get_or_insert_with(<__IliumPlugin as ::core::default::Default>::default))
+            })
+        }
+
+        /// A scene imports no host interface but the frame surface, so there is no host to install.
+        fn __ilium_install_host() {}
+
+        #krate::__ilium_wasm_export_lifecycle!();
+
+        /// One `scene-renderer` resource: the scene and the pixel field it draws into.
+        struct __IliumSceneRenderer {
+            program: ::core::cell::RefCell<__IliumPlugin>,
+            field: ::core::cell::RefCell<#krate::SceneField>,
+        }
+
+        impl bindings::exports::ilium::exports::renderer::Guest for __IliumGlue {
+            type SceneRenderer = __IliumSceneRenderer;
+        }
+
+        impl bindings::exports::ilium::exports::renderer::GuestSceneRenderer for __IliumSceneRenderer {
+            fn new(spec_json: ::std::string::String) -> Self {
+                Self {
+                    program: ::core::cell::RefCell::new(
+                        <__IliumPlugin as #krate::SceneProgram>::new(&spec_json),
+                    ),
+                    field: ::core::cell::RefCell::new(#krate::SceneField::default()),
+                }
+            }
+
+            fn readiness(&self) -> #krate::wasm::bindings::ilium::anim::renderer_types::Readiness {
+                #krate::wasm::IntoWit::into_wit(
+                    <__IliumPlugin as #krate::SceneProgram>::readiness(&*self.program.borrow()),
+                )
+            }
+
+            fn frames_per_second(&self) -> u32 {
+                <__IliumPlugin as #krate::SceneProgram>::frames_per_second(&*self.program.borrow())
+            }
+
+            fn wants_pointer(&self) -> bool {
+                <__IliumPlugin as #krate::SceneProgram>::wants_pointer(&*self.program.borrow())
+            }
+
+            fn wants_occupancy(&self) -> bool {
+                <__IliumPlugin as #krate::SceneProgram>::wants_occupancy(&*self.program.borrow())
+            }
+
+            fn uses_cell_colors(&self) -> bool {
+                <__IliumPlugin as #krate::SceneProgram>::uses_cell_colors(&*self.program.borrow())
+            }
+
+            fn render(
+                &self,
+                frame: #krate::wasm::bindings::ilium::anim::renderer_types::FrameInput,
+                surface: &#krate::wasm::bindings::ilium::anim::surface::FrameSurface,
+            ) {
+                let frame: #krate::generated::anim::FrameInput =
+                    #krate::wasm::IntoMirror::into_mirror(frame);
+                let (width, height) = surface.size();
+                let columns = ::core::cmp::min(width / #krate::plugin::FIELD_PIXELS_PER_COLUMN, u32::from(u16::MAX)) as u16;
+                let rows = ::core::cmp::min(height / #krate::plugin::FIELD_PIXELS_PER_ROW, u32::from(u16::MAX)) as u16;
+                let mut field = self.field.borrow_mut();
+                if field.columns != columns || field.rows != rows {
+                    field.resize(columns, rows);
+                } else {
+                    field.clear();
+                }
+                let mut program = self.program.borrow_mut();
+                <__IliumPlugin as #krate::SceneProgram>::render(&mut *program, &frame, &mut *field);
+                if !field.pixels.is_empty() {
+                    let _ = surface.write_rows(
+                        0,
+                        #krate::wasm::bindings::ilium::types::ui::PixelFormat::Gray8,
+                        &field.pixels,
+                    );
+                }
+                if <__IliumPlugin as #krate::SceneProgram>::uses_cell_colors(&*program)
+                    && !field.cell_colors.is_empty()
+                {
+                    let _ = surface.write_cell_colors(0, &field.cell_colors);
+                }
+                surface.present();
+            }
+
+            fn set_palette(&self, palette_rgb: ::std::vec::Vec<u32>) {
+                <__IliumPlugin as #krate::SceneProgram>::set_palette(
+                    &mut *self.program.borrow_mut(),
+                    palette_rgb,
+                );
+            }
+
+            fn reconfigure(&self, settings_json: ::std::string::String) -> bool {
+                <__IliumPlugin as #krate::SceneProgram>::reconfigure(
+                    &mut *self.program.borrow_mut(),
+                    &settings_json,
+                )
+            }
+
+            fn status(&self) -> ::core::option::Option<::std::string::String> {
+                <__IliumPlugin as #krate::SceneProgram>::status(&*self.program.borrow())
+            }
+        }
 
         bindings::export!(__IliumGlue with_types_in bindings);
     })

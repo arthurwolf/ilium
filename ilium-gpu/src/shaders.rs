@@ -7,7 +7,7 @@ use ilium_ambient::gpu::GpuKernel;
 pub(crate) fn shader_source(kernel: GpuKernel) -> Option<&'static str> {
     match kernel {
         GpuKernel::FbmClouds => Some(include_str!("shaders/fbm_clouds.wgsl")),
-        GpuKernel::DitheredWaves | GpuKernel::DithrPatterns => None,
+        GpuKernel::DithrPatterns => None,
     }
 }
 

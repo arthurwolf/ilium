@@ -12,7 +12,9 @@
 //! `agent-config:<agent>`) open on `fs.read:<scope>` once the composition root points them at a
 //! folder (`configure_read_only_scope`). `pick` asks the [`FilePicker`] of the process on a worker
 //! thread; each confirmed path becomes a `picked/<n>` scope of this instance, opened by
-//! `fs.read:picked` or `fs.write:picked`. `agent-config.propose` still answers `not-permitted`.
+//! `fs.read:picked` or `fs.write:picked`. `agent-config.propose:<agent>` applies a new agent session
+//! transcript (`projects/<project>/<id>.jsonl`, revision none, so an existing file is never replaced) to
+//! the agent's configuration folder; every other proposed file is rejected with a reason.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -197,6 +199,8 @@ struct FsState {
     lock_answers: HashMap<u64, LockId>,
     revisioned: HashMap<u64, Revisioned>,
     written: HashMap<u64, RevisionToken>,
+    /// Results of `propose-agent-config` calls, until `take-proposal`.
+    proposals: HashMap<u64, ProposalResult>,
     watches: HashMap<u64, WatchEntry>,
     /// Held advisory locks: lock id to (scope-qualified path, exclusive).
     held_locks: HashMap<u64, (String, bool)>,
@@ -381,6 +385,7 @@ impl FsState {
             lock_answers: HashMap::new(),
             revisioned: HashMap::new(),
             written: HashMap::new(),
+            proposals: HashMap::new(),
             watches: HashMap::new(),
             held_locks: HashMap::new(),
             completed: HashMap::new(),
@@ -637,6 +642,108 @@ fn extra_scope_root(
     } else {
         Err(refused())
     }
+}
+
+/// Largest new session transcript one proposal may create.
+const NEW_TRANSCRIPT_MAX_BYTES: usize = 128 * 1024 * 1024;
+
+/// The `projects/<project>/<id>.jsonl` shape of a new agent session transcript, as path parts.
+/// Both names are plain file names: no dots in the project folder, an id of letters, digits, `-`
+/// and `_`.
+fn new_transcript_parts(path: &str) -> Option<(&str, &str)> {
+    let mut parts = path.split('/');
+    let (projects, project, file) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() || projects != "projects" {
+        return None;
+    }
+    let id = file.strip_suffix(".jsonl")?;
+    let plain = |name: &str, allow_dot: bool| {
+        !name.is_empty()
+            && name.len() <= 255
+            && name != "."
+            && name != ".."
+            && name.chars().all(|character| {
+                character.is_ascii_alphanumeric()
+                    || matches!(character, '-' | '_')
+                    || (allow_dot && character == '.')
+            })
+    };
+    (plain(project, false) && plain(id, false)).then_some((project, file))
+}
+
+/// Applies the changes of one proposal. The only change accepted without a review is the creation
+/// of a new session transcript under the agent's `projects` folder; the rest is rejected with its
+/// reason in the history.
+fn apply_agent_config_changes(
+    root: Option<&Path>,
+    title: &str,
+    changes: &[ConfigChange],
+) -> ProposalResult {
+    let mut applied = Vec::new();
+    let mut rejected = Vec::new();
+    let mut history = format!("{title}\n");
+    for change in changes {
+        match apply_new_transcript(root, change) {
+            Ok(()) => {
+                history.push_str(&format!("applied {}\n", change.path));
+                applied.push(change.path.clone());
+            }
+            Err(reason) => {
+                history.push_str(&format!("rejected {}: {reason}\n", change.path));
+                rejected.push(change.path.clone());
+            }
+        }
+    }
+    ProposalResult {
+        applied,
+        rejected,
+        history,
+    }
+}
+
+fn apply_new_transcript(root: Option<&Path>, change: &ConfigChange) -> Result<(), String> {
+    let root = root.ok_or("the agent's configuration folder is not available")?;
+    let (project, file) = new_transcript_parts(&change.path)
+        .ok_or("only a new session transcript projects/<project>/<id>.jsonl is accepted")?;
+    let content = match (&change.content, &change.revision) {
+        (Some(content), None) => content,
+        _ => return Err("only a whole new file (revision none) is accepted".to_owned()),
+    };
+    if content.len() > NEW_TRANSCRIPT_MAX_BYTES {
+        return Err(format!(
+            "the transcript of {} bytes is over the {NEW_TRANSCRIPT_MAX_BYTES} byte cap",
+            content.len()
+        ));
+    }
+    let projects = root.join("projects");
+    fs::create_dir_all(&projects).map_err(|error| error.to_string())?;
+    let canonical_projects = fs::canonicalize(&projects).map_err(|error| error.to_string())?;
+    if !canonical_projects.starts_with(root) {
+        return Err(
+            "the projects folder leaves the configuration folder through a link".to_owned(),
+        );
+    }
+    let project_folder = canonical_projects.join(project);
+    fs::create_dir_all(&project_folder).map_err(|error| error.to_string())?;
+    let canonical_folder = fs::canonicalize(&project_folder).map_err(|error| error.to_string())?;
+    if canonical_folder.parent() != Some(canonical_projects.as_path()) {
+        return Err("the project folder leaves the projects folder through a link".to_owned());
+    }
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(canonical_folder.join(file))
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                "conflict: the file exists".to_owned()
+            } else {
+                error.to_string()
+            }
+        })?;
+    output
+        .write_all(content)
+        .and_then(|()| output.sync_all())
+        .map_err(|error| error.to_string())
 }
 
 fn kind_of(file_type: fs::FileType) -> EntryKind {
@@ -1538,18 +1645,41 @@ impl HostFs for FsImport {
 
     fn propose_agent_config(
         &mut self,
-        _agent: String,
-        _title: String,
-        _changes: Vec<ConfigChange>,
+        agent: String,
+        title: String,
+        changes: Vec<ConfigChange>,
     ) -> Result<RequestId, PluginError> {
-        Err(plugin_error(
-            ErrorCode::NotPermitted,
-            "the agent-config.propose grant is not held",
-        ))
+        let wanted = format!("agent-config.propose:{agent}");
+        if !self.with_state(|state| state.env.holds(&wanted)) {
+            return Err(plugin_error(
+                ErrorCode::NotPermitted,
+                "the agent-config.propose grant is not held",
+            ));
+        }
+        if changes.is_empty() {
+            return Err(plugin_error(
+                ErrorCode::InvalidArgument,
+                "a proposal needs at least one change",
+            ));
+        }
+        self.with_state(|state| state.require_capacity())?;
+        let root = self.with_state(|state| {
+            state
+                .read_only
+                .get(&format!("agent-config:{agent}"))
+                .cloned()
+        });
+        let result = apply_agent_config_changes(root.as_deref(), &title, &changes);
+        Ok(self.with_state(|state| {
+            let id = state.allocate_request();
+            state.proposals.insert(id, result);
+            state.finish(id);
+            RequestId(id)
+        }))
     }
 
-    fn take_proposal(&mut self, _request: RequestId) -> Option<ProposalResult> {
-        None
+    fn take_proposal(&mut self, request: RequestId) -> Option<ProposalResult> {
+        self.with_state(|state| state.proposals.remove(&request.0))
     }
 
     fn take_bytes(&mut self, request: RequestId) -> Option<Vec<u8>> {

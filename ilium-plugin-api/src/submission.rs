@@ -253,6 +253,19 @@ mod tests {
     }
 
     #[test]
+    fn kernel_commands_need_no_grant_and_are_well_formed() {
+        let submission = item(
+            Intent::InvokeCommand(InvokeCommandSpec {
+                command: "kernel.focus-node".into(),
+                arguments_json: "{\"node\": 3}".into(),
+            }),
+            None,
+        );
+        assert!(check_shape(&submission).is_ok());
+        assert!(check_grants(&submission, "test.plugin", &[]).is_ok());
+    }
+
+    #[test]
     fn empty_batch_has_no_refusal() {
         assert!(batch_refusals(&[], "test.plugin", &[]).is_empty());
     }

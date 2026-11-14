@@ -99,7 +99,7 @@ The contract version is 0.1. The plugin is replaceable. A replacement must provi
   "unstable": ["plugin-services"],
   "capabilities": {
     "server": [
-      "panes.read", "panes.lifecycle", "panes.create", "panes.create-command:codex", "panes.create-command:claude", "tree.write", "agent.read",
+      "panes.read", "panes.lifecycle", "panes.create", "panes.create-command:codex", "panes.create-command:claude", "tree.read", "tree.write", "agent.read",
       "fs.read:agent-sessions:claude", "fs.read:agent-sessions:codex",
       "fs.read:agent-config:claude", "agent-config.propose:claude",
       "process.run:codex", "process.long-lived", "jobs.run", "notify.toast",
@@ -107,7 +107,7 @@ The contract version is 0.1. The plugin is replaceable. A replacement must provi
       "extensions.provide:ilium.core.session-convert/formats",
       "extensions.provide:ilium.core.session-convert/after-convert"
     ],
-    "client": ["agent.read", "ui.panels"]
+    "client": ["agent.read", "tree.read", "ui.panels", "keys.intercept"]
   },
   "contributes": {
     "commands": [{ "id": "convert", "title": "Convert session", "category": "Agents" }],
@@ -175,6 +175,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "panes.create",
       "panes.create-command:codex",
       "panes.create-command:claude",
+      "tree.read",
       "tree.write",
       "agent.read",
       "fs.read:agent-sessions:claude",
@@ -191,7 +192,9 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ],
     "client": [
       "agent.read",
-      "ui.panels"
+      "tree.read",
+      "ui.panels",
+      "keys.intercept"
     ]
   },
   "activation": [

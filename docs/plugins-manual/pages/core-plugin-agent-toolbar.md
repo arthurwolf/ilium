@@ -115,6 +115,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "agent.read",
       "agent.read-prompts",
       "ui.chrome",
+      "settings.read-kernel:user-interface",
       "extensions.provide:ilium.core.agent-toolbar/toolbar-actions",
       "extensions.provide:ilium.core.agent-toolbar/banner-segments"
     ]

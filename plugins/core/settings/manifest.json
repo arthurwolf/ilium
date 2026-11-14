@@ -137,6 +137,12 @@
         "title": "All settings",
         "modal": false
       }
+    ],
+    "commands": [
+      {
+        "id": "editor-line-display",
+        "title": "Editor line display"
+      }
     ]
   },
   "limits_tier": "first-party"

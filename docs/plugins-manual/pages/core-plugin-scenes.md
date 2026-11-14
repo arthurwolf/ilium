@@ -71,7 +71,7 @@ Every scene below belongs to the Scenes plugin. The [Ambient look](/pages/core-p
 
 This block is a fragment. It lists the contributions. The whole manifest is in [Complete manifest](#complete-manifest).
 
-A scene package has a `scene` entry and no server or client side. Each scene listed under `contributes.scenes` appears in the Animations tab. The `capabilities.scene` list holds the grants for media, the observer location, the GPU and a live-data host.
+A scene package has a `scene` entry and no server or client side. Each scene listed under `contributes.scenes` appears in the scene list of the Plugin scene row of the Animations tab, and its `settings_schema` properties become the controls of that scene (the `order`, `title`, `help`, `minimum`, `maximum`, `step`, `unit` and `default` keys shape each row). Dithered waves is the first scene whose code lives only in this package. The `capabilities.scene` list holds the grants for media, the observer location, the GPU and a live-data host.
 
 ```json
 {
@@ -95,7 +95,17 @@ A scene package has a `scene` entry and no server or client side. Each scene lis
         "settings_schema": { "type": "object", "properties": {} } },
       { "id": "stars-overhead", "title": "Stars overhead", "family": "maps-space",
         "modes": ["live"], "frame_rate_cap": 10,
-        "settings_schema": { "type": "object", "properties": {} } }
+        "settings_schema": { "type": "object", "properties": {} } },
+      { "id": "dithered-waves", "title": "Dithered waves", "family": "procedural",
+        "modes": ["live"], "frame_rate_cap": 30,
+        "settings_schema": { "type": "object", "properties": {
+          "wave_speed": { "type": "integer", "order": 2, "title": "Wave speed",
+                          "help": "How fast the waves drift.",
+                          "minimum": 0, "maximum": 200, "step": 5, "unit": "%", "default": 50 },
+          "pattern": { "type": "string", "order": 3, "title": "Pattern",
+                       "enum": ["bayer2", "bayer4", "bayer8", "noise"],
+                       "enum_titles": ["Coarse (2x2)", "Crosshatch (4x4)", "Fine (8x8)", "Stipple"],
+                       "default": "bayer4" } } } }
     ]
   }
 }
@@ -224,6 +234,143 @@ The `capabilities` list of this manifest is the grant set of one sample scene pa
         "settings_schema": {
           "type": "object",
           "properties": {}
+        }
+      },
+      {
+        "id": "dithered-waves",
+        "title": "Dithered waves",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "wave_frequency": {
+              "type": "integer",
+              "order": 0,
+              "title": "Wave frequency",
+              "help": "How many wave crests fit the screen height. More crests make narrower bands.",
+              "minimum": 100,
+              "maximum": 800,
+              "step": 25,
+              "unit": "%",
+              "default": 300
+            },
+            "wave_amplitude": {
+              "type": "integer",
+              "order": 1,
+              "title": "Wave warp",
+              "help": "How strongly noise bends the bands. 0 gives plain parallel waves.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 30
+            },
+            "wave_speed": {
+              "type": "integer",
+              "order": 2,
+              "title": "Wave speed",
+              "help": "How fast the waves drift. 0 freezes the picture.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 50
+            },
+            "pattern": {
+              "type": "string",
+              "order": 3,
+              "title": "Pattern",
+              "help": "The fixed dot lattice the waves are cut with. Coarser lattices show fewer gray steps.",
+              "enum": [
+                "bayer2",
+                "bayer4",
+                "bayer8",
+                "noise"
+              ],
+              "enum_titles": [
+                "Coarse (2x2)",
+                "Crosshatch (4x4)",
+                "Fine (8x8)",
+                "Stipple"
+              ],
+              "default": "bayer4"
+            },
+            "levels": {
+              "type": "integer",
+              "order": 4,
+              "title": "Gray levels",
+              "help": "Gray steps between empty and full ink. 2 draws pure dots.",
+              "minimum": 2,
+              "maximum": 6,
+              "step": 1,
+              "default": 2
+            },
+            "pixel_size": {
+              "type": "integer",
+              "order": 5,
+              "title": "Pixel size",
+              "help": "Edge length of one dot block, in Braille dots.",
+              "minimum": 1,
+              "maximum": 4,
+              "step": 1,
+              "unit": "dots",
+              "default": 1
+            },
+            "intensity": {
+              "type": "integer",
+              "order": 6,
+              "title": "Ink strength",
+              "help": "How much ink the brightest dots carry before the shared look is applied.",
+              "minimum": 10,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 35
+            },
+            "band_sharpness": {
+              "type": "integer",
+              "order": 7,
+              "title": "Band sharpness",
+              "help": "How abruptly the bands turn from empty to full.",
+              "minimum": 50,
+              "maximum": 300,
+              "step": 10,
+              "unit": "%",
+              "default": 150
+            },
+            "bias": {
+              "type": "integer",
+              "order": 8,
+              "title": "Dot bias",
+              "help": "Shifts the cut-off: positive adds dots, negative removes them.",
+              "minimum": -30,
+              "maximum": 30,
+              "step": 5,
+              "unit": "%",
+              "default": 0
+            },
+            "ripple": {
+              "type": "boolean",
+              "order": 9,
+              "title": "Ripple",
+              "help": "Adds a faint ripple around a slowly wandering point.",
+              "default": false
+            },
+            "seed": {
+              "type": "integer",
+              "order": 10,
+              "title": "Layout",
+              "help": "Picks one of many different wave layouts.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 1
+            }
+          }
         }
       }
     ]

@@ -101,7 +101,6 @@ pub fn gpu_availability() -> GpuAvailability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GpuKernel {
     FbmClouds,
-    DitheredWaves,
     DithrPatterns,
 }
 

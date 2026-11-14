@@ -19,7 +19,7 @@ pub mod wasm;
 pub use plugin::{
     clear_host, host, no_host, set_host, DispatchToHandler, DispatchToNobody, HandlerProbe, HostHandle, Annotator, CatalogProvider, Detector, Handler, HookHandler, HostApi, HostCalls,
     InferenceProvider, JobRunner, Lifecycle, LifecycleState, MenuProvider, Migrator, NativeEntry,
-    NativeRenderer, Plugin, Renderer, SceneRenderer, ServiceProvider, SettingsValidate,
+    NativeRenderer, Plugin, Renderer, SceneField, SceneProgram, SceneRenderer, ServiceProvider, SettingsValidate,
     TokenProvider, Views, VirtualRowsProvider,
 };
 

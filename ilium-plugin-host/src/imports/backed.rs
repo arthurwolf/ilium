@@ -440,12 +440,17 @@ impl HostKernelSettings for KernelSettingsTables {
     }
 }
 
-/// `ilium:host/sessions` over the kernel (contract section 19.3): the calling session is
-/// listed with its real name, project and pane count. Requests to other sessions are refused
-/// until the cross-session transport exists; nothing is queued that would never be answered.
+/// `ilium:host/sessions` over the kernel (contract section 19.3): every live session of the
+/// machine is listed with its socket identity, and a request goes to one of them through the
+/// kernel's cross-session connection. The reply arrives later: the request id comes back from
+/// `send`, a `request-completed` event follows, and `take-reply` hands over the JSON text.
 pub struct KernelSessions {
     kernel: Arc<dyn KernelFacade>,
     crosses: bool,
+    plugin: String,
+    results: ResultQueue,
+    ids: RequestIds,
+    replies: Arc<Mutex<std::collections::HashMap<u64, String>>>,
 }
 
 impl KernelSessions {
@@ -454,12 +459,23 @@ impl KernelSessions {
         Self {
             kernel,
             crosses: holds(granted, "sessions.cross"),
+            plugin: String::new(),
+            results: ResultQueue::default(),
+            ids: RequestIds::new(),
+            replies: Arc::default(),
         }
     }
-}
 
-impl HostSessions for KernelSessions {
-    fn list_live(&mut self) -> Vec<LiveSession> {
+    /// The same import completing its requests on the runtime's queue with its id allocator.
+    #[must_use]
+    pub fn with_requests(mut self, plugin: &str, results: ResultQueue, ids: RequestIds) -> Self {
+        self.plugin = plugin.to_owned();
+        self.results = results;
+        self.ids = ids;
+        self
+    }
+
+    fn own_entry(&self) -> LiveSession {
         let workspace = self.kernel.workspace();
         let name = workspace
             .and_then(|workspace| workspace.session_name())
@@ -474,14 +490,48 @@ impl HostSessions for KernelSessions {
             .iter()
             .filter(|node| node.class == NodeClass::Pane)
             .count();
-        vec![LiveSession {
+        LiveSession {
             socket_id: format!("{project}#{name}"),
             name,
             project,
             panes: u32::try_from(panes).unwrap_or(u32::MAX),
             attached_clients: 0,
             is_self: true,
-        }]
+        }
+    }
+}
+
+impl HostSessions for KernelSessions {
+    fn list_live(&mut self) -> Vec<LiveSession> {
+        let own = self.own_entry();
+        let Some(sessions) = self.kernel.sessions() else {
+            return vec![own];
+        };
+        let others = sessions.live_sessions();
+        if others.is_empty() {
+            return vec![own];
+        }
+        others
+            .into_iter()
+            .filter(|session| self.crosses || session.is_self)
+            .map(|session| {
+                if session.is_self {
+                    LiveSession {
+                        socket_id: session.socket_id,
+                        ..own.clone()
+                    }
+                } else {
+                    LiveSession {
+                        name: session.name,
+                        project: session.project,
+                        socket_id: session.socket_id,
+                        panes: 0,
+                        attached_clients: 0,
+                        is_self: false,
+                    }
+                }
+            })
+            .collect()
     }
 
     fn send(&mut self, request: CrossRequest) -> Result<RequestId, PluginError> {
@@ -494,21 +544,48 @@ impl HostSessions for KernelSessions {
         if !self
             .list_live()
             .iter()
-            .any(|session| session.name == request.session)
+            .any(|session| session.socket_id == request.session)
         {
             return Err(PluginError::new(
                 ErrorCode::NotFound,
-                "no live session has that name",
+                "no live session has that identity",
             ));
         }
-        Err(PluginError::new(
-            ErrorCode::Unsupported,
-            "requests between sessions are not delivered yet",
-        ))
+        let Some(sessions) = self.kernel.sessions() else {
+            return Err(PluginError::new(
+                ErrorCode::Unsupported,
+                "this process has no connection to other sessions",
+            ));
+        };
+        let id = self.ids.next_request();
+        let replies = Arc::clone(&self.replies);
+        let results = Arc::clone(&self.results);
+        let plugin = self.plugin.clone();
+        sessions
+            .cross_request(
+                &request.session,
+                &request.command,
+                &request.arguments_json,
+                Box::new(move |reply| {
+                    lock(&replies).insert(id.0, reply);
+                    push_bounded(
+                        &results,
+                        (
+                            plugin,
+                            RequestResult {
+                                request: RequestRef::Call(id),
+                                outcome: Outcome::Ok,
+                            },
+                        ),
+                    );
+                }),
+            )
+            .map_err(|error| PluginError::new(error.code, error.message))?;
+        Ok(id)
     }
 
-    fn take_reply(&mut self, _request: RequestId) -> Option<String> {
-        None
+    fn take_reply(&mut self, request: RequestId) -> Option<String> {
+        lock(&self.replies).remove(&request.0)
     }
 }
 
@@ -922,7 +999,11 @@ impl HostAgent for KernelAgent {
     }
 
     fn session(&mut self, pane: NodeId) -> Option<SessionRef> {
-        self.rest.session(pane)
+        if !self.reads_agents {
+            return None;
+        }
+        let text = self.kernel.agents()?.session_json(pane)?;
+        serde_json::from_str(&text).ok()
     }
 
     fn last_prompt(&mut self, pane: NodeId) -> Option<String> {

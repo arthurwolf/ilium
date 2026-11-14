@@ -1,38 +1,133 @@
 //! Core plugin `ilium.core.scenes` (manual page core-plugin-scenes.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! a minimal real implementation.
+//! One scene component serves every scene the manifest contributes. The host builds one
+//! `scene-renderer` per scene, handing the scene id in the spec (`scene`), and the scene draws
+//! tone into the Braille field of the frame surface; colour, palette, dithering and display
+//! stay with the shared look of the host.
+//!
+//! `dithered-waves` is ported from the former built-in scene and draws for real (module
+//! `dithered_waves`). The other ids of the catalogue (`waves`, `clock`, `stars-overhead`) are
+//! still the tests-first skeleton: they follow the palette and draw nothing yet.
 
+pub mod dithered_waves;
+
+use dithered_waves::{DitheredWaves, DitheredWavesSettings};
 use ilium_plugin_sdk::generated::anim::renderer_types::FrameInput;
-use ilium_plugin_sdk::generated::anim::renderer_types::Readiness;
-use ilium_plugin_sdk::generated::anim::surface::FrameSurfaceHandle;
-use ilium_plugin_sdk::generated::exports::renderer::SceneRendererHandle;
 use ilium_plugin_sdk::plugin::NativeSurface;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Lifecycle, NativeRenderer, Renderer};
+use ilium_plugin_sdk::{ilium_plugin, Lifecycle, NativeRenderer, SceneField, SceneProgram};
+use serde_json::Value;
+
+/// Id of the ported scene of this package.
+pub const DITHERED_WAVES_ID: &str = "dithered-waves";
 
 /// The scene side of `ilium.core.scenes` (core-plugin-scenes.md, world `ilium:anim/base@0.1.0`).
+/// One value is one scene: the component glue builds it from the spec of a `scene-renderer`.
 #[ilium_plugin(side = "scene", exports = [])]
-#[derive(Default)]
 pub struct ScenesScene {
+    /// Id of the scene this value draws (`scene` of the spec); empty before a spec arrives.
+    scene_id: String,
     /// Shared palette as RGB values; empty means the scene keeps its own greys.
     palette_rgb: Vec<u32>,
-    /// Next renderer handle number handed out by `scene_renderer_new`.
-    next_handle: u32,
+    /// What draws: the ported scene, or nothing for the skeleton ids.
+    drawing: Drawing,
 }
 
-/// Frame rate every scene of this package asks for.
+/// The drawing behind a scene id.
+enum Drawing {
+    /// Skeleton scenes: the frame is left blank.
+    Blank,
+    /// The `dithered-waves` scene.
+    DitheredWaves(Box<DitheredWaves>),
+}
+
+impl Default for ScenesScene {
+    fn default() -> Self {
+        Self {
+            scene_id: String::new(),
+            palette_rgb: Vec::new(),
+            drawing: Drawing::Blank,
+        }
+    }
+}
+
+/// Frame rate of a scene without a cadence of its own.
 const SCENE_FRAMES_PER_SECOND: u32 = 30;
 
+/// The cadence each scene of the catalogue asks for; never above its manifest cap.
+fn frames_per_second_of(scene_id: &str) -> u32 {
+    match scene_id {
+        "waves" => 24,
+        "clock" => 2,
+        "stars-overhead" => 10,
+        DITHERED_WAVES_ID => dithered_waves::FRAMES_PER_SECOND,
+        _ => SCENE_FRAMES_PER_SECOND,
+    }
+}
+
 impl ScenesScene {
+    /// The scene a spec describes: `scene` names it, `settings` (or the spec itself) holds
+    /// its settings and `palette` the shared palette as RGB values.
+    fn from_spec(spec_json: &str) -> Self {
+        let spec: Value = serde_json::from_str(spec_json).unwrap_or(Value::Null);
+        let scene_id = spec
+            .get("scene")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let palette_rgb = spec
+            .get("palette")
+            .and_then(Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.as_u64().map(|rgb| (rgb & 0x00ff_ffff) as u32))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let drawing = if scene_id == DITHERED_WAVES_ID {
+            Drawing::DitheredWaves(Box::new(DitheredWaves::from_spec(&spec)))
+        } else {
+            Drawing::Blank
+        };
+        Self {
+            scene_id,
+            palette_rgb,
+            drawing,
+        }
+    }
+
     /// Colour for cell `index` of `count`: the palette entry matching its position, or white.
     fn tone(&self, index: usize, count: usize) -> u32 {
         if self.palette_rgb.is_empty() || count == 0 {
             return 0x00ff_ffff;
         }
         self.palette_rgb[index * self.palette_rgb.len() / count]
+    }
+
+    /// Draws one frame into the pixel field. `frame.time_millis` is the scene clock.
+    fn draw(&mut self, frame: &FrameInput, field: &mut SceneField) {
+        let width = field.width();
+        let height = field.height();
+        if let Drawing::DitheredWaves(waves) = &mut self.drawing {
+            waves.render(width, height, frame.time_millis, &mut field.pixels);
+        }
+    }
+
+    /// Applies new settings to the drawing; `false` for text that is not a JSON object.
+    fn apply_settings(&mut self, settings_json: &str) -> bool {
+        let Ok(settings) = serde_json::from_str::<Value>(settings_json) else {
+            return false;
+        };
+        if !settings.is_object() {
+            return false;
+        }
+        if matches!(self.drawing, Drawing::DitheredWaves(_)) {
+            let settings = DitheredWavesSettings::from_spec(&settings);
+            self.drawing = Drawing::DitheredWaves(Box::new(DitheredWaves::new(&settings)));
+        }
+        true
     }
 }
 
@@ -42,74 +137,18 @@ impl Lifecycle for ScenesScene {
     }
 }
 
-impl Renderer for ScenesScene {
-    fn scene_renderer_new(&mut self, _spec_json: String) -> SceneRendererHandle {
-        self.next_handle += 1;
-        SceneRendererHandle(self.next_handle)
+/// The scene contract of the component glue (one value per `scene-renderer`).
+///
+/// PALETTE (future plugin contract): the palette arrives in the spec, in every frame input
+/// and through `set_palette`; a scene with natural colours follows it. The scenes of this
+/// package draw tone only, so the shared look colours them.
+impl SceneProgram for ScenesScene {
+    fn new(spec_json: &str) -> Self {
+        Self::from_spec(spec_json)
     }
 
-    fn scene_renderer_readiness(&mut self, _handle: SceneRendererHandle) -> Readiness {
-        Readiness::Ready
-    }
-
-    fn scene_renderer_frames_per_second(&mut self, _handle: SceneRendererHandle) -> u32 {
-        SCENE_FRAMES_PER_SECOND
-    }
-
-    fn scene_renderer_wants_pointer(&mut self, _handle: SceneRendererHandle) -> bool {
-        false
-    }
-
-    fn scene_renderer_wants_occupancy(&mut self, _handle: SceneRendererHandle) -> bool {
-        false
-    }
-
-    fn scene_renderer_uses_cell_colors(&mut self, _handle: SceneRendererHandle) -> bool {
-        true
-    }
-
-    fn scene_renderer_render(
-        &mut self,
-        _handle: SceneRendererHandle,
-        _frame: FrameInput,
-        _surface: FrameSurfaceHandle,
-    ) {
-        // Pixel drawing goes through the host surface handle, which has no SDK call yet.
-    }
-
-    fn scene_renderer_set_palette(&mut self, _handle: SceneRendererHandle, palette_rgb: Vec<u32>) {
-        self.palette_rgb = palette_rgb;
-    }
-
-    fn scene_renderer_reconfigure(
-        &mut self,
-        _handle: SceneRendererHandle,
-        _settings_json: String,
-    ) -> bool {
-        true
-    }
-
-    fn scene_renderer_status(&mut self, _handle: SceneRendererHandle) -> Option<String> {
-        None
-    }
-}
-
-/// Native (in-process) renderer of the scene side, used by `FakeScene::new::<ScenesScene>`
-/// (reference-test-harness.md "Scene harness", test-plan.md section 1.3).
-impl NativeRenderer for ScenesScene {
-    fn new(_spec_json: &str) -> Self {
-        Self {
-            palette_rgb: Vec::new(),
-            next_handle: 0,
-        }
-    }
-
-    fn render(&mut self, _frame: &FrameInput, surface: &mut NativeSurface) {
-        let count = surface.cells.len();
-        for index in 0..count {
-            let colour = self.tone(index, count);
-            surface.cells[index].1 = colour;
-        }
+    fn render(&mut self, frame: &FrameInput, field: &mut SceneField) {
+        self.draw(frame, field);
     }
 
     fn set_palette(&mut self, palette_rgb: Vec<u32>) {
@@ -117,7 +156,43 @@ impl NativeRenderer for ScenesScene {
     }
 
     fn frames_per_second(&self) -> u32 {
-        SCENE_FRAMES_PER_SECOND
+        frames_per_second_of(&self.scene_id)
+    }
+
+    fn reconfigure(&mut self, settings_json: &str) -> bool {
+        self.apply_settings(settings_json)
+    }
+}
+
+/// Native (in-process) renderer of the scene side, used by `FakeScene::new::<ScenesScene>`
+/// (reference-test-harness.md "Scene harness", test-plan.md section 1.3). A drawing scene
+/// fills the Braille field and the harness shows it as Braille cells; a skeleton scene keeps
+/// the cells and follows the palette.
+impl NativeRenderer for ScenesScene {
+    fn new(spec_json: &str) -> Self {
+        Self::from_spec(spec_json)
+    }
+
+    fn render(&mut self, frame: &FrameInput, surface: &mut NativeSurface) {
+        if matches!(self.drawing, Drawing::Blank) {
+            let count = surface.cells.len();
+            for index in 0..count {
+                let colour = self.tone(index, count);
+                surface.cells[index].1 = colour;
+            }
+            return;
+        }
+        let mut field = SceneField::new(surface.columns, surface.rows);
+        self.draw(frame, &mut field);
+        surface.cells = field.to_native_cells();
+    }
+
+    fn set_palette(&mut self, palette_rgb: Vec<u32>) {
+        self.palette_rgb = palette_rgb;
+    }
+
+    fn frames_per_second(&self) -> u32 {
+        frames_per_second_of(&self.scene_id)
     }
 }
 
@@ -155,13 +230,16 @@ mod spec_tests {
 
     /// REQ: COR-010
     #[test]
-    fn cor_010_catalogue_names_the_three_scenes_in_order() {
+    fn cor_010_catalogue_names_the_scenes_in_order() {
         let manifest = manifest_value();
         let ids: Vec<String> = scene_entries(&manifest)
             .iter()
             .map(|scene| scene["id"].as_str().unwrap_or_default().to_string())
             .collect();
-        assert_eq!(ids, vec!["waves", "clock", "stars-overhead"]);
+        assert_eq!(
+            ids,
+            vec!["waves", "clock", "stars-overhead", "dithered-waves"]
+        );
     }
 
     /// REQ: COR-010
@@ -224,17 +302,24 @@ mod spec_tests {
 
     /// REQ: COR-011
     #[test]
-    fn cor_011_every_scene_settings_schema_has_no_properties() {
+    fn cor_011_only_the_ported_scene_declares_scene_controls() {
         let manifest = manifest_value();
         for scene in scene_entries(&manifest) {
             let properties = scene["settings_schema"]["properties"]
                 .as_object()
                 .expect("settings_schema.properties is an object");
-            assert!(
-                properties.is_empty(),
-                "scene {} adds scene controls of its own",
-                scene["id"]
-            );
+            if scene["id"] == "dithered-waves" {
+                assert!(
+                    !properties.is_empty(),
+                    "dithered-waves has its own controls"
+                );
+            } else {
+                assert!(
+                    properties.is_empty(),
+                    "scene {} adds scene controls of its own",
+                    scene["id"]
+                );
+            }
         }
     }
 

@@ -204,7 +204,7 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
         "box_machine",
         "machine_screen",
         "fbm_clouds",
-        "dithered_waves",
+        "plugin_scene",
         "dithr_patterns",
         "hex_expedition",
         "vector_td",

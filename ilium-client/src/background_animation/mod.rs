@@ -75,7 +75,10 @@ pub enum AnimationKind {
     BoxMachine,
     MachineScreen,
     FbmClouds,
-    DitheredWaves,
+    /// A scene a plugin supplies (the Scene row picks which). A saved `dithered_waves`
+    /// selection, from before that scene moved into the Scenes plugin, loads as this kind.
+    #[serde(alias = "dithered_waves")]
+    PluginScene,
     DithrPatterns,
     HexExpedition,
     VectorTd,
@@ -139,7 +142,7 @@ impl AnimationKind {
         Self::BoxMachine,
         Self::MachineScreen,
         Self::FbmClouds,
-        Self::DitheredWaves,
+        Self::PluginScene,
         Self::DithrPatterns,
         Self::HexExpedition,
         Self::VectorTd,
@@ -225,7 +228,7 @@ impl AnimationKind {
             Self::BoxMachine => Some(AmbientKind::BoxMachine),
             Self::MachineScreen => Some(AmbientKind::MachineScreen),
             Self::FbmClouds => Some(AmbientKind::FbmClouds),
-            Self::DitheredWaves => Some(AmbientKind::DitheredWaves),
+            Self::PluginScene => Some(AmbientKind::Plugin),
             Self::DithrPatterns => Some(AmbientKind::DithrPatterns),
             Self::HexExpedition => Some(AmbientKind::HexExpedition),
             Self::VectorTd => Some(AmbientKind::VectorTd),

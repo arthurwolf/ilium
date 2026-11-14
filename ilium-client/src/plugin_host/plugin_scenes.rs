@@ -1,7 +1,9 @@
 //! Plugin scenes (gap G9b): the scenes a plugin's scene component contributes, offered to the
-//! ambient engine as [`ExternalSceneFactory`] entries of one client-wide [`registry`].
+//! ambient engine as [`ExternalSceneFactory`] entries of the process-wide
+//! `ilium_ambient::external::external_scenes` registry, where `AmbientKind::Plugin` finds them.
 //!
-//! A plugin declares its scenes in `contributes.scenes` of its manifest and ships one
+//! A plugin declares its scenes in `contributes.scenes` of its manifest (with the scene's own
+//! settings in `settings_schema`, see `scene_controls`) and ships one
 //! `ilium:anim/base` component that exports `ilium:exports/renderer@0.1.0`. At client start
 //! every enabled plugin with such a component is compiled once and each of its scenes is
 //! registered as `<plugin-id>.<scene-id>`. Building a scene instantiates the component in a
@@ -18,10 +20,11 @@
 //! `http`, `media` ... calls trap with `host.engine-error`), the glyph plane and owner ids.
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use ilium_ambient::external::{ExternalSceneFactory, ExternalScenes};
+use ilium_ambient::control::{Control, ControlValue};
+use ilium_ambient::external::{external_scenes, ExternalSceneFactory, ExternalScenes, SceneValues};
 use ilium_ambient::scene::SceneReadiness;
 use ilium_ambient::style::ScenePalette;
 use ilium_ambient::{Frame, OccupancyMask, Scene, SceneEnv};
@@ -37,16 +40,10 @@ use ilium_plugin_host::scene_guest::{
 use ilium_plugin_host::store_data::GuestIdentity;
 use serde_json::{json, Value};
 
+use super::scene_controls::SceneControlSchema;
+
 /// How often (in rendered frames) a scene is asked for its status line.
 const STATUS_EVERY_FRAMES: u32 = 30;
-
-static REGISTRY: LazyLock<RwLock<ExternalScenes>> =
-    LazyLock::new(|| RwLock::new(ExternalScenes::default()));
-
-/// The plugin scenes of this client, by `<plugin-id>.<scene-id>`.
-pub(crate) fn registry() -> &'static RwLock<ExternalScenes> {
-    &REGISTRY
-}
 
 /// One scene a plugin contributes, as its manifest declares it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +54,8 @@ pub(crate) struct SceneDeclaration {
     pub(crate) title: String,
     /// The highest frame rate the manifest allows (`frame_rate_cap`), 1..=30.
     pub(crate) frame_rate_cap: u32,
+    /// The scene's own settings rows, from `settings_schema`.
+    pub(crate) controls: SceneControlSchema,
 }
 
 /// The scenes and the scene-side grants a manifest declares. Scenes without an id are skipped.
@@ -81,10 +80,15 @@ pub(crate) fn declared_scenes(manifest: &str) -> (Vec<SceneDeclaration>, Vec<Str
                         .get("frame_rate_cap")
                         .and_then(Value::as_u64)
                         .map_or(30, |cap| cap.clamp(1, 30) as u32);
+                    let controls = scene
+                        .get("settings_schema")
+                        .map(SceneControlSchema::from_schema)
+                        .unwrap_or_default();
                     Some(SceneDeclaration {
                         id,
                         title,
                         frame_rate_cap,
+                        controls,
                     })
                 })
                 .collect()
@@ -153,19 +157,45 @@ pub(crate) fn register_catalogue(
     registered
 }
 
-/// Registers the scenes of `catalogue` in the client-wide [`registry`].
+/// Registers the scenes of `catalogue` in the process-wide registry.
 pub(crate) fn register_bundled(
     engine: &Arc<PluginEngine>,
     catalogue: &[CataloguePlugin],
     disabled: &BTreeSet<String>,
 ) -> usize {
-    match registry().write() {
+    match external_scenes().write() {
         Ok(mut scenes) => register_catalogue(&mut scenes, engine, catalogue, disabled),
         Err(_) => {
             tracing::error!("plugin scene registry is poisoned; no plugin scenes registered");
             0
         }
     }
+}
+
+/// Follows a plugin being enabled or disabled while the client runs: its scenes leave the
+/// registry at once, or are compiled and registered again. Returns how many scenes were
+/// registered (0 when disabling).
+pub(crate) fn set_plugin_enabled(
+    engine: &Arc<PluginEngine>,
+    catalogue: &[CataloguePlugin],
+    plugin: &str,
+    enabled: bool,
+) -> usize {
+    let Ok(mut scenes) = external_scenes().write() else {
+        tracing::error!("plugin scene registry is poisoned; plugin scenes not updated");
+        return 0;
+    };
+    // Whatever the plugin had registered goes first, so a repeated enable cannot duplicate.
+    scenes.unregister_plugin(plugin);
+    if !enabled {
+        return 0;
+    }
+    let own: Vec<CataloguePlugin> = catalogue
+        .iter()
+        .filter(|candidate| candidate.id == plugin)
+        .cloned()
+        .collect();
+    register_catalogue(&mut scenes, engine, &own, &BTreeSet::new())
 }
 
 /// A scene of a plugin's scene component.
@@ -181,11 +211,11 @@ pub(crate) struct PluginSceneFactory {
 impl PluginSceneFactory {
     /// Instantiates the component for one scene. A component that fails to start becomes a
     /// scene that draws nothing and says why in its status line.
-    fn build(&self, palette: &ScenePalette) -> PluginScene {
+    fn build(&self, palette: &ScenePalette, values: &SceneValues) -> PluginScene {
         let palette_rgb = palette_rgb(palette);
         let spec = json!({
             "scene": self.declaration.id,
-            "settings": {},
+            "settings": self.declaration.controls.settings_json(values),
             "palette": palette_rgb,
             "mode": "live",
         })
@@ -216,8 +246,21 @@ impl ExternalSceneFactory for PluginSceneFactory {
         &self.declaration.title
     }
 
-    fn create(&self, env: &SceneEnv) -> Box<dyn Scene> {
-        Box::new(self.build(&env.palette))
+    fn controls(&self, values: &SceneValues) -> Vec<Control> {
+        self.declaration.controls.controls(values)
+    }
+
+    fn set_control(
+        &self,
+        values: &mut SceneValues,
+        id: &str,
+        value: ControlValue,
+    ) -> Result<bool, String> {
+        self.declaration.controls.set_control(values, id, value)
+    }
+
+    fn create(&self, env: &SceneEnv, values: &SceneValues) -> Box<dyn Scene> {
+        Box::new(self.build(&env.palette, values))
     }
 }
 
@@ -521,11 +564,13 @@ mod tests {
                     id: "grey".to_owned(),
                     title: "Grey field".to_owned(),
                     frame_rate_cap: 5,
+                    controls: SceneControlSchema::default(),
                 },
                 SceneDeclaration {
                     id: "second".to_owned(),
                     title: "second".to_owned(),
                     frame_rate_cap: 30,
+                    controls: SceneControlSchema::default(),
                 },
             ]
         );
@@ -567,12 +612,13 @@ mod tests {
                 id: "grey".to_owned(),
                 title: "Grey field".to_owned(),
                 frame_rate_cap: 5,
+                controls: SceneControlSchema::default(),
             },
             engine,
             compiled,
             granted: Vec::new(),
         };
-        let mut scene = factory.build(&ScenePalette::default());
+        let mut scene = factory.build(&ScenePalette::default(), &SceneValues::new());
         assert_eq!(scene.status(), None);
         assert_eq!(scene.readiness(), SceneReadiness::Ready);
         // The guest asks for 7 frames per second, the manifest allows 5.
@@ -599,12 +645,13 @@ mod tests {
                 id: "none".to_owned(),
                 title: "None".to_owned(),
                 frame_rate_cap: 30,
+                controls: SceneControlSchema::default(),
             },
             engine,
             compiled,
             granted: Vec::new(),
         };
-        let mut scene = factory.build(&ScenePalette::default());
+        let mut scene = factory.build(&ScenePalette::default(), &SceneValues::new());
         assert!(scene.status().is_some());
         assert!(matches!(scene.readiness(), SceneReadiness::Unavailable(_)));
         let (raster, _) = draw(&mut scene, 2, 1);

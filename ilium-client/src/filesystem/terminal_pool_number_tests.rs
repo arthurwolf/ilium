@@ -1,5 +1,5 @@
 use crate::app::{App, Mode, SettingsState, SettingsTab, TerminalRow};
-use crate::config::{self, NewPaneDirectory, SmartCopyLightKey, TerminalSettings};
+use crate::config::{self, NewPaneDirectory, TerminalSettings};
 use crate::value_dialog::ValueDialogState;
 use crate::value_settings::SettingsNumber;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -15,8 +15,6 @@ fn number_app() -> (tempfile::TempDir, App) {
         scrollback_budget_mib: 16,
         engine_memory_budget_mib: 4096,
         new_pane_directory: NewPaneDirectory::LastUsed,
-        smart_copy_light: false,
-        smart_copy_light_key: SmartCopyLightKey::Alt,
     };
     config::save_terminal_settings(directory.path(), &settings).unwrap();
     let mut app = App::new("terminal-pool-number-test".into(), directory.path().into());
@@ -66,8 +64,6 @@ fn terminal_pool_number_dialog_collects_before_reporting_completion_and_reloads_
         let concurrent = TerminalSettings {
             scrollback_budget_mib: app.terminal_settings.scrollback_budget_mib + 4,
             new_pane_directory: NewPaneDirectory::FocusedTerminal,
-            smart_copy_light: !app.terminal_settings.smart_copy_light,
-            smart_copy_light_key: SmartCopyLightKey::Shift,
             ..app.terminal_settings
         };
         app.apply_terminal_settings(concurrent);

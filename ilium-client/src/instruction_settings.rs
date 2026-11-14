@@ -14,20 +14,18 @@ pub enum InstructionField {
     Organization,
     SharedContext,
     ProjectNaming,
-    SmartCopy,
     AskForUpdate,
     /// Custom remote-compaction prompt. Edited from the Remote compaction tab
     /// only, so it is deliberately not part of `ALL` / the LLM tab lists.
     CompactionPrompt,
 }
 impl InstructionField {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 6] = [
         Self::Voice,
         Self::EntryNaming,
         Self::Organization,
         Self::SharedContext,
         Self::ProjectNaming,
-        Self::SmartCopy,
         Self::AskForUpdate,
     ];
     pub fn label(self) -> &'static str {
@@ -37,7 +35,6 @@ impl InstructionField {
             Self::Organization => "Organization instructions",
             Self::SharedContext => "Shared naming and organization context",
             Self::ProjectNaming => "Project naming instructions",
-            Self::SmartCopy => "Smart Copy instructions",
             Self::AskForUpdate => "Ask for update instructions",
             Self::CompactionPrompt => "Remote compaction custom prompt",
         }
@@ -49,7 +46,6 @@ impl InstructionField {
             Self::Organization => "Organization",
             Self::SharedContext => "Shared naming + grouping",
             Self::ProjectNaming => "Project naming",
-            Self::SmartCopy => "Smart Copy",
             Self::AskForUpdate => "Ask for update",
             Self::CompactionPrompt => "Compaction prompt",
         }
@@ -61,7 +57,6 @@ impl InstructionField {
             Self::Organization => "Grouping and ordering rules.",
             Self::SharedContext => "Vocabulary for names + groups.",
             Self::ProjectNaming => "Project names and acronyms.",
-            Self::SmartCopy => "Prioritize exact-source items.",
             Self::AskForUpdate => "What status updates emphasize.",
             Self::CompactionPrompt => "Summary instructions.",
         }
@@ -77,7 +72,6 @@ impl InstructionField {
                 "Vocabulary and preferences applied to both naming and organization."
             }
             Self::ProjectNaming => "Preferred language and abbreviations for project names.",
-            Self::SmartCopy => "Which exact-source copy targets to prioritize.",
             Self::AskForUpdate => "What agents should emphasize when asked for a status update.",
             Self::CompactionPrompt => {
                 "Instructions the summarizer follows for the Custom compaction technique. \
@@ -93,7 +87,6 @@ Empty uses the built-in Claude Code prompt."
             Self::Organization => &i.organization,
             Self::SharedContext => &i.naming_and_organization,
             Self::ProjectNaming => &i.project_naming,
-            Self::SmartCopy => &i.smart_copy,
             Self::AskForUpdate => &i.ask_for_update,
             Self::CompactionPrompt => &app.remote_compaction_settings.custom_prompt,
         }
@@ -104,7 +97,7 @@ pub fn fields(tab: SettingsTab) -> &'static [InstructionField] {
     match tab {
         SettingsTab::LlmInstructions => &InstructionField::ALL,
         SettingsTab::Titles => &[EntryNaming],
-        SettingsTab::Inference => &[Organization, SharedContext, ProjectNaming, SmartCopy],
+        SettingsTab::Inference => &[Organization, SharedContext, ProjectNaming],
         SettingsTab::AgentMonitoring => &[AskForUpdate],
         _ => &[],
     }
@@ -235,7 +228,6 @@ impl App {
             InstructionField::Organization => i.organization = value,
             InstructionField::SharedContext => i.naming_and_organization = value,
             InstructionField::ProjectNaming => i.project_naming = value,
-            InstructionField::SmartCopy => i.smart_copy = value,
             InstructionField::AskForUpdate => i.ask_for_update = value,
             InstructionField::Voice | InstructionField::CompactionPrompt => unreachable!(),
         };

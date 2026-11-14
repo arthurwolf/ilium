@@ -4,13 +4,17 @@
 //! and the composer. Plugin structs stay unit structs (tests build them as literals), so state
 //! lives in thread-local cells.
 //!
-//! Host-dependent work (reading and appending `project:CHATROOM.md`, the `ilium chat` command line,
-//! publishing the `chatroom` topic) needs the SDK `host()` calls, which the SDK lane has not
-//! implemented yet; see the report of the implementation lane.
+//! The server side follows `project:CHATROOM.md`, forwards each new record to the panels and to the
+//! agent panes it names (`@name`), writes the user's posts and answers `ilium chat`. The pure
+//! rules live in `messages`, `hooks`, `root` and `router`; the host file access in `room`.
 
+pub mod cli;
+pub mod hooks;
 pub mod messages;
+pub mod room;
 pub mod root;
 pub mod router;
+pub mod server;
 
 use std::cell::RefCell;
 
@@ -18,11 +22,12 @@ use ilium_plugin_sdk::exports::VirtualRowChild;
 use ilium_plugin_sdk::types::{
     ActionKind, ActionValue, Activation, Alignment, Area, BlockSpec, BlockTitle, BorderType,
     Borders, Constraint, Direction, ErrorCode, Event, Flex, Intent, LayoutSpec, Margin,
-    MessageSpec, MessageTarget, NodeFlags, Padding, ParagraphSpec, PluginError, PluginId,
-    PluginSide, RichSpan, ScrollViewSpec, SeparatorSpec, Spacing, Span, SpanTarget, Style,
-    Submission, TextInputSpec, TitlePosition, UiNode, UiTree, ViewTarget, Widget,
+    MessageSpec, MessageTarget, NodeFlags, OpenViewSpec, Padding, ParagraphSpec, PluginError,
+    PluginId, PluginSide, RequestId, RequestRef, RichSpan, ScrollViewSpec, SeparatorSpec, Spacing,
+    Span, SpanTarget, Style, Submission, TextInputSpec, TitlePosition, UiNode, UiTree, ViewTarget,
+    Widget,
 };
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views, VirtualRowsProvider};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, Views, VirtualRowsProvider};
 
 /// The plugin id, also the target of the composer message.
 const PLUGIN_ID: &str = "ilium.core.chatroom";
@@ -30,6 +35,10 @@ const PLUGIN_ID: &str = "ilium.core.chatroom";
 const TOPIC: &str = "chatroom";
 /// Channel the composer posts on.
 const POST_CHANNEL: &str = "post";
+/// Id of the panel in the manifest, and the commands that open it.
+const PANEL_ID: &str = "chatroom";
+const OPEN_COMMAND: &str = "ilium.core.chatroom/open";
+const ADD_COMMAND: &str = "ilium.core.chatroom/add";
 /// Widget keys of the panel (assumed; see tests/API_GAPS.md).
 const COMPOSER_KEY: &str = "composer";
 const SCROLL_KEY: &str = "scroll";
@@ -166,15 +175,35 @@ pub struct ChatroomServer;
 
 impl Lifecycle for ChatroomServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        let mut api = host();
+        server::start(&mut *api);
         Ok(())
     }
 }
 
 impl Handler for ChatroomServer {
-    /// Appending to the room file and publishing the topic need the SDK host file calls; until
-    /// they exist the server side accepts the events and submits nothing.
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut api = host();
+        let mut submissions = Vec::new();
+        for event in batch {
+            match event {
+                Event::FsChanged(_) => submissions.extend(server::poll(&mut *api)),
+                Event::Message(message) => {
+                    submissions.extend(server::on_message(&mut *api, &message))
+                }
+                Event::CliInvoked(invoked) => {
+                    cli::on_invoked(&mut *api, invoked.invocation, &invoked.argv, &invoked.cwd)
+                }
+                Event::CliCancelled(invocation) => cli::on_cancelled(invocation),
+                Event::RequestCompleted(result) => {
+                    if let RequestRef::Call(RequestId(request)) = result.request {
+                        cli::on_stdin_ready(&mut *api, request);
+                    }
+                }
+                _ => {}
+            }
+        }
+        submissions
     }
 }
 
@@ -210,6 +239,8 @@ impl VirtualRowsProvider for ChatroomServer {
 struct ClientState {
     records: Vec<Record>,
     draft: String,
+    /// Whether the project has a room, once the server answered a history request.
+    room_exists: Option<bool>,
 }
 
 thread_local! {
@@ -268,6 +299,21 @@ impl Handler for ChatroomClient {
                         CLIENT.with(|cell| cell.borrow_mut().records.push(record));
                     }
                 }
+                Event::Message(message) => on_server_message(&message.channel, &message.payload),
+                Event::CommandInvoked(invoked) if invoked.command == OPEN_COMMAND => {
+                    submissions.push(server_message(server::HISTORY_REQUEST_CHANNEL, Vec::new()));
+                    submissions.push(open_panel());
+                }
+                Event::CommandInvoked(invoked) if invoked.command == ADD_COMMAND => {
+                    submissions.push(server_message(server::INIT_CHANNEL, Vec::new()));
+                    submissions.push(open_panel());
+                }
+                Event::ViewVisibility(visibility) if visibility.visible => {
+                    if matches!(&visibility.view, ViewTarget::Panel(id) if id == PANEL_ID) {
+                        submissions
+                            .push(server_message(server::HISTORY_REQUEST_CHANNEL, Vec::new()));
+                    }
+                }
                 Event::UiAction(action) if action.key == COMPOSER_KEY => {
                     if let Some(submission) = composer_action(action.kind, action.value) {
                         submissions.push(submission);
@@ -277,6 +323,64 @@ impl Handler for ChatroomClient {
             }
         }
         submissions
+    }
+}
+
+fn open_panel() -> Submission {
+    Submission::new(Intent::OpenView(OpenViewSpec {
+        view: ViewTarget::Panel(PANEL_ID.to_string()),
+        focus: true,
+    }))
+}
+
+fn server_message(channel: &str, payload: Vec<u8>) -> Submission {
+    Submission::new(Intent::Message(MessageSpec {
+        to: MessageTarget {
+            plugin: PluginId(PLUGIN_ID.to_string()),
+            side: PluginSide::Server,
+            client: None,
+        },
+        channel: channel.to_string(),
+        payload,
+    }))
+}
+
+/// Applies a record or the history the server sent.
+fn on_server_message(channel: &str, payload: &[u8]) {
+    match channel {
+        server::RECORD_CHANNEL => {
+            let text = String::from_utf8_lossy(payload);
+            if let Some(record) = parse_record(&text) {
+                CLIENT.with(|cell| {
+                    let mut state = cell.borrow_mut();
+                    state.room_exists = Some(true);
+                    state.records.push(record);
+                });
+            }
+        }
+        server::HISTORY_CHANNEL => {
+            let Ok(value) = serde_json::from_slice::<serde_json::Value>(payload) else {
+                return;
+            };
+            let exists = value.get("exists").and_then(serde_json::Value::as_bool);
+            let records: Vec<Record> = value
+                .get("lines")
+                .and_then(serde_json::Value::as_array)
+                .map(|lines| {
+                    lines
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .filter_map(parse_record)
+                        .collect()
+                })
+                .unwrap_or_default();
+            CLIENT.with(|cell| {
+                let mut state = cell.borrow_mut();
+                state.room_exists = exists;
+                state.records = records;
+            });
+        }
+        _ => {}
     }
 }
 
@@ -376,7 +480,12 @@ fn build_view(state: &ClientState, columns: usize) -> UiTree {
     if !state.records.is_empty() {
         lines.push(agents_line(&state.records));
     }
-    if state.records.is_empty() {
+    if state.room_exists == Some(false) {
+        lines.push(
+            "This project has no chatroom. Use Add chatroom to project, or run ilium chat init."
+                .to_string(),
+        );
+    } else if state.records.is_empty() {
         lines.push("No messages yet. Type below to post as user.".to_string());
     } else {
         lines.extend(message_lines(&state.records, inner_width));

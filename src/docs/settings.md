@@ -53,7 +53,7 @@ The tabs appear in this order:
 | Optimization | Scan Codex or Claude Code transcripts and apply the cheapest auto-compaction threshold | none (writes the agent's own config) |
 | Remote compaction | Summarize a Claude or Codex session through the Inference model and resume from it | `[remote_compaction]` |
 | Keyboard | Prefix keys and per-action key remapping, complete presets | `[keyboard]`, `[keybindings]` |
-| Terminal | Scrollback budget, new-pane directory, Smart Copy light | `[terminal]` |
+| Terminal | Scrollback budget, new-pane directory, parser pool | `[terminal]` |
 | Editor | Line display, line numbers, minimap, autosave, Markdown default | `[editor]` |
 | Session | Recovery policy and automatic snapshot backups | `[session]` |
 | Git | Worktree creation defaults | `[git]` |
@@ -205,10 +205,8 @@ Inside tmux, double the prefix to pass it through. Remapping only changes which 
 | --- | --- | --- |
 | Scrollback budget | MiB retained per pane for new terminal views | 8 |
 | New-pane directory | Project root, Focused terminal, Last used | Project root |
-| Smart Copy light | On / Off | On |
-| Smart Copy light key | Ctrl, Alt, Shift | Ctrl |
 
-A larger scrollback budget does not resurrect output that has already scrolled away and does not grow existing views. Terminal history also yields to the per-pane memory limit: Ilium discards the oldest retained output and scrollback while preserving the live screen and terminal state. With Smart Copy light on, hold the chosen key over a terminal, click regions to select them, and release the key to copy. See [Smart Copy](smart-copy.md).
+A larger scrollback budget does not resurrect output that has already scrolled away and does not grow existing views. Terminal history also yields to the per-pane memory limit: Ilium discards the oldest retained output and scrollback while preserving the live screen and terminal state.
 
 ### Editor
 
@@ -383,7 +381,7 @@ The file is a set of tables. Only the tables and keys you want to change need to
 | `[status_rules]` | Global rules for the Custom agent-monitoring display mode: `version`, `defaults_version`, ordered `rules` and an optional `fallback` icon. Edit them in Settings -> Agent Monitoring -> Configure custom icons; see [Custom status icons](custom-status-icons.md) |
 | `[text_triggers]` | Text trigger rules |
 | `[agent_setup]` | Global instruction file paths and "never ask" choices |
-| `[terminal]` | `scrollback_budget_mib`, `engine_memory_budget_mib`, `new_pane_directory`, `smart_copy_light`, `smart_copy_light_key` |
+| `[terminal]` | `scrollback_budget_mib`, `engine_memory_budget_mib`, `new_pane_directory` |
 | `[editor]` | `line_display`, `show_line_numbers`, `show_minimap`, `autosave_enabled`, `autosave_delay_ms`, `markdown_rendered_by_default` |
 | `[session]` | `recovery_policy`, `backups_enabled` |
 | `[git]` | `default_where`, `branch_prefix`, `worktree_location_template`, `default_base`, `branch_line`, `setup_command`, `default_close_policy` |
@@ -407,7 +405,6 @@ Accepted spellings for common enumerated values:
 | `ui.agent_monitoring_mode` | `normal`, `attention`, `custom` |
 | `ui.sidebar_density` | `compact`, `standard`, `comfortable` |
 | `terminal.new_pane_directory` | `project_root`, `focused_terminal`, `last_used` |
-| `terminal.smart_copy_light_key` | `ctrl`, `alt`, `shift` |
 | `editor.line_display` | `clip`, `wrap` |
 | `session.recovery_policy` | `restore_automatically`, `ask_before_restore`, `start_fresh` |
 

@@ -292,6 +292,11 @@ impl FakeTree {
                     .and_then(|extras| extras.container)
                     .unwrap_or(ContainerKind::Group),
             ),
+            // The fake marks a worktree pane on the pane itself (set_worktree); a real tree reports a
+            // worktree container above the pane, and a plugin looks at the node and its ancestors.
+            NodeClass::Pane if extras.is_some_and(|extras| extras.worktree) => {
+                Some(ContainerKind::Worktree)
+            }
             NodeClass::Pane | NodeClass::Folder => None,
         };
         Some(NodeView {

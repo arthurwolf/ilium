@@ -2651,7 +2651,7 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     first_client
         .write(&b"\x1b[B".repeat(tree_order_row))
         .expect("focus Tree order after the sizing controls");
-    // The full catalog has six identities; cross several options.
+    // The catalog is the manual order plus the tree plugin's five orderings; cross several.
     first_client
         .write(b"+")
         .expect("open the Tree order catalog");
@@ -2659,17 +2659,17 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         wait_until(
             || {
                 let screen = first_client.screen_text();
-                screen.contains("Manual")
-                    && screen.contains("Type")
-                    && screen.contains("Age up (newest first)")
-                    && screen.contains("Age down (oldest first)")
-                    && screen.contains("Name A-Z")
-                    && screen.contains("Name Z-A")
+                screen.contains("Manual order")
+                    && screen.contains("Item type")
+                    && screen.contains("Newest first")
+                    && screen.contains("Oldest first")
+                    && screen.contains("Name (A–Z)")
+                    && screen.contains("Name (Z–A)")
             },
             WAIT_TIMEOUT
         )
         .await,
-        "the PTY catalog should render all six Tree order choices: {:?}",
+        "the PTY catalog should render all six Tree order choices (manual plus the tree plugin): {:?}",
         first_client.screen_text()
     );
     first_client
@@ -2680,7 +2680,10 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
             || {
                 let screen = first_client.screen_text();
                 ilium_client::config::load(&xdg.ilium_config_dir).is_ok_and(|config| {
-                    config.ui.tree_order == ilium_client::config::TreeOrder::NameDescending
+                    config
+                        .ui
+                        .plugin_tree_ordering
+                        .is_some_and(|choice| choice.names("ilium.core.tree", "name-za"))
                 }) && !screen.contains("Search:")
                     && !screen.contains("Saving; wait for disk receipt")
             },

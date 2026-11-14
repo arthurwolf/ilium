@@ -65,7 +65,7 @@ pub const DEFAULT_ROWS: u16 = 24;
 pub const DEFAULT_COLS: u16 = 80;
 
 /// Renders an immutable screen without consulting or mutating a live
-/// `TerminalView`. Smart Copy uses this while live PTY output continues to be
+/// `TerminalView`. Frozen panes use this while live PTY output continues to be
 /// applied behind the frozen viewport.
 pub fn render_frozen_screen(screen: &vt100::Screen, area: Rect, destination: &mut Buffer) {
     if !area.is_empty() {
@@ -1317,9 +1317,10 @@ impl PaintedTerminal {
                     .then(|| target.clone())
             })
     }
+    #[cfg(test)]
     pub(crate) fn capture_cost(&self) -> Result<ilium_execution::JobCost, String> {
         let (rows, columns) = self.snapshot.visible.size();
-        // Capture reads only the visible screen (`SmartCopySnapshot::capture`);
+        // Capture reads only the visible screen (`CapturedScreen::capture`);
         // the shared scrollback is cloned by reference, so charging the 10k-row
         // cap here refused every pane wider than ~100 columns; words,
         // detected regions, escaped JSON and serialization scratch coexist.
@@ -1334,7 +1335,7 @@ impl PaintedTerminal {
             .saturating_add(128 * 1024);
         if bytes > 128 * 1024 * 1024 {
             return Err(format!(
-                "Smart Copy capture exceeds its128MiB single-capture limit ({bytes} bytes required)"
+                "Screen capture exceeds its 128MiB single-capture limit ({bytes} bytes required)"
             ));
         }
         Ok(ilium_execution::JobCost {
@@ -1342,6 +1343,7 @@ impl PaintedTerminal {
             result_bytes: bytes,
         })
     }
+    #[cfg(test)]
     pub(crate) fn capture_charge(
         &self,
         bytes: usize,
@@ -1352,6 +1354,7 @@ impl PaintedTerminal {
             .map(|charge| charge.reserve_capture(bytes))
             .transpose()
     }
+    #[cfg(test)]
     pub(crate) fn allocation_bytes(&self) -> usize {
         self.snapshot
             .allocation_charge

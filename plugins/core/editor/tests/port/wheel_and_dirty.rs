@@ -127,8 +127,7 @@ fn port_pane_save_of_a_pathless_buffer_submits_nothing() {
 fn dirty_of(editor: &mut ilium_plugin_core_editor::EditorClient) -> serde_json::Value {
     let listed = done_json(call_buffers(editor, "list", json!({})));
     listed
-        .get("buffers")
-        .and_then(|buffers| buffers.get(0))
+        .get(0)
         .and_then(|buffer| buffer.get("dirty"))
         .cloned()
         .unwrap_or(serde_json::Value::Null)

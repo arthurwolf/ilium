@@ -139,38 +139,6 @@ fn benchmark_full_ui_draw_with_49_working_panes() {
 
 #[test]
 #[ignore = "manual performance benchmark"]
-fn benchmark_chatroom_reconciliation_without_a_room() {
-    let mut fixture = many_pane_fixture();
-    let now = Instant::now();
-    fixture.app.tick_chatroom_projects(now);
-
-    measure_median_nanoseconds("client.reconcile_chatroom_no_room", 2_000, || {
-        black_box(fixture.app.tick_chatroom_projects(now));
-    });
-}
-
-#[test]
-#[ignore = "manual performance benchmark"]
-fn benchmark_chatroom_reconciliation_with_a_room() {
-    let project_directory = tempfile::tempdir().expect("create chatroom benchmark project");
-    crate::chatroom::initialize(project_directory.path()).expect("initialize benchmark chatroom");
-    let mut app = App::new(
-        "performance-chatroom".to_owned(),
-        project_directory.path().to_path_buf(),
-    );
-    app.tree
-        .add_project(project_directory.path().to_path_buf())
-        .expect("add chatroom benchmark project");
-    let now = Instant::now();
-    app.tick_chatroom_projects(now);
-
-    measure_median_nanoseconds("client.reconcile_chatroom_existing_room", 100, || {
-        black_box(app.tick_chatroom_projects(now));
-    });
-}
-
-#[test]
-#[ignore = "manual performance benchmark"]
 fn benchmark_many_pane_animation_scheduler() {
     let fixture = many_pane_fixture();
 
@@ -263,11 +231,22 @@ fn benchmark_tree_ordering_and_visible_ids() {
             TreeOrder::Manual,
         ));
     });
-    measure_median_nanoseconds("client.tree_name_order_49", 2_000, || {
-        black_box(crate::tree_ordering::ordered_children(
+    let ranks: std::collections::HashMap<ilium_core::NodeId, f64> = fixture
+        .app
+        .tree
+        .children_of(group_id)
+        .unwrap()
+        .iter()
+        .rev()
+        .enumerate()
+        .map(|(index, id)| (*id, index as f64))
+        .collect();
+    measure_median_nanoseconds("client.tree_plugin_key_order_49", 2_000, || {
+        black_box(crate::tree_ordering::ordered_children_ranked(
             &fixture.app.tree,
             group_id,
-            TreeOrder::NameAscending,
+            TreeOrder::PluginKey,
+            &ranks,
         ));
     });
     measure_median_nanoseconds("client.visible_tree_node_ids_49", 1_000, || {

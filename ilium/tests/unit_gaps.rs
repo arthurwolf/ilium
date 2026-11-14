@@ -255,12 +255,6 @@ fn cli_error_restart_client_names_path_and_cause() {
 }
 
 #[test]
-fn cli_error_chatroom_prefixes_the_wrapped_message() {
-    let error = CliError::Chatroom(anyhow::anyhow!("no room"));
-    assert_eq!(error.to_string(), "chatroom operation failed: no room");
-}
-
-#[test]
 fn cli_error_not_inside_pane_names_the_missing_variable() {
     let error = CliError::NotInsideIliumPane("ILIUM_PANE_ID");
     assert_eq!(

@@ -56,8 +56,8 @@ fn pool_help_position(app: &App) -> Position {
         .collect();
     assert_eq!(matches.len(), 1, "one visible parser-pool help anchor");
     let anchor = matches[0];
-    assert_eq!(anchor.selected, state.selected_row == 4);
-    if state.selected_row == 4 {
+    assert_eq!(anchor.selected, state.selected_row == 2);
+    if state.selected_row == 2 {
         assert_eq!(anchors.iter().filter(|anchor| anchor.selected).count(), 1);
     }
     assert_eq!(anchor.hit_area.y, layout.content_area.y + 13 - state.scroll);
@@ -90,10 +90,10 @@ fn assert_restored(app: &App, screen: Rect, selected_row: usize, scroll: u16) {
 fn terminal_pool_help_anchor_respects_scroll_and_viewport_clipping() {
     for screen in [Rect::new(0, 0, 80, 24), Rect::new(0, 0, 120, 40)] {
         for scroll in [10, 13] {
-            let (_directory, app) = help_app(screen, 4, scroll);
+            let (_directory, app) = help_app(screen, 2, scroll);
             pool_help_position(&app);
         }
-        let (_directory, app) = help_app(screen, 4, 14);
+        let (_directory, app) = help_app(screen, 2, 14);
         let Mode::Settings(state) = &app.mode else {
             panic!("settings expected");
         };
@@ -103,7 +103,7 @@ fn terminal_pool_help_anchor_respects_scroll_and_viewport_clipping() {
         assert!(crate::settings_ui::settings_help_at(&layout, &app, state, top).is_none());
     }
     let screen = Rect::new(0, 0, 80, 12);
-    let (_directory, app) = help_app(screen, 4, 0);
+    let (_directory, app) = help_app(screen, 2, 0);
     let Mode::Settings(state) = &app.mode else {
         panic!("settings expected");
     };
@@ -121,7 +121,7 @@ fn terminal_pool_question_mark_opens_the_selected_topic_and_restores_navigation(
         (Rect::new(0, 0, 80, 24), 10, KeyModifiers::NONE),
         (Rect::new(0, 0, 120, 40), 0, KeyModifiers::SHIFT),
     ] {
-        let (_directory, mut app) = help_app(screen, 4, scroll);
+        let (_directory, mut app) = help_app(screen, 2, scroll);
         let position = pool_help_position(&app);
         let settings = app.terminal_settings;
         let topic = observe_open(|| {
@@ -133,7 +133,7 @@ fn terminal_pool_question_mark_opens_the_selected_topic_and_restores_navigation(
         assert_eq!(topic.as_deref(), Some("TERM-03"));
         assert!(matches!(&app.mode, Mode::SettingsHelp(_)));
         app.pop_modal();
-        assert_restored(&app, screen, 4, scroll);
+        assert_restored(&app, screen, 2, scroll);
         assert_eq!(pool_help_position(&app), position);
         assert_eq!(app.terminal_settings, settings);
     }
@@ -141,7 +141,7 @@ fn terminal_pool_question_mark_opens_the_selected_topic_and_restores_navigation(
 #[test]
 fn terminal_pool_help_click_opens_the_hit_topic_and_restores_navigation() {
     for (screen, scroll) in [(Rect::new(0, 0, 80, 24), 10), (Rect::new(0, 0, 120, 40), 0)] {
-        for selected_row in [0, 4] {
+        for selected_row in [0, 2] {
             let (_directory, mut app) = help_app(screen, selected_row, scroll);
             let position = pool_help_position(&app);
             let settings = app.terminal_settings;

@@ -68,6 +68,10 @@ impl App {
             ClientEffect::SetEditorOption { pane, option } => {
                 self.plugin_set_editor_option(plugin, pane, option)
             }
+            ClientEffect::FreezeAgent(node) => {
+                self.action_freeze_agent(node);
+                true
+            }
         }
     }
 

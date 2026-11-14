@@ -62,7 +62,7 @@ impl FakeScene {
     pub fn new<R: SceneRenderer + 'static>(scene_id: &str, columns: u16, rows: u16) -> FakeScene {
         let factory: RendererFactory =
             Box::new(|spec_json| Box::new(Wrapped(R::new(spec_json))) as Box<dyn ErasedRenderer>);
-        let renderer = factory("{}");
+        let renderer = factory(&serde_json::json!({ "scene": scene_id }).to_string());
         FakeScene {
             renderer,
             factory,
@@ -75,13 +75,18 @@ impl FakeScene {
         }
     }
 
-    /// The spec JSON handed to the renderer: the settings object plus the location when set.
+    /// The spec JSON handed to the renderer: the settings object plus the scene id and the
+    /// location when set. A spec of the host carries the settings under `settings`; the
+    /// harness keeps them at the top level too, so a renderer may read either.
     fn spec_json(&self) -> String {
         let mut spec: serde_json::Value = serde_json::from_str(&self.settings_json)
             .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
-        if let (Some((latitude, longitude)), Some(object)) = (self.location, spec.as_object_mut()) {
-            object.insert("latitude".to_string(), serde_json::json!(latitude));
-            object.insert("longitude".to_string(), serde_json::json!(longitude));
+        if let Some(object) = spec.as_object_mut() {
+            object.insert("scene".to_string(), serde_json::json!(self.scene_id));
+            if let Some((latitude, longitude)) = self.location {
+                object.insert("latitude".to_string(), serde_json::json!(latitude));
+                object.insert("longitude".to_string(), serde_json::json!(longitude));
+            }
         }
         spec.to_string()
     }

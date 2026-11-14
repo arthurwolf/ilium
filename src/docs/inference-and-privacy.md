@@ -209,7 +209,6 @@ entry_naming = ""
 organization = ""
 naming_and_organization = ""
 project_naming = ""
-smart_copy = ""
 ask_for_update = ""
 ```
 

@@ -357,7 +357,8 @@ pub async fn run(words: Vec<OsString>, cwd: &Path) -> Ran {
     };
     let command = prepared.command.clone();
     let stdin = if prepared.read_stdin {
-        match tokio::task::spawn_blocking(read_standard_input).await {
+        let optional = command.stdin == "optional";
+        match tokio::task::spawn_blocking(move || read_standard_input(optional)).await {
             Ok(Ok(bytes)) => bytes,
             Ok(Err(error)) => {
                 eprintln!(
@@ -386,10 +387,34 @@ pub async fn run(words: Vec<OsString>, cwd: &Path) -> Ran {
     Ran::Exit(code)
 }
 
-fn read_standard_input() -> std::io::Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    std::io::stdin().lock().read_to_end(&mut bytes)?;
-    Ok(bytes)
+/// How long an `optional` standard input may stay silent before the command runs without it. A
+/// lifecycle hook closes the pipe right after writing; an inherited open pipe (an agent tool, an
+/// interactive shell) must not stall a command that does not need the input.
+const OPTIONAL_STDIN_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
+/// Bound on the bytes read from an `optional` standard input.
+const OPTIONAL_STDIN_LIMIT_BYTES: u64 = 1024 * 1024;
+
+fn read_standard_input(optional: bool) -> std::io::Result<Vec<u8>> {
+    if !optional {
+        let mut bytes = Vec::new();
+        std::io::stdin().lock().read_to_end(&mut bytes)?;
+        return Ok(bytes);
+    }
+    let (sender, receiver) = std::sync::mpsc::channel();
+    // Detached on purpose: when the input never reaches end of file, the reader stays blocked
+    // until this short-lived process exits.
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = std::io::stdin()
+            .lock()
+            .take(OPTIONAL_STDIN_LIMIT_BYTES)
+            .read_to_end(&mut bytes);
+        let _ = sender.send(result.map(|_| bytes));
+    });
+    match receiver.recv_timeout(OPTIONAL_STDIN_WAIT) {
+        Ok(result) => result,
+        Err(_) => Ok(Vec::new()),
+    }
 }
 
 fn terminal_columns() -> u16 {
@@ -579,6 +604,60 @@ impl KernelFacade for EmptyKernel {
     }
 }
 
+/// The project root a command with a `project_marker` works in, picked in this order:
+/// 1. the nearest ancestor of `cwd` that holds the marker file;
+/// 2. the main checkout owning the linked Git worktree that contains `cwd`, when it holds it;
+/// 3. the same two lookups from the pane's own worktree (`ILIUM_WORKTREE`), for a shell that
+///    left its worktree;
+/// 4. `cwd` itself, where the command reports a missing marker.
+///
+/// A linked worktree records its main repository in its `.git` file, so no `git` process runs.
+/// An empty marker means the caller's directory is the project.
+fn resolve_marker_root(cwd: &Path, marker: &str, pane_worktree: Option<&Path>) -> PathBuf {
+    if marker.is_empty() {
+        return cwd.to_path_buf();
+    }
+    marker_root_from(cwd, marker)
+        .or_else(|| pane_worktree.and_then(|start| marker_root_from(start, marker)))
+        .unwrap_or_else(|| cwd.to_path_buf())
+}
+
+fn marker_root_from(start: &Path, marker: &str) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|ancestor| ancestor.join(marker).is_file())
+        .map(Path::to_path_buf)
+        .or_else(|| {
+            main_checkout_of_linked_worktree(start).filter(|root| root.join(marker).is_file())
+        })
+}
+
+fn main_checkout_of_linked_worktree(start: &Path) -> Option<PathBuf> {
+    for ancestor in start.ancestors() {
+        let dot_git = ancestor.join(".git");
+        let Ok(metadata) = std::fs::symlink_metadata(&dot_git) else {
+            continue;
+        };
+        if !metadata.file_type().is_file() {
+            return None;
+        }
+        let contents = std::fs::read_to_string(&dot_git).ok()?;
+        let gitdir = contents.lines().find_map(|line| {
+            line.strip_prefix("gitdir:")
+                .map(|path| PathBuf::from(path.trim()))
+        })?;
+        let gitdir = ancestor.join(gitdir);
+        // A submodule's gitdir has no `commondir`, so it never maps to a main checkout.
+        let commondir = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
+        let common = std::fs::canonicalize(gitdir.join(commondir.trim())).ok()?;
+        if common.file_name()? != ".git" {
+            return None;
+        }
+        return common.parent().map(Path::to_path_buf);
+    }
+    None
+}
+
 /// Runs the whole transient host on the calling (blocking) thread and returns the exit code.
 fn transient_host(
     command: &CliCommand,
@@ -589,6 +668,23 @@ fn transient_host(
 ) -> i32 {
     use ilium_plugin_host::imports::cli::CliChunk;
 
+    let project_root = resolve_marker_root(
+        &absolute_cwd,
+        &command.project_marker,
+        std::env::var_os("ILIUM_WORKTREE")
+            .map(PathBuf::from)
+            .as_deref(),
+    );
+    let env: Vec<(String, String)> = command
+        .env
+        .iter()
+        .filter_map(|name| {
+            std::env::var(name)
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(|value| (name.clone(), value))
+        })
+        .collect();
     let data = data_dir();
     let catalogue: Vec<CataloguePlugin> = bundled_catalogue("server")
         .into_iter()
@@ -629,13 +725,13 @@ fn transient_host(
         wiring::import_provider(wiring::ProcessImports {
             storage_root: wiring::storage_root(dir),
             scope: StorageContext {
-                project: Some(absolute_cwd.clone()),
+                project: Some(project_root.clone()),
                 ..StorageContext::default()
             },
             basic: None,
             log: Arc::clone(&log),
             backends: wiring::wave_two::Backends::server(
-                absolute_cwd.clone(),
+                project_root.clone(),
                 dir.clone(),
                 wiring::wave_two::ServerBackendInputs {
                     inference: Some(Arc::new(
@@ -677,6 +773,7 @@ fn transient_host(
         stdout_tty: std::io::stdout().is_terminal(),
         stderr_tty: std::io::stderr().is_terminal(),
         caller_pane: None,
+        env,
     };
     let started = thread.call(move |runtime| {
         for failure in runtime.load(catalogue) {
@@ -1090,5 +1187,40 @@ mod tests {
         assert!(kernel.tree().node(NodeId(1)).is_none());
         assert!(kernel.panes().screen_text(NodeId(1)).is_none());
         assert_eq!(kernel.process_kind(), ProcessKind::Cli);
+    }
+
+    /// REQ: API-005
+    #[test]
+    fn a_marker_root_is_the_nearest_ancestor_holding_the_marker() {
+        let project = tempfile::tempdir().unwrap();
+        let nested = project.path().join("src/deep");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(project.path().join("CHATROOM.md"), "").unwrap();
+
+        assert_eq!(
+            resolve_marker_root(&nested, "CHATROOM.md", None),
+            project.path()
+        );
+        // Without the marker anywhere, the caller's directory is the project.
+        let other = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_marker_root(other.path(), "CHATROOM.md", None),
+            other.path()
+        );
+        // An empty marker never walks up.
+        assert_eq!(resolve_marker_root(&nested, "", None), nested);
+    }
+
+    /// REQ: API-005
+    #[test]
+    fn a_marker_root_falls_back_to_the_pane_worktree() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("CHATROOM.md"), "").unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            resolve_marker_root(elsewhere.path(), "CHATROOM.md", Some(project.path())),
+            project.path()
+        );
     }
 }

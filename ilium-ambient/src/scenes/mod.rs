@@ -4,7 +4,6 @@ pub mod carpet;
 pub mod clouds;
 pub mod cube_clock;
 pub mod dither_water;
-pub mod dithered_waves;
 pub mod dithr_patterns;
 pub mod fbm_clouds;
 pub mod growth;

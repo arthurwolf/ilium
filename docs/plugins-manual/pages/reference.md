@@ -74,7 +74,7 @@ This page shows which reference page answers which question, the values you look
 | Rate of `toast` | 3 per 10 s per plugin. | [Error codes and limits](/pages/reference-errors-and-limits/#requestable-limits) |
 | Rate of `geocode` | 1 per second per plugin. | [Error codes and limits](/pages/reference-errors-and-limits/#requestable-limits) |
 | Status segment and frame slot update | 10 per second per slot. | [Error codes and limits](/pages/reference-errors-and-limits/#requestable-limits) |
-| Contribution caps | `tree_toolbar` 4, `row_actions` 4, `tree_orderings` 4, `status_segments` 2, `pane_frame_slots` 4, `display_modes` 2, `catalogs` 8, `client_requests` 16, `languages` 8. | Manifest keys |
+| Contribution caps | `tree_toolbar` 4, `row_actions` 4, `tree_orderings` 8, `status_segments` 2, `pane_frame_slots` 4, `display_modes` 2, `catalogs` 8, `client_requests` 16, `languages` 8. | Manifest keys |
 | Events and intents | 18 extended events, 23 extended intents, `ok-epoch`, 17 ui-action kinds, 12 action-value cases. | Events and intents |
 | Settings rows | 18 row types. Six new: `location`, `preview`, `notice`, `map`, `multi-choice`, `meter`. | Manifest keys |
 | Manifest error codes | 13 new codes, `manifest.catalog-unknown` to `manifest.scene-prerender`. | Errors and limits |
@@ -168,7 +168,7 @@ The render shows the lookup the CLI offers for a key. Illustrative, not generate
 
 <pre class="term">╭  ≡ ● · Plugin limits──────────────────────────╮
 │ status_segments …… 2   row_actions …… 4       │
-│ tree_toolbar ……… 4   tree_orderings … 4       │
+│ tree_toolbar ……… 4   tree_orderings … 8       │
 │ pane_frame_slots … 4   display_modes … 2      │
 ╰────────────────────────────────────────────── ╯
 </pre>

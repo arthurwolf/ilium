@@ -47,7 +47,7 @@ fn manifest_010_activation_is_scene_wildcard_and_tier_first_party() {
 
 /// REQ: COR-010, COR-011
 #[test]
-fn manifest_011_contributes_exactly_three_scenes_in_page_order() {
+fn manifest_011_contributes_exactly_the_scenes_in_page_order() {
     let ids: Vec<String> = scene_entries()
         .iter()
         .map(|e| e["id"].as_str().unwrap().to_string())

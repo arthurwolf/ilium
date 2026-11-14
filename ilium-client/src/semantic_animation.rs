@@ -56,7 +56,8 @@ fn canonical_id(kind: AnimationKind) -> Result<String, String> {
 }
 
 fn kind_for(id: &str) -> Result<AnimationKind, String> {
-    if !valid_animation_identifier(id) || id == "semantic" {
+    // Plugin scenes are a dynamic set, so the recommendation never offers them.
+    if !valid_animation_identifier(id) || id == "semantic" || id == "plugin_scene" {
         return Err("Choose a canonical concrete animation identifier".into());
     }
     let kind: AnimationKind = serde_json::from_value(serde_json::Value::String(id.to_owned()))
@@ -832,7 +833,7 @@ fn build_catalog() -> Result<String, String> {
     );
     for kind in AnimationKind::ALL {
         let id = canonical_id(kind)?;
-        if id == "semantic" {
+        if id == "semantic" || kind == AnimationKind::PluginScene {
             continue;
         }
         text.push_str(&format!("{id:?} | {}\n", kind.description()));

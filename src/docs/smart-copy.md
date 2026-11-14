@@ -1,5 +1,13 @@
 # Smart Copy
 
+> **Smart Copy is now a core plugin** (`ilium.core.smart-copy`). The agent toolbar button and the plugin's
+> terminal right-click entry run it: it freezes the pane, scans the visible rows for URLs, paths, hashes, emails,
+> ports, versions and other tokens, and lists the best candidates in a picker (`1` to `3` copy, `n` and `p` page,
+> `Esc` closes). If an inference provider is configured the candidates are ranked by the model; the copied text is
+> still read from the screen, never typed by a model. The Smart Copy light modifier-key mode, the Smart Copy
+> instruction preference and the in-pane region overlay described below belonged to the former built-in feature
+> and are no longer part of Ilium; disabling the plugin removes Smart Copy entirely.
+
 Smart Copy turns what is on a terminal screen into things you can copy with one click: a URL, a file path, a code block, a table cell, a whole paragraph, an error message. It freezes the visible screen, outlines the regions it understands, and lets you click them to build a selection that goes to the clipboard.
 
 There are two variants:

@@ -474,7 +474,6 @@ fn settings_snapshot(app: &App) -> Value {
             "ui.agent_monitoring_mode",
             "ui.sidebar_density", "ui.stable_glyphs", "ui.agent_debug_menu_enabled", "ui.task_progress_style", "ui.icons.<icon_key>",
             "terminal.scrollback_budget_mib", "terminal.engine_memory_budget_mib", "terminal.new_pane_directory",
-            "terminal.smart_copy_light", "terminal.smart_copy_light_key",
             "editor.line_numbers", "editor.minimap", "editor.autosave",
             "editor.autosave_delay_ms", "editor.markdown_rendered_by_default",
             "session.recovery_policy", "session.backups_enabled", "keyboard.shortcut_base", "keyboard.preset",
@@ -518,7 +517,11 @@ fn settings_snapshot(app: &App) -> Value {
             "left_panel_unfocused_width": app.ui_settings.left_panel_sizing.unfocused_width,
             "left_panel_focused_width": app.ui_settings.left_panel_sizing.focused_width,
             "left_panel_minimum_terminal_width": app.ui_settings.left_panel_sizing.minimum_terminal_width,
-            "tree_order": format!("{:?}", app.ui_settings.tree_order).to_ascii_lowercase(),
+            "tree_order": app
+                .ui_settings
+                .plugin_tree_ordering
+                .as_ref()
+                .map_or_else(|| "manual".to_owned(), |choice| choice.config_value()),
             "tree_row_management_controls": app.ui_settings.show_tree_row_management_controls,
             "color_scheme": format!("{:?}", app.ui_settings.color_scheme).to_ascii_lowercase(),
             "stable_glyphs": app.ui_settings.use_stable_glyphs,
@@ -538,8 +541,6 @@ fn settings_snapshot(app: &App) -> Value {
             "engine_memory_budget_mib": app.terminal_settings.engine_memory_budget_mib,
             "parser_pool_enabled": app.terminal_settings.engine_memory_budget_mib != 0,
             "new_pane_directory": format!("{:?}", app.terminal_settings.new_pane_directory).to_ascii_lowercase(),
-            "smart_copy_light": app.terminal_settings.smart_copy_light,
-            "smart_copy_light_key": app.terminal_settings.smart_copy_light_key.config_name(),
         },
         "editor": {
             "line_numbers": app.editor_settings.show_line_numbers,
@@ -693,9 +694,6 @@ fn right_panel_snapshot(target: &RightPanelTarget) -> Value {
         } => {
             json!({ "kind": "resource", "project_id": project_id.0, "resource_id": resource_id.0 })
         }
-        RightPanelTarget::Chatroom { project_id } => {
-            json!({ "kind": "chatroom", "project_id": project_id.0 })
-        }
         RightPanelTarget::Pane { pane_id } => {
             json!({ "kind": "pane", "active_pane_id": pane_id.0 })
         }
@@ -733,7 +731,6 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::ContextMenu(_) => "context_menu",
         Mode::TerminalPaneContextMenu(_) => "terminal_pane_context_menu",
         Mode::AgentToolbarModelSubmenu(_) => "agent_toolbar_model_submenu",
-        Mode::SmartCopy => "smart_copy",
         Mode::AgentDebugLog(_) => "agent_debug_log",
         Mode::LastPromptDialog(_) => "last_prompt_dialog",
         Mode::AgentDebugSavePath(_, _) => "agent_debug_save_path",
@@ -757,7 +754,6 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::BoardRenamePrompt(..) => "board_rename_prompt",
         Mode::BoardDeleteConfirm(..) => "board_delete_confirm",
         Mode::ConfirmClose(_) => "confirm_close",
-        Mode::ConvertSession => "convert_session",
         Mode::RemoteCompaction => "remote_compaction",
         Mode::AttentionOverview => "attention_overview",
         Mode::ConfirmRemoveWorkspace(_) => "confirm_remove_workspace",

@@ -48,10 +48,7 @@ impl App {
     fn recap_ui_active(&self) -> bool {
         self.modal_stack.is_empty()
             && matches!(self.mode, Mode::Normal)
-            && !matches!(
-                self.right_panel_target,
-                RightPanelTarget::Chatroom { .. } | RightPanelTarget::Resource { .. }
-            )
+            && !matches!(self.right_panel_target, RightPanelTarget::Resource { .. })
     }
 
     /// The pane whose recap dot sits under `position`.

@@ -69,7 +69,7 @@ fn point_010_empty_point_collects_nothing() {
 
 /// REQ: F-095, F-096, F-100
 #[test]
-fn catalog_095_list_returns_the_three_manifest_scenes() {
+fn catalog_095_list_returns_the_manifest_scenes() {
     let mut session = session_with_plugin();
     let ids: Vec<String> = catalog_scenes(&mut session)
         .iter()

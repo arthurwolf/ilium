@@ -8,11 +8,7 @@ use serde_json::json;
 
 fn first_buffer(editor: &mut ilium_plugin_core_editor::EditorClient) -> serde_json::Value {
     let listed = done_json(call_buffers(editor, "list", json!({})));
-    listed
-        .get("buffers")
-        .and_then(|buffers| buffers.get(0))
-        .cloned()
-        .unwrap_or(serde_json::Value::Null)
+    listed.get(0).cloned().unwrap_or(serde_json::Value::Null)
 }
 
 /// REQ: PORT:ilium-client/src/editor_pane.rs::empty_buffer_has_no_path_and_is_not_dirty
@@ -27,14 +23,7 @@ fn port_pane_empty_buffer_has_no_path_and_is_not_dirty() {
         "{buffer}"
     );
     let lines = read_lines(&mut editor, 1, 0, 10);
-    assert_eq!(
-        lines
-            .get("lines")
-            .and_then(|l| l.as_array())
-            .map(|l| l.len()),
-        Some(1),
-        "{lines}"
-    );
+    assert_eq!(lines.as_array().map(|l| l.len()), Some(1), "{lines}");
 }
 
 /// REQ: PORT:ilium-client/src/editor_pane.rs::load_missing_file_starts_empty_but_remembers_path
@@ -63,7 +52,7 @@ fn port_pane_opening_a_directory_path_is_rejected() {
         "read",
         json!({"buffer": 99, "first-line": 0, "count": 1}),
     ));
-    assert!(reply.get("error").is_some(), "{reply}");
+    assert_eq!(reply, json!([]), "an unknown buffer reads as no lines");
 }
 
 /// REQ: PORT:ilium-client/src/editor_pane.rs::save_then_load_round_trips_contents
@@ -73,11 +62,7 @@ fn port_pane_buffer_contents_round_trip_through_the_buffers_service() {
     direct_open(&mut editor, 1, None, 1);
     crate::support::seed_text(&mut editor, 1, "hello\nworld");
     let lines = read_lines(&mut editor, 1, 0, 10);
-    assert_eq!(
-        lines.get("lines"),
-        Some(&json!(["hello", "world"])),
-        "{lines}"
-    );
+    assert_eq!(lines, json!(["hello", "world"]), "{lines}");
 }
 
 /// REQ: PORT:ilium-client/src/editor_pane.rs::input_returns_and_tracks_modification
@@ -130,7 +115,7 @@ fn port_pane_wrapping_adds_visual_rows_and_keeps_buffer_text_and_wrap_mode() {
     direct_open(&mut editor, 1, None, 1);
     crate::support::seed_text(&mut editor, 1, long);
     let lines = read_lines(&mut editor, 1, 0, 5);
-    assert_eq!(lines.get("lines"), Some(&json!([long])), "{lines}");
+    assert_eq!(lines, json!([long]), "{lines}");
 }
 
 /// REQ: PORT:ilium-client/src/editor_pane.rs::empty_buffer_has_no_path_and_is_not_dirty
@@ -139,7 +124,7 @@ fn port_pane_empty_buffer_reads_back_as_one_empty_line() {
     let mut editor = direct("{}");
     direct_open(&mut editor, 1, None, 1);
     let lines = read_lines(&mut editor, 1, 0, 1);
-    assert_eq!(lines.get("lines"), Some(&json!([""])), "{lines}");
+    assert_eq!(lines, json!([""]), "{lines}");
 }
 
 /// REQ: PORT:ilium-client/src/editor_pane.rs::heading_rendering_switches_between_graphics_and_plain_text
@@ -186,13 +171,10 @@ fn port_pane_failed_read_leaves_no_buffer_behind() {
         "read",
         json!({"buffer": 99, "first-line": 0, "count": 1}),
     ));
-    assert!(reply.get("error").is_some(), "{reply}");
+    assert_eq!(reply, json!([]), "an unknown buffer reads as no lines");
     let listed = done_json(call_buffers(&mut editor, "list", json!({})));
     assert_eq!(
-        listed
-            .get("buffers")
-            .and_then(|buffers| buffers.as_array())
-            .map(|buffers| buffers.len()),
+        listed.as_array().map(|buffers| buffers.len()),
         Some(0),
         "{listed}"
     );
@@ -230,7 +212,7 @@ fn port_pane_second_line_reads_back_on_its_own() {
     direct_open(&mut editor, 1, None, 1);
     crate::support::seed_text(&mut editor, 1, "hello\nworld");
     let lines = read_lines(&mut editor, 1, 1, 1);
-    assert_eq!(lines.get("lines"), Some(&json!(["world"])), "{lines}");
+    assert_eq!(lines, json!(["world"]), "{lines}");
 }
 
 /// REQ: PORT:ilium-client/src/editor_pane.rs::wrapping_tracks_visual_rows_without_changing_the_buffer

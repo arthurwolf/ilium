@@ -2,13 +2,17 @@
 
 use std::collections::BTreeMap;
 
+use ilium_plugin_sdk::host::{HostClock, HostKernelSettings, HostTimers};
 use ilium_plugin_sdk::types::{
     Activation, AgentActivity, ClearFrameSlotSpec, CommandInvokedEvent, Event, Intent,
-    InvokeCommandSpec, MessageEvent, MessageSpec, MessageTarget, NodeId, PluginError, PluginId, PluginSide,
-    RichSpan, SetFrameSlotSpec, SpanTarget, Style, Submission,
+    InvokeCommandSpec, MessageEvent, MessageSpec, MessageTarget, NodeId, PluginError, PluginId,
+    PluginSide, RichSpan, SetFrameSlotSpec, SpanTarget, Style, Submission, TimerId,
 };
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle};
 
+use crate::freeze::{
+    AutoFreezeSettings, FreezeBook, ACTIVITY_DETAIL_SIGNAL, FREEZE_AGENT_COMMAND, SETTINGS_TAB,
+};
 use crate::settings::UiSettings;
 use crate::PLUGIN_ID;
 
@@ -16,6 +20,8 @@ use crate::PLUGIN_ID;
 const BANNER_CHARS: usize = 120;
 /// The remote compaction command of `ilium.core.compaction`.
 const COMPACTION_COMMAND: &str = "ilium.core.compaction/compact";
+/// How often the auto-freeze policy looks at the clock while agent panes exist.
+const FREEZE_CHECK_MILLIS: u32 = 30_000;
 
 /// The client side of `ilium.core.agent-toolbar` (core-plugin-agent-toolbar.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["handler"])]
@@ -27,6 +33,10 @@ pub struct AgentToolbarClient {
     goals: BTreeMap<u64, Option<String>>,
     /// Latest history reply received from the server side, kept for the popup.
     history_payload: Option<Vec<u8>>,
+    /// The agent panes the auto-freeze policy follows.
+    freeze: FreezeBook,
+    /// The repeating timer that lets the auto-freeze policy see time pass.
+    freeze_timer: Option<TimerId>,
 }
 
 pub(crate) fn plain(text: &str) -> Vec<RichSpan> {
@@ -93,7 +103,11 @@ impl AgentToolbarClient {
         }
         out.push(clear_slot(node, "prompt"));
         if let Some(prompt) = self.last_prompts.get(&node.0) {
-            out.push(set_slot(node, "recover", &format!("Stopped. Last prompt: {prompt}")));
+            out.push(set_slot(
+                node,
+                "recover",
+                &format!("Stopped. Last prompt: {prompt}"),
+            ));
         }
     }
 
@@ -113,6 +127,50 @@ impl AgentToolbarClient {
             &invoked.command,
             pane.0.to_string().into_bytes(),
         ));
+    }
+
+    /// Notes one detailed-activity signal of the kernel and keeps the check timer in step.
+    fn on_activity_detail(&mut self, pane: NodeId, value: &str, out: &mut Vec<Submission>) {
+        self.freeze.observe(pane.0, value);
+        self.check_freeze(out);
+        self.sync_freeze_timer();
+    }
+
+    /// Asks the kernel to freeze every pane that has been inactive long enough.
+    fn check_freeze(&mut self, out: &mut Vec<Submission>) {
+        let settings = {
+            let mut api = host();
+            match HostKernelSettings::read(&mut *api, SETTINGS_TAB.to_string()) {
+                Ok(tab) => AutoFreezeSettings::from_tab(&tab),
+                Err(_) => AutoFreezeSettings::default(),
+            }
+        };
+        let now = {
+            let mut api = host();
+            HostClock::monotonic_millis(&mut *api)
+        };
+        for pane in self.freeze.due(now, settings) {
+            out.push(Submission::new(Intent::InvokeCommand(InvokeCommandSpec {
+                command: FREEZE_AGENT_COMMAND.to_string(),
+                arguments_json: serde_json::json!({ "node": pane }).to_string(),
+            })));
+        }
+    }
+
+    /// Runs the check timer while there is an agent pane to watch, and not otherwise.
+    fn sync_freeze_timer(&mut self) {
+        let mut api = host();
+        match (self.freeze.is_empty(), self.freeze_timer) {
+            (false, None) => {
+                self.freeze_timer =
+                    HostTimers::set(&mut *api, FREEZE_CHECK_MILLIS, Some(FREEZE_CHECK_MILLIS)).ok();
+            }
+            (true, Some(timer)) => {
+                HostTimers::cancel(&mut *api, timer);
+                self.freeze_timer = None;
+            }
+            _ => {}
+        }
     }
 
     /// Remote compaction needs the setting on and a pane with a verified transcript session.
@@ -147,12 +205,20 @@ impl Handler for AgentToolbarClient {
         let mut out = Vec::new();
         for event in batch {
             match event {
-                Event::UserLineSubmitted(line) => self.on_user_line(line.pane, &line.text, &mut out),
+                Event::UserLineSubmitted(line) => {
+                    self.on_user_line(line.pane, &line.text, &mut out)
+                }
                 Event::AgentActivityChanged(change) => {
                     self.on_activity(change.node, change.current, &mut out);
                 }
                 Event::AgentGoalChanged(goal) => {
                     self.goals.insert(goal.node.0, goal.goal);
+                }
+                Event::SignalChanged(signal) if signal.signal == ACTIVITY_DETAIL_SIGNAL => {
+                    self.on_activity_detail(signal.pane, &signal.value, &mut out);
+                }
+                Event::TimerFired(timer) if self.freeze_timer == Some(timer) => {
+                    self.check_freeze(&mut out);
                 }
                 Event::CommandInvoked(invoked) => self.on_command(&invoked, &mut out),
                 Event::Message(message) => self.on_message(&message, &mut out),

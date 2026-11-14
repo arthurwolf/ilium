@@ -100,7 +100,10 @@ pub fn validate_json(json: &str, context: &ValidationContext) -> Vec<Diagnostic>
     };
     let mut errors = schema_errors(&value);
     // An identity failure explains the document first (API-080): a bad id hides unknown keys.
-    if errors.iter().any(|error| error.code.as_str() == "manifest.id-invalid") {
+    if errors
+        .iter()
+        .any(|error| error.code.as_str() == "manifest.id-invalid")
+    {
         errors.retain(|error| error.code.as_str() != "manifest.unknown-key");
     }
     if context.mode == CheckMode::Install && value.get("files").is_none() {
@@ -1271,7 +1274,9 @@ const MANIFEST_SCHEMA: &str = r###"{
               "output": {"enum": ["jsonl", "text"]},
               "requires_server": {"type": "boolean"},
               "stdin": {"enum": ["none", "optional", "required"]},
-              "argument_groups": {"type": "array", "items": {"enum": ["pane-selector"]}, "maxItems": 4}
+              "argument_groups": {"type": "array", "items": {"enum": ["pane-selector"]}, "maxItems": 4},
+              "env": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"}, "maxItems": 8, "uniqueItems": true},
+              "project_marker": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$"}
             },
             "required": ["name", "summary"]
           },
@@ -1440,7 +1445,7 @@ const MANIFEST_SCHEMA: &str = r###"{
             },
             "required": ["id", "title", "slot"]
           },
-          "maxItems": 4
+          "maxItems": 8
         },
         "status_segments": {
           "type": "array",
@@ -2441,6 +2446,7 @@ fn check_data_schema(value: &Value, path: &str, errors: &mut Vec<Diagnostic>) {
         "secret",
         "multiline",
         "enum_titles",
+        "order",
         "picker",
         "extensions",
         "items",

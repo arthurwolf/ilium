@@ -20,16 +20,6 @@ fn unmodelled() -> PluginError {
     )
 }
 
-// ilium:host/intents-host
-impl m::host::intents_host::HostIntentsHost for NativeBridge {
-    fn submit(
-        &mut self,
-        a0: m::types::intents::Submission,
-    ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError> {
-        ::core::result::Result::Err(unmodelled())
-    }
-}
-
 // ilium:host/commands
 impl m::host::commands::HostCommands for NativeBridge {
     fn set_state(
@@ -121,25 +111,6 @@ impl m::host::ui_host::HostUiHost for NativeBridge {
         a4: ::std::vec::Vec<u8>,
     ) -> ::core::result::Result<(), m::types::errors::PluginError> {
         ::core::result::Result::Err(unmodelled())
-    }
-}
-
-// ilium:host/sessions
-impl m::host::sessions::HostSessions for NativeBridge {
-    fn list_live(&mut self) -> ::std::vec::Vec<m::host::sessions::LiveSession> {
-        ::std::vec::Vec::new()
-    }
-    fn send(
-        &mut self,
-        a0: m::host::sessions::CrossRequest,
-    ) -> ::core::result::Result<m::types::ids::RequestId, m::types::errors::PluginError> {
-        ::core::result::Result::Err(unmodelled())
-    }
-    fn take_reply(
-        &mut self,
-        a0: m::types::ids::RequestId,
-    ) -> ::core::option::Option<::std::string::String> {
-        ::core::option::Option::None
     }
 }
 

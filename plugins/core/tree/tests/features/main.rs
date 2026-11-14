@@ -17,3 +17,4 @@ mod node_commands;
 mod ordering;
 mod rename_dialog;
 mod topics_services;
+mod tree_orderings;

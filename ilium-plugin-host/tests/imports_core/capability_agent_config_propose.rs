@@ -51,7 +51,7 @@ fn take_proposal_returns_the_result_once_and_every_path_is_accounted_for() {
 
 /// REQ: WIT:ilium:host/fs.take-proposal
 #[test]
-fn take_proposal_is_none_while_the_user_has_not_answered() {
+fn a_change_that_is_not_a_new_session_transcript_is_rejected_with_its_reason() {
     let dir = tempfile::tempdir().unwrap();
     let mut fixture = fixture_in(dir.path(), Tier::T2, &PROPOSE);
     let request = expect_ok(fixture.fs().propose_agent_config(
@@ -59,10 +59,14 @@ fn take_proposal_is_none_while_the_user_has_not_answered() {
         "Update Gemini settings".to_owned(),
         vec![create_settings_change()],
     ));
-    assert!(
-        fixture.fs().take_proposal(request).is_none(),
-        "no proposal result may exist before the user answers"
-    );
+    complete(&mut fixture, request);
+    let result = fixture
+        .fs()
+        .take_proposal(request)
+        .expect("proposal result");
+    assert!(result.applied.is_empty());
+    assert_eq!(result.rejected, vec!["settings.json".to_owned()]);
+    assert!(result.history.contains("rejected settings.json"));
 }
 
 /// REQ: WIT:ilium:host/fs.propose-agent-config
@@ -70,11 +74,10 @@ fn take_proposal_is_none_while_the_user_has_not_answered() {
 fn propose_agent_config_with_an_empty_change_list_is_invalid_argument() {
     let dir = tempfile::tempdir().unwrap();
     let mut fixture = fixture_in(dir.path(), Tier::T2, &PROPOSE);
-    match fixture.fs().propose_agent_config(
-        "gemini".to_owned(),
-        "Empty".to_owned(),
-        Vec::new(),
-    ) {
+    match fixture
+        .fs()
+        .propose_agent_config("gemini".to_owned(), "Empty".to_owned(), Vec::new())
+    {
         Err(error) => assert_eq!(
             error.code,
             ilium_plugin_api::generated::types::ErrorCode::InvalidArgument

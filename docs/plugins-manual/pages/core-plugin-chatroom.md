@@ -83,7 +83,7 @@ The contract version is 0.1. The grants follow the file scope rules: the room is
   "id": "ilium.core.chatroom",
   "capabilities": {
     "server": [
-      "tree.decorate", "tree.write",
+      "tree.read", "terminal.write", "tree.decorate", "tree.write",
       "fs.read:project", "fs.write:project", "fs.watch:project",
       "topics.subscribe:chatroom",
       "services.use:ilium.core.agent-setup"
@@ -122,6 +122,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   },
   "capabilities": {
     "server": [
+      "tree.read",
+      "terminal.write",
       "tree.decorate",
       "tree.write",
       "fs.read:project",
@@ -144,13 +146,21 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
   ],
   "limits_tier": "first-party",
   "contributes": {
-    "cli": [{
-      "name": "chat",
-      "summary": "Project chatroom: init, send, context, tail",
-      "output": "text",
-      "stdin": "none",
-      "requires_server": false
-    }],
+    "cli": [
+      {
+        "name": "chat",
+        "summary": "Project chatroom: init, send, context, tail",
+        "output": "text",
+        "stdin": "optional",
+        "requires_server": false,
+        "env": [
+          "AGENT_NAME",
+          "ILIUM_CHATROOM_AUTHOR",
+          "ILIUM_PANE_ID"
+        ],
+        "project_marker": "CHATROOM.md"
+      }
+    ],
     "extension_points": [
       {
         "id": "before-post",
@@ -160,16 +170,32 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "payload_schema": {
           "type": "object",
           "properties": {
-            "author": { "type": "string" },
-            "text": { "type": "string" },
-            "kind": { "type": "string" }
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            }
           },
-          "required": ["author", "text", "kind"]
+          "required": [
+            "author",
+            "text",
+            "kind"
+          ]
         },
         "reply_schema": {
           "type": "object",
-          "properties": { "text": { "type": "string" } },
-          "required": ["text"]
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ]
         },
         "risk": "high",
         "deadline_ms": 20,
@@ -183,16 +209,63 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "entry_schema": {
           "type": "object",
           "properties": {
-            "id": { "type": "string" },
-            "kind": { "type": "string" },
-            "view": { "type": "string" }
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "view": {
+              "type": "string"
+            }
           },
-          "required": ["id", "kind", "view"]
+          "required": [
+            "id",
+            "kind",
+            "view"
+          ]
         },
         "risk": "standard",
         "max_entries": 64,
         "dynamic": false,
         "version": "0.1.0"
+      }
+    ],
+    "commands": [
+      {
+        "id": "open",
+        "title": "Open the chatroom",
+        "category": "Chatroom"
+      },
+      {
+        "id": "add",
+        "title": "Add chatroom to project",
+        "category": "Chatroom"
+      }
+    ],
+    "context_menu": [
+      {
+        "id": "open-chatroom",
+        "title": "Open chatroom",
+        "target": "tree-node",
+        "when": "node.kind == \"project\"",
+        "command": "open"
+      },
+      {
+        "id": "add-chatroom",
+        "title": "Add chatroom to project",
+        "target": "tree-node",
+        "when": "node.kind == \"project\"",
+        "command": "add"
+      }
+    ],
+    "panels": [
+      {
+        "id": "chatroom",
+        "title": "Chatroom",
+        "placement": "right",
+        "modal": false,
+        "wants_keys": true
       }
     ]
   }

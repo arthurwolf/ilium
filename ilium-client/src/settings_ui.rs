@@ -2542,7 +2542,7 @@ pub(crate) fn render_live_tree_preview(
             workspace_git_statuses: &app.workspace_git_statuses,
             show_worktree_branch_line: app.git_settings.branch_line
                 == crate::config::GitBranchLine::WorktreeOnly,
-            tree_order: app.ui_settings.tree_order,
+            tree_order: crate::config::TreeOrder::Manual,
             row_layout: &app.ui_settings.tree_row_layout,
             show_project_separators: app.ui_settings.show_project_separators,
             sidebar_density: app.ui_settings.sidebar_density,
@@ -2561,7 +2561,6 @@ pub(crate) fn render_live_tree_preview(
             cost: None,
             hover: crate::tree_ui::TreeHoverState::default(),
             sidebar_files: &Default::default(),
-            chatroom_projects: &Default::default(),
             resources: Some(&app.resources),
             panes: &app.panes,
         },
@@ -5295,7 +5294,10 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
         AppearanceRow::MinimumTerminalWidth => {
             format!("{} columns", ui.left_panel_sizing.minimum_terminal_width)
         }
-        AppearanceRow::TreeOrder => ui.tree_order.label().to_string(),
+        AppearanceRow::TreeOrder => ui.plugin_tree_ordering.as_ref().map_or_else(
+            || "Manual order".to_string(),
+            |choice| choice.display_name(),
+        ),
         AppearanceRow::ResourceGrouping => on_off(ui.resource_queue_grouping),
         AppearanceRow::ProjectSeparators => on_off(ui.show_project_separators),
         AppearanceRow::TreeToolbarAlwaysVisible => on_off(ui.tree_toolbar_always_visible),
@@ -5784,7 +5786,7 @@ fn setting_control_value(value: &str) -> String {
         format!("‹ {value} ›")
     }
 }
-const TERMINAL_HELP_TOPICS: [(usize, &str); 3] = [(0, "TERM-01"), (1, "TERM-02"), (4, "TERM-03")];
+const TERMINAL_HELP_TOPICS: [(usize, &str); 3] = [(0, "TERM-01"), (1, "TERM-02"), (2, "TERM-03")];
 #[cfg(test)]
 #[path = "terminal_pool_help_regressions.rs"]
 pub(crate) mod terminal_pool_help_regressions;
@@ -5822,7 +5824,7 @@ mod terminal_pool_ui_regressions {
                 _ => {}
             }
         }
-        let lines = terminal_lines(&TerminalSettings::default(), 4);
+        let lines = terminal_lines(&TerminalSettings::default(), 2);
         let rows: Vec<_> = lines
             .iter()
             .filter(|line| {
@@ -5831,14 +5833,12 @@ mod terminal_pool_ui_regressions {
                         span.content.as_ref(),
                         "Scrollback budget"
                             | "New pane directory"
-                            | "Smart Copy light"
-                            | "Smart Copy light key"
                             | "Parser pool"
                     )
                 })
             })
             .collect();
-        assert_eq!(rows.len(), 5);
+        assert_eq!(rows.len(), 3);
         assert_eq!(
             TERMINAL_HELP_TOPICS.map(|(_, id)| id),
             ["TERM-01", "TERM-02", "TERM-03"]
@@ -5866,7 +5866,7 @@ mod terminal_pool_ui_regressions {
                 engine_memory_budget_mib: budget_mib,
                 ..TerminalSettings::default()
             };
-            let lines = terminal_lines(&settings, 4);
+            let lines = terminal_lines(&settings, 2);
             let row = lines
                 .iter()
                 .find(|line| line.spans.iter().any(|span| span.content == "Parser pool"))
@@ -5920,16 +5920,6 @@ fn terminal_lines(settings: &TerminalSettings, selected: usize) -> Vec<Line<'sta
                 "New pane directory",
                 settings.new_pane_directory.label().to_string(),
                 "Choose the initial directory for a terminal pane.",
-            ),
-            (
-                "Smart Copy light",
-                on_off(settings.smart_copy_light),
-                "Hold the key below over a terminal and click regions to select them; releasing the key copies them and shows a Preview. Terminals that cannot report key release finish on the next mouse move or after a short pause.",
-            ),
-            (
-                "Smart Copy light key",
-                settings.smart_copy_light_key.label().to_string(),
-                "The modifier key that starts Smart Copy light while held.",
             ),
             (
                 "Parser pool",
@@ -9821,7 +9811,6 @@ mod tests {
                 minimum_terminal_width: 150,
                 ..crate::config::LeftPanelSizingSettings::default()
             },
-            tree_order: crate::config::TreeOrder::AgeAscending,
             agent_identifiers: crate::config::AgentIdentifierSettings {
                 mode: crate::config::AgentIdentifierMode::Icon,
                 claude_icon: crate::config::ClaudeAgentIcon::MagicWand,

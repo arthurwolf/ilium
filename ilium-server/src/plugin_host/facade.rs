@@ -88,6 +88,9 @@ pub(crate) struct ServerFacade {
     /// Staged `send-input` writes still waiting for their delays. Owned here so a stopping
     /// host aborts them with the facade (the set aborts its tasks when dropped).
     input_stages: Mutex<tokio::task::JoinSet<()>>,
+    /// Requests to other sessions still in flight (`cross_request`). Owned here so a stopping
+    /// host aborts them with the facade, like the staged input writes.
+    cross_requests: Mutex<tokio::task::JoinSet<()>>,
     /// When each coalescing key of a plugin's `notify` last reached the desktop.
     notify_coalescer: Mutex<intent_routing::NotifyCoalescer>,
     /// The basic pane kinds of the catalogue, set once when the host starts (gap G14a).
@@ -426,6 +429,7 @@ impl ServerFacade {
             settings: ilium_plugin_host::config_settings::ConfigFileSettings::of_user(),
             live_chrome: Mutex::new(Vec::new()),
             input_stages: Mutex::new(tokio::task::JoinSet::new()),
+            cross_requests: Mutex::new(tokio::task::JoinSet::new()),
             notify_coalescer: Mutex::new(intent_routing::NotifyCoalescer::default()),
             pane_kinds: std::sync::OnceLock::new(),
             focused: Mutex::new(None),
@@ -806,6 +810,36 @@ impl ServerFacade {
     }
 }
 
+/// The verified session of a terminal pane's agent, from what the detection loop discovered.
+impl ilium_plugin_api::kernel::AgentRead for ServerFacade {
+    fn session_json(&self, pane: NodeId) -> Option<String> {
+        let state = self.state.upgrade()?;
+        let (agent, session_id, transcript) = self.tokio.block_on(async {
+            let panes = state.panes.read().await;
+            let crate::pane::PaneResource::Terminal(runtime) = panes.get(&to_core(pane))? else {
+                return None;
+            };
+            let agent = match runtime.session_agent_class.as_ref()? {
+                ilium_core::AgentClass::Claude => "claude",
+                ilium_core::AgentClass::Codex => "codex",
+                _ => return None,
+            };
+            Some((
+                agent,
+                runtime.session_id.clone()?,
+                runtime.session_transcript_path.clone(),
+            ))
+        })?;
+        let home = directories::BaseDirs::new()?.home_dir().to_path_buf();
+        ilium_plugin_host::wiring::wave_two::session_ref_json(
+            &home,
+            agent,
+            &session_id,
+            transcript.as_deref(),
+        )
+    }
+}
+
 impl TreeAnnotations for ServerFacade {
     fn metadata(&self, plugin: &str, node: NodeId) -> Option<Vec<u8>> {
         // A removed node has no metadata, whatever the store still holds for its id.
@@ -1050,6 +1084,10 @@ impl KernelFacade for ServerFacade {
         Some(self)
     }
 
+    fn agents(&self) -> Option<&dyn ilium_plugin_api::kernel::AgentRead> {
+        Some(self)
+    }
+
     fn terminal(&self) -> Option<&dyn TerminalAccess> {
         Some(self)
     }
@@ -1286,6 +1324,59 @@ impl SessionAccess for ServerFacade {
             ErrorCode::Unsupported,
             "the server saves the session snapshot itself",
         ))
+    }
+
+    fn live_sessions(&self) -> Vec<ilium_plugin_api::kernel::LiveSessionInfo> {
+        let own_socket = self
+            .state
+            .upgrade()
+            .map(|state| state.socket_path.clone())
+            .unwrap_or_default();
+        super::cross_session::live_sessions(
+            &own_socket,
+            &self.session_name,
+            &self.project_dir.to_string_lossy(),
+        )
+    }
+
+    fn cross_request(
+        &self,
+        socket_id: &str,
+        command: &str,
+        arguments_json: &str,
+        done: Box<dyn FnOnce(String) + Send>,
+    ) -> Result<(), FacadeError> {
+        let arguments: serde_json::Value =
+            serde_json::from_str(arguments_json).map_err(|error| {
+                FacadeError::new(
+                    ErrorCode::InvalidArgument,
+                    format!("the arguments are not JSON: {error}"),
+                )
+            })?;
+        let socket = super::cross_session::live_sockets()
+            .into_iter()
+            .find(|socket| socket.socket_id == socket_id)
+            .ok_or_else(|| {
+                FacadeError::new(ErrorCode::NotFound, "no live session has that identity")
+            })?;
+        let command = command.to_owned();
+        let mut requests = self
+            .cross_requests
+            .lock()
+            .map_err(|_| FacadeError::new(ErrorCode::Internal, "the request set is poisoned"))?;
+        // Finished requests leave the set before a new one joins it, so it stays small.
+        while requests.try_join_next().is_some() {}
+        requests.spawn_on(
+            async move {
+                let reply = match super::cross_session::run(socket, command, arguments).await {
+                    Ok(value) => value,
+                    Err(message) => serde_json::json!({ "error": message }),
+                };
+                done(reply.to_string());
+            },
+            &self.tokio,
+        );
+        Ok(())
     }
 }
 

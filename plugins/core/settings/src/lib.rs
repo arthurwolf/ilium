@@ -4,6 +4,7 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Lifecycle and handler bodies keep the
 //! activation state and answer event batches with no submissions.
 
+pub mod editor_line_display;
 pub mod onboarding;
 
 use ilium_plugin_sdk::generated::types::events::Event;
@@ -11,8 +12,9 @@ use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
-use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::{
+    ActionKind, ActionValue, Activation, Intent, InvokeCommandSpec, OpenViewSpec, PluginError,
+};
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
 
 /// The client side of `ilium.core.settings` (core-plugin-settings.md, world `ilium:client/base@0.1.0`).
@@ -20,6 +22,8 @@ use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
 #[derive(Default)]
 pub struct SettingsClient {
     activated: bool,
+    /// The open "Editor line display" dialog, if any.
+    line_display: Option<editor_line_display::Dialog>,
 }
 
 impl Lifecycle for SettingsClient {
@@ -31,14 +35,78 @@ impl Lifecycle for SettingsClient {
 }
 
 impl Handler for SettingsClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut submissions = Vec::new();
+        for event in batch {
+            match event {
+                Event::CommandInvoked(invoked)
+                    if invoked.command == editor_line_display::COMMAND =>
+                {
+                    // Arguments that do not name an editor pane and its mode open nothing.
+                    if let Some(request) =
+                        editor_line_display::Request::from_arguments(&invoked.arguments_json)
+                    {
+                        self.line_display = Some(editor_line_display::Dialog::new(request));
+                        submissions.push(Submission::new(Intent::OpenView(OpenViewSpec {
+                            view: editor_line_display::view(),
+                            focus: true,
+                        })));
+                    }
+                }
+                Event::UiAction(action) if action.view == editor_line_display::view() => {
+                    submissions.extend(self.line_display_action(
+                        &action.key,
+                        &action.action_id,
+                        action.kind,
+                        action.value,
+                    ));
+                }
+                _ => {}
+            }
+        }
+        submissions
+    }
+}
+
+impl SettingsClient {
+    /// Applies one action of the "Editor line display" dialog. When it ends the dialog, returns
+    /// the kernel command that sets the mode (if it changed) and the intent that closes the popup.
+    fn line_display_action(
+        &mut self,
+        key: &str,
+        action_id: &str,
+        kind: ActionKind,
+        value: Option<ActionValue>,
+    ) -> Vec<Submission> {
+        let Some(dialog) = self.line_display.as_mut() else {
+            return Vec::new();
+        };
+        let step = dialog.act(key, action_id, kind, value);
+        if step != editor_line_display::Step::Stay {
+            self.line_display = None;
+        }
+        let close = || Submission::new(Intent::CloseView(editor_line_display::view()));
+        match step {
+            editor_line_display::Step::Apply { pane, mode } => vec![
+                Submission::new(Intent::InvokeCommand(InvokeCommandSpec {
+                    command: editor_line_display::SET_OPTION_COMMAND.to_owned(),
+                    arguments_json: editor_line_display::set_option_arguments(pane, mode),
+                })),
+                close(),
+            ],
+            // The kernel already removed a popup it closed itself; every other end closes it here.
+            editor_line_display::Step::Cancel if kind != ActionKind::Closed => vec![close()],
+            _ => Vec::new(),
+        }
     }
 }
 
 impl Views for SettingsClient {
-    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        UiTree::default()
+    fn render(&mut self, view: ViewTarget, _area: Area) -> UiTree {
+        match &self.line_display {
+            Some(dialog) if view == editor_line_display::view() => dialog.render(),
+            _ => UiTree::default(),
+        }
     }
 }
 
@@ -153,6 +221,16 @@ mod spec_tests {
         assert!(
             submissions.is_empty(),
             "the host saves the change; the plugin submits nothing"
+        );
+    }
+
+    /// The editor line-display chooser is a command of this plugin, opened by the editor toolbar.
+    /// REQ: COR-050
+    #[test]
+    fn manifest_declares_the_editor_line_display_command() {
+        assert_eq!(
+            manifest()["contributes"]["commands"],
+            serde_json::json!([{ "id": "editor-line-display", "title": "Editor line display" }])
         );
     }
 

@@ -9,6 +9,7 @@ use crate::live_data::{
 };
 use crate::location::GeoLocation;
 use crate::pi_digits::presentation::{PiScene, PiSettings};
+use crate::plugin_scene::PluginSceneSettings;
 use crate::scene::{Scene, SceneEnv};
 use crate::scenes::quiet::{
     almost_touching::{AlmostTouchingScene, AlmostTouchingSettings},
@@ -36,7 +37,6 @@ use crate::scenes::{
     clouds::{CloudsScene, CloudsSettings},
     cube_clock::{CubeClockScene, CubeClockSettings},
     dither_water::{DitherWaterScene, DitherWaterSettings},
-    dithered_waves::{DitheredWavesScene, DitheredWavesSettings},
     dithr_patterns::{DithrPatternsScene, DithrPatternsSettings},
     fbm_clouds::{FbmCloudsScene, FbmCloudsSettings},
     galactic_empires::{GalacticEmpiresScene, GalacticEmpiresSettings},
@@ -74,7 +74,8 @@ pub enum AmbientKind {
     BoxMachine,
     MachineScreen,
     FbmClouds,
-    DitheredWaves,
+    /// A scene supplied by a plugin; the Scene row picks which one.
+    Plugin,
     DithrPatterns,
     HexExpedition,
     VectorTd,
@@ -126,7 +127,7 @@ impl AmbientKind {
         Self::BoxMachine,
         Self::MachineScreen,
         Self::FbmClouds,
-        Self::DitheredWaves,
+        Self::Plugin,
         Self::DithrPatterns,
         Self::HexExpedition,
         Self::VectorTd,
@@ -208,7 +209,7 @@ impl AmbientKind {
             Self::BoxMachine => "Box machine",
             Self::MachineScreen => "Machine screen",
             Self::FbmClouds => "Dithered fBm clouds",
-            Self::DitheredWaves => "Dithered waves",
+            Self::Plugin => "Plugin scene",
             Self::DithrPatterns => "Dithr patterns",
             Self::HexExpedition => "Hex expedition",
             Self::VectorTd => "Vector TD",
@@ -288,8 +289,8 @@ impl AmbientKind {
             Self::FbmClouds => {
                 "Domain-warped noise clouds thresholded into one-bit dots (software, slow-mo by default)."
             }
-            Self::DitheredWaves => {
-                "Layered wave shader rendered on the CPU with ordered dithering (software, slow-mo by default)."
+            Self::Plugin => {
+                "A scene supplied by an enabled plugin, such as Dithered waves from the Scenes plugin. Pick the scene and set its own options; colour, dithering and display use the shared rows."
             }
             Self::DithrPatterns => {
                 "Many dithr-style animated patterns to choose from, with selectable dither algorithms (software, slow-mo by default)."
@@ -317,7 +318,6 @@ impl AmbientKind {
             Self::BoxMachine => crate::scenes::box_machine::INSPIRED_BY,
             Self::MachineScreen => crate::scenes::machine_screen::INSPIRED_BY,
             Self::FbmClouds => crate::scenes::fbm_clouds::INSPIRED_BY,
-            Self::DitheredWaves => crate::scenes::dithered_waves::INSPIRED_BY,
             Self::DithrPatterns => crate::scenes::dithr_patterns::INSPIRED_BY,
             Self::HexExpedition => crate::scenes::hex_expedition::INSPIRED_BY,
             Self::VectorTd => crate::scenes::vector_td::INSPIRED_BY,
@@ -337,10 +337,7 @@ impl AmbientKind {
 
     /// Scenes with an optional GPU renderer (the `render_backend` row).
     pub fn has_gpu_backend(self) -> bool {
-        matches!(
-            self,
-            Self::FbmClouds | Self::DitheredWaves | Self::DithrPatterns
-        )
+        matches!(self, Self::FbmClouds | Self::DithrPatterns)
     }
 
     /// Whether the shared observer location matters to this scene.
@@ -383,7 +380,7 @@ pub struct AmbientSettings {
     pub box_machine: BoxMachineSettings,
     pub machine_screen: MachineScreenSettings,
     pub fbm_clouds: FbmCloudsSettings,
-    pub dithered_waves: DitheredWavesSettings,
+    pub plugin_scene: PluginSceneSettings,
     pub dithr_patterns: DithrPatternsSettings,
     pub hex_expedition: HexExpeditionSettings,
     pub vector_td: VectorTdSettings,
@@ -437,7 +434,7 @@ impl AmbientSettings {
             box_machine: self.box_machine.normalized(),
             machine_screen: self.machine_screen.normalized(),
             fbm_clouds: self.fbm_clouds.normalized(),
-            dithered_waves: self.dithered_waves.normalized(),
+            plugin_scene: self.plugin_scene.normalized(),
             dithr_patterns: self.dithr_patterns.normalized(),
             hex_expedition: self.hex_expedition.normalized(),
             vector_td: self.vector_td.normalized(),
@@ -490,7 +487,7 @@ impl AmbientSettings {
             AmbientKind::BoxMachine => self.box_machine.controls(),
             AmbientKind::MachineScreen => self.machine_screen.controls(),
             AmbientKind::FbmClouds => self.fbm_clouds.controls(),
-            AmbientKind::DitheredWaves => self.dithered_waves.controls(),
+            AmbientKind::Plugin => self.plugin_scene.controls(),
             AmbientKind::DithrPatterns => self.dithr_patterns.controls(),
             AmbientKind::HexExpedition => self.hex_expedition.controls(),
             AmbientKind::VectorTd => self.vector_td.controls(),
@@ -548,7 +545,7 @@ impl AmbientSettings {
             AmbientKind::BoxMachine => self.box_machine.set_control(id, value),
             AmbientKind::MachineScreen => self.machine_screen.set_control(id, value),
             AmbientKind::FbmClouds => self.fbm_clouds.set_control(id, value),
-            AmbientKind::DitheredWaves => self.dithered_waves.set_control(id, value),
+            AmbientKind::Plugin => self.plugin_scene.set_control(id, value),
             AmbientKind::DithrPatterns => self.dithr_patterns.set_control(id, value),
             AmbientKind::HexExpedition => self.hex_expedition.set_control(id, value),
             AmbientKind::VectorTd => self.vector_td.set_control(id, value),
@@ -625,7 +622,7 @@ impl AmbientSettings {
             AmbientKind::BoxMachine => serde_json::to_string(&normalized.box_machine),
             AmbientKind::MachineScreen => serde_json::to_string(&normalized.machine_screen),
             AmbientKind::FbmClouds => serde_json::to_string(&normalized.fbm_clouds),
-            AmbientKind::DitheredWaves => serde_json::to_string(&normalized.dithered_waves),
+            AmbientKind::Plugin => Ok(normalized.plugin_scene.scene_key()),
             AmbientKind::DithrPatterns => serde_json::to_string(&normalized.dithr_patterns),
             AmbientKind::HexExpedition => serde_json::to_string(&normalized.hex_expedition),
             AmbientKind::VectorTd => serde_json::to_string(&normalized.vector_td),
@@ -652,6 +649,10 @@ impl AmbientSettings {
     }
 
     pub fn create_scene(&self, kind: AmbientKind, env: &SceneEnv) -> Box<dyn Scene> {
+        if kind == AmbientKind::Plugin {
+            // The plugin scene registry already wraps the scene in `PaletteScene`.
+            return self.create_raw_scene(kind, env);
+        }
         Box::new(crate::scene::PaletteScene::new(
             self.create_raw_scene(kind, env),
             env.palette.clone(),
@@ -761,9 +762,7 @@ impl AmbientSettings {
                 Box::new(MachineScreenScene::new(&settings.machine_screen, env))
             }
             AmbientKind::FbmClouds => Box::new(FbmCloudsScene::new(&settings.fbm_clouds, env)),
-            AmbientKind::DitheredWaves => {
-                Box::new(DitheredWavesScene::new(&settings.dithered_waves, env))
-            }
+            AmbientKind::Plugin => settings.plugin_scene.create_scene(env),
             AmbientKind::DithrPatterns => {
                 Box::new(DithrPatternsScene::new(&settings.dithr_patterns, env))
             }

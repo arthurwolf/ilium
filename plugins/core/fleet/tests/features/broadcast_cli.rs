@@ -127,14 +127,14 @@ fn broadcast_110_a_trailing_newline_is_removed() {
 
 /// REQ: F-110
 #[test]
-fn broadcast_110_only_one_trailing_newline_is_removed() {
+fn broadcast_110_every_trailing_newline_is_removed_like_the_original_command() {
     let (mut host, _, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "-"], b"notice\n\n");
     let texts: Vec<String> = sent_inputs(&host)
         .into_iter()
         .map(|spec| spec.text)
         .collect();
-    assert_eq!(texts, vec![String::from("notice\n"); 2]);
+    assert_eq!(texts, vec![String::from("notice"); 2]);
 }
 
 /// REQ: F-110
@@ -165,8 +165,8 @@ fn broadcast_110_a_multi_line_message_is_sent_as_one_bracketed_paste() {
 #[test]
 fn broadcast_110_file_reads_the_message_from_a_file() {
     let (mut host, _, _, _) = fleet();
-    host.fs().write("/work/notice.md", b"from a file\n");
-    run_cli(&mut host, &["broadcast", "--file", "/work/notice.md"], b"");
+    host.fs().write("project:notice.md", b"from a file\n");
+    run_cli(&mut host, &["broadcast", "--file", "notice.md"], b"");
     let texts: Vec<String> = sent_inputs(&host)
         .into_iter()
         .map(|spec| spec.text)
@@ -479,12 +479,17 @@ fn broadcast_110_invert_without_a_pattern_is_an_invalid_request() {
 #[test]
 fn broadcast_110_other_sessions_get_a_broadcast_request_with_the_text() {
     let (mut host, _, _, _) = fleet();
-    add_session(&mut host, "review", false, &[]);
+    add_session(
+        &mut host,
+        "review",
+        false,
+        &[pane_json(2, "review", "agent", Some("Claude"), Some("idle"))],
+    );
     run_cli(&mut host, &["broadcast", "hello"], b"");
     let requests = host.sessions().requests();
     let sent: Vec<&(String, String, String)> = requests
         .iter()
-        .filter(|(session, _, _)| session == "review")
+        .filter(|(session, command, _)| session == "review" && command == "broadcast")
         .collect();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].1, "broadcast");

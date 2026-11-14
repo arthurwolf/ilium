@@ -188,7 +188,18 @@ pub trait TerminalAccess: Send + Sync {
 /// Agent detection state (`ilium:primitives/agent`).
 pub trait AgentRead: Send + Sync {
     /// The agent of a pane as JSON of the `agent-view` record, if one was identified.
-    fn agent_json(&self, pane: NodeId) -> Option<String>;
+    fn agent_json(&self, pane: NodeId) -> Option<String> {
+        let _ = pane;
+        None
+    }
+
+    /// The verified session of a pane's agent as JSON of the `session-ref` record: the scope
+    /// `agent-sessions:<agent>`, the transcript path inside it (empty while the transcript
+    /// location is not known) and the session id. `None` while no session is verified.
+    fn session_json(&self, pane: NodeId) -> Option<String> {
+        let _ = pane;
+        None
+    }
 }
 
 /// Session snapshots (`ilium:host/sessions`).
@@ -199,6 +210,44 @@ pub trait SessionAccess: Send + Sync {
     fn snapshot_json(&self, name: &str) -> Option<String>;
     /// Asks the kernel to write the current session snapshot.
     fn save(&self) -> Result<(), FacadeError>;
+    /// Every live session of every project on this machine, this one included (server only).
+    fn live_sessions(&self) -> Vec<LiveSessionInfo> {
+        Vec::new()
+    }
+    /// Sends one command to a live session, named by its `socket_id`, and calls `done` once with
+    /// the reply as JSON text: the answer itself on success, `{"error": "<message>"}` when the
+    /// session could not be reached or refused. The call returns at once; `done` runs on another
+    /// thread when the other session answered or the attempt failed. Commands: `list-panes`
+    /// (`{}`; answers an array of pane records) and `broadcast` (`{"text", "targets":
+    /// [{"pane_id", "queue"}], "timeout_seconds"}`; answers an array of `{"pane_id",
+    /// "outcome", "reason"}`).
+    fn cross_request(
+        &self,
+        socket_id: &str,
+        command: &str,
+        arguments_json: &str,
+        done: Box<dyn FnOnce(String) + Send>,
+    ) -> Result<(), FacadeError> {
+        let _ = (socket_id, command, arguments_json, done);
+        Err(FacadeError::new(
+            crate::generated::types::ErrorCode::Unsupported,
+            "this process has no connection to other sessions",
+        ))
+    }
+}
+
+/// One live session of any project on this machine (`ilium:host/sessions`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSessionInfo {
+    /// The session name (`default`, `review`, ...). Names repeat across projects.
+    pub name: String,
+    /// The canonical project directory; empty for a session of another project, whose path
+    /// the socket name alone does not give.
+    pub project: String,
+    /// The endpoint identity (the socket file name without `.sock`); unique per session.
+    pub socket_id: String,
+    /// Whether this is the session the plugin runs in.
+    pub is_self: bool,
 }
 
 /// The project workspace (`ilium:host/workspace`).

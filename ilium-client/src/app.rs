@@ -35,7 +35,7 @@ use crate::completed_agent_action::{self, CompletedAgentCloseAction};
 use crate::config::{
     AgentSetupSettings, ApiSettings, DebugSettings, EditorSettings, GitSettings,
     KanbanBoardSettings, KeyboardSettings, LeftPanelSizingMode, SessionSettings, TerminalSettings,
-    TreeOrder, UiSettings, VoiceSettings,
+    UiSettings, VoiceSettings,
 };
 use crate::cost_settings::{CostRow, CostSettings};
 use crate::editor_pane::{is_markdown_path, EditorPane, EditorViewMode};
@@ -180,13 +180,9 @@ impl HistoryPagingChange {
     }
 }
 
-/// File-backed chatrooms need eventual observation of external agent writes,
-/// but filesystem repair and parsing do not belong on animation cadences.
-const CHATROOM_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
-
-/// Full provider-integration repair cadence. Hooks and guidance change rarely,
-/// so the every-second deadline only stats the visible room between repairs.
-const CHATROOM_REPAIR_INTERVAL: Duration = Duration::from_secs(15);
+/// Provider-integration status refresh cadence. Agent-setup guidance changes
+/// rarely, and filesystem inspection does not belong on animation cadences.
+const INTEGRATION_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(15);
 
 fn initial_statusline_generation() -> u64 {
     std::time::SystemTime::now()
@@ -299,18 +295,13 @@ pub enum FocusTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RightPanelTarget {
     Empty,
-    /// A project-local, file-backed coordination surface. It is deliberately
-    /// not a pane: no PTY, server snapshot, or split-view slot owns it.
-    Chatroom {
-        project_id: NodeId,
-    },
     Resource {
         project_id: NodeId,
         resource_id: ilium_core::resource_queue::ResourceId,
     },
     /// The global attention queue: every agent that needs the user, listed in
-    /// the order the "Next: needs you" button visits them. Like the chatroom
-    /// it owns no PTY, snapshot or split-view slot.
+    /// the order the "Next: needs you" button visits them. It
+    /// owns no PTY, snapshot or split-view slot.
     Attention,
     /// A panel, a settings page or an onboarding step a plugin contributes (foundation
     /// contract section 19.1). The plugin renders its tree; the client only places it.
@@ -332,7 +323,6 @@ impl RightPanelTarget {
     pub const fn active_pane_id(&self) -> Option<NodeId> {
         match self {
             Self::Empty
-            | Self::Chatroom { .. }
             | Self::Resource { .. }
             | Self::Attention
             | Self::PluginView { .. }
@@ -347,22 +337,6 @@ impl RightPanelTarget {
             } => Some(*pane_id),
         }
     }
-}
-
-/// Client-local message feed and composer state for one virtual project row.
-/// `CHATROOM.md` remains authoritative; this cache only makes rendering and
-/// typed input independent of filesystem I/O during each draw call.
-#[derive(Default)]
-pub struct ChatroomViewState {
-    pub messages: Vec<crate::chatroom::ChatMessage>,
-    pub draft: String,
-    pub(crate) retained_result: Option<std::sync::Arc<ilium_execution::Retained<()>>>,
-    /// Wrapped rows between the current viewport and the live tail. Zero is
-    /// the explicit "follow new messages" state.
-    pub scroll_from_newest: usize,
-    /// True only between a left-button press on the scrollbar and its release.
-    /// This keeps unrelated drags elsewhere in the virtual pane inert.
-    pub is_scrollbar_dragging: bool,
 }
 
 /// The input-handling mode. Most keys are dispatched differently
@@ -436,9 +410,6 @@ pub enum Mode {
     TerminalPaneContextMenu(TerminalPaneContextMenu),
     /// The agent toolbar's Codex Sol/Astra/Luna reasoning-strength submenu.
     AgentToolbarModelSubmenu(AgentToolbarModelSubmenuState),
-    /// An immutable terminal snapshot is being semantically indexed for
-    /// point-and-click clipboard extraction.
-    SmartCopy,
     /// Full right-panel semantic history for one exact agent pane.
     AgentDebugLog(AgentDebugLogViewState),
     /// Full, untruncated text of a pane's displayed last prompt.
@@ -490,9 +461,6 @@ pub enum Mode {
     /// Read-only explanation and animated specimen opened from a Settings row.
     /// The parent Settings state remains on the modal stack for exact return.
     SettingsHelp(crate::settings_help::dialog::SettingsHelpState),
-    /// Step/progress/log dialog over a frozen agent pane while its session is
-    /// converted to the other provider. State lives in `App::conversion`.
-    ConvertSession,
     /// Progress dialog over a frozen agent pane while its conversation is
     /// compacted by a remote model. State lives in `App::remote_compaction`.
     RemoteCompaction,
@@ -1022,16 +990,12 @@ impl AgentMonitoringRow {
 pub enum TerminalRow {
     ScrollbackBudget,
     NewPaneDirectory,
-    SmartCopyLight,
-    SmartCopyLightKey,
     EngineMemoryBudget,
 }
 impl TerminalRow {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 3] = [
         Self::ScrollbackBudget,
         Self::NewPaneDirectory,
-        Self::SmartCopyLight,
-        Self::SmartCopyLightKey,
         Self::EngineMemoryBudget,
     ];
 }
@@ -1487,9 +1451,6 @@ pub enum ContextMenuAction {
     /// tree from `ROOT_ID`.
     AskForUpdate,
     SendMessageToAll,
-    /// Converts the target agent pane's session to the other built-in
-    /// provider (see `crate::session_conversion`).
-    ConvertTo(BuiltinAgentProvider),
     Freeze,
     Unfreeze,
     ShowSplitView,
@@ -1501,7 +1462,6 @@ pub enum ContextMenuAction {
     NewGroup,
     NewSplitView,
     NewFolder,
-    AddChatroom,
     NewResource,
     LinkResource,
     /// Resource-row section of the tree context menu.
@@ -1565,14 +1525,12 @@ impl ContextMenuAction {
             Self::SchedulePaneInput => (1, 2),
             Self::ClearPromptQueue => (1, 3),
             Self::Freeze | Self::Unfreeze => (1, 4),
-            Self::ConvertTo(_) => (1, 5),
             Self::NewTerminal => (2, 0),
             Self::NewEditor => (2, 1),
             Self::NewAgent(_) => (2, 2),
             Self::NewGroup => (2, 3),
             Self::NewSplitView => (2, 4),
             Self::NewFolder => (2, 5),
-            Self::AddChatroom => (2, 6),
             Self::NewResource => (2, 7),
             Self::LinkResource => (2, 8),
             Self::ResourceOpenPanel => (7, 0),
@@ -1630,9 +1588,6 @@ impl ContextMenuAction {
             Self::ClearPromptQueue | Self::Close => IconTarget::RowClose,
             Self::AskForUpdate => IconTarget::AskForUpdate,
             Self::SendMessageToAll => IconTarget::AskForUpdate,
-            Self::ConvertTo(BuiltinAgentProvider::Claude) => IconTarget::Claude,
-            Self::ConvertTo(BuiltinAgentProvider::Codex) => IconTarget::Codex,
-            Self::ConvertTo(BuiltinAgentProvider::Antigravity) => IconTarget::Antigravity,
             Self::Freeze => IconTarget::Lock,
             Self::Unfreeze => IconTarget::FrozenAgent,
             Self::ShowSplitView | Self::NewSplitView => IconTarget::SplitVertical,
@@ -1642,7 +1597,7 @@ impl ContextMenuAction {
             Self::NewAgent(BuiltinAgentProvider::Antigravity) => IconTarget::Antigravity,
             Self::NewEditor => IconTarget::Editor,
             Self::NewFolder | Self::ChangeProjectFolder => IconTarget::Folder,
-            Self::AddChatroom | Self::NewResource | Self::LinkResource => IconTarget::Project,
+            Self::NewResource | Self::LinkResource => IconTarget::Project,
             Self::ResourceOpenPanel
             | Self::ResourceEdit
             | Self::ResourcePause
@@ -1678,7 +1633,6 @@ impl ContextMenuAction {
             Self::ClearPromptQueue => "Clear prompt queue".to_string(),
             Self::AskForUpdate => "Ask for status update".to_string(),
             Self::SendMessageToAll => "Send message to all".to_string(),
-            Self::ConvertTo(provider) => format!("Convert session to {}", provider.label()),
             Self::Freeze => "Freeze agent".to_string(),
             Self::Unfreeze => "Unfreeze agent".to_string(),
             Self::ShowSplitView => "Show split view".to_string(),
@@ -1689,7 +1643,6 @@ impl ContextMenuAction {
             Self::NewGroup => "New group\u{2026}".to_string(),
             Self::NewSplitView => "New split view\u{2026}".to_string(),
             Self::NewFolder => "Open folder\u{2026}".to_string(),
-            Self::AddChatroom => "Add chatroom to project".to_string(),
             Self::NewResource => "New resource…".to_string(),
             Self::LinkResource => "Link existing resource…".to_string(),
             Self::ResourceOpenPanel => "Resource: open control panel".to_string(),
@@ -1739,7 +1692,10 @@ impl ContextMenuAction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubmenuItemAction {
-    SetTreeOrder(TreeOrder),
+    /// The stored manual order; `active` marks it as the order in effect.
+    SetManualTreeOrder {
+        active: bool,
+    },
     /// A tree ordering a plugin contributes; `active` marks the ordering in effect.
     SetPluginTreeOrdering {
         plugin: String,
@@ -1765,10 +1721,7 @@ pub enum SubmenuItemAction {
 impl SubmenuItemAction {
     pub(crate) const fn menu_group(&self) -> u8 {
         match self {
-            Self::SetTreeOrder(TreeOrder::AgeAscending | TreeOrder::AgeDescending) => 1,
-            Self::SetTreeOrder(TreeOrder::NameAscending | TreeOrder::NameDescending) => 2,
-            Self::SetTreeOrder(TreeOrder::CostDescending) => 3,
-            Self::SetPluginTreeOrdering { .. } => 4,
+            Self::SetPluginTreeOrdering { .. } => 1,
             Self::CopyWorktreeBranch | Self::CopyWorktreePath => 1,
             Self::RemoveWorktree => 2,
             _ => 0,
@@ -2297,22 +2250,9 @@ pub struct App {
     /// Read-only mirror of the server's tree -- see the module docs.
     pub tree: Tree,
     pub panes: HashMap<NodeId, PaneRuntime>,
-    /// File-backed room presentation keyed by the owning real project node.
-    pub chatrooms: HashMap<NodeId, ChatroomViewState>,
     pub resources: crate::resource_queue::ResourceUi,
-    /// Last observed room availability. This is only used to invalidate the
-    /// sidebar hit-test cache when another process creates/removes a room.
-    pub(crate) chatroom_projects: HashSet<NodeId>,
-    /// Explicit filesystem-poll deadline shared by visible message refresh and
-    /// provider integration repair.
-    next_chatroom_reconcile_at: Option<Instant>,
-    /// Next full provider-integration repair; between repairs only the
-    /// visible room is re-read, and only when its file stamp changed.
-    next_chatroom_repair_at: Option<Instant>,
-    /// Stamp of the visible room file at the last queued reconcile.
-    pub(crate) chatroom_file_stamp: Option<(NodeId, Option<(std::time::SystemTime, u64)>)>,
-    /// At most one filesystem-owned visible-room fingerprint request is outstanding.
-    pub(crate) chatroom_stamp_pending: bool,
+    /// Deadline of the next integration-status refresh (agent-setup guidance files).
+    next_integration_maintenance_at: Option<Instant>,
     /// On-demand history caches are separate from the render tree so normal
     /// structural snapshots never carry or clone the retained journal.
     pub agent_debug_logs: HashMap<NodeId, AgentDebugLogCache>,
@@ -2552,8 +2492,6 @@ pub struct App {
     pending_progress_monitor_enabled: Option<bool>,
     pending_inference_test: bool,
     pending_model_refresh: Option<ilium_inference::InferenceProviderKind>,
-    pending_smart_copy_request: Option<crate::smart_copy_workers::SmartCopyWorkerRequest>,
-    smart_copy_cancel_requested: bool,
     /// Semantic icon searches are decided by the picker state but spawned by
     /// `crate::run`, which is the only layer that owns background workers.
     pending_icon_semantic_search: Option<IconSearchRequest>,
@@ -2686,30 +2624,12 @@ pub struct App {
     /// The banner toolbar button under the pointer, for its hover highlight.
     pub hovered_last_prompt_button:
         Option<(NodeId, crate::last_prompt_toolbar::PromptToolbarButton)>,
-    /// Active frozen viewport and progressively validated semantic regions.
-    pub smart_copy_session: Option<crate::smart_copy::SmartCopySession>,
-    /// Set while Smart Copy light (no model call) owns [`Mode::SmartCopy`].
-    pub smart_copy_light: Option<crate::smart_copy_light::SmartCopyLightState>,
-    /// The "Preview" dialog shown for a second after a light selection is copied.
     pub(crate) diagnostic_view: Option<crate::diagnostic::DiagnosticView>,
     pub(crate) presentation_health: Option<std::sync::Arc<crate::presentation::PresentationHealth>>,
     pub(crate) connection_health:
         Option<std::sync::Arc<crate::connection_health::ConnectionHealth>>,
     pub(crate) presentation_warning: Option<String>,
     pub(crate) projection_admission_details: Option<String>,
-    pub smart_copy_preview: Option<crate::smart_copy_light::SmartCopyPreview>,
-    pub(crate) light_copy_selection: Option<crate::smart_copy_selection::SelectionOwner>,
-    pub(crate) light_copy_preview_generation: Option<u64>,
-    /// Failed preparation returns its entire original frozen session here.
-    /// Bounded failures await exact restoration without replacing newer selections.
-    pub(crate) light_copy_recovery:
-        std::collections::VecDeque<crate::smart_copy_selection::SelectionCompletion>,
-    pub(crate) light_copy_restored:
-        std::collections::VecDeque<crate::smart_copy_selection::RestoredSelection>,
-    pub(crate) light_copy_retry_generation: Option<u64>,
-    pub(crate) light_copy_shutdown: bool,
-    smart_copy_source: Option<crate::terminal_view::PaintedTerminal>,
-    next_smart_copy_generation: u64,
     /// A multi-write PTY keystroke sequence still being drained by
     /// `tick::on_tick`, one stage per tick past its own delay -- see
     /// `PendingStagedKeystrokes`'s doc comment for why Codex's model picker
@@ -2820,13 +2740,11 @@ pub struct App {
         Option<crate::terminal_context_preparation::TerminalContextPreparation>,
     pending_terminal_context: Option<TerminalContextBlueprint>,
     next_terminal_context_generation: u64,
-    pending_smart_copy_capture: Option<(NodeId, std::sync::Arc<()>, u64)>,
     pub editor_files: Option<crate::filesystem::editors::EditorFiles>,
     pub(crate) terminal_baselines: Option<crate::filesystem::transcript_baseline::BaselineFiles>,
     pub(crate) sidebar_files: Option<crate::filesystem::sidebar::SidebarFiles>,
     pub(crate) sidebar_snapshot: crate::filesystem::sidebar::SidebarSnapshot,
     pub(crate) integration_files: Option<crate::filesystem::integrations::IntegrationFiles>,
-    pub(crate) failed_chatroom_appends: Vec<(NodeId, PathBuf, String)>,
     pub(crate) integration_status_hold: Option<std::sync::Arc<ilium_execution::Retained<()>>>,
     pub(crate) explorer_execution:
         Option<(ilium_execution::Client, std::sync::Arc<tokio::sync::Notify>)>,
@@ -2884,8 +2802,9 @@ pub struct App {
     /// entry. A hint only: lookups re-verify it before trusting it and fall
     /// back to a bounded scan, so a stale or foreign path cannot be shown.
     pub agent_transcript_paths: HashMap<NodeId, PathBuf>,
-    /// Panes whose agent is being converted: their terminal output is ignored
-    /// so the last screen stays on display behind the conversion dialog.
+    /// Panes whose agent is frozen (being compacted, or stopped awaiting an
+    /// unfreeze): their terminal output is ignored so the last screen stays on
+    /// display.
     pub frozen_panes: HashSet<NodeId>,
     /// Pinned terminal frames retained while an agent process is frozen.
     pub(crate) frozen_screens: HashMap<NodeId, crate::terminal_view::PaintedTerminal>,
@@ -2893,14 +2812,6 @@ pub struct App {
     pub(crate) frozen_screen_holds: HashMap<NodeId, ilium_execution::Retention>,
     /// Pane-instance fences for pending frozen-screen reads and parsing.
     pub(crate) frozen_screen_restore_identities: HashMap<NodeId, Arc<()>>,
-    /// Start time of the current auto-freeze eligibility window per pane.
-    pub(crate) auto_freeze_since: HashMap<NodeId, Instant>,
-    /// The active "Convert to" dialog, if any (see `Mode::ConvertSession`).
-    pub conversion: Option<Box<crate::session_conversion::ConversionDialogState>>,
-    /// Conversion the event loop must start on a blocking worker.
-    pub pending_conversion_start: Option<crate::session_conversion::ConversionJob>,
-    /// Set when the user cancels a running conversion.
-    pub pending_conversion_cancel: bool,
     /// The active remote-compaction dialog, if any (see `Mode::RemoteCompaction`).
     pub remote_compaction:
         Option<Box<crate::remote_compaction_dialog::RemoteCompactionDialogState>>,
@@ -2919,7 +2830,7 @@ pub struct App {
     pub optimization: crate::compaction_app::OptimizationState,
     /// Position of a pane being swapped for its converted replacement, and
     /// whether the user was looking at it, so the replacement can take over.
-    pub pending_replacement_focus: Option<crate::session_conversion::ReplacementFocus>,
+    pub pending_replacement_focus: Option<crate::remote_compaction_flow::ReplacementFocus>,
     /// Exact detected process owning each verified agent session. Kept beside
     /// `agent_session_ids` because title prompts need the PID while process
     /// discovery remains server-owned.
@@ -2989,8 +2900,8 @@ pub struct App {
     /// inputs (see `tree_ui::node_at_position`'s previous direct call).
     /// The built items are determined by tree structure plus `TreeOrder`.
     /// `TreeItemCache` keys both inputs; status events also bump
-    /// `tree_version` because Type ordering distinguishes agent terminals
-    /// from plain shells. This keeps mouse hit rows aligned with rendering
+    /// `tree_version` because a plugin's item-type ordering ranks agent
+    /// terminals apart from plain shells. This keeps mouse hit rows aligned with rendering
     /// without rebuilding labels on every pointer move.
     tree_hit_test_cache: tree_ui::TreeItemCache,
     // Original IPC allocation guards drop after every installed/pending UI payload.
@@ -3105,15 +3016,10 @@ impl App {
             session_name,
             tree: Tree::new(),
             panes: HashMap::new(),
-            chatrooms: HashMap::new(),
             resources: crate::resource_queue::ResourceUi::default(),
-            chatroom_projects: HashSet::new(),
             // The first authoritative tree snapshot installs this deadline.
             // Until then an empty client has no project to inspect.
-            next_chatroom_reconcile_at: None,
-            next_chatroom_repair_at: None,
-            chatroom_file_stamp: None,
-            chatroom_stamp_pending: false,
+            next_integration_maintenance_at: None,
             agent_debug_logs: HashMap::new(),
             pane_detection_evidence: HashMap::new(),
             agent_debug_log_filter: AgentDebugLogFilter::default(),
@@ -3270,8 +3176,6 @@ impl App {
             pending_progress_monitor_enabled: None,
             pending_inference_test: false,
             pending_model_refresh: None,
-            pending_smart_copy_request: None,
-            smart_copy_cancel_requested: false,
             pending_icon_semantic_search: None,
             ollama_models: Vec::new(),
             openai_models: Vec::new(),
@@ -3337,22 +3241,11 @@ impl App {
             last_prompt_banner_closed: HashSet::new(),
             goal_tab_selected: HashSet::new(),
             hovered_last_prompt_button: None,
-            smart_copy_session: None,
-            smart_copy_light: None,
             diagnostic_view: None,
             presentation_health: None,
             connection_health: None,
             presentation_warning: None,
             projection_admission_details: None,
-            smart_copy_preview: None,
-            light_copy_selection: None,
-            light_copy_preview_generation: None,
-            light_copy_recovery: std::collections::VecDeque::with_capacity(8),
-            light_copy_restored: std::collections::VecDeque::with_capacity(8),
-            light_copy_retry_generation: None,
-            light_copy_shutdown: false,
-            smart_copy_source: None,
-            next_smart_copy_generation: 1,
             pending_staged_keystrokes: None,
             terminal_selection: None,
             terminal_selection_source: None,
@@ -3422,8 +3315,6 @@ impl App {
             terminal_context_preparation: None,
             pending_terminal_context: None,
             next_terminal_context_generation: 1,
-            pending_smart_copy_capture: None,
-            failed_chatroom_appends: Vec::new(),
             integration_status_hold: None,
             sidebar_snapshot: Default::default(),
             sidebar_files: {
@@ -3542,10 +3433,6 @@ impl App {
             frozen_screens: HashMap::new(),
             frozen_screen_holds: HashMap::new(),
             frozen_screen_restore_identities: HashMap::new(),
-            auto_freeze_since: HashMap::new(),
-            conversion: None,
-            pending_conversion_start: None,
-            pending_conversion_cancel: false,
             remote_compaction: None,
             pending_remote_compaction_job: None,
             pending_remote_compaction_cancel: false,
@@ -3635,11 +3522,6 @@ impl App {
                     crate::value_dialog_host::ValueTarget::Animation(_)
                 ) {
                     self.commit_animation_value_dialog(&mut host, &outcome)
-                } else if matches!(
-                    host.target,
-                    crate::value_dialog_host::ValueTarget::EditorLineDisplay { .. }
-                ) {
-                    self.commit_editor_line_display_dialog(&host, &outcome)
                 } else if matches!(
                     host.target,
                     crate::value_dialog_host::ValueTarget::Plugin(_)
@@ -4790,7 +4672,6 @@ impl App {
     pub(crate) fn displayed_pane_slots(&self) -> [Option<NodeId>; 4] {
         match self.right_panel_target {
             RightPanelTarget::Empty
-            | RightPanelTarget::Chatroom { .. }
             | RightPanelTarget::Resource { .. }
             | RightPanelTarget::Attention
             | RightPanelTarget::PluginView { .. } => [None; 4],
@@ -4848,7 +4729,6 @@ impl App {
                 self.tree.parent_of(pane_id) == Some(split_id)
             }
             RightPanelTarget::Empty
-            | RightPanelTarget::Chatroom { .. }
             | RightPanelTarget::Resource { .. }
             | RightPanelTarget::Attention
             | RightPanelTarget::PluginView { .. } => false,
@@ -5006,7 +4886,6 @@ impl App {
     pub fn pane_viewports(&self) -> Vec<PaneViewport> {
         let viewports = match self.right_panel_target {
             RightPanelTarget::Empty
-            | RightPanelTarget::Chatroom { .. }
             | RightPanelTarget::Resource { .. }
             | RightPanelTarget::Attention
             | RightPanelTarget::PluginView { .. } => Vec::new(),
@@ -5601,15 +5480,6 @@ impl App {
         self.composed_tree_rows = Some(std::sync::Arc::new(rows));
     }
 
-    pub(crate) fn smart_copy_terminal_source(
-        &self,
-        pane_id: NodeId,
-    ) -> Option<&crate::terminal_view::PaintedTerminal> {
-        let source = self.smart_copy_source.as_ref()?;
-        (self.smart_copy_session.as_ref().is_some_and(|session| session.pane_id == pane_id)
-            && matches!(self.panes.get(&pane_id), Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity, &source.identity))).then_some(source)
-    }
-
     pub(crate) fn selection_terminal_source(
         &self,
         pane_id: NodeId,
@@ -5812,17 +5682,6 @@ impl App {
         }
     }
 
-    /// Returns the exact frozen-screen rectangle used by Smart Copy rendering
-    /// and pointer hit-testing. A completed agent's acknowledgement row is
-    /// presentation chrome, not part of the captured terminal screen.
-    pub(crate) fn smart_copy_terminal_area(&self, pane_id: NodeId) -> Option<Rect> {
-        let viewport = self.pane_viewport(pane_id)?;
-        Some(
-            self.completed_agent_close_action(viewport)
-                .map_or(viewport.content_area, |action| action.terminal_area),
-        )
-    }
-
     /// Returns every currently actionable transfer across a visible split
     /// separator. A transfer is available only when both panes have live
     /// terminal runtimes, which includes ordinary shells and detected agents
@@ -5954,16 +5813,6 @@ impl App {
             {
                 RightPanelTarget::PluginView { plugin, kind, name }
             }
-            RightPanelTarget::Chatroom { project_id }
-                if self.tree.get(project_id).is_some_and(Node::is_project)
-                    && self
-                        .tree
-                        .get(project_id)
-                        .and_then(Node::project_path)
-                        .is_some_and(|_| self.chatroom_projects.contains(&project_id)) =>
-            {
-                RightPanelTarget::Chatroom { project_id }
-            }
             RightPanelTarget::Pane { pane_id }
                 if self.tree.get(pane_id).is_some_and(Node::is_pane) =>
             {
@@ -5994,421 +5843,24 @@ impl App {
         };
     }
 
-    /// Creates the file room and all provider-facing integration artifacts
-    /// for one real project selected from its context menu.
-    pub fn action_add_chatroom_to_project(&mut self, project_id: NodeId) {
-        let Some(path) = self
-            .tree
-            .get(project_id)
-            .filter(|node| node.is_project())
-            .and_then(Node::project_path)
-            .map(Path::to_path_buf)
-        else {
-            self.status_message = Some("That entry is not a project".into());
-            return;
+    /// Makes the next tick refresh the agent-setup integration statuses at once.
+    pub(crate) fn request_integration_maintenance(&mut self) {
+        self.next_integration_maintenance_at = Some(Instant::now());
+    }
+
+    /// Refreshes the agent-setup integration statuses when their deadline is due.
+    pub fn tick_integration_maintenance(&mut self, now: Instant) -> bool {
+        let Some(next_at) = self.next_integration_maintenance_at else {
+            return false;
         };
-        let intent = crate::filesystem::integrations::IntegrationIntent::AddRoom(
-            crate::filesystem::integrations::RoomTarget {
-                id: project_id,
-                path,
-            },
-        );
-        let _ = self.enqueue_integration(intent);
-    }
-
-    /// Selects a virtual room row and makes its file-backed feed the active
-    /// right-panel surface without pretending it is a server-owned pane.
-    pub fn show_chatroom(&mut self, project_id: NodeId) {
-        if self
-            .tree
-            .get(project_id)
-            .and_then(Node::project_path)
-            .is_none()
-        {
-            return;
-        }
-        if !self.chatroom_projects.contains(&project_id) {
-            self.status_message = Some("This project has no chatroom".to_string());
-            return;
-        }
-        self.select_tree_path(vec![
-            project_id,
-            crate::tree_ui::chatroom_node_id(project_id),
-        ]);
-        self.right_panel_target = RightPanelTarget::Chatroom { project_id };
-        if let Some(path) = self.tree.get(project_id).and_then(Node::project_path) {
-            let state = self.chatrooms.entry(project_id).or_default();
-            if state.draft.is_empty() {
-                if let Some(index) = self
-                    .failed_chatroom_appends
-                    .iter()
-                    .position(|(_, target, _)| target == path)
-                {
-                    state.draft = self.failed_chatroom_appends.remove(index).2;
-                }
-            }
-        }
-        self.focus = FocusTarget::Pane;
-        self.refresh_chatroom(project_id);
-    }
-
-    /// Re-reads the visible project's room after an append or a low-frequency
-    /// maintenance pass. Broken manual edits surface as a status message but
-    /// retain the last readable messages instead of blanking the conversation.
-    pub fn refresh_chatroom(&mut self, project_id: NodeId) -> bool {
-        if self
-            .tree
-            .get(project_id)
-            .and_then(Node::project_path)
-            .is_none()
-        {
+        if now < next_at {
             return false;
         }
+        self.next_integration_maintenance_at = Some(now + INTEGRATION_MAINTENANCE_INTERVAL);
         if let Err(error) = self.queue_integration_maintenance(false) {
             self.status_message = Some(error);
         }
         false
-    }
-
-    /// Checks every visible project at boot and during normal UI ticks. An
-    /// existing room repairs missing provider hooks/guidance before its agents
-    /// do further work; projects without rooms remain completely untouched.
-    pub fn reconcile_chatroom_projects(&mut self) -> bool {
-        let ids: HashSet<NodeId> = self.tree.project_ids().into_iter().collect();
-        let before = self.chatroom_projects.len();
-        self.chatroom_projects.retain(|id| ids.contains(id));
-        self.chatrooms.retain(|id, _| ids.contains(id));
-        if let Err(error) = self.queue_integration_maintenance(false) {
-            self.status_message = Some(error);
-        }
-        let changed = before != self.chatroom_projects.len();
-        if changed {
-            self.bump_tree_version();
-        }
-        changed
-    }
-
-    /// Makes a structural project snapshot eligible for immediate chatroom
-    /// discovery without coupling status-only tree version bumps to file I/O.
-    pub(crate) fn request_chatroom_reconcile(&mut self) {
-        self.next_chatroom_reconcile_at = Some(Instant::now());
-        self.next_chatroom_repair_at = None;
-    }
-
-    /// Identifies the visible room for a fingerprint job without touching the filesystem.
-    fn visible_chatroom_target(&self) -> Option<crate::filesystem::integrations::RoomTarget> {
-        let RightPanelTarget::Chatroom { project_id } = self.right_panel_target else {
-            return None;
-        };
-        let project_root = self.tree.get(project_id).and_then(Node::project_path)?;
-        Some(crate::filesystem::integrations::RoomTarget {
-            id: project_id,
-            path: project_root.to_path_buf(),
-        })
-    }
-
-    /// Reconciles chatroom files only when their independent deadline is due.
-    /// A full repair (provider hooks, guidance, every room) runs on structural
-    /// changes and at most every `CHATROOM_REPAIR_INTERVAL`; in between, the
-    /// room only re-reads when its file's stamp changed.
-    pub fn tick_chatroom_projects(&mut self, now: Instant) -> bool {
-        let Some(next_reconcile_at) = self.next_chatroom_reconcile_at else {
-            return false;
-        };
-        if now < next_reconcile_at {
-            return false;
-        }
-        self.next_chatroom_reconcile_at = Some(now + CHATROOM_RECONCILE_INTERVAL);
-        let repair_due = self.next_chatroom_repair_at.is_none_or(|at| now >= at);
-        if repair_due {
-            self.next_chatroom_repair_at = Some(now + CHATROOM_REPAIR_INTERVAL);
-            return self.reconcile_chatroom_projects();
-        }
-        let Some(room) = self.visible_chatroom_target() else {
-            return false;
-        };
-        if self.chatroom_stamp_pending {
-            return false;
-        }
-        let result = self
-            .integration_files
-            .as_mut()
-            .ok_or_else(|| "Integration workers unavailable".to_owned())
-            .and_then(|files| {
-                files.enqueue(crate::filesystem::integrations::IntegrationIntent::CheckRoom(room))
-            });
-        match result {
-            Ok(()) => self.chatroom_stamp_pending = true,
-            Err(error) => self.status_message = Some(error),
-        }
-        false
-    }
-
-    /// Handles text entry directly in the room's composer. The user is the
-    /// author of TUI messages; agents use the identical storage path through
-    /// `ilium chat send`, so ordering remains serialized by the file lock.
-    pub fn handle_chatroom_key(&mut self, key: crossterm::event::KeyEvent) {
-        use crossterm::event::KeyCode;
-        let RightPanelTarget::Chatroom { project_id } = self.right_panel_target else {
-            return;
-        };
-        if !is_press(&key) {
-            return;
-        }
-        match key.code {
-            KeyCode::Esc => self.leave_pane_focus(),
-            KeyCode::Up => self.scroll_chatroom_by(project_id, -1, 1),
-            KeyCode::Down => self.scroll_chatroom_by(project_id, 1, 1),
-            KeyCode::PageUp => {
-                let page_lines = self
-                    .chatroom_scroll_metrics(project_id)
-                    .map(|metrics| metrics.visible_lines.max(1))
-                    .unwrap_or(1);
-                self.scroll_chatroom_by(project_id, -1, page_lines);
-            }
-            KeyCode::PageDown => {
-                let page_lines = self
-                    .chatroom_scroll_metrics(project_id)
-                    .map(|metrics| metrics.visible_lines.max(1))
-                    .unwrap_or(1);
-                self.scroll_chatroom_by(project_id, 1, page_lines);
-            }
-            KeyCode::Home => self.scroll_chatroom_to_top(project_id),
-            KeyCode::End => self.scroll_chatroom_to_bottom(project_id),
-            KeyCode::Enter => {
-                if self.failed_chatroom_appends.len() >= 32 {
-                    self.status_message =
-                        Some("Chatroom recovery capacity reached; draft retained".into());
-                    return;
-                }
-                if self.chatrooms.get(&project_id).is_some_and(|state| {
-                    state.draft.len() > 16 * 1024 || state.draft.chars().count() > 4000
-                }) {
-                    self.status_message = Some(
-                        "Chatroom messages are limited to 4000 characters; draft retained".into(),
-                    );
-                    return;
-                }
-                let draft = self
-                    .chatrooms
-                    .get_mut(&project_id)
-                    .map(|state| std::mem::take(&mut state.draft))
-                    .unwrap_or_default();
-                if draft.trim().is_empty() {
-                    return;
-                }
-                let Some(project_root) = self
-                    .tree
-                    .get(project_id)
-                    .and_then(Node::project_path)
-                    .map(Path::to_path_buf)
-                else {
-                    // The draft was already taken out of the composer above;
-                    // put it back so a project that vanished mid-composition
-                    // (stale right-panel target) doesn't silently discard the
-                    // user's typed message -- same recovery as a failed append.
-                    if let Some(state) = self.chatrooms.get_mut(&project_id) {
-                        state.draft = draft;
-                    }
-                    self.status_message =
-                        Some("Could not send chatroom message: project is gone".to_string());
-                    return;
-                };
-                let room = crate::filesystem::integrations::RoomTarget {
-                    id: project_id,
-                    path: project_root,
-                };
-                let intent = crate::filesystem::integrations::IntegrationIntent::Append {
-                    room,
-                    draft: draft.clone(),
-                };
-                if let Err(error) = self.enqueue_integration(intent) {
-                    self.chatrooms.entry(project_id).or_default().draft = draft;
-                    self.status_message = Some(format!("Could not send chatroom message: {error}"));
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(state) = self.chatrooms.get_mut(&project_id) {
-                    state.draft.pop();
-                }
-            }
-            KeyCode::Char(character)
-                if !key
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
-                self.chatrooms
-                    .entry(project_id)
-                    .or_default()
-                    .draft
-                    .push(character);
-            }
-            _ => {}
-        }
-    }
-
-    /// Routes wheel and scrollbar gestures for the active virtual room.
-    ///
-    /// Chatrooms do not own a server pane viewport, so this path deliberately
-    /// uses `chatroom_ui`'s shared geometry instead of `handle_pane_mouse`.
-    pub fn handle_chatroom_mouse(
-        &mut self,
-        mouse: crossterm::event::MouseEvent,
-        position: Position,
-    ) {
-        use crossterm::event::{MouseButton, MouseEventKind};
-
-        let RightPanelTarget::Chatroom { project_id } = self.right_panel_target else {
-            return;
-        };
-        let room_layout = crate::chatroom_ui::layout(self.layout.pane_area);
-        let metrics = self.chatroom_scroll_metrics(project_id);
-        let is_dragging = self
-            .chatrooms
-            .get(&project_id)
-            .is_some_and(|state| state.is_scrollbar_dragging);
-        match mouse.kind {
-            MouseEventKind::ScrollUp if room_layout.message_content_area.contains(position) => {
-                self.scroll_chatroom_by(project_id, -1, 3);
-            }
-            MouseEventKind::ScrollDown if room_layout.message_content_area.contains(position) => {
-                self.scroll_chatroom_by(project_id, 1, 3);
-            }
-            MouseEventKind::Down(MouseButton::Left)
-                if metrics.is_some_and(|metrics| metrics.is_overflowing())
-                    && room_layout.scrollbar_area.contains(position) =>
-            {
-                if let Some(state) = self.chatrooms.get_mut(&project_id) {
-                    state.is_scrollbar_dragging = true;
-                }
-                if let Some(metrics) = metrics {
-                    let top = crate::chatroom_ui::scrollbar_top_for_row(
-                        room_layout.scrollbar_area,
-                        metrics.maximum_top,
-                        position.y,
-                    );
-                    self.set_chatroom_scroll_top(project_id, top, metrics.maximum_top);
-                }
-            }
-            MouseEventKind::Drag(MouseButton::Left) if is_dragging => {
-                if let Some(metrics) = metrics {
-                    let top = crate::chatroom_ui::scrollbar_top_for_row(
-                        room_layout.scrollbar_area,
-                        metrics.maximum_top,
-                        position.y,
-                    );
-                    self.set_chatroom_scroll_top(project_id, top, metrics.maximum_top);
-                }
-            }
-            MouseEventKind::Up(MouseButton::Left) if is_dragging => {
-                if let Some(metrics) = metrics {
-                    let top = crate::chatroom_ui::scrollbar_top_for_row(
-                        room_layout.scrollbar_area,
-                        metrics.maximum_top,
-                        position.y,
-                    );
-                    self.set_chatroom_scroll_top(project_id, top, metrics.maximum_top);
-                }
-                if let Some(state) = self.chatrooms.get_mut(&project_id) {
-                    state.is_scrollbar_dragging = false;
-                }
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(state) = self.chatrooms.get_mut(&project_id) {
-                    state.is_scrollbar_dragging = false;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// True while the active room owns an in-progress scrollbar drag. The
-    /// top-level mouse router uses this to retain the gesture outside the pane.
-    pub fn is_chatroom_scrollbar_dragging(&self) -> bool {
-        let RightPanelTarget::Chatroom { project_id } = self.right_panel_target else {
-            return false;
-        };
-        self.chatrooms
-            .get(&project_id)
-            .is_some_and(|state| state.is_scrollbar_dragging)
-    }
-
-    /// Returns wrapped-line scroll limits for one cached room at the current
-    /// responsive right-panel width.
-    pub fn chatroom_scroll_metrics(
-        &self,
-        project_id: NodeId,
-    ) -> Option<crate::chatroom_ui::ChatroomScrollMetrics> {
-        let state = self.chatrooms.get(&project_id)?;
-        Some(crate::chatroom_ui::scroll_metrics(
-            self.layout.pane_area,
-            &state.messages,
-            state.scroll_from_newest,
-        ))
-    }
-
-    /// Moves through history by rendered rows. Negative movement goes toward
-    /// older messages; reaching the newest valid top re-enables live following.
-    pub fn scroll_chatroom_by(&mut self, project_id: NodeId, direction: i32, lines: usize) {
-        let Some(metrics) = self.chatroom_scroll_metrics(project_id) else {
-            return;
-        };
-        let next_top = if direction < 0 {
-            metrics.top.saturating_sub(lines)
-        } else {
-            metrics.top.saturating_add(lines).min(metrics.maximum_top)
-        };
-        self.set_chatroom_scroll_top(project_id, next_top, metrics.maximum_top);
-    }
-
-    /// Jumps to the oldest available wrapped row and disables live following
-    /// whenever the room actually overflows.
-    pub fn scroll_chatroom_to_top(&mut self, project_id: NodeId) {
-        let Some(metrics) = self.chatroom_scroll_metrics(project_id) else {
-            return;
-        };
-        self.set_chatroom_scroll_top(project_id, 0, metrics.maximum_top);
-    }
-
-    /// Returns to the live tail. A zero tail distance is the sole state that
-    /// follows newly appended messages automatically.
-    pub fn scroll_chatroom_to_bottom(&mut self, project_id: NodeId) {
-        if let Some(state) = self.chatrooms.get_mut(&project_id) {
-            state.scroll_from_newest = 0;
-        }
-    }
-
-    /// Stores a bounded top row as its distance from the newest valid top.
-    /// This representation makes "pinned to bottom" explicit and resize-safe.
-    fn set_chatroom_scroll_top(&mut self, project_id: NodeId, top: usize, maximum_top: usize) {
-        if let Some(state) = self.chatrooms.get_mut(&project_id) {
-            state.scroll_from_newest = maximum_top.saturating_sub(top.min(maximum_top));
-        }
-    }
-
-    /// Builds the participant list from the already server-confirmed pane
-    /// tree. Chat authors are historical; this deliberately reports only
-    /// currently live agent panes as active participants.
-    pub fn chatroom_participants(&self, project_id: NodeId) -> Vec<String> {
-        self.tree
-            .all_ids()
-            .filter(|pane_id| self.tree.project_ancestor(*pane_id) == Some(project_id))
-            .filter_map(|pane_id| {
-                let node = self.tree.get(pane_id)?;
-                let NodeKind::Pane { status, .. } = &node.kind else {
-                    return None;
-                };
-                match status {
-                    PaneStatus::Agent(agent) => Some(format!(
-                        "{} — {} ({:?})",
-                        agent.class.label(),
-                        node.name,
-                        agent.activity()
-                    )),
-                    _ => None,
-                }
-            })
-            .collect()
     }
 
     /// Activates the surviving sidebar row chosen after a close. Panes and
@@ -9784,12 +9236,40 @@ impl App {
         let _ = self.queue_request(request);
     }
 
+    /// Mirrors the verified agent sessions of the panes for the WebAssembly plugin host.
+    pub(crate) fn sync_wasm_agent_sessions(&mut self) {
+        let Some(plugins) = self.wasm_plugins.as_ref() else {
+            return;
+        };
+        let sessions = self
+            .agent_session_ids
+            .iter()
+            .filter_map(|(pane, session_id)| {
+                let NodeKind::Pane { status, .. } = &self.tree.get(*pane)?.kind else {
+                    return None;
+                };
+                let agent = match status.agent_state()?.class {
+                    ilium_core::AgentClass::Claude => "claude",
+                    ilium_core::AgentClass::Codex => "codex",
+                    _ => return None,
+                };
+                Some((
+                    pane.0,
+                    agent,
+                    session_id.clone(),
+                    self.agent_transcript_paths.get(pane).cloned(),
+                ))
+            });
+        plugins.sync_agent_sessions(sessions);
+    }
+
     /// Mirrors the current tree for the WebAssembly plugin host.
     pub(crate) fn sync_wasm_plugin_tree(&mut self) {
         let focused = self.focused_pane_id();
         if let Some(plugins) = self.wasm_plugins.as_mut() {
             plugins.sync_tree(&self.tree, focused);
         }
+        self.sync_wasm_agent_sessions();
         // The key map changes rarely; mirroring it here keeps it current without a hook at
         // every place that edits a binding.
         self.mirror_plugin_keymap();
@@ -10875,7 +10355,11 @@ impl App {
                     "Visible terminal copied to clipboard",
                 );
             }
-            AgentToolbarAction::SmartCopy => self.start_smart_copy(pane_id),
+            AgentToolbarAction::SmartCopy => self.invoke_plugin_command(
+                crate::plugin_host::commands::SMART_COPY_COMMAND,
+                serde_json::json!({ "node": pane_id.0 }).to_string(),
+                ilium_plugin_api::generated::types::CommandOrigin::Menu,
+            ),
             AgentToolbarAction::CycleEffort => self.step_agent_effort(pane_id, false),
             AgentToolbarAction::Compact if self.action_remote_compact(pane_id, false) => {}
             AgentToolbarAction::CodexModelTier(_) => {}
@@ -10900,618 +10384,6 @@ impl App {
                 }
             }
         }
-    }
-
-    fn start_smart_copy(&mut self, pane_id: NodeId) {
-        let Some(source) = self
-            .selection_terminal_source(pane_id)
-            .cloned()
-            .or_else(|| self.emitted_terminal_source(pane_id))
-        else {
-            self.status_message =
-                Some("Smart Copy is waiting for terminal presentation acknowledgement".into());
-            return;
-        };
-        let generation = self.next_smart_copy_generation;
-        let Some(next) = generation.checked_add(1) else {
-            self.status_message = Some("Smart Copy generation exhausted".into());
-            return;
-        };
-        // Capture path roots now; completion must not consult a newer tree/cwd.
-        let path_context = crate::smart_copy_tokens::PathContext::new(
-            self.tree.pane_cwd(pane_id),
-            &self.session_cwd,
-            directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()),
-        );
-        let mut capture_result = self
-            .terminal_context_preparation
-            .as_mut()
-            .map(|preparation| {
-                preparation.request_capture(pane_id, generation, &source, path_context.clone())
-            });
-        if capture_result.as_ref().is_some_and(Result::is_err)
-            && self.release_foreign_selection_pin(pane_id)
-        {
-            capture_result = self
-                .terminal_context_preparation
-                .as_mut()
-                .map(|preparation| {
-                    preparation.request_capture(pane_id, generation, &source, path_context.clone())
-                });
-        }
-        if let Some(result) = capture_result {
-            match result {
-                Ok(()) => {
-                    self.light_copy_preview_generation = None;
-                    self.smart_copy_preview = None;
-                    self.next_smart_copy_generation = next;
-                    self.pending_smart_copy_capture =
-                        Some((pane_id, source.identity.clone(), generation));
-                    self.smart_copy_session = None;
-                    self.smart_copy_source = None;
-                    self.pending_smart_copy_request = None;
-                    self.smart_copy_cancel_requested = true;
-                    self.status_message =
-                        Some("Preparing Smart Copy from the emitted terminal frame…".into());
-                    self.mode = Mode::SmartCopy;
-                }
-                Err(error) => self.status_message = Some(error),
-            }
-            return;
-        }
-        #[cfg(test)]
-        {
-            let snapshot = source.with_screen(crate::smart_copy::SmartCopySnapshot::capture);
-            self.next_smart_copy_generation = next;
-            self.complete_smart_copy_capture(pane_id, generation, snapshot);
-        }
-        #[cfg(not(test))]
-        {
-            self.status_message = Some("Smart Copy preparation is unavailable".into());
-        }
-    }
-    pub(crate) fn collect_emitted_smart_copy_capture(&mut self) -> bool {
-        let Some(completion) = self
-            .terminal_context_preparation
-            .as_mut()
-            .and_then(|owner| owner.collect_capture())
-        else {
-            return false;
-        };
-        let matches = self.pending_smart_copy_capture.as_ref().is_some_and(
-            |(pane, identity, generation)| {
-                *pane == completion.pane_id
-                    && *generation == completion.generation
-                    && std::sync::Arc::ptr_eq(identity, &completion.identity)
-            },
-        ) && matches!(self.mode, Mode::SmartCopy)
-            && matches!(self.panes.get(&completion.pane_id), Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity, &completion.identity));
-        if !matches {
-            return false;
-        }
-        self.pending_smart_copy_capture = None;
-        match completion.result {
-            Ok(result) => {
-                let (prepared, job_hold) = result.into_parts();
-                // Transfer the producer-installed debit and retirement permit
-                // before moving any result allocation into the live session.
-                let prepared = prepared.into_payload();
-                self.smart_copy_source = Some(prepared.source);
-                self.install_smart_copy_capture(prepared.session, prepared.prompt, prepared.charge);
-                drop(job_hold); // Same original debit is now held by the session.
-            }
-            Err(error) => {
-                self.mode = Mode::Normal;
-                self.status_message = Some(error);
-            }
-        }
-        true
-    }
-    #[cfg(test)] // Production completes through collect_emitted_smart_copy_capture.
-    fn complete_smart_copy_capture(
-        &mut self,
-        pane_id: NodeId,
-        generation: u64,
-        snapshot: crate::smart_copy::SmartCopySnapshot,
-    ) {
-        let user_prompt = match crate::smart_copy::user_prompt(&snapshot) {
-            Ok(prompt) => prompt,
-            Err(error) => {
-                self.status_message = Some(format!("Could not prepare Smart Copy: {error}"));
-                return;
-            }
-        };
-        // Legacy synchronous mouse fixtures only; production uses the I/O job.
-        let paths = crate::smart_copy_tokens::PathContext::new(
-            self.tree.pane_cwd(pane_id),
-            &self.session_cwd,
-            directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()),
-        );
-        let session = crate::smart_copy::SmartCopySession::with_path_context(
-            generation, pane_id, snapshot, &paths,
-        );
-        self.install_smart_copy_capture(session, user_prompt, None);
-        #[cfg(test)]
-        {
-            // Explicitly synthetic capture provenance for pre-existing mouse
-            // fixtures. CPU selection preparation still follows the real bank.
-            let client = crate::execution::test_client();
-            let capture = client
-                .try_reserve_external(ilium_execution::JobCost {
-                    input_bytes: 8192,
-                    result_bytes: 8192,
-                })
-                .unwrap()
-                .retain(())
-                .unwrap();
-            let (_, hold) = capture.into_parts();
-            if let Some(session) = &mut self.smart_copy_session {
-                session.output_retention = Some(hold);
-            }
-            if self.light_copy_selection.is_none() {
-                self.light_copy_selection =
-                    Some(crate::smart_copy_selection::SelectionOwner::new(client));
-            }
-        }
-    }
-    fn install_smart_copy_capture(
-        &mut self,
-        session: crate::smart_copy::SmartCopySession,
-        user_prompt: String,
-        source_hold: Option<std::sync::Arc<crate::terminal_parsing::SnapshotCharge>>,
-    ) {
-        let pane_id = session.pane_id;
-        let generation = session.generation;
-        self.smart_copy_session = Some(session);
-        if self.smart_copy_light.is_some() {
-            // Smart Copy light never calls a model: the detected regions are
-            // the whole offer, so the session is complete from the start.
-            if let Some(session) = self.smart_copy_session.as_mut() {
-                session.phase = crate::smart_copy::SmartCopyPhase::Complete;
-                session.is_light = true;
-            }
-            self.pending_smart_copy_request = None;
-            self.smart_copy_cancel_requested = false;
-            self.terminal_selection = None;
-            self.terminal_selection_source = None;
-            self.status_message = None;
-            self.mode = Mode::SmartCopy;
-            return;
-        }
-        self.pending_smart_copy_request = Some(crate::smart_copy_workers::SmartCopyWorkerRequest {
-            source_hold,
-            generation,
-            pane_id,
-            inference_settings: self.inference_settings.clone(),
-            request: ilium_inference::InferenceRequest {
-                system_prompt: crate::smart_copy::system_prompt_with_instructions(
-                    &self.inference_settings.instructions,
-                ),
-                user_prompt,
-                max_tokens: ilium_inference::UNKNOWN_MODEL_MAX_OUTPUT_TOKENS,
-                timeout: None,
-            },
-        });
-        self.smart_copy_cancel_requested = false;
-        self.terminal_selection = None;
-        self.terminal_selection_source = None;
-        self.mode = Mode::SmartCopy;
-    }
-
-    pub(crate) fn take_pending_smart_copy_request(
-        &mut self,
-    ) -> Option<crate::smart_copy_workers::SmartCopyWorkerRequest> {
-        self.pending_smart_copy_request.take()
-    }
-
-    pub(crate) fn retry_pending_smart_copy_request(
-        &mut self,
-        request: crate::smart_copy_workers::SmartCopyWorkerRequest,
-    ) {
-        if self.smart_copy_session.as_ref().is_some_and(|session| {
-            session.generation == request.generation && session.pane_id == request.pane_id
-        }) {
-            self.pending_smart_copy_request = Some(request);
-        }
-    }
-
-    pub(crate) fn take_smart_copy_cancel_requested(&mut self) -> bool {
-        std::mem::take(&mut self.smart_copy_cancel_requested)
-    }
-
-    pub fn exit_smart_copy(&mut self) {
-        if self.smart_copy_session.is_none()
-            && self.light_copy_recovery.front().is_some_and(|original| {
-                original.original().is_none()
-                    && self.light_copy_retry_generation == Some(original.generation)
-            })
-        {
-            self.light_copy_recovery.pop_front();
-        } // Explicitly acknowledge unknown-source failure.
-        self.light_copy_retry_generation = None; // Explicit Escape/cancel settles this failed original.
-        self.smart_copy_light = None;
-        self.smart_copy_source = None;
-        if let Some(owner) = &mut self.terminal_context_preparation {
-            owner.cancel_capture();
-        }
-        self.pending_smart_copy_capture = None;
-        self.smart_copy_cancel_requested = true;
-        self.pending_smart_copy_request = None;
-        self.smart_copy_session = None;
-        self.mode = Mode::Normal;
-    }
-
-    pub fn apply_smart_copy_worker_event(
-        &mut self,
-        event: crate::smart_copy_workers::SmartCopyWorkerEvent,
-    ) {
-        use crate::smart_copy::SmartCopyPhase;
-        use crate::smart_copy_workers::SmartCopyWorkerUpdate;
-
-        let Some(session) = self.smart_copy_session.as_mut() else {
-            return;
-        };
-        if session.generation != event.generation || session.pane_id != event.pane_id {
-            return;
-        }
-        if let Some(retention) = event.retention {
-            session.output_retention = Some(retention);
-        }
-        if matches!(session.phase, SmartCopyPhase::Failed(_)) {
-            return;
-        }
-        match event.update {
-            SmartCopyWorkerUpdate::ResponseStarted => session.phase = SmartCopyPhase::Streaming,
-            SmartCopyWorkerUpdate::Progress {
-                received_characters,
-            } => session.received_characters = received_characters,
-            SmartCopyWorkerUpdate::JsonLine(line) => {
-                if let Err(error) = session.apply_json_line(&line) {
-                    if error == "Smart Copy retained candidate byte bound exceeded" {
-                        session.phase = SmartCopyPhase::Failed(error.clone());
-                        self.smart_copy_cancel_requested = true;
-                    }
-                    tracing::warn!(generation = session.generation, %error, "rejected Smart Copy candidate");
-                }
-            }
-            SmartCopyWorkerUpdate::ExactOutputTokens(tokens) => {
-                session.exact_output_tokens = Some(tokens)
-            }
-            SmartCopyWorkerUpdate::Finished => session.phase = SmartCopyPhase::Complete,
-            SmartCopyWorkerUpdate::Failed(error) => session.phase = SmartCopyPhase::Failed(error),
-        }
-    }
-
-    pub fn smart_copy_set_hover(&mut self, position: Position) {
-        let Some(pane_id) = self
-            .smart_copy_session
-            .as_ref()
-            .map(|session| session.pane_id)
-        else {
-            return;
-        };
-        let Some(content_area) = self.smart_copy_terminal_area(pane_id) else {
-            return;
-        };
-        if let Some(session) = self.smart_copy_session.as_mut() {
-            session.set_hover(content_area, position);
-        }
-    }
-
-    pub fn smart_copy_cycle_overlap(&mut self, direction: i32) {
-        if let Some(session) = self.smart_copy_session.as_mut() {
-            session.cycle_overlap(direction);
-        }
-    }
-
-    /// Starts Smart Copy light when the configured modifier is held while the
-    /// pointer is over a terminal pane. Returns whether the event was consumed.
-    /// Only plain pointer events start it, so Ctrl+wheel keeps its meaning.
-    pub(crate) fn try_start_smart_copy_light(
-        &mut self,
-        mouse: &crossterm::event::MouseEvent,
-        position: Position,
-    ) -> bool {
-        if !self.light_copy_recovery.is_empty() || !self.light_copy_restored.is_empty() {
-            self.status_message = Some("Earlier failed copy is retained; waiting to restore its selection for Enter/Escape".into());
-            return false;
-        }
-        use crossterm::event::MouseEventKind;
-        let settings = self.terminal_settings;
-        if !settings.smart_copy_light
-            || self.smart_copy_light.is_some()
-            || !matches!(self.mode, Mode::Normal)
-            || !self.modal_stack.is_empty()
-            || self.onboarding.is_some()
-            || !mouse
-                .modifiers
-                .contains(settings.smart_copy_light_key.modifier())
-            || !matches!(
-                mouse.kind,
-                MouseEventKind::Moved
-                    | MouseEventKind::Down(_)
-                    | MouseEventKind::Up(_)
-                    | MouseEventKind::Drag(_)
-            )
-        {
-            return false;
-        }
-        let Some(viewport) = self.pane_viewport_at(position) else {
-            return false;
-        };
-        if !viewport.content_area.contains(position)
-            || !matches!(
-                self.panes.get(&viewport.pane_id),
-                Some(PaneRuntime::Terminal(_))
-            )
-        {
-            return false;
-        }
-        // Armed before the capture starts: the synchronous test path installs
-        // the session from inside `start_smart_copy`.
-        self.smart_copy_light = Some(crate::smart_copy_light::SmartCopyLightState::new(
-            settings.smart_copy_light_key,
-            Instant::now(),
-        ));
-        self.smart_copy_preview = None;
-        self.light_copy_preview_generation = None;
-        self.start_smart_copy(viewport.pane_id);
-        if matches!(self.mode, Mode::SmartCopy) {
-            return true;
-        }
-        self.smart_copy_light = None;
-        false
-    }
-
-    /// Records that the light key is still down (a mouse event carried it).
-    pub(crate) fn note_smart_copy_light_key_held(&mut self, now: Instant) {
-        if let Some(light) = self.smart_copy_light.as_mut() {
-            light.last_key_activity = now;
-        }
-    }
-
-    pub(crate) fn smart_copy_light_key(&self) -> Option<crate::config::SmartCopyLightKey> {
-        self.smart_copy_light.map(|light| light.key)
-    }
-
-    /// The key was released: copy the selection, show the Preview and leave
-    /// the mode. An empty selection just leaves.
-    pub fn finish_smart_copy_light(&mut self) {
-        let retry = self
-            .smart_copy_session
-            .as_ref()
-            .is_some_and(|session| self.light_copy_retry_generation == Some(session.generation));
-        if self.smart_copy_light.is_none() && !retry {
-            return;
-        }
-        if self
-            .smart_copy_session
-            .as_ref()
-            .is_none_or(|session| session.selected_count() == 0)
-        {
-            self.exit_smart_copy();
-            return;
-        }
-        let Some(clipboard) = self.terminal_clipboard.as_ref() else {
-            self.status_message = Some(
-                "Clipboard unavailable; selection retained. Enter retries; Escape cancels".into(),
-            );
-            self.light_copy_retry_generation = self
-                .smart_copy_session
-                .as_ref()
-                .map(|session| session.generation);
-            self.smart_copy_light = None;
-            return;
-        };
-        let Some(owner) = &mut self.light_copy_selection else {
-            self.status_message = Some(
-                "Selection service unavailable; original retained. Enter retries; Escape cancels"
-                    .into(),
-            );
-            self.light_copy_retry_generation = self
-                .smart_copy_session
-                .as_ref()
-                .map(|session| session.generation);
-            self.smart_copy_light = None;
-            return;
-        };
-        let generation = self
-            .smart_copy_session
-            .as_ref()
-            .map(|session| session.generation);
-        match owner.admit(&mut self.smart_copy_session, clipboard) {
-            Ok(_) => {
-                self.light_copy_preview_generation = generation;
-                self.exit_smart_copy(); // The owner already holds the exact source.
-                self.status_message = Some("Preparing selection for clipboard…".into());
-            }
-            Err(error) => {
-                self.status_message = Some(error); // Original slot and target unchanged.
-                self.light_copy_retry_generation = generation;
-                self.smart_copy_light = None; // Explicit Enter retry or Escape; no hot grace re-admission.
-                self.status_message = self
-                    .status_message
-                    .take()
-                    .map(|error| format!("{error}. Enter retries; Escape cancels"));
-            }
-        }
-    }
-
-    pub(crate) fn collect_light_copy_selection(&mut self) -> bool {
-        let Some(owner) = &mut self.light_copy_selection else {
-            return false;
-        };
-        let mut changed = false;
-        if self.light_copy_recovery.len() + self.light_copy_restored.len() < 8 {
-            if let Some(completion) = owner.collect(self.terminal_clipboard.as_ref()) {
-                let generation = completion.generation;
-                match completion.into_preview(Instant::now()) {
-                    Ok(preview) => {
-                        if self.light_copy_preview_generation == Some(generation) {
-                            self.status_message =
-                                Some(format!("Copied {} selection(s)", preview.region_count));
-                            self.smart_copy_preview = Some(preview);
-                        }
-                    }
-                    Err(original) => {
-                        if matches!(self.mode, Mode::Normal) && self.smart_copy_preview.is_none() {
-                            self.status_message = Some(format!(
-                                "Copy failed: {}. Retained selection is being restored",
-                                original
-                                    .result
-                                    .as_ref()
-                                    .err()
-                                    .map(String::as_str)
-                                    .unwrap_or("delivery unavailable")
-                            ));
-                        }
-                        self.light_copy_recovery.push_back(original);
-                    }
-                }
-                changed = true;
-            }
-        }
-        // Restoration is also CPU-owned; failed originals stay in order when
-        // admission is refused, never clone plaintext or become inaccessible.
-        if !self.light_copy_shutdown
-            && self
-                .light_copy_recovery
-                .front()
-                .is_some_and(|original| original.original().is_some())
-        {
-            if let Some(original) = self.light_copy_recovery.pop_front() {
-                if let Err(original) = owner.recover(original) {
-                    self.light_copy_recovery.push_front(original);
-                }
-            }
-        }
-        if self.light_copy_recovery.len() + self.light_copy_restored.len() < 8 {
-            if let Some(result) = owner.collect_recovery() {
-                match result {
-                    Ok(restored) => self.light_copy_restored.push_back(restored),
-                    Err(original) => self.light_copy_recovery.push_front(original),
-                }
-                changed = true;
-            }
-        }
-        // Never replace a newer live selection or acknowledged preview.
-        if !self.light_copy_shutdown
-            && !owner.pending_copy()
-            && self.smart_copy_session.is_none()
-            && self.smart_copy_preview.is_none()
-            && self.pending_smart_copy_capture.is_none()
-            && matches!(self.mode, Mode::Normal)
-            && self.modal_stack.is_empty()
-        {
-            if let Some(original) = self
-                .light_copy_recovery
-                .front()
-                .filter(|original| original.original().is_none())
-            {
-                self.light_copy_retry_generation = Some(original.generation);
-                self.status_message = Some("Copy failed; original custody is unknown after worker failure. Escape acknowledges this failure; no copy success claimed".into());
-                self.mode = Mode::SmartCopy;
-                changed = true;
-            } else if let Some(restored) = self.light_copy_restored.pop_front() {
-                let generation = restored.generation;
-                let pane_id = restored.original.pane_id;
-                self.status_message = Some(format!(
-                    "Copy {} failed: {}. Enter retries the retained selection; Escape cancels",
-                    restored.sequence, restored.error
-                ));
-                self.smart_copy_session = Some(restored.original); // Same candidate allocations/click order.
-                self.light_copy_retry_generation = Some(generation);
-                self.smart_copy_light = None; // No automatic grace retry of failures.
-                self.light_copy_preview_generation = None;
-                if self.panes.contains_key(&pane_id) {
-                    self.right_panel_target = RightPanelTarget::Pane { pane_id };
-                    self.focus = FocusTarget::Pane;
-                }
-                self.mode = Mode::SmartCopy;
-                changed = true;
-            }
-        }
-        changed
-    }
-
-    /// Escape: leave without copying anything.
-    pub fn cancel_smart_copy_light(&mut self) {
-        self.exit_smart_copy();
-    }
-
-    /// Ends the Preview after its second, and finishes a light selection whose
-    /// key release the terminal cannot report once the pointer has idled.
-    pub(crate) fn tick_smart_copy_light(&mut self, now: Instant) -> bool {
-        let mut changed = false;
-        if let Some(preview) = &self.smart_copy_preview {
-            // Every frame while the Preview is up repaints its progress bar.
-            changed = true;
-            if preview.is_expired(now) {
-                self.smart_copy_preview = None;
-            }
-        }
-        if let Some(light) = self.smart_copy_light {
-            let has_selection = self
-                .smart_copy_session
-                .as_ref()
-                .is_some_and(|session| session.selected_count() > 0);
-            if has_selection
-                && now.saturating_duration_since(light.last_key_activity)
-                    >= crate::smart_copy_light::RELEASE_IDLE_GRACE
-            {
-                self.finish_smart_copy_light();
-                changed = true;
-            }
-        }
-        changed
-    }
-
-    pub fn smart_copy_copy_current(&mut self) {
-        if self.light_copy_retry_generation.is_some() && self.smart_copy_session.is_none() {
-            self.status_message = Some("Original custody is unknown; this selection cannot be retried. Escape acknowledges the failure".into());
-            return;
-        }
-        if self
-            .smart_copy_session
-            .as_ref()
-            .is_some_and(|session| self.light_copy_retry_generation == Some(session.generation))
-        {
-            self.finish_smart_copy_light(); // Retry the exact original, without toggling/rejoining on UI.
-            return;
-        }
-        // Each click toggles the hovered region in a persistent multi-selection
-        // and republishes the whole selection to the clipboard.
-        let toggled = self
-            .smart_copy_session
-            .as_mut()
-            .and_then(|session| session.toggle_current_selection());
-        let Some((label, is_selected)) = toggled else {
-            self.status_message = Some("Move over a highlighted Smart Copy selection".to_string());
-            return;
-        };
-        let count = self
-            .smart_copy_session
-            .as_ref()
-            .map_or(0, |session| session.selected_count());
-        if count == 0 {
-            self.status_message = Some(format!("Deselected {label}; selection is empty"));
-            return;
-        }
-        let verb = if is_selected { "Added" } else { "Removed" };
-        if self.smart_copy_light.is_some() {
-            // Light mode copies once, when the key is released.
-            self.status_message = Some(format!("{verb} {label}; {count} selected"));
-            return;
-        }
-        let text = self
-            .smart_copy_session
-            .as_ref()
-            .map(|session| session.selected_text())
-            .unwrap_or_default();
-        self.copy_terminal_text_to_clipboard(
-            text,
-            &format!("{verb} {label}; copied {count} selection(s)"),
-        );
     }
 
     /// Writes a keystroke sequence to `pane_id`'s PTY, one stage at a time.
@@ -11679,12 +10551,11 @@ impl App {
         self.hovered_agent_toolbar_action = hover;
     }
 
-    /// Selects the tree's presentation order immediately and persists it in
-    /// `[ui]`, shared by the settings row and context-menu submenu.
-    pub fn settings_set_tree_order(&mut self, tree_order: crate::config::TreeOrder) {
+    /// Selects the stored manual order immediately and persists it in `[ui]`: a plugin
+    /// ordering chosen earlier is dropped, on disk too. Shared by the settings row, the
+    /// context-menu submenu and every direct move.
+    pub fn settings_set_manual_tree_order(&mut self) {
         let mut ui = self.ui_settings.clone();
-        ui.tree_order = tree_order;
-        // A built-in order replaces a plugin ordering chosen earlier, on disk too.
         ui.plugin_tree_ordering = None;
         self.apply_and_persist_ui_settings(ui);
     }
@@ -11698,9 +10569,25 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
-    /// Cycles through every registered tree-order mode.
+    /// Cycles through the manual order and every ordering an enabled plugin contributes.
     pub fn settings_adjust_tree_order(&mut self, direction: i32) {
-        self.settings_set_tree_order(self.ui_settings.tree_order.stepped(direction));
+        let orderings = self.plugin_tree_orderings();
+        // Position 0 is the manual order; position `n` is the `n`-th plugin ordering.
+        let current = orderings
+            .iter()
+            .position(|ordering| {
+                self.ui_settings
+                    .plugin_tree_ordering
+                    .as_ref()
+                    .is_some_and(|choice| choice.names(&ordering.plugin, &ordering.id))
+            })
+            .map_or(0, |index| index + 1);
+        let count = orderings.len() + 1;
+        let step = if direction < 0 { count - 1 } else { 1 };
+        match orderings.into_iter().nth((current + step) % count) {
+            None => self.settings_set_manual_tree_order(),
+            Some(ordering) => self.settings_set_plugin_tree_ordering(ordering.plugin, ordering.id),
+        }
     }
 
     /// Cycles among full names, single letters, chosen icons, and no agent
@@ -11868,10 +10755,6 @@ impl App {
             }
             TerminalRow::NewPaneDirectory => {
                 settings.new_pane_directory = settings.new_pane_directory.stepped(direction)
-            }
-            TerminalRow::SmartCopyLight => settings.smart_copy_light = !settings.smart_copy_light,
-            TerminalRow::SmartCopyLightKey => {
-                settings.smart_copy_light_key = settings.smart_copy_light_key.stepped(direction)
             }
         };
         self.apply_terminal_settings(settings);
@@ -12104,46 +10987,6 @@ impl App {
                 &mut requirements.next_semantic_delay,
                 Duration::from_millis(90),
             );
-        }
-
-        if self.smart_copy_preview.is_some() {
-            requirements.is_active = true;
-            retain_minimum_delay(
-                &mut requirements.next_semantic_delay,
-                crate::smart_copy_light::PREVIEW_FRAME_INTERVAL,
-            );
-        }
-        if self.smart_copy_light.is_some() {
-            // The idle grace must be able to fire without any input event.
-            retain_minimum_delay(
-                &mut requirements.next_semantic_delay,
-                Duration::from_millis(250),
-            );
-            requirements.is_active = true;
-        }
-        if let Some(session) = &self.smart_copy_session {
-            use crate::smart_copy::SmartCopyPhase;
-            let is_request_active = matches!(
-                session.phase,
-                SmartCopyPhase::Connecting | SmartCopyPhase::Streaming
-            );
-            if is_request_active && !motion_off {
-                requirements.is_active = true;
-                retain_minimum_delay(
-                    &mut requirements.next_semantic_delay,
-                    Duration::from_millis(100),
-                );
-            }
-            for candidate in &session.candidates {
-                let age = now.saturating_duration_since(candidate.arrived_at);
-                if age < crate::smart_copy::ARRIVAL_FLASH_DURATION && !motion_off {
-                    requirements.is_active = true;
-                    retain_minimum_delay(
-                        &mut requirements.next_semantic_delay,
-                        crate::smart_copy::ARRIVAL_FLASH_DURATION - age,
-                    );
-                }
-            }
         }
 
         if !motion_off
@@ -13016,42 +11859,7 @@ impl App {
                     // The following ACK advances the ordinal after this payload is consumed.
                 }
                 #[cfg(test)]
-                ParseResult::CaptureFailed {
-                    target,
-                    generation,
-                    message,
-                } => {
-                    if self.pending_smart_copy_capture.as_ref().is_some_and(
-                        |(pane, identity, pending)| {
-                            *pane == target.pane_id
-                                && *pending == generation
-                                && std::sync::Arc::ptr_eq(identity, &target.identity)
-                        },
-                    ) {
-                        self.pending_smart_copy_capture = None;
-                        self.mode = Mode::Normal;
-                        self.status_message = Some(message);
-                        changed = true;
-                    }
-                }
-                #[cfg(test)]
-                ParseResult::Capture {
-                    target,
-                    generation,
-                    snapshot,
-                } => {
-                    if self.pending_smart_copy_capture.as_ref().is_some_and(
-                        |(pane, identity, pending)| {
-                            *pane == target.pane_id
-                                && *pending == generation
-                                && std::sync::Arc::ptr_eq(identity, &target.identity)
-                        },
-                    ) {
-                        self.pending_smart_copy_capture = None;
-                        self.complete_smart_copy_capture(target.pane_id, generation, snapshot);
-                        changed = true;
-                    }
-                }
+                ParseResult::CaptureFailed { .. } | ParseResult::Capture { .. } => {}
             }
         }
         changed |= self.publish_ready_terminal_inputs();
@@ -13201,7 +12009,6 @@ impl App {
     }
 
     pub(crate) fn prepare_terminal_shutdown(&mut self) {
-        self.exit_smart_copy();
         self.terminal_selection = None;
         self.terminal_selection_source = None;
         self.emitted_geometry = None;
@@ -13218,7 +12025,7 @@ impl App {
         // Menu/search copies no longer serve an interaction after detach.
         // Releasing their pins permits the final ordered parser publication.
         self.modal_stack
-            .retain(|mode| !matches!(mode, Mode::TerminalPaneContextMenu(_) | Mode::SmartCopy));
+            .retain(|mode| !matches!(mode, Mode::TerminalPaneContextMenu(_)));
     }
 
     #[cfg(test)]
@@ -14137,38 +12944,8 @@ impl App {
                 Some("Close individual agents; the worktree row has fixed membership".into());
             return false;
         }
-        let emptied_ancestor = self.empty_group_ancestor_after_close(target);
-        let is_admitted = self.queue_request(ClientRequest::ClosePane { pane_id: target });
-        if is_admitted {
-            if let Some(group_id) = emptied_ancestor {
-                self.queue_request(ClientRequest::ClosePane { pane_id: group_id });
-            }
-        }
-        is_admitted
-    }
-
-    /// Topmost group that becomes empty once `target` is closed, when
-    /// `auto_remove_empty_groups` is on. Only plain groups qualify: projects,
-    /// split views and the root stay even when empty.
-    fn empty_group_ancestor_after_close(&self, target: NodeId) -> Option<NodeId> {
-        if !self.ui_settings.auto_remove_empty_groups {
-            return None;
-        }
-        let mut emptied = None;
-        let mut current = target;
-        while let Some(parent_id) = self.tree.parent_of(current) {
-            let parent = self.tree.get(parent_id)?;
-            let only_child = self
-                .tree
-                .children_of(parent_id)
-                .is_ok_and(|children| children == [current]);
-            if parent_id == ROOT_ID || !parent.is_group() || !only_child {
-                break;
-            }
-            emptied = Some(parent_id);
-            current = parent_id;
-        }
-        emptied
+        // Closing a group that this empties is the Tree plugin's job (`ilium.core.tree`).
+        self.queue_request(ClientRequest::ClosePane { pane_id: target })
     }
 
     pub(crate) fn request_interactive_close(&mut self, target: NodeId) {
@@ -14214,15 +12991,11 @@ impl App {
     pub(crate) fn confirm_workspace_close_removal(&mut self, pane_id: NodeId) {
         self.mode = Mode::Normal;
         let request_id = self.next_workspace_request_id();
-        let emptied_ancestor = self.empty_group_ancestor_after_close(pane_id);
-        let is_admitted = self.queue_request(ClientRequest::ClosePaneWithWorkspaceDisposition {
+        self.queue_request(ClientRequest::ClosePaneWithWorkspaceDisposition {
             request_id,
             pane_id,
             disposition: ilium_ipc::WorkspaceDisposition::RemoveWorktree,
         });
-        if let (true, Some(group_id)) = (is_admitted, emptied_ancestor) {
-            self.queue_request(ClientRequest::ClosePane { pane_id: group_id });
-        }
     }
 
     pub fn request_move(
@@ -14268,8 +13041,8 @@ impl App {
     /// Centralizing this in the two structural request methods covers row
     /// arrows, context actions, drag/drop, and keyboard move mode uniformly.
     fn restore_manual_tree_order_for_mutation(&mut self) {
-        if self.ui_settings.tree_order != TreeOrder::Manual {
-            self.settings_set_tree_order(TreeOrder::Manual);
+        if self.ui_settings.plugin_tree_ordering.is_some() {
+            self.settings_set_manual_tree_order();
         }
         // Ordering by cost is an automatic view too, so a direct move leaves it.
         if self.cost_settings.sort_by_cost {
@@ -16271,13 +15044,6 @@ impl App {
         if self.finish_plugin_clipboard(id, &completion.view().result) {
             return;
         }
-        if self
-            .light_copy_selection
-            .as_mut()
-            .is_some_and(|selection| selection.acknowledge(id, &completion.view().result))
-        {
-            return;
-        }
         if let Some(message) = self.pending_clipboard_copies.remove(&id) {
             self.status_message = Some(match &completion.view().result {
                 Ok(_) => message,
@@ -16432,15 +15198,17 @@ impl App {
         }
     }
 
-    /// The "Order by" submenu: the built-in orders, then the tree orderings enabled plugins
-    /// contribute. The selected row is the plugin ordering in effect, if any.
-    fn order_by_submenu_items(
-        &self,
-        built_in: Vec<SubmenuItem>,
-        built_in_selected: usize,
-    ) -> (Vec<SubmenuItem>, usize) {
-        let mut items = built_in;
-        let mut selected = built_in_selected;
+    /// The "Order by" submenu: the manual order, then the tree orderings enabled plugins
+    /// contribute. The selected row is the ordering in effect.
+    fn order_by_submenu_items(&self) -> (Vec<SubmenuItem>, usize) {
+        let in_effect = self.plugin_tree_ordering_in_effect();
+        let mut items = vec![SubmenuItem {
+            label: "Manual order".to_string(),
+            action: SubmenuItemAction::SetManualTreeOrder { active: !in_effect },
+            disabled_reason: None,
+            disabled_reason_retention: None,
+        }];
+        let mut selected = 0;
         for ordering in self.plugin_tree_orderings() {
             let active = self
                 .ui_settings
@@ -16468,31 +15236,7 @@ impl App {
     /// the terminal has no room on the right.
     pub fn open_context_submenu(&self, menu: &mut ContextMenu, parent: ContextMenuAction) {
         let (items, selected_index): (Vec<SubmenuItem>, usize) = match parent {
-            ContextMenuAction::OrderBy => self.order_by_submenu_items(
-                TreeOrder::ALL
-                    .iter()
-                    .map(|tree_order| SubmenuItem {
-                        action: SubmenuItemAction::SetTreeOrder(*tree_order),
-                        label: match tree_order {
-                            TreeOrder::Manual => "Manual order",
-                            TreeOrder::Type => "Item type",
-                            TreeOrder::AgeAscending => "Newest first",
-                            TreeOrder::AgeDescending => "Oldest first",
-                            TreeOrder::NameAscending => "Name (A–Z)",
-                            TreeOrder::NameDescending => "Name (Z–A)",
-                            TreeOrder::CostDescending => "Cost (highest first)",
-                            TreeOrder::PluginKey => "Plugin order",
-                        }
-                        .to_string(),
-                        disabled_reason: None,
-                        disabled_reason_retention: None,
-                    })
-                    .collect(),
-                TreeOrder::ALL
-                    .iter()
-                    .position(|tree_order| *tree_order == self.ui_settings.tree_order)
-                    .unwrap_or(0),
-            ),
+            ContextMenuAction::OrderBy => self.order_by_submenu_items(),
             ContextMenuAction::NewAgent(provider) => {
                 let in_worktree = self.tree.worktree_container_for_node(menu.target).is_some();
                 let mut items = if in_worktree {
@@ -16708,7 +15452,7 @@ impl App {
         }
         self.select_node(target);
         match item.action.clone() {
-            SubmenuItemAction::SetTreeOrder(tree_order) => self.settings_set_tree_order(tree_order),
+            SubmenuItemAction::SetManualTreeOrder { .. } => self.settings_set_manual_tree_order(),
             SubmenuItemAction::SetPluginTreeOrdering { plugin, id, .. } => {
                 self.settings_set_plugin_tree_ordering(plugin, id);
             }
@@ -17263,7 +16007,6 @@ impl App {
             }
             Some(node) if node.is_project() => {
                 actions.push(ContextMenuAction::SendMessageToAll);
-                actions.insert(0, ContextMenuAction::AddChatroom);
                 actions.insert(0, ContextMenuAction::NewResource);
                 actions.insert(0, ContextMenuAction::LinkResource);
                 actions.insert(0, ContextMenuAction::ChangeProjectFolder);
@@ -17297,10 +16040,6 @@ impl App {
                 }
                 if self.tree.is_agent_pane_idle_for_update(target) {
                     actions.insert(insert_at, ContextMenuAction::AskForUpdate);
-                    insert_at += 1;
-                }
-                if let Some(provider) = self.conversion_target_for(target) {
-                    actions.insert(insert_at, ContextMenuAction::ConvertTo(provider));
                 }
                 if self.frozen_panes.contains(&target) {
                     actions.insert(0, ContextMenuAction::Unfreeze);
@@ -17424,7 +16163,6 @@ impl App {
             }
             ContextMenuAction::AskForUpdate => self.action_ask_for_update(target),
             ContextMenuAction::SendMessageToAll => self.open_agent_message_dialog(target),
-            ContextMenuAction::ConvertTo(provider) => self.action_convert_session(target, provider),
             ContextMenuAction::Freeze => self.action_freeze_agent(target),
             ContextMenuAction::Unfreeze => self.action_unfreeze_agent(target),
             ContextMenuAction::ShowSplitView => self.show_split_view(target),
@@ -17450,7 +16188,6 @@ impl App {
                 self.action_new_split_view(ilium_plugin_api::generated::types::CommandOrigin::Menu);
             }
             ContextMenuAction::NewFolder => self.action_new_folder(),
-            ContextMenuAction::AddChatroom => self.action_add_chatroom_to_project(target),
             ContextMenuAction::NewResource => self.open_resource_dialog(target, false),
             ContextMenuAction::LinkResource => self.open_resource_dialog(target, true),
             ContextMenuAction::ResourceOpenPanel
@@ -17632,7 +16369,6 @@ impl App {
                     return;
                 }
             };
-        self.auto_freeze_since.remove(&pane_id);
         // Focus must reach the server while the frozen pane still exists;
         // UnfreezePane replaces it with a new pane ID.
         self.focus_pane(pane_id);
@@ -17640,71 +16376,6 @@ impl App {
         // Carry focus across the server's new pane ID at the same tree slot.
         self.remember_replacement_focus(pane_id);
         self.status_message = Some(UNFREEZING_AGENT_STATUS.to_string());
-    }
-
-    pub(crate) fn tick_auto_freeze(&mut self, now: Instant) -> bool {
-        let settings = crate::agent_freeze::AutoFreezeSettings {
-            enabled: self.ui_settings.auto_freeze_enabled,
-            after: Duration::from_secs(self.ui_settings.auto_freeze_after_seconds),
-            freeze_done: self.ui_settings.auto_freeze_done,
-            freeze_waiting_for_input: self.ui_settings.auto_freeze_idle,
-            freeze_waiting_for_approval: self.ui_settings.auto_freeze_waiting_approval,
-            freeze_waiting_for_background: self.ui_settings.auto_freeze_waiting_background,
-        };
-        // Disabled is the common case; the walk below would only clear the
-        // eligibility clocks, so skip three passes over every pane per tick.
-        if !settings.enabled {
-            self.auto_freeze_since.clear();
-            return false;
-        }
-        let pane_ids: Vec<NodeId> = self
-            .tree
-            .panes()
-            .filter_map(|node| match &node.kind {
-                NodeKind::Pane {
-                    content: PaneContentKind::Terminal,
-                    status: PaneStatus::Agent(state),
-                    ..
-                } if !self.frozen_panes.contains(&node.id) => settings
-                    .should_freeze(
-                        state.activity(),
-                        self.auto_freeze_since
-                            .get(&node.id)
-                            .map_or(Duration::ZERO, |since| {
-                                now.saturating_duration_since(*since)
-                            }),
-                    )
-                    .then_some(node.id)
-                    .or_else(|| {
-                        (settings.state_for(state.activity())
-                            == crate::agent_freeze::AutoFreezeState::Eligible)
-                            .then_some(node.id)
-                    }),
-                _ => None,
-            })
-            .collect();
-        let live_ids: HashSet<NodeId> = self.tree.panes().map(|node| node.id).collect();
-        self.auto_freeze_since
-            .retain(|pane_id, _| live_ids.contains(pane_id));
-        for node in self.tree.panes() {
-            let eligible = matches!(&node.kind, NodeKind::Pane { status: PaneStatus::Agent(state), .. } if settings.state_for(state.activity()) == crate::agent_freeze::AutoFreezeState::Eligible);
-            if eligible && !self.frozen_panes.contains(&node.id) {
-                self.auto_freeze_since.entry(node.id).or_insert(now);
-            } else {
-                self.auto_freeze_since.remove(&node.id);
-            }
-        }
-        let mut changed = false;
-        for pane_id in pane_ids {
-            let Some(since) = self.auto_freeze_since.get(&pane_id).copied() else {
-                continue;
-            };
-            if now.saturating_duration_since(since) >= settings.after {
-                self.action_freeze_agent(pane_id);
-                changed = true;
-            }
-        }
-        changed
     }
 
     /// Sends the rendered status-check prompt followed by Enter to every eligible pane
@@ -18400,7 +17071,7 @@ impl App {
             .chain(self.restructure_budget_autosave_deadline)
             .chain(self.remote_compaction_save_deadline)
             .chain(self.custom_status_rules_save_deadline)
-            .chain(self.next_chatroom_reconcile_at)
+            .chain(self.next_integration_maintenance_at)
             .chain(self.compaction_next_poll(now))
             .min();
 
@@ -18503,7 +17174,6 @@ impl App {
             (&overlay.ranks, overlay.rank_epoch),
             (
                 &self.sidebar_snapshot,
-                &self.chatroom_projects,
                 Some(&self.resources),
                 visibility.as_ref(),
             ),
@@ -18556,8 +17226,6 @@ impl App {
                         || tree_ui::folder_entry(&self.tree, hit.id, &self.sidebar_snapshot)
                             .is_some()
                         || self.resources.rows.targets.contains_key(&hit.id)
-                        || tree_ui::chatroom_project(&self.tree, hit.id, &self.chatroom_projects)
-                            .is_some()
                 });
         }
         if !cfg!(test) {
@@ -18584,7 +17252,6 @@ impl App {
             (&overlay.ranks, overlay.rank_epoch),
             (
                 &self.sidebar_snapshot,
-                &self.chatroom_projects,
                 Some(&self.resources),
                 visibility.as_ref(),
             ),
@@ -18702,12 +17369,6 @@ impl App {
                         self.resource_select_target(id, target);
                         return;
                     }
-                    if let Some(project_id) =
-                        crate::tree_ui::chatroom_project(&self.tree, id, &self.chatroom_projects)
-                    {
-                        self.show_chatroom(project_id);
-                        return;
-                    }
                     if let Some(entry) =
                         crate::tree_ui::folder_entry(&self.tree, id, &self.sidebar_snapshot)
                     {
@@ -18761,10 +17422,6 @@ impl App {
     pub fn handle_pane_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::{KeyCode, KeyModifiers};
         self.dismiss_attention_arrival();
-        if matches!(self.right_panel_target, RightPanelTarget::Chatroom { .. }) {
-            self.handle_chatroom_key(key);
-            return;
-        }
         if matches!(self.right_panel_target, RightPanelTarget::Attention) {
             self.handle_attention_key(key);
             return;
@@ -21191,7 +19848,10 @@ impl App {
     ) {
         use crate::editor_toolbar::ToolbarAction;
         if action == ToolbarAction::ChooseLineDisplay {
-            self.begin_editor_line_display_dialog(id);
+            self.action_editor_line_display(
+                id,
+                ilium_plugin_api::generated::types::CommandOrigin::Toolbar,
+            );
             return;
         }
         let content_area = self.editor_content_area(id);
@@ -21372,6 +20032,7 @@ mod tests {
     use ilium_core::AgentClass;
 
     use super::*;
+    use crate::config::TreeOrder;
 
     fn app() -> App {
         App::new("test-session".to_string(), std::env::temp_dir())
@@ -24716,7 +23377,6 @@ mod tests {
             .tree
             .add_pane(group, "shell", PaneContentKind::Terminal)
             .unwrap();
-        app.settings_set_tree_order(TreeOrder::AgeDescending);
 
         for target in [ROOT_ID, group, pane] {
             assert!(app
@@ -24735,7 +23395,7 @@ mod tests {
 
         assert_eq!(
             submenu.items[submenu.selected_index].action,
-            SubmenuItemAction::SetTreeOrder(TreeOrder::AgeDescending)
+            SubmenuItemAction::SetManualTreeOrder { active: true }
         );
         assert!(submenu.area.x >= menu.area.right() || submenu.area.right() <= menu.area.x);
     }
@@ -24799,7 +23459,8 @@ mod tests {
     }
 
     #[test]
-    fn closing_the_last_item_also_closes_its_emptied_group_chain() {
+    fn closing_an_item_sends_only_its_own_close_request() {
+        // The kernel does not close the group an item leaves empty; the Tree plugin does.
         let mut app = app();
         let outer = app.tree.add_group(ROOT_ID, "outer").unwrap();
         let inner = app.tree.add_group(outer, "inner").unwrap();
@@ -24809,50 +23470,11 @@ mod tests {
             .unwrap();
         app.take_outbound_requests();
 
-        assert!(app.ui_settings.auto_remove_empty_groups);
         app.request_close(only);
         assert_eq!(
             app.take_outbound_requests(),
-            vec![
-                ClientRequest::ClosePane { pane_id: only },
-                ClientRequest::ClosePane { pane_id: outer },
-            ]
+            vec![ClientRequest::ClosePane { pane_id: only }]
         );
-    }
-
-    #[test]
-    fn closing_a_non_last_item_or_disabled_setting_leaves_the_group() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let first = app
-            .tree
-            .add_pane(group, "a", PaneContentKind::Terminal)
-            .unwrap();
-        let second = app
-            .tree
-            .add_pane(group, "b", PaneContentKind::Terminal)
-            .unwrap();
-        app.take_outbound_requests();
-
-        app.request_close(first);
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::ClosePane { pane_id: first }]
-        );
-
-        app.ui_settings.auto_remove_empty_groups = false;
-        let solo_group = app.tree.add_group(ROOT_ID, "solo").unwrap();
-        let solo = app
-            .tree
-            .add_pane(solo_group, "c", PaneContentKind::Terminal)
-            .unwrap();
-        app.take_outbound_requests();
-        app.request_close(solo);
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::ClosePane { pane_id: solo }]
-        );
-        let _ = second;
     }
 
     #[test]
@@ -25662,22 +24284,25 @@ mod tests {
             .tree
             .add_pane(group, "shell", PaneContentKind::Terminal)
             .unwrap();
-        app.settings_set_tree_order(TreeOrder::NameAscending);
+        app.settings_set_plugin_tree_ordering("ilium.core.tree".into(), "name-az".into());
         app.request_move(pane, ilium_core::TreeMoveDirection::Up);
 
-        assert_eq!(app.ui_settings.tree_order, TreeOrder::Manual);
+        assert_eq!(app.ui_settings.plugin_tree_ordering, None);
         assert!(matches!(
             app.take_outbound_requests().as_slice(),
             [ClientRequest::MoveNode { node_id, .. }] if *node_id == pane
         ));
         assert_eq!(
-            crate::config::load(&config_dir).unwrap().ui.tree_order,
-            TreeOrder::Manual
+            crate::config::load(&config_dir)
+                .unwrap()
+                .ui
+                .plugin_tree_ordering,
+            None
         );
 
-        app.settings_set_tree_order(TreeOrder::Type);
+        app.settings_set_plugin_tree_ordering("ilium.core.tree".into(), "type".into());
         app.request_reparent(pane, group, Some(0));
-        assert_eq!(app.ui_settings.tree_order, TreeOrder::Manual);
+        assert_eq!(app.ui_settings.plugin_tree_ordering, None);
         assert!(matches!(
             app.take_outbound_requests().as_slice(),
             [ClientRequest::ReparentNode { node_id, .. }] if *node_id == pane
@@ -25687,7 +24312,7 @@ mod tests {
     }
 
     #[test]
-    fn a_plugin_tree_ordering_choice_persists_until_a_built_in_order_replaces_it() {
+    fn a_plugin_tree_ordering_choice_persists_until_the_manual_order_replaces_it() {
         let config_dir = std::env::temp_dir()
             .join("ilium-app-plugin-tree-order-tests")
             .join(format!("{:?}", std::thread::current().id()));
@@ -25715,12 +24340,12 @@ mod tests {
             .plugin_tree_ordering
             .expect("the submenu choice is written to config.toml");
         assert!(persisted.names("ilium.core.cost", "by-cost"));
-        // No plugin contributes the ordering in this app, so the built-in order applies
+        // No plugin contributes the ordering in this app, so the manual order applies
         // while the choice stays remembered for when the plugin is back.
         assert!(!app.plugin_tree_ordering_in_effect());
         assert_eq!(app.effective_tree_order(), TreeOrder::Manual);
 
-        app.settings_set_tree_order(TreeOrder::Type);
+        app.settings_set_manual_tree_order();
         assert_eq!(app.ui_settings.plugin_tree_ordering, None);
         assert_eq!(
             crate::config::load(&config_dir)
@@ -28994,71 +27619,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn smart_copy_freezes_the_visible_screen_and_accepts_a_unique_streamed_record() {
-        let mut app = app();
-        app.inference_settings.instructions.smart_copy = "Prioritize URLs {{literal}} & 🦀".into();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane_id = app
-            .tree
-            .add_pane(group, "codex", PaneContentKind::Terminal)
-            .unwrap();
-        let mut view = TerminalView::new(4, 40);
-        view.feed(b"curl https://example.test/api\r\n");
-        app.panes
-            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
-
-        app.execute_agent_toolbar_action(pane_id, AgentToolbarAction::SmartCopy);
-
-        assert!(matches!(app.mode, Mode::SmartCopy));
-        let request = app
-            .take_pending_smart_copy_request()
-            .expect("toolbar action should queue inference");
-        assert!(request
-            .request
-            .system_prompt
-            .contains("Prioritize URLs {{literal}} & 🦀"));
-        assert_eq!(
-            request.request.max_tokens,
-            ilium_inference::UNKNOWN_MODEL_MAX_OUTPUT_TOKENS
-        );
-        assert!(request
-            .request
-            .user_prompt
-            .contains("https://example.test/api"));
-
-        let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&pane_id) else {
-            panic!("terminal pane should remain available");
-        };
-        view.feed(b"live output changed after capture\r\n");
-        app.apply_smart_copy_worker_event(crate::smart_copy_workers::SmartCopyWorkerEvent {
-            retention: None,
-            generation: request.generation,
-            pane_id,
-            update: crate::smart_copy_workers::SmartCopyWorkerUpdate::JsonLine(
-                r#"{"label":"curl","kind":"word","parts":[{"line":1,"from":"w1","through":"w1"}]}"#
-                    .to_string(),
-            ),
-        });
-
-        let session = app
-            .smart_copy_session
-            .as_ref()
-            .expect("selection session should remain active");
-        assert_eq!(session.candidates.len(), 3);
-        assert!(session
-            .candidates
-            .iter()
-            .any(|candidate| candidate.kind == "word" && candidate.text == "curl"));
-        let paragraph = session
-            .candidates
-            .iter()
-            .find(|candidate| candidate.kind == "paragraph")
-            .expect("the pre-scan should retain the frozen paragraph");
-        assert_eq!(paragraph.text, "curl https://example.test/api");
-        assert!(!paragraph.text.contains("live output changed"));
-    }
-
     fn codex_pane(app: &mut App) -> NodeId {
         let group = app.tree.add_group(ROOT_ID, "codex-work").unwrap();
         let pane_id = app
@@ -30375,7 +28935,7 @@ mod tests {
             app.cost_settings
         );
 
-        assert_eq!(app.effective_tree_order(), app.ui_settings.tree_order);
+        assert_eq!(app.effective_tree_order(), TreeOrder::Manual);
         app.settings_adjust_cost_row(CostRow::SortByCost, 0);
         assert_eq!(app.effective_tree_order(), TreeOrder::CostDescending);
 
@@ -30965,133 +29525,26 @@ mod tests {
     }
 
     #[test]
-    fn chatroom_refresh_follows_only_while_the_view_is_at_the_live_tail() {
-        fn reconcile(app: &mut App) -> bool {
-            let before_rooms = app.chatroom_projects.clone();
-            let before_messages = app
-                .chatrooms
-                .iter()
-                .map(|(id, state)| (*id, state.messages.clone()))
-                .collect::<HashMap<_, _>>();
-            app.reconcile_chatroom_projects();
-            app.settle_filesystem_for_test();
-            before_rooms != app.chatroom_projects
-                || before_messages
-                    != app
-                        .chatrooms
-                        .iter()
-                        .map(|(id, state)| (*id, state.messages.clone()))
-                        .collect::<HashMap<_, _>>()
-        }
-
-        let directory = tempfile::tempdir().unwrap();
-        crate::chatroom::initialize(directory.path()).unwrap();
-        for index in 0..20 {
-            crate::chatroom::append_message(
-                directory.path(),
-                "agent:codex",
-                &format!("initial history message {index:02}"),
-            )
-            .unwrap();
-        }
-        let mut app = app();
-        let project_id = app
-            .tree
-            .add_project(directory.path().to_path_buf())
-            .unwrap();
-        app.set_screen_area(Rect::new(0, 0, 90, 16));
-        assert!(
-            reconcile(&mut app),
-            "room discovery completes before selecting its row"
-        );
-        app.show_chatroom(project_id);
-        assert!(reconcile(&mut app));
-        assert!(!reconcile(&mut app));
-
-        let initial_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
-        assert!(initial_metrics.is_overflowing());
-        assert_eq!(initial_metrics.top, initial_metrics.maximum_top);
-        assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 0);
-
-        app.handle_chatroom_key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::PageUp,
-            crossterm::event::KeyModifiers::NONE,
-        ));
-        let manually_scrolled_top = app.chatroom_scroll_metrics(project_id).unwrap().top;
-        assert!(app.chatrooms[&project_id].scroll_from_newest > 0);
-
-        crate::chatroom::append_message(
-            directory.path(),
-            "agent:claude",
-            "new message while history is being inspected",
-        )
-        .unwrap();
-        assert!(reconcile(&mut app));
-        assert_eq!(
-            app.chatroom_scroll_metrics(project_id).unwrap().top,
-            manually_scrolled_top
-        );
-        assert!(app.chatrooms[&project_id].scroll_from_newest > 0);
-
-        app.handle_chatroom_key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::End,
-            crossterm::event::KeyModifiers::NONE,
-        ));
-        crate::chatroom::append_message(
-            directory.path(),
-            "agent:codex",
-            "new message while following the live tail",
-        )
-        .unwrap();
-        assert!(reconcile(&mut app));
-        let followed_metrics = app.chatroom_scroll_metrics(project_id).unwrap();
-        assert_eq!(followed_metrics.top, followed_metrics.maximum_top);
-        assert_eq!(app.chatrooms[&project_id].scroll_from_newest, 0);
-    }
-
-    #[test]
-    fn chatroom_reconciliation_uses_an_independent_one_second_deadline() {
-        let mut app = app();
+    fn integration_maintenance_uses_its_own_fifteen_second_deadline() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new("test".to_string(), project.path().to_path_buf());
         let now = Instant::now();
-        app.next_chatroom_reconcile_at = Some(now + CHATROOM_RECONCILE_INTERVAL);
-
-        assert!(!app.tick_chatroom_projects(now));
+        app.next_integration_maintenance_at = Some(now + INTEGRATION_MAINTENANCE_INTERVAL);
+        assert!(!app.tick_integration_maintenance(now));
         assert_eq!(
-            app.next_chatroom_reconcile_at.unwrap(),
-            now + CHATROOM_RECONCILE_INTERVAL
+            app.next_integration_maintenance_at.unwrap(),
+            now + INTEGRATION_MAINTENANCE_INTERVAL,
+            "an early tick leaves the deadline alone"
         );
 
-        assert!(!app.tick_chatroom_projects(now + CHATROOM_RECONCILE_INTERVAL));
+        assert!(!app.tick_integration_maintenance(now + INTEGRATION_MAINTENANCE_INTERVAL));
         assert_eq!(
-            app.next_chatroom_reconcile_at.unwrap(),
-            now + CHATROOM_RECONCILE_INTERVAL * 2
+            app.next_integration_maintenance_at.unwrap(),
+            now + INTEGRATION_MAINTENANCE_INTERVAL * 2
         );
 
-        app.request_chatroom_reconcile();
-        assert!(app.next_chatroom_reconcile_at.unwrap() <= Instant::now());
-    }
-
-    #[test]
-    fn chatroom_full_repairs_are_throttled_between_structural_requests() {
-        let mut app = app();
-        let now = Instant::now();
-        app.next_chatroom_reconcile_at = Some(now);
-        assert!(!app.tick_chatroom_projects(now), "first deadline repairs");
-        let repair_at = app.next_chatroom_repair_at.expect("repair scheduled");
-        assert_eq!(repair_at, now + CHATROOM_REPAIR_INTERVAL);
-
-        // No room is visible, so between repairs the stamp is unchanged and the
-        // next second's deadline queues nothing and keeps the repair deadline.
-        app.next_chatroom_reconcile_at = Some(now + CHATROOM_RECONCILE_INTERVAL);
-        assert!(!app.tick_chatroom_projects(now + CHATROOM_RECONCILE_INTERVAL));
-        assert_eq!(app.next_chatroom_repair_at, Some(repair_at));
-        assert!(app.visible_chatroom_target().is_none());
-
-        app.request_chatroom_reconcile();
-        assert_eq!(
-            app.next_chatroom_repair_at, None,
-            "structural change forces repair"
-        );
+        app.request_integration_maintenance();
+        assert!(app.next_integration_maintenance_at.unwrap() <= Instant::now());
     }
 
     #[test]
@@ -31157,7 +29610,7 @@ mod tests {
     }
 
     #[test]
-    fn project_chatroom_setup_refresh_is_idempotent_and_preserves_room_data() {
+    fn project_chatroom_setup_refresh_is_idempotent() {
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("test".to_string(), project.path().to_path_buf());
         app.refresh_agent_setup_statuses();
@@ -31178,7 +29631,6 @@ mod tests {
 
         app.settings_toggle_agent_setup_row(&row);
         app.settle_filesystem_for_test();
-        assert!(crate::chatroom::exists(project.path()));
         assert!(matches!(
             app.agent_setup_status(AgentFeature::Chatroom, &project.path().join("CLAUDE.md")),
             AgentSetupTargetStatus::Available(FeatureSetupStatus::Managed)
@@ -31186,7 +29638,6 @@ mod tests {
 
         app.settings_toggle_agent_setup_row(&row);
         app.settle_filesystem_for_test();
-        assert!(crate::chatroom::exists(project.path()));
         assert!(matches!(
             app.agent_setup_status(AgentFeature::Chatroom, &project.path().join("CLAUDE.md")),
             AgentSetupTargetStatus::Available(FeatureSetupStatus::Managed)
@@ -32094,171 +30545,6 @@ mod board_handoff_tests {
 }
 
 #[cfg(test)]
-mod light_copy_recovery_contract_tests {
-    use super::*;
-    fn admitted_failure_fixture() -> (App, *const u8) {
-        let mut app = App::new("light-copy-owned-recovery".into(), std::env::temp_dir());
-        let client = crate::execution::test_client();
-        app.terminal_clipboard = Some(crate::terminal_clipboard::ClipboardService::fixture_queue(
-            client.clone(),
-        ));
-        app.light_copy_selection = Some(crate::smart_copy_selection::SelectionOwner::new(
-            client.clone(),
-        ));
-        let capture = client
-            .try_reserve_external(ilium_execution::JobCost {
-                input_bytes: 8192,
-                result_bytes: 8192,
-            })
-            .unwrap()
-            .retain(())
-            .unwrap();
-        let (_, hold) = capture.into_parts();
-        let mut session = crate::smart_copy::SmartCopySession::fixture_selection(
-            991,
-            &["retained original α", "second selected region"],
-        );
-        session.output_retention = Some(hold);
-        let pointer = session.selected_parts().next().unwrap().as_ptr();
-        app.smart_copy_session = Some(session);
-        app.smart_copy_light = Some(crate::smart_copy_light::SmartCopyLightState::new(
-            app.terminal_settings.smart_copy_light_key,
-            Instant::now(),
-        ));
-        app.mode = Mode::SmartCopy;
-        app.finish_smart_copy_light();
-        assert!(app.smart_copy_session.is_none());
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while app.light_copy_retry_generation.is_none() {
-            app.collect_light_copy_selection();
-            if let Some(reply) = app
-                .terminal_clipboard
-                .as_ref()
-                .unwrap()
-                .fixture_process_next(|_| Err("temporary native failure".into()))
-            {
-                app.accept_clipboard_completion(reply);
-            }
-            assert!(
-                Instant::now() < deadline,
-                "failed original was not returned to selection UI"
-            );
-            std::thread::yield_now();
-        }
-        (app, pointer)
-    }
-    #[test]
-    fn failed_copy_restores_original_selection_and_enter_retries_without_ui_join_or_toggle() {
-        let (mut app, pointer) = admitted_failure_fixture();
-        assert!(matches!(app.mode, Mode::SmartCopy));
-        assert!(app.smart_copy_preview.is_none());
-        assert!(
-            app.smart_copy_light.is_none(),
-            "failed copy must not automatically retry after grace"
-        );
-        let session = app.smart_copy_session.as_ref().unwrap();
-        assert_eq!(session.generation, 991);
-        assert_eq!(session.selected_parts().next().unwrap().as_ptr(), pointer);
-        assert_eq!(session.selected_count(), 2);
-        assert!(app
-            .status_message
-            .as_ref()
-            .unwrap()
-            .contains("Enter retries"));
-        crate::keys::handle_event(
-            &mut app,
-            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Enter,
-                crossterm::event::KeyModifiers::NONE,
-            )),
-        );
-        assert!(app.smart_copy_session.is_none());
-        assert!(matches!(app.mode, Mode::Normal));
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while app.smart_copy_preview.is_none() {
-            app.collect_light_copy_selection();
-            if let Some(reply) = app
-                .terminal_clipboard
-                .as_ref()
-                .unwrap()
-                .fixture_process_next(|operation| {
-                    let crate::terminal_clipboard::Operation::WriteShared(text) = operation else {
-                        panic!("wrong retry operation");
-                    };
-                    assert_eq!(
-                        text.as_str(),
-                        "retained original α\n\nsecond selected region"
-                    );
-                    Ok(String::new())
-                })
-            {
-                app.accept_clipboard_completion(reply);
-            }
-            assert!(Instant::now() < deadline);
-            std::thread::yield_now();
-        }
-        assert!(app.smart_copy_preview.as_ref().unwrap().copied);
-        assert_eq!(app.smart_copy_preview.as_ref().unwrap().region_count, 2);
-    }
-    #[test]
-    fn escape_explicitly_cancels_restored_original_and_does_not_disable_next_admission() {
-        let (mut app, _) = admitted_failure_fixture();
-        crate::keys::handle_event(
-            &mut app,
-            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Esc,
-                crossterm::event::KeyModifiers::NONE,
-            )),
-        );
-        assert!(matches!(app.mode, Mode::Normal));
-        assert!(app.smart_copy_session.is_none());
-        assert!(app.light_copy_retry_generation.is_none());
-        assert!(app.light_copy_recovery.is_empty() && app.light_copy_restored.is_empty());
-        let client = crate::execution::test_client();
-        let capture = client
-            .try_reserve_external(ilium_execution::JobCost {
-                input_bytes: 8192,
-                result_bytes: 8192,
-            })
-            .unwrap()
-            .retain(())
-            .unwrap();
-        let (_, hold) = capture.into_parts();
-        let mut session = crate::smart_copy::SmartCopySession::fixture_selection(
-            992,
-            &["next independent selection"],
-        );
-        session.output_retention = Some(hold);
-        let mut slot = Some(session);
-        app.light_copy_selection
-            .as_mut()
-            .unwrap()
-            .admit(&mut slot, app.terminal_clipboard.as_ref().unwrap())
-            .unwrap();
-        assert!(
-            slot.is_none(),
-            "one transient copy failure must not permanently close admission"
-        );
-        app.light_copy_shutdown = true;
-        app.light_copy_selection.as_mut().unwrap().native_closed();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while app.light_copy_selection.as_ref().unwrap().pending() {
-            app.collect_light_copy_selection();
-            if let Some(reply) = app
-                .terminal_clipboard
-                .as_ref()
-                .unwrap()
-                .fixture_process_next(|_| panic!("cancelled next selection must not write"))
-            {
-                app.accept_clipboard_completion(reply);
-            }
-            assert!(Instant::now() < deadline);
-        }
-        app.light_copy_recovery.clear(); // Explicit failed shutdown receipt; whole source retires on CPU.
-    }
-}
-
-#[cfg(test)]
 mod text_trigger_receipt_tests {
     use super::*;
 
@@ -32439,56 +30725,5 @@ mod popover_repo_reuse_tests {
             1,
             "stale check asks again"
         );
-    }
-}
-
-#[cfg(test)]
-mod smart_copy_capture_retention_contract_tests {
-    use super::*;
-
-    #[test]
-    fn model_event_replacement_preserves_independent_capture_debit() {
-        let capture_client = crate::execution::test_document_client();
-        let model_client = crate::execution::test_document_client();
-        let mut app = App::new("capture-retention-contract".into(), std::env::temp_dir());
-        let capture = capture_client
-            .try_reserve_external(ilium_execution::JobCost {
-                input_bytes: 8192,
-                result_bytes: 8192,
-            })
-            .expect("capture reservation")
-            .retain(())
-            .expect("capture owner");
-        let (_, capture_hold) = capture.into_parts();
-        let model = model_client
-            .try_reserve_external(ilium_execution::JobCost {
-                input_bytes: 4096,
-                result_bytes: 4096,
-            })
-            .expect("model reservation")
-            .retain(())
-            .expect("model owner");
-        let (_, model_hold) = model.into_parts();
-        let mut session =
-            crate::smart_copy::SmartCopySession::fixture_selection(7123, &["original capture"]);
-        let pane_id = session.pane_id;
-        session.capture_retention = Some(capture_hold);
-        app.smart_copy_session = Some(session);
-        let before = capture_client.usage();
-        app.apply_smart_copy_worker_event(crate::smart_copy_workers::SmartCopyWorkerEvent {
-            generation: 7123,
-            pane_id,
-            update: crate::smart_copy_workers::SmartCopyWorkerUpdate::ResponseStarted,
-            retention: Some(model_hold),
-        });
-        let session = app.smart_copy_session.as_ref().expect("same session");
-        assert!(session.capture_retention.is_some());
-        assert!(session.output_retention.is_some());
-        assert_eq!(capture_client.usage().input_bytes, before.input_bytes);
-        assert_eq!(capture_client.usage().result_bytes, before.result_bytes);
-        drop(app.smart_copy_session.take());
-        assert_eq!(capture_client.usage().input_bytes, 0);
-        assert_eq!(capture_client.usage().result_bytes, 0);
-        assert_eq!(model_client.usage().result_bytes, 0);
     }
 }

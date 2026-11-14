@@ -9,6 +9,7 @@ mod app;
 mod budget;
 mod budget_receipts;
 mod dialogs;
+mod editor_line_display;
 mod layout;
 mod misc;
 mod modal_stack;

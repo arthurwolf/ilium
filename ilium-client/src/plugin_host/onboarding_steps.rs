@@ -129,6 +129,8 @@ mod tests {
             placement: None,
             when: None,
             caption: None,
+            dynamic: false,
+            menu_item: None,
         }
     }
 

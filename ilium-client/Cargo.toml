@@ -45,7 +45,6 @@ ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
 ilium-inference = { version = "0.1.1", path = "../ilium-inference" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 ilium-remote-compaction = { version = "0.1.1", path = "../ilium-remote-compaction" }
-ilium-session-convert = { version = "0.1.1", path = "../ilium-session-convert" }
 ilium-sound = { version = "0.1.1", path = "../ilium-sound" }
 ilium-transport = { version = "0.1.1", path = "../ilium-transport" }
 ilium-voice = { version = "0.1.1", path = "../ilium-voice" }

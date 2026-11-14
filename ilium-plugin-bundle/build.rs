@@ -32,12 +32,12 @@ const API_VERSION: [u16; 3] = [0, 1, 0];
 const API_VERSION_SECTION: &str = "ilium:api-version";
 const WASM_TARGET: &str = "wasm32-wasip2";
 /// Sides built as components, in build order.
-const BUILT_SIDES: &[&str] = &["server", "client"];
+const BUILT_SIDES: &[&str] = &["server", "client", "scene"];
 /// Sides a manifest can declare.
 const ALL_SIDES: &[&str] = &["server", "client", "scene"];
 /// Sides without component glue in the SDK yet; their components are reported as pending,
-/// never as missing.
-const PENDING_SIDES: &[&str] = &["scene"];
+/// never as missing. Every side has glue now.
+const PENDING_SIDES: &[&str] = &[];
 /// The settings file, beside this script.
 const SETTINGS_FILE: &str = "bundle-build.conf";
 /// The keys of the settings file.

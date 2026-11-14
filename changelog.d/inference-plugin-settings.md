@@ -1,0 +1,2 @@
+### Added
+- The Inference core plugin now contributes its own settings page (provider, per-provider endpoint, key and model, title style, restructure budget) whose rows edit the built-in `[inference]` table of `config.toml` directly, and a Test provider command that writes the latency and model into its Last test row. A plugin that holds `settings.write-kernel:<tab>` can bind its settings rows to that tab's table with `kernel_tab` and `kernel_key`; a change reloads the client's inference settings at once.

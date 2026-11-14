@@ -163,6 +163,17 @@ pub fn candidates_message(lines: &[&str]) -> Event {
     })
 }
 
+/// The `scan` message the client side sends to ask the server side for the candidates of a pane.
+pub fn scan_message(pane: u64, rows: Option<(u32, u32)>) -> Event {
+    Event::Message(MessageEvent {
+        from: PluginId(PLUGIN_ID.to_string()),
+        from_side: PluginSide::Client,
+        from_client: None,
+        channel: "scan".to_string(),
+        payload: ilium_plugin_core_smart_copy::scan_payload(pane, rows),
+    })
+}
+
 /// The picker popup target of the page.
 pub fn picker_target() -> ViewTarget {
     ViewTarget::Popup("smart-copy".to_string())

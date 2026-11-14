@@ -284,7 +284,34 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "publishes": [
         "ilium.core.tree/changed"
       ]
-    }
+    },
+    "tree_orderings": [
+      {
+        "id": "type",
+        "title": "Item type",
+        "slot": "order-type"
+      },
+      {
+        "id": "age-newest",
+        "title": "Newest first",
+        "slot": "order-age-newest"
+      },
+      {
+        "id": "age-oldest",
+        "title": "Oldest first",
+        "slot": "order-age-oldest"
+      },
+      {
+        "id": "name-az",
+        "title": "Name (A–Z)",
+        "slot": "order-name-az"
+      },
+      {
+        "id": "name-za",
+        "title": "Name (Z–A)",
+        "slot": "order-name-za"
+      }
+    ]
   },
   "activation": [
     "startup"

@@ -63,8 +63,6 @@ pub enum CliError {
         #[source]
         source: std::io::Error,
     },
-    #[error("chatroom operation failed: {0}")]
-    Chatroom(#[from] anyhow::Error),
     #[error(
         "not running inside an ilium-managed pane: {0} is not set -- `ilium progress` only \
          works when run from inside a pane ilium itself spawned"

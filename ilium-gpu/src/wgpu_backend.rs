@@ -427,7 +427,7 @@ mod tests {
             return;
         };
         let mut out = vec![0.0f32; 16];
-        for kernel in [GpuKernel::DitheredWaves, GpuKernel::DithrPatterns] {
+        for kernel in [GpuKernel::DithrPatterns] {
             let job = GpuJob {
                 kernel,
                 width: 4,

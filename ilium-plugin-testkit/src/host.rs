@@ -12,13 +12,15 @@ use ilium_plugin_sdk_core::generated::host::{Bucket, InstanceState};
 use ilium_plugin_sdk_core::host::inference::{Completion, CompletionRequest};
 use ilium_plugin_sdk_core::host::keymap::Binding;
 use ilium_plugin_sdk_core::host::workspace::WorkspaceSpec;
+use ilium_plugin_sdk_core::host::LiveSession;
 use ilium_plugin_sdk_core::primitives::terminal::{OutputFilter, Selection};
 use ilium_plugin_sdk_core::primitives::{SessionRef, SignatureSpec, TranscriptTurn};
 use ilium_plugin_sdk_core::types::Area;
 use ilium_plugin_sdk_core::types::{
     ActionKind, ActionValue, Activation, AgentModel, Color, ColorRole, DeactivationReason,
-    ErrorCode, Event, Intent, Outcome, PluginError, PluginId, PluginSide, PointerModifiers,
-    RequestId, RequestRef, RequestResult, Submission, UiAction, UiTree, ViewTarget,
+    ErrorCode, Event, GrabId, Intent, KeyEvent, Outcome, PluginError, PluginId, PluginSide,
+    PointerModifiers, RequestId, RequestRef, RequestResult, Submission, UiAction, UiTree,
+    ViewTarget,
 };
 use ilium_plugin_sdk_core::NativeEntry;
 use serde_json::Value;
@@ -1517,8 +1519,14 @@ impl FakeHost {
     }
 
     /// Sends a key to a view.
-    pub fn key(&mut self, _target: ViewTarget, _key: &str) {
+    pub fn key(&mut self, _target: ViewTarget, key: &str) {
         self.require_active("key");
+        self.deliver_one(Event::KeyPressed(KeyEvent {
+            grab: GrabId(0),
+            pane: None,
+            chord: key.to_owned(),
+            repeat: false,
+        }));
     }
 
     /// Hover text at a cell.
@@ -2048,8 +2056,14 @@ impl FakeHost {
             payload_json: payload_json.to_string(),
             caller: ilium_plugin_sdk_core::types::PluginId(self.plugin_id.clone()),
         };
-        self.call_plugin(|plugin| plugin.handle_service(call))
-            .flatten()
+        let reply = self
+            .call_plugin(|plugin| plugin.handle_service(call))
+            .flatten();
+        let queued = std::mem::take(&mut self.bridge.queued_submissions);
+        if !queued.is_empty() {
+            self.admit_submissions(queued);
+        }
+        reply
     }
 
     /// Calls the plugin's own single-method service.
@@ -3466,6 +3480,80 @@ impl FakeSessions {
     /// Requests made to sessions as `(session, kind, payload)`.
     pub fn requests(&self) -> Vec<(String, String, String)> {
         self.requests.clone()
+    }
+
+    /// Every session the plugin can see: the live ones, then the unreachable ones (a running
+    /// server that does not answer is still listed). The session name is its identity here.
+    pub(crate) fn listed(&self) -> Vec<LiveSession> {
+        let live = self.live.iter().map(|(name, path, is_self, panes_json)| {
+            let panes = serde_json::from_str::<serde_json::Value>(panes_json)
+                .ok()
+                .and_then(|value| value.as_array().map(Vec::len))
+                .unwrap_or(0);
+            LiveSession {
+                name: name.clone(),
+                project: path.clone(),
+                socket_id: name.clone(),
+                panes: u32::try_from(panes).unwrap_or(u32::MAX),
+                attached_clients: 0,
+                is_self: *is_self,
+            }
+        });
+        let unreachable = self.unreachable.iter().map(|(name, path)| LiveSession {
+            name: name.clone(),
+            project: path.clone(),
+            socket_id: name.clone(),
+            panes: 0,
+            attached_clients: 0,
+            is_self: false,
+        });
+        live.chain(unreachable).collect()
+    }
+
+    /// Records one request and answers it the way a reachable session would: `list-panes` with
+    /// the panes it was registered with, `broadcast` with one outcome per target (`queued` for
+    /// a target that asked to queue, else `delivered`). An unreachable session answers an error.
+    pub(crate) fn answer(&mut self, session: &str, command: &str, arguments_json: &str) -> String {
+        self.requests.push((
+            session.to_string(),
+            command.to_string(),
+            arguments_json.to_string(),
+        ));
+        if self.unreachable.iter().any(|(name, _)| name == session) {
+            return serde_json::json!({"error": "the session did not answer"}).to_string();
+        }
+        match command {
+            "list-panes" => self
+                .live
+                .iter()
+                .find(|(name, _, _, _)| name == session)
+                .map_or_else(
+                    || "[]".to_string(),
+                    |(_, _, _, panes_json)| panes_json.clone(),
+                ),
+            "broadcast" => {
+                let arguments: serde_json::Value =
+                    serde_json::from_str(arguments_json).unwrap_or_default();
+                let outcomes: Vec<serde_json::Value> = arguments["targets"]
+                    .as_array()
+                    .map(|targets| {
+                        targets
+                            .iter()
+                            .map(|target| {
+                                let outcome = if target["queue"].as_bool() == Some(true) {
+                                    "queued"
+                                } else {
+                                    "delivered"
+                                };
+                                serde_json::json!({"pane_id": target["pane_id"], "outcome": outcome})
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                serde_json::Value::Array(outcomes).to_string()
+            }
+            _ => serde_json::json!({"error": "unknown command"}).to_string(),
+        }
     }
 }
 

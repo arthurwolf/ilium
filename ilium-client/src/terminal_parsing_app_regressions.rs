@@ -297,7 +297,7 @@ fn all_variants(target: PaneTarget, ordinal: u64) -> Vec<ParseResult> {
         ParseResult::Capture {
             target: target.clone(),
             generation: 77,
-            snapshot: state.with_screen(crate::smart_copy::SmartCopySnapshot::capture),
+            snapshot: state.with_screen(crate::terminal_parsing::CapturedScreen::capture),
         },
         ParseResult::CaptureFailed {
             target,

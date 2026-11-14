@@ -295,6 +295,141 @@ pub trait NativeRenderer: Sized {
 /// Alias used by the plan (test-plan.md section 1.3).
 pub use NativeRenderer as SceneRenderer;
 
+/// Pixels per terminal column of the Braille field a scene draws into.
+pub const FIELD_PIXELS_PER_COLUMN: u32 = 2;
+/// Pixels per terminal row of the Braille field a scene draws into.
+pub const FIELD_PIXELS_PER_ROW: u32 = 4;
+
+/// The pixel field of one frame: two pixels per terminal column and four per row (the Braille
+/// field of the ambient scenes), one grey value per pixel (0 is no ink, 255 full ink), and an
+/// optional colour per terminal cell. `render` of a [`SceneProgram`] fills it; the component glue
+/// writes it to the host's frame surface, and the native harness turns it into Braille cells.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SceneField {
+    /// Columns of the field in terminal cells.
+    pub columns: u16,
+    /// Rows of the field in terminal cells.
+    pub rows: u16,
+    /// One grey value per pixel, row by row; `width() * height()` long.
+    pub pixels: Vec<u8>,
+    /// One `0xRRGGBB` value per terminal cell, row by row; only read when the program
+    /// reports `uses_cell_colors`.
+    pub cell_colors: Vec<u32>,
+}
+
+impl SceneField {
+    /// A cleared field of `columns` x `rows` cells.
+    pub fn new(columns: u16, rows: u16) -> Self {
+        let mut field = Self::default();
+        field.resize(columns, rows);
+        field
+    }
+
+    /// Width in pixels.
+    pub fn width(&self) -> usize {
+        usize::from(self.columns) * FIELD_PIXELS_PER_COLUMN as usize
+    }
+
+    /// Height in pixels.
+    pub fn height(&self) -> usize {
+        usize::from(self.rows) * FIELD_PIXELS_PER_ROW as usize
+    }
+
+    /// Resizes to `columns` x `rows` cells and clears every pixel and colour.
+    pub fn resize(&mut self, columns: u16, rows: u16) {
+        self.columns = columns;
+        self.rows = rows;
+        self.pixels.clear();
+        self.pixels.resize(self.width() * self.height(), 0);
+        self.cell_colors.clear();
+        self.cell_colors
+            .resize(usize::from(columns) * usize::from(rows), 0x00ff_ffff);
+    }
+
+    /// Clears every pixel to no ink.
+    pub fn clear(&mut self) {
+        self.pixels.fill(0);
+    }
+
+    /// The Braille character of cell (`column`, `row`): a dot is raised where the pixel is
+    /// at least half inked. A blank cell is a space.
+    pub fn braille(&self, column: u16, row: u16) -> char {
+        // Dot numbers of the Braille block, by (sub column, sub row).
+        const BITS: [[u32; 4]; 2] = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]];
+        let width = self.width();
+        let mut bits = 0u32;
+        for (sub_x, column_bits) in BITS.iter().enumerate() {
+            for (sub_y, bit) in column_bits.iter().enumerate() {
+                let x = usize::from(column) * FIELD_PIXELS_PER_COLUMN as usize + sub_x;
+                let y = usize::from(row) * FIELD_PIXELS_PER_ROW as usize + sub_y;
+                if self.pixels.get(y * width + x).is_some_and(|ink| *ink >= 128) {
+                    bits |= bit;
+                }
+            }
+        }
+        if bits == 0 {
+            ' '
+        } else {
+            char::from_u32(0x2800 + bits).unwrap_or(' ')
+        }
+    }
+
+    /// The field as native cells: `(Braille glyph, cell colour, 0)`.
+    pub fn to_native_cells(&self) -> Vec<(char, u32, u32)> {
+        let mut cells = Vec::with_capacity(usize::from(self.columns) * usize::from(self.rows));
+        for row in 0..self.rows {
+            for column in 0..self.columns {
+                let index = usize::from(row) * usize::from(self.columns) + usize::from(column);
+                let colour = self.cell_colors.get(index).copied().unwrap_or(0x00ff_ffff);
+                cells.push((self.braille(column, row), colour, 0));
+            }
+        }
+        cells
+    }
+}
+
+/// A scene that draws into the pixel field of the host frame surface. This is the contract of
+/// the scene component: `#[ilium_plugin(side = "scene")]` exports `ilium:exports/renderer` and
+/// forwards each call of one `scene-renderer` resource to a value of the plugin type.
+///
+/// PALETTE (future plugin contract): the palette arrives in the spec (`palette`), in every
+/// [`FrameInput`] and through `set_palette`; a scene with natural colours must follow it.
+pub trait SceneProgram: Sized {
+    /// Builds the scene from the spec JSON: `scene` (id), `settings`, `palette`, `mode`.
+    fn new(spec_json: &str) -> Self;
+    /// Draws one frame. `frame.width` and `frame.height` are the field size in pixels and
+    /// equal `field.width()` and `field.height()`.
+    fn render(&mut self, frame: &FrameInput, field: &mut SceneField);
+    /// Receives a later change of the shared palette.
+    fn set_palette(&mut self, palette_rgb: Vec<u32>);
+    /// Target frame rate; the host never asks for more than the manifest's cap.
+    fn frames_per_second(&self) -> u32;
+    /// Whether the scene is ready, still preparing what it draws from, or failed.
+    fn readiness(&self) -> crate::generated::anim::Readiness {
+        crate::generated::anim::Readiness::Ready
+    }
+    /// Whether the scene wants the pointer position.
+    fn wants_pointer(&self) -> bool {
+        false
+    }
+    /// Whether the scene wants the screen occupancy.
+    fn wants_occupancy(&self) -> bool {
+        false
+    }
+    /// Whether `render` fills `field.cell_colors`.
+    fn uses_cell_colors(&self) -> bool {
+        false
+    }
+    /// Applies new settings; `false` asks the host to restart the scene.
+    fn reconfigure(&mut self, _settings_json: &str) -> bool {
+        false
+    }
+    /// One status line for the Settings screen, when the scene has something to say.
+    fn status(&self) -> Option<String> {
+        None
+    }
+}
+
 /// What `#[ilium_plugin]` emits in native mode (rust-sdk.md "The ilium_plugin macro").
 pub trait NativeEntry: Sized {
     /// The side the plugin declared: "server", "client" or "scene".

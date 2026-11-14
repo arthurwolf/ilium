@@ -107,7 +107,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     },
                 ),
             ),
-            ("smart-copy", ilium_client::app::Mode::SmartCopy),
             ("context-menu", ilium_client::app::Mode::Normal),
             (
                 "schedule-pane-input",
@@ -222,11 +221,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ),
             ("voice-prompt-empty", ilium_client::app::Mode::VoicePromptEditor(Box::new(ilium_client::voice_settings::VoicePromptEditorState::new("")))),
             ("voice-prompt-overflow", ilium_client::app::Mode::VoicePromptEditor(Box::new(ilium_client::voice_settings::VoicePromptEditorState::new(&"Synthetic voice instructions: preserve readable spacing and Unicode 界.\n".repeat(80))))),
-            ("conversion-stopping", ilium_client::app::Mode::ConvertSession),
-            ("conversion-starting", ilium_client::app::Mode::ConvertSession),
-            ("conversion-failed-before-stop", ilium_client::app::Mode::ConvertSession),
-            ("conversion-running", ilium_client::app::Mode::ConvertSession),
-            ("conversion-failed", ilium_client::app::Mode::ConvertSession),
             ("stats-hover-preview", ilium_client::app::Mode::Normal),
             ("stats-pinned", ilium_client::app::Mode::Normal),
             ("queue-prompt-short", ilium_client::app::Mode::Normal),
@@ -267,9 +261,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ("inference-key-prompt", ilium_client::app::Mode::Normal),
             ("inference-budget-prompt", ilium_client::app::Mode::Normal),
             ("git-setup-command-prompt", ilium_client::app::Mode::Normal),
-            ("chatroom-empty", ilium_client::app::Mode::Normal),
-            ("chatroom-history-oldest", ilium_client::app::Mode::Normal),
-            ("chatroom-history-newest", ilium_client::app::Mode::Normal),
             ("settings-help", ilium_client::app::Mode::Normal),
             ("settings-value-number", ilium_client::app::Mode::Normal),
             ("settings-icon-catalogue", ilium_client::app::Mode::Normal),
@@ -601,12 +592,8 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     width,
                     height,
                 )?;
-            } else if name.starts_with("chatroom-") {
-                configure_synthetic_chatroom(&mut app, name, output.join("synthetic-workspace"))?;
             } else if name.starts_with("terminal-") {
                 configure_synthetic_terminals(&mut app, name, width, height)?;
-            } else if name.starts_with("conversion-") {
-                configure_synthetic_conversion(&mut app, name);
             } else if name.starts_with("remote-compaction-") {
                 configure_synthetic_remote_compaction(&mut app, name == "remote-compaction-failed");
             } else if name.starts_with("agent-debug-history-") {
@@ -666,8 +653,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     "Synthetic cached location picker; no search client, address lookup, network request or setting save is performed",
                 name if name.starts_with("voice-prompt-") =>
                     "Synthetic voice instruction editor; no saving, provider request, microphone, audio or live input is performed",
-                name if name.starts_with("conversion-") =>
-                    "Synthetic cached conversion state; no agent termination, transcript conversion, worker, server request or resume action is performed",
                 name if name.starts_with("stats-") =>
                     "Synthetic pane and empty cached stats presentation; no transcript loading, stats worker, server request, font or live input is tested",
                 name if name.starts_with("queue-prompt-") =>
@@ -676,8 +661,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     "Synthetic cached onboarding step; no provider requests, saves, audio, voice or practice actions; no actual audio playback or live keyboard input is tested",
                 "board-populated-first" | "board-populated-last" | "board-details-title" | "board-details-notes" =>
                     "Synthetic Markdown board loaded from new fixture input; no board saves, server requests, font or live input are tested",
-                "chatroom-empty" | "chatroom-history-oldest" | "chatroom-history-newest" =>
-                    "Synthetic cached chatroom only; no file writes, live participants, terminal font or input are tested",
                 "remote-compaction-running" | "remote-compaction-failed" =>
                     "Synthetic compaction presentation only; no worker, provider request, transcript or process operation; font and live input are not tested",
                 "agent-debug-history-oldest" | "agent-debug-history-newest" =>
@@ -995,32 +978,6 @@ fn configure_synthetic_remote_compaction(app: &mut App, failed: bool) {
     app.mode = ilium_client::app::Mode::RemoteCompaction;
 }
 
-/// Presentation-only cache: never initialize or append a real chatroom file.
-fn configure_synthetic_chatroom(
-    app: &mut App,
-    name: &str,
-    project_path: PathBuf,
-) -> Result<(), Box<dyn Error>> {
-    let project_id = app.tree.add_project(project_path)?;
-    let mut room = ilium_client::app::ChatroomViewState::default();
-    if name != "chatroom-empty" {
-        room.messages = (0..60).map(|index| ilium_client::chatroom::ChatMessage {
-            timestamp: format!("2026-10-08 12:{index:02}:00 +02:00"),
-            author: "synthetic-agent".to_owned(),
-            content: format!("Synthetic coordination record {index:02}: a long explanation tests wrapped message spacing and the history overflow track."),
-        }).collect();
-        room.draft = "Synthetic unsent draft — long enough to exercise horizontal composer scrolling and keep the insertion point visible".to_owned();
-        if name == "chatroom-history-oldest" {
-            room.scroll_from_newest = usize::MAX;
-        }
-    }
-    app.chatrooms.insert(project_id, room);
-    app.right_panel_target = ilium_client::app::RightPanelTarget::Chatroom { project_id };
-    app.focus = ilium_client::app::FocusTarget::Pane;
-    app.mode = ilium_client::app::Mode::Normal;
-    Ok(())
-}
-
 /// A real cached BoardPane in the compositor, without a server or a board save.
 fn configure_synthetic_board_pane(
     app: &mut App,
@@ -1088,45 +1045,6 @@ fn configure_synthetic_board_pane(
     app.focus = ilium_client::app::FocusTarget::Pane;
     app.mode = ilium_client::app::Mode::Normal;
     Ok(())
-}
-
-fn configure_synthetic_conversion(app: &mut App, name: &str) {
-    use ilium_client::session_conversion::{ConversionDialogState, ConversionPhase};
-    use ilium_core::BuiltinAgentProvider;
-    let mut state = ConversionDialogState::new(
-        ilium_core::ROOT_ID,
-        BuiltinAgentProvider::Claude,
-        BuiltinAgentProvider::Codex,
-        "synthetic-session".to_owned(),
-        PathBuf::from("/synthetic/project"),
-    );
-    state.is_agent_stopped = !matches!(
-        name,
-        "conversion-stopping" | "conversion-failed-before-stop"
-    );
-    state.progress = 0.55;
-    state.steps = vec![
-        "Read source conversation".to_owned(),
-        "Translate messages".to_owned(),
-        "Write target conversation".to_owned(),
-    ];
-    state.total_steps = state.steps.len();
-    state.current_step = 2;
-    state.log = (0..40)
-        .map(|index| {
-            format!("Synthetic conversion log line {index}: translating conversation messages")
-        })
-        .collect();
-    state.phase = match name {
-        "conversion-stopping" => ConversionPhase::StoppingAgent,
-        "conversion-starting" => ConversionPhase::Starting,
-        "conversion-failed" | "conversion-failed-before-stop" => ConversionPhase::Failed(
-            "Synthetic conversion failure: target provider unavailable".to_owned(),
-        ),
-        _ => ConversionPhase::Converting,
-    };
-    app.conversion = Some(Box::new(state));
-    app.mode = ilium_client::app::Mode::ConvertSession;
 }
 
 fn synthetic_location_picker(kind: &str, directory: PathBuf) -> ilium_client::app::Mode {

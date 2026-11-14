@@ -62,8 +62,8 @@ pub fn scene_entry(id: &str) -> Value {
         .unwrap_or_else(|| panic!("scene {id} in the manifest"))
 }
 
-/// The three scene ids of the manifest, in page order.
-pub const MANIFEST_SCENES: [&str; 3] = ["waves", "clock", "stars-overhead"];
+/// The scene ids of the manifest, in page order.
+pub const MANIFEST_SCENES: [&str; 4] = ["waves", "clock", "stars-overhead", "dithered-waves"];
 
 /// A frame input of the given pixel size at `time_millis` since the scene started, at J2000 plus that time.
 pub fn frame(width: u32, height: u32, time_millis: u64) -> FrameInput {

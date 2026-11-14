@@ -44,7 +44,17 @@ pub struct CliCommand {
     pub requires_server: bool,
     /// The argument groups the command takes.
     pub argument_groups: Vec<String>,
+    /// Environment variables of the caller that the command may read. They reach the plugin as
+    /// leading `--ilium-env=NAME=VALUE` words of its argument list (see `ENV_ARGUMENT_PREFIX`).
+    pub env: Vec<String>,
+    /// A file name that marks the project root the command works in; the launcher looks for it
+    /// from the caller's directory upward (and through a linked Git worktree) before the
+    /// command starts. Empty: the caller's directory is the project.
+    pub project_marker: String,
 }
+
+/// The reserved prefix of the leading words that carry the caller's environment variables.
+pub const ENV_ARGUMENT_PREFIX: &str = "--ilium-env=";
 
 impl CliCommand {
     /// Reads one manifest entry; `None` when it has no usable name.
@@ -79,6 +89,8 @@ impl CliCommand {
                 .and_then(Value::as_bool)
                 .unwrap_or(true),
             argument_groups: strings("argument_groups"),
+            env: strings("env"),
+            project_marker: text("project_marker").unwrap_or_default().to_owned(),
         })
     }
 
@@ -124,6 +136,9 @@ pub struct CliStart {
     pub stderr_tty: bool,
     /// The pane the command ran in (`ILIUM_PANE_ID`).
     pub caller_pane: Option<u64>,
+    /// The caller's values for the variables the command declares in its `env` list; names the
+    /// command does not declare are dropped.
+    pub env: Vec<(String, String)>,
 }
 
 /// Why a subcommand did not start.
@@ -279,6 +294,26 @@ impl HostRuntime {
         } else {
             (start.args.clone(), None)
         };
+        let argv = if command.env.is_empty() {
+            argv
+        } else {
+            if argv
+                .iter()
+                .any(|word| word.starts_with(ENV_ARGUMENT_PREFIX))
+            {
+                return Err(CliStartError::Usage(format!(
+                    "arguments may not start with {ENV_ARGUMENT_PREFIX}"
+                )));
+            }
+            let mut words: Vec<String> = start
+                .env
+                .iter()
+                .filter(|(name, _)| command.env.iter().any(|declared| declared == name))
+                .map(|(name, value)| format!("{ENV_ARGUMENT_PREFIX}{name}={value}"))
+                .collect();
+            words.extend(argv);
+            words
+        };
         let invocation = self.cli_book.open(CliSession {
             plugin: command.plugin.clone(),
             output: OutputForm::from_manifest(Some(&command.output)),
@@ -427,6 +462,19 @@ mod tests {
         assert!(command.argument_groups.is_empty());
         assert!(CliCommand::from_manifest("x.y", &json!({"name": "Bad"})).is_none());
         assert!(CliCommand::from_manifest("x.y", &json!({"summary": "no name"})).is_none());
+    }
+
+    /// REQ: API-005
+    #[test]
+    fn declared_environment_names_and_the_project_marker_are_read() {
+        let entry = json!({
+            "name": "chat", "env": ["ILIUM_PANE_ID", 7], "project_marker": "CHATROOM.md"
+        });
+        let command = CliCommand::from_manifest("x.y", &entry).expect("entry parses");
+        assert_eq!(command.env, vec!["ILIUM_PANE_ID".to_owned()]);
+        assert_eq!(command.project_marker, "CHATROOM.md");
+        let plain = CliCommand::from_manifest("x.y", &json!({"name": "ls"})).expect("parses");
+        assert!(plain.env.is_empty() && plain.project_marker.is_empty());
     }
 
     /// REQ: API-005

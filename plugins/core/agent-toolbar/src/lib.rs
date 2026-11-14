@@ -5,6 +5,7 @@
 //! action, the model and context message and the debug history.
 
 mod client;
+pub mod freeze;
 mod server;
 mod settings;
 

@@ -143,15 +143,9 @@ fn is_codex_pane(app: &App, pane_id: NodeId) -> bool {
         .is_some_and(|state| state.class == AgentClass::Codex)
 }
 
-/// Link in the live (not frozen by selection or smart copy) Codex screen.
+/// Link in the live (not frozen by selection) Codex screen.
 fn live_link(app: &App, pane_id: NodeId) -> Option<GoalResumeLink> {
-    if !is_codex_pane(app, pane_id)
-        || app.selection_terminal_source(pane_id).is_some()
-        || app
-            .smart_copy_session
-            .as_ref()
-            .is_some_and(|session| session.pane_id == pane_id)
-    {
+    if !is_codex_pane(app, pane_id) || app.selection_terminal_source(pane_id).is_some() {
         return None;
     }
     let Some(PaneRuntime::Terminal(view)) = app.panes.get(&pane_id) else {

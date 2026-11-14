@@ -31,7 +31,7 @@ impl AnimationKind {
             Self::BoxMachine => "A generative machine of boxes and rails slowly builds and rearranges itself. It is an abstract mechanical scene that keeps reassembling its parts.",
             Self::MachineScreen => "A generative machine display shows scanning patterns and glyph-like blocks. It resembles an old instrument screen that is always reading something.",
             Self::FbmClouds => "Domain-warped noise clouds are thresholded into one-bit dots. It is rendered in software and runs in slow motion by default.",
-            Self::DitheredWaves => "A layered wave shader is rendered on the CPU with ordered dithering. It runs in software and in slow motion by default, so the waves move gently.",
+            Self::PluginScene => "A scene supplied by an enabled plugin, such as the dithered waves of the Scenes plugin. Pick the scene here and set its own options; colour, dithering and display use the shared rows.",
             Self::DithrPatterns => "A set of dithr-style animated patterns, each with selectable dither algorithms. It is a showcase for comparing how different dithering methods look.",
             Self::HexExpedition => "An endless explorer's hex map is generated as you watch, from jungle and desert to volcanic lands. A slow camera pans across animated water, trees, smoke, fires and lava.",
             Self::VectorTd => "A tower defense game plays itself, with an AI building, upgrading and unlocking glowing vector towers. It fights waves of monsters, level after level, across several maps.",

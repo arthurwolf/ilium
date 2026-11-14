@@ -329,7 +329,6 @@ pub(crate) fn inference_settings_bytes(settings: &InferenceSettings) -> usize {
         &instructions.organization,
         &instructions.naming_and_organization,
         &instructions.project_naming,
-        &instructions.smart_copy,
         &instructions.ask_for_update,
         &settings.kilo_gateway.model,
         &database.uri,
@@ -1057,7 +1056,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn naming_and_smart_copy_share_the_exact_process_provider_gate() {
+    fn naming_workers_share_the_exact_process_provider_gate() {
         let (events_tx, _) = tokio::sync::mpsc::channel(1);
         let workers = NamingWorkers::new(events_tx, &InferenceSettings::default()).unwrap();
         assert!(Arc::ptr_eq(

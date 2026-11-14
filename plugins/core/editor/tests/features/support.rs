@@ -78,7 +78,7 @@ pub fn activation(settings_json: &str) -> Activation {
 
 /// An activated plugin instance driven directly (no host context).
 pub fn direct(settings_json: &str) -> EditorClient {
-    let mut editor = EditorClient;
+    let mut editor = EditorClient::default();
     Lifecycle::activate(&mut editor, activation(settings_json)).expect("activate");
     editor
 }

@@ -51,6 +51,10 @@ pub struct FakeCli {
     env: BTreeMap<String, String>,
     cwd: String,
     outputs: BTreeMap<u64, Rc<RefCell<InvocationOutput>>>,
+    /// The standard input each invocation was started with.
+    stdin: BTreeMap<u64, Vec<u8>>,
+    /// The pane each invocation ran in (`ILIUM_PANE_ID` when it was started).
+    callers: BTreeMap<u64, u64>,
     outbox: Outbox,
 }
 
@@ -64,9 +68,17 @@ impl FakeCli {
     }
 
     /// Delivers `cli-invoked` with these arguments and stdin.
-    pub fn invoke(&mut self, args: &[&str], _stdin: &[u8]) -> Invocation {
+    pub fn invoke(&mut self, args: &[&str], stdin: &[u8]) -> Invocation {
         self.next_id += 1;
         let id = self.next_id;
+        self.stdin.insert(id, stdin.to_vec());
+        if let Some(pane) = self
+            .env
+            .get("ILIUM_PANE_ID")
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            self.callers.insert(id, pane);
+        }
         let name = args.first().map(|word| word.to_string()).unwrap_or_default();
         let arguments: Vec<String> = args.iter().skip(1).map(|word| word.to_string()).collect();
         let output = Rc::new(RefCell::new(InvocationOutput::default()));
@@ -85,6 +97,16 @@ impl FakeCli {
             id,
             output,
         }
+    }
+
+    /// The standard input of an invocation (what `read-stdin` hands the plugin).
+    pub(crate) fn stdin_of(&self, invocation: u64) -> Option<Vec<u8>> {
+        self.stdin.get(&invocation).cloned()
+    }
+
+    /// The pane an invocation ran in, when `ILIUM_PANE_ID` was set at its start.
+    pub(crate) fn caller_pane_of(&self, invocation: u64) -> Option<u64> {
+        self.callers.get(&invocation).copied()
     }
 
     /// Appends plugin output to a running invocation; false when the id is unknown.

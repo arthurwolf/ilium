@@ -11,10 +11,43 @@
 //! `SceneEnv::palette` when the scene is built and later changes through
 //! `Scene::set_palette`; a plugin scene with natural colours must follow it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{LazyLock, Mutex, RwLock};
 
 use crate::control::{Control, ControlValue};
-use crate::scene::{PaletteScene, Scene, SceneEnv};
+use crate::scene::{Frame, PaletteScene, Scene, SceneEnv};
+
+/// The edited control values of one external scene, by control id. They live in the project
+/// settings (`AmbientSettings::plugin_scene`), never in the factory, so two projects can
+/// show the same scene with different settings.
+pub type SceneValues = BTreeMap<String, ControlValue>;
+
+static EXTERNAL_SCENES: LazyLock<RwLock<ExternalScenes>> =
+    LazyLock::new(|| RwLock::new(ExternalScenes::default()));
+
+/// The external scenes of this process, registered by the plugin host and read by the
+/// ambient engine (`AmbientKind::Plugin`).
+pub fn external_scenes() -> &'static RwLock<ExternalScenes> {
+    &EXTERNAL_SCENES
+}
+
+static INTERNED: LazyLock<Mutex<BTreeSet<&'static str>>> =
+    LazyLock::new(|| Mutex::new(BTreeSet::new()));
+
+/// A `'static` copy of `text`, shared by equal texts. Settings rows hold `&'static str`;
+/// plugin scene controls come from manifests, so their texts are interned once and live
+/// as long as the process (the set is bounded by the installed scene manifests).
+pub fn intern(text: &str) -> &'static str {
+    let Ok(mut set) = INTERNED.lock() else {
+        return Box::leak(text.to_owned().into_boxed_str());
+    };
+    if let Some(existing) = set.get(text) {
+        return existing;
+    }
+    let leaked: &'static str = Box::leak(text.to_owned().into_boxed_str());
+    set.insert(leaked);
+    leaked
+}
 
 /// Longest id of an external scene, in bytes.
 pub const MAXIMUM_EXTERNAL_SCENE_ID_BYTES: usize = 256;
@@ -25,18 +58,24 @@ pub trait ExternalSceneFactory: Send + Sync {
     fn id(&self) -> &str;
     /// The name shown in the background animation list.
     fn title(&self) -> &str;
-    /// The scene's own settings rows, never colour, dither or display rows (those are the
-    /// shared look's).
-    fn controls(&self) -> Vec<Control> {
+    /// The scene's own settings rows showing `values` (defaults for ids not in it), never
+    /// colour, dither or display rows (those are the shared look's).
+    fn controls(&self, _values: &SceneValues) -> Vec<Control> {
         Vec::new()
     }
-    /// Applies one edit of a scene control: `Ok(true)` when something changed, `Ok(false)`
-    /// for an unknown id or an unchanged value, `Err` for invalid input to show the user.
-    fn set_control(&self, _id: &str, _value: ControlValue) -> Result<bool, String> {
+    /// Applies one edit of a scene control to `values`: `Ok(true)` when something changed,
+    /// `Ok(false)` for an unknown id or an unchanged value, `Err` for invalid input to show
+    /// the user.
+    fn set_control(
+        &self,
+        _values: &mut SceneValues,
+        _id: &str,
+        _value: ControlValue,
+    ) -> Result<bool, String> {
         Ok(false)
     }
-    /// Builds a fresh scene. `env.palette` holds the shared palette to follow.
-    fn create(&self, env: &SceneEnv) -> Box<dyn Scene>;
+    /// Builds a fresh scene showing `values`. `env.palette` holds the shared palette to follow.
+    fn create(&self, env: &SceneEnv, values: &SceneValues) -> Box<dyn Scene>;
 }
 
 /// Why an external scene was not registered.
@@ -114,35 +153,67 @@ impl ExternalScenes {
             .collect()
     }
 
-    /// The scene controls of one external scene; empty for an unknown id.
-    pub fn controls(&self, id: &str) -> Vec<Control> {
+    /// Whether a scene with this id is registered.
+    pub fn contains(&self, id: &str) -> bool {
+        self.factories.contains_key(id)
+    }
+
+    /// The id the settings select: `wanted` when registered, else the first registered id
+    /// (a saved scene whose plugin is disabled falls back instead of showing nothing).
+    pub fn resolve(&self, wanted: &str) -> Option<String> {
+        if self.factories.contains_key(wanted) {
+            return Some(wanted.to_owned());
+        }
+        self.factories.keys().next().cloned()
+    }
+
+    /// The scene controls of one external scene showing `values`; empty for an unknown id.
+    pub fn controls(&self, id: &str, values: &SceneValues) -> Vec<Control> {
         self.factories
             .get(id)
-            .map(|factory| factory.controls())
+            .map(|factory| factory.controls(values))
             .unwrap_or_default()
     }
 
-    /// Applies one control edit to an external scene; `Ok(false)` for an unknown id.
+    /// Applies one control edit to `values` of an external scene; `Ok(false)` for an unknown id.
     pub fn set_control(
         &self,
         id: &str,
+        values: &mut SceneValues,
         control: &str,
         value: ControlValue,
     ) -> Result<bool, String> {
         match self.factories.get(id) {
-            Some(factory) => factory.set_control(control, value),
+            Some(factory) => factory.set_control(values, control, value),
             None => Ok(false),
         }
     }
 
     /// Builds the external scene `id`, wrapped in `PaletteScene` like every built-in scene so
     /// the shared look applies to it. `None` for an unknown id.
-    pub fn create_scene(&self, id: &str, env: &SceneEnv) -> Option<Box<dyn Scene>> {
+    pub fn create_scene(
+        &self,
+        id: &str,
+        env: &SceneEnv,
+        values: &SceneValues,
+    ) -> Option<Box<dyn Scene>> {
         let factory = self.factories.get(id)?;
         Some(Box::new(PaletteScene::new(
-            factory.create(env),
+            factory.create(env, values),
             env.palette.clone(),
         )))
+    }
+}
+
+/// What `AmbientKind::Plugin` shows while no plugin scene is registered (every scene plugin
+/// is disabled or failed to load): nothing is drawn and the status line says why.
+pub struct NoPluginScene;
+
+impl Scene for NoPluginScene {
+    fn render(&mut self, _frame: &mut Frame<'_>) {}
+
+    fn status(&self) -> Option<String> {
+        Some("No plugin scene is available. Enable a scene plugin in Settings > Plugins.".into())
     }
 }
 
@@ -178,7 +249,6 @@ mod tests {
     struct RedFactory {
         id: String,
         seen_palette: Arc<Mutex<Option<ScenePalette>>>,
-        speed: Mutex<i32>,
     }
 
     impl ExternalSceneFactory for RedFactory {
@@ -188,18 +258,22 @@ mod tests {
         fn title(&self) -> &str {
             "Red"
         }
-        fn set_control(&self, id: &str, value: ControlValue) -> Result<bool, String> {
+        fn set_control(
+            &self,
+            values: &mut SceneValues,
+            id: &str,
+            value: ControlValue,
+        ) -> Result<bool, String> {
             match (id, value) {
                 ("speed", ControlValue::Number(speed)) => {
-                    let mut current = self.speed.lock().map_err(|_| "poisoned".to_owned())?;
-                    let changed = *current != speed;
-                    *current = speed;
+                    let changed = values.get("speed") != Some(&ControlValue::Number(speed));
+                    values.insert("speed".into(), ControlValue::Number(speed));
                     Ok(changed)
                 }
                 _ => Ok(false),
             }
         }
-        fn create(&self, env: &SceneEnv) -> Box<dyn Scene> {
+        fn create(&self, env: &SceneEnv, _values: &SceneValues) -> Box<dyn Scene> {
             if let Ok(mut seen) = self.seen_palette.lock() {
                 *seen = Some(env.palette.clone());
             }
@@ -215,7 +289,6 @@ mod tests {
             Box::new(RedFactory {
                 id: id.to_owned(),
                 seen_palette: Arc::clone(&seen),
-                speed: Mutex::new(1),
             }),
             seen,
         )
@@ -255,7 +328,7 @@ mod tests {
             shift_percent: 0,
         };
         let mut scene = scenes
-            .create_scene("example.weather.rain", &env(palette.clone()))
+            .create_scene("example.weather.rain", &env(palette.clone()), &SceneValues::new())
             .unwrap();
         assert_eq!(seen.lock().unwrap().as_ref(), Some(&palette));
         // The scene drew red; the shared look moved it onto the blue-green palette.
@@ -270,13 +343,21 @@ mod tests {
         let (red, _) = factory("example.weather.rain");
         scenes.register(red).unwrap();
         let mut scene = scenes
-            .create_scene("example.weather.rain", &env(ScenePalette::default()))
+            .create_scene(
+                "example.weather.rain",
+                &env(ScenePalette::default()),
+                &SceneValues::new(),
+            )
             .unwrap();
         assert!(render(scene.as_mut())
             .iter()
             .all(|color| *color == [200, 40, 40]));
         assert!(scenes
-            .create_scene("example.weather.snow", &env(ScenePalette::default()))
+            .create_scene(
+                "example.weather.snow",
+                &env(ScenePalette::default()),
+                &SceneValues::new(),
+            )
             .is_none());
     }
 
@@ -314,18 +395,60 @@ mod tests {
     fn scene_controls_round_trip_through_the_factory() {
         let mut scenes = ExternalScenes::default();
         scenes.register(factory("example.weather.rain").0).unwrap();
-        assert!(scenes.controls("example.weather.rain").is_empty());
+        let mut values = SceneValues::new();
+        assert!(scenes
+            .controls("example.weather.rain", &values)
+            .is_empty());
         assert_eq!(
-            scenes.set_control("example.weather.rain", "speed", ControlValue::Number(3)),
+            scenes.set_control(
+                "example.weather.rain",
+                &mut values,
+                "speed",
+                ControlValue::Number(3)
+            ),
             Ok(true)
         );
         assert_eq!(
-            scenes.set_control("example.weather.rain", "speed", ControlValue::Number(3)),
+            scenes.set_control(
+                "example.weather.rain",
+                &mut values,
+                "speed",
+                ControlValue::Number(3)
+            ),
             Ok(false)
         );
         assert_eq!(
-            scenes.set_control("example.missing", "speed", ControlValue::Number(3)),
+            scenes.set_control(
+                "example.missing",
+                &mut values,
+                "speed",
+                ControlValue::Number(3)
+            ),
             Ok(false)
         );
+        assert_eq!(values.len(), 1);
+    }
+
+    #[test]
+    fn resolve_falls_back_to_the_first_registered_scene() {
+        let mut scenes = ExternalScenes::default();
+        assert_eq!(scenes.resolve("example.weather.rain"), None);
+        scenes.register(factory("example.weather.snow").0).unwrap();
+        scenes.register(factory("example.weather.rain").0).unwrap();
+        assert_eq!(
+            scenes.resolve("example.weather.snow").as_deref(),
+            Some("example.weather.snow")
+        );
+        assert_eq!(
+            scenes.resolve("gone.plugin.scene").as_deref(),
+            Some("example.weather.rain")
+        );
+    }
+
+    #[test]
+    fn interned_text_is_shared() {
+        let first = intern("example interned text");
+        let second = intern("example interned text");
+        assert!(std::ptr::eq(first, second));
     }
 }

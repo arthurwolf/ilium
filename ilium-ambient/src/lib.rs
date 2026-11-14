@@ -16,6 +16,7 @@ pub mod live_data;
 pub mod location;
 pub mod minecraft;
 pub mod pi_digits;
+pub mod plugin_scene;
 pub mod prepared_cache;
 pub mod raster;
 pub mod registry;
@@ -40,7 +41,7 @@ pub use scenes::spectrum::{
 pub use scenes::{
     atlantic_dusk::AtlanticDuskSettings, box_machine::BoxMachineSettings, clouds::CloudsSettings,
     cube_clock::CubeClockSettings, dither_water::DitherWaterSettings,
-    dithered_waves::DitheredWavesSettings, dithr_patterns::DithrPatternsSettings,
+    dithr_patterns::DithrPatternsSettings,
     fbm_clouds::FbmCloudsSettings, hex_expedition::HexExpeditionSettings, images::ImagesSettings,
     machine_screen::MachineScreenSettings, night_lights::NightLightsSettings, pipes::PipesSettings,
     solar_system::SolarSystemSettings, spectrum::SpectrumSettings, stars::StarsSettings,

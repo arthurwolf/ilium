@@ -18,6 +18,7 @@
     "server": [
       "cli.contribute",
       "sessions.cross",
+      "fs.read:project",
       "http-api.route:/create_agent",
       "terminal.write",
       "panes.create",
@@ -53,6 +54,7 @@
         "summary": "Send a line to agents",
         "output": "jsonl",
         "requires_server": true,
+        "stdin": "optional",
         "argument_groups": [
           "pane-selector"
         ]

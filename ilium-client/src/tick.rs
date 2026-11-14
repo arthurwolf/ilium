@@ -44,7 +44,7 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         | app.tick_inference_number_autosave(now)
         | app.tick_remote_compaction_save(now)
         | app.tick_custom_status_rules_save(now);
-    let chatroom_changed = app.tick_chatroom_projects(now);
+    let integration_changed = app.tick_integration_maintenance(now);
     let attention_changed = app.tick_attention() | app.tick_attention_dialog();
     // Focus and `config.toml` changes reach the plugins (gap G2); a reloaded `[padding]` or
     // `[animations]` table redraws.
@@ -70,8 +70,6 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
     let animation_hover_changed = app.tick_animation_hover(now);
     let plugin_issue_hover_changed = app.tick_plugin_issue_hover(now);
     let location_picker_changed = app.tick_location_picker();
-    let smart_copy_light_changed = app.tick_smart_copy_light(now);
-    let auto_freeze_changed = app.tick_auto_freeze(now);
     app.drain_pending_staged_keystrokes(now);
     let setup_prompt_was_open = matches!(app.mode, crate::app::Mode::AgentSetupPrompt(_));
     app.maybe_show_agent_setup_prompt();
@@ -87,7 +85,7 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         || resource_saved
         || autosave_wrote
         || budget_saved
-        || chatroom_changed
+        || integration_changed
         || attention_changed
         || config_reloaded
         || session_stats_changed
@@ -106,8 +104,6 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         || animation_hover_changed
         || plugin_issue_hover_changed
         || location_picker_changed
-        || smart_copy_light_changed
-        || auto_freeze_changed
         || setup_prompt_changed
 }
 

@@ -315,7 +315,7 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("test".into(), project.path().to_path_buf());
         app.set_screen_area(Rect::new(0, 0, width, height));
-        app.animation_settings.kind = AnimationKind::DitheredWaves;
+        app.animation_settings.kind = AnimationKind::FbmClouds;
         app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
@@ -332,7 +332,7 @@ mod tests {
             .rows()
             .iter()
             .position(|row| *row == AnimationRow::SceneControl("render_backend"))
-            .expect("the waves scene has a render_backend row")
+            .expect("the fBm clouds scene has a render_backend row")
     }
 
     /// Selects the row and scrolls it into view; returns its screen y.

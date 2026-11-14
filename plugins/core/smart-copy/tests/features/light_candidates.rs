@@ -3,7 +3,7 @@
 //! smart-copy.md "What Smart Copy recognises"), plus the `recognisers` collect point.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{Event, NodeId, ScreenChangedEvent, Submission};
+use ilium_plugin_sdk::types::{Event, Submission};
 use proptest::prelude::*;
 
 use crate::common::{add_terminal_pane, candidate_lines, candidate_payloads, server_host};
@@ -17,12 +17,7 @@ fn host_showing(rows: &[&str]) -> (FakeHost, u64) {
 }
 
 fn screen_changed(pane: u64, first_row: u32, last_row: u32) -> Event {
-    Event::ScreenChanged(ScreenChangedEvent {
-        pane: NodeId(pane),
-        first_row,
-        last_row,
-        revision: 1,
-    })
+    crate::common::scan_message(pane, Some((first_row, last_row)))
 }
 
 fn scan(rows: &[&str]) -> Vec<String> {

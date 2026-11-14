@@ -86,7 +86,6 @@ impl App {
         }
         let fallback = self.active_pane_id().or(match &self.right_panel_target {
             RightPanelTarget::SplitView { split_id, .. } => Some(*split_id),
-            RightPanelTarget::Chatroom { project_id } => Some(*project_id),
             _ => None,
         });
         if let Some(selection) = fallback.and_then(resolve) {

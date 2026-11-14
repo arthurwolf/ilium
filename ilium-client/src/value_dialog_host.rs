@@ -4,11 +4,6 @@ use crate::value_dialog::{ChoiceDialogState, ChoiceOption, ValueDialogState};
 use ilium_core::{AgentProvider, NodeId, PromptQueueDelivery};
 
 pub enum ValueTarget {
-    EditorLineDisplay {
-        pane_id: NodeId,
-        path: Option<std::path::PathBuf>,
-        original: crate::config::LineDisplay,
-    },
     OnboardingVoice {
         control: crate::value_voice::VoiceValue,
         identity: std::sync::Arc<()>,

@@ -438,10 +438,6 @@ pub struct TerminalSettings {
     /// Pooled pressure may reclaim an eligible hidden parser.
     pub engine_memory_budget_mib: u32,
     pub new_pane_directory: NewPaneDirectory,
-    /// Holding `smart_copy_light_key` over a terminal pane starts Smart Copy
-    /// light: click regions to select them, release the key to copy them.
-    pub smart_copy_light: bool,
-    pub smart_copy_light_key: SmartCopyLightKey,
 }
 impl Default for TerminalSettings {
     fn default() -> Self {
@@ -449,70 +445,10 @@ impl Default for TerminalSettings {
             scrollback_budget_mib: 8,
             engine_memory_budget_mib: 0,
             new_pane_directory: NewPaneDirectory::ProjectRoot,
-            smart_copy_light: true,
-            smart_copy_light_key: SmartCopyLightKey::Control,
         }
     }
 }
 
-/// The modifier key that, while held, runs Smart Copy light.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SmartCopyLightKey {
-    #[default]
-    Control,
-    Alt,
-    Shift,
-}
-impl SmartCopyLightKey {
-    pub const ALL: [Self; 3] = [Self::Control, Self::Alt, Self::Shift];
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Control => "Ctrl",
-            Self::Alt => "Alt",
-            Self::Shift => "Shift",
-        }
-    }
-    pub const fn config_name(self) -> &'static str {
-        match self {
-            Self::Control => "ctrl",
-            Self::Alt => "alt",
-            Self::Shift => "shift",
-        }
-    }
-    pub fn stepped(self, direction: i32) -> Self {
-        stepped_value(&Self::ALL, self, direction)
-    }
-    /// The mouse-event modifier bit that is set while this key is held.
-    pub const fn modifier(self) -> crossterm::event::KeyModifiers {
-        match self {
-            Self::Control => crossterm::event::KeyModifiers::CONTROL,
-            Self::Alt => crossterm::event::KeyModifiers::ALT,
-            Self::Shift => crossterm::event::KeyModifiers::SHIFT,
-        }
-    }
-    /// Whether `code` is a modifier-only key event for this key (reported by
-    /// terminals that support the Kitty key-release protocol).
-    pub fn matches_modifier_key(self, code: crossterm::event::KeyCode) -> bool {
-        use crossterm::event::{KeyCode, ModifierKeyCode};
-        let KeyCode::Modifier(modifier) = code else {
-            return false;
-        };
-        match self {
-            Self::Control => matches!(
-                modifier,
-                ModifierKeyCode::LeftControl | ModifierKeyCode::RightControl
-            ),
-            Self::Alt => matches!(
-                modifier,
-                ModifierKeyCode::LeftAlt | ModifierKeyCode::RightAlt
-            ),
-            Self::Shift => matches!(
-                modifier,
-                ModifierKeyCode::LeftShift | ModifierKeyCode::RightShift
-            ),
-        }
-    }
-}
 impl TerminalSettings {
     pub const MIN_SCROLLBACK_BUDGET_MIB: u16 = 4;
     pub const MAX_SCROLLBACK_BUDGET_MIB: u16 = 512;
@@ -897,61 +833,39 @@ pub struct AgentIdentifierSettings {
 
 /// How the left tree presents the durable child order owned by the server.
 /// Automatic modes are a client-side view only, so returning to `Manual`
-/// reveals and edits the exact order persisted in the project snapshot.
+/// reveals and edits the exact order persisted in the project snapshot. The
+/// kernel knows only the mechanism (sort siblings by a rank map); every named
+/// ordering (item type, age, name) is a plugin ordering
+/// (`contributes.tree_orderings`) chosen as [`UiSettings::plugin_tree_ordering`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TreeOrder {
     #[default]
     Manual,
-    Type,
-    AgeAscending,
-    AgeDescending,
-    NameAscending,
-    NameDescending,
     /// Most expensive first. Driven by the Agent Cost tab's "sort by cost"
-    /// switch rather than chosen here, so it is not part of [`Self::ALL`].
+    /// switch rather than chosen from the "Order by" submenu.
     CostDescending,
     /// Ascending by the sort keys a plugin set on tree nodes (`contributes.tree_orderings`):
     /// the decorations it set in the ordering's slot. Chosen from the "Order by" submenu,
-    /// which names the plugin ordering, so it is not part of [`Self::ALL`]; the choice
-    /// itself persists as [`UiSettings::plugin_tree_ordering`].
+    /// which names the plugin ordering; the choice itself persists as
+    /// [`UiSettings::plugin_tree_ordering`].
     PluginKey,
 }
 
 impl TreeOrder {
-    /// Shared registry for the context submenu and settings selector.
-    pub const ALL: [Self; 6] = [
-        Self::Manual,
-        Self::Type,
-        Self::AgeAscending,
-        Self::AgeDescending,
-        Self::NameAscending,
-        Self::NameDescending,
-    ];
-
-    /// User-facing label. Age means elapsed age, so ascending puts the
-    /// youngest nodes first and descending puts the oldest nodes first.
+    /// User-facing label of the built-in modes.
     pub const fn label(self) -> &'static str {
         match self {
             Self::Manual => "Manual",
-            Self::Type => "Type",
-            Self::AgeAscending => "Age up (newest first)",
-            Self::AgeDescending => "Age down (oldest first)",
-            Self::NameAscending => "Name A-Z",
-            Self::NameDescending => "Name Z-A",
             Self::CostDescending => "Cost high-low",
             Self::PluginKey => "Plugin order",
         }
-    }
-
-    pub fn stepped(self, direction: i32) -> Self {
-        stepped_value(&Self::ALL, self, direction)
     }
 }
 
 /// A plugin tree ordering the user chose (`contributes.tree_orderings`), remembered across
 /// restarts as `ui.plugin_tree_ordering = "<plugin id>/<ordering id>"`. The choice is kept
 /// even while its plugin is disabled or missing; it applies again once the plugin
-/// contributes the ordering, and until then the built-in [`TreeOrder`] is used.
+/// contributes the ordering, and until then the manual order is used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginTreeOrderingChoice {
     pub plugin: String,
@@ -970,6 +884,33 @@ impl PluginTreeOrderingChoice {
             plugin: plugin.to_string(),
             ordering: ordering.to_string(),
         })
+    }
+
+    /// The tree plugin's ordering that an older `ui.tree_order` value named, if it named one
+    /// (`manual` and anything unknown name none).
+    pub fn from_legacy_tree_order(value: &str) -> Option<Self> {
+        let ordering = match value.trim().to_ascii_lowercase().as_str() {
+            "type" => "type",
+            "age_ascending" => "age-newest",
+            "age_descending" => "age-oldest",
+            "name_ascending" => "name-az",
+            "name_descending" => "name-za",
+            _ => return None,
+        };
+        Some(Self {
+            plugin: "ilium.core.tree".to_string(),
+            ordering: ordering.to_string(),
+        })
+    }
+
+    /// A readable name for the settings row, which has no plugin manifest at hand: the
+    /// ordering id with its dashes as spaces and the first letter capitalised.
+    pub fn display_name(&self) -> String {
+        let mut name = self.ordering.replace('-', " ");
+        if let Some(first) = name.get(..1) {
+            name = first.to_uppercase() + &name[1..];
+        }
+        name
     }
 
     /// The config spelling [`Self::parse`] reads back.
@@ -1138,13 +1079,11 @@ pub struct UiSettings {
     /// Agent-type representation in the left tree. Activity remains a
     /// separate, always-visible status column regardless of this choice.
     pub agent_identifiers: AgentIdentifierSettings,
-    /// Presentation order applied independently inside every normal group.
-    /// Split-view child order remains structural because it controls pane
-    /// placement in the right panel.
-    pub tree_order: TreeOrder,
     /// The plugin tree ordering chosen in the tree's "Order by" submenu
-    /// (`contributes.tree_orderings`). It overrides [`Self::tree_order`] while its plugin
-    /// still contributes it, and choosing a built-in order clears it.
+    /// (`contributes.tree_orderings`), applied independently inside every normal
+    /// group while its plugin still contributes it. Split-view child order remains
+    /// structural because it controls pane placement in the right panel. Choosing
+    /// "Manual order" clears it.
     pub plugin_tree_ordering: Option<PluginTreeOrderingChoice>,
     pub tree_row_layout: crate::tree_row_layout::TreeRowLayout,
     pub tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout,
@@ -1265,7 +1204,6 @@ impl Default for UiSettings {
             left_panel_sizing: LeftPanelSizingSettings::default(),
             color_scheme: ColorScheme::Dark,
             agent_identifiers: AgentIdentifierSettings::default(),
-            tree_order: TreeOrder::Manual,
             plugin_tree_ordering: None,
             tree_row_layout: crate::tree_row_layout::TreeRowLayout::default(),
             tree_toolbar_layout: crate::tree_toolbar_layout::TreeToolbarLayout::default(),
@@ -1405,6 +1343,8 @@ struct RawUiConfig {
     claude_agent_icon: Option<String>,
     codex_agent_icon: Option<String>,
     antigravity_agent_icon: Option<String>,
+    /// The pre-plugin spelling of the Order By choice (`type`, `age_ascending`, ...). Read only
+    /// to carry an older config over to the tree plugin's orderings; never written.
     tree_order: Option<String>,
     /// `"<plugin id>/<ordering id>"`, see [`PluginTreeOrderingChoice`].
     plugin_tree_ordering: Option<String>,
@@ -1455,8 +1395,6 @@ struct RawTerminalConfig {
     scrollback_budget_mib: Option<u16>,
     engine_memory_budget_mib: Option<u32>,
     new_pane_directory: Option<String>,
-    smart_copy_light: Option<bool>,
-    smart_copy_light_key: Option<String>,
 }
 #[derive(Debug, Default, Deserialize)]
 struct RawEditorConfig {
@@ -1576,11 +1514,6 @@ pub enum ConfigLoadError {
     /// `ui.antigravity_agent_icon` is not one of the curated choices.
     #[error("ui.antigravity_agent_icon = {0:?} is not a supported Antigravity icon")]
     InvalidAntigravityAgentIcon(String),
-    /// `ui.tree_order` is outside the closed ordering-mode set.
-    #[error(
-        "ui.tree_order = {0:?} must be \"manual\", \"type\", \"age_ascending\", \"age_descending\", \"name_ascending\", or \"name_descending\""
-    )]
-    InvalidTreeOrder(String),
     #[error("ui.motion_level = {0:?} must be full, reduced, or off")]
     InvalidMotionLevel(String),
     #[error("ui.sidebar_density = {0:?} must be compact, standard, or comfortable")]
@@ -1597,8 +1530,6 @@ pub enum ConfigLoadError {
     InvalidEngineMemoryBudget(u32),
     #[error("terminal.new_pane_directory = {0:?} is not supported")]
     InvalidNewPaneDirectory(String),
-    #[error("terminal.smart_copy_light_key = {0:?} must be \"ctrl\", \"alt\" or \"shift\"")]
-    InvalidSmartCopyLightKey(String),
     #[error("editor.line_display = {0:?} must be \"clip\" or \"wrap\"")]
     InvalidEditorLineDisplay(String),
     #[error("session.recovery_policy = {0:?} is not supported")]
@@ -1913,10 +1844,6 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         Some(value) => parse_antigravity_agent_icon(&value)?,
         None => defaults.agent_identifiers.antigravity_icon,
     };
-    let tree_order = match raw.tree_order {
-        Some(value) => parse_tree_order(&value)?,
-        None => defaults.tree_order,
-    };
     let agent_monitoring_mode = match raw.agent_monitoring_mode {
         Some(value) => crate::agent_monitoring::AgentMonitoringMode::parse(&value)
             .ok_or(ConfigLoadError::InvalidAgentMonitoringMode(value))?,
@@ -1982,13 +1909,18 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
             codex_icon,
             antigravity_icon,
         },
-        tree_order,
         // A malformed choice is dropped rather than failing the whole config: the value is
-        // only ever written by the client, and losing it just restores the built-in order.
+        // only ever written by the client, and losing it just restores the manual order.
+        // An older `tree_order = "age_ascending"` carries over to the tree plugin's ordering.
         plugin_tree_ordering: raw
             .plugin_tree_ordering
             .as_deref()
-            .and_then(PluginTreeOrderingChoice::parse),
+            .and_then(PluginTreeOrderingChoice::parse)
+            .or_else(|| {
+                raw.tree_order
+                    .as_deref()
+                    .and_then(PluginTreeOrderingChoice::from_legacy_tree_order)
+            }),
         tree_row_layout: raw.tree_row_layout.unwrap_or_default().normalized(),
         tree_toolbar_layout: raw.tree_toolbar_layout.unwrap_or_default().normalized(),
         tree_inactivity_minutes: raw.tree_inactivity_minutes.unwrap_or(15).max(1),
@@ -2116,27 +2048,11 @@ fn merge_terminal(raw: RawTerminalConfig) -> Result<TerminalSettings, ConfigLoad
         .map(parse_new_pane_directory)
         .transpose()?
         .unwrap_or(defaults.new_pane_directory);
-    let smart_copy_light_key = raw
-        .smart_copy_light_key
-        .as_deref()
-        .map(parse_smart_copy_light_key)
-        .transpose()?
-        .unwrap_or(defaults.smart_copy_light_key);
     Ok(TerminalSettings {
         scrollback_budget_mib,
         engine_memory_budget_mib,
         new_pane_directory,
-        smart_copy_light: raw.smart_copy_light.unwrap_or(defaults.smart_copy_light),
-        smart_copy_light_key,
     })
-}
-fn parse_smart_copy_light_key(value: &str) -> Result<SmartCopyLightKey, ConfigLoadError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "ctrl" | "control" => Ok(SmartCopyLightKey::Control),
-        "alt" | "option" => Ok(SmartCopyLightKey::Alt),
-        "shift" => Ok(SmartCopyLightKey::Shift),
-        _ => Err(ConfigLoadError::InvalidSmartCopyLightKey(value.to_string())),
-    }
 }
 fn merge_editor(raw: RawEditorConfig) -> Result<EditorSettings, ConfigLoadError> {
     let defaults = EditorSettings::default();
@@ -2302,19 +2218,6 @@ fn parse_antigravity_agent_icon(value: &str) -> Result<AntigravityAgentIcon, Con
     }
 }
 
-/// Parses the stable config spelling shared with [`tree_order_name`].
-fn parse_tree_order(value: &str) -> Result<TreeOrder, ConfigLoadError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "manual" => Ok(TreeOrder::Manual),
-        "type" => Ok(TreeOrder::Type),
-        "age_ascending" => Ok(TreeOrder::AgeAscending),
-        "age_descending" => Ok(TreeOrder::AgeDescending),
-        "name_ascending" => Ok(TreeOrder::NameAscending),
-        "name_descending" => Ok(TreeOrder::NameDescending),
-        _ => Err(ConfigLoadError::InvalidTreeOrder(value.to_string())),
-    }
-}
-
 /// Parses `[ui].color_scheme`'s string value, case-insensitively.
 fn parse_color_scheme(value: &str) -> Result<ColorScheme, ConfigLoadError> {
     match value.trim().to_ascii_lowercase().as_str() {
@@ -2371,22 +2274,6 @@ fn antigravity_agent_icon_name(icon: AntigravityAgentIcon) -> &'static str {
         AntigravityAgentIcon::Satellite => "satellite",
         AntigravityAgentIcon::Orbit => "orbit",
         AntigravityAgentIcon::Atom => "atom",
-    }
-}
-
-/// Stable on-disk spelling for one tree-order mode.
-fn tree_order_name(tree_order: TreeOrder) -> &'static str {
-    match tree_order {
-        TreeOrder::Manual => "manual",
-        TreeOrder::Type => "type",
-        TreeOrder::AgeAscending => "age_ascending",
-        TreeOrder::AgeDescending => "age_descending",
-        TreeOrder::NameAscending => "name_ascending",
-        TreeOrder::NameDescending => "name_descending",
-        // Never persisted: the effective order is derived from [cost].sort_by_cost.
-        TreeOrder::CostDescending => "manual",
-        // Never persisted: the plugin ordering is chosen for this client run only.
-        TreeOrder::PluginKey => "manual",
     }
 }
 
@@ -3256,7 +3143,7 @@ fn read_toml_document(path: &Path) -> Result<ConfigDocument, ClientError> {
 /// `config.toml` holds authentication secrets (`[voice].api_key`, the
 /// `[inference]` provider keys), so the write goes through
 /// `ilium_platform::secure_fs` -- the temp file is created owner-only with
-/// symlink refusal, exactly like `workspace_file::save`'s snapshot write,
+/// symlink refusal, exactly like the session snapshot write,
 /// rather than `std::fs::write`'s umask-default (typically world-readable)
 /// mode. Permissions are finalized on the temporary handle before rename.
 /// The rename replaces a previously broader destination with the private file.
@@ -3426,10 +3313,6 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         toml::Value::String(
             antigravity_agent_icon_name(ui.agent_identifiers.antigravity_icon).to_string(),
         ),
-    );
-    table.insert(
-        "tree_order".to_string(),
-        toml::Value::String(tree_order_name(ui.tree_order).to_string()),
     );
     if let Some(choice) = &ui.plugin_tree_ordering {
         table.insert(
@@ -3657,14 +3540,6 @@ fn terminal_settings_to_toml(settings: &TerminalSettings) -> toml::Value {
             }
             .into(),
         ),
-    );
-    table.insert(
-        "smart_copy_light".into(),
-        toml::Value::Boolean(settings.smart_copy_light),
-    );
-    table.insert(
-        "smart_copy_light_key".into(),
-        toml::Value::String(settings.smart_copy_light_key.config_name().into()),
     );
     toml::Value::Table(table)
 }
@@ -3913,8 +3788,6 @@ mod tests {
                 engine_memory_budget_mib: budget_mib,
                 scrollback_budget_mib: 16,
                 new_pane_directory: NewPaneDirectory::FocusedTerminal,
-                smart_copy_light: false,
-                smart_copy_light_key: SmartCopyLightKey::Alt,
             };
             save_terminal_settings(directory.path(), &settings).unwrap();
             assert_eq!(load(directory.path()).unwrap().terminal, settings);
@@ -3950,8 +3823,6 @@ mod tests {
             engine_memory_budget_mib: 4096,
             scrollback_budget_mib: 16,
             new_pane_directory: NewPaneDirectory::LastUsed,
-            smart_copy_light: false,
-            smart_copy_light_key: SmartCopyLightKey::Shift,
         };
         for (text, budget_mib) in [("0", 0), ("256", 256), ("257", 257), ("16384", 16384)] {
             let mut settings = current;
@@ -4001,33 +3872,6 @@ mod tests {
                 expected
             );
         }
-    }
-
-    #[test]
-    fn smart_copy_light_settings_default_on_and_round_trip() {
-        let defaults = TerminalSettings::default();
-        assert!(defaults.smart_copy_light);
-        assert_eq!(defaults.smart_copy_light_key, SmartCopyLightKey::Control);
-
-        let changed = TerminalSettings {
-            smart_copy_light: false,
-            smart_copy_light_key: SmartCopyLightKey::Alt,
-            ..defaults
-        };
-        let table = terminal_settings_to_toml(&changed);
-        let raw: RawTerminalConfig = table.try_into().expect("written table parses back");
-        assert_eq!(merge_terminal(raw).expect("valid"), changed);
-
-        let raw: RawTerminalConfig = toml::from_str("smart_copy_light_key = \"Option\"").unwrap();
-        assert_eq!(
-            merge_terminal(raw).expect("alias").smart_copy_light_key,
-            SmartCopyLightKey::Alt
-        );
-        let raw: RawTerminalConfig = toml::from_str("smart_copy_light_key = \"hyper\"").unwrap();
-        assert!(matches!(
-            merge_terminal(raw),
-            Err(ConfigLoadError::InvalidSmartCopyLightKey(_))
-        ));
     }
 
     use super::*;
@@ -4891,29 +4735,40 @@ mod tests {
     }
 
     #[test]
-    fn tree_order_settings_parse_every_mode_and_wrap_in_both_directions() {
-        for tree_order in TreeOrder::ALL {
+    fn an_older_tree_order_value_carries_over_to_the_tree_plugin_ordering() {
+        let cases = [
+            ("type", Some("type")),
+            ("age_ascending", Some("age-newest")),
+            ("age_descending", Some("age-oldest")),
+            ("name_ascending", Some("name-az")),
+            ("name_descending", Some("name-za")),
+            ("manual", None),
+            ("random", None),
+        ];
+        for (legacy, expected) in cases {
+            let choice = PluginTreeOrderingChoice::from_legacy_tree_order(legacy);
             assert_eq!(
-                parse_tree_order(tree_order_name(tree_order)).unwrap(),
-                tree_order
+                choice.as_ref().map(|choice| choice.ordering.as_str()),
+                expected,
+                "{legacy}"
             );
+            if let Some(choice) = choice {
+                assert_eq!(choice.plugin, "ilium.core.tree");
+            }
         }
-        assert_eq!(TreeOrder::Manual.stepped(-1), TreeOrder::NameDescending);
-        assert_eq!(TreeOrder::NameDescending.stepped(1), TreeOrder::Manual);
-    }
-
-    #[test]
-    fn invalid_tree_order_is_a_clear_config_error() {
         let dir = scratch_dir();
-        std::fs::write(dir.join("config.toml"), "[ui]\ntree_order = \"random\"\n").unwrap();
-
-        assert!(matches!(
-            load(&dir),
-            Err(ClientError::ConfigLoad {
-                source: ConfigLoadError::InvalidTreeOrder(_),
-                ..
-            })
-        ));
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\ntree_order = \"name_descending\"\n",
+        )
+        .unwrap();
+        let ui = load(&dir).expect("an older tree_order still loads").ui;
+        assert_eq!(
+            ui.plugin_tree_ordering
+                .map(|choice| choice.config_value())
+                .as_deref(),
+            Some("ilium.core.tree/name-za")
+        );
     }
 
     #[test]
@@ -4944,7 +4799,7 @@ mod tests {
     }
 
     #[test]
-    fn a_malformed_plugin_tree_ordering_falls_back_to_the_built_in_order() {
+    fn a_malformed_plugin_tree_ordering_falls_back_to_the_manual_order() {
         for malformed in ["", "no-separator", "/by-cost", "ilium.core.cost/"] {
             assert_eq!(
                 PluginTreeOrderingChoice::parse(malformed),
@@ -4955,14 +4810,13 @@ mod tests {
         let dir = scratch_dir();
         std::fs::write(
             dir.join("config.toml"),
-            "[ui]\ntree_order = \"type\"\nplugin_tree_ordering = \"broken\"\n",
+            "[ui]\nplugin_tree_ordering = \"broken\"\n",
         )
         .unwrap();
         let ui = load(&dir)
             .expect("a malformed choice never fails the config")
             .ui;
         assert_eq!(ui.plugin_tree_ordering, None);
-        assert_eq!(ui.tree_order, TreeOrder::Type);
     }
 
     #[test]
@@ -5452,7 +5306,6 @@ mod tests {
                 codex_icon: CodexAgentIcon::Dna,
                 antigravity_icon: AntigravityAgentIcon::Orbit,
             },
-            tree_order: TreeOrder::NameDescending,
             plugin_tree_ordering: Some(PluginTreeOrderingChoice {
                 plugin: "ilium.core.cost".to_string(),
                 ordering: "by-cost".to_string(),

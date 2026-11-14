@@ -51,6 +51,34 @@ pub fn agent_scopes_in(home: &Path) -> AgentScopes {
     .collect()
 }
 
+/// The `session-ref` record, as JSON, of an agent's verified session: the scope
+/// `agent-sessions:<agent>`, the transcript path inside that scope (empty when the transcript
+/// location is unknown or lies outside the scope) and the session id. `None` for an agent
+/// without a session scope. The facades of both processes answer `AgentRead::session_json`
+/// with this text.
+pub fn session_ref_json(
+    home: &Path,
+    agent: &str,
+    session_id: &str,
+    transcript: Option<&Path>,
+) -> Option<String> {
+    let scope = format!("agent-sessions:{agent}");
+    let roots = agent_scopes_in(home);
+    let root = roots.get(&scope)?;
+    let path = transcript
+        .and_then(|transcript| transcript.strip_prefix(root).ok())
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    serde_json::to_string(
+        &ilium_plugin_api::generated::primitives::agent::SessionRef {
+            scope,
+            path,
+            session_id: session_id.to_owned(),
+        },
+    )
+    .ok()
+}
+
 /// What the server composition root supplies.
 #[derive(Default)]
 pub struct ServerBackendInputs {

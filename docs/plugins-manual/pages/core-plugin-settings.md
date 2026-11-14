@@ -142,6 +142,8 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
 
 The plugin ships with Ilium as a first-party (T1) package. `settings.read-all` and `settings.write-all` are limited to bundled plugins of this tier.
 
+The plugin also owns the editor's "Editor line display" choice. The editor toolbar runs the command `ilium.core.settings/editor-line-display` with the pane and its current mode. The plugin opens a popup with Clip and Wrap and, on Apply, asks the client to set the mode with the kernel command `kernel.set-editor-option`. A kernel command needs no grant. Choosing the mode the pane already has changes nothing.
+
 ```json
 {
   "api": "ilium:plugin@0.1.0",
@@ -292,6 +294,12 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "id": "overview",
         "title": "All settings",
         "modal": false
+      }
+    ],
+    "commands": [
+      {
+        "id": "editor-line-display",
+        "title": "Editor line display"
       }
     ]
   },

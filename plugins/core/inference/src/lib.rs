@@ -8,16 +8,18 @@ pub mod kilo;
 pub mod redact;
 pub mod request;
 pub mod settings;
+pub mod test_provider;
 
 use ilium_plugin_sdk::exports::ProviderCall;
+use ilium_plugin_sdk::generated::host::{HostClock, HostInference, HostSettings};
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::host::catalogs::{CatalogPage, CatalogQuery};
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{Activation, CatalogItem, ErrorCode};
-use ilium_plugin_sdk::types::{Area, UiTree, ViewTarget};
+use ilium_plugin_sdk::types::{Area, RequestRef, UiTree, ViewTarget};
 use ilium_plugin_sdk::{
-    ilium_plugin, CatalogProvider, Handler, InferenceProvider, Lifecycle, Views,
+    host, ilium_plugin, CatalogProvider, Handler, InferenceProvider, Lifecycle, Views,
 };
 
 /// The server side of `ilium.core.inference` (core-plugin-inference.md, world `ilium:server/base@0.1.0`).
@@ -26,6 +28,11 @@ use ilium_plugin_sdk::{
 pub struct InferenceServer {
     settings: serde_json::Value,
     loaded_models: Vec<String>,
+    /// The request of the Test provider run in flight; a newer run replaces it, so the result
+    /// of the older one is ignored.
+    test: Option<RequestRef>,
+    /// The monotonic clock reading when the run in flight started.
+    test_started: u64,
 }
 
 impl Lifecycle for InferenceServer {
@@ -33,12 +40,34 @@ impl Lifecycle for InferenceServer {
         validate_settings(&context.settings_json)?;
         self.settings =
             serde_json::from_str(&context.settings_json).unwrap_or(serde_json::Value::Null);
+        // The row reads "Not run yet" until a test finishes; a host without the row refuses
+        // the write, which only means there is nothing to show.
+        let _ = HostSettings::set_info(
+            &mut *host(),
+            test_provider::LAST_TEST_ROW.to_owned(),
+            test_provider::NOT_RUN_YET.to_owned(),
+        );
         Ok(())
     }
 }
 
 impl Handler for InferenceServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        for event in batch {
+            match event {
+                Event::CommandInvoked(invoked)
+                    if invoked
+                        .command
+                        .ends_with(test_provider::TEST_COMMAND_SUFFIX) =>
+                {
+                    self.start_test();
+                }
+                Event::RequestCompleted(done) if self.test.as_ref() == Some(&done.request) => {
+                    self.finish_test(done.request);
+                }
+                _ => {}
+            }
+        }
         Vec::new()
     }
 }
@@ -99,6 +128,33 @@ impl CatalogProvider for InferenceServer {
 }
 
 impl InferenceServer {
+    /// Sends the one test request. A run already in flight is replaced.
+    fn start_test(&mut self) {
+        let mut api = host();
+        self.test_started = HostClock::monotonic_millis(&mut *api);
+        self.test = HostInference::complete(&mut *api, test_provider::request())
+            .ok()
+            .map(RequestRef::Call);
+    }
+
+    /// Writes latency and model, or `failed` when the host returned no completion.
+    fn finish_test(&mut self, request: RequestRef) {
+        self.test = None;
+        let mut api = host();
+        let elapsed = HostClock::monotonic_millis(&mut *api).saturating_sub(self.test_started);
+        let completion = match request {
+            RequestRef::Call(id) => HostInference::take_completion(&mut *api, id),
+            RequestRef::Submission(_) => None,
+        };
+        let text = test_provider::result_text(
+            elapsed,
+            completion
+                .as_ref()
+                .map(|completion| completion.model.as_str()),
+        );
+        let _ = HostSettings::set_info(&mut *api, test_provider::LAST_TEST_ROW.to_owned(), text);
+    }
+
     /// The saved model of the selected provider, then the loaded list, sorted and without duplicates.
     fn offered_models(&self) -> Vec<String> {
         let mut names = self.loaded_models.clone();
@@ -348,5 +404,47 @@ mod spec_tests {
                 }
             }
         }
+    }
+
+    /// Every settings row bound to the kernel `inference` table names a key that exists in the
+    /// table, in a tab the client side owns, and carries the default of that key, so a fresh
+    /// install shows what the kernel uses.
+    #[test]
+    fn kernel_bound_rows_name_real_keys_with_the_real_defaults() {
+        let manifest = shipped_manifest();
+        let owned = grants_on_side(&manifest, "client");
+        let table = serde_json::to_value(settings::InferenceSettings::default())
+            .expect("the settings serialize");
+        let mut bound = 0;
+        let sections = manifest["contributes"]["settings"][0]["sections"]
+            .as_array()
+            .expect("sections");
+        for row in sections
+            .iter()
+            .flat_map(|section| section["rows"].as_array().into_iter().flatten())
+        {
+            let Some(tab) = row["kernel_tab"].as_str() else {
+                continue;
+            };
+            assert!(
+                owned.contains(&format!("settings.write-kernel:{tab}")),
+                "row {} binds a tab the client does not own",
+                row["key"]
+            );
+            let mut current = &table;
+            for part in row["kernel_key"].as_str().expect("kernel_key").split('.') {
+                current = &current[part];
+            }
+            assert!(!current.is_null(), "row {} names no key", row["key"]);
+            if !row["default"].is_null() && row["key"] != "selected_provider" {
+                assert_eq!(
+                    &row["default"], current,
+                    "default of row {} differs from the kernel's",
+                    row["key"]
+                );
+            }
+            bound += 1;
+        }
+        assert!(bound >= 14, "the provider rows are bound: {bound}");
     }
 }

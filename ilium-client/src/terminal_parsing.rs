@@ -438,7 +438,7 @@ pub(crate) enum ParseResult {
     Capture {
         target: PaneTarget,
         generation: u64,
-        snapshot: crate::smart_copy::SmartCopySnapshot,
+        snapshot: CapturedScreen,
     },
     #[cfg(test)]
     CaptureFailed {
@@ -484,6 +484,25 @@ impl ParseResult {
         std::mem::size_of::<Self>()
             .saturating_add(128)
             .saturating_add(extra)
+    }
+}
+/// An immutable copy of one pane's screen taken by [`PaneCommand::Capture`], holding its admitted
+/// allocation charge for as long as the copy lives.
+#[cfg(test)]
+pub(crate) struct CapturedScreen {
+    pub screen: vt100::Screen,
+    allocation_hold: Option<Arc<SnapshotCharge>>,
+}
+#[cfg(test)]
+impl CapturedScreen {
+    pub(crate) fn capture(screen: &vt100::Screen) -> Self {
+        Self {
+            screen: screen.clone(),
+            allocation_hold: None,
+        }
+    }
+    pub(crate) fn retain_allocation(&mut self, charge: Arc<SnapshotCharge>) {
+        self.allocation_hold = Some(charge);
     }
 }
 pub(crate) struct SnapshotCharge {
@@ -580,16 +599,17 @@ impl SnapshotCharge {
         *cached = Arc::downgrade(&pin);
         Ok(pin)
     }
+    #[cfg(test)]
     pub(crate) fn reserve_capture(&self, bytes: usize) -> Result<Arc<Self>, String> {
         reserve_counter(&self.captures, bytes, MAX_CAPTURE_BYTES).ok_or_else(|| format!(
-            "Smart Copy capture admission exhausted ({bytes} bytes required;128MiB aggregate limit); release an older capture or reduce pane geometry"))?;
+            "Screen capture admission exhausted ({bytes} bytes required;128MiB aggregate limit); release an older capture or reduce pane geometry"))?;
         let storage = match self.storage_governor.reserve_external_storage(bytes) {
             // Every capture owns its independent allocation lease.
             Ok(storage) => storage, // Keep the lease through the capture's final allocation owner.
             Err(error) => {
                 self.captures.fetch_sub(bytes, Ordering::AcqRel); // No allocation or category credit may leak on rejection.
                 self.released.notify_all();
-                return Err(format!("Smart Copy capture storage admission: {error:?}"));
+                return Err(format!("Screen capture storage admission: {error:?}"));
             }
         };
         Ok(Arc::new(Self {
@@ -1572,10 +1592,9 @@ impl Job for ParserJob {
                                             .saturating_mul(256),
                                     )
                                     .saturating_add(128 * 1024);
-                                let charge=SnapshotCharge::reserve(&shared,capture_bytes,true).ok_or_else(||format!("Smart Copy capture cannot fit its128MiB aggregate admission budget ({} bytes required); release an older capture or reduce pane geometry",capture_bytes))?;
-                                let mut snapshot = engine
-                                    .state
-                                    .with_screen(crate::smart_copy::SmartCopySnapshot::capture);
+                                let charge=SnapshotCharge::reserve(&shared,capture_bytes,true).ok_or_else(||format!("Screen capture cannot fit its 128MiB aggregate admission budget ({} bytes required); release an older capture or reduce pane geometry",capture_bytes))?;
+                                let mut snapshot =
+                                    engine.state.with_screen(CapturedScreen::capture);
                                 snapshot.retain_allocation(Arc::new(charge));
                                 push_result(
                                     &shared,
@@ -3369,7 +3388,7 @@ mod tests {
         let capture_bytes = queued.capture_cost().unwrap().input_bytes;
         let capture_charge = queued.capture_charge(capture_bytes).unwrap().unwrap();
         assert!(!Arc::ptr_eq(&raw_charge._storage, &capture_charge._storage));
-        let mut capture = queued.with_screen(crate::smart_copy::SmartCopySnapshot::capture);
+        let mut capture = queued.with_screen(CapturedScreen::capture);
         capture.retain_allocation(capture_charge);
         let capture = Arc::new(capture);
         drop(prepared);

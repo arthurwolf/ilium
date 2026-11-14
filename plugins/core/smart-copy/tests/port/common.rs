@@ -184,7 +184,7 @@ pub fn status_contains(submissions: &[Submission], needle: &str) -> bool {
 
 // ---- helpers of the ports part ----
 
-use ilium_plugin_sdk::types::{GrabId, KeyEvent, NodeId as PortNodeId, ScreenChangedEvent};
+use ilium_plugin_sdk::types::{GrabId, KeyEvent};
 
 /// A key event by name.
 pub fn key(name: &str) -> Event {
@@ -204,17 +204,21 @@ pub fn server_showing(rows: &[&str]) -> (FakeHost, u64) {
     (host, pane)
 }
 
+/// The `scan` message the client side sends to ask the server side for the candidates of a pane.
+pub fn scan_message(pane: u64, rows: Option<(u32, u32)>) -> Event {
+    Event::Message(MessageEvent {
+        from: PluginId(PLUGIN_ID.to_string()),
+        from_side: PluginSide::Client,
+        from_client: None,
+        channel: "scan".to_string(),
+        payload: ilium_plugin_core_smart_copy::scan_payload(pane, rows),
+    })
+}
+
 /// The candidate lines the server side sends for a screen with these rows.
 pub fn scan(rows: &[&str]) -> Vec<String> {
     let (mut host, pane) = server_showing(rows);
-    let last = rows.len().saturating_sub(1) as u32;
-    let event = Event::ScreenChanged(ScreenChangedEvent {
-        pane: PortNodeId(pane),
-        first_row: 0,
-        last_row: last,
-        revision: 1,
-    });
-    candidate_lines(&host.deliver_one(event))
+    candidate_lines(&host.deliver_one(scan_message(pane, None)))
 }
 
 /// True when the scan of one row offers the token as a candidate line.

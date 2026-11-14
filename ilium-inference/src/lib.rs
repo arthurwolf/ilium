@@ -93,7 +93,6 @@ pub struct PromptInstructions {
     pub organization: String,
     pub naming_and_organization: String,
     pub project_naming: String,
-    pub smart_copy: String,
     pub ask_for_update: String,
 }
 
@@ -2205,7 +2204,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_instructions_default_and_persist_all_six_fields() {
+    fn prompt_instructions_default_and_persist_all_five_fields() {
         let old: InferenceSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(old.instructions, PromptInstructions::default());
         let mut settings = old;
@@ -2214,7 +2213,6 @@ mod tests {
             organization: "organization".into(),
             naming_and_organization: "shared".into(),
             project_naming: "project".into(),
-            smart_copy: "copy".into(),
             ask_for_update: "update".into(),
         };
         let restored: InferenceSettings =

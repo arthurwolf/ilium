@@ -13,6 +13,7 @@
 //! `ServerEvent::Contributions` and plugin state changes as plugin control envelopes.
 
 mod cli_bridge;
+mod cross_session;
 mod facade;
 mod http_routes;
 pub(crate) mod pane_kinds;

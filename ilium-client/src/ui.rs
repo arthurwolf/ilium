@@ -153,12 +153,6 @@ pub(crate) fn draw_at_with_cursor(
     if !late_layers_are_source_transparent(app) {
         app.animation_frame.discard_composed_receipt();
     }
-    // Copied text can repaint an identical Braille glyph after composition.
-    // Withhold this draw rather than crediting preview text as scene pixels.
-    if app.smart_copy_preview.is_some() {
-        app.animation_frame.discard_composed_receipt();
-    }
-    draw_smart_copy_preview(frame, area, app);
     draw_startup_dialog(frame, area, app);
     skip_vs16_continuation_cells(frame.buffer_mut(), layout.tree_area);
     if app.onboarding.is_none() && app.draw_plugin_permission_review(frame) {
@@ -219,83 +213,6 @@ fn late_layers_are_source_transparent(app: &App) -> bool {
                 | Mode::Move
                 | Mode::Settings(_)
         )
-}
-
-/// The "Preview" dialog: what Smart Copy light just put on the clipboard, with
-/// a progress bar that counts down the second before it disappears.
-fn draw_smart_copy_preview(frame: &mut Frame, area: Rect, app: &App) {
-    use ratatui::widgets::LineGauge;
-
-    let Some(preview) = &app.smart_copy_preview else {
-        return;
-    };
-    if area.width < 12 || area.height < 7 {
-        return;
-    }
-    let lines = preview.display_lines();
-    let content_width = lines
-        .iter()
-        .map(|line| UnicodeWidthStr::width(line.as_str()))
-        .chain(std::iter::once(UnicodeWidthStr::width(
-            preview.summary().as_str(),
-        )))
-        .max()
-        .unwrap_or(0);
-    // Borders (2) + text rows + summary + gauge.
-    let height = (lines.len() as u16 + 4).min(area.height);
-    let width = u16::try_from(content_width.saturating_add(4))
-        .unwrap_or(u16::MAX)
-        .max(28)
-        .min(area.width);
-    let dialog = Rect::new(
-        area.x + (area.width - width) / 2,
-        area.y + (area.height.saturating_sub(height)) / 2,
-        width,
-        height,
-    );
-    frame.render_widget(Clear, dialog);
-    let chrome = theme::chrome_title("Preview");
-    // At the supported twelve-cell minimum, the title and decorative chrome
-    // cannot both fit. Keep the identifying label first; retain the ordinary
-    // UTF-8 chrome after it, where the border renderer can clip decoration.
-    let title = if chrome.width() > usize::from(dialog.width.saturating_sub(2)) {
-        let mut title = Line::from(" Preview ");
-        title.spans.extend(theme::chrome_title("").spans);
-        title
-    } else {
-        chrome
-    };
-    let block = theme::block(true).title(title);
-    let inner = block.inner(dialog);
-    frame.render_widget(block, dialog);
-    if inner.height < 2 {
-        return;
-    }
-    let text_height = inner.height - 2;
-    let mut rows: Vec<Line<'static>> = lines
-        .into_iter()
-        .take(usize::from(text_height))
-        .map(Line::from)
-        .collect();
-    rows.resize(usize::from(text_height), Line::from(""));
-    frame.render_widget(
-        Paragraph::new(rows),
-        Rect::new(inner.x, inner.y, inner.width, text_height),
-    );
-    frame.render_widget(
-        Paragraph::new(preview.summary()).style(Style::new().add_modifier(Modifier::DIM)),
-        Rect::new(inner.x, inner.y + text_height, inner.width, 1),
-    );
-    let ratio = preview.remaining_fraction(Instant::now());
-    frame.render_widget(
-        LineGauge::default()
-            .ratio(ratio)
-            .filled_symbol("━")
-            .unfilled_symbol("─")
-            .filled_style(Style::new().add_modifier(Modifier::BOLD))
-            .label(""),
-        Rect::new(inner.x, inner.y + text_height + 1, inner.width, 1),
-    );
 }
 
 /// Client chrome owns the credit. No terminal, animation cache or protected
@@ -986,7 +903,6 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
                 show_management_actions: app.ui_settings.show_tree_row_management_controls,
             },
             sidebar_files: &app.sidebar_snapshot,
-            chatroom_projects: &app.chatroom_projects,
             resources: Some(&app.resources),
             panes: &app.panes,
         },
@@ -1170,13 +1086,12 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
             );
         }
         Mode::ContextMenu(menu) => {
-            draw_context_menu(frame, menu, app.ui_settings.tree_order, &app.ui_settings);
+            draw_context_menu(frame, menu, &app.ui_settings);
         }
         Mode::TerminalPaneContextMenu(menu) => {
             draw_terminal_pane_context_menu(frame, menu, &app.ui_settings)
         }
         Mode::AgentToolbarModelSubmenu(state) => draw_agent_toolbar_model_submenu(frame, state),
-        Mode::SmartCopy => {}
         Mode::AgentDebugLog(_) => {}
         Mode::LastPromptDialog(state) => draw_last_prompt_dialog(frame, area, state),
         Mode::AgentDebugSavePath(_, state) => {
@@ -1371,18 +1286,6 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                 modal::render_text_prompt_cursor(frame, area, "Save As", state, "Save").or(cursor);
         }
         Mode::ConfirmClose(target) => draw_confirm_close(frame, area, app, *target),
-        Mode::ConvertSession => {
-            if let Some(state) = &app.conversion {
-                let pane_area = app
-                    .pane_viewport(state.pane_id)
-                    .map(|viewport| viewport.outer_area);
-                crate::session_conversion::render(
-                    frame,
-                    crate::session_conversion::dialog_area(pane_area, area),
-                    state,
-                );
-            }
-        }
         Mode::AttentionOverview => {
             if let Some(state) = &app.attention.dialog {
                 crate::attention::dialog::render(
@@ -1726,12 +1629,7 @@ fn draw_confirm_close(frame: &mut Frame, area: Rect, app: &App, target: NodeId) 
 
 /// Draws the actionable right-click popup. It is intentionally opaque and
 /// rendered after panels so no terminal content leaks through its commands.
-fn draw_context_menu(
-    frame: &mut Frame,
-    menu: &ContextMenu,
-    current_tree_order: crate::config::TreeOrder,
-    ui: &crate::config::UiSettings,
-) {
+fn draw_context_menu(frame: &mut Frame, menu: &ContextMenu, ui: &crate::config::UiSettings) {
     let layout = menu.layout();
     let width = menu.area.width.saturating_sub(2);
     let icon_width = popup_icon_width(ui, menu.actions.iter().map(|action| action.icon_target()));
@@ -1761,17 +1659,8 @@ fn draw_context_menu(
         let item = &submenu.items[index];
         let checked = if matches!(submenu.parent, crate::app::ContextMenuAction::OrderBy) {
             Some(match &item.action {
-                // A plugin ordering in effect replaces the built-in order's check.
-                SubmenuItemAction::SetTreeOrder(order) => {
-                    *order == current_tree_order
-                        && !submenu.items.iter().any(|item| {
-                            matches!(
-                                item.action,
-                                SubmenuItemAction::SetPluginTreeOrdering { active: true, .. }
-                            )
-                        })
-                }
-                SubmenuItemAction::SetPluginTreeOrdering { active, .. } => *active,
+                SubmenuItemAction::SetManualTreeOrder { active }
+                | SubmenuItemAction::SetPluginTreeOrdering { active, .. } => *active,
                 _ => false,
             })
         } else {
@@ -2530,10 +2419,6 @@ fn draw_pane_sources(
         app.resource_detail(frame, area);
         return Vec::new();
     }
-    if let RightPanelTarget::Chatroom { project_id } = &app.right_panel_target {
-        crate::chatroom_ui::render(frame, area, app, *project_id);
-        return Vec::new();
-    }
     if matches!(app.right_panel_target, RightPanelTarget::Attention) {
         crate::attention::panel::render_panel(
             frame,
@@ -2665,18 +2550,7 @@ fn draw_pane_runtime(
             let terminal_area = frozen_dialog
                 .as_ref()
                 .map_or(completed_terminal_area, |layout| layout.terminal_area);
-            let smart_copy = app
-                .smart_copy_session
-                .as_ref()
-                .filter(|session| session.pane_id == viewport.pane_id);
-            if let Some(session) = smart_copy {
-                terminal_view::render_frozen_screen(
-                    &session.snapshot.screen,
-                    terminal_area,
-                    frame.buffer_mut(),
-                );
-                draw_smart_copy_highlights(frame, terminal_area, session);
-            } else if let Some(source) = app.frozen_screens.get(&viewport.pane_id) {
+            if let Some(source) = app.frozen_screens.get(&viewport.pane_id) {
                 source.with_screen(|screen| {
                     terminal_view::render_frozen_screen(screen, terminal_area, frame.buffer_mut());
                 });
@@ -2805,18 +2679,11 @@ fn draw_pane_runtime(
                     draw_terminal_selection(app, frame, viewport.pane_id, terminal_area, screen);
                 });
             }
-            let source = if smart_copy.is_some() {
-                app.smart_copy_terminal_source(viewport.pane_id).cloned()
-            } else {
-                Some(
-                    app.selection_terminal_source(viewport.pane_id)
-                        .cloned()
-                        .unwrap_or_else(|| term.painted_source()),
-                )
-            };
-            if let Some(source) = source {
-                sources.push((viewport.pane_id, source));
-            }
+            let source = app
+                .selection_terminal_source(viewport.pane_id)
+                .cloned()
+                .unwrap_or_else(|| term.painted_source());
+            sources.push((viewport.pane_id, source));
             if let Some(source) = app.selection_terminal_source(viewport.pane_id) {
                 draw_terminal_scrollbar_metrics(
                     frame,
@@ -2852,17 +2719,6 @@ fn draw_pane_runtime(
 
     if let Some(toolbar_area) = viewport.toolbar_area {
         if matches!(runtime, PaneRuntime::Terminal(_)) {
-            if let Some(session) = app
-                .smart_copy_session
-                .as_ref()
-                .filter(|session| session.pane_id == viewport.pane_id)
-            {
-                draw_smart_copy_toolbar(frame, toolbar_area, session);
-                if session.candidates.is_empty() && !session.is_light {
-                    draw_smart_copy_progress_dialog(frame, viewport.content_area, session);
-                }
-                return;
-            }
             if app.shows_agent_toolbar(viewport.pane_id) {
                 let below_row = Rect::new(
                     viewport.content_area.x,
@@ -3066,157 +2922,6 @@ fn draw_section_rules(
                 format!("progress \u{b7} {monitors} tasks")
             };
             crate::section_frame::render_rule(frame, rule, Some(&title), focused);
-        }
-    }
-}
-
-fn draw_smart_copy_toolbar(
-    frame: &mut Frame,
-    area: Rect,
-    session: &crate::smart_copy::SmartCopySession,
-) {
-    use crate::smart_copy::SmartCopyPhase;
-
-    let phase = match &session.phase {
-        SmartCopyPhase::Connecting => "connecting",
-        SmartCopyPhase::Streaming => "streaming",
-        SmartCopyPhase::Complete => "complete",
-        SmartCopyPhase::Failed(_) => "failed",
-    };
-    let usage = session.exact_output_tokens.map_or_else(
-        || format!("~{} tokens", session.estimated_output_tokens()),
-        |tokens| format!("{tokens} tokens"),
-    );
-    let current = session
-        .current_candidate()
-        .map_or_else(String::new, |candidate| {
-            let overlap = session
-                .overlap_position()
-                .map_or_else(String::new, |(index, count)| format!(" · {index}/{count}"));
-            format!(" · {}{overlap}", candidate.label)
-        });
-    let exit = crate::smart_copy::exit_button_rect(area);
-    let elapsed = session.started_at.elapsed().as_secs_f32();
-    let progress_area = Rect::new(area.x, area.y, exit.x.saturating_sub(area.x), area.height);
-    if session.is_light {
-        frame.render_widget(
-            Paragraph::new(format!(
-                "🧲 Smart copy light · {} selected · click to add, release the key to copy{current}",
-                session.selected_count()
-            )),
-            progress_area,
-        );
-        frame.render_widget(
-            Paragraph::new("[ Exit ]")
-                .alignment(Alignment::Center)
-                .style(Style::new().add_modifier(Modifier::BOLD)),
-            exit,
-        );
-        return;
-    }
-    frame.render_widget(
-        Paragraph::new(format!(
-            "🧲 Smart copy · {phase} · {elapsed:.1}s · {} selections · {usage}{current}",
-            session.candidates.len()
-        )),
-        progress_area,
-    );
-    frame.render_widget(
-        Paragraph::new("[ Exit ]")
-            .alignment(Alignment::Center)
-            .style(Style::new().add_modifier(Modifier::BOLD)),
-        exit,
-    );
-}
-
-fn draw_smart_copy_progress_dialog(
-    frame: &mut Frame,
-    content_area: Rect,
-    session: &crate::smart_copy::SmartCopySession,
-) {
-    use crate::smart_copy::SmartCopyPhase;
-
-    if content_area.width < 4 || content_area.height < 4 {
-        return;
-    }
-    let width = content_area.width.min(64);
-    let height = content_area.height.min(7);
-    let area = Rect::new(
-        content_area.x + (content_area.width - width) / 2,
-        content_area.y + (content_area.height - height) / 2,
-        width,
-        height,
-    );
-    let state = match &session.phase {
-        SmartCopyPhase::Connecting => "Waiting for the model to answer…".to_string(),
-        SmartCopyPhase::Streaming => {
-            "Response started; waiting for the first valid block…".to_string()
-        }
-        SmartCopyPhase::Complete => "The model returned no valid selectable blocks.".to_string(),
-        SmartCopyPhase::Failed(error) => format!("Request failed: {error}"),
-    };
-    let usage = session.exact_output_tokens.map_or_else(
-        || {
-            format!(
-                "Estimated output: ~{} tokens",
-                session.estimated_output_tokens()
-            )
-        },
-        |tokens| format!("Output: {tokens} tokens"),
-    );
-    let elapsed = session.started_at.elapsed().as_secs_f32();
-    frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(state),
-            Line::from(usage),
-            Line::from(format!("Elapsed: {elapsed:.1}s")),
-            Line::from(format!(
-                "Received characters: {} · rejected records: {}",
-                session.received_characters, session.invalid_lines
-            )),
-        ])
-        .block(theme::block(true).title(theme::chrome_title("🧲 Smart copy")))
-        .alignment(Alignment::Center),
-        area,
-    );
-}
-
-fn draw_smart_copy_highlights(
-    frame: &mut Frame,
-    content_area: Rect,
-    session: &crate::smart_copy::SmartCopySession,
-) {
-    let now = Instant::now();
-    for (candidate_index, candidate) in session.candidates.iter().enumerate() {
-        let is_current = session
-            .current_candidate()
-            .is_some_and(|current| std::ptr::eq(current, candidate));
-        let is_flashing =
-            now.duration_since(candidate.arrived_at) < crate::smart_copy::ARRIVAL_FLASH_DURATION;
-        // Clicked regions stay inverted, exactly like the hover style, so the
-        // whole multi-selection reads as one highlighted set.
-        let is_selected = session.is_selected(candidate_index);
-        if !is_current && !is_flashing && !is_selected {
-            continue;
-        }
-        for span in &candidate.spans {
-            if span.row >= content_area.height {
-                continue;
-            }
-            let last_column = span.end_column.min(content_area.width.saturating_sub(1));
-            for column in span.start_column..=last_column {
-                let position = Position::new(
-                    content_area.x.saturating_add(column),
-                    content_area.y.saturating_add(span.row),
-                );
-                if let Some(cell) = frame.buffer_mut().cell_mut(position) {
-                    cell.modifier.insert(Modifier::REVERSED);
-                    if is_flashing {
-                        cell.modifier.insert(Modifier::BOLD);
-                    }
-                }
-            }
         }
     }
 }
@@ -3574,7 +3279,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::ContextMenu(..) => "TREE ACTIONS",
         Mode::TerminalPaneContextMenu(..) => "TERMINAL ACTIONS",
         Mode::AgentToolbarModelSubmenu(..) => "MODEL STRENGTH",
-        Mode::SmartCopy => "SMART COPY",
         Mode::AgentDebugLog(..) => "AGENT DEBUG LOG",
         Mode::LastPromptDialog(..) => "LAST PROMPT",
         Mode::AgentDebugSavePath(..) => "SAVE AGENT DEBUG LOG",
@@ -3597,7 +3301,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::BoardRenamePrompt(_, _, _) => "RENAME BOARD ITEM",
         Mode::BoardDeleteConfirm(_, _) => "DELETE BOARD ITEM",
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
-        Mode::ConvertSession => "CONVERTING SESSION",
         Mode::RemoteCompaction => "REMOTE COMPACTION",
         Mode::AttentionOverview => "NEEDS YOU",
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
@@ -3813,106 +3516,7 @@ fn draw_voice_control(frame: &mut Frame, area: Rect, app: &App) {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn smart_copy_preview_fits_narrow_screens() {
-        let project = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "synthetic-narrow-preview".into(),
-            project.path().to_path_buf(),
-        );
-        app.smart_copy_preview = Some(crate::smart_copy_light::SmartCopyPreview::new(
-            "界界界界界界界界界界界界".into(),
-            1,
-            true,
-            Instant::now(),
-        ));
-        for width in [12, 16, 20, 27, 28, 40] {
-            let area = Rect::new(0, 0, width, 9);
-            let mut terminal = Terminal::new(TestBackend::new(width, area.height)).unwrap();
-            terminal
-                .draw(|frame| super::draw_smart_copy_preview(frame, area, &app))
-                .unwrap();
-            let buffer = terminal.backend().buffer();
-            let top = (0..area.height)
-                .find(|y| (0..width).any(|x| buffer[(x, *y)].symbol() == "╭"))
-                .expect("the preview frame must remain visible");
-            let row: String = (0..width).map(|x| buffer[(x, top)].symbol()).collect();
-            assert!(row.contains("Preview"));
-            assert!(
-                row.contains('╮'),
-                "the right border must fit at width {width}"
-            );
-            crate::ui_capture::save(&format!("smart-copy-preview-{width}x9"), &terminal);
-        }
-    }
-
     #[test]
-    fn smart_copy_preview_withholds_scene_attribution_and_recovers_after_close() {
-        use crate::background_animation::test_support::{fake_host, FakeProbe};
-        let project = tempfile::tempdir().unwrap();
-        let mut app = App::new("preview-paint".into(), project.path().to_path_buf());
-        let area = Rect::new(0, 0, 100, 30);
-        app.set_screen_area(area);
-        let probe = FakeProbe::new();
-        *app.animation_frame.host_mut() = fake_host(&probe);
-        app.animation_settings.enabled = true;
-        app.animation_settings.kind = crate::background_animation::AnimationKind::Stars;
-        app.animation_settings.density_percent = 100;
-        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
-        terminal
-            .draw(|frame| {
-                draw_at_with_cursor(frame, &mut app, Duration::ZERO);
-            })
-            .unwrap();
-        app.animation_frame.settle_for_test();
-        terminal
-            .draw(|frame| {
-                draw_at_with_cursor(frame, &mut app, Duration::ZERO);
-            })
-            .unwrap();
-        assert!(
-            app.animation_frame
-                .composed_bits()
-                .iter()
-                .any(|bits| *bits != 0),
-            "Control draw must contain actual composed scene ink"
-        );
-        app.smart_copy_preview = Some(crate::smart_copy_light::SmartCopyPreview::new(
-            "⣿⣿⣿⣿".into(),
-            1,
-            true,
-            Instant::now(),
-        ));
-        let preview = terminal
-            .draw(|frame| {
-                draw_at_with_cursor(frame, &mut app, Duration::ZERO);
-            })
-            .unwrap();
-        assert!(
-            preview
-                .buffer
-                .content()
-                .iter()
-                .any(|cell| cell.symbol().contains('⣿')),
-            "The actual copied Braille preview must render"
-        );
-        assert!(
-            app.animation_frame.composed_bits().is_empty(),
-            "Late arbitrary preview text must not retain scene attribution"
-        );
-        app.smart_copy_preview = None;
-        terminal
-            .draw(|frame| {
-                draw_at_with_cursor(frame, &mut app, Duration::ZERO);
-            })
-            .unwrap();
-        assert!(
-            app.animation_frame
-                .composed_bits()
-                .iter()
-                .any(|bits| *bits != 0),
-            "Closing preview must restore ordinary scene attribution"
-        );
-    }
     use super::*;
     use crate::app::{PaneRuntime, RightPanelTarget};
     use crate::terminal_view::TerminalView;
@@ -4865,7 +4469,6 @@ mod tests {
     fn tree_order_submenu_renders_one_check_before_the_active_option() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 100, 30));
-        app.ui_settings.tree_order = crate::config::TreeOrder::AgeDescending;
         app.open_context_menu(ROOT_ID, 2, 2);
         let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("context menu should be open");
@@ -4874,14 +4477,7 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
 
         terminal
-            .draw(|frame| {
-                draw_context_menu(
-                    frame,
-                    &menu,
-                    crate::config::TreeOrder::AgeDescending,
-                    &app.ui_settings,
-                )
-            })
+            .draw(|frame| draw_context_menu(frame, &menu, &app.ui_settings))
             .unwrap();
         let rendered = terminal
             .backend()
@@ -4899,7 +4495,7 @@ mod tests {
         // is read back as one extra space.
         let icon = context_menu_icon(&app.ui_settings, IconTarget::TopLevel);
         let wide_cell_padding = " ".repeat(icon.width().saturating_sub(icon.chars().count()));
-        let active_row = format!("✓ {}{wide_cell_padding}  Oldest first", icon.trim_start());
+        let active_row = format!("✓ {}{wide_cell_padding}  Manual order", icon.trim_start());
         assert!(rendered.contains(&active_row));
         assert_eq!(rendered.matches('✓').count(), 1);
     }
@@ -4915,7 +4511,7 @@ mod tests {
         let render = |ui: &crate::config::UiSettings| {
             let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
             terminal
-                .draw(|frame| draw_context_menu(frame, &menu, crate::config::TreeOrder::Manual, ui))
+                .draw(|frame| draw_context_menu(frame, &menu, ui))
                 .unwrap();
             terminal
                 .backend()
@@ -5519,9 +5115,7 @@ mod context_menu_visual_tests {
             }
             let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
             terminal
-                .draw(|frame| {
-                    draw_context_menu(frame, menu, app.ui_settings.tree_order, &app.ui_settings)
-                })
+                .draw(|frame| draw_context_menu(frame, menu, &app.ui_settings))
                 .unwrap();
             save_frame(&format!("tree-target-{name}"), &terminal);
         }
@@ -5551,14 +5145,7 @@ mod context_menu_visual_tests {
                 assert_eq!(layout.action_at(row), Some(selected));
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                 terminal
-                    .draw(|frame| {
-                        draw_context_menu(
-                            frame,
-                            &menu,
-                            app.ui_settings.tree_order,
-                            &app.ui_settings,
-                        )
-                    })
+                    .draw(|frame| draw_context_menu(frame, &menu, &app.ui_settings))
                     .unwrap();
                 let cell = &terminal.backend().buffer()[(menu.area.x + 1, menu.area.y + 1 + row)];
                 assert_eq!(Some(cell.bg), theme::selected_style().bg);
@@ -5585,9 +5172,7 @@ mod context_menu_visual_tests {
         );
         let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
         terminal
-            .draw(|frame| {
-                draw_context_menu(frame, &menu, app.ui_settings.tree_order, &app.ui_settings)
-            })
+            .draw(|frame| draw_context_menu(frame, &menu, &app.ui_settings))
             .unwrap();
         save_frame("tree-order-submenu", &terminal);
     }

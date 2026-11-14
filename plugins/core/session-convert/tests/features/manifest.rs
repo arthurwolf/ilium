@@ -97,6 +97,7 @@ fn manifest_050_server_grants_are_those_of_the_page_in_order() {
             "panes.create",
             "panes.create-command:codex",
             "panes.create-command:claude",
+            "tree.read",
             "tree.write",
             "agent.read",
             "fs.read:agent-sessions:claude",
@@ -116,10 +117,10 @@ fn manifest_050_server_grants_are_those_of_the_page_in_order() {
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_client_grants_are_agent_read_and_ui_panels() {
+fn manifest_050_client_grants_are_agent_read_tree_read_ui_panels_and_keys_intercept() {
     assert_eq!(
         strings(&manifest()["capabilities"]["client"]),
-        ["agent.read", "ui.panels"]
+        ["agent.read", "tree.read", "ui.panels", "keys.intercept"]
     );
 }
 

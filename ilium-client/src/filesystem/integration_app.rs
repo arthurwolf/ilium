@@ -1,8 +1,7 @@
-use super::integrations::{FeatureTarget, IntegrationIntent, Maintenance, RoomTarget};
+use super::integrations::{FeatureTarget, IntegrationIntent, Maintenance};
 use super::ordered::WriteCompletion;
 use crate::agent_feature_setup::{AgentFeature, FeatureSetupStatus};
-use crate::app::{AgentSetupTargetStatus, App, Mode, RightPanelTarget};
-use ilium_core::{Node, NodeId};
+use crate::app::{AgentSetupTargetStatus, App, Mode};
 use ilium_execution::JobOutcome;
 use std::{path::Path, sync::Arc};
 
@@ -32,28 +31,8 @@ impl App {
                 }
             }
         }
-        let rooms = self
-            .tree
-            .project_ids()
-            .into_iter()
-            .filter_map(|id| {
-                self.tree
-                    .get(id)
-                    .and_then(Node::project_path)
-                    .map(|path| RoomTarget {
-                        id,
-                        path: path.to_path_buf(),
-                    })
-            })
-            .collect();
-        let visible = match self.right_panel_target {
-            RightPanelTarget::Chatroom { project_id } => Some(project_id),
-            _ => None,
-        };
         let snapshot = Maintenance {
             targets: targets.into_boxed_slice().into_vec(),
-            rooms,
-            visible,
             automatic,
         };
         snapshot.checked()?;
@@ -78,40 +57,6 @@ impl App {
         });
         result
     }
-    pub(crate) fn install_chatroom_messages(
-        &mut self,
-        project_id: NodeId,
-        messages: Vec<crate::chatroom::ChatMessage>,
-    ) -> bool {
-        let previous = self.chatrooms.entry(project_id).or_default();
-        if previous.messages == messages {
-            return false;
-        }
-        let previous_metrics = crate::chatroom_ui::scroll_metrics(
-            self.layout.pane_area,
-            &previous.messages,
-            previous.scroll_from_newest,
-        );
-        let next_metrics = crate::chatroom_ui::scroll_metrics(self.layout.pane_area, &messages, 0);
-        previous.scroll_from_newest = if previous.scroll_from_newest == 0 {
-            0
-        } else if next_metrics.total_lines >= previous_metrics.total_lines {
-            previous.scroll_from_newest.saturating_add(
-                next_metrics
-                    .total_lines
-                    .saturating_sub(previous_metrics.total_lines),
-            )
-        } else {
-            previous.scroll_from_newest.saturating_sub(
-                previous_metrics
-                    .total_lines
-                    .saturating_sub(next_metrics.total_lines),
-            )
-        }
-        .min(next_metrics.maximum_top);
-        previous.messages = messages;
-        true
-    }
     pub(crate) fn collect_integration_files(&mut self) -> bool {
         let Some(mut files) = self.integration_files.take() else {
             return false;
@@ -119,10 +64,6 @@ impl App {
         let mut changed = false;
         while let Some((intent, completion)) = files.poll() {
             changed = true;
-            let check_room = matches!(&intent, IntegrationIntent::CheckRoom(_));
-            if check_room {
-                self.chatroom_stamp_pending = false;
-            }
             let mut result = None;
             let hold = match completion {
                 WriteCompletion::Outcome { outcome, .. } => {
@@ -153,54 +94,8 @@ impl App {
             let Some(result) = result else {
                 continue;
             };
-            if let IntegrationIntent::CheckRoom(requested) = &intent {
-                match result {
-                    Ok(mut result) => {
-                        if let Some(room) = result.rooms.pop() {
-                            let current = self.tree.get(requested.id).and_then(Node::project_path);
-                            if current == Some(requested.path.as_path()) {
-                                let observed = Some((requested.id, room.stamp));
-                                if self.chatroom_file_stamp != observed {
-                                    self.chatroom_file_stamp = observed;
-                                    let queued = self
-                                        .integration_snapshot(false)
-                                        .and_then(|snapshot| files.want(snapshot));
-                                    if let Err(error) = queued {
-                                        self.status_message = Some(error);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        self.status_message = Some(format!("Chatroom check failed: {error}"));
-                    }
-                }
-                continue;
-            }
             match result {
                 Err(error) => {
-                    if let IntegrationIntent::Append { room, draft } = &intent {
-                        let current = self.tree.get(room.id).and_then(Node::project_path);
-                        if current == Some(room.path.as_path()) {
-                            let state = self.chatrooms.entry(room.id).or_default();
-                            if state.draft.is_empty() {
-                                state.draft = draft.clone();
-                            } else {
-                                self.failed_chatroom_appends.push((
-                                    room.id,
-                                    room.path.clone(),
-                                    draft.clone(),
-                                ));
-                            }
-                        } else {
-                            self.failed_chatroom_appends.push((
-                                room.id,
-                                room.path.clone(),
-                                draft.clone(),
-                            ));
-                        }
-                    }
                     self.status_message = Some(format!(
                         "Integration publication unconfirmed; authored input retained: {error}"
                     ));
@@ -232,73 +127,8 @@ impl App {
                             }
                         }
                     }
-                    for room in result.rooms.drain(..) {
-                        let current = self.tree.get(room.room.id).and_then(Node::project_path);
-                        if current != Some(room.room.path.as_path()) {
-                            continue;
-                        }
-                        if matches!(self.right_panel_target, RightPanelTarget::Chatroom { project_id } if project_id == room.room.id)
-                        {
-                            self.chatroom_file_stamp = Some((room.room.id, room.stamp));
-                        }
-                        match room.result {
-                            Ok((exists, messages)) => {
-                                let availability_changed = if exists {
-                                    self.chatroom_projects.insert(room.room.id)
-                                } else {
-                                    self.chatroom_projects.remove(&room.room.id)
-                                };
-                                if availability_changed {
-                                    self.bump_tree_version();
-                                }
-                                if let Some(messages) = messages {
-                                    let feed_count = self
-                                        .chatrooms
-                                        .values()
-                                        .filter(|state| state.retained_result.is_some())
-                                        .count();
-                                    if feed_count >= 8
-                                        && self
-                                            .chatrooms
-                                            .get(&room.room.id)
-                                            .is_none_or(|state| state.retained_result.is_none())
-                                    {
-                                        let evict=self.chatrooms.iter().find_map(|(id,state)|(*id!=room.room.id && state.scroll_from_newest==0 && !matches!(self.right_panel_target,RightPanelTarget::Chatroom{project_id} if project_id==*id)).then_some(*id));
-                                        if let Some(evict) = evict {
-                                            if let Some(state) = self.chatrooms.get_mut(&evict) {
-                                                state.messages.clear();
-                                                state.retained_result = None;
-                                            }
-                                        } else {
-                                            self.status_message=Some("Chatroom feed capacity reached; existing scrolled history retained".into());
-                                            continue;
-                                        }
-                                    }
-                                    self.install_chatroom_messages(room.room.id, messages);
-                                    self.chatrooms
-                                        .entry(room.room.id)
-                                        .or_default()
-                                        .retained_result = hold.clone();
-                                }
-                            }
-                            Err(error) => {
-                                result.failures.push(format!(
-                                    "Could not refresh chatroom; previous feed retained: {error}"
-                                ));
-                            }
-                        }
-                    }
                     if result.failures.is_empty() {
                         match &intent {
-                            IntegrationIntent::Append { .. } => {
-                                self.status_message = Some("Chatroom message sent".into())
-                            }
-                            IntegrationIntent::AddRoom(room) => {
-                                self.show_chatroom(room.id);
-                                self.status_message = Some(
-                                    "Chatroom added; hooks and managed guidance are ready".into(),
-                                );
-                            }
                             IntegrationIntent::Install {
                                 prompt: Some(prompt),
                                 ..
@@ -314,16 +144,12 @@ impl App {
                                     Some("Managed agent instructions updated".into())
                             }
                             IntegrationIntent::Maintenance(_) => {}
-                            IntegrationIntent::CheckRoom(_) => {}
                         }
                     } else {
-                        let prefix = if matches!(intent, IntegrationIntent::Append { .. }) {
-                            "Chatroom append saved; feed refresh incomplete"
-                        } else {
-                            "Integration setup incomplete"
-                        };
-                        self.status_message =
-                            Some(format!("{prefix}: {}", result.failures.join("; ")));
+                        self.status_message = Some(format!(
+                            "Integration setup incomplete: {}",
+                            result.failures.join("; ")
+                        ));
                     }
                     self.reconcile_cached_agent_setup_prompts();
                     self.reconcile_right_panel_target();

@@ -1,16 +1,24 @@
 //! Core plugin `ilium.core.fleet` (manual page core-plugin-fleet.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! Minimal conforming bodies: no contributions are produced until the feature logic moves here.
+//! The server side owns the fleet command lines: `ilium panes` lists the panes of every running
+//! session and `ilium broadcast` sends one message to the agents among them (moved from the
+//! `ilium` binary, which now only forwards these commands to the plugin). The shared pane
+//! selection lives in `pane_filter`, the cross-session pane lists in `scan`, and each running
+//! command line is a small state machine kept in `jobs`.
 
+pub mod broadcast;
 pub mod delivery;
+pub mod pane_filter;
+pub mod panes;
+pub mod scan;
+
+mod jobs;
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle};
 
 /// The server side of `ilium.core.fleet` (core-plugin-fleet.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = [])]
@@ -24,8 +32,25 @@ impl Lifecycle for FleetServer {
 }
 
 impl Handler for FleetServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut api = host();
+        let mut out = Vec::new();
+        for event in batch {
+            match event {
+                Event::CliInvoked(invoked) => jobs::start(
+                    &mut *api,
+                    invoked.invocation,
+                    &invoked.name,
+                    &invoked.argv,
+                    &invoked.cwd,
+                    &mut out,
+                ),
+                Event::CliCancelled(invocation) => jobs::on_cancelled(invocation),
+                Event::RequestCompleted(result) => jobs::on_completed(&mut *api, &result, &mut out),
+                _ => {}
+            }
+        }
+        out
     }
 }
 

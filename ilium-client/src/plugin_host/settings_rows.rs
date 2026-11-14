@@ -12,7 +12,7 @@
 //! and what is clickable are the same rectangles.
 
 use ilium_plugin_host::config_settings::PluginSettingsStore;
-use ilium_plugin_host::settings::{manifest_rows, SettingsRow};
+use ilium_plugin_host::settings::{manifest_rows, KernelBinding, SettingsRow};
 use ratatui::layout::Rect;
 use serde_json::{Map, Value};
 
@@ -50,6 +50,9 @@ pub(crate) struct SettingRow {
     pub schema: Value,
     /// The refusal text of the last edit, shown under the row until the next edit.
     pub validation: Option<String>,
+    /// Set when the row edits a built-in tab's own `config.toml` table instead of the plugin's:
+    /// the owner of that tab (`settings.write-kernel:<tab>`) declares it in the manifest.
+    pub kernel: Option<KernelBinding>,
 }
 
 /// The editable rows of one plugin manifest, with the stored values over the defaults.
@@ -64,6 +67,52 @@ pub(crate) fn rows_for(
     manifest_rows(&manifest)
         .into_iter()
         .map(|row| SettingRow::new(plugin, row, stored))
+        .collect()
+}
+
+/// The rows of one plugin manifest, with a kernel-bound row reading its value from the
+/// built-in tab's table of `config.toml` through `store`. A row is bound only when the plugin
+/// holds `settings.write-kernel:<tab>` for the tab it names; any other row keeps the plugin's
+/// own table.
+pub(crate) fn rows_with_kernel(
+    plugin: &str,
+    manifest: &str,
+    stored: &Map<String, Value>,
+    store: &PluginSettingsStore,
+) -> Vec<SettingRow> {
+    let owned = kernel_tabs_owned(manifest);
+    let mut rows = rows_for(plugin, manifest, stored);
+    for row in &mut rows {
+        let bound = row
+            .kernel
+            .as_ref()
+            .is_some_and(|binding| owned.contains(&binding.tab));
+        if !bound {
+            row.kernel = None;
+            continue;
+        }
+        if let Some(binding) = &row.kernel {
+            row.value = store
+                .kernel_get(&binding.tab, &binding.key)
+                .or_else(|| (!row.default.is_null()).then(|| row.default.clone()))
+                .unwrap_or(Value::Null);
+        }
+    }
+    rows
+}
+
+/// The kernel tabs whose `settings.write-kernel:<tab>` grant the manifest asks for on the client.
+fn kernel_tabs_owned(manifest: &str) -> Vec<String> {
+    let Ok(manifest) = serde_json::from_str::<Value>(manifest) else {
+        return Vec::new();
+    };
+    manifest["capabilities"]["client"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter_map(|grant| grant.strip_prefix("settings.write-kernel:"))
+        .map(str::to_owned)
         .collect()
 }
 
@@ -89,6 +138,7 @@ impl SettingRow {
             default: row.default,
             schema: row.schema,
             validation: None,
+            kernel: row.kernel,
         }
     }
 
@@ -306,6 +356,9 @@ impl SettingRow {
     /// holds the new value and no refusal; on a refusal it keeps the old value and holds the
     /// refusal text. Returns whether the stored value changed.
     pub(crate) fn commit(&mut self, store: &PluginSettingsStore, value: Value) -> bool {
+        if self.kernel.is_some() {
+            return self.commit_kernel(store, value);
+        }
         let mut patch = Map::new();
         patch.insert(self.key.clone(), value.clone());
         match store.apply_patch(&self.plugin, &self.single_schema(), &patch) {
@@ -325,6 +378,50 @@ impl SettingRow {
                         error.message
                     }
                 });
+                false
+            }
+        }
+    }
+
+    /// The write of a kernel-bound row: the value is checked against the row's schema, then
+    /// stored at the dotted key of the built-in tab's table (`null` removes the key, so the
+    /// kernel's default applies again).
+    fn commit_kernel(&mut self, store: &PluginSettingsStore, value: Value) -> bool {
+        let Some(binding) = self.kernel.clone() else {
+            return false;
+        };
+        let candidate = if value.is_null() {
+            self.default.clone()
+        } else {
+            value.clone()
+        };
+        if !candidate.is_null() {
+            let mut object = Map::new();
+            object.insert(self.key.clone(), candidate.clone());
+            if let Err(findings) = ilium_plugin_host::settings::validate_settings(
+                &self.single_schema(),
+                &Value::Object(object).to_string(),
+            ) {
+                self.validation = Some(
+                    findings
+                        .iter()
+                        .map(|finding| finding.message.clone())
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                );
+                return false;
+            }
+        }
+        let before = store.kernel_get(&binding.tab, &binding.key);
+        let stored = if value.is_null() { None } else { Some(&value) };
+        match store.kernel_set(&binding.tab, &binding.key, stored) {
+            Ok(()) => {
+                self.value = candidate;
+                self.validation = None;
+                before.as_ref() != stored
+            }
+            Err(error) => {
+                self.validation = Some(error.message);
                 false
             }
         }
@@ -382,7 +479,7 @@ fn plain(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{rows_for, SettingRow, Step};
+    use super::{rows_for, rows_with_kernel, SettingRow, Step};
     use crate::value_control::{cell_width, ControlAction, PointerButton};
     use ilium_plugin_host::config_settings::PluginSettingsStore;
     use ratatui::layout::{Position, Rect};
@@ -617,5 +714,37 @@ mod tests {
         // The label never overlaps the first button.
         assert!(geometry.label.right() < geometry.previous.x);
         assert!(geometry.next.right() <= geometry.row.right());
+    }
+    const KERNEL_MANIFEST: &str = r#"{"capabilities":{"client":["settings.write-kernel:inference"]},
+      "contributes":{"settings":[{"kind":"tab","id":"main","title":"Inference",
+      "sections":[{"title":"OpenAI","rows":[
+        {"type":"text","key":"model","title":"Model","default":"",
+         "kernel_tab":"inference","kernel_key":"openai.model"},
+        {"type":"text","key":"other","title":"Other","default":"",
+         "kernel_tab":"terminal","kernel_key":"shell"},
+        {"type":"toggle","key":"plain","title":"Plain","default":false}
+      ]}]}]}}"#;
+
+    #[test]
+    fn a_kernel_bound_row_reads_and_writes_the_tab_table_it_is_granted() {
+        let (store, _directory) = store();
+        store
+            .kernel_set("inference", "openai.model", Some(&json!("gpt-a")))
+            .expect("seed the kernel value");
+        let mut rows = rows_with_kernel("acme.inf", KERNEL_MANIFEST, &Map::new(), &store);
+        let model = rows.iter_mut().find(|row| row.key == "model").expect("row");
+        assert_eq!(model.value, json!("gpt-a"));
+        assert!(model.commit(&store, json!("gpt-b")));
+        assert_eq!(
+            store.kernel_get("inference", "openai.model"),
+            Some(json!("gpt-b"))
+        );
+        assert!(model.commit(&store, Value::Null));
+        assert_eq!(store.kernel_get("inference", "openai.model"), None);
+        // A tab the plugin holds no grant for is not bound: the row stays in the plugin's table.
+        let other = rows.iter().find(|row| row.key == "other").expect("row");
+        assert!(other.kernel.is_none());
+        let plain = rows.iter().find(|row| row.key == "plain").expect("row");
+        assert!(plain.kernel.is_none());
     }
 }
