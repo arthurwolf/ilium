@@ -37,6 +37,7 @@
       "ui.panels",
       "settings.write-kernel:terminal",
       "open-external",
+      "notify.toast",
       "extensions.provide:ilium.core.terminal/open-link",
       "extensions.provide:ilium.core.terminal/link-actions"
     ]
@@ -68,6 +69,19 @@
         "id": "link-open",
         "title": "Open link",
         "side": "client"
+      },
+      {
+        "id": "paste-screen",
+        "title": "Paste screen into another pane",
+        "side": "client"
+      }
+    ],
+    "context_menu": [
+      {
+        "id": "paste-screen",
+        "title": "Paste screen into another pane",
+        "command": "paste-screen",
+        "target": "terminal"
       }
     ],
     "extension_points": [

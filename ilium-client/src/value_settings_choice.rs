@@ -1,11 +1,10 @@
 //! Closed settings catalogs with stable enum identities and fresh commit validation.
 use crate::app::{
-    AgentMonitoringRow, App, AppearanceRow, AttentionRow, EditorRow, Mode, SettingsTab, TerminalRow,
+    AgentMonitoringRow, App, AppearanceRow, EditorRow, Mode, SettingsTab, TerminalRow,
 };
 use crate::config::{
     AgentIdentifierMode, LineDisplay, MotionLevel, NewPaneDirectory, SidebarDensity,
 };
-use crate::remote_compaction_settings::TechniqueTarget;
 use crate::theme::ColorScheme;
 use crate::value_dialog::{ChoiceDialogState, ChoiceOption, DialogOutcome, ValueDialogState};
 
@@ -33,7 +32,6 @@ pub enum SettingsChoice {
     SoundFile,
     TitleStyle,
     CodexThreadNames,
-    ResetTimeDisplay,
     InferenceProvider,
     KiloModel,
     OllamaModel,
@@ -45,39 +43,6 @@ pub enum SettingsChoice {
     GitBranchLine,
     GitClosePolicy,
     SessionRecovery,
-    RemoteTechnique(TechniqueTarget),
-    AttentionMode,
-    AttentionPressSorts,
-    AttentionModel,
-    AttentionShowBriefing,
-    AttentionLargeButtons,
-}
-
-/// Model ids offered for the attention queue: the models of the provider that
-/// currently names threads, plus the saved override when it is outside that list.
-pub(crate) fn attention_model_ids(app: &App) -> Vec<String> {
-    // OpenRouter has no discovered catalogue; only a saved override is offered.
-    let no_models = Vec::new();
-    let discovered = match app.inference_settings.selected_provider {
-        ilium_inference::InferenceProviderKind::KiloGateway => &app.kilo_gateway_models,
-        ilium_inference::InferenceProviderKind::Ollama => &app.ollama_models,
-        ilium_inference::InferenceProviderKind::OpenAi => &app.openai_models,
-        ilium_inference::InferenceProviderKind::Anthropic => &app.anthropic_models,
-        ilium_inference::InferenceProviderKind::OpenRouter => &no_models,
-    };
-    let mut ids: Vec<String> = Vec::new();
-    for model in app
-        .attention_settings
-        .model_override
-        .iter()
-        .chain(discovered.iter())
-        .filter(|model| !model.trim().is_empty())
-    {
-        if !ids.contains(model) {
-            ids.push(model.clone());
-        }
-    }
-    ids
 }
 
 fn sound_file_id(path: &std::path::Path) -> String {
@@ -225,7 +190,7 @@ fn tree_order_catalog(app: &App) -> (Vec<ChoiceOption>, String) {
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 42] = [
+    pub const ALL: [Self; 33] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
@@ -248,7 +213,6 @@ impl SettingsChoice {
         Self::SoundFile,
         Self::TitleStyle,
         Self::CodexThreadNames,
-        Self::ResetTimeDisplay,
         Self::InferenceProvider,
         Self::KiloModel,
         Self::OllamaModel,
@@ -260,14 +224,6 @@ impl SettingsChoice {
         Self::GitBranchLine,
         Self::GitClosePolicy,
         Self::SessionRecovery,
-        Self::RemoteTechnique(TechniqueTarget::Claude),
-        Self::RemoteTechnique(TechniqueTarget::Codex),
-        Self::RemoteTechnique(TechniqueTarget::Other),
-        Self::AttentionMode,
-        Self::AttentionPressSorts,
-        Self::AttentionModel,
-        Self::AttentionShowBriefing,
-        Self::AttentionLargeButtons,
     ];
 
     pub fn at(app: &App, tab: SettingsTab, row: usize) -> Option<Self> {
@@ -279,18 +235,6 @@ impl SettingsChoice {
                 Some(crate::app::GitRow::DefaultClosePolicy) => Some(Self::GitClosePolicy),
                 _ => None,
             },
-            SettingsTab::RemoteCompaction => {
-                match crate::remote_compaction_settings::RemoteCompactionRow::rows(
-                    &app.remote_compaction_settings,
-                )
-                .get(row)
-                {
-                    Some(crate::remote_compaction_settings::RemoteCompactionRow::Technique(
-                        target,
-                    )) => Some(Self::RemoteTechnique(*target)),
-                    _ => None,
-                }
-            }
             SettingsTab::Session
                 if crate::app::SessionRow::ALL.get(row)
                     == Some(&crate::app::SessionRow::RecoveryPolicy) =>
@@ -313,15 +257,6 @@ impl SettingsChoice {
                     _ => None,
                 }
             }
-            SettingsTab::ResetPlanning if row == 2 => Some(Self::ResetTimeDisplay),
-            SettingsTab::Attention => match AttentionRow::ALL.get(row) {
-                Some(AttentionRow::Mode) => Some(Self::AttentionMode),
-                Some(AttentionRow::PressSorts) => Some(Self::AttentionPressSorts),
-                Some(AttentionRow::Model) => Some(Self::AttentionModel),
-                Some(AttentionRow::ShowBriefing) => Some(Self::AttentionShowBriefing),
-                Some(AttentionRow::LargeButtons) => Some(Self::AttentionLargeButtons),
-                _ => None,
-            },
             SettingsTab::Sound => match crate::app::SoundRow::ALL.get(row) {
                 Some(crate::app::SoundRow::Source) => Some(Self::SoundSource),
                 Some(crate::app::SoundRow::File) => Some(Self::SoundFile),
@@ -394,12 +329,6 @@ impl SettingsChoice {
             Self::OllamaModel => "Ollama model",
             Self::OpenAiModel => "OpenAI model",
             Self::AnthropicModel => "Anthropic model",
-            Self::ResetTimeDisplay => "Time display",
-            Self::AttentionMode => "Attention mode",
-            Self::AttentionPressSorts => "Sort refreshes attention",
-            Self::AttentionModel => "Attention model",
-            Self::AttentionShowBriefing => "Show briefing on arrival",
-            Self::AttentionLargeButtons => "Large attention buttons",
             Self::SoundSource => "Sound source",
             Self::SoundFile => "Sound file",
             Self::TitleStyle => "Title style",
@@ -422,9 +351,6 @@ impl SettingsChoice {
             Self::AttentionIndicator => "Attention running indicator",
             Self::LeftPanelSizingMode => "Left panel sizing",
             Self::AgentMonitoringMode => "Agent Monitoring mode",
-            Self::RemoteTechnique(TechniqueTarget::Claude) => "Claude technique",
-            Self::RemoteTechnique(TechniqueTarget::Codex) => "Codex technique",
-            Self::RemoteTechnique(TechniqueTarget::Other) => "Other agents technique",
         }
     }
 
@@ -513,59 +439,6 @@ impl SettingsChoice {
             Self::KiloModel => (
                 crate::value_inference::OnboardingInference::KiloModel.options(app),
                 app.inference_settings.kilo_gateway.model.clone(),
-            ),
-            Self::AttentionMode => catalog(
-                &crate::attention::AttentionMode::ALL,
-                app.attention_settings.mode,
-                |value| value.label().into(),
-            ),
-            Self::AttentionPressSorts => catalog(
-                &[true, false],
-                app.attention_settings.press_sorts,
-                |value| crate::value_control::boolean_switch(value).into(),
-            ),
-            Self::AttentionLargeButtons => catalog(
-                &[true, false],
-                app.attention_settings.large_buttons,
-                |value| crate::value_control::boolean_switch(value).into(),
-            ),
-            Self::AttentionShowBriefing => catalog(
-                &[true, false],
-                app.attention_settings.show_briefing,
-                |value| crate::value_control::boolean_switch(value).into(),
-            ),
-            Self::AttentionModel => {
-                let mut options = vec![ChoiceOption {
-                    id: "none".into(),
-                    label: "Same as titles".into(),
-                    disabled_reason: None,
-                }];
-                options.extend(
-                    attention_model_ids(app)
-                        .into_iter()
-                        .map(|model| ChoiceOption {
-                            id: model.clone(),
-                            label: model,
-                            disabled_reason: None,
-                        }),
-                );
-                let selected = app
-                    .attention_settings
-                    .model_override
-                    .clone()
-                    .unwrap_or_else(|| "none".into());
-                (options, selected)
-            }
-            Self::ResetTimeDisplay => catalog(
-                &[
-                    crate::reset_planning::ResetTimeStyle::Exact,
-                    crate::reset_planning::ResetTimeStyle::Human,
-                ],
-                app.reset_planning_settings.time_style,
-                |value| match value {
-                    crate::reset_planning::ResetTimeStyle::Exact => "Exact · d h m s".into(),
-                    crate::reset_planning::ResetTimeStyle::Human => "Human · rounded".into(),
-                },
             ),
             Self::SoundSource => catalog(
                 &ilium_sound::SoundSourceKind::ALL,
@@ -676,17 +549,6 @@ impl SettingsChoice {
                 &crate::agent_monitoring::AgentMonitoringMode::ALL,
                 app.ui_settings.agent_monitoring_mode,
                 |value| value.label().into(),
-            ),
-            Self::RemoteTechnique(target) => (
-                ilium_remote_compaction::Technique::ALL
-                    .into_iter()
-                    .map(|value| ChoiceOption {
-                        id: value.id().into(),
-                        label: value.label().into(),
-                        disabled_reason: None,
-                    })
-                    .collect(),
-                app.remote_compaction_settings.technique(target).id().into(),
             ),
         }
     }
@@ -960,9 +822,6 @@ impl App {
         let mut ui = self.ui_settings.clone();
         let mut voice = self.voice_settings.clone();
         let mut sound = self.sound_settings.clone();
-        let mut resets = self.reset_planning_settings.clone();
-        let mut remote_compaction = self.remote_compaction_settings.clone();
-        let mut attention = self.attention_settings.clone();
         match field {
             SettingsChoice::GitDefaultWhere => {
                 select!(crate::config::GitDefaultWhere::ALL, git.default_where)
@@ -987,30 +846,6 @@ impl App {
             | SettingsChoice::OpenAiModel
             | SettingsChoice::AnthropicModel => {
                 return Err("Inference choice was not dispatched".into());
-            }
-            SettingsChoice::AttentionMode => {
-                select!(crate::attention::AttentionMode::ALL, attention.mode);
-            }
-            SettingsChoice::AttentionPressSorts => {
-                select!([true, false], attention.press_sorts);
-            }
-            SettingsChoice::AttentionLargeButtons => {
-                select!([true, false], attention.large_buttons);
-            }
-            SettingsChoice::AttentionShowBriefing => {
-                select!([true, false], attention.show_briefing);
-            }
-            SettingsChoice::AttentionModel => {
-                attention.set_model_override((id != "none").then(|| id.to_owned()));
-            }
-            SettingsChoice::ResetTimeDisplay => {
-                select!(
-                    [
-                        crate::reset_planning::ResetTimeStyle::Exact,
-                        crate::reset_planning::ResetTimeStyle::Human
-                    ],
-                    resets.time_style
-                );
             }
             SettingsChoice::SoundSource => {
                 select!(ilium_sound::SoundSourceKind::ALL, sound.source);
@@ -1130,11 +965,6 @@ impl App {
                     ui.agent_monitoring_mode
                 );
             }
-            SettingsChoice::RemoteTechnique(target) => {
-                let value = ilium_remote_compaction::Technique::from_id(id)
-                    .ok_or("This technique is no longer available")?;
-                *remote_compaction.technique_mut(target) = value;
-            }
         }
         let intent = token.map_or(
             ConfigurationIntent::Plain {
@@ -1155,26 +985,6 @@ impl App {
                     intent,
                 )?;
                 self.apply_git_settings(git);
-            }
-            SettingsChoice::AttentionMode
-            | SettingsChoice::AttentionPressSorts
-            | SettingsChoice::AttentionLargeButtons
-            | SettingsChoice::AttentionShowBriefing
-            | SettingsChoice::AttentionModel => {
-                self.enqueue_configuration(
-                    directory,
-                    ConfigurationChange::Attention(attention.clone()),
-                    intent,
-                )?;
-                self.apply_attention_settings(attention);
-            }
-            SettingsChoice::ResetTimeDisplay => {
-                self.enqueue_configuration(
-                    directory,
-                    ConfigurationChange::ResetPlanning(resets.clone()),
-                    intent,
-                )?;
-                self.apply_reset_planning_settings(resets);
             }
             SettingsChoice::SoundSource | SettingsChoice::SoundFile => {
                 self.enqueue_configuration(
@@ -1202,14 +1012,6 @@ impl App {
                     intent,
                 )?;
                 self.apply_voice_runtime_settings(voice);
-            }
-            SettingsChoice::RemoteTechnique(_) => {
-                self.enqueue_configuration(
-                    directory,
-                    ConfigurationChange::RemoteCompaction(remote_compaction.clone()),
-                    intent,
-                )?;
-                self.apply_remote_compaction_settings(remote_compaction);
             }
             SettingsChoice::TerminalDirectory => {
                 self.enqueue_configuration(
@@ -1857,7 +1659,6 @@ mod tests {
             1,
             2,
             2,
-            2,
             ilium_inference::InferenceProviderKind::ALL.len(),
             crate::value_inference::OnboardingInference::KiloModel
                 .options(&app)
@@ -1871,15 +1672,6 @@ mod tests {
             crate::config::GitBranchLine::ALL.len(),
             crate::config::GitClosePolicy::ALL.len(),
             crate::config::SessionRecoveryPolicy::ALL.len(),
-            ilium_remote_compaction::Technique::ALL.len(),
-            ilium_remote_compaction::Technique::ALL.len(),
-            ilium_remote_compaction::Technique::ALL.len(),
-            crate::attention::AttentionMode::ALL.len(),
-            2,
-            // Depends on the selected provider; recomputed inside the loop below.
-            0,
-            2,
-            2,
         ];
         assert_eq!(expected.len(), SettingsChoice::ALL.len());
         for (field, expected) in SettingsChoice::ALL.into_iter().zip(expected) {
@@ -1889,11 +1681,6 @@ mod tests {
                 SettingsChoice::OpenAiModel => ilium_inference::InferenceProviderKind::OpenAi,
                 SettingsChoice::AnthropicModel => ilium_inference::InferenceProviderKind::Anthropic,
                 _ => app.inference_settings.selected_provider,
-            };
-            let expected = if field == SettingsChoice::AttentionModel {
-                1 + attention_model_ids(&app).len()
-            } else {
-                expected
             };
             let (options, selected) = field.options(&app);
             assert_eq!(options.len(), expected, "{field:?}");
@@ -2144,41 +1931,6 @@ mod tests {
             saved.agent_monitoring_mode,
             crate::agent_monitoring::AgentMonitoringMode::Attention
         );
-    }
-
-    #[test]
-    fn reset_time_catalog_persists_display_without_changing_monitors() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new("reset-choice".into(), directory.path().into());
-        app.config_dir = Some(directory.path().into());
-        app.reset_planning_settings.monitor_claude = false;
-        app.reset_planning_settings.monitor_codex = true;
-        let checked = std::time::SystemTime::now();
-        app.reset_monitor_state.codex.last_checked = Some(checked);
-        app.save_settings_choice(
-            SettingsChoice::ResetTimeDisplay,
-            "Human",
-            directory.path().into(),
-            None,
-        )
-        .unwrap();
-        app.settle_filesystem_for_test();
-        let saved = crate::config::load(directory.path())
-            .unwrap()
-            .reset_planning;
-        assert_eq!(
-            saved.time_style,
-            crate::reset_planning::ResetTimeStyle::Human
-        );
-        assert!(!saved.monitor_claude);
-        assert!(saved.monitor_codex);
-        assert_eq!(app.reset_monitor_state.codex.last_checked, Some(checked));
-        app.step_settings_choice(SettingsChoice::ResetTimeDisplay, -1);
-        assert_eq!(
-            app.reset_planning_settings.time_style,
-            crate::reset_planning::ResetTimeStyle::Exact
-        );
-        app.settle_filesystem_for_test();
     }
 
     #[test]

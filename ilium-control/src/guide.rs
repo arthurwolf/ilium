@@ -129,7 +129,7 @@ freeze ID RESUME_CMD keeps a placeholder for a stopped agent, unfreeze ID restar
 Voice: ilium voice say SENTENCE... types into the live voice session; HTTP: POST /v1/voice.
 Settings: ilium ctl op with the operations set_debug_logging,
 set_progress_monitors (enabled true or false), update_sound_settings,
-update_detection_settings and update_text_triggers (a full settings object);
+and update_detection_settings (a full settings object);
 ilium ctl ops prints an example of each. They change the running
 server only; each client owns the saved copy in ~/.config/ilium/config.toml and
 may push it again, so edit that file for a lasting change.

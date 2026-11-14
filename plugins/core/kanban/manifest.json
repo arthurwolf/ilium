@@ -15,11 +15,15 @@
   },
   "client": {
     "entry": "client.wasm",
-    "world": "ilium:client/base@0.1.0"
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
   },
   "capabilities": {
     "client": [
       "panes.provide-kind",
+      "keys.intercept",
       "fs.read:project",
       "fs.write:project",
       "fs.watch",
@@ -36,7 +40,8 @@
     ]
   },
   "activation": [
-    "pane-kind:board"
+    "pane-kind:board",
+    "command:ilium.core.kanban/new-board"
   ],
   "unstable": [
     "plugin-services"
@@ -51,6 +56,18 @@
         }
       ]
     },
+    "commands": [
+      {
+        "id": "new-board",
+        "title": "New board",
+        "category": "Board"
+      },
+      {
+        "id": "reload",
+        "title": "Reload board",
+        "category": "Board"
+      }
+    ],
     "pane_kinds": [
       {
         "id": "board",

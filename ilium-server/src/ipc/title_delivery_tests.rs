@@ -247,7 +247,6 @@ async fn synthetic_submission_sources_and_controls_never_create_task_receipts() 
             panic!("fixture-owned terminal");
         };
         for source in [
-            PromptSubmissionSource::TextTrigger,
             PromptSubmissionSource::AskForUpdate,
             PromptSubmissionSource::ProgressResult,
             PromptSubmissionSource::ToolbarAction,

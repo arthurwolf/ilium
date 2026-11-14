@@ -64,9 +64,6 @@ pub(crate) enum ConfigurationIntent {
         desired: crate::config::AgentSetupSettings,
         dialog: Option<AgentSetupDialog>,
     },
-    TextTriggers {
-        dialog: Option<ilium_ipc::TextTrigger>,
-    },
     CustomAgents,
     Onboarding {
         revision: u64,

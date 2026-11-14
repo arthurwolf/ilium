@@ -222,7 +222,7 @@ Right-click a terminal pane. The menu is built from the exact text visible at th
 | **Copy visible terminal to clipboard** | Always | All visible text |
 | **Copy full terminal history** | Always | The whole retained scrollback (see Settings, **Terminal**, **Scrollback budget**) |
 | **Paste clipboard** | Always | Pastes the clipboard into the pane (bracketed paste if the program asked for it) |
-| **Paste screen into _pane_ _direction_** | A neighbouring split pane is also a live terminal | See [Screen transfer](#screen-transfer-between-panes) |
+| **Paste screen into another pane** | The Terminal plugin is on and another terminal pane is in the same split view | See [Screen transfer](#screen-transfer-between-panes) |
 | **Open externally** / **Open in editor** | The clicked cell is an allowed URL, or a path that exists right now | Opens it with the system handler, or in an Ilium editor beside the terminal |
 
 Keys in the menu: Up / Down (`k` / `j`) move, Enter / Right (`l`) activate, Esc or `q` close.
@@ -253,10 +253,10 @@ Screen transfer pastes the **visible screen** of one terminal pane into another,
 ### Use it
 
 1. Put two or more panes in a split view (see [Panes and layout](panes-and-layout.md)). Both must be live **terminal** panes, shells or agents. A border next to an editor or board offers no transfer.
-2. On the separator between two such panes, a small arrow control appears on the edge of the **source** pane, pointing toward the **destination**. Panes that share an edge in a four-pane grid get controls for each direction; diagonal panes do not.
-3. **Click the arrow.** The source pane's visible text is pasted into the destination pane. The status bar says "Screen pasted into _label_ _direction_".
+2. Right-click the **source** pane and choose **Paste screen into another pane**. With one other terminal in the split view the screen is pasted into it at once. With several, a list asks which pane to paste into. With none, a notice says there is no other terminal in the split view.
+3. The source pane's visible text is pasted into the destination pane without pressing Enter.
 
-Or right-click the source pane and choose **Paste screen into _label_ on the left / on the right / above / below**.
+The entry belongs to the Terminal plugin: with the plugin off, the menu has no such entry.
 
 ### Details
 

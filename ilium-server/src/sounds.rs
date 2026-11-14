@@ -507,11 +507,6 @@ fn spawn_config_watcher_with_interval(
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
-            if state.text_trigger_config_path.get().is_some() {
-                if let Err(error) = crate::text_trigger_config::refresh(&state).await {
-                    tracing::warn!(%error, "Text Triggers reload failed; retaining accepted rules");
-                }
-            }
             let Some(input_bytes) = config_path
                 .capacity()
                 .checked_mul(4)

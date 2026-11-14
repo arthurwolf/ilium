@@ -12,13 +12,16 @@ use serde_json::Value;
 pub fn create(scene_id: &str, spec: &Value, env: &SceneEnv) -> Option<Box<dyn Scene>> {
     Some(match scene_id {
         "atlantic-dusk" => crate::atlantic_dusk::create(spec, env),
+        "carpet" => crate::carpet::create(spec, env),
         "cube-clock" => crate::cube_clock::create(spec, env),
         "dither-water" => crate::dither_water::create(spec, env),
         "fbm-clouds" => crate::fbm_clouds::create(spec, env),
         "hex-expedition" => crate::hex_expedition::create(spec, env),
+        "live-chess" => crate::live_chess::scene::create(spec, env),
         "machine-screen" => crate::machine_screen::create(spec, env),
         "pipes" => crate::pipes::create(spec, env),
         "pi-digits" => crate::pi_digits::create(spec, env),
+        "wind" => crate::wind::create(spec, env),
         // The scenes of the second port round (quiet scenes, box machine, galactic empires,
         // dithr patterns, solar system) have their own table in `scenes2`.
         _ => return crate::scenes2::create(scene_id, spec, env),

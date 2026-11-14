@@ -3101,12 +3101,10 @@ dependencies = [
  "clap",
  "directories",
  "futures-util",
- "ilium-agent-session",
  "ilium-ambient",
  "ilium-client",
  "ilium-control",
  "ilium-core",
- "ilium-inference",
  "ilium-ipc",
  "ilium-logging",
  "ilium-platform",
@@ -3213,7 +3211,6 @@ dependencies = [
  "ilium-agent-session",
  "ilium-ambient",
  "ilium-animation-js",
- "ilium-compaction-analysis",
  "ilium-core",
  "ilium-execution",
  "ilium-gpu",
@@ -3227,7 +3224,6 @@ dependencies = [
  "ilium-plugin-host",
  "ilium-plugin-testkit",
  "ilium-prompts",
- "ilium-remote-compaction",
  "ilium-server",
  "ilium-sound",
  "ilium-transport",
@@ -3259,20 +3255,10 @@ dependencies = [
  "two-face",
  "unicode-segmentation",
  "unicode-width",
- "ureq",
  "uuid",
  "vt100",
  "zbus",
  "zip",
-]
-
-[[package]]
-name = "ilium-compaction-analysis"
-version = "0.1.1"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3903,20 +3889,6 @@ dependencies = [
  "tokio",
  "tracing",
  "vt100",
-]
-
-[[package]]
-name = "ilium-remote-compaction"
-version = "0.1.1"
-dependencies = [
- "chrono",
- "ilium-agent-session",
- "ilium-prompts",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "uuid",
 ]
 
 [[package]]

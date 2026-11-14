@@ -148,7 +148,7 @@ The split view appears as a row in the tree with its members as children. Select
 
 - Click any pane to focus it, or move with `Ctrl+B` and an arrow key (directional), `o` (next) or `;` (previous).
 - Each pane has its own toolbar, last-prompt banner and progress footer. Prompt and progress rows appear only when there is content to show; the terminal expands when they disappear.
-- On a separator between two terminals a small control lets you transfer the visible screen of one terminal into its neighbour, which is useful for handing context from one agent to another. The same action is in the terminal's right-click menu as **Paste screen into** (left, right, above, below, depending on the neighbour).
+- The terminal's right-click menu has **Paste screen into another pane**, which transfers the visible screen of one terminal of a split view into another, which is useful for handing context from one agent to another. It comes from the Terminal plugin.
 - A four-pane grid exposes eight directional transfers: left and right for each row, up and down for each column.
 
 ## Moving, ordering and renaming

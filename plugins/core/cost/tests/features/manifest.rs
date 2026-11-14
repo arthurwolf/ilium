@@ -133,8 +133,8 @@ fn doc_cor_050_server_grants_are_the_eight_of_the_page_in_order() {
             "agent.read",
             "agent.transcript",
             "tree.decorate",
-            "http:status.anthropic.com",
-            "http:status.openai.com",
+            "http:claude-resets.com",
+            "http:codex-resets.com",
             "services.provide:ilium.core.cost/usage",
             "settings.contribute:agent-cost",
             "settings.write-kernel:agent-cost",
@@ -167,16 +167,13 @@ fn doc_cor_050_capabilities_have_only_the_server_and_client_sides() {
 
 /// REQ: COR-050, F-088
 #[test]
-fn doc_cor_050_http_grants_name_exactly_the_two_status_hosts() {
+fn doc_cor_050_http_grants_name_exactly_the_two_reset_feed_hosts() {
     let manifest = manifest_value();
     let http: Vec<String> = strings(&manifest["capabilities"]["server"])
         .into_iter()
         .filter(|grant| grant.starts_with("http"))
         .collect();
-    assert_eq!(
-        http,
-        ["http:status.anthropic.com", "http:status.openai.com"]
-    );
+    assert_eq!(http, ["http:claude-resets.com", "http:codex-resets.com"]);
 }
 
 /// REQ: COR-050, F-031
@@ -337,7 +334,8 @@ fn doc_cor_050_settings_section_is_cost_display_on_the_agent_cost_tab() {
             .as_array()
             .expect("array")
             .len(),
-        1
+        2,
+        "the cost-display section and the reset-planning tab"
     );
     assert_eq!(section["kind"], "section");
     assert_eq!(section["id"], "cost-display");

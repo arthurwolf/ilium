@@ -3254,43 +3254,6 @@
     ]
   },
   {
-    "id": "RESET-01",
-    "title": "Monitor Claude resets",
-    "explanation": "“Check the public Claude reset feed hourly for announced reset history.”",
-    "specimen": "`Off` versus `On · checking…` → `On · history only`.",
-    "states": "monitor status changes.",
-    "motion": "static.",
-    "caveat": "the supplied source says this feed currently provides no future reset time; do not draw a Claude countdown.",
-    "frames": [
-      "`Off` versus `On · checking…` → `On · history only`."
-    ]
-  },
-  {
-    "id": "RESET-02",
-    "title": "Monitor Codex resets",
-    "explanation": "“Check public Codex reset announcements hourly and show a countdown only when an exact time is supplied.”",
-    "specimen": "`Off`, `On · no scheduled reset`, `On · reset announced`, with a conditional `2 h 3 m` synthetic countdown.",
-    "states": "monitoring and announcement status.",
-    "motion": "static.",
-    "caveat": "public resets are separate from account rolling usage windows.",
-    "frames": [
-      "MONITOR ON\nFeed: no scheduled reset\nCountdown: unavailable\n",
-      "MONITOR ON\nFeed: reset announced for 14:00\nCountdown: 2 h 3 m (synthetic)\n"
-    ]
-  },
-  {
-    "id": "RESET-03",
-    "title": "Time display",
-    "explanation": "“Choose exact seconds or rounded human wording for a timed announced reset.”",
-    "specimen": "the same synthetic event shown as `Exact · d h m s` and `Human · tomorrow`.",
-    "states": "formatting changes.",
-    "motion": "exact view may tick once per second; human view updates less often.",
-    "caveat": "no countdown is possible without a supplied scheduled time.",
-    "frames": [
-      "the same synthetic event shown as `Exact · d h m s` and `Human · tomorrow`."
-    ]
-  },
-  {
     "id": "SES-01",
     "title": "Recovery policy",
     "explanation": "“Choose what the detached server does with a prior project-session snapshot on its next start.”",
@@ -3482,19 +3445,6 @@
       "Off (default, 0): initialized hidden panes retain their parsed state for faster revisits; RAM use grows with retained panes and snapshots.",
       "On: 1024 MiB: engine-state budget 1024 MiB; snapshot allowance 1280 MiB. Only an eligible hidden parser may be evicted; displayed panes stay.",
       "On with a retained old generation: preserve the last complete picture and show status in unused terminal rows. Actual release, a larger budget, or Off can restore pool admission; fixed per-pane limits remain."
-    ]
-  },
-  {
-    "id": "TEXTTRIGGER-01",
-    "title": "Text triggers",
-    "explanation": "“An enabled regex can match a completed output line and send a configured literal message plus Enter to its selected target after the rule's delay (60 seconds by default, 0 sends immediately).”",
-    "specimen": "Targets: [Agents] [Terminals] [Both]\nDelay (seconds): 60\n^READY$ → would send configured literal text + Enter",
-    "states": "enabled/disabled, match/no match, target and literal output are distinct.",
-    "motion": "static.",
-    "caveat": "Target values come from TextTriggerTarget. Delay is whole seconds (0 to 86400); rules saved before the setting existed use 60. Help neither matches live output nor sends text.",
-    "frames": [
-      "OUTPUT LINE: READY\nRegex: ^DONE$\nmatch: no → no message\n",
-      "OUTPUT LINE: DONE\nRegex: ^DONE$\nmatch: yes → would send literal + Enter\n"
     ]
   },
   {
@@ -3919,7 +3869,7 @@
     "explanation": "A real featured Lichess game shown with original dithered chess-piece silhouettes.",
     "specimen": "Board orientation · Chess brightness · White pieces · Black pieces · Board color",
     "states": "Orientation swaps the players while keeping each piece upright. Small viewports may not fit the board.",
-    "motion": "The board follows authoritative positions from the public Lichess TV stream.",
+    "motion": "The board follows authoritative positions polled every few seconds from the public Lichess TV.",
     "caveat": "Clocks show the latest feed values. Failed connections retain the last board with an error and receipt age. No synthetic game or invented move is substituted.",
     "frames": [
       "Live chess — illustrative settings specimen; no network request"
@@ -4592,88 +4542,6 @@
     "frames": [
       "[ON  ●] keeps the tree toolbar visible; [○ OFF] shows it when the tree is focused or hovered."
     ]
-  },
-  {
-    "id": "ATT-01",
-    "title": "Attention mode",
-    "explanation": "“Choose how the attention queue is fed: Off hides it, Instant only uses what agent detection already knows and calls no LLM, Shared adds the attention question to the Sort call, Turbo asks one parallel LLM call per agent.”",
-    "specimen": "Attention mode ........ ‹ Instant only (no LLM) ›\n\nOff            queue hidden, nothing computed\nInstant only   detection facts only, no LLM call\nShared         rides on the Sort call\nTurbo          one parallel LLM call per agent",
-    "states": "Off, Instant only (no LLM), Shared with Sort, Turbo (parallel LLM). Only Shared and Turbo ever call an LLM; Instant only never does, so it costs nothing and sends no pane text anywhere.",
-    "motion": "None.",
-    "caveat": "Instant only can list approvals and stopped goals that detection already sees, but it cannot judge what a quiet pane is waiting for. Turbo uses many more LLM calls than Shared.",
-    "frames": [
-      "Attention mode ........ ‹ Instant only (no LLM) ›\n\nOff            queue hidden, nothing computed\nInstant only   detection facts only, no LLM call\nShared         rides on the Sort call\nTurbo          one parallel LLM call per agent"
-    ]
-  },
-  {
-    "id": "ATT-02",
-    "title": "Sort refreshes attention",
-    "explanation": "“When On, pressing Sort also refreshes the attention queue so one press updates both.”",
-    "specimen": "Sort refreshes attention ........ [ON  ●]\n\n[ON  ●]  press Sort: tree order and queue refresh together\n[○ OFF]  press Sort: tree order only",
-    "states": "On and Off. Off keeps Sort for tree order alone. The queue is unaffected when Attention mode is Off.",
-    "motion": "None.",
-    "caveat": "Turning it Off does not hide the queue; it only stops the Sort press from refreshing it.",
-    "frames": [
-      "Sort refreshes attention ........ [ON  ●]\n\n[ON  ●]  press Sort: tree order and queue refresh together\n[○ OFF]  press Sort: tree order only"
-    ]
-  },
-  {
-    "id": "ATT-03",
-    "title": "Turbo parallel calls",
-    "explanation": "“Set how many attention LLM calls Turbo mode may have in flight at once, from 1 to 64.”",
-    "specimen": "Turbo parallel calls ........ ‹ 16 ›\n\n1 .. 64  calls in flight at the same time\nOne call per agent; extra agents wait their turn",
-    "states": "A whole number from 1 to 64; the default is 16. Values outside the range are clamped when the file is loaded.",
-    "motion": "None.",
-    "caveat": "Higher values finish a refresh sooner but can hit provider rate limits. It only applies in Turbo mode.",
-    "frames": [
-      "Turbo parallel calls ........ ‹ 16 ›\n\n1 .. 64  calls in flight at the same time\nOne call per agent; extra agents wait their turn"
-    ]
-  },
-  {
-    "id": "ATT-04",
-    "title": "Forget stale items after",
-    "explanation": "“Set how long an attention item stays listed after the live state stops supporting it, from 60 seconds to 24 hours.”",
-    "specimen": "Forget stale items after ........ ‹ 1800 s ›\n\nItem no longer supported by the pane\n  ... waits this long, then leaves the queue",
-    "states": "Whole seconds from 60 to 86400; the default is 1800 (30 minutes). The arrows step by 60 seconds.",
-    "motion": "None.",
-    "caveat": "An item that is still supported never expires. A shorter time keeps the queue clean; a longer time keeps items you may have missed.",
-    "frames": [
-      "Forget stale items after ........ ‹ 1800 s ›\n\nItem no longer supported by the pane\n  ... waits this long, then leaves the queue"
-    ]
-  },
-  {
-    "id": "ATT-05",
-    "title": "Attention model",
-    "explanation": "“Choose the model used for attention calls. Same as titles follows whatever model names your titles.”",
-    "specimen": "Attention model ........ ‹ Same as titles ›\n\nSame as titles   use the title naming model\nOther entries    models of the selected provider",
-    "states": "Same as titles, or one of the models offered by the provider selected under Models. A saved model outside that list stays selectable.",
-    "motion": "None.",
-    "caveat": "The list follows the provider chosen on the Models tab; switching provider does not rewrite a saved override. It does nothing in Off or Instant only mode.",
-    "frames": [
-      "Attention model ........ ‹ Same as titles ›\n\nSame as titles   use the title naming model\nOther entries    models of the selected provider"
-    ]
-  },
-  {
-    "id": "ATT-06",
-    "title": "Show briefing on arrival",
-    "explanation": "“When On, reaching an agent from the attention queue shows a box at the top of that agent saying why you were brought there, what the agent is doing, and what it needs from you.”",
-    "specimen": "Show briefing on arrival ........ [ON  ●]\n\n[ON  ●]  a box above the terminal explains why you are here\n[○ OFF]  you land on the agent with no extra box",
-    "states": "On and Off; the default is On. The box only ever appears while Attention mode is not Off. In Instant only mode it shows wording derived from agent detection, marked automatic; in Shared and Turbo mode it shows the model's wording, marked AI.",
-    "motion": "None.",
-    "caveat": "Each box can be dismissed with its x or folded to one line, and it comes back only for a new attention item on that agent. Turning the setting Off removes every open box at once.",
-    "frames": [
-      "Show briefing on arrival ........ [ON  ●]\n\n[ON  ●]  a box above the terminal explains why you are here\n[○ OFF]  you land on the agent with no extra box"
-    ]
-  },
-  {
-    "id": "ATT-07",
-    "title": "Large attention buttons",
-    "explanation": "Use larger attention controls at the bottom of the left panel.",
-    "specimen": "Large attention buttons ........ [ON  ●]",
-    "states": "On (default) uses three rows with centered text and a three-row by five-column overview button. Off uses one row.",
-    "motion": "The list gives its bottom two rows to the larger buttons.",
-    "caveat": "Very short panels fall back to a one-row button to preserve the list and toolbar.",
-    "frames": ["Large attention buttons ........ [○ OFF]", "Large attention buttons ........ [ON  ●]"]
   },
   {
     "id": "AP-36",

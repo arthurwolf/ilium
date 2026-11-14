@@ -178,10 +178,6 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             None
         }
-        ServerEvent::TextTriggersChanged { settings } => {
-            app.apply_text_trigger_settings(settings);
-            None
-        }
         ServerEvent::SessionRecoveryAvailable { pane_count } => {
             let recovery = crate::app::Mode::ConfirmSessionRecovery { pane_count };
             if matches!(app.mode, crate::app::Mode::Normal) {
@@ -191,10 +187,8 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             None
         }
-        ServerEvent::PaneProcessTerminated { pane_id, result } => {
-            app.apply_remote_pane_process_terminated(pane_id, result);
-            None
-        }
+        // The outcome answers the plugin host's own request; nothing in the client waits for it.
+        ServerEvent::PaneProcessTerminated { .. } => None,
         ServerEvent::SoundPreviewCompleted { succeeded } => {
             app.status_message = Some(if succeeded {
                 "Sound preview played".to_string()

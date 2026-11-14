@@ -1,14 +1,13 @@
 //! Numeric settings binding. Rendering never owns persistence or runtime effects.
 use crate::app::{
-    AgentMonitoringRow, App, AppearanceRow, AttentionRow, EditorRow, KanbanBoardRow, Mode,
-    SettingsTab, TerminalRow,
+    AgentMonitoringRow, App, AppearanceRow, EditorRow, KanbanBoardRow, Mode, SettingsTab,
+    TerminalRow,
 };
 use crate::value_config::{self, BoardNumber, PanelNumber, ScalarNumber};
 use crate::value_number::{NumberSpec, NumberValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsNumber {
-    Remote(crate::remote_compaction_settings::RemoteCompactionRow),
     Panel(PanelNumber),
     Ui(UiNumber),
     TerminalScrollback,
@@ -21,8 +20,6 @@ pub enum SettingsNumber {
     InferenceTokenBudget,
     WorkingPollSeconds,
     IdlePollSeconds,
-    AttentionTurboConcurrency,
-    AttentionExpirySeconds,
     PaddingThreshold,
 }
 
@@ -47,7 +44,6 @@ impl UiNumber {
 // Numeric bindings project either live runtime values or a read-only persisted
 // snapshot. Reading a dialog value never applies a whole configuration to App.
 struct NumberSettingsValues<'a> {
-    remote_compaction: &'a crate::remote_compaction_settings::RemoteCompactionSettings,
     padding: &'a crate::padding::PaddingSettings,
     inference: &'a ilium_inference::InferenceSettings,
     voice: &'a crate::config::VoiceSettings,
@@ -57,18 +53,12 @@ struct NumberSettingsValues<'a> {
     editor: &'a crate::config::EditorSettings,
     kanban_board: &'a crate::config::KanbanBoardSettings,
     api: &'a crate::config::ApiSettings,
-    attention: &'a crate::attention::AttentionSettings,
     detection: Option<&'a ilium_ipc::AgentDetectionSettings>,
 }
 
 impl SettingsNumber {
     pub fn at(app: &App, tab: SettingsTab, row: usize) -> Option<Self> {
         match tab {
-            SettingsTab::RemoteCompaction => crate::remote_compaction_settings_ui::rows(app)
-                .get(row)
-                .copied()
-                .filter(|row| row.is_debounced())
-                .map(Self::Remote),
             SettingsTab::Inference
                 if crate::settings_ui::inference_rows(&app.inference_settings).get(row)
                     == Some(&crate::app::InferenceRow::Field(
@@ -158,11 +148,6 @@ impl SettingsNumber {
                 }
                 None => None,
             },
-            SettingsTab::Attention => match AttentionRow::ALL.get(row) {
-                Some(AttentionRow::TurboConcurrency) => Some(Self::AttentionTurboConcurrency),
-                Some(AttentionRow::ExpirySeconds) => Some(Self::AttentionExpirySeconds),
-                _ => None,
-            },
             SettingsTab::Api if row == 0 => Some(Self::ApiPort),
             SettingsTab::Padding if row == crate::padding_ui::ROW_THRESHOLD => {
                 Some(Self::PaddingThreshold)
@@ -173,7 +158,6 @@ impl SettingsNumber {
 
     pub fn title(self) -> &'static str {
         match self {
-            Self::Remote(row) => row.label(),
             Self::WorkingPollSeconds => "Working poll interval (s; 0 = 500 ms minimum)",
             Self::IdlePollSeconds => "Idle poll interval (s; 0 = 500 ms minimum)",
             Self::InferenceTokenBudget => "Restructure prompt tokens",
@@ -195,15 +179,12 @@ impl SettingsNumber {
             Self::Board(BoardNumber::CardPreviewLines) => "Card preview lines",
             Self::Board(BoardNumber::MinimumColumnWidth) => "Minimum column width",
             Self::ApiPort => "HTTP API port",
-            Self::AttentionTurboConcurrency => "Turbo parallel calls",
-            Self::AttentionExpirySeconds => "Forget stale items after",
             Self::PaddingThreshold => "Terminal columns",
         }
     }
 
     pub fn snapshot(self, app: &App) -> (NumberSpec, String) {
         self.snapshot_values(NumberSettingsValues {
-            remote_compaction: &app.remote_compaction_settings,
             padding: &app.padding_settings,
             inference: &app.inference_settings,
             voice: &app.voice_settings,
@@ -213,14 +194,12 @@ impl SettingsNumber {
             editor: &app.editor_settings,
             kanban_board: &app.kanban_board_settings,
             api: &app.api_settings,
-            attention: &app.attention_settings,
             detection: app.agent_detection_settings.as_ref(),
         })
     }
 
     pub(crate) fn persisted_snapshot(self, config: &crate::config::ClientConfig) -> String {
         self.snapshot_values(NumberSettingsValues {
-            remote_compaction: &config.remote_compaction,
             padding: &config.padding,
             inference: &config.inference,
             voice: &config.voice,
@@ -230,7 +209,6 @@ impl SettingsNumber {
             editor: &config.editor,
             kanban_board: &config.kanban_board,
             api: &config.api,
-            attention: &config.attention,
             detection: None,
         })
         .1
@@ -238,55 +216,6 @@ impl SettingsNumber {
 
     fn snapshot_values(self, values: NumberSettingsValues<'_>) -> (NumberSpec, String) {
         match self {
-            Self::Remote(row) => {
-                use crate::remote_compaction_settings::*;
-                let settings = values.remote_compaction;
-                let (minimum, maximum, value) = match row {
-                    RemoteCompactionRow::Threshold => (
-                        THRESHOLD_PERCENT_RANGE.0 as i128,
-                        THRESHOLD_PERCENT_RANGE.1 as i128,
-                        settings.threshold_percent as i128,
-                    ),
-                    RemoteCompactionRow::PauseTimeout => (
-                        PAUSE_TIMEOUT_RANGE.0 as i128,
-                        PAUSE_TIMEOUT_RANGE.1 as i128,
-                        settings.pause_timeout_seconds as i128,
-                    ),
-                    RemoteCompactionRow::Cooldown => (
-                        COOLDOWN_MINUTES_RANGE.0 as i128,
-                        COOLDOWN_MINUTES_RANGE.1 as i128,
-                        settings.cooldown_minutes as i128,
-                    ),
-                    RemoteCompactionRow::TailTokens => (
-                        TAIL_TOKENS_RANGE.0 as i128,
-                        TAIL_TOKENS_RANGE.1 as i128,
-                        settings.tail_tokens as i128,
-                    ),
-                    RemoteCompactionRow::ProtectedToolTokens => (
-                        PROTECTED_TOOL_TOKENS_RANGE.0 as i128,
-                        PROTECTED_TOOL_TOKENS_RANGE.1 as i128,
-                        settings.protected_recent_tool_tokens as i128,
-                    ),
-                    RemoteCompactionRow::ToolResultChars => (
-                        TOOL_RESULT_CHARS_RANGE.0 as i128,
-                        TOOL_RESULT_CHARS_RANGE.1 as i128,
-                        settings.tool_result_chars as i128,
-                    ),
-                    RemoteCompactionRow::SummarizerContextTokens => (
-                        SUMMARIZER_CONTEXT_RANGE.0 as i128,
-                        SUMMARIZER_CONTEXT_RANGE.1 as i128,
-                        settings.summarizer_context_tokens as i128,
-                    ),
-                    RemoteCompactionRow::KeepBackups => (
-                        KEEP_BACKUPS_RANGE.0 as i128,
-                        KEEP_BACKUPS_RANGE.1 as i128,
-                        settings.keep_backups as i128,
-                    ),
-                    _ => unreachable!("Only numeric remote rows are bound"),
-                };
-                (NumberSpec::Integer { minimum, maximum }, value.to_string())
-            }
-
             Self::PaddingThreshold => (
                 NumberSpec::Integer {
                     minimum: i128::from(crate::padding::MIN_WIDTH_THRESHOLD),
@@ -350,14 +279,6 @@ impl SettingsNumber {
             ),
             Self::Board(field) => (field.spec(), field.value(values.kanban_board).to_string()),
             Self::ApiPort => (ScalarNumber::ApiPort.spec(), values.api.port.to_string()),
-            Self::AttentionTurboConcurrency => (
-                ScalarNumber::AttentionTurboConcurrency.spec(),
-                values.attention.turbo_concurrency.to_string(),
-            ),
-            Self::AttentionExpirySeconds => (
-                ScalarNumber::AttentionExpirySeconds.spec(),
-                values.attention.expiry_seconds.to_string(),
-            ),
         }
     }
 
@@ -371,26 +292,6 @@ impl SettingsNumber {
                 current.saturating_add(900).min(i64::MAX as u64)
             };
             return Ok(next.to_string());
-        }
-        if let Self::Remote(row) = self {
-            let mut updated = app.remote_compaction_settings.clone();
-            updated.adjust(row, direction);
-            use crate::remote_compaction_settings::RemoteCompactionRow;
-            return Ok(match row {
-                RemoteCompactionRow::Threshold => updated.threshold_percent.to_string(),
-                RemoteCompactionRow::PauseTimeout => updated.pause_timeout_seconds.to_string(),
-                RemoteCompactionRow::Cooldown => updated.cooldown_minutes.to_string(),
-                RemoteCompactionRow::TailTokens => updated.tail_tokens.to_string(),
-                RemoteCompactionRow::ProtectedToolTokens => {
-                    updated.protected_recent_tool_tokens.to_string()
-                }
-                RemoteCompactionRow::ToolResultChars => updated.tool_result_chars.to_string(),
-                RemoteCompactionRow::SummarizerContextTokens => {
-                    updated.summarizer_context_tokens.to_string()
-                }
-                RemoteCompactionRow::KeepBackups => updated.keep_backups.to_string(),
-                _ => return Err("Not a numeric remote setting".into()),
-            });
         }
         if self == Self::EditorAutosaveDelay {
             spec.parse(&text)?;
@@ -415,7 +316,6 @@ impl SettingsNumber {
             Self::TerminalScrollback => 4,
             Self::Ui(UiNumber::CompletedProgressHideAfter) => 30,
             Self::Ui(UiNumber::AutoFreezeAfter) => 15 * 60,
-            Self::AttentionExpirySeconds => 60,
             _ => 1,
         };
         match spec.stepped(spec.parse(&text)?, NumberValue::Integer(step), direction)? {
@@ -769,11 +669,6 @@ impl App {
     }
 
     pub(crate) fn step_settings_number(&mut self, field: SettingsNumber, direction: i32) {
-        if let SettingsNumber::Remote(row) = field {
-            // Preserve remote settings' existing 600 ms numeric save debounce.
-            self.settings_adjust_remote_compaction_row(row, direction);
-            return;
-        }
         let result = (|| {
             let text = field.stepped(self, direction)?;
             if field == SettingsNumber::PaddingThreshold && text == field.snapshot(self).1 {
@@ -854,32 +749,6 @@ impl App {
         }
         // Construct and validate from current settings, preserving concurrent fields.
         let change = match field {
-            SettingsNumber::Remote(row) => {
-                use crate::remote_compaction_settings::RemoteCompactionRow;
-                let NumberValue::Integer(value) = field.snapshot(self).0.parse(text)? else {
-                    return Err("Enter a whole number".into());
-                };
-                let mut settings = self.remote_compaction_settings.clone();
-                match row {
-                    RemoteCompactionRow::Threshold => settings.threshold_percent = value as _,
-                    RemoteCompactionRow::PauseTimeout => {
-                        settings.pause_timeout_seconds = value as _
-                    }
-                    RemoteCompactionRow::Cooldown => settings.cooldown_minutes = value as _,
-                    RemoteCompactionRow::TailTokens => settings.tail_tokens = value as _,
-                    RemoteCompactionRow::ProtectedToolTokens => {
-                        settings.protected_recent_tool_tokens = value as _
-                    }
-                    RemoteCompactionRow::ToolResultChars => settings.tool_result_chars = value as _,
-                    RemoteCompactionRow::SummarizerContextTokens => {
-                        settings.summarizer_context_tokens = value as _
-                    }
-                    RemoteCompactionRow::KeepBackups => settings.keep_backups = value as _,
-                    _ => return Err("Not a numeric remote setting".into()),
-                }
-                ConfigurationChange::RemoteCompaction(settings)
-            }
-
             SettingsNumber::WorkingPollSeconds | SettingsNumber::IdlePollSeconds => {
                 return Err("Server number was not dispatched".into());
             }
@@ -951,20 +820,6 @@ impl App {
                     .map_err(|_| "API port exceeds its storage range".to_owned())?;
                 ConfigurationChange::Api(settings)
             }
-            SettingsNumber::AttentionTurboConcurrency => {
-                let mut settings = self.attention_settings.clone();
-                settings.turbo_concurrency =
-                    u8::try_from(ScalarNumber::AttentionTurboConcurrency.parse(text)?)
-                        .map_err(|_| "Parallel call count exceeds storage range")?;
-                ConfigurationChange::Attention(settings)
-            }
-            SettingsNumber::AttentionExpirySeconds => {
-                let mut settings = self.attention_settings.clone();
-                settings.expiry_seconds =
-                    u32::try_from(ScalarNumber::AttentionExpirySeconds.parse(text)?)
-                        .map_err(|_| "Duration exceeds storage range")?;
-                ConfigurationChange::Attention(settings)
-            }
             SettingsNumber::PaddingThreshold => {
                 let NumberValue::Integer(value) = field.snapshot(self).0.parse(text)? else {
                     return Err("Enter a whole number of columns".into());
@@ -987,15 +842,6 @@ impl App {
         // Admission precedes local runtime changes. The same immutable values
         // are supplied to the writer and applied to existing consumers.
         match change {
-            ConfigurationChange::RemoteCompaction(settings) => {
-                self.enqueue_configuration(
-                    directory,
-                    ConfigurationChange::RemoteCompaction(settings.clone()),
-                    intent,
-                )?;
-                self.apply_remote_compaction_settings(settings);
-            }
-
             ConfigurationChange::Voice(settings) => {
                 self.enqueue_configuration(
                     directory,
@@ -1054,14 +900,6 @@ impl App {
             ConfigurationChange::Api(settings) => {
                 self.enqueue_configuration(directory, ConfigurationChange::Api(settings), intent)?;
                 self.api_settings = settings;
-            }
-            ConfigurationChange::Attention(settings) => {
-                self.enqueue_configuration(
-                    directory,
-                    ConfigurationChange::Attention(settings.clone()),
-                    intent,
-                )?;
-                self.apply_attention_settings(settings);
             }
             ConfigurationChange::Padding(settings) => {
                 self.enqueue_configuration(
@@ -1248,69 +1086,6 @@ mod tests {
             .is_err());
         assert_eq!(app.configuration_admission.attempts, attempts);
         assert_eq!(app.ui_settings.auto_freeze_after_seconds, 137);
-    }
-
-    #[test]
-    fn remote_numbers_validate_bounds_and_preserve_original_ladders() {
-        use crate::remote_compaction_settings::RemoteCompactionRow as Row;
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new("remote-number".into(), directory.path().into());
-        for row in [
-            Row::Threshold,
-            Row::PauseTimeout,
-            Row::Cooldown,
-            Row::TailTokens,
-            Row::ProtectedToolTokens,
-            Row::ToolResultChars,
-            Row::SummarizerContextTokens,
-            Row::KeepBackups,
-        ] {
-            let field = SettingsNumber::Remote(row);
-            let (spec, current) = field.snapshot(&app);
-            let NumberSpec::Integer { minimum, maximum } = spec else {
-                panic!("Remote settings require whole numbers");
-            };
-            assert!(spec.parse(&minimum.to_string()).is_ok());
-            assert!(spec.parse(&maximum.to_string()).is_ok());
-            assert!(spec.parse(&(minimum - 1).to_string()).is_err());
-            assert!(spec.parse(&(maximum + 1).to_string()).is_err());
-            assert!(spec.parse("1.5").is_err());
-            assert!(spec.parse(&current).is_ok());
-            for direction in [-1, 1] {
-                let actual = field.stepped(&app, direction).unwrap();
-                let original = app.remote_compaction_settings.clone();
-                app.remote_compaction_settings.adjust(row, direction);
-                let expected = field.snapshot(&app).1;
-                app.remote_compaction_settings = original;
-                assert_eq!(actual, expected, "{row:?}, direction {direction}");
-            }
-            let original = app.remote_compaction_settings.clone();
-            app.save_settings_number(field, &minimum.to_string(), directory.path().into(), None)
-                .unwrap();
-            assert_eq!(field.snapshot(&app).1, minimum.to_string());
-            app.settle_filesystem_for_test();
-            let saved = crate::config::load(directory.path())
-                .unwrap()
-                .remote_compaction;
-            assert_eq!(saved.enabled, original.enabled);
-            app.remote_compaction_settings = saved;
-            assert_eq!(
-                field.snapshot(&app).1,
-                minimum.to_string(),
-                "{row:?} reload"
-            );
-            let attempts = app.configuration_admission.attempts;
-            assert!(app
-                .save_settings_number(
-                    field,
-                    &(maximum + 1).to_string(),
-                    directory.path().into(),
-                    None
-                )
-                .is_err());
-            assert_eq!(app.configuration_admission.attempts, attempts);
-            assert_eq!(field.snapshot(&app).1, minimum.to_string());
-        }
     }
 
     #[test]

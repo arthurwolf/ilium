@@ -122,11 +122,6 @@ impl AnimationLoopCache {
         };
         settings.panels = super::PanelTarget::Both;
         settings.fps_limit = 0;
-        // This cache is exclusively for built-in scenes. Package selection,
-        // mode, and package settings are consumed by the separate package
-        // runner and cannot change these packed native frames.
-        settings.source = crate::animation_plugins::AnimationSourceTab::Native;
-        settings.plugin = crate::animation_plugins::PluginPreferences::default();
         settings.semantic_scope = super::SemanticScope::Project;
         if self.settings.as_ref() == Some(&settings) && self.width == width && self.height == height
         {
@@ -572,7 +567,7 @@ mod tests {
     }
 
     #[test]
-    fn returning_to_native_scene_reuses_cache_after_plugin_selection() {
+    fn semantic_scope_change_reuses_the_built_cache() {
         let native = AnimationSettings {
             loop_seconds: 1,
             ..Default::default()
@@ -581,12 +576,6 @@ mod tests {
         let cached_cells = cache.frames.as_ptr();
 
         let mut returned = native.clone();
-        returned.source = crate::animation_plugins::AnimationSourceTab::Plugin;
-        returned.plugin.selected = Some(crate::animation_plugins::PluginSelection {
-            package_id: "example-animation".into(),
-            mode: ilium_animation_js::manifest::AnimationMode::Live,
-            settings: serde_json::json!({"density": 64}),
-        });
         returned.semantic_scope = crate::background_animation::SemanticScope::Entry;
 
         cache.begin(&returned, 24, 12);

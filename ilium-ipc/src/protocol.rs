@@ -212,9 +212,6 @@ pub enum PromptSubmissionSource {
     /// one or more idle/done agent panes. Appended last for the same reason
     /// as `ToolbarAction`.
     AskForUpdate,
-    /// A regex Text Trigger response written by the detached server after a
-    /// completed eligible terminal-output line matched a configured rule.
-    TextTrigger,
     /// A task-terminal or monitor-failure notification emitted by the progress
     /// lifecycle coordinator.
     ProgressResult,
@@ -885,12 +882,6 @@ pub enum ClientRequest {
     UpdateProgressMonitorEnabled {
         enabled: bool,
     },
-    /// Replaces the detached server's text-trigger rules immediately. The
-    /// client persists the same value in `[text_triggers]` for future servers.
-    /// Appended to preserve every earlier bincode variant discriminant.
-    UpdateTextTriggers {
-        settings: crate::TextTriggerSettings,
-    },
     /// Inserts literal text into one terminal, then delivers a separate Enter
     /// after the receiving application has had time to process the insertion.
     /// Unlike `KeyInput`, this is a semantic submission, not a raw byte write:
@@ -1213,7 +1204,6 @@ impl ClientRequest {
             Self::WaitPaneProgressMonitor { .. } => "wait_pane_progress_monitor",
             Self::PasteTerminalText { .. } => "paste_terminal_text",
             Self::UpdateProgressMonitorEnabled { .. } => "update_progress_monitor_enabled",
-            Self::UpdateTextTriggers { .. } => "update_text_triggers",
             Self::SubmitTerminalText { .. } => "submit_terminal_text",
             Self::RegisterVoiceTextReceiver => "register_voice_text_receiver",
             Self::SubmitVoiceText { .. } => "submit_voice_text",
@@ -1513,12 +1503,6 @@ pub enum ServerEvent {
     /// existing bincode discriminant.
     ProgressMonitorEnabledChanged {
         enabled: bool,
-    },
-    /// The detached server accepted a live text-trigger update. Every
-    /// attached client converges its rendered settings without sending a
-    /// request back to the server.
-    TextTriggersChanged {
-        settings: crate::TextTriggerSettings,
     },
     /// Correlated result of a one-shot progress probe validation.
     ProgressMonitorCheckCompleted {

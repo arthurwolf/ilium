@@ -118,10 +118,10 @@ pub fn pane_from_payload(payload: &[u8]) -> Option<u64> {
     value.get("pane")?.as_u64()
 }
 
-/// Reads `"pane"` out of a command's arguments JSON.
+/// Reads `"pane"` out of a command's arguments JSON; a context-menu entry sends `"node"`.
 pub fn pane_from_arguments(arguments_json: &str) -> Option<u64> {
     let value: Value = serde_json::from_str(arguments_json).ok()?;
-    value.get("pane")?.as_u64()
+    value.get("pane").or_else(|| value.get("node"))?.as_u64()
 }
 
 /// Everything the server keeps: one schedule and one queue per pane.
@@ -404,6 +404,7 @@ mod tests {
     #[test]
     fn pane_arguments_are_read() {
         assert_eq!(pane_from_arguments(r#"{"pane": 12}"#), Some(12));
+        assert_eq!(pane_from_arguments(r#"{"node": 13}"#), Some(13));
         assert_eq!(pane_from_arguments("{}"), None);
         assert_eq!(pane_from_payload(&pane_payload(4)), Some(4));
     }

@@ -55,10 +55,6 @@ pub(crate) fn draw_at_with_cursor(
 ) -> Option<Position> {
     app.composed_tree_rows = None;
     app.composed_terminal_sources.clear();
-    // The attention button's row is part of the tree panel's geometry, so the
-    // reservation must match the mode before anything is measured or drawn.
-    tree_ui::set_attention_button_reserved(app.attention_enabled());
-    tree_ui::set_attention_button_large(app.attention_settings.large_buttons);
     tree_ui::set_tree_toolbar_always_visible(app.ui_settings.tree_toolbar_always_visible);
     app.reconcile_animation_presentation();
     app.composed_editor_sources.clear();
@@ -154,13 +150,6 @@ pub(crate) fn draw_at_with_cursor(
     }
     draw_startup_dialog(frame, area, app);
     skip_vs16_continuation_cells(frame.buffer_mut(), layout.tree_area);
-    if app.onboarding.is_none() && app.draw_plugin_permission_review(frame) {
-        app.animation_frame.discard_composed_receipt();
-        if let Some(view) = &mut app.diagnostic_view {
-            crate::diagnostic::render(frame, view);
-        }
-        return None;
-    }
     if let Some(view) = &mut app.diagnostic_view {
         crate::diagnostic::render(frame, view);
         app.animation_frame.discard_composed_receipt();
@@ -906,17 +895,6 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             panes: &app.panes,
         },
     );
-    if let Some(button_area) = app.attention_button_rect() {
-        let (main_area, plus_area) = crate::attention::dialog::split_button(button_area);
-        crate::attention::panel::render_button(frame, main_area, app.attention_count());
-        if let Some(plus_area) = plus_area {
-            crate::attention::dialog::render_plus(
-                frame,
-                plus_area,
-                app.is_attention_plus_hovered(),
-            );
-        }
-    }
     let values = painted_rows
         .node_ids()
         .map(|node_id| {
@@ -1109,7 +1087,6 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                 },
             );
         }
-        Mode::TextTriggerDialog(state) => draw_text_trigger_dialog(frame, area, state),
         Mode::EditorLineContextMenu(menu) => {
             draw_editor_line_context_menu(frame, menu, &app.ui_settings)
         }
@@ -1269,40 +1246,6 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                 modal::render_text_prompt_cursor(frame, area, "Save As", state, "Save").or(cursor);
         }
         Mode::ConfirmClose(target) => draw_confirm_close(frame, area, app, *target),
-        Mode::AttentionOverview => {
-            if let Some(state) = &app.attention.dialog {
-                crate::attention::dialog::render(
-                    frame,
-                    area,
-                    state,
-                    &app.attention_overview_cards(),
-                    app.ui_settings.color_scheme,
-                );
-            }
-        }
-        Mode::RemoteCompaction => {
-            if let Some(state) = &app.remote_compaction {
-                let pane_area = app
-                    .pane_viewport(state.pane_id)
-                    .map(|viewport| viewport.outer_area);
-                let banner_text = app
-                    .remote_compaction_settings
-                    .should_show_privacy_banner()
-                    .then(|| {
-                        crate::remote_compaction_settings_ui::privacy_banner_text(
-                            &app.inference_settings,
-                        )
-                    });
-                let banner_rows =
-                    crate::remote_compaction_dialog::banner_rows(banner_text.as_deref());
-                crate::remote_compaction_dialog::render(
-                    frame,
-                    crate::remote_compaction_dialog::dialog_area(pane_area, area, banner_rows),
-                    state,
-                    banner_text.as_deref(),
-                );
-            }
-        }
         Mode::WaitingWorkspaceCloseOffer { .. } => {
             let popup_width = 64.min(area.width);
             let popup = modal::centered_fixed_rect(popup_width, 5, area);
@@ -1396,138 +1339,6 @@ fn workspace_close_wait_lines(inner_width: u16) -> Vec<&'static str> {
         return vec!["Checking…", "Esc"];
     }
     vec!["…"]
-}
-
-fn draw_text_trigger_dialog(
-    frame: &mut Frame,
-    area: Rect,
-    state: &crate::text_trigger_dialog::TextTriggerDialogState,
-) {
-    use crate::text_trigger_dialog::TextTriggerFocus;
-    let layout = crate::text_trigger_dialog::layout(area);
-    frame.render_widget(Clear, layout.popup);
-    frame.render_widget(
-        theme::block(true).title(theme::chrome_title(if state.editing_index.is_some() {
-            "Edit text trigger"
-        } else {
-            "Add text trigger"
-        })),
-        layout.popup,
-    );
-    let field = |label: &str, value: &str, active: bool| {
-        Paragraph::new(format!("{label}: {value}")).style(if active {
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-        } else {
-            Style::new()
-        })
-    };
-    frame.render_widget(
-        field(
-            "Regexp",
-            &state.regexp.buf,
-            state.focus == TextTriggerFocus::Regexp,
-        ),
-        layout.regexp,
-    );
-    frame.render_widget(
-        field(
-            "Message",
-            &state.message.buf,
-            state.focus == TextTriggerFocus::Message,
-        ),
-        layout.message,
-    );
-    let scope_style = if state.focus == TextTriggerFocus::Target {
-        theme::selected_style()
-    } else {
-        Style::new().fg(Color::Cyan)
-    };
-    crate::text_trigger_dialog::target_control(area, state).render(
-        frame,
-        crate::value_control::ControlStyles {
-            background: Style::new(),
-            label: scope_style,
-            value: scope_style,
-            button: scope_style,
-            disabled: Style::new().add_modifier(Modifier::DIM),
-        },
-    );
-    let delay_style = if state.focus == TextTriggerFocus::Delay {
-        Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-    } else {
-        Style::new()
-    };
-    crate::text_trigger_dialog::delay_control(area, state).render(
-        frame,
-        crate::value_control::ControlStyles {
-            background: Style::new(),
-            label: delay_style,
-            value: delay_style,
-            button: delay_style,
-            disabled: Style::new().add_modifier(Modifier::DIM),
-        },
-    );
-    frame.render_widget(
-        Paragraph::new("SAMPLE TEXT")
-            .style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Rect::new(
-            layout.sample.x,
-            layout.sample.y.saturating_sub(1),
-            layout.sample.width,
-            1,
-        ),
-    );
-    frame.render_widget(&state.sample, layout.sample);
-    frame.render_widget(
-        Paragraph::new(format!(
-            "[{}] Enabled",
-            if state.enabled { "x" } else { " " }
-        ))
-        .style(if state.focus == TextTriggerFocus::Enabled {
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-        } else {
-            Style::new()
-        }),
-        layout.enabled,
-    );
-    let (preview, preview_title) = state.preview_display();
-    let preview_title = match state.preview_issue() {
-        Some(issue) => Line::from(vec![
-            Span::raw("LIVE PREVIEW · "),
-            Span::raw(issue.message()),
-        ]),
-        None => Line::from(preview_title),
-    };
-    // Only visible rows need paragraph objects. The worker-owned text stays
-    // borrowed; drawing never rebuilds or joins the complete prepared result.
-    let preview_lines = preview
-        .lines()
-        .take(usize::from(layout.preview.height.saturating_sub(2)))
-        .map(Line::from)
-        .collect::<Vec<_>>();
-    frame.render_widget(
-        Paragraph::new(preview_lines).block(theme::block(false).title(preview_title)),
-        layout.preview,
-    );
-    frame.render_widget(
-        Paragraph::new("[ Save trigger ]")
-            .alignment(Alignment::Center)
-            .style(if state.focus == TextTriggerFocus::Save {
-                Style::new()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::new().fg(Color::Cyan)
-            }),
-        layout.save,
-    );
-    frame.render_widget(
-        Paragraph::new("Tab fields · arrows select scope · Space toggle · Enter save · Esc cancel")
-            .alignment(Alignment::Center)
-            .style(Style::new().add_modifier(Modifier::DIM)),
-        layout.hint,
-    );
 }
 
 fn draw_create_board(frame: &mut Frame, area: Rect, state: &CreateBoardState) -> Option<Position> {
@@ -2046,16 +1857,6 @@ fn draw_pane_sources(
         app.resource_detail(frame, area);
         return Vec::new();
     }
-    if matches!(app.right_panel_target, RightPanelTarget::Attention) {
-        crate::attention::panel::render_panel(
-            frame,
-            area,
-            &app.attention_panel_rows(),
-            app.attention.panel_selected,
-            matches!(app.focus, FocusTarget::Pane),
-        );
-        return Vec::new();
-    }
     crate::plugin_host::views::release_hidden(app);
     if matches!(app.right_panel_target, RightPanelTarget::PluginView { .. }) {
         crate::plugin_host::views::draw(frame, area, app);
@@ -2089,29 +1890,7 @@ fn draw_pane_sources(
     for viewport in viewports {
         draw_pane_runtime(frame, app, viewport, &mut sources);
     }
-    draw_screen_transfer_controls(frame, app);
     sources
-}
-
-/// Draws the two directional actions in the middle of every eligible split
-/// separator. They are rendered after pane borders so the configured glyphs
-/// remain directly clickable instead of being overwritten by chrome.
-fn draw_screen_transfer_controls(frame: &mut Frame, app: &App) {
-    for transfer in app.screen_transfers() {
-        let icon_target = match transfer.direction {
-            crate::split_layout::PaneDirection::Left => IconTarget::ScreenTransferLeft,
-            crate::split_layout::PaneDirection::Right => IconTarget::ScreenTransferRight,
-            crate::split_layout::PaneDirection::Up => IconTarget::ScreenTransferUp,
-            crate::split_layout::PaneDirection::Down => IconTarget::ScreenTransferDown,
-        };
-        let glyph = app.ui_settings.icons.glyph(icon_target);
-        let control = Paragraph::new(Span::styled(
-            glyph,
-            theme::selected_style().add_modifier(Modifier::BOLD),
-        ))
-        .alignment(Alignment::Center);
-        frame.render_widget(control, transfer.control_area);
-    }
 }
 
 fn blocking_terminal_error(error: &crate::status_icons::TooltipContent) -> String {
@@ -2436,34 +2215,6 @@ fn draw_pane_runtime(
 
     draw_plugin_frame_rows(frame, app, viewport);
 
-    if let Some(briefing_area) = viewport.briefing_area {
-        if matches!(runtime, PaneRuntime::Terminal(_)) {
-            if let Some(view) = app.briefing_view(viewport.pane_id) {
-                crate::attention::briefing::render(
-                    frame,
-                    briefing_area,
-                    &view,
-                    app.ui_settings.color_scheme,
-                    app.hovered_briefing_button(viewport.pane_id),
-                );
-            }
-        }
-    }
-
-    // A newly arrived attention item announces itself on the focused pane's
-    // rule beside the last-prompt banner; never over terminal content.
-    if pane_focused && matches!(runtime, PaneRuntime::Terminal(_)) {
-        if let (Some(rule), Some((kind, title, reason))) = (
-            viewport
-                .last_prompt_bottom_rule
-                .or(viewport.toolbar_rule)
-                .or(viewport.progress_rule),
-            app.attention_arrival_view(),
-        ) {
-            crate::attention::panel::render_arrival(frame, rule, kind, &title, &reason);
-        }
-    }
-
     if let Some(progress_area) = viewport.progress_area {
         if matches!(runtime, PaneRuntime::Terminal(_))
             && app.shows_progress_footer(viewport.pane_id)
@@ -2523,11 +2274,6 @@ fn draw_section_rules(
     }
     if let Some(rule) = viewport.last_prompt_bottom_rule {
         if prompt_shown {
-            crate::section_frame::render_rule(frame, rule, None, focused);
-        }
-    }
-    if let Some(rule) = viewport.briefing_bottom_rule {
-        if app.briefing_view(pane_id).is_some() {
             crate::section_frame::render_rule(frame, rule, None, focused);
         }
     }
@@ -2792,7 +2538,7 @@ fn pane_title(app: &App, id: NodeId) -> String {
                 ),
                 _ => node.name.clone(),
             };
-            let title = crate::pane_title::decorate_pane_title(status, &logical_title);
+            let title = logical_title;
             // Header slots plugins contribute (`pane_frame_slots`) follow the title.
             match app.plugin_frame_header_text(id) {
                 Some(plugin_text) => format!("{title} {plugin_text}"),
@@ -2883,7 +2629,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::AgentToolbarModelSubmenu(..) => "MODEL STRENGTH",
         Mode::LastPromptDialog(..) => "LAST PROMPT",
         Mode::ValueDialog(..) => "VALUE OPTIONS",
-        Mode::TextTriggerDialog(..) => "TEXT TRIGGER",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
         Mode::CreateAgentFromLine(..) => "CREATE AGENT",
         Mode::CreateAgentWorkspace(..) => "CREATE AGENT WORKTREE",
@@ -2898,8 +2643,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::BoardRenamePrompt(_, _, _) => "RENAME BOARD ITEM",
         Mode::BoardDeleteConfirm(_, _) => "DELETE BOARD ITEM",
         Mode::ConfirmClose(_) => "CONFIRM CLOSE",
-        Mode::RemoteCompaction => "REMOTE COMPACTION",
-        Mode::AttentionOverview => "NEEDS YOU",
         Mode::ConfirmRemoveWorkspace(_) => "REMOVE WORKTREE",
         Mode::ConfirmSessionRecovery { .. } => "SESSION RECOVERY",
         // Unreachable in practice -- `draw` returns before this ever runs
@@ -2971,78 +2714,8 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(theme::STATUSBAR_CAP_LEFT).style(cap_style),
         left_cap,
     );
-    let now = chrono::Utc::now();
-    let standard_maximum_pill_width = usize::from(inner.width.saturating_sub(20));
-    let mut reset_labels = Vec::new();
-    for provider in [
-        crate::reset_planning::ResetProvider::Claude,
-        crate::reset_planning::ResetProvider::Codex,
-    ] {
-        if !provider.enabled(&app.reset_planning_settings) {
-            continue;
-        }
-        if let Some(scheduled) = &app.reset_monitor_state.provider(provider).scheduled {
-            reset_labels.push(crate::reset_planning::countdown_text(
-                provider,
-                scheduled,
-                app.reset_planning_settings.time_style,
-                now,
-            ));
-        } else if let Some(watch) = &app.reset_monitor_state.provider(provider).active_watch {
-            if let Some(label) = crate::reset_planning::active_reset_watch_text(
-                provider,
-                watch,
-                app.reset_planning_settings.time_style,
-                now,
-            ) {
-                if UnicodeWidthStr::width(label.as_str()) + 2 <= standard_maximum_pill_width {
-                    reset_labels.push(label);
-                } else if let Some(compact_label) =
-                    crate::reset_planning::compact_active_reset_watch_text(provider, watch, now)
-                {
-                    reset_labels.push(compact_label);
-                }
-            }
-        }
-    }
-    let maximum_pill_width = usize::from(inner.width.saturating_sub(14));
-    let combined = reset_labels.join("  ·  ");
-    let reset_label = if !reset_labels.is_empty()
-        && UnicodeWidthStr::width(combined.as_str()) + 2 <= maximum_pill_width
-    {
-        Some(combined)
-    } else {
-        reset_labels
-            .into_iter()
-            .find(|label| UnicodeWidthStr::width(label.as_str()) + 2 <= maximum_pill_width)
-    };
-    let pill_width = reset_label
-        .as_ref()
-        .map(|label| UnicodeWidthStr::width(label.as_str()) as u16 + 2)
-        .unwrap_or(0);
-    let left_width = inner
-        .width
-        .saturating_sub(pill_width.saturating_add(u16::from(pill_width > 0)));
     frame.render_widget(Paragraph::new("").style(bar_style), inner);
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)).style(bar_style),
-        Rect::new(inner.x, inner.y, left_width, inner.height),
-    );
-    if let Some(label) = reset_label {
-        let pill_area = Rect::new(
-            inner.right().saturating_sub(pill_width),
-            inner.y,
-            pill_width,
-            inner.height,
-        );
-        let pill_style = Style::new()
-            .fg(Color::Rgb(0xd8, 0xed, 0xff))
-            .bg(Color::Rgb(0x98, 0x45, 0x13));
-        frame.render_widget(
-            Paragraph::new(format!(" {label} ")).style(pill_style),
-            pill_area,
-        );
-    }
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(bar_style), inner);
     frame.render_widget(
         Paragraph::new(theme::STATUSBAR_CAP_RIGHT).style(cap_style),
         right_cap,
@@ -3327,99 +3000,6 @@ mod tests {
     }
 
     #[test]
-    fn scheduled_reset_uses_a_right_aligned_orange_and_light_blue_status_segment() {
-        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp"));
-        let now = chrono::Utc::now();
-        app.reset_monitor_state.codex.scheduled = Some(crate::reset_planning::ScheduledReset {
-            announced_at: now,
-            scheduled_for: Some(now + chrono::Duration::hours(2)),
-            source_url: "https://x.com/thsottiaux/status/1".to_owned(),
-            is_banked: false,
-        });
-        let mut terminal = Terminal::new(TestBackend::new(100, 1)).unwrap();
-        terminal
-            .draw(|frame| draw_status_bar(frame, frame.area(), &app))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let line = (0..100)
-            .map(|x| buffer[(x, 0)].symbol())
-            .collect::<String>();
-        assert!(line.contains("Codex reset in"));
-        let pill_cell = &buffer[(90, 0)];
-        assert_eq!(pill_cell.fg, Color::Rgb(0xd8, 0xed, 0xff));
-        assert_eq!(pill_cell.bg, Color::Rgb(0x98, 0x45, 0x13));
-
-        app.reset_planning_settings.monitor_codex = false;
-        terminal
-            .draw(|frame| draw_status_bar(frame, frame.area(), &app))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let line = (0..100)
-            .map(|x| buffer[(x, 0)].symbol())
-            .collect::<String>();
-        assert!(!line.contains("Codex reset"));
-    }
-
-    #[test]
-    fn active_codex_reset_watch_is_shown_as_a_possible_window_only_while_monitoring_is_enabled() {
-        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp"));
-        app.reset_planning_settings.time_style = crate::reset_planning::ResetTimeStyle::Human;
-        let now = chrono::Utc::now();
-        let watch = crate::reset_planning::ActiveResetWatch {
-            expires_at: now + chrono::Duration::days(2),
-        };
-        let expected = crate::reset_planning::active_reset_watch_text(
-            crate::reset_planning::ResetProvider::Codex,
-            &watch,
-            app.reset_planning_settings.time_style,
-            now,
-        )
-        .expect("an unexpired active watch should have status text");
-        app.reset_monitor_state.codex.active_watch = Some(watch);
-        let mut terminal = Terminal::new(TestBackend::new(140, 1)).unwrap();
-        terminal
-            .draw(|frame| draw_status_bar(frame, frame.area(), &app))
-            .unwrap();
-        let line = (0..140)
-            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
-            .collect::<String>();
-        assert!(line.contains("Possible Codex reset watch window ends in"));
-        assert!(line.contains(&expected));
-
-        app.reset_planning_settings.monitor_codex = false;
-        terminal
-            .draw(|frame| draw_status_bar(frame, frame.area(), &app))
-            .unwrap();
-        let line = (0..140)
-            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
-            .collect::<String>();
-        assert!(!line.contains("Possible Codex reset watch"));
-    }
-
-    #[test]
-    fn active_codex_reset_watch_keeps_a_compact_label_at_typical_terminal_width() {
-        let mut app = App::new("default".to_owned(), PathBuf::from("/tmp"));
-        app.reset_planning_settings.time_style = crate::reset_planning::ResetTimeStyle::Human;
-        app.reset_monitor_state.codex.active_watch =
-            Some(crate::reset_planning::ActiveResetWatch {
-                expires_at: chrono::Utc::now()
-                    + chrono::Duration::days(2)
-                    + chrono::Duration::hours(1),
-            });
-        let mut terminal = Terminal::new(TestBackend::new(58, 1)).unwrap();
-        terminal
-            .draw(|frame| draw_status_bar(frame, frame.area(), &app))
-            .unwrap();
-        let line = (0..58)
-            .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
-            .collect::<String>();
-        assert!(
-            line.contains("Possible Codex reset watch ends in 2d1h"),
-            "{line}"
-        );
-    }
-
-    #[test]
     fn terminal_scrollbar_thumb_tracks_the_full_viewport_from_top_to_tail() {
         let mut view = TerminalView::new(4, 20);
         for line in 0..10 {
@@ -3457,7 +3037,7 @@ mod tests {
     }
 
     #[test]
-    fn right_panel_title_prefixes_done_without_mutating_the_pane_name() {
+    fn right_panel_title_carries_no_completion_marker_and_keeps_the_pane_name() {
         let mut app = App::new("test".to_owned(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
         let pane_id = app
@@ -3471,10 +3051,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(
-            pane_title(&app, pane_id),
-            "[done] Review authentication — Codex"
-        );
+        assert_eq!(pane_title(&app, pane_id), "Review authentication — Codex");
         assert_eq!(app.tree.get(pane_id).unwrap().name, "Review authentication");
 
         app.tree
@@ -4012,118 +3589,6 @@ mod tests {
     }
 
     #[test]
-    fn text_trigger_dialog_visually_marks_matches_and_loop_risk() {
-        use ilium_execution::{
-            Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits, ShutdownMode,
-        };
-        const MIB: usize = 1024 * 1024;
-        let disabled = LaneConfig {
-            threads: 0,
-            queue_slots: 0,
-            priority: None,
-            resident_bytes_per_thread: 0,
-        };
-        let mut execution = Execution::start(
-            QuotaGroup::new(QuotaLimits {
-                clients: 4,
-                jobs: 4,
-                service_jobs: 0,
-                input_bytes: 64 * MIB,
-                result_bytes: 32 * MIB,
-                worker_threads: 1,
-                worker_bytes: 64 * MIB,
-            }),
-            ExecutionConfig {
-                cpu: LaneConfig {
-                    threads: 1,
-                    queue_slots: 4,
-                    priority: None,
-                    resident_bytes_per_thread: MIB,
-                },
-                io: disabled,
-                service: disabled,
-            },
-        )
-        .expect("isolated actual preview CPU worker");
-        let client = execution
-            .client(crate::text_trigger_dialog::preview_limits())
-            .unwrap();
-        let mut app = App::new("test".to_string(), std::env::temp_dir());
-        app.configure_text_trigger_preview(client);
-        let mut state = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
-        state.regexp.buf = "ready".to_owned();
-        state.message.buf = "ready".to_owned();
-        state.sample = TextArea::from(vec!["not yet".to_owned(), "system ready now".to_owned()]);
-        app.mode = Mode::TextTriggerDialog(Box::new(state));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
-            app.reconcile_text_trigger_preview();
-            let Mode::TextTriggerDialog(state) = &app.mode else {
-                panic!("dialog lost");
-            };
-            if state.preview_display().0.contains("echoed input can loop") {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "actual CPU preview did not complete"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        app.set_screen_area(Rect::new(0, 0, 100, 34));
-        let mut terminal = Terminal::new(TestBackend::new(100, 34)).unwrap();
-
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-
-        assert!(rendered.contains("LIVE PREVIEW"));
-        assert!(rendered.contains("Regexp: ready"));
-        assert!(rendered.contains("Message: ready"));
-        assert!(rendered.contains("· not yet"));
-        assert!(rendered.contains("✓ system [ready] now"));
-        assert!(rendered.contains("echoed input can loop"));
-        let Mode::TextTriggerDialog(state) = &mut app.mode else {
-            panic!("dialog lost");
-        };
-        state.regexp = crate::text_prompt::TextPromptState::new("a".repeat(256 * 1024 + 1));
-        state.mark_preview_dirty();
-        app.reconcile_text_trigger_preview();
-        let Mode::TextTriggerDialog(state) = &app.mode else {
-            panic!("dialog lost");
-        };
-        assert_eq!(
-            state.preview_issue(),
-            Some(crate::text_trigger_dialog::TextTriggerPreviewIssue::CaptureLimit)
-        );
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
-        let refused = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-        assert!(refused.contains("bounded capture limit"));
-        assert!(
-            refused.contains("✓ system [ready] now"),
-            "last completed preview must remain visible on refusal"
-        );
-        app.close_text_trigger_preview();
-        execution.request_shutdown(ShutdownMode::Drain);
-        let report = execution
-            .join_until_background(std::time::Instant::now() + std::time::Duration::from_secs(5))
-            .unwrap();
-        assert!(report.shutdown_complete);
-        app.collect_closed_text_trigger_preview();
-    }
-
-    #[test]
     fn split_view_renders_both_terminal_members_and_active_slot_chrome() {
         let mut app = App::new("test".to_string(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -4174,629 +3639,5 @@ mod tests {
         assert!(rendered.contains("RIGHT-PANE"));
         assert!(rendered.contains("first"));
         assert!(rendered.contains("second"));
-    }
-
-    #[test]
-    fn split_view_renders_configured_directional_screen_transfer_controls() {
-        let mut app = App::new("test".to_string(), std::env::temp_dir());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let left = app
-            .tree
-            .add_pane(group, "left", PaneContentKind::Terminal)
-            .unwrap();
-        let right = app
-            .tree
-            .add_pane(group, "right", PaneContentKind::Terminal)
-            .unwrap();
-        let split = app
-            .tree
-            .create_split_view(
-                group,
-                "Vertical split",
-                SplitOrientation::Vertical,
-                &[left, right],
-            )
-            .unwrap();
-        app.panes.insert(
-            left,
-            PaneRuntime::Terminal(Box::new(TerminalView::new(20, 30))),
-        );
-        app.panes.insert(
-            right,
-            PaneRuntime::Terminal(Box::new(TerminalView::new(20, 30))),
-        );
-        app.right_panel_target = RightPanelTarget::SplitView {
-            split_id: split,
-            active_pane_id: Some(left),
-        };
-        app.ui_settings
-            .icons
-            .set(IconTarget::ScreenTransferRight, "⇢".to_string());
-        app.ui_settings
-            .icons
-            .set(IconTarget::ScreenTransferLeft, "⇠".to_string());
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let rightward = app
-            .screen_transfers()
-            .into_iter()
-            .find(|transfer| {
-                transfer.source_pane_id == left
-                    && transfer.destination_pane_id == right
-                    && transfer.direction == crate::split_layout::PaneDirection::Right
-            })
-            .unwrap();
-        let leftward = app
-            .screen_transfers()
-            .into_iter()
-            .find(|transfer| {
-                transfer.source_pane_id == right
-                    && transfer.destination_pane_id == left
-                    && transfer.direction == crate::split_layout::PaneDirection::Left
-            })
-            .unwrap();
-        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-
-        terminal
-            .draw(|frame| draw_pane(frame, app.layout.pane_area, &app))
-            .unwrap();
-
-        let buffer = terminal.backend().buffer();
-        assert_eq!(
-            buffer[(rightward.control_area.x, rightward.control_area.y)].symbol(),
-            "⇢"
-        );
-        assert_eq!(
-            buffer[(leftward.control_area.x, leftward.control_area.y)].symbol(),
-            "⇠"
-        );
-    }
-}
-
-/// Real source-window UI route, prepared on the shared finite CPU bank.
-#[cfg(test)]
-pub(crate) fn test_source_window_pixels(
-    editor: &mut EditorPane,
-    width: u16,
-    height: u16,
-) -> ratatui::buffer::Buffer {
-    editor.show_minimap = false;
-    // One extra column: the editor reserves it for the scrollbar, so the
-    // text window keeps the requested width.
-    let area = Rect::new(
-        0,
-        0,
-        width + 1,
-        height + crate::editor_chrome::TOOLBAR_HEIGHT,
-    );
-    let content = crate::editor_chrome::compute(area, false).content_area;
-    assert_eq!(content.width, width);
-    assert_eq!(content.height, height);
-    editor.prepare_test_source_window_with_syntax(
-        width,
-        height,
-        &ratatui_image::picker::Picker::halfblocks(),
-    );
-    let mut terminal =
-        ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
-            .unwrap();
-    terminal
-        .draw(|frame| draw_editor(frame, area, editor))
-        .unwrap();
-    let mut output = ratatui::buffer::Buffer::empty(Rect::new(0, 0, width, height));
-    for row in 0..height {
-        for column in 0..width {
-            output[(column, row)] =
-                terminal.backend().buffer()[(content.x + column, content.y + row)].clone();
-        }
-    }
-    output
-}
-
-#[cfg(test)]
-mod text_trigger_numeric_control_tests {
-    #[test]
-    fn delay_renders_centered_number_with_decrement_increment_and_entry() {
-        for (width, height) in [(80, 24), (120, 40)] {
-            let state = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
-            let area = ratatui::layout::Rect::new(0, 0, width, height);
-            let delay = crate::text_trigger_dialog::layout(area).delay;
-            let mut terminal =
-                ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
-            terminal
-                .draw(|frame| super::draw_text_trigger_dialog(frame, area, &state))
-                .unwrap();
-            let buffer = terminal.backend().buffer();
-            let position = |symbol: &str| {
-                (delay.x..delay.right())
-                    .find(|&column| buffer[(column, delay.y)].symbol() == symbol)
-                    .unwrap_or_else(|| panic!("{width}x{height}: delay lacks {symbol}"))
-            };
-            let decrement = position(crate::value_control::NUMBER_DECREMENT_GLYPH);
-            let increment = position(crate::value_control::NUMBER_INCREMENT_GLYPH);
-            let entry = position("*");
-            let first_digit = position("6");
-            let last_digit = position("0");
-            assert!(decrement < first_digit && last_digit < increment && increment < entry);
-            assert!(
-                (i32::from(first_digit + last_digit) - i32::from(decrement + increment)).abs() <= 1,
-                "{width}x{height}: delay value is not centered between its step buttons"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod source_touch_provenance_tests {
-    use super::*;
-
-    #[test]
-    fn late_modal_and_suspended_parent_withhold_scene_history() {
-        let project = tempfile::tempdir().unwrap();
-        let mut app = App::new("touch provenance".into(), project.path().to_path_buf());
-        assert!(late_layers_are_source_transparent(&app));
-        app.mode = Mode::ConfirmSessionRecovery { pane_count: 1 };
-        assert!(!late_layers_are_source_transparent(&app));
-        app.mode = Mode::Normal;
-        app.modal_stack
-            .push(Mode::ConfirmSessionRecovery { pane_count: 1 });
-        assert!(!late_layers_are_source_transparent(&app));
-    }
-}
-
-#[cfg(test)]
-mod worktree_close_dialog_tests {
-    use super::*;
-    use ratatui::{backend::TestBackend, Terminal};
-
-    #[test]
-    fn waiting_workspace_close_keeps_status_and_cancel_visible_on_small_terminals() {
-        for (width, height) in [(24, 10), (40, 12), (60, 20), (80, 24)] {
-            let app = App::new(
-                "worktree close visual regression".into(),
-                std::env::temp_dir(),
-            );
-            let mode = Mode::WaitingWorkspaceCloseOffer {
-                request_id: 1,
-                pane_id: ROOT_ID,
-            };
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal
-                .draw(|frame| {
-                    draw_mode_overlay(frame, frame.area(), &app, &mode);
-                })
-                .unwrap();
-
-            let rendered = terminal
-                .backend()
-                .buffer()
-                .content()
-                .chunks(usize::from(width))
-                .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
-                .collect::<Vec<_>>()
-                .join("\n");
-            assert!(
-                rendered.contains("Worktree close"),
-                "{width}x{height}: {rendered}"
-            );
-            assert!(
-                rendered.contains("Checking"),
-                "{width}x{height}: {rendered}"
-            );
-            assert!(
-                rendered.contains("Esc cancels"),
-                "{width}x{height}: {rendered}"
-            );
-            if width <= 40 {
-                assert!(
-                    rendered.contains("Checking worktree…"),
-                    "narrow terminal should use the compact status: {rendered}"
-                );
-            }
-            if width == 80 {
-                assert!(
-                    rendered.contains("Checking whether this worktree can be removed"),
-                    "wide terminal should retain the full status: {rendered}"
-                );
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod context_menu_visual_tests {
-    use super::*;
-    use crate::terminal_context_menu::{TerminalContextAction, TerminalPaneContextMenu};
-    use ratatui::{backend::TestBackend, Terminal};
-
-    #[test]
-    fn context_menu_joined_emoji_label_preserves_row_width() {
-        let line = popup_action_line("👩‍💻 work", String::new(), None, true, 20, Style::new());
-        assert_eq!(UnicodeWidthStr::width(line.spans[0].content.as_ref()), 20);
-        assert!(line.spans[0].content.ends_with(" ▸ "));
-    }
-
-    #[test]
-    fn context_menu_custom_icon_gutter_aligns_labels_and_submenu_arrows() {
-        let mut ui = crate::config::UiSettings::default();
-        ui.icons.terminal = "T".into();
-        ui.icons.editor = "📝".into();
-        let gutter = popup_icon_width(&ui, [IconTarget::Terminal, IconTarget::Editor].into_iter());
-        let line = |target| {
-            popup_action_line(
-                "Command",
-                popup_icon(&ui, target, gutter),
-                None,
-                true,
-                30,
-                Style::new(),
-            )
-        };
-        let narrow = line(IconTarget::Terminal);
-        let wide = line(IconTarget::Editor);
-        let narrow_text = &narrow.spans[0].content;
-        let wide_text = &wide.spans[0].content;
-        let column = |text: &str| UnicodeWidthStr::width(&text[..text.find("Command").unwrap()]);
-        assert_eq!(column(narrow_text), column(wide_text));
-        assert_eq!(UnicodeWidthStr::width(narrow_text.as_ref()), 30);
-        assert_eq!(UnicodeWidthStr::width(wide_text.as_ref()), 30);
-        assert!(narrow_text.ends_with(" ▸ "));
-        assert!(wide_text.ends_with(" ▸ "));
-        ui.show_context_menu_icons = false;
-        assert_eq!(popup_icon_width(&ui, [IconTarget::Terminal].into_iter()), 0);
-        let text_only = popup_action_line(
-            "Command",
-            popup_icon(&ui, IconTarget::Terminal, 0),
-            None,
-            false,
-            30,
-            Style::new(),
-        );
-        assert!(text_only.spans[0].content.starts_with("  Command"));
-    }
-
-    fn save_frame(name: &str, terminal: &Terminal<TestBackend>) {
-        crate::ui_capture::save_with_env(name, terminal, "ILIUM_MENU_RENDER_DIR");
-    }
-
-    #[test]
-    fn context_menu_visual_target_matrix_uses_production_actions() {
-        use ilium_core::{
-            AgentActivity, AgentClass, PaneContentKind, PaneStatus, SplitOrientation,
-        };
-
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "synthetic menu matrix".into(),
-            directory.path().to_path_buf(),
-        );
-        let project = app
-            .tree
-            .add_project(directory.path().to_path_buf())
-            .unwrap();
-        let group = app.tree.add_group(project, "work").unwrap();
-        let folder = app
-            .tree
-            .add_folder(group, directory.path().join("files"))
-            .unwrap();
-        let split = app
-            .tree
-            .create_split_view(group, "split", SplitOrientation::Vertical, &[])
-            .unwrap();
-        let shell = app
-            .tree
-            .add_pane(group, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        let editor = app
-            .tree
-            .add_pane(group, "notes", PaneContentKind::Editor)
-            .unwrap();
-        let markdown = app
-            .tree
-            .add_pane(group, "tasks.md", PaneContentKind::Editor)
-            .unwrap();
-        app.restored_editor_paths
-            .insert(markdown, directory.path().join("tasks.md"));
-        let board = app
-            .tree
-            .add_pane(group, "board", PaneContentKind::Board)
-            .unwrap();
-        let mut targets = vec![
-            ("root", ROOT_ID),
-            ("project", project),
-            ("group", group),
-            ("folder", folder),
-            ("split", split),
-            ("shell", shell),
-            ("editor", editor),
-            ("markdown", markdown),
-            ("board", board),
-        ];
-        for (name, class) in [
-            ("claude", AgentClass::Claude),
-            ("codex", AgentClass::Codex),
-            ("antigravity", AgentClass::Antigravity),
-        ] {
-            let pane = app
-                .tree
-                .add_pane(group, name, PaneContentKind::Terminal)
-                .unwrap();
-            app.tree
-                .set_pane_status(
-                    pane,
-                    PaneStatus::from_activity(class, AgentActivity::Idle, None),
-                )
-                .unwrap();
-            targets.push((name, pane));
-        }
-        let worktree = app
-            .tree
-            .add_pane(group, "worktree", PaneContentKind::Terminal)
-            .unwrap();
-        app.tree
-            .set_pane_workspace(
-                worktree,
-                Some(ilium_core::PaneWorkspace {
-                    workspace_id: Some("synthetic-menu-workspace".into()),
-                    repo_common_dir: directory.path().join("repo.git"),
-                    worktree_root: directory.path().join("worktree"),
-                    branch: "synthetic-branch".into(),
-                    base_ref: "main".into(),
-                    base_commit: "synthetic".into(),
-                    created_by_ilium: true,
-                    created_at_unix: 0,
-                }),
-            )
-            .unwrap();
-        targets.push(("worktree", worktree));
-        app.set_screen_area(Rect::new(0, 0, 100, 40));
-        for (name, target) in targets {
-            app.open_context_menu(target, 2, 2);
-            let Mode::ContextMenu(menu) = &app.mode else {
-                panic!("{name} menu");
-            };
-            let layout = menu.layout();
-            for (row, visual_row) in layout.rows.iter().enumerate() {
-                if let crate::context_menu_layout::MenuRow::Action(index) = visual_row {
-                    assert_eq!(layout.action_at(row as u16), Some(*index), "{name}");
-                }
-            }
-            let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
-            terminal
-                .draw(|frame| draw_context_menu(frame, menu, &app.ui_settings))
-                .unwrap();
-            save_frame(&format!("tree-target-{name}"), &terminal);
-        }
-    }
-
-    #[test]
-    fn context_menu_visual_tree_groups_padding_and_short_screen_reachability() {
-        let project = tempfile::tempdir().unwrap();
-        let mut app = App::new("menu visual fixture".into(), project.path().to_path_buf());
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let pane = app
-            .tree
-            .add_pane(group, "shell", ilium_core::PaneContentKind::Terminal)
-            .unwrap();
-        for (width, height) in [(100, 40), (80, 24), (40, 10)] {
-            app.set_screen_area(Rect::new(0, 0, width, height));
-            app.open_context_menu(pane, 2, 2);
-            let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-                panic!("menu");
-            };
-            for (name, selected) in [("first", 0), ("last", menu.actions.len() - 1)] {
-                menu.selected_index = selected;
-                let layout = menu.layout();
-                let row = layout
-                    .row_for_action(selected)
-                    .expect("selected action is visible");
-                assert_eq!(layout.action_at(row), Some(selected));
-                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                terminal
-                    .draw(|frame| draw_context_menu(frame, &menu, &app.ui_settings))
-                    .unwrap();
-                let cell = &terminal.backend().buffer()[(menu.area.x + 1, menu.area.y + 1 + row)];
-                assert_eq!(Some(cell.bg), theme::selected_style().bg);
-                assert_eq!(cell.symbol(), " ", "selected rows retain left padding");
-                save_frame(&format!("tree-{width}x{height}-{name}"), &terminal);
-            }
-        }
-        app.set_screen_area(Rect::new(0, 0, 100, 40));
-        app.open_context_menu(ROOT_ID, 2, 2);
-        let Mode::ContextMenu(mut menu) = std::mem::replace(&mut app.mode, Mode::Normal) else {
-            panic!("menu");
-        };
-        let order = menu
-            .actions
-            .iter()
-            .position(|action| *action == crate::app::ContextMenuAction::OrderBy)
-            .unwrap();
-        menu.selected_index = order;
-        app.open_context_submenu(&mut menu, crate::app::ContextMenuAction::OrderBy);
-        let submenu = menu.submenu.as_ref().unwrap();
-        assert_eq!(
-            submenu.area.y,
-            menu.area.y + 1 + menu.layout().row_for_action(order).unwrap()
-        );
-        let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
-        terminal
-            .draw(|frame| draw_context_menu(frame, &menu, &app.ui_settings))
-            .unwrap();
-        save_frame("tree-order-submenu", &terminal);
-    }
-
-    #[test]
-    fn context_menu_visual_terminal_uses_the_same_groups_and_selection() {
-        let mut actions = vec![
-            TerminalContextAction::ShowAgentDebugLog,
-            TerminalContextAction::ToggleAgentToolbar {
-                currently_visible: true,
-            },
-            TerminalContextAction::CopySelectionToClipboard,
-            TerminalContextAction::CopyLastSubmittedPromptToClipboard {
-                prompt: "synthetic prompt".into(),
-            },
-            TerminalContextAction::CopyLineToClipboard,
-            TerminalContextAction::CopyVisibleTerminalToClipboard,
-            TerminalContextAction::CopyFullTerminalHistoryToClipboard,
-            TerminalContextAction::CopyHistoryFilePathToClipboard {
-                path: "/synthetic/history.jsonl".into(),
-            },
-            TerminalContextAction::PasteClipboard,
-        ];
-        actions.sort_by_key(TerminalContextAction::menu_order);
-        let mut menu = TerminalPaneContextMenu {
-            pane_id: ROOT_ID,
-            source_line_text: "synthetic line".into(),
-            visible_contents: "synthetic screen".into(),
-            full_history: "synthetic history".into(),
-            selection_text: Some("synthetic selection".into()),
-            area: Rect::new(2, 2, 44, 17),
-            actions,
-            selected_index: 0,
-            row_offset: 0,
-            preparation_generation: 0,
-            _preparation_hold: None,
-        };
-        assert_eq!(
-            menu.actions.first(),
-            Some(&TerminalContextAction::CopySelectionToClipboard)
-        );
-        assert_eq!(
-            menu.actions.last(),
-            Some(&TerminalContextAction::ShowAgentDebugLog)
-        );
-        for icons in [true, false] {
-            let ui = crate::config::UiSettings {
-                show_context_menu_icons: icons,
-                ..Default::default()
-            };
-            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-            terminal
-                .draw(|frame| draw_terminal_pane_context_menu(frame, &menu, &ui))
-                .unwrap();
-            let buffer = terminal.backend().buffer();
-            assert_eq!(buffer[(3, 3)].symbol(), " ", "top breathing room");
-            let separators = menu
-                .layout()
-                .rows
-                .iter()
-                .filter(|row| matches!(row, crate::context_menu_layout::MenuRow::Separator))
-                .count();
-            assert_eq!(separators, 3);
-            save_frame(
-                if icons {
-                    "terminal-icons"
-                } else {
-                    "terminal-text"
-                },
-                &terminal,
-            );
-        }
-        menu.area = Rect::new(0, 0, 40, 10);
-        menu.selected_index = menu.actions.len() - 1;
-        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
-        terminal
-            .draw(|frame| {
-                draw_terminal_pane_context_menu(frame, &menu, &crate::config::UiSettings::default())
-            })
-            .unwrap();
-        save_frame("terminal-short-last", &terminal);
-
-        let directory = tempfile::tempdir().unwrap();
-        for (width, height, menu_area, icon_preference) in [
-            (80, 24, Rect::new(2, 2, 44, 17), true),
-            (80, 24, Rect::new(2, 2, 44, 17), false),
-            (40, 10, Rect::new(0, 0, 40, 10), true),
-        ] {
-            let mut app = App::new("composed terminal menu".into(), directory.path().into());
-            app.set_screen_area(Rect::new(0, 0, width, height));
-            app.ui_settings.show_context_menu_icons = icon_preference;
-            app.mode = Mode::TerminalPaneContextMenu(TerminalPaneContextMenu {
-                pane_id: ROOT_ID,
-                source_line_text: menu.source_line_text.clone(),
-                visible_contents: menu.visible_contents.clone(),
-                full_history: menu.full_history.clone(),
-                selection_text: menu.selection_text.clone(),
-                area: menu_area,
-                actions: menu.actions.clone(),
-                selected_index: 0,
-                row_offset: 0,
-                preparation_generation: 0,
-                _preparation_hold: None,
-            });
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal.draw(|frame| draw(frame, &mut app)).unwrap();
-            let buffer = terminal.backend().buffer();
-            assert_eq!(
-                buffer[(menu_area.x, menu_area.y)].symbol(),
-                "╭",
-                "the composed menu keeps its rounded frame at {width}x{height}"
-            );
-            let rendered = buffer
-                .content()
-                .iter()
-                .map(|cell| cell.symbol())
-                .collect::<String>();
-            assert!(
-                rendered.contains("Terminal actions"),
-                "the composed menu title is visible at {width}x{height}"
-            );
-            assert!(
-                rendered.contains("Copy selection"),
-                "the composed menu action is visible at {width}x{height}"
-            );
-            save_frame(
-                &format!("composed-terminal-menu-{width}x{height}-icons-{icon_preference}"),
-                &terminal,
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod editor_polish_capture_tests {
-    use super::*;
-    #[test]
-    fn export_populated_editor_visual_matrix() {
-        use crate::app::{FocusTarget, PaneRuntime, RightPanelTarget};
-        use ilium_core::{PaneContentKind, ROOT_ID};
-        use ratatui::{backend::TestBackend, Terminal};
-        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
-            for tail in [false, true] {
-                let mut app = App::new(
-                    "synthetic-editor-capture".to_owned(),
-                    std::path::PathBuf::from("/synthetic/project"),
-                );
-                let group = app.tree.add_group(ROOT_ID, "Synthetic workspace").unwrap();
-                let pane = app
-                    .tree
-                    .add_pane(group, "notes.rs", PaneContentKind::Editor)
-                    .unwrap();
-                let mut editor = EditorPane::empty();
-                let text = (0..80).map(|index| format!("let synthetic_value_{index} = \"Readable source with Unicode 界 and a long line for wrap inspection\";" )).collect::<Vec<_>>().join("\n");
-                editor.replace_contents(&text);
-                if tail {
-                    editor
-                        .textarea
-                        .move_cursor(ratatui_textarea::CursorMove::Bottom);
-                }
-                app.panes
-                    .insert(pane, PaneRuntime::Editor(Box::new(editor)));
-                app.right_panel_target = RightPanelTarget::Pane { pane_id: pane };
-                app.focus = FocusTarget::Pane;
-                app.set_screen_area(Rect::new(0, 0, width, height));
-                // Existing fixture installs the real source window and commits geometry after flush ACK.
-                app.prepare_test_editor_source_frame(pane);
-                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-                terminal.draw(|frame| draw(frame, &mut app)).unwrap();
-                crate::ui_capture::save(
-                    &format!(
-                        "editor-populated-{}-{width}x{height}",
-                        if tail { "tail" } else { "top" }
-                    ),
-                    &terminal,
-                );
-            }
-        }
     }
 }

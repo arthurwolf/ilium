@@ -1,0 +1,1358 @@
+//! Reset planning: the public Claude and Codex reset-announcement feeds as pure data.
+//!
+//! These unauthenticated feeds describe discretionary, provider-wide resets. They do not expose a
+//! user's own rolling quota window. In particular the Claude feed currently has no scheduled-reset
+//! contract, and a Codex announcement may be scheduled without an exact `scheduled_for` time, or
+//! may expose a possible-reset watch whose expiry is only the end of the forecast window.
+//!
+//! Everything here is a function of its arguments: no host call, no clock and no I/O. The caller
+//! (`reset_server`) fetches the feeds with the `http` import, passes each response in, and shows
+//! the text this module builds. Times are milliseconds since the Unix epoch, taken by the caller
+//! from the host clock.
+
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+pub const CODEX_STATUS_URL: &str = "https://codex-resets.com/api/v1/status";
+pub const CODEX_LEGACY_URL: &str = "https://codex-resets.com/api/resets";
+pub const CLAUDE_RESETS_URL: &str = "https://claude-resets.com/api/resets";
+/// How often a provider's feed is read.
+pub const POLL_INTERVAL: Duration = Duration::from_secs(60 * 60);
+/// The longest one request may take.
+pub const REQUEST_TIMEOUT_MILLIS: u32 = 12_000;
+/// A response body above this is refused as malformed.
+pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+const MAX_SOURCE_AGE: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// How a countdown is written: with seconds, or rounded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ResetTimeStyle {
+    #[default]
+    Exact,
+    Human,
+}
+
+/// The `[reset_planning]` table of `config.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ResetPlanningSettings {
+    pub monitor_claude: bool,
+    pub monitor_codex: bool,
+    pub time_style: ResetTimeStyle,
+}
+
+impl Default for ResetPlanningSettings {
+    fn default() -> Self {
+        Self {
+            monitor_claude: true,
+            monitor_codex: true,
+            time_style: ResetTimeStyle::Exact,
+        }
+    }
+}
+
+impl ResetPlanningSettings {
+    /// The settings of the JSON object a kernel-settings read answers; a missing or wrongly
+    /// typed key keeps its default, a malformed document is all defaults.
+    pub fn from_json(text: &str) -> Self {
+        let Ok(Value::Object(table)) = serde_json::from_str::<Value>(text) else {
+            return Self::default();
+        };
+        let mut settings = Self::default();
+        if let Some(value) = table.get("monitor_claude").and_then(Value::as_bool) {
+            settings.monitor_claude = value;
+        }
+        if let Some(value) = table.get("monitor_codex").and_then(Value::as_bool) {
+            settings.monitor_codex = value;
+        }
+        match table.get("time_style").and_then(Value::as_str) {
+            Some("human") => settings.time_style = ResetTimeStyle::Human,
+            Some("exact") => settings.time_style = ResetTimeStyle::Exact,
+            _ => {}
+        }
+        settings
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResetProvider {
+    Claude,
+    Codex,
+}
+
+impl ResetProvider {
+    pub const ALL: [ResetProvider; 2] = [ResetProvider::Claude, ResetProvider::Codex];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude",
+            Self::Codex => "Codex",
+        }
+    }
+
+    pub const fn enabled(self, settings: &ResetPlanningSettings) -> bool {
+        match self {
+            Self::Claude => settings.monitor_claude,
+            Self::Codex => settings.monitor_codex,
+        }
+    }
+
+    /// The position of the provider in per-provider arrays.
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Claude => 0,
+            Self::Codex => 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduledReset {
+    pub announced_at: DateTime<Utc>,
+    pub scheduled_for: Option<DateTime<Utc>>,
+    pub source_url: String,
+    pub is_banked: bool,
+}
+
+/// A provider's forecast window for a possible reset.
+///
+/// `expires_at` marks when the watch window ends; it is not a promised reset time and must not
+/// be presented as one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveResetWatch {
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ParsedProviderResetData {
+    pub scheduled: Option<ScheduledReset>,
+    pub active_watch: Option<ActiveResetWatch>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProviderStatus {
+    /// Epoch milliseconds of the last accepted result.
+    pub last_checked_millis: Option<i64>,
+    pub last_error: Option<String>,
+    pub scheduled: Option<ScheduledReset>,
+    pub active_watch: Option<ActiveResetWatch>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ResetMonitorState {
+    pub claude: ProviderStatus,
+    pub codex: ProviderStatus,
+}
+
+impl ResetMonitorState {
+    pub fn provider(&self, provider: ResetProvider) -> &ProviderStatus {
+        match provider {
+            ResetProvider::Claude => &self.claude,
+            ResetProvider::Codex => &self.codex,
+        }
+    }
+
+    /// Forgets what one provider announced (its monitor was switched off).
+    pub fn clear(&mut self, provider: ResetProvider) {
+        match provider {
+            ResetProvider::Claude => self.claude = ProviderStatus::default(),
+            ResetProvider::Codex => self.codex = ProviderStatus::default(),
+        }
+    }
+
+    pub fn apply(
+        &mut self,
+        event: MonitorEvent,
+        settings: &ResetPlanningSettings,
+        now_millis: i64,
+    ) {
+        if !event.provider.enabled(settings) {
+            return;
+        }
+        let state = match event.provider {
+            ResetProvider::Claude => &mut self.claude,
+            ResetProvider::Codex => &mut self.codex,
+        };
+        state.last_checked_millis = Some(now_millis);
+        match event.result {
+            Ok(observation) => {
+                if let Some(warning) = event.source_warning {
+                    // Legacy has no upstream-freshness contract. It may add a newer
+                    // announcement, but cannot retract or roll back one already obtained from
+                    // the versioned status endpoint.
+                    if let Some(candidate) = observation.scheduled {
+                        let is_newer = state
+                            .scheduled
+                            .as_ref()
+                            .is_none_or(|retained| candidate.announced_at > retained.announced_at);
+                        if is_newer {
+                            state.scheduled = Some(candidate);
+                        }
+                    }
+                    state.last_error = Some(warning);
+                } else {
+                    state.scheduled = observation.scheduled;
+                    state.active_watch = observation.active_watch;
+                    state.last_error = None;
+                }
+            }
+            Err(error) => {
+                // Keep a previously confirmed future announcement through a transient outage;
+                // the failure is still logged.
+                state.last_error = Some(error);
+            }
+        }
+    }
+
+    /// The pace the label must be redrawn at, or `None` when nothing counts down.
+    pub fn display_tick_interval(
+        &self,
+        settings: &ResetPlanningSettings,
+        now: DateTime<Utc>,
+    ) -> Option<Duration> {
+        let has_timed_reset = ResetProvider::ALL.into_iter().any(|provider| {
+            provider.enabled(settings)
+                && (self
+                    .provider(provider)
+                    .scheduled
+                    .as_ref()
+                    .is_some_and(|reset| reset.scheduled_for.is_some())
+                    || self
+                        .provider(provider)
+                        .active_watch
+                        .as_ref()
+                        .is_some_and(|watch| watch.expires_at > now))
+        });
+        has_timed_reset.then_some(match settings.time_style {
+            ResetTimeStyle::Exact => Duration::from_secs(1),
+            ResetTimeStyle::Human => Duration::from_secs(60),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct MonitorEvent {
+    pub provider: ResetProvider,
+    pub result: Result<ParsedProviderResetData, String>,
+    /// A usable legacy observation arrived after the primary source failed.
+    pub source_warning: Option<String>,
+}
+
+/// What reading one provider's feed(s) came to.
+#[derive(Debug)]
+pub struct FetchOutcome {
+    pub result: Result<ParsedProviderResetData, String>,
+    pub source_warning: Option<String>,
+    pub retry_after: Option<Duration>,
+}
+
+/// One response body with its HTTP `Age`.
+#[derive(Debug)]
+pub struct FetchedBody {
+    pub body: String,
+    pub age: Duration,
+}
+
+#[derive(Debug)]
+pub struct FetchFailure {
+    pub message: String,
+    pub may_use_legacy: bool,
+    pub retry_after: Option<Duration>,
+}
+
+impl FetchFailure {
+    pub fn malformed(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            may_use_legacy: true,
+            retry_after: None,
+        }
+    }
+
+    pub fn transport(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            may_use_legacy: false,
+            retry_after: None,
+        }
+    }
+
+    pub fn http(url: &str, status: u16, retry_after: Option<Duration>) -> Self {
+        Self {
+            message: format!("{url}: HTTP {status}"),
+            may_use_legacy: matches!(status, 404 | 405 | 410 | 500..=599) && retry_after.is_none(),
+            retry_after,
+        }
+    }
+}
+
+fn failed_outcome(failure: FetchFailure) -> FetchOutcome {
+    FetchOutcome {
+        result: Err(failure.message),
+        source_warning: None,
+        retry_after: failure.retry_after,
+    }
+}
+
+/// The earliest next read after one finished: the hourly cadence, or a longer server delay.
+pub fn next_poll_millis(completed_millis: i64, retry_after: Option<Duration>) -> i64 {
+    let delay = POLL_INTERVAL.max(retry_after.unwrap_or_default());
+    let delay_millis = i64::try_from(delay.as_millis()).unwrap_or(i64::MAX);
+    // Saturating addition keeps an enormous Retry-After from wrapping into an immediate read.
+    completed_millis.saturating_add(delay_millis)
+}
+
+/// Which request of a provider's read comes next.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stage {
+    Primary,
+    /// The primary feed failed in a way the legacy feed may cover.
+    Legacy {
+        primary_message: String,
+    },
+}
+
+/// The step after a response (or failure) arrived.
+#[derive(Debug)]
+pub enum Step {
+    /// Read this URL next, at this stage.
+    Fetch(&'static str, Stage),
+    Done(FetchOutcome),
+}
+
+/// The URL a provider's read starts with.
+pub fn first_url(provider: ResetProvider) -> &'static str {
+    match provider {
+        ResetProvider::Claude => CLAUDE_RESETS_URL,
+        ResetProvider::Codex => CODEX_STATUS_URL,
+    }
+}
+
+/// Advances one provider's read: `result` is what the request of `stage` came to.
+pub fn advance(
+    provider: ResetProvider,
+    stage: Stage,
+    now: DateTime<Utc>,
+    result: Result<FetchedBody, FetchFailure>,
+) -> Step {
+    match (provider, stage) {
+        (ResetProvider::Claude, _) => {
+            let parsed = result.and_then(|document| {
+                parse_claude_feed(&document.body, now, document.age)
+                    .map_err(FetchFailure::malformed)
+            });
+            Step::Done(match parsed {
+                Ok(scheduled) => FetchOutcome {
+                    result: Ok(ParsedProviderResetData {
+                        scheduled,
+                        active_watch: None,
+                    }),
+                    source_warning: None,
+                    retry_after: None,
+                },
+                Err(failure) => failed_outcome(failure),
+            })
+        }
+        (ResetProvider::Codex, Stage::Primary) => {
+            let primary = result.and_then(|document| {
+                parse_codex_status(&document.body, now, document.age)
+                    .map_err(FetchFailure::malformed)
+            });
+            match primary {
+                Ok(observation) => Step::Done(FetchOutcome {
+                    result: Ok(observation),
+                    source_warning: None,
+                    retry_after: None,
+                }),
+                Err(failure) if failure.may_use_legacy => Step::Fetch(
+                    CODEX_LEGACY_URL,
+                    Stage::Legacy {
+                        primary_message: failure.message,
+                    },
+                ),
+                Err(failure) => Step::Done(failed_outcome(failure)),
+            }
+        }
+        (ResetProvider::Codex, Stage::Legacy { primary_message }) => {
+            let legacy = result.and_then(|document| {
+                validate_http_age(document.age)
+                    .and_then(|()| parse_codex_legacy(&document.body))
+                    .map_err(FetchFailure::malformed)
+            });
+            Step::Done(match legacy {
+                Ok(scheduled) => FetchOutcome {
+                    result: Ok(ParsedProviderResetData {
+                        scheduled,
+                        active_watch: None,
+                    }),
+                    source_warning: Some(format!(
+                        "Codex v1 failed ({primary_message}); using legacy feed with unknown upstream freshness"
+                    )),
+                    retry_after: None,
+                },
+                Err(legacy_failure) => failed_outcome(FetchFailure {
+                    message: format!(
+                        "Codex v1 failed ({primary_message}); legacy failed ({})",
+                        legacy_failure.message
+                    ),
+                    may_use_legacy: false,
+                    retry_after: legacy_failure.retry_after,
+                }),
+            })
+        }
+    }
+}
+
+/// Reads one provider's feeds synchronously through `fetch` (the driver the tests use; the
+/// plugin steps `advance` between host calls instead).
+pub fn fetch_provider_with<F>(
+    provider: ResetProvider,
+    now: DateTime<Utc>,
+    mut fetch: F,
+) -> FetchOutcome
+where
+    F: FnMut(&str) -> Result<FetchedBody, FetchFailure>,
+{
+    let mut url = first_url(provider);
+    let mut stage = Stage::Primary;
+    loop {
+        match advance(provider, stage, now, fetch(url)) {
+            Step::Done(outcome) => return outcome,
+            Step::Fetch(next_url, next_stage) => {
+                url = next_url;
+                stage = next_stage;
+            }
+        }
+    }
+}
+
+/// The `Retry-After` header: delta-seconds or an HTTP date.
+pub fn parse_retry_after(value: &str, now: DateTime<Utc>) -> Option<Duration> {
+    let value = value.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let deadline = DateTime::parse_from_rfc2822(value).ok()?;
+    let delay = deadline.signed_duration_since(now);
+    if delay <= chrono::Duration::zero() {
+        return Some(Duration::ZERO);
+    }
+    delay.to_std().ok()
+}
+
+fn validate_http_age(age: Duration) -> Result<(), String> {
+    if age > MAX_SOURCE_AGE {
+        Err("reset feed HTTP Age exceeds six hours".to_owned())
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_recent_timestamp(value: &Value, field: &str, now: DateTime<Utc>) -> Result<(), String> {
+    let timestamp = parse_timestamp(value, field)?;
+    if timestamp.signed_duration_since(now) > chrono::Duration::minutes(5) {
+        return Err(format!("reset feed {field} is in the future"));
+    }
+    if now.signed_duration_since(timestamp) > chrono::Duration::hours(6) {
+        return Err(format!("reset feed {field} is older than six hours"));
+    }
+    Ok(())
+}
+
+fn parse_is_banked(value: &Value) -> Result<bool, String> {
+    match value.get("reset_type").and_then(|field| field.as_str()) {
+        Some("regular") => Ok(false),
+        Some("banked") => Ok(true),
+        _ => Err("reset announcement has an invalid reset_type".to_owned()),
+    }
+}
+
+fn parse_optional_timestamp(value: &Value, field: &str) -> Result<Option<DateTime<Utc>>, String> {
+    match value.get(field) {
+        Some(Value::Null) => Ok(None),
+        Some(_) => parse_timestamp(value, field).map(Some),
+        None => Err(format!("reset announcement has no {field} field")),
+    }
+}
+
+fn parse_codex_source_url(source: &Value) -> Result<String, String> {
+    match source.get("type").and_then(|value| value.as_str()) {
+        Some("x_post") => {
+            if source.get("author").and_then(|value| value.as_str()) != Some("thsottiaux") {
+                return Err("Codex scheduled reset has an unknown source author".to_owned());
+            }
+            source
+                .get("url")
+                .and_then(|value| value.as_str())
+                .filter(|url| url.starts_with("https://x.com/"))
+                .map(str::to_owned)
+                .ok_or_else(|| "Codex scheduled reset has no valid source post".to_owned())
+        }
+        Some("observed") => match source.get("url") {
+            None => Ok(CODEX_STATUS_URL.to_owned()),
+            Some(value) => value
+                .as_str()
+                .filter(|url| url.starts_with("https://"))
+                .map(str::to_owned)
+                .ok_or_else(|| "Codex observed reset has an invalid source URL".to_owned()),
+        },
+        _ => Err("Codex scheduled reset has an unknown source type".to_owned()),
+    }
+}
+
+pub fn parse_codex_status(
+    body: &str,
+    now: DateTime<Utc>,
+    age: Duration,
+) -> Result<ParsedProviderResetData, String> {
+    validate_http_age(age)?;
+    let json: Value = serde_json::from_str(body).map_err(|error| error.to_string())?;
+    let meta = json
+        .get("meta")
+        .ok_or("Codex reset feed has no meta object")?;
+    if meta.get("api_version").and_then(|value| value.as_str()) != Some("v1") {
+        return Err("Codex reset feed has an unsupported API version".to_owned());
+    }
+    validate_recent_timestamp(meta, "generated_at", now)?;
+    let data = json
+        .get("data")
+        .ok_or("Codex reset feed has no data object")?;
+    let scheduled = data
+        .get("scheduled_reset")
+        .ok_or("Codex reset feed has no scheduled_reset field")?;
+    let scheduled = if scheduled.is_null() {
+        None
+    } else {
+        if scheduled.get("status").and_then(|value| value.as_str()) != Some("scheduled") {
+            return Err("Codex scheduled reset has an unexpected status".to_owned());
+        }
+        if scheduled
+            .get("id")
+            .and_then(|value| value.as_str())
+            .is_none_or(str::is_empty)
+        {
+            return Err("Codex scheduled reset has no id".to_owned());
+        }
+        let announced_at = parse_timestamp(scheduled, "announced_at")?;
+        let scheduled_for = parse_optional_timestamp(scheduled, "scheduled_for")?;
+        let source = scheduled
+            .get("source")
+            .ok_or("Codex scheduled reset has no source")?;
+        let source_url = parse_codex_source_url(source)?;
+        Some(ScheduledReset {
+            announced_at,
+            scheduled_for,
+            source_url,
+            is_banked: parse_is_banked(scheduled)?,
+        })
+    };
+    let active_watch = match data.get("active_watch") {
+        None | Some(Value::Null) => None,
+        Some(watch) => {
+            let expires_at = parse_timestamp(watch, "expires_at")?;
+            (expires_at > now).then_some(ActiveResetWatch { expires_at })
+        }
+    };
+    Ok(ParsedProviderResetData {
+        scheduled,
+        active_watch,
+    })
+}
+
+pub fn parse_codex_legacy(body: &str) -> Result<Option<ScheduledReset>, String> {
+    let json: Value = serde_json::from_str(body).map_err(|error| error.to_string())?;
+    let scheduled = json
+        .get("scheduled")
+        .ok_or("legacy Codex reset feed has no scheduled field")?;
+    if scheduled.is_null() {
+        return Ok(None);
+    }
+    if scheduled
+        .get("tweet_id")
+        .and_then(|value| value.as_str())
+        .is_none_or(str::is_empty)
+    {
+        return Err("legacy Codex scheduled reset has no tweet_id".to_owned());
+    }
+    let source_url = scheduled
+        .get("tweet_url")
+        .and_then(|value| value.as_str())
+        .filter(|url| url.starts_with("https://x.com/"))
+        .ok_or("legacy Codex scheduled reset has no valid tweet_url")?
+        .to_owned();
+    Ok(Some(ScheduledReset {
+        announced_at: parse_timestamp(scheduled, "announced_at")?,
+        scheduled_for: parse_optional_timestamp(scheduled, "scheduled_for")?,
+        source_url,
+        is_banked: parse_is_banked(scheduled)?,
+    }))
+}
+
+pub fn parse_claude_feed(
+    body: &str,
+    now: DateTime<Utc>,
+    age: Duration,
+) -> Result<Option<ScheduledReset>, String> {
+    validate_http_age(age)?;
+    let json: Value = serde_json::from_str(body).map_err(|error| error.to_string())?;
+    let claude = json
+        .pointer("/providers/claude")
+        .ok_or("Claude reset feed has no provider object")?;
+    if json.get("scheduled_reset").is_some()
+        || claude.get("scheduled_reset").is_some()
+        || claude.get("scheduled").is_some()
+    {
+        return Err("Claude reset feed has an unrecognized schedule contract".to_owned());
+    }
+    let events = claude
+        .get("events")
+        .and_then(|value| value.as_array())
+        .ok_or("Claude reset feed has no events list")?;
+    for event in events {
+        match event.get("kind").and_then(|value| value.as_str()) {
+            Some("reset" | "policy") => {}
+            _ => return Err("Claude reset feed has an unknown event kind".to_owned()),
+        }
+        if let Some(reset_type) = event.get("resetType") {
+            match reset_type.as_str() {
+                Some("regular" | "banked") => {}
+                _ => return Err("Claude reset feed has an unknown resetType".to_owned()),
+            }
+        }
+    }
+    let meta = json
+        .get("meta")
+        .ok_or("Claude reset feed has no meta object")?;
+    validate_recent_timestamp(meta, "asOf", now)?;
+    let detector = meta
+        .get("detector")
+        .ok_or("Claude reset feed has no detector metadata")?;
+    if detector.get("status").and_then(|value| value.as_str()) != Some("fresh") {
+        return Err("Claude reset detector is not fresh".to_owned());
+    }
+    validate_recent_timestamp(detector, "asOf", now)?;
+    validate_recent_timestamp(detector, "lastSuccessfulCheckAt", now)?;
+    // This catalog has historical resets/policy changes and detector health, but no structured
+    // future execution time or pending-reset lifecycle.
+    Ok(None)
+}
+
+fn parse_timestamp(value: &Value, field: &str) -> Result<DateTime<Utc>, String> {
+    let text = value
+        .get(field)
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| format!("reset announcement has no {field}"))?;
+    DateTime::parse_from_rfc3339(text)
+        .map(|timestamp| timestamp.with_timezone(&Utc))
+        .map_err(|error| format!("invalid {field}: {error}"))
+}
+
+/// `1d 4h 7m 32s`, without the zero leading units.
+fn exact_duration(remaining: i64) -> String {
+    let days = remaining / 86_400;
+    let hours = (remaining % 86_400) / 3_600;
+    let minutes = (remaining % 3_600) / 60;
+    let seconds = remaining % 60;
+    if days > 0 {
+        format!("{days}d {hours}h {minutes}m {seconds}s")
+    } else if hours > 0 {
+        format!("{hours}h {minutes}m {seconds}s")
+    } else {
+        format!("{minutes}m {seconds}s")
+    }
+}
+
+/// `3 days`, `2 hours` or `5 minutes`, rounded to the nearest unit.
+fn rounded_duration(remaining: i64) -> String {
+    if remaining >= 86_400 {
+        let days = (remaining + 43_200) / 86_400;
+        format!("{days} {}", if days == 1 { "day" } else { "days" })
+    } else if remaining >= 3_600 {
+        let hours = (remaining + 1_800) / 3_600;
+        format!("{hours} {}", if hours == 1 { "hour" } else { "hours" })
+    } else {
+        let minutes = ((remaining + 30) / 60).max(1);
+        format!(
+            "{minutes} {}",
+            if minutes == 1 { "minute" } else { "minutes" }
+        )
+    }
+}
+
+pub fn countdown_text(
+    provider: ResetProvider,
+    scheduled: &ScheduledReset,
+    style: ResetTimeStyle,
+    now: DateTime<Utc>,
+) -> String {
+    let name = if scheduled.is_banked {
+        format!("{} banked reset", provider.label())
+    } else {
+        format!("{} reset", provider.label())
+    };
+    let Some(target) = scheduled.scheduled_for else {
+        return format!("{name} scheduled · time TBD");
+    };
+    let remaining = (target - now).num_seconds();
+    if remaining <= 0 {
+        return format!("{name} due · awaiting confirmation");
+    }
+    match style {
+        ResetTimeStyle::Exact => format!("{name} in {}", exact_duration(remaining)),
+        ResetTimeStyle::Human => {
+            // The guest has no time zone, so "tomorrow" is the next UTC calendar day.
+            let tomorrow = now.date_naive().succ_opt().unwrap_or(now.date_naive());
+            if target.date_naive() == tomorrow {
+                format!("{name} tomorrow")
+            } else {
+                format!("{name} in {}", rounded_duration(remaining))
+            }
+        }
+    }
+}
+
+pub fn active_reset_watch_text(
+    provider: ResetProvider,
+    watch: &ActiveResetWatch,
+    style: ResetTimeStyle,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    let remaining = (watch.expires_at - now).num_seconds();
+    if remaining <= 0 {
+        return None;
+    }
+    let duration = match style {
+        ResetTimeStyle::Exact => exact_duration(remaining),
+        ResetTimeStyle::Human => rounded_duration(remaining),
+    };
+    Some(format!(
+        "Possible {} reset watch window ends in {duration}",
+        provider.label()
+    ))
+}
+
+pub fn compact_active_reset_watch_text(
+    provider: ResetProvider,
+    watch: &ActiveResetWatch,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    let remaining = (watch.expires_at - now).num_seconds();
+    if remaining <= 0 {
+        return None;
+    }
+    let duration = if remaining >= 3_600 {
+        let rounded_hours = (remaining + 1_800) / 3_600;
+        let days = rounded_hours / 24;
+        let hours = rounded_hours % 24;
+        if days > 0 && hours > 0 {
+            format!("{days}d{hours}h")
+        } else if days > 0 {
+            format!("{days}d")
+        } else {
+            format!("{hours}h")
+        }
+    } else {
+        format!("{}m", ((remaining + 30) / 60).max(1))
+    };
+    Some(format!(
+        "Possible {} reset watch ends in {duration}",
+        provider.label()
+    ))
+}
+
+/// The status bar text of every monitored provider's announcement, or `None` when nothing is
+/// announced. A watch window shows in its short form when the full text would make the line
+/// longer than `MAX_LINE_CHARACTERS`.
+pub fn status_text(
+    state: &ResetMonitorState,
+    settings: &ResetPlanningSettings,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    const MAX_LINE_CHARACTERS: usize = 72;
+    const SEPARATOR: &str = "  ·  ";
+    let mut build = |compact: bool| -> Vec<String> {
+        let mut labels = Vec::new();
+        for provider in ResetProvider::ALL {
+            if !provider.enabled(settings) {
+                continue;
+            }
+            let status = state.provider(provider);
+            if let Some(scheduled) = &status.scheduled {
+                labels.push(countdown_text(
+                    provider,
+                    scheduled,
+                    settings.time_style,
+                    now,
+                ));
+            } else if let Some(watch) = &status.active_watch {
+                let label = if compact {
+                    compact_active_reset_watch_text(provider, watch, now)
+                } else {
+                    active_reset_watch_text(provider, watch, settings.time_style, now)
+                };
+                labels.extend(label);
+            }
+        }
+        labels
+    };
+    let mut labels = build(false);
+    if labels.join(SEPARATOR).chars().count() > MAX_LINE_CHARACTERS {
+        labels = build(true);
+    }
+    (!labels.is_empty()).then(|| labels.join(SEPARATOR))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn now() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-09-27T04:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    fn v1(scheduled: Value) -> String {
+        json!({"data":{"scheduled_reset":scheduled},"meta":{
+            "api_version":"v1","generated_at":"2026-09-27T03:43:37.281Z"
+        }})
+        .to_string()
+    }
+
+    fn v1_with_watch(scheduled: Value, active_watch: Option<Value>) -> String {
+        let mut document = json!({"data":{"scheduled_reset":scheduled},"meta":{
+            "api_version":"v1","generated_at":"2026-09-27T03:43:37.281Z"
+        }});
+        if let Some(active_watch) = active_watch {
+            document["data"]["active_watch"] = active_watch;
+        }
+        document.to_string()
+    }
+
+    fn parse_scheduled(body: &str) -> Result<Option<ScheduledReset>, String> {
+        parse_codex_status(body, now(), Duration::ZERO).map(|status| status.scheduled)
+    }
+
+    fn pending() -> Value {
+        json!({
+            "id":"2103963215885701493","status":"scheduled","reset_type":"regular",
+            "announced_at":"2026-09-26T21:41:35.000Z","scheduled_for":null,
+            "text":"More resets coming next week",
+            "source":{"type":"x_post","author":"thsottiaux",
+                "url":"https://x.com/thsottiaux/status/2103963215885701493"}
+        })
+    }
+
+    fn fetched(body: String) -> FetchedBody {
+        FetchedBody {
+            body,
+            age: Duration::ZERO,
+        }
+    }
+
+    fn claude() -> Value {
+        json!({
+            "providers":{"claude":{"events":[
+                {"kind":"reset","resetType":"banked","date":"2026-09-22T16:44:06Z",
+                    "verification":"curated","note":"apply any time until October 22"},
+                {"kind":"policy","date":"2026-09-14T00:00:00Z","verification":"curated"},
+                {"kind":"reset","date":"2026-09-01T00:00:00Z","verification":"provisional"}
+            ]}},
+            "meta":{"asOf":"2026-09-27T03:44:29Z","detector":{
+                "status":"fresh","asOf":"2026-09-27T03:44:29Z",
+                "lastSuccessfulCheckAt":"2026-09-27T03:43:05Z"
+            }}
+        })
+    }
+
+    #[test]
+    fn settings_keep_defaults_for_missing_or_wrong_keys() {
+        assert_eq!(
+            ResetPlanningSettings::from_json("{}"),
+            ResetPlanningSettings::default()
+        );
+        let settings = ResetPlanningSettings::from_json(
+            r#"{"monitor_claude":false,"time_style":"human","monitor_codex":"yes"}"#,
+        );
+        assert!(!settings.monitor_claude);
+        assert!(settings.monitor_codex);
+        assert_eq!(settings.time_style, ResetTimeStyle::Human);
+        assert_eq!(
+            ResetPlanningSettings::from_json("not json"),
+            ResetPlanningSettings::default()
+        );
+    }
+
+    #[test]
+    fn codex_scheduled_without_time_is_not_a_countdown() {
+        let scheduled = parse_scheduled(&v1(pending())).unwrap().unwrap();
+        assert_eq!(scheduled.scheduled_for, None);
+        assert_eq!(
+            countdown_text(
+                ResetProvider::Codex,
+                &scheduled,
+                ResetTimeStyle::Exact,
+                now()
+            ),
+            "Codex reset scheduled · time TBD"
+        );
+    }
+
+    #[test]
+    fn codex_explicit_target_offset_and_due_are_not_completion() {
+        let mut event = pending();
+        event["scheduled_for"] = json!("2026-09-28T02:00:00+02:00");
+        let scheduled = parse_scheduled(&v1(event)).unwrap().unwrap();
+        let target = DateTime::parse_from_rfc3339("2026-09-28T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(scheduled.scheduled_for, Some(target));
+        assert_eq!(
+            countdown_text(
+                ResetProvider::Codex,
+                &scheduled,
+                ResetTimeStyle::Exact,
+                target
+            ),
+            "Codex reset due · awaiting confirmation"
+        );
+    }
+
+    #[test]
+    fn codex_v1_rejects_unknown_type_missing_target_and_stale_metadata() {
+        let mut event = pending();
+        event["reset_type"] = json!("unknown");
+        assert!(parse_scheduled(&v1(event)).is_err());
+        let mut event = pending();
+        event.as_object_mut().unwrap().remove("scheduled_for");
+        assert!(parse_scheduled(&v1(event)).is_err());
+        assert!(parse_codex_status(
+            &v1(Value::Null),
+            now() + chrono::Duration::days(1),
+            Duration::ZERO
+        )
+        .is_err());
+        assert!(
+            parse_codex_status(&v1(Value::Null), now(), Duration::from_secs(7 * 3600)).is_err()
+        );
+    }
+
+    #[test]
+    fn codex_observed_source_uses_status_page_without_url() {
+        let mut event = pending();
+        event["source"] = json!({"type":"observed"});
+        let scheduled = parse_scheduled(&v1(event)).unwrap().unwrap();
+        assert_eq!(scheduled.source_url, CODEX_STATUS_URL);
+    }
+
+    #[test]
+    fn codex_active_watch_is_a_separate_possible_reset_window() {
+        let expires_at = DateTime::parse_from_rfc3339("2026-09-29T04:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let status = parse_codex_status(
+            &v1_with_watch(
+                Value::Null,
+                Some(json!({"expires_at":expires_at.to_rfc3339()})),
+            ),
+            now(),
+            Duration::ZERO,
+        )
+        .unwrap();
+
+        assert!(status.scheduled.is_none());
+        let watch = status.active_watch.expect("active watch should be parsed");
+        assert_eq!(watch.expires_at, expires_at);
+        let label =
+            active_reset_watch_text(ResetProvider::Codex, &watch, ResetTimeStyle::Human, now())
+                .expect("unexpired watch should be displayed");
+        assert!(label.contains("Possible Codex reset"), "{label}");
+        assert!(label.contains("watch window ends"), "{label}");
+        assert!(label.contains("2 days"), "{label}");
+    }
+
+    #[test]
+    fn codex_active_watch_may_be_missing_or_null() {
+        let missing = parse_codex_status(&v1(Value::Null), now(), Duration::ZERO).unwrap();
+        assert!(missing.scheduled.is_none());
+        assert!(missing.active_watch.is_none());
+
+        let explicit_null = parse_codex_status(
+            &v1_with_watch(Value::Null, Some(Value::Null)),
+            now(),
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert!(explicit_null.scheduled.is_none());
+        assert!(explicit_null.active_watch.is_none());
+    }
+
+    #[test]
+    fn codex_expired_active_watch_is_not_reported_as_a_future_watch() {
+        let status = parse_codex_status(
+            &v1_with_watch(
+                Value::Null,
+                Some(json!({"expires_at":"2026-09-27T03:59:59Z"})),
+            ),
+            now(),
+            Duration::ZERO,
+        )
+        .unwrap();
+
+        assert!(status.scheduled.is_none());
+        assert!(status.active_watch.is_none());
+    }
+
+    #[test]
+    fn compact_watch_text_keeps_hours_when_the_window_is_more_than_a_day_away() {
+        let watch = ActiveResetWatch {
+            expires_at: now() + chrono::Duration::days(2) + chrono::Duration::hours(8),
+        };
+
+        assert_eq!(
+            compact_active_reset_watch_text(ResetProvider::Codex, &watch, now()),
+            Some("Possible Codex reset watch ends in 2d8h".to_owned())
+        );
+    }
+
+    #[test]
+    fn legacy_watch_does_not_schedule_and_banked_pending_has_unknown_time() {
+        assert!(
+            parse_codex_legacy(r#"{"scheduled":null,"watch":{"reset_chance_percent":60}}"#)
+                .unwrap()
+                .is_none()
+        );
+        assert!(parse_codex_legacy(r#"{"events":[],"watch":null}"#).is_err());
+        let scheduled = parse_codex_legacy(
+            r#"{"scheduled":{
+            "tweet_id":"2101352781219258527","text":"Tuesday",
+            "announced_at":"2026-09-19T16:48:38Z","scheduled_for":null,
+            "reset_type":"banked","tweet_url":"https://x.com/thsottiaux/status/2101352781219258527"
+        }}"#,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(scheduled.is_banked);
+        assert_eq!(scheduled.scheduled_for, None);
+        assert_eq!(
+            countdown_text(
+                ResetProvider::Codex,
+                &scheduled,
+                ResetTimeStyle::Exact,
+                now()
+            ),
+            "Codex banked reset scheduled · time TBD"
+        );
+    }
+
+    #[test]
+    fn primary_success_avoids_fallback_and_malformed_primary_uses_one_legacy_request() {
+        let mut urls = Vec::new();
+        let healthy = fetch_provider_with(ResetProvider::Codex, now(), |url| {
+            urls.push(url.to_owned());
+            Ok(fetched(v1(Value::Null)))
+        });
+        assert!(healthy.result.unwrap().scheduled.is_none());
+        assert_eq!(urls, vec![CODEX_STATUS_URL]);
+        urls.clear();
+        let degraded = fetch_provider_with(ResetProvider::Codex, now(), |url| {
+            urls.push(url.to_owned());
+            if url == CODEX_STATUS_URL {
+                Ok(fetched("{".to_owned()))
+            } else {
+                Ok(fetched(
+                    r#"{"scheduled":null,"watch":{"reset_chance_percent":60}}"#.to_owned(),
+                ))
+            }
+        });
+        assert!(degraded.result.unwrap().scheduled.is_none());
+        assert!(degraded
+            .source_warning
+            .unwrap()
+            .contains("unknown upstream freshness"));
+        assert_eq!(urls, vec![CODEX_STATUS_URL, CODEX_LEGACY_URL]);
+    }
+
+    #[test]
+    fn rate_limit_and_transport_failure_do_not_cascade() {
+        let mut requests = 0;
+        let limited = fetch_provider_with(ResetProvider::Codex, now(), |_| {
+            requests += 1;
+            Err(FetchFailure::http(
+                CODEX_STATUS_URL,
+                429,
+                Some(Duration::from_secs(7200)),
+            ))
+        });
+        assert!(limited.result.is_err());
+        assert_eq!(limited.retry_after, Some(Duration::from_secs(7200)));
+        assert_eq!(requests, 1);
+        requests = 0;
+        let unavailable = fetch_provider_with(ResetProvider::Codex, now(), |_| {
+            requests += 1;
+            Err(FetchFailure::transport("network unavailable"))
+        });
+        assert!(unavailable.result.is_err());
+        assert_eq!(requests, 1);
+        assert!(!FetchFailure::http(CODEX_STATUS_URL, 503, Some(Duration::ZERO)).may_use_legacy);
+        assert!(FetchFailure::http(CODEX_STATUS_URL, 503, None).may_use_legacy);
+    }
+
+    #[test]
+    fn retry_after_and_poll_deadline_preserve_hourly_floor() {
+        let then = DateTime::parse_from_rfc3339("1994-11-06T08:48:37Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(parse_retry_after("90", then), Some(Duration::from_secs(90)));
+        assert_eq!(
+            parse_retry_after("Sun, 06 Nov 1994 08:49:37 GMT", then),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(
+            parse_retry_after("Sun, 06 Nov 1994 08:47:37 GMT", then),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(parse_retry_after("invalid", then), None);
+        assert_eq!(next_poll_millis(1_000, None), 1_000 + 3_600_000);
+        assert_eq!(
+            next_poll_millis(1_000, Some(Duration::from_secs(7200))),
+            1_000 + 7_200_000
+        );
+        assert_eq!(
+            next_poll_millis(i64::MAX - 5, Some(Duration::from_secs(7200))),
+            i64::MAX
+        );
+    }
+
+    #[test]
+    fn claude_history_and_banked_grant_have_no_schedule() {
+        let payload = claude();
+        assert!(
+            parse_claude_feed(&payload.to_string(), now(), Duration::ZERO)
+                .unwrap()
+                .is_none()
+        );
+        let mut changed = payload;
+        changed["providers"]["claude"]["events"][0]["kind"] = json!("scheduled");
+        assert!(parse_claude_feed(&changed.to_string(), now(), Duration::ZERO).is_err());
+    }
+
+    #[test]
+    fn claude_stale_detector_or_new_schedule_contract_is_not_healthy_none() {
+        let mut changed = claude();
+        changed["meta"]["detector"]["lastSuccessfulCheckAt"] = json!("2026-09-26T00:00:00Z");
+        assert!(parse_claude_feed(&changed.to_string(), now(), Duration::ZERO).is_err());
+        let mut changed = claude();
+        changed["providers"]["claude"]["scheduled_reset"] = Value::Null;
+        assert!(parse_claude_feed(&changed.to_string(), now(), Duration::ZERO).is_err());
+    }
+
+    #[test]
+    fn degraded_legacy_cannot_retract_or_roll_back_retained_announcement() {
+        let retained = parse_scheduled(&v1(pending())).unwrap().unwrap();
+        let mut state = ResetMonitorState::default();
+        state.codex.scheduled = Some(retained.clone());
+        let settings = ResetPlanningSettings::default();
+        state.apply(
+            MonitorEvent {
+                provider: ResetProvider::Codex,
+                result: Ok(ParsedProviderResetData::default()),
+                source_warning: Some("primary failed; legacy used".to_owned()),
+            },
+            &settings,
+            1,
+        );
+        assert_eq!(state.codex.scheduled, Some(retained.clone()));
+        let older = ScheduledReset {
+            announced_at: retained.announced_at - chrono::Duration::days(1),
+            scheduled_for: None,
+            source_url: CODEX_LEGACY_URL.to_owned(),
+            is_banked: true,
+        };
+        state.apply(
+            MonitorEvent {
+                provider: ResetProvider::Codex,
+                result: Ok(ParsedProviderResetData {
+                    scheduled: Some(older),
+                    active_watch: None,
+                }),
+                source_warning: Some("legacy used".to_owned()),
+            },
+            &settings,
+            2,
+        );
+        assert_eq!(state.codex.scheduled, Some(retained));
+        assert!(state.codex.last_error.is_some());
+        state.apply(
+            MonitorEvent {
+                provider: ResetProvider::Codex,
+                result: Ok(ParsedProviderResetData::default()),
+                source_warning: None,
+            },
+            &settings,
+            3,
+        );
+        assert!(state.codex.scheduled.is_none());
+        assert!(state.codex.last_error.is_none());
+    }
+
+    #[test]
+    fn active_watch_survives_legacy_fallback_and_clears_on_primary_null() {
+        let watch = ActiveResetWatch {
+            expires_at: now() + chrono::Duration::days(2),
+        };
+        let mut state = ResetMonitorState::default();
+        let settings = ResetPlanningSettings::default();
+        state.apply(
+            MonitorEvent {
+                provider: ResetProvider::Codex,
+                result: Ok(ParsedProviderResetData {
+                    scheduled: None,
+                    active_watch: Some(watch.clone()),
+                }),
+                source_warning: None,
+            },
+            &settings,
+            1,
+        );
+        assert_eq!(state.codex.active_watch, Some(watch.clone()));
+        assert!(state
+            .display_tick_interval(&settings, now())
+            .is_some_and(|interval| interval <= Duration::from_secs(60)));
+
+        state.apply(
+            MonitorEvent {
+                provider: ResetProvider::Codex,
+                result: Ok(ParsedProviderResetData::default()),
+                source_warning: Some("primary failed; legacy used".to_owned()),
+            },
+            &settings,
+            2,
+        );
+        assert_eq!(state.codex.active_watch, Some(watch));
+
+        state.apply(
+            MonitorEvent {
+                provider: ResetProvider::Codex,
+                result: Ok(ParsedProviderResetData::default()),
+                source_warning: None,
+            },
+            &settings,
+            3,
+        );
+        assert!(state.codex.active_watch.is_none());
+    }
+
+    #[test]
+    fn disabled_provider_ignores_late_result() {
+        let mut state = ResetMonitorState::default();
+        let settings = ResetPlanningSettings {
+            monitor_codex: false,
+            ..ResetPlanningSettings::default()
+        };
+        state.apply(
+            MonitorEvent {
+                provider: ResetProvider::Codex,
+                result: Err("late failure".to_owned()),
+                source_warning: None,
+            },
+            &settings,
+            1,
+        );
+        assert!(state.codex.last_checked_millis.is_none());
+        assert!(state.codex.last_error.is_none());
+    }
+
+    #[test]
+    fn exact_countdown_has_seconds_and_due_waits_for_confirmation() {
+        let start = DateTime::parse_from_rfc3339("2026-09-27T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let scheduled = ScheduledReset {
+            announced_at: start,
+            scheduled_for: Some(
+                start
+                    + chrono::Duration::days(1)
+                    + chrono::Duration::hours(4)
+                    + chrono::Duration::minutes(7)
+                    + chrono::Duration::seconds(32),
+            ),
+            source_url: "https://x.com/thsottiaux/status/1".to_owned(),
+            is_banked: false,
+        };
+        assert_eq!(
+            countdown_text(
+                ResetProvider::Codex,
+                &scheduled,
+                ResetTimeStyle::Exact,
+                start
+            ),
+            "Codex reset in 1d 4h 7m 32s"
+        );
+        assert_eq!(
+            countdown_text(
+                ResetProvider::Codex,
+                &scheduled,
+                ResetTimeStyle::Exact,
+                scheduled.scheduled_for.unwrap()
+            ),
+            "Codex reset due · awaiting confirmation"
+        );
+    }
+
+    #[test]
+    fn human_countdown_says_tomorrow_for_the_next_calendar_day() {
+        let scheduled = ScheduledReset {
+            announced_at: now(),
+            scheduled_for: Some(now() + chrono::Duration::hours(10)),
+            source_url: "https://x.com/thsottiaux/status/1".to_owned(),
+            is_banked: false,
+        };
+        assert_eq!(
+            countdown_text(
+                ResetProvider::Codex,
+                &scheduled,
+                ResetTimeStyle::Human,
+                now()
+            ),
+            "Codex reset tomorrow"
+        );
+    }
+
+    #[test]
+    fn status_text_lists_each_monitored_provider_and_switches_to_the_short_form() {
+        let mut state = ResetMonitorState::default();
+        state.claude.scheduled = Some(ScheduledReset {
+            announced_at: now(),
+            scheduled_for: None,
+            source_url: String::new(),
+            is_banked: false,
+        });
+        state.codex.active_watch = Some(ActiveResetWatch {
+            expires_at: now() + chrono::Duration::days(2) + chrono::Duration::hours(8),
+        });
+        let mut settings = ResetPlanningSettings::default();
+        let text = status_text(&state, &settings, now()).unwrap();
+        assert!(
+            text.starts_with("Claude reset scheduled · time TBD  ·  "),
+            "{text}"
+        );
+        assert!(
+            text.ends_with("Possible Codex reset watch ends in 2d8h"),
+            "{text}"
+        );
+        settings.monitor_claude = false;
+        let text = status_text(&state, &settings, now()).unwrap();
+        assert!(
+            text.starts_with("Possible Codex reset watch window ends in"),
+            "{text}"
+        );
+        settings.monitor_codex = false;
+        assert_eq!(status_text(&state, &settings, now()), None);
+    }
+}

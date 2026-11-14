@@ -166,30 +166,6 @@ fn startup_failure_is_send_sync_for_typed_root_io_error_custody() {
 }
 
 #[test]
-fn selected_v8_helper_fits_declared_client_roles_and_retiring_helpers_still_compete() {
-    // Isolated ledger, real admission API: no process-global fixture pressure.
-    let quota = QuotaGroup::new(process_quota().snapshot().limits);
-    let native_roles = CPU_THREADS + IO_THREADS + SERVICE_THREADS + 27 + 3 + 1 + 6;
-    let helper_limits = ilium_animation_js::helper::HelperLimits::default();
-    let helper_roles = helper_limits.sandbox.maximum_tasks as usize + 2;
-    let native = quota.reserve_external_worker(native_roles, 0).unwrap();
-    let selected = quota
-        .reserve_external_worker(helper_roles, 0)
-        .expect("selected V8 helper must fit alongside declared native client roles");
-    assert!(matches!(
-        quota.reserve_external_worker(helper_roles, 0),
-        Err(RejectReason::WorkerLimit)
-    ));
-    assert_eq!(quota.snapshot().worker_threads, native_roles + helper_roles);
-    // An owner retained during physical retirement keeps precisely this debit.
-    drop(selected);
-    let replacement = quota.reserve_external_worker(helper_roles, 0).unwrap();
-    drop(replacement);
-    drop(native);
-    assert_eq!(quota.snapshot().worker_threads, 0);
-}
-
-#[test]
 fn panicking_bootstrap_joins_actual_bank_before_returning_typed_observer_failure() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

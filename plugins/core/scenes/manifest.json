@@ -16,7 +16,8 @@
       "media.video",
       "location.observer",
       "gpu.kernels",
-      "http:services.swpc.noaa.gov"
+      "http:services.swpc.noaa.gov",
+      "http:lichess.org"
     ]
   },
   "activation": [
@@ -3037,6 +3038,1670 @@
               "type": "boolean",
               "help": "Show this planet and its orbital path. Hidden planets do not change the scale of the remaining solar system.",
               "default": true
+            }
+          }
+        }
+      },
+      {
+        "id": "wind",
+        "title": "Wind",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "glyph_plane": true,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "dot_count": {
+              "type": "integer",
+              "order": 0,
+              "title": "Dots",
+              "help": "How many dots the wind carries. They live only in empty screen cells.",
+              "minimum": 10,
+              "maximum": 50000,
+              "step": 50,
+              "default": 2000
+            },
+            "dot_weight": {
+              "type": "integer",
+              "order": 1,
+              "title": "Dot weight",
+              "help": "Average weight. Light dots follow the wind and pushes closely; heavy dots resist both and fall faster under gravity.",
+              "minimum": 1,
+              "maximum": 100,
+              "step": 5,
+              "default": 30
+            },
+            "weight_variation": {
+              "type": "integer",
+              "order": 2,
+              "title": "Weight variation",
+              "help": "How much the weights of single dots differ. 0% makes all dots identical.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 40
+            },
+            "drag": {
+              "type": "integer",
+              "order": 3,
+              "title": "Air drag",
+              "help": "Resistance of the air. High drag stops dots quickly and lowers their top speed.",
+              "minimum": 1,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 40
+            },
+            "wind_strength": {
+              "type": "integer",
+              "order": 4,
+              "title": "Wind strength",
+              "help": "Force of the wind. 0% leaves only gravity and pushes.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 35
+            },
+            "wind_angle": {
+              "type": "integer",
+              "order": 5,
+              "title": "Wind direction",
+              "help": "Where the wind blows to: 0° right, 90° down, 180° left, 270° up. With a rotating wind this is the start direction.",
+              "minimum": 0,
+              "maximum": 359,
+              "step": 15,
+              "unit": "°",
+              "default": 0
+            },
+            "wind_mode": {
+              "type": "string",
+              "order": 6,
+              "title": "Wind mode",
+              "help": "Fixed keeps one direction; Rotating turns the wind steadily around.",
+              "enum": [
+                "fixed",
+                "rotating"
+              ],
+              "enum_titles": [
+                "Fixed",
+                "Rotating"
+              ],
+              "default": "fixed"
+            },
+            "rotation_speed": {
+              "type": "integer",
+              "order": 7,
+              "title": "Rotation speed",
+              "help": "Degrees per second the wind turns. Positive turns clockwise on screen, negative counter-clockwise.",
+              "minimum": -90,
+              "maximum": 90,
+              "step": 5,
+              "unit": "°/s",
+              "default": 12
+            },
+            "gusts": {
+              "type": "integer",
+              "order": 8,
+              "title": "Gusts",
+              "help": "How much the wind strength and direction vary from place to place and over time.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 30
+            },
+            "gravity_enabled": {
+              "type": "boolean",
+              "order": 9,
+              "title": "Gravity",
+              "help": "Pull every dot toward the bottom of the screen. Heavy dots fall faster than light ones.",
+              "default": false
+            },
+            "gravity_strength": {
+              "type": "integer",
+              "order": 10,
+              "title": "Gravity strength",
+              "help": "How strongly gravity pulls.",
+              "minimum": 1,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 30
+            },
+            "bounce": {
+              "type": "integer",
+              "order": 11,
+              "title": "Bounce",
+              "help": "Speed a dot keeps when it hits text or a wall. 0% makes dots stick and slide.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 30
+            },
+            "edge_mode": {
+              "type": "string",
+              "order": 12,
+              "title": "Screen edges",
+              "help": "Dots wrap to the opposite side, or bounce off the screen edge.",
+              "enum": [
+                "wrap",
+                "bounce"
+              ],
+              "enum_titles": [
+                "Wrap around",
+                "Bounce"
+              ],
+              "default": "wrap"
+            },
+            "scroll_push": {
+              "type": "integer",
+              "order": 13,
+              "title": "Scroll push",
+              "help": "Speed given to dots by text that scrolls into their cell, in the direction it moves. 0% ignores scrolling.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 60
+            },
+            "appear_push": {
+              "type": "integer",
+              "order": 14,
+              "title": "Appear push",
+              "help": "Speed given to dots by text that appears from nowhere, such as typing. Usually gentler than scrolling.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 20
+            },
+            "push_reach": {
+              "type": "integer",
+              "order": 15,
+              "title": "Push reach",
+              "help": "How many cells away from changing text a dot is still pushed. 0 pushes only dots the text lands on.",
+              "minimum": 0,
+              "maximum": 4,
+              "step": 1,
+              "unit": " cells",
+              "default": 1
+            },
+            "scroll_range": {
+              "type": "integer",
+              "order": 16,
+              "title": "Scroll detection",
+              "help": "Largest jump in cells that still counts as scrolling. Larger values follow fast scrolling but may misread new text.",
+              "minimum": 1,
+              "maximum": 8,
+              "step": 1,
+              "unit": " cells",
+              "default": 3
+            },
+            "diffusion": {
+              "type": "integer",
+              "order": 17,
+              "title": "Diffusion",
+              "help": "Nearby dots push each other apart, which keeps them from bunching up. 0% lets dots pile together freely.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 0
+            },
+            "dispersion": {
+              "type": "integer",
+              "order": 18,
+              "title": "Dispersion",
+              "help": "Every so often a random dot jumps to a random empty place on the screen. Higher values do it more often. 0% never does.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 0
+            },
+            "mouse_force": {
+              "type": "boolean",
+              "order": 19,
+              "title": "Mouse force",
+              "help": "The mouse pushes nearby dots away. Move the pointer to move particles; turn off to ignore it.",
+              "default": true
+            },
+            "merge_dots": {
+              "type": "boolean",
+              "order": 20,
+              "title": "Merge dots",
+              "help": "Dots piled into one cell become a larger dot character; twice as many become a larger one still.",
+              "default": false
+            },
+            "merge_threshold": {
+              "type": "integer",
+              "order": 21,
+              "title": "Merge at",
+              "help": "How many dots in one cell make the larger dot.",
+              "minimum": 2,
+              "maximum": 12,
+              "step": 1,
+              "unit": " dots",
+              "default": 3
+            },
+            "seed": {
+              "type": "integer",
+              "order": 22,
+              "title": "Random seed",
+              "help": "Selects the starting positions and weights of the dots.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 1
+            },
+            "frame_rate": {
+              "type": "integer",
+              "order": 23,
+              "title": "Frame rate",
+              "help": "Redraws per second. Higher is smoother and uses more processor time.",
+              "minimum": 5,
+              "maximum": 30,
+              "step": 1,
+              "unit": " fps",
+              "default": 20
+            }
+          }
+        }
+      },
+      {
+        "id": "carpet",
+        "title": "Carpet",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "carpet_mode": {
+              "type": "string",
+              "order": 1,
+              "title": "Simulation",
+              "help": "Choose one of nine hidden-object simulations.",
+              "enum": [
+                "mouse-hunters",
+                "autonomous-snake",
+                "slow-life",
+                "automated-chess",
+                "lichess-tv-chess",
+                "dvd-ball",
+                "planetary-orbits",
+                "digital-clock",
+                "analog-clock"
+              ],
+              "enum_titles": [
+                "Mouse hunters",
+                "Autonomous Snake",
+                "Slow Life",
+                "Automated chess",
+                "Lichess TV chess",
+                "DVD ball",
+                "Planetary orbits",
+                "Digital clock",
+                "Analog clock"
+              ],
+              "default": "autonomous-snake"
+            },
+            "carpet_yaw": {
+              "type": "integer",
+              "order": 2,
+              "title": "Camera yaw",
+              "help": "Rotate the ground plane without rotating hidden model coordinates.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 5,
+              "unit": "°",
+              "default": 45
+            },
+            "carpet_pitch": {
+              "type": "integer",
+              "order": 3,
+              "title": "Camera pitch",
+              "help": "Ground elevation angle; 30 degrees gives an isometric view.",
+              "minimum": 15,
+              "maximum": 75,
+              "step": 5,
+              "unit": "°",
+              "default": 30
+            },
+            "carpet_zoom": {
+              "type": "integer",
+              "order": 4,
+              "title": "Ground zoom",
+              "help": "Scale the projected carpet.",
+              "minimum": 30,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 145
+            },
+            "carpet_hatch_direction": {
+              "type": "integer",
+              "order": 5,
+              "title": "Hatch direction",
+              "help": "All lines share this direction in the ground plane.",
+              "minimum": 0,
+              "maximum": 180,
+              "step": 5,
+              "unit": "°",
+              "default": 90
+            },
+            "carpet_infinite_lines": {
+              "type": "boolean",
+              "order": 6,
+              "title": "Infinite lines",
+              "help": "Continue flat hatch lines to the viewport edges beyond the ground.",
+              "default": true
+            },
+            "carpet_spacing": {
+              "type": "integer",
+              "order": 7,
+              "title": "Hatch spacing",
+              "help": "Distance between parallel hatch lines measured in Braille dots.",
+              "minimum": 2,
+              "maximum": 24,
+              "step": 1,
+              "unit": " dots",
+              "default": 2
+            },
+            "carpet_line_width": {
+              "type": "integer",
+              "order": 8,
+              "title": "Line width",
+              "help": "Thickness of one hatch line relative to one Braille dot.",
+              "minimum": 20,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 90
+            },
+            "carpet_height": {
+              "type": "integer",
+              "order": 9,
+              "title": "Lift height",
+              "help": "Scale every hidden object height.",
+              "minimum": 5,
+              "maximum": 250,
+              "step": 5,
+              "unit": "%",
+              "default": 25
+            },
+            "carpet_radius": {
+              "type": "integer",
+              "order": 10,
+              "title": "Object radius",
+              "help": "Radius in thousandths of the normalized ground width.",
+              "minimum": 5,
+              "maximum": 120,
+              "step": 5,
+              "unit": "‰",
+              "default": 55
+            },
+            "carpet_softness": {
+              "type": "integer",
+              "order": 11,
+              "title": "Bend softness",
+              "help": "Shape the rounded lift around spheres and tubes without changing their support radius.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 50
+            },
+            "carpet_easing_ms": {
+              "type": "integer",
+              "order": 12,
+              "title": "Motion easing",
+              "help": "Smooth transition duration; limited to one game step, generation or clock tick so each change can settle.",
+              "minimum": 0,
+              "maximum": 3000,
+              "step": 50,
+              "unit": " ms",
+              "default": 200
+            },
+            "carpet_fps": {
+              "type": "integer",
+              "order": 13,
+              "title": "Frame rate",
+              "help": "Maximum Carpet redraw cadence; lower values reduce rendering work.",
+              "minimum": 1,
+              "maximum": 30,
+              "step": 1,
+              "unit": " fps",
+              "default": 20
+            },
+            "carpet_simulation_speed": {
+              "type": "integer",
+              "order": 14,
+              "title": "Simulation speed",
+              "help": "Scale games and motion; civil clocks always display live time.",
+              "minimum": 5,
+              "maximum": 500,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "carpet_seed": {
+              "type": "integer",
+              "order": 15,
+              "title": "Seed",
+              "help": "Reproducible simulation seed. A change starts a new simulation.",
+              "minimum": 0,
+              "maximum": 999999,
+              "step": 1,
+              "default": 17
+            },
+            "carpet_hunters_count": {
+              "type": "integer",
+              "order": 16,
+              "title": "Hunters",
+              "help": "Number of mouse-following hunters.",
+              "minimum": 1,
+              "maximum": 64,
+              "step": 1,
+              "default": 6,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "mouse-hunters"
+                ]
+              }
+            },
+            "carpet_hunters_speed": {
+              "type": "integer",
+              "order": 17,
+              "title": "Hunter speed",
+              "help": "Ground width travelled each second.",
+              "minimum": 1,
+              "maximum": 100,
+              "step": 1,
+              "unit": "%/s",
+              "default": 20,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "mouse-hunters"
+                ]
+              }
+            },
+            "carpet_hunters_separation": {
+              "type": "integer",
+              "order": 18,
+              "title": "Separation",
+              "help": "Minimum flock separation influence.",
+              "minimum": 10,
+              "maximum": 200,
+              "step": 5,
+              "unit": "‰",
+              "default": 50,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "mouse-hunters"
+                ]
+              }
+            },
+            "carpet_snake_grid": {
+              "type": "integer",
+              "order": 19,
+              "title": "Snake grid",
+              "help": "Even-sized safe Hamiltonian board.",
+              "minimum": 4,
+              "maximum": 32,
+              "step": 2,
+              "unit": " cells",
+              "default": 12,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "autonomous-snake"
+                ]
+              }
+            },
+            "carpet_snake_step_ms": {
+              "type": "integer",
+              "order": 20,
+              "title": "Snake move",
+              "help": "Interval between moves.",
+              "minimum": 40,
+              "maximum": 3000,
+              "step": 10,
+              "unit": " ms",
+              "default": 200,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "autonomous-snake"
+                ]
+              }
+            },
+            "carpet_snake_initial_length": {
+              "type": "integer",
+              "order": 21,
+              "title": "Initial length",
+              "help": "Snake length at the beginning of each game.",
+              "minimum": 2,
+              "maximum": 32,
+              "step": 1,
+              "default": 4,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "autonomous-snake"
+                ]
+              }
+            },
+            "carpet_snake_food_count": {
+              "type": "integer",
+              "order": 22,
+              "title": "Food count",
+              "help": "Maximum simultaneous food targets.",
+              "minimum": 1,
+              "maximum": 16,
+              "step": 1,
+              "default": 3,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "autonomous-snake"
+                ]
+              }
+            },
+            "carpet_life_grid": {
+              "type": "integer",
+              "order": 23,
+              "title": "Life grid",
+              "help": "Square Conway Life board.",
+              "minimum": 4,
+              "maximum": 32,
+              "step": 1,
+              "unit": " cells",
+              "default": 24,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "slow-life"
+                ]
+              }
+            },
+            "carpet_life_generation_ms": {
+              "type": "integer",
+              "order": 24,
+              "title": "Life generation",
+              "help": "Slow default generation interval; easing interpolates births and deaths.",
+              "minimum": 100,
+              "maximum": 10000,
+              "step": 100,
+              "unit": " ms",
+              "default": 1500,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "slow-life"
+                ]
+              }
+            },
+            "carpet_life_density": {
+              "type": "integer",
+              "order": 25,
+              "title": "Life population",
+              "help": "Initial seeded live-cell density.",
+              "minimum": 1,
+              "maximum": 90,
+              "step": 1,
+              "unit": "%",
+              "default": 25,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "slow-life"
+                ]
+              }
+            },
+            "carpet_dvd_speed": {
+              "type": "integer",
+              "order": 26,
+              "title": "Ball speed",
+              "help": "Bouncing ball ground speed.",
+              "minimum": 1,
+              "maximum": 100,
+              "step": 1,
+              "unit": "%/s",
+              "default": 15,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "dvd-ball"
+                ]
+              }
+            },
+            "carpet_orbit_speed": {
+              "type": "integer",
+              "order": 27,
+              "title": "Orbit speed",
+              "help": "Stylized planetary motion rate; not an astronomical ephemeris.",
+              "minimum": 1,
+              "maximum": 500,
+              "step": 5,
+              "unit": "%",
+              "default": 100,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "planetary-orbits"
+                ]
+              }
+            },
+            "carpet_orbit_scale": {
+              "type": "integer",
+              "order": 28,
+              "title": "Orbit scale",
+              "help": "Scale the planetary system within the ground.",
+              "minimum": 20,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 100,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "planetary-orbits"
+                ]
+              }
+            },
+            "carpet_utc_offset_minutes": {
+              "type": "integer",
+              "order": 29,
+              "title": "UTC offset",
+              "help": "Civil clock offset from UTC; default explicitly displays UTC.",
+              "minimum": -720,
+              "maximum": 840,
+              "step": 15,
+              "unit": " min",
+              "default": 0,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "digital-clock",
+                  "analog-clock"
+                ]
+              }
+            },
+            "carpet_chess_ai_depth": {
+              "type": "integer",
+              "order": 30,
+              "title": "AI depth",
+              "help": "Bounded lookahead for automated legal chess moves.",
+              "minimum": 1,
+              "maximum": 3,
+              "step": 1,
+              "unit": " plies",
+              "default": 2,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess"
+                ]
+              }
+            },
+            "carpet_chess_node_budget": {
+              "type": "integer",
+              "order": 31,
+              "title": "AI budget",
+              "help": "Hard search-work ceiling for every autonomous move.",
+              "minimum": 100,
+              "maximum": 5000,
+              "step": 100,
+              "unit": " nodes",
+              "default": 1500,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess"
+                ]
+              }
+            },
+            "carpet_chess_restart_ms": {
+              "type": "integer",
+              "order": 32,
+              "title": "New game delay",
+              "help": "Hold finished games before starting another.",
+              "minimum": 500,
+              "maximum": 15000,
+              "step": 500,
+              "unit": " ms",
+              "default": 3000,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess"
+                ]
+              }
+            },
+            "carpet_chess_max_plies": {
+              "type": "integer",
+              "order": 33,
+              "title": "Game move limit",
+              "help": "Maximum game length before a new seeded game begins.",
+              "minimum": 40,
+              "maximum": 600,
+              "step": 10,
+              "unit": " plies",
+              "default": 300,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess"
+                ]
+              }
+            },
+            "carpet_chess_move_ms": {
+              "type": "integer",
+              "order": 34,
+              "title": "Chess move",
+              "help": "Autonomous move interval.",
+              "minimum": 200,
+              "maximum": 10000,
+              "step": 100,
+              "unit": " ms",
+              "default": 1500,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess"
+                ]
+              }
+            },
+            "carpet_chess_easing_ms": {
+              "type": "integer",
+              "order": 35,
+              "title": "Piece easing",
+              "help": "Duration of eased chess movements and capture fades.",
+              "minimum": 0,
+              "maximum": 3000,
+              "step": 50,
+              "unit": " ms",
+              "default": 650,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess",
+                  "lichess-tv-chess"
+                ]
+              }
+            },
+            "carpet_pawn_height": {
+              "type": "integer",
+              "order": 36,
+              "title": "Pawn height",
+              "help": "Lift for pawn pieces relative to base height.",
+              "minimum": 5,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 45,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess",
+                  "lichess-tv-chess"
+                ]
+              }
+            },
+            "carpet_knight_height": {
+              "type": "integer",
+              "order": 37,
+              "title": "Knight height",
+              "help": "Lift for knight pieces relative to base height.",
+              "minimum": 5,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 75,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess",
+                  "lichess-tv-chess"
+                ]
+              }
+            },
+            "carpet_bishop_height": {
+              "type": "integer",
+              "order": 38,
+              "title": "Bishop height",
+              "help": "Lift for bishop pieces relative to base height.",
+              "minimum": 5,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 85,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess",
+                  "lichess-tv-chess"
+                ]
+              }
+            },
+            "carpet_rook_height": {
+              "type": "integer",
+              "order": 39,
+              "title": "Rook height",
+              "help": "Lift for rook pieces relative to base height.",
+              "minimum": 5,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 65,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess",
+                  "lichess-tv-chess"
+                ]
+              }
+            },
+            "carpet_queen_height": {
+              "type": "integer",
+              "order": 40,
+              "title": "Queen height",
+              "help": "Lift for queen pieces relative to base height.",
+              "minimum": 5,
+              "maximum": 250,
+              "step": 5,
+              "unit": "%",
+              "default": 115,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess",
+                  "lichess-tv-chess"
+                ]
+              }
+            },
+            "carpet_king_height": {
+              "type": "integer",
+              "order": 41,
+              "title": "King height",
+              "help": "Lift for king pieces relative to base height.",
+              "minimum": 5,
+              "maximum": 250,
+              "step": 5,
+              "unit": "%",
+              "default": 130,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "automated-chess",
+                  "lichess-tv-chess"
+                ]
+              }
+            },
+            "carpet_life_wrap": {
+              "type": "boolean",
+              "order": 42,
+              "title": "Life wrap",
+              "help": "Join opposite Life board edges.",
+              "default": true,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "slow-life"
+                ]
+              }
+            },
+            "carpet_clock_seconds": {
+              "type": "boolean",
+              "order": 43,
+              "title": "Clock seconds",
+              "help": "Include seconds in both civil clocks.",
+              "default": true,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "digital-clock",
+                  "analog-clock"
+                ]
+              }
+            },
+            "carpet_clock_24h": {
+              "type": "boolean",
+              "order": 44,
+              "title": "24-hour clock",
+              "help": "Use 24-hour digital numbers.",
+              "default": true,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "digital-clock"
+                ]
+              }
+            },
+            "carpet_clock_tubes": {
+              "type": "boolean",
+              "order": 45,
+              "title": "Clock hands",
+              "help": "Draw analog hands as hidden tubes between the center and live points.",
+              "default": false,
+              "visible_when": {
+                "key": "carpet_mode",
+                "in": [
+                  "analog-clock"
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "live-chess",
+        "title": "Live chess",
+        "family": "strategy",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 4,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "black_at_bottom": {
+              "type": "boolean",
+              "order": 1,
+              "title": "Black at bottom",
+              "help": "Rotate the board by 180 degrees. Pieces remain upright.",
+              "default": false
+            },
+            "brightness_percent": {
+              "type": "integer",
+              "order": 2,
+              "title": "Chess brightness",
+              "help": "Intensity before Braille dithering; zero hides the board and pieces.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "white_red": {
+              "type": "integer",
+              "order": 3,
+              "title": "White red",
+              "help": "Independent RGB channel; changing color preserves dot density.",
+              "minimum": 0,
+              "maximum": 255,
+              "step": 5,
+              "default": 235
+            },
+            "white_green": {
+              "type": "integer",
+              "order": 4,
+              "title": "White green",
+              "help": "Independent RGB channel; changing color preserves dot density.",
+              "minimum": 0,
+              "maximum": 255,
+              "step": 5,
+              "default": 222
+            },
+            "white_blue": {
+              "type": "integer",
+              "order": 5,
+              "title": "White blue",
+              "help": "Independent RGB channel; changing color preserves dot density.",
+              "minimum": 0,
+              "maximum": 255,
+              "step": 5,
+              "default": 184
+            },
+            "black_red": {
+              "type": "integer",
+              "order": 6,
+              "title": "Black red",
+              "help": "Independent RGB channel; changing color preserves dot density.",
+              "minimum": 0,
+              "maximum": 255,
+              "step": 5,
+              "default": 100
+            },
+            "black_green": {
+              "type": "integer",
+              "order": 7,
+              "title": "Black green",
+              "help": "Independent RGB channel; changing color preserves dot density.",
+              "minimum": 0,
+              "maximum": 255,
+              "step": 5,
+              "default": 164
+            },
+            "black_blue": {
+              "type": "integer",
+              "order": 8,
+              "title": "Black blue",
+              "help": "Independent RGB channel; changing color preserves dot density.",
+              "minimum": 0,
+              "maximum": 255,
+              "step": 5,
+              "default": 205
+            },
+            "board_red": {
+              "type": "integer",
+              "order": 9,
+              "title": "Board red",
+              "help": "Independent RGB channel; changing color preserves dot density.",
+              "minimum": 0,
+              "maximum": 255,
+              "step": 5,
+              "default": 80
+            },
+            "board_green": {
+              "type": "integer",
+              "order": 10,
+              "title": "Board green",
+              "help": "Independent RGB channel; changing color preserves dot density.",
+              "minimum": 0,
+              "maximum": 255,
+              "step": 5,
+              "default": 95
+            },
+            "board_blue": {
+              "type": "integer",
+              "order": 11,
+              "title": "Board blue",
+              "help": "Independent RGB channel; changing color preserves dot density.",
+              "minimum": 0,
+              "maximum": 255,
+              "step": 5,
+              "default": 105
+            }
+          }
+        }
+      },
+      {
+        "id": "frost",
+        "title": "Frost",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "order": 0,
+              "title": "Growth source",
+              "type": "string",
+              "help": "Start at the outer frame or beside visible text, without reading its content.",
+              "enum": [
+                "frame-edges",
+                "foreground-characters"
+              ],
+              "enum_titles": [
+                "Frame edges",
+                "Foreground characters"
+              ],
+              "default": "frame-edges"
+            },
+            "reach": {
+              "order": 1,
+              "title": "Reach",
+              "type": "integer",
+              "help": "Maximum distance a crystalline branch travels from its source.",
+              "minimum": 2,
+              "maximum": 20,
+              "step": 1,
+              "unit": " cells",
+              "default": 9
+            },
+            "branching": {
+              "order": 2,
+              "title": "Branching",
+              "type": "integer",
+              "help": "Small side twigs along each cached main branch.",
+              "minimum": 0,
+              "maximum": 3,
+              "step": 1,
+              "default": 2
+            },
+            "growth_seconds": {
+              "order": 3,
+              "title": "Growth time",
+              "type": "integer",
+              "help": "Grow, hold briefly, retreat, then begin again.",
+              "minimum": 3,
+              "maximum": 30,
+              "step": 1,
+              "unit": " s",
+              "default": 10
+            },
+            "seed": {
+              "order": 4,
+              "title": "Seed",
+              "type": "integer",
+              "help": "Repeatable branch placement and crystalline bends.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 1
+            }
+          }
+        }
+      },
+      {
+        "id": "embroidery",
+        "title": "Embroidery orbit",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "petals": {
+              "order": 0,
+              "title": "Rose parameter",
+              "type": "integer",
+              "help": "Integer frequency of the Maurer rose.",
+              "minimum": 2,
+              "maximum": 12,
+              "step": 1,
+              "default": 6
+            },
+            "step_degrees": {
+              "order": 1,
+              "title": "Stitch angle",
+              "type": "integer",
+              "help": "Angular step between consecutive chords.",
+              "minimum": 1,
+              "maximum": 179,
+              "step": 1,
+              "default": 71
+            },
+            "stitches": {
+              "order": 2,
+              "title": "Stitch count",
+              "type": "integer",
+              "help": "Maximum cached chords in the embroidery.",
+              "minimum": 60,
+              "maximum": 720,
+              "step": 1,
+              "default": 360
+            },
+            "cycle_seconds": {
+              "order": 3,
+              "title": "Drawing cycle",
+              "type": "integer",
+              "help": "Seconds for drawing, resting and fading.",
+              "minimum": 12,
+              "maximum": 120,
+              "step": 1,
+              "default": 45
+            }
+          }
+        }
+      },
+      {
+        "id": "hesitating-ink",
+        "title": "Ink that hesitates",
+        "family": "quiet",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "loops": {
+              "order": 0,
+              "title": "Curl count",
+              "type": "integer",
+              "help": "Number of curls in the bounded wandering stroke.",
+              "minimum": 2,
+              "maximum": 12,
+              "step": 1,
+              "default": 5
+            },
+            "cycle_seconds": {
+              "order": 1,
+              "title": "Drawing cycle",
+              "type": "integer",
+              "help": "Time for drawing, hesitating, resting and fading.",
+              "minimum": 12,
+              "maximum": 120,
+              "step": 1,
+              "default": 40
+            },
+            "hesitation": {
+              "order": 2,
+              "title": "Pause strength",
+              "type": "integer",
+              "help": "Time held still within each curl. Zero draws continuously.",
+              "minimum": 0,
+              "maximum": 85,
+              "step": 1,
+              "default": 55
+            },
+            "seed": {
+              "order": 3,
+              "title": "Path seed",
+              "type": "integer",
+              "help": "Stable seed changes the curl phases and amplitudes.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 7
+            }
+          }
+        }
+      },
+      {
+        "id": "growth",
+        "title": "Growth",
+        "family": "procedural",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 30,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "order": 0,
+              "title": "Growth pattern",
+              "type": "string",
+              "help": "Morphology of the colony",
+              "enum": [
+                "branching-hyphae",
+                "concentric-rings",
+                "veined-mat",
+                "fast-carpet"
+              ],
+              "enum_titles": [
+                "Branching hyphae",
+                "Concentric rings",
+                "Veined mat",
+                "Fast carpet"
+              ],
+              "default": "branching-hyphae"
+            },
+            "color_mode": {
+              "order": 1,
+              "title": "Color mode",
+              "type": "string",
+              "help": "Use one tone or palette-derived cell colors",
+              "enum": [
+                "monochrome",
+                "palette-hues"
+              ],
+              "enum_titles": [
+                "Monochrome",
+                "Palette hues"
+              ],
+              "default": "monochrome"
+            },
+            "density": {
+              "order": 2,
+              "title": "Density",
+              "type": "integer",
+              "help": "How much of the field the colony fills before it thins out.",
+              "minimum": 1,
+              "maximum": 100,
+              "step": 1,
+              "unit": "%",
+              "default": 55
+            },
+            "growth_rate": {
+              "order": 3,
+              "title": "Growth rate",
+              "type": "integer",
+              "help": "How fast the colony spreads.",
+              "minimum": 1,
+              "maximum": 100,
+              "step": 1,
+              "unit": "%",
+              "default": 45
+            },
+            "branch_angle": {
+              "order": 4,
+              "title": "Branch variation",
+              "type": "integer",
+              "help": "How far each branch may bend away from its parent.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "unit": "%",
+              "default": 35
+            },
+            "seeds": {
+              "order": 5,
+              "title": "Initial seeds",
+              "type": "integer",
+              "help": "Number of points the colony grows from at the start and after each reseed.",
+              "minimum": 1,
+              "maximum": 32,
+              "step": 1,
+              "default": 5
+            },
+            "reseed_seconds": {
+              "order": 6,
+              "title": "Reseed interval",
+              "type": "integer",
+              "help": "Seconds between new seeds.",
+              "minimum": 1,
+              "maximum": 3600,
+              "step": 1,
+              "unit": " s",
+              "default": 60
+            },
+            "reserve_edge": {
+              "order": 7,
+              "title": "Reserve edge",
+              "type": "boolean",
+              "help": "Keep an outside rim as a permanent source",
+              "default": true
+            },
+            "reserve_width": {
+              "order": 8,
+              "title": "Reserve width",
+              "type": "integer",
+              "help": "Width of the permanent outside rim, in cells.",
+              "minimum": 0,
+              "maximum": 8,
+              "step": 1,
+              "unit": " cells",
+              "default": 1
+            },
+            "mouse_erase": {
+              "order": 9,
+              "title": "Mouse erases",
+              "type": "boolean",
+              "help": "The pointer clears nearby fungus",
+              "default": true
+            },
+            "mouse_radius": {
+              "order": 10,
+              "title": "Mouse radius",
+              "type": "integer",
+              "help": "How far around the pointer the colony is cleared, in cells.",
+              "minimum": 0,
+              "maximum": 12,
+              "step": 1,
+              "unit": " cells",
+              "default": 3
+            },
+            "appear_erase": {
+              "order": 11,
+              "title": "Appear erase",
+              "type": "integer",
+              "help": "How much of the colony is cleared where new text appears.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "unit": "%",
+              "default": 100
+            },
+            "scroll_erase": {
+              "order": 12,
+              "title": "Scroll erase",
+              "type": "integer",
+              "help": "How much of the colony is cleared when the screen scrolls.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "unit": "%",
+              "default": 50
+            },
+            "scroll_push": {
+              "order": 13,
+              "title": "Scroll push",
+              "type": "integer",
+              "help": "How much of the colony is pushed along when the screen scrolls.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 1,
+              "unit": "%",
+              "default": 55
+            },
+            "seed": {
+              "order": 14,
+              "title": "Random seed",
+              "type": "integer",
+              "help": "Selects repeatable seed positions.",
+              "minimum": 0,
+              "maximum": 9999,
+              "step": 1,
+              "default": 7
+            },
+            "frame_rate": {
+              "order": 15,
+              "title": "Frame rate",
+              "type": "integer",
+              "help": "Frames drawn per second.",
+              "minimum": 5,
+              "maximum": 30,
+              "step": 1,
+              "unit": " fps",
+              "default": 20
+            }
+          }
+        }
+      },
+      {
+        "id": "vector-td",
+        "title": "Vector TD",
+        "family": "strategy",
+        "modes": [
+          "live"
+        ],
+        "frame_rate_cap": 20,
+        "settings_schema": {
+          "type": "object",
+          "properties": {
+            "map": {
+              "order": 0,
+              "title": "Map",
+              "type": "string",
+              "help": "Play every map in turn, moving on after each cleared level, or stay on one map. Changing it restarts the game.",
+              "enum": [
+                "all-in-turn",
+                "switchback",
+                "spiral",
+                "comb",
+                "twin-gates",
+                "staircase",
+                "serpent"
+              ],
+              "enum_titles": [
+                "All in turn",
+                "Switchback",
+                "Spiral",
+                "Comb",
+                "Twin gates",
+                "Staircase",
+                "Serpent"
+              ],
+              "default": "all-in-turn"
+            },
+            "start_level": {
+              "order": 1,
+              "title": "Start level",
+              "type": "integer",
+              "help": "Later levels start with more money, stronger monsters and more tower types unlocked. Changing it restarts the game.",
+              "minimum": 1,
+              "maximum": 12,
+              "step": 1,
+              "default": 1
+            },
+            "waves": {
+              "order": 2,
+              "title": "Waves per level",
+              "type": "integer",
+              "help": "Waves to survive before a level is cleared; every tenth wave brings a boss.",
+              "minimum": 5,
+              "maximum": 40,
+              "step": 1,
+              "default": 20
+            },
+            "difficulty": {
+              "order": 3,
+              "title": "Difficulty",
+              "type": "string",
+              "help": "Monster health. On Hard the AI sometimes loses a level and retries it with stronger towers.",
+              "enum": [
+                "easy",
+                "normal",
+                "hard"
+              ],
+              "enum_titles": [
+                "Easy",
+                "Normal",
+                "Hard"
+              ],
+              "default": "normal"
+            },
+            "game_speed": {
+              "order": 4,
+              "title": "Game speed",
+              "type": "integer",
+              "help": "How fast the game plays, on top of the global Speed setting.",
+              "minimum": 25,
+              "maximum": 400,
+              "step": 25,
+              "unit": "%",
+              "default": 100
+            },
+            "palette": {
+              "order": 5,
+              "title": "Colours",
+              "type": "string",
+              "help": "Black and white uses only the global palette; Colour gives every tower, monster and shot its own colour.",
+              "enum": [
+                "black-and-white",
+                "colour"
+              ],
+              "enum_titles": [
+                "Black and white",
+                "Colour"
+              ],
+              "default": "colour"
+            },
+            "scheme": {
+              "order": 6,
+              "title": "Colour scheme",
+              "type": "string",
+              "help": "The base colours. The sliders below adjust them further.",
+              "enum": [
+                "neon",
+                "cool",
+                "warm",
+                "phosphor"
+              ],
+              "enum_titles": [
+                "Neon",
+                "Cool",
+                "Warm",
+                "Phosphor"
+              ],
+              "default": "neon"
+            },
+            "brightness": {
+              "order": 7,
+              "title": "Brightness",
+              "type": "integer",
+              "help": "How bright the lines and fills are. Lower values thin the dots out.",
+              "minimum": 20,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "contrast": {
+              "order": 8,
+              "title": "Contrast",
+              "type": "integer",
+              "help": "Spreads the difference between dim and bright parts, such as grid against towers.",
+              "minimum": 50,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "hue": {
+              "order": 9,
+              "title": "Hue",
+              "type": "integer",
+              "help": "Rotates every colour around the colour wheel.",
+              "minimum": 0,
+              "maximum": 360,
+              "step": 10,
+              "unit": "deg",
+              "default": 0
+            },
+            "saturation": {
+              "order": 10,
+              "title": "Saturation",
+              "type": "integer",
+              "help": "0 is grey, 100 the scheme as designed, 200 as vivid as possible.",
+              "minimum": 0,
+              "maximum": 200,
+              "step": 5,
+              "unit": "%",
+              "default": 100
+            },
+            "glow": {
+              "order": 11,
+              "title": "Glow",
+              "type": "integer",
+              "help": "How strongly towers, monsters and the path are filled rather than only outlined.",
+              "minimum": 0,
+              "maximum": 100,
+              "step": 5,
+              "unit": "%",
+              "default": 45
+            },
+            "grid": {
+              "order": 12,
+              "title": "Grid",
+              "type": "boolean",
+              "help": "Draw the faint cell grid of the board.",
+              "default": true
+            },
+            "range_rings": {
+              "order": 13,
+              "title": "Range rings",
+              "type": "boolean",
+              "help": "Always show the firing range of every tower, not only when it is built or upgraded.",
+              "default": false
+            },
+            "hud": {
+              "order": 14,
+              "title": "Status line",
+              "type": "boolean",
+              "help": "Show level, wave, money and lives along the top.",
+              "default": true
+            },
+            "seed": {
+              "order": 15,
+              "title": "Seed",
+              "type": "integer",
+              "help": "Seeds the random details of the game. Changing it restarts the game.",
+              "minimum": 0,
+              "maximum": 999,
+              "step": 1,
+              "default": 0
             }
           }
         }

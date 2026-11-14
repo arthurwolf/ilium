@@ -32,6 +32,29 @@
     ]
   },
   "contributes": {
+    "context_menu": [
+      {
+        "id": "schedule-input",
+        "title": "Hit key(s) X time from now",
+        "target": "tree-node",
+        "command": "schedule-input",
+        "when": "pane.kind == \"terminal\""
+      },
+      {
+        "id": "queue-prompt",
+        "title": "Queue prompt...",
+        "target": "tree-node",
+        "command": "queue-prompt",
+        "when": "pane.kind == \"terminal\""
+      },
+      {
+        "id": "clear-prompt-queue",
+        "title": "Clear prompt queue",
+        "target": "tree-node",
+        "command": "clear-prompt-queue",
+        "when": "pane.kind == \"terminal\""
+      }
+    ],
     "extension_points": [
       {
         "id": "schedule-sources",

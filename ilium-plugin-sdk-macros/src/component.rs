@@ -347,6 +347,26 @@ fn scene_body(
                     field.clear();
                 }
                 let mut program = self.program.borrow_mut();
+                field.pointer = if <__IliumPlugin as #krate::SceneProgram>::wants_pointer(&*program) {
+                    surface.pointer().map(|pointer| #krate::plugin::FieldPointer {
+                        column: pointer.column,
+                        row: pointer.row,
+                        sub_x: pointer.sub_x,
+                        sub_y: pointer.sub_y,
+                        pressed: pointer.pressed,
+                    })
+                } else {
+                    ::core::option::Option::None
+                };
+                field.occupancy = if <__IliumPlugin as #krate::SceneProgram>::wants_occupancy(&*program) {
+                    surface.occupancy().map(|grid| #krate::plugin::FieldOccupancy {
+                        columns: grid.columns,
+                        rows: grid.rows,
+                        cells: grid.cells,
+                    })
+                } else {
+                    ::core::option::Option::None
+                };
                 <__IliumPlugin as #krate::SceneProgram>::render(&mut *program, &frame, &mut *field);
                 if !field.pixels.is_empty() {
                     let _ = surface.write_rows(

@@ -17,24 +17,118 @@
   "capabilities": {
     "server": [
       "terminal.output-filter",
-      "terminal.write"
+      "terminal.write",
+      "settings.write-kernel:text-triggers",
+      "extensions.provide:ilium.core.text-triggers/rule-packs",
+      "extensions.provide:ilium.core.text-triggers/before-fire",
+      "terminal.read-screen",
+      "terminal.read-cells",
+      "tree.read"
     ],
     "client": [
-      "ui.panels",
-      "settings.write-kernel:text-triggers"
+      "ui.panels"
     ]
   },
-  "activation": [
-    "startup",
-    "view:ilium.core.text-triggers/rules"
-  ],
-  "limits_tier": "first-party",
   "contributes": {
+    "extension_points": [
+      {
+        "id": "rule-packs",
+        "kind": "collect",
+        "title": "Rule packs",
+        "entry_schema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string"
+                  },
+                  "reply": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "pattern",
+                  "reply",
+                  "enabled"
+                ]
+              }
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "rules"
+          ]
+        },
+        "risk": "high",
+        "max_entries": 64,
+        "dynamic": false,
+        "version": "0.1.0"
+      },
+      {
+        "id": "before-fire",
+        "kind": "hook",
+        "mode": "veto",
+        "title": "Before a rule fires",
+        "payload_schema": {
+          "type": "object",
+          "properties": {
+            "rule": {
+              "type": "string"
+            },
+            "pane": {
+              "type": "string"
+            },
+            "match": {
+              "type": "string"
+            },
+            "reply_length": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "rule",
+            "pane",
+            "match",
+            "reply_length"
+          ]
+        },
+        "risk": "high",
+        "deadline_ms": 20,
+        "max_handlers": 8,
+        "version": "0.1.0"
+      }
+    ],
     "panels": [
       {
         "id": "rules",
         "title": "Text triggers"
       }
     ]
-  }
+  },
+  "activation": [
+    "startup",
+    "view:ilium.core.text-triggers/rules"
+  ],
+  "replaceable": true,
+  "surface": [
+    "services:test-rule",
+    "points:rule-packs",
+    "points:before-fire",
+    "topics:fired"
+  ],
+  "limits_tier": "first-party"
 }

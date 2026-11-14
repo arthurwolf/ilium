@@ -73,15 +73,6 @@ fn proposal(kind: AnimationKind, parameters: Vec<(&str, ControlValue)>) -> Propo
     }
 }
 
-fn carpet(mode: usize, parameters: Vec<(&str, ControlValue)>) -> ProposedRecommendation {
-    let mut result = proposal(AnimationKind::Carpet, parameters);
-    result.parameters.push(ProposedParameter {
-        id: "carpet_mode".into(),
-        value: Index(mode),
-    });
-    result
-}
-
 fn paris() -> ProposedRecommendation {
     proposal(
         AnimationKind::OpenStreetMap,
@@ -122,7 +113,7 @@ fn all_concrete_ids_and_descriptions_are_present_once_without_aliases() {
         assert_eq!(kind_for(&id).unwrap(), kind);
     }
     assert_eq!(
-        count, 58,
+        count, 25,
         "Review the frozen inventory when concrete scenes change"
     );
     assert!(
@@ -133,26 +124,15 @@ fn all_concrete_ids_and_descriptions_are_present_once_without_aliases() {
     assert!(kind_for("semantic").is_err());
     assert!(kind_for("plugin_scene").is_err());
     assert!(kind_for("breathing_mountain").is_err());
+    // Scenes that moved into the Scenes plugin load as plugin scenes, so they are aliases here.
+    assert!(kind_for("carpet").is_err());
+    assert!(kind_for("chess").is_err());
     assert!(kind_for("not_a_scene").is_err());
 }
 
 #[test]
 fn conditional_inventory_is_not_default_only() {
     for (kind, ids) in [
-        (
-            AnimationKind::Carpet,
-            vec![
-                "carpet_hunters_count",
-                "carpet_snake_food_count",
-                "carpet_life_wrap",
-                "carpet_chess_ai_depth",
-                "carpet_king_height",
-                "carpet_dvd_speed",
-                "carpet_orbit_scale",
-                "carpet_clock_24h",
-                "carpet_clock_tubes",
-            ],
-        ),
         (AnimationKind::Graph, vec!["rising_hue", "falling_hue"]),
         (AnimationKind::Wikipedia, vec!["wiki_zoom"]),
         (
@@ -183,14 +163,6 @@ fn conditional_inventory_is_not_default_only() {
         }
         assert!(rows.values().all(exposable));
     }
-    let rows = inventory(AnimationKind::Carpet).unwrap();
-    assert_eq!(rows.len(), 45);
-    assert_eq!(rows["carpet_infinite_lines"].value, Bool(true));
-    let ControlKind::Choice { options } = &rows["carpet_mode"].kind else {
-        panic!("mode")
-    };
-    assert_eq!(options.len(), 9);
-    assert_eq!(options[1], "Autonomous Snake");
     let graph = inventory(AnimationKind::Graph).unwrap();
     let ControlKind::Choice { options } = &graph["source"].kind else {
         panic!("source")
@@ -202,26 +174,6 @@ fn conditional_inventory_is_not_default_only() {
 fn malformed_types_bounds_duplicates_and_inactive_controls_are_rejected() {
     let base = AnimationSettings::default();
     for bad in [
-        carpet(9, vec![]),
-        carpet(1, vec![("carpet_spacing", Number(25))]),
-        carpet(1, vec![("carpet_spacing", Bool(true))]),
-        carpet(1, vec![("carpet_snake_grid", Number(5))]),
-        carpet(
-            1,
-            vec![
-                ("carpet_snake_grid", Number(4)),
-                ("carpet_snake_initial_length", Number(16)),
-            ],
-        ),
-        carpet(1, vec![("carpet_easing_ms", Number(201))]),
-        carpet(7, vec![("carpet_easing_ms", Number(901))]),
-        carpet(1, vec![("carpet_dvd_speed", Number(20))]),
-        carpet(
-            1,
-            vec![("carpet_seed", Number(1)), ("carpet_seed", Number(2))],
-        ),
-        carpet(1, vec![("carpet_seed", Text("untrusted".into()))]),
-        proposal(AnimationKind::Carpet, vec![]),
         proposal(AnimationKind::OpenStreetMap, vec![("place", Index(0))]),
         proposal(AnimationKind::Graph, vec![("poll", Number(5))]),
         proposal(
@@ -237,34 +189,9 @@ fn malformed_types_bounds_duplicates_and_inactive_controls_are_rejected() {
     .is_err());
     assert!(serde_json::from_str::<ProposedRecommendations>(r#"{"definitions":[]}"#).is_err());
     assert!(serde_json::from_str::<ProposedParameter>(
-        r#"{"id":"carpet_spacing","value":{"Number":2.5}}"#
+        r#"{"id":"tide_seconds","value":{"Number":2.5}}"#
     )
     .is_err());
-}
-
-#[test]
-fn dependency_order_and_every_carpet_mode_work_without_enabling_background() {
-    let base = AnimationSettings::default();
-    for mode in 0..9 {
-        let rec = validate_recommendation(&carpet(mode, vec![]), &base).unwrap();
-        let resolved = resolve_recommendation(&rec, &base).unwrap();
-        assert_eq!(resolved.ambient.carpet.mode, mode as i32);
-        assert!(!resolved.enabled);
-    }
-    let raw = carpet(
-        1,
-        vec![
-            ("carpet_easing_ms", Number(2800)),
-            ("carpet_snake_step_ms", Number(3000)),
-        ],
-    );
-    let rec = validate_recommendation(&raw, &base).unwrap();
-    let resolved = resolve_recommendation(&rec, &base).unwrap();
-    assert_eq!(resolved.ambient.carpet.easing_ms, 2800);
-    assert_eq!(resolved.ambient.carpet.snake_step_ms, 3000);
-    assert_eq!(resolved.appearance, base.appearance);
-    assert_eq!(resolved.fps_limit, base.fps_limit);
-    assert_eq!(base, AnimationSettings::default());
 }
 
 #[test]
@@ -485,15 +412,6 @@ fn numeric_dependency_pairs_accept_both_orders_and_reject_invalid_final_values()
             AnimationKind::Spectrum,
             vec![("ceiling_db", Number(-20)), ("floor_db", Number(-30))],
         ),
-        carpet(
-            1,
-            vec![
-                ("carpet_easing_ms", Number(600)),
-                ("carpet_snake_step_ms", Number(800)),
-                ("carpet_snake_initial_length", Number(15)),
-                ("carpet_snake_grid", Number(4)),
-            ],
-        ),
     ];
     for raw in cases {
         let forward = validate_recommendation(&raw, &base).unwrap();
@@ -510,13 +428,6 @@ fn numeric_dependency_pairs_accept_both_orders_and_reject_invalid_final_values()
         proposal(
             AnimationKind::Spectrum,
             vec![("ceiling_db", Number(-25)), ("floor_db", Number(-30))],
-        ),
-        carpet(
-            1,
-            vec![
-                ("carpet_easing_ms", Number(801)),
-                ("carpet_snake_step_ms", Number(800)),
-            ],
         ),
     ] {
         assert!(validate_recommendation(&raw, &base).is_err());

@@ -182,7 +182,7 @@ fn f_112_cancelled_job_ends_with_the_cancelled_error() {
 
 /// REQ: F-112
 #[test]
-fn f_112_job_waits_at_most_55_seconds_for_the_model() {
+fn f_112_job_waits_at_most_18_seconds_for_the_model() {
     let mut host = activated_server();
     host.set_inference_answer("{}".to_string());
     host.run_job(
@@ -190,7 +190,7 @@ fn f_112_job_waits_at_most_55_seconds_for_the_model() {
         json!({"evidence": "x"}).to_string().as_bytes(),
     )
     .expect("job succeeds");
-    assert_eq!(host.inference_wait_ms(), vec![4_000]);
+    assert_eq!(host.inference_wait_ms(), vec![18_000]);
 }
 
 /// REQ: F-112

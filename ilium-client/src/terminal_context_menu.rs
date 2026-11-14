@@ -8,7 +8,6 @@ use ilium_core::NodeId;
 use ratatui::layout::Rect;
 
 use crate::open_target::OpenTarget;
-use crate::split_layout::PaneDirection;
 
 /// Actions available from a terminal pane's right-click menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,11 +32,6 @@ pub enum TerminalContextAction {
         path: std::path::PathBuf,
     },
     PasteClipboard,
-    PasteScreenInto {
-        destination_pane_id: NodeId,
-        direction: PaneDirection,
-        destination_label: String,
-    },
     ShowAgentDebugLog,
     /// Present only for a currently detected agent pane. Flips the same
     /// global `ui_settings.agent_toolbar_enabled` flag the toolbar's own X
@@ -87,7 +81,6 @@ impl TerminalContextAction {
             Self::CopyPreviousExactPromptToClipboard { .. } => (2, 1),
             Self::CopyHistoryFilePathToClipboard { .. } => (2, 2),
             Self::PasteClipboard => (3, 0),
-            Self::PasteScreenInto { .. } => (3, 1),
             Self::ToggleAgentToolbar { .. } => (4, 0),
             Self::ShowAgentDebugLog => (4, 1),
             Self::Plugin { .. } => (5, 0),
@@ -112,12 +105,6 @@ impl TerminalContextAction {
             Self::LastSubmittedPromptUnavailable => IconTarget::AgentUnavailable,
             Self::CopyVisibleTerminalToClipboard => IconTarget::Terminal,
             Self::PasteClipboard => IconTarget::ScreenTransferDown,
-            Self::PasteScreenInto { direction, .. } => match direction {
-                PaneDirection::Left => IconTarget::ScreenTransferLeft,
-                PaneDirection::Right => IconTarget::ScreenTransferRight,
-                PaneDirection::Up => IconTarget::ScreenTransferUp,
-                PaneDirection::Down => IconTarget::ScreenTransferDown,
-            },
             Self::ShowAgentDebugLog => IconTarget::Done,
             Self::ToggleAgentToolbar { .. } => IconTarget::AgentToolbarConfig,
             Self::OpenExternally(OpenTarget::Directory(_)) => IconTarget::Folder,
@@ -146,14 +133,6 @@ impl TerminalContextAction {
             Self::CopyFullTerminalHistoryToClipboard => "Copy full history".to_string(),
             Self::CopyHistoryFilePathToClipboard { .. } => "Copy history file path".to_string(),
             Self::PasteClipboard => "Paste clipboard".to_string(),
-            Self::PasteScreenInto {
-                direction,
-                destination_label,
-                ..
-            } => format!(
-                "Paste screen into {destination_label} {}",
-                direction.label()
-            ),
             Self::ShowAgentDebugLog => "Show debug log".to_string(),
             Self::ToggleAgentToolbar { currently_visible } => if *currently_visible {
                 "Hide agent toolbar"

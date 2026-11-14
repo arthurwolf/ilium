@@ -23,3 +23,14 @@
 ## Move blockers (re-verified 2026-11-14, second pass)
 
 The per-file reasons and the blocker keys B1 to B10 (each with its evidence in the source) are in `docs/tasks/02-cuts/kanban.md`. The earlier K1 (no `intent_routing.rs`), K3 (no popup text input) and K6 (no terminal menu entries) of this section are closed by the consumer streams; the rest were re-read against the current tree.
+
+## Kernel excision round (2026-11-14)
+
+- Moved into the plugin with tests: `src/model.rs` (BoardPane edits, selection, detail panel, moves, checkbox), `src/store.rs` (folder layout, load listing, save plan, limits), `src/io.rs` (fs host reads, revision-checked Markdown write, folder write run), `src/view.rs` (pane UiTree), `src/client.rs` (pane binding, key grabs, prompts, request routing).
+- Kernel board code still in place, because the plugin cannot replace these yet:
+  - Mouse drag of a card between columns: the plugin host never delivers `ActionKind::Dropped` for a `tree-list` item and the `drop-value` does not name the dragged item (only `source-key`, `target-key`, `index`). Needs a client change in `plugin_host/view.rs` (emit `Dropped` with the source item id) before `board_ui.rs` drag code can go.
+  - Agent control of boards (`ilium-control` `BoardCommand`, `control/executor.rs`, `control/snapshot.rs`, `control/policy.rs`): the plugin exposes no service for select, open card, update card, toggle checkbox or text extract. Needs a `ilium.core.kanban/board` service and a control route to it.
+  - Pane identity: `PaneContentKind::Board` and `BoardStorage` in `ilium-core`, `ClientRequest::NewBoard` and the server `add_board` persist boards in session snapshots. Deleting them needs a snapshot migration to `PaneContentKind::Plugin("ilium.core.kanban.board")` with the storage binding written to the plugin storage key `board/<node>`.
+  - `new-board` in the `ilium` CLI, the voice board constants in `ilium-prompts`, the onboarding practice board, `Mode::Create*Board*` dialogs and the `KanbanBoard` settings tab remain until the above are gone.
+  - The `markdown` widget is not drawn client-side, so the preview of Markdown in a card body is plain text.
+- The plugin keeps the pane width it last drew (`Entry::area_columns`) to size the column viewport for keyboard navigation; the real width reaches the plugin only in `render`.

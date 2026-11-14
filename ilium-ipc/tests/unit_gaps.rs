@@ -1,5 +1,5 @@
 //! Direct coverage for public `ilium-ipc` items that had no unit test: plugin wire records,
-//! text-trigger target labels, voice-text rejections, pane environment names, request diagnostic
+//! voice-text rejections, pane environment names, request diagnostic
 //! names, bounded decoding and frame writing.
 
 use bincode::Options;
@@ -7,7 +7,7 @@ use ilium_core::NodeId;
 use ilium_ipc::{
     decode_bounded_frame, encode_frame, pane_env, plugin, ClientRequest, FrameWriter, IpcError,
     MouseEventKind, MouseModifiers, PaneResizeCause, PromptSubmissionSource, ServerEvent,
-    TextTriggerTarget, VoiceTextRejection, VoiceTextRejectionCode, MAX_FRAME_LEN,
+    VoiceTextRejection, VoiceTextRejectionCode, MAX_FRAME_LEN,
 };
 use serde::de::DeserializeOwned;
 use serde::{Serialize, Serializer};
@@ -358,69 +358,6 @@ fn structural_and_submitted_requests_are_not_high_frequency() {
         assert!(
             !request.is_high_frequency_diagnostic(),
             "{request:?} must stay on the info-level trail"
-        );
-    }
-}
-
-#[test]
-fn text_trigger_target_labels_are_exact() {
-    assert_eq!(TextTriggerTarget::Agents.label(), "Agents");
-    assert_eq!(TextTriggerTarget::Terminals.label(), "Terminals");
-    assert_eq!(TextTriggerTarget::Both.label(), "Both");
-}
-
-#[test]
-fn text_trigger_target_labels_are_distinct() {
-    let labels: Vec<&str> = TextTriggerTarget::ALL
-        .iter()
-        .map(|target| target.label())
-        .collect();
-    let unique: HashSet<&str> = labels.iter().copied().collect();
-    assert_eq!(
-        unique.len(),
-        labels.len(),
-        "labels {labels:?} must be distinct"
-    );
-}
-
-#[derive(Serialize)]
-struct TargetHolder {
-    target: TextTriggerTarget,
-}
-
-/// The saved settings name is the snake_case serde name; the label is its capitalised form.
-#[test]
-fn text_trigger_target_label_matches_the_saved_serde_name() {
-    for target in TextTriggerTarget::ALL {
-        let saved = toml::to_string(&TargetHolder { target }).expect("serialize target");
-        let saved_name = saved
-            .trim()
-            .trim_start_matches("target = \"")
-            .trim_end_matches('"');
-        assert_eq!(
-            saved_name,
-            target.label().to_ascii_lowercase(),
-            "saved name must equal the label, ignoring case"
-        );
-    }
-}
-
-fn declared_index(target: TextTriggerTarget) -> usize {
-    match target {
-        TextTriggerTarget::Agents => 0,
-        TextTriggerTarget::Terminals => 1,
-        TextTriggerTarget::Both => 2,
-    }
-}
-
-#[test]
-fn text_trigger_target_all_lists_each_variant_once_in_declared_order() {
-    assert_eq!(TextTriggerTarget::ALL.len(), 3);
-    for (position, target) in TextTriggerTarget::ALL.iter().enumerate() {
-        assert_eq!(
-            declared_index(*target),
-            position,
-            "ALL[{position}] must be the variant declared at that position"
         );
     }
 }

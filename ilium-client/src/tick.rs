@@ -42,10 +42,8 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
     let resource_saved = app.tick_resource_dialog(now);
     let budget_saved = app.tick_restructure_budget_autosave(now)
         | app.tick_inference_number_autosave(now)
-        | app.tick_remote_compaction_save(now)
         | app.tick_custom_status_rules_save(now);
     let integration_changed = app.tick_integration_maintenance(now);
-    let attention_changed = app.tick_attention() | app.tick_attention_dialog();
     // Focus and `config.toml` changes reach the plugins (gap G2); a reloaded `[padding]` or
     // `[animations]` table redraws.
     let config_reloaded = app.tick_wasm_plugin_feed();
@@ -59,7 +57,6 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
     if goal_geometry_changed {
         app.resize_displayed_panes(ilium_ipc::PaneResizeCause::RightPanelPresentation);
     }
-    let remote_compaction_started = app.tick_remote_compaction_monitor(now);
     let cost_changed = app.tick_cost(now);
     let model_catalog_changed = app.collect_model_catalog_preparation();
     let context_menu_hover_changed = app.tick_context_menu_hover(now);
@@ -67,7 +64,6 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
     let pending_toolbar_changed =
         app.tick_pending_toolbar_actions(now) | app.tick_pending_menu_actions(now);
     let animation_hover_changed = app.tick_animation_hover(now);
-    let plugin_issue_hover_changed = app.tick_plugin_issue_hover(now);
     let location_picker_changed = app.tick_location_picker();
     app.drain_pending_staged_keystrokes(now);
     let setup_prompt_was_open = matches!(app.mode, crate::app::Mode::AgentSetupPrompt(_));
@@ -85,7 +81,6 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         || autosave_wrote
         || budget_saved
         || integration_changed
-        || attention_changed
         || config_reloaded
         || session_stats_changed
         || session_models_changed
@@ -93,14 +88,12 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         || claude_goals_changed
         || goal_selection_changed
         || goal_geometry_changed
-        || remote_compaction_started
         || cost_changed
         || model_catalog_changed
         || context_menu_hover_changed
         || agent_popover_changed
         || pending_toolbar_changed
         || animation_hover_changed
-        || plugin_issue_hover_changed
         || location_picker_changed
         || setup_prompt_changed
 }
@@ -507,7 +500,6 @@ pub fn apply_naming_worker_event(
                 result,
                 recaps,
                 recap_stamps,
-                attention,
             } = outcome;
             workers.restructure_worker_finished(project_id);
             if app.onboarding.is_some()
@@ -529,15 +521,6 @@ pub fn apply_naming_worker_event(
                 tracing::debug!(?project_id, error = %error, error_debug = ?error, "project restructure inference failure details");
             }
             let is_plan_ready = result.is_ok();
-            // The attention list is applied first and never gates the sort: a
-            // failed call carries none, and a bad list was already split off.
-            let outcome = match &result {
-                Ok(_) => crate::attention::runtime::SharedOutcome::Replied(attention),
-                Err(_) => crate::attention::runtime::SharedOutcome::Failed,
-            };
-            if !app.complete_shared_attention(project_id, outcome) {
-                return;
-            }
             app.finish_project_restructure(
                 project_id,
                 &inference_activity_revisions,
@@ -548,7 +531,6 @@ pub fn apply_naming_worker_event(
                 app.apply_batch_recaps(recaps, &recap_stamps);
             }
         }
-        NamingWorkerEvent::Attention(reply) => app.apply_attention_reply(reply),
         NamingWorkerEvent::ExactPrepared {
             result,
             source_hold,

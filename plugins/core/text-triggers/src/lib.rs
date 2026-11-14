@@ -1,16 +1,25 @@
-//! Core plugin `ilium.core.text-triggers` (manual page core-plugin-text-triggers.md).
+//! Core plugin `ilium.core.text-triggers` (manual page core-plugin-text-triggers.md): regular-expression
+//! rules that watch terminal output and send a reply to the pane that printed the match.
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Minimal conforming bodies: no contributions are produced until the feature logic moves here.
+//! The server side ([`server`]) reads the rule list from the `text-triggers` kernel settings tab,
+//! scans a pane's screen when it changes ([`matching`] holds the pure instance tracking and the
+//! delivery ordering) and sends each reply after its rule's delay. The client side ([`client`])
+//! owns the rules panel and the rule editor; [`wire`] is the message format between them and the
+//! preview of a rule against a sample. [`config`] holds the rule fields and their validation.
 
+pub mod client;
 pub mod config;
 pub mod matching;
+pub mod server;
+pub mod wire;
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
-use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
+use ilium_plugin_sdk::types::{Activation, Area, PluginError, UiTree, ViewTarget};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, Views};
+
+/// The plugin id, also the target of the messages between its two sides.
+pub const PLUGIN_ID: &str = "ilium.core.text-triggers";
 
 /// The server side of `ilium.core.text-triggers` (core-plugin-text-triggers.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = [])]
@@ -19,30 +28,43 @@ pub struct TextTriggersServer;
 
 impl Lifecycle for TextTriggersServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        let mut api = host();
+        server::start(&mut *api);
         Ok(())
     }
 }
 
 impl Handler for TextTriggersServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut api = host();
+        batch
+            .into_iter()
+            .flat_map(|event| server::on_event(&mut *api, event))
+            .collect()
     }
 }
 
 /// The client side of `ilium.core.text-triggers` (core-plugin-text-triggers.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
 pub struct TextTriggersClient;
 
 impl Lifecycle for TextTriggersClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        client::reset();
         Ok(())
     }
 }
 
 impl Handler for TextTriggersClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        batch.into_iter().flat_map(client::on_event).collect()
+    }
+}
+
+impl Views for TextTriggersClient {
+    fn render(&mut self, view: ViewTarget, _area: Area) -> UiTree {
+        client::render(&view)
     }
 }
 

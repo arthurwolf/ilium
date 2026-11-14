@@ -2,7 +2,6 @@
 //! atomic replacement and durability all execute in the finite I/O bank.
 use crate::config::{AgentSetupSettings, SessionSettings};
 use ilium_execution::{Job, JobContext, JobCost};
-use ilium_ipc::{TextTrigger, TextTriggerSettings};
 use std::path::PathBuf;
 
 pub enum NumberReadTarget {
@@ -27,10 +26,7 @@ pub enum ConfigurationChange {
     StatusRules(Box<ilium_core::status_rule_expression::StatusRules>),
     Terminal(crate::config::TerminalSettings),
     Git(crate::config::GitSettings),
-    ResetPlanning(crate::reset_planning::ResetPlanningSettings),
-    Attention(crate::attention::AttentionSettings),
     Cost(crate::cost_settings::CostSettings),
-    RemoteCompaction(crate::remote_compaction_settings::RemoteCompactionSettings),
     Editor(crate::config::EditorSettings),
     Onboarding(crate::onboarding::progress::OnboardingProgress),
     Keyboard(crate::config::KeyboardSettings),
@@ -55,14 +51,6 @@ pub enum ConfigurationChange {
         previous: AgentSetupSettings,
         desired: AgentSetupSettings,
     },
-    TextTriggers {
-        previous: TextTriggerSettings,
-        desired: TextTriggerSettings,
-    },
-    TextTriggerEdit {
-        previous: Option<TextTrigger>,
-        desired: Option<TextTrigger>,
-    },
     CustomAgents {
         previous: crate::config::CustomAgentSettings,
         desired: crate::config::CustomAgentSettings,
@@ -79,7 +67,6 @@ pub enum ConfigurationSaved {
     Plain,
     Session(SessionSettings),
     AgentSetup(AgentSetupSettings),
-    TextTriggers(TextTriggerSettings),
     CustomAgents(crate::config::CustomAgentSettings),
     Animation(Box<crate::background_animation::AnimationSettings>),
     Separators(bool),
@@ -127,16 +114,8 @@ impl Job for ConfigurationWrite {
                 .map(|()| ConfigurationSaved::Plain),
             Git(value) => crate::config::save_git_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
-            ResetPlanning(value) => crate::config::save_reset_planning_settings(directory, &value)
-                .map(|()| ConfigurationSaved::Plain),
-            Attention(value) => crate::config::save_attention_settings(directory, &value)
-                .map(|()| ConfigurationSaved::Plain),
             Cost(value) => crate::config::save_cost_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
-            RemoteCompaction(value) => {
-                crate::config::save_remote_compaction_settings(directory, &value)
-                    .map(|()| ConfigurationSaved::Plain)
-            }
             Editor(value) => crate::config::save_editor_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Onboarding(value) => crate::config::save_onboarding_progress(directory, &value)
@@ -173,16 +152,6 @@ impl Job for ConfigurationWrite {
                 crate::config::update_agent_setup_settings(directory, &previous, &desired)
                     .map(ConfigurationSaved::AgentSetup)
             }
-            TextTriggers { previous, desired } => {
-                crate::config::save_text_trigger_settings(directory, &previous, &desired)
-                    .map(|()| ConfigurationSaved::TextTriggers(desired))
-            }
-            TextTriggerEdit { previous, desired } => crate::config::save_text_trigger_edit(
-                directory,
-                previous.as_ref(),
-                desired.as_ref(),
-            )
-            .map(ConfigurationSaved::TextTriggers),
             CustomAgents { previous, desired } => {
                 crate::config::update_custom_agent_settings(directory, &previous, &desired)
                     .map(ConfigurationSaved::CustomAgents)
@@ -346,10 +315,7 @@ impl ConfigurationChange {
             }
             Git(value) => serialized_bound(value)?,
             StatusRules(value) => serialized_bound(value)?,
-            ResetPlanning(value) => serialized_bound(value)?,
-            Attention(value) => serialized_bound(value)?,
             Cost(value) => serialized_bound(value)?,
-            RemoteCompaction(value) => serialized_bound(value)?,
             Onboarding(value) => serialized_bound(value)?,
             Sound(value) => serialized_bound(value)?,
             Notifications(value) => serialized_bound(value)?,
@@ -359,12 +325,6 @@ impl ConfigurationChange {
             Debug(value) => serialized_bound(value)?,
             Api(value) => serialized_bound(value)?,
             AgentSetup { previous, desired } => {
-                serialized_bound(previous)? + serialized_bound(desired)?
-            }
-            TextTriggers { previous, desired } => {
-                serialized_bound(previous)? + serialized_bound(desired)?
-            }
-            TextTriggerEdit { previous, desired } => {
                 serialized_bound(previous)? + serialized_bound(desired)?
             }
             CustomAgents { previous, desired } => {
@@ -408,8 +368,6 @@ impl ConfigurationChange {
         Ok(match self {
             Git(value) => Git(normalize(&value)?),
             StatusRules(value) => StatusRules(Box::new(normalize(&*value)?)),
-            ResetPlanning(value) => ResetPlanning(normalize(&value)?),
-            Attention(value) => Attention(normalize(&value)?.normalized()),
             Cost(mut value) => {
                 value.prices = value
                     .prices
@@ -418,7 +376,6 @@ impl ConfigurationChange {
                     .collect();
                 Cost(value)
             }
-            RemoteCompaction(value) => RemoteCompaction(normalize(&value)?),
             Onboarding(value) => Onboarding(normalize(&value)?),
             Sound(value) => Sound(normalize(&value)?),
             Notifications(value) => Notifications(normalize(&value)?),
@@ -446,14 +403,6 @@ impl ConfigurationChange {
                 }
             }
             AgentSetup { previous, desired } => AgentSetup {
-                previous: normalize(&previous)?,
-                desired: normalize(&desired)?,
-            },
-            TextTriggers { previous, desired } => TextTriggers {
-                previous: normalize(&previous)?,
-                desired: normalize(&desired)?,
-            },
-            TextTriggerEdit { previous, desired } => TextTriggerEdit {
                 previous: normalize(&previous)?,
                 desired: normalize(&desired)?,
             },

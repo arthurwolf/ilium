@@ -6,7 +6,7 @@ use ilium_plugin_sdk::host::{HostClock, HostKernelSettings, HostTimers};
 use ilium_plugin_sdk::types::{
     Activation, AgentActivity, ClearFrameSlotSpec, CommandInvokedEvent, Event, Intent,
     InvokeCommandSpec, MessageEvent, MessageSpec, MessageTarget, NodeId, PluginError, PluginId,
-    PluginSide, RichSpan, SetFrameSlotSpec, SpanTarget, Style, Submission, TimerId,
+    PluginSide, RequestRef, RichSpan, SetFrameSlotSpec, SpanTarget, Style, Submission, TimerId,
 };
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle};
 
@@ -45,6 +45,9 @@ pub struct AgentToolbarClient {
     freeze: FreezeBook,
     /// The repeating timer that lets the auto-freeze policy see time pass.
     freeze_timer: Option<TimerId>,
+    /// The panes whose Compact click went to the compaction plugin, by submission correlation; a refusal (the
+    /// plugin is off) sends the agent's own `/compact` instead.
+    pending_compact: BTreeMap<u64, u64>,
 }
 
 pub(crate) fn plain(text: &str) -> Vec<RichSpan> {
@@ -158,11 +161,13 @@ impl AgentToolbarClient {
         let Some(pane) = invoked.context.pane else {
             return;
         };
-        if invoked.command == "compact" && self.routes_to_remote_compaction(pane) {
-            out.push(Submission::new(Intent::InvokeCommand(InvokeCommandSpec {
+        if invoked.command == "compact" && self.routes_to_compaction_plugin(pane) {
+            let submission = Submission::new(Intent::InvokeCommand(InvokeCommandSpec {
                 command: COMPACTION_COMMAND.to_string(),
                 arguments_json: "{}".to_string(),
-            })));
+            }));
+            self.pending_compact.insert(submission.correlation, pane.0);
+            out.push(submission);
             return;
         }
         out.push(message_to(
@@ -216,9 +221,27 @@ impl AgentToolbarClient {
         }
     }
 
-    /// Remote compaction needs the setting on and a pane with a verified transcript session.
-    fn routes_to_remote_compaction(&self, pane: NodeId) -> bool {
-        UiSettings::read().remote_compaction && host().session(pane).is_some()
+    /// A pane with a verified transcript session compacts through the compaction plugin, which compacts remotely when
+    /// its setting is on and otherwise hands the agent's own `/compact` back to this plugin's server side.
+    fn routes_to_compaction_plugin(&self, pane: NodeId) -> bool {
+        host().session(pane).is_some()
+    }
+
+    /// The compaction plugin refused the command (it is turned off): the agent compacts itself.
+    fn on_request_completed(&mut self, request: &RequestRef, ok: bool, out: &mut Vec<Submission>) {
+        let RequestRef::Submission(correlation) = request else {
+            return;
+        };
+        let Some(pane) = self.pending_compact.remove(correlation) else {
+            return;
+        };
+        if !ok {
+            out.push(message_to(
+                PluginSide::Server,
+                "compact",
+                pane.to_string().into_bytes(),
+            ));
+        }
     }
 
     fn on_message(&mut self, message: &MessageEvent, out: &mut Vec<Submission>) {
@@ -262,6 +285,9 @@ impl Handler for AgentToolbarClient {
                 }
                 Event::TimerFired(timer) if self.freeze_timer == Some(timer) => {
                     self.check_freeze(&mut out);
+                }
+                Event::RequestCompleted(result) => {
+                    self.on_request_completed(&result.request, result.outcome.is_ok(), &mut out);
                 }
                 Event::CommandInvoked(invoked) => self.on_command(&invoked, &mut out),
                 Event::Message(message) => self.on_message(&message, &mut out),

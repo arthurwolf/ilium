@@ -152,10 +152,9 @@ fn render_field(
 }
 
 fn needs_screen_occupancy(settings: &crate::background_animation::AnimationSettings) -> bool {
-    settings.kind == crate::background_animation::AnimationKind::Wind
-        || (settings.source == crate::animation_plugins::AnimationSourceTab::Native
-            && settings.kind == crate::background_animation::AnimationKind::Frost
-            && settings.ambient.frost.mode == ilium_ambient::FrostMode::Characters)
+    // A plugin scene may react to what the workspace draws (Wind does); the host only builds the
+    // mask for it, and the scene's own `wants-occupancy` decides whether it is read.
+    settings.kind == crate::background_animation::AnimationKind::PluginScene
 }
 
 /// Render one screen-wide field, then reveal it only through safe workspace
@@ -199,7 +198,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         } else {
             quantized_elapsed_at(elapsed, app.animation_frames_per_second())
         };
-    // Screen-reactive Wind and native character Frost receive the exclusion
+    // Plugin scenes (some react to the screen text, such as Frost and Growth) receive the exclusion
     // mask before their frame request; unrelated scenes pay no mask cost.
     app.animation_frame
         .set_occupancy(if needs_screen_occupancy(&settings) {
@@ -300,9 +299,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     if !settings.panels.shows_right()
         || matches!(
             app.right_panel_target,
-            RightPanelTarget::Resource { .. }
-                | RightPanelTarget::Attention
-                | RightPanelTarget::PluginView { .. }
+            RightPanelTarget::Resource { .. } | RightPanelTarget::PluginView { .. }
         )
     {
         finish_field(app, presentation, painted_bits);
@@ -421,9 +418,7 @@ fn screen_occupancy(
         if settings.panels.shows_right()
             && !matches!(
                 app.right_panel_target,
-                RightPanelTarget::Resource { .. }
-                    | RightPanelTarget::Attention
-                    | RightPanelTarget::PluginView { .. }
+                RightPanelTarget::Resource { .. } | RightPanelTarget::PluginView { .. }
             )
         {
             let viewports = app.pane_viewports();
@@ -1638,7 +1633,7 @@ mod tests {
     }
 
     #[test]
-    fn wind_occupancy_marks_text_borders_and_unpainted_cells_but_not_blanks() {
+    fn plugin_scene_occupancy_marks_text_borders_and_unpainted_cells_but_not_blanks() {
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("wind".to_owned(), project.path().to_path_buf());
         let screen = Rect::new(0, 0, 80, 24);
@@ -1646,7 +1641,7 @@ mod tests {
         app.layout.tree_area = Rect::new(0, 0, 20, 24);
         app.layout.pane_area = Rect::new(20, 0, 60, 24);
         let settings = crate::background_animation::AnimationSettings {
-            kind: crate::background_animation::AnimationKind::Wind,
+            kind: crate::background_animation::AnimationKind::PluginScene,
             panels: crate::background_animation::PanelTarget::Both,
             ..Default::default()
         };
@@ -1667,38 +1662,26 @@ mod tests {
     }
 
     #[test]
-    fn character_frost_requests_occupancy_only_for_native_character_mode() {
+    fn only_plugin_scenes_request_occupancy() {
         let mut settings = crate::background_animation::AnimationSettings {
-            kind: crate::background_animation::AnimationKind::Frost,
-            source: crate::animation_plugins::AnimationSourceTab::Native,
+            kind: crate::background_animation::AnimationKind::PluginScene,
             ..Default::default()
         };
-        assert!(
-            !needs_screen_occupancy(&settings),
-            "edge frost is frame-only"
-        );
-        settings.ambient.frost.mode = ilium_ambient::FrostMode::Characters;
         assert!(needs_screen_occupancy(&settings));
-        settings.source = crate::animation_plugins::AnimationSourceTab::Plugin;
+        settings.kind = crate::background_animation::AnimationKind::Shoreline;
         assert!(!needs_screen_occupancy(&settings));
-        settings.kind = crate::background_animation::AnimationKind::Wind;
-        assert!(
-            needs_screen_occupancy(&settings),
-            "Wind keeps its existing mask"
-        );
     }
 
     #[test]
-    fn frost_mask_marks_glyph_anchors_and_blocks_wide_continuations() {
+    fn character_mask_marks_glyph_anchors_and_blocks_wide_continuations() {
         let project = tempfile::tempdir().unwrap();
-        let mut app = App::new("frost-mask".to_owned(), project.path().to_path_buf());
+        let mut app = App::new("character-mask".to_owned(), project.path().to_path_buf());
         let screen = Rect::new(0, 0, 80, 24);
         app.set_screen_area(screen);
         app.layout.tree_area = Rect::new(0, 0, 20, 24);
         app.layout.pane_area = Rect::new(20, 0, 60, 24);
         let settings = crate::background_animation::AnimationSettings {
-            kind: crate::background_animation::AnimationKind::Frost,
-            source: crate::animation_plugins::AnimationSourceTab::Native,
+            kind: crate::background_animation::AnimationKind::PluginScene,
             panels: crate::background_animation::PanelTarget::Both,
             ..Default::default()
         };

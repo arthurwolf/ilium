@@ -3568,11 +3568,9 @@ ilium-client/src/app.rs	sound_preview_refusal_retry_reports_only_admitted_reques
 ilium-client/src/app.rs	sound_preview_sends_missing_file_validation_to_server	plain		notifications	adapt-to-plugin-api	plugins/core/notifications	F-047,F-048,F-049	pending
 ilium-client/src/app.rs	split_creation_choices_exclude_panes_already_in_a_split	plain		layout	moves-to-plugin	plugins/core/layout	F-003	ported
 ilium-client/src/app.rs	split_layout_resizes_only_visible_terminal_members_to_their_slots	plain		layout	kernel-stays		F-003	pending
-ilium-client/src/app.rs	split_separator_transfer_control_pastes_only_from_its_adjacent_source	plain		layout	kernel-stays		F-003	pending
 ilium-client/src/app.rs	split_slot_click_focuses_that_member_and_uses_slot_relative_coordinates	plain		layout	kernel-stays		F-003	pending
 ilium-client/src/app.rs	split_target_reconciliation_clears_a_member_moved_by_another_client	plain		layout	kernel-stays		F-003	pending
 ilium-client/src/app.rs	split_target_reconciliation_clears_a_removed_split	plain		layout	kernel-stays		F-003	pending
-ilium-client/src/app.rs	split_terminal_menu_pastes_the_live_source_screen_into_an_adjacent_terminal	plain		layout	kernel-stays		F-003	pending
 ilium-client/src/app.rs	stable_glyph_setting_is_an_explicit_opt_in	plain		settings	adapt-to-plugin-api	plugins/core/settings	F-089,F-090	pending
 ilium-client/src/app.rs	stale_presentation_ack_cannot_replace_newer_emitted_geometry	plain		kernel	kernel-stays		F-001,F-002,F-003,F-004,F-007,F-008,F-011,F-012,F-013,F-014,F-019,F-024,F-058,F-073,F-074,F-075,F-078,F-079,F-085,F-086,F-087,F-091,F-092,F-093,F-094,F-104,F-105,F-106,F-111	pending
 ilium-client/src/app.rs	stale_project_offer_cannot_recreate_or_modify_a_closed_project_target	plain		kernel	kernel-stays		F-001,F-002,F-003,F-004,F-007,F-008,F-011,F-012,F-013,F-014,F-019,F-024,F-058,F-073,F-074,F-075,F-078,F-079,F-085,F-086,F-087,F-091,F-092,F-093,F-094,F-104,F-105,F-106,F-111	pending

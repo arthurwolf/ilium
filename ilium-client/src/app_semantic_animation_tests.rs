@@ -43,10 +43,23 @@ fn paris() -> AnimationRecommendation {
         ],
     )
 }
+/// The Graph source id the recommendation `carpet(index)` selects.
+fn graph_source_id(index: usize) -> String {
+    let mut settings = ilium_ambient::AmbientSettings::default();
+    settings
+        .set_control(
+            ilium_ambient::AmbientKind::Graph,
+            "source",
+            ControlValue::Index(index),
+        )
+        .unwrap();
+    settings.graph.source_id
+}
+/// A distinct Graph recommendation per `source`, standing in for a scene with several looks.
 fn carpet(mode: usize) -> AnimationRecommendation {
     recommendation(
-        AnimationKind::Carpet,
-        vec![("carpet_mode", ControlValue::Index(mode))],
+        AnimationKind::Graph,
+        vec![("source", ControlValue::Index(mode))],
     )
 }
 fn snapshot_recommendation(
@@ -91,8 +104,8 @@ fn fixture() -> Fixture {
     snapshot_recommendation(&mut app.tree, project, Some(paris()), 0);
     snapshot_recommendation(&mut app.tree, group, Some(carpet(0)), 0);
     snapshot_recommendation(&mut app.tree, pane, Some(carpet(1)), 0);
-    snapshot_recommendation(&mut app.tree, other_project, Some(carpet(7)), 0);
-    snapshot_recommendation(&mut app.tree, other_pane, Some(carpet(8)), 0);
+    snapshot_recommendation(&mut app.tree, other_project, Some(carpet(4)), 0);
+    snapshot_recommendation(&mut app.tree, other_pane, Some(carpet(5)), 0);
     app.animation_settings.kind = AnimationKind::Semantic;
     app.animation_settings.playback_mode = AnimationPlaybackMode::Live;
     app.select_node(pane);
@@ -184,9 +197,9 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .carpet
-            .mode,
-        1
+            .graph
+            .source_id,
+        graph_source_id(1)
     );
     fixture.app.select_node(fixture.group);
     assert_eq!(
@@ -195,9 +208,9 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .carpet
-            .mode,
-        0
+            .graph
+            .source_id,
+        graph_source_id(0)
     );
     let mut virtual_path = fixture.app.path_to(fixture.group);
     virtual_path.push(NodeId(u64::MAX));
@@ -208,9 +221,9 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .carpet
-            .mode,
-        0
+            .graph
+            .source_id,
+        graph_source_id(0)
     );
     fixture.app.tree_state.select(Vec::new());
     // The authored animation is one global setting: the other project is
@@ -222,9 +235,9 @@ fn semantic_project_entry_group_and_pane_fallback_are_local() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .carpet
-            .mode,
-        8
+            .graph
+            .source_id,
+        graph_source_id(5)
     );
     assert!(fixture.app.take_pending_restructure_requests().is_empty());
     assert_eq!(
@@ -250,12 +263,20 @@ fn semantic_cache_revalidates_snapshots_without_rebuilding_equivalent_hosts() {
     assert_eq!(*first, *revalidated);
     compose(&mut fixture.app, 2);
     assert_eq!(probe.builds.lock().unwrap().len(), 1);
-    snapshot_recommendation(&mut fixture.app.tree, fixture.project, Some(carpet(7)), 1);
+    snapshot_recommendation(&mut fixture.app.tree, fixture.project, Some(carpet(2)), 1);
     compose(&mut fixture.app, 3);
     assert_eq!(probe.alive.load(Ordering::SeqCst), 1);
     assert_eq!(
-        probe.builds.lock().unwrap().last().unwrap().1.carpet.mode,
-        7
+        probe
+            .builds
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .1
+            .graph
+            .source_id,
+        graph_source_id(2)
     );
 }
 #[test]
@@ -401,7 +422,7 @@ fn semantic_undo_restores_effective_choice_and_stale_apply_preserves_it() {
     let revisions = previous
         .project_activity_revisions(fixture.project)
         .unwrap();
-    let recommendation = carpet(7);
+    let recommendation = carpet(2);
     let plan = RecommendedRestructurePlan {
         structure: RestructurePlan {
             children: vec![RestructureNode::Pane {
@@ -430,9 +451,9 @@ fn semantic_undo_restores_effective_choice_and_stale_apply_preserves_it() {
             .effective_animation_settings()
             .unwrap()
             .ambient
-            .carpet
-            .mode,
-        7
+            .graph
+            .source_id,
+        graph_source_id(4)
     );
     let accepted = server_tree.clone();
     assert!(server_tree

@@ -35,7 +35,9 @@ use ilium_plugin_api::generated::anim::surface::{OccupancyGrid, ScenePointer};
 use ilium_plugin_api::generated::anim::Readiness;
 use ilium_plugin_host::calls::ResolvedLimits;
 use ilium_plugin_host::engine::{CompiledComponent, PluginEngine};
+use ilium_plugin_host::imports::env::ImportEnv;
 use ilium_plugin_host::imports::generated_dispatch::ImportSet;
+use ilium_plugin_host::imports::http::HttpImport;
 use ilium_plugin_host::runtime::CataloguePlugin;
 use ilium_plugin_host::scene_guest::{
     PresentedFrame, SceneFrameInput, SceneGuest, SceneTraits, PIXELS_PER_COLUMN, PIXELS_PER_ROW,
@@ -234,11 +236,25 @@ impl PluginSceneFactory {
             side: ilium_plugin_api::Side::Scene,
             granted: self.granted.clone(),
         };
+        // A scene draws inside a render frame, so its http import never waits for an answer
+        // (`take-response` reports a running fetch as not ready) and reaches only the hosts
+        // the scene side of the manifest grants.
+        let imports = ImportSet {
+            http: Some(Box::new(
+                HttpImport::new(
+                    ImportEnv::unrestricted()
+                        .with_identity(&self.plugin, 1)
+                        .with_grants(self.granted.clone()),
+                )
+                .without_waiting(),
+            )),
+            ..ImportSet::default()
+        };
         let guest = SceneGuest::instantiate(
             Arc::clone(&self.engine),
             &self.compiled,
             ResolvedLimits(Default::default()),
-            ImportSet::default(),
+            imports,
             identity,
             &spec,
         );
@@ -491,9 +507,15 @@ impl Scene for PluginScene {
 
     fn occupancy(&mut self, mask: &OccupancyMask) {
         let (columns, rows) = (mask.width(), mask.height());
-        let cells = (0..i32::from(rows))
-            .flat_map(|row| (0..i32::from(columns)).map(move |column| (column, row)))
+        // Two planes, row by row: the occupied cells, then the cells holding a foreground
+        // character anchor (`FieldOccupancy` documents the layout for the guest).
+        let positions = || {
+            (0..i32::from(rows))
+                .flat_map(|row| (0..i32::from(columns)).map(move |column| (column, row)))
+        };
+        let cells = positions()
             .map(|(column, row)| mask.is_occupied(column, row))
+            .chain(positions().map(|(column, row)| mask.is_character(column, row)))
             .collect();
         self.occupancy = Some(OccupancyGrid {
             columns,

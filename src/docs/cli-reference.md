@@ -738,8 +738,7 @@ Error messages worth knowing:
 ## Other binaries and hidden commands
 
 - `ilium-server`: the background daemon, one per project session. You normally never start it yourself; `ilium` spawns it detached with internal arguments. It also accepts unauthenticated `POST /create_agent` requests on `127.0.0.1:8872`; any local process can submit one, so keep that listener private (the port is `[api].port` in `config.toml`). See [Automation](automation.md).
-- `ilium-animation-helper`: the confined helper that runs bundled `.iliumanim` animations. It and the animations must stay beside `ilium`. See [Animations](animations.md).
-- Hidden subcommands exist for internal and release qualification use (`clipboard-helper`, `release-embedding-probe`, `release-animation-probe`). They are not part of the user interface and may change without notice.
+- Hidden subcommands exist for internal and release qualification use (`clipboard-helper`, `release-embedding-probe`). They are not part of the user interface and may change without notice.
 - Flatpak builds forward the `ilium` command to the host so panes can use host tools. See [Installation](installation.md).
 
 ## Recipes

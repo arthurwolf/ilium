@@ -31,10 +31,15 @@
       "settings.read-kernel:inference",
       "services.provide:ilium.core.recap/recap",
       "extensions.provide:ilium.core.recap/fact-sources",
-      "extensions.provide:ilium.core.recap/before-recap"
+      "extensions.provide:ilium.core.recap/before-recap",
+      "fs.read:agent-sessions:claude",
+      "fs.read:agent-sessions:codex",
+      "fs.read:project",
+      "settings.read-kernel:setup"
     ],
     "client": [
-      "help.read"
+      "help.read",
+      "settings.read-kernel:setup"
     ]
   },
   "activation": [

@@ -260,12 +260,6 @@ pub enum Action {
     /// also reachable via a right-click in the tree panel
     /// (`ContextMenuAction::Settings`), which never goes through this table.
     Settings,
-    /// Jumps to the agent that most needs the user (attention queue press).
-    AttentionNext,
-    /// Shows or hides the attention queue in the right panel.
-    AttentionPanel,
-    /// Opens the "Needs you" overview dialog listing every queued agent.
-    AttentionOverview,
     /// Switch the focused pane's prompt banner between prompt and goal.
     ToggleGoalTab,
     /// Pin and focus the current goal's toolbar popover.
@@ -553,21 +547,6 @@ pub const LEADER_BINDINGS: &[KeyBinding] = &[
         description: "Open settings (also: use the tree footer gear)",
     },
     KeyBinding {
-        key: BindingKey::Character('i'),
-        action: Action::AttentionNext,
-        description: "Jump to the agent that most needs you (attention queue)",
-    },
-    KeyBinding {
-        key: BindingKey::Character('I'),
-        action: Action::AttentionPanel,
-        description: "Show or hide the attention queue panel",
-    },
-    KeyBinding {
-        key: BindingKey::Character('O'),
-        action: Action::AttentionOverview,
-        description: "Open the Needs you overview (every agent that needs attention)",
-    },
-    KeyBinding {
         key: BindingKey::Character('G'),
         action: Action::ToggleGoalTab,
         description: "Switch the focused pane between its prompt and goal tabs",
@@ -636,9 +615,6 @@ pub fn action_name(action: Action) -> &'static str {
         Action::ToggleMinimap => "toggle_minimap",
         Action::ToggleAutosave => "toggle_autosave",
         Action::Settings => "settings",
-        Action::AttentionNext => "attention_next",
-        Action::AttentionPanel => "attention_panel",
-        Action::AttentionOverview => "attention_overview",
         Action::ToggleGoalTab => "toggle_goal_tab",
         Action::ToggleGoalPopover => "toggle_goal_popover",
     }
@@ -684,9 +660,6 @@ pub const fn action_label(action: Action) -> &'static str {
         Action::ToggleMinimap => "Toggle minimap",
         Action::ToggleAutosave => "Toggle autosave",
         Action::Settings => "Open settings",
-        Action::AttentionNext => "Next needing you",
-        Action::AttentionPanel => "Attention panel",
-        Action::AttentionOverview => "Needs you overview",
         Action::ToggleGoalTab => "Toggle goal tab",
         Action::ToggleGoalPopover => "Toggle goal details",
     }
@@ -1165,48 +1138,6 @@ pub const fn action_mnemonics(action: Action) -> &'static [ActionMnemonic] {
                 word: "save",
             },
         ],
-        Action::AttentionNext => &[
-            Mnemonic {
-                key: 'a',
-                word: "attention",
-            },
-            Mnemonic {
-                key: 'i',
-                word: "important",
-            },
-            Mnemonic {
-                key: 'n',
-                word: "next",
-            },
-        ],
-        Action::AttentionPanel => &[
-            Mnemonic {
-                key: 'a',
-                word: "attention",
-            },
-            Mnemonic {
-                key: 'i',
-                word: "inbox",
-            },
-            Mnemonic {
-                key: 'p',
-                word: "panel",
-            },
-        ],
-        Action::AttentionOverview => &[
-            Mnemonic {
-                key: 'a',
-                word: "attention",
-            },
-            Mnemonic {
-                key: 'o',
-                word: "overview",
-            },
-            Mnemonic {
-                key: 'l',
-                word: "list",
-            },
-        ],
         Action::ToggleGoalTab => &[Mnemonic {
             key: 'g',
             word: "goal",
@@ -1659,76 +1590,6 @@ mod tests {
                 BindingKey::Character('x')
             ),
             Some(Action::ClosePane)
-        );
-    }
-
-    #[test]
-    fn attention_actions_are_bound_to_i_capital_i_and_capital_o_in_every_preset() {
-        assert_eq!(
-            action_for_table(LEADER_BINDINGS, BindingKey::Character('i')),
-            Some(Action::AttentionNext)
-        );
-        assert_eq!(
-            action_for_table(LEADER_BINDINGS, BindingKey::Character('I')),
-            Some(Action::AttentionPanel)
-        );
-        assert_eq!(
-            action_for_table(LEADER_BINDINGS, BindingKey::Character('O')),
-            Some(Action::AttentionOverview)
-        );
-        for preset in KeymapPreset::ALL {
-            let bindings = preset_bindings(preset);
-            assert_eq!(
-                action_for_table(&bindings, BindingKey::Character('i')),
-                Some(Action::AttentionNext)
-            );
-            assert_eq!(
-                action_for_table(&bindings, BindingKey::Character('I')),
-                Some(Action::AttentionPanel)
-            );
-            assert_eq!(
-                action_for_table(&bindings, BindingKey::Character('O')),
-                Some(Action::AttentionOverview),
-                "{preset:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn attention_actions_round_trip_their_config_names_and_are_remappable() {
-        assert_eq!(
-            action_from_name("attention_next"),
-            Some(Action::AttentionNext)
-        );
-        assert_eq!(
-            action_from_name("attention_panel"),
-            Some(Action::AttentionPanel)
-        );
-        assert_eq!(
-            action_from_name("attention_overview"),
-            Some(Action::AttentionOverview)
-        );
-        let mut bindings = LEADER_BINDINGS.to_vec();
-        let free_key = *available_keys(&bindings)
-            .first()
-            .expect("the leader table leaves some key free");
-        assert_eq!(
-            assign_key(
-                &mut bindings,
-                Action::AttentionNext,
-                BindingKey::Character(free_key)
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            action_for_table(&bindings, BindingKey::Character(free_key)),
-            Some(Action::AttentionNext)
-        );
-        assert_eq!(mnemonic_for(Action::AttentionNext, 'i'), Some("important"));
-        assert_eq!(mnemonic_for(Action::AttentionPanel, 'I'), Some("inbox"));
-        assert_eq!(
-            mnemonic_for(Action::AttentionOverview, 'O'),
-            Some("overview")
         );
     }
 }

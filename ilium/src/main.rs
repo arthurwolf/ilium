@@ -24,10 +24,8 @@ use ilium::session;
 
 mod close_pane;
 mod ctl;
-mod pane_filter;
 mod pane_scan;
 mod progress_wait;
-mod recap;
 mod resource;
 mod voice;
 
@@ -133,9 +131,6 @@ enum Command {
         #[arg(long)]
         hold_for_native_audit: bool,
     },
-    /// Internal installed animation qualification through this shipped binary.
-    #[command(hide = true)]
-    ReleaseAnimationProbe,
     /// Create (if not already running) and attach to a named session.
     NewSession { name: String },
     /// List this project's known sessions and whether each is currently running.
@@ -190,10 +185,6 @@ enum Command {
         #[command(subcommand)]
         command: voice::VoiceCommand,
     },
-    /// Factual short and long recaps of selected agent and shell panes.
-    /// Agent recaps read only the transcript bound to the pane's session;
-    /// shell recaps read bounded screen text. Output is JSONL by default.
-    Recap(recap::RecapArgs),
     /// Close a pane of this session, by default the pane this command runs
     /// in. `--worktree remove` also removes the pane's Ilium-created Git
     /// worktree when it is clean, merged and unused. Output is JSONL.
@@ -514,11 +505,6 @@ async fn dispatch(cli: Cli, explicit_cwd: bool) -> Result<(), CliError> {
                     CliError::ServerReportedError(format!("release embedding probe: {error:#}"))
                 })
         }
-        Some(Command::ReleaseAnimationProbe) => ilium_client::release_animation::probe()
-            .await
-            .map_err(|error| {
-                CliError::ServerReportedError(format!("release animation probe: {error:#}"))
-            }),
         None => {
             attach_or_create(
                 session::DEFAULT_SESSION_NAME,
@@ -561,7 +547,6 @@ async fn dispatch(cli: Cli, explicit_cwd: bool) -> Result<(), CliError> {
         Some(Command::Progress { command }) => progress(command).await,
         Some(Command::Wait { monitor_id }) => progress(ProgressCommand::Wait { monitor_id }).await,
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
-        Some(Command::Recap(args)) => recap::recap(args, &cli.cwd).await,
         Some(Command::ClosePane(args)) => close_pane::close_pane(args).await,
         Some(Command::Ctl(args)) => ctl::ctl(args, &cli.cwd).await,
     }

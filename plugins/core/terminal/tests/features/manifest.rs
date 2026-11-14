@@ -78,6 +78,7 @@ fn cor_050_client_capabilities_are_exactly_the_ones_of_the_page() {
             "ui.panels",
             "settings.write-kernel:terminal",
             "open-external",
+            "notify.toast",
             "extensions.provide:ilium.core.terminal/open-link",
             "extensions.provide:ilium.core.terminal/link-actions"
         ]
@@ -159,6 +160,7 @@ fn cor_050_contributes_the_link_detectors_and_the_link_open_command() {
         contributes.keys().collect::<Vec<_>>(),
         [
             "commands",
+            "context_menu",
             "extension_points",
             "link_detectors",
             "services",
@@ -178,7 +180,20 @@ fn cor_050_contributes_the_link_detectors_and_the_link_open_command() {
     // EXT-050: a detector's command names a declared command.
     assert_eq!(
         manifest["contributes"]["commands"],
-        json!([{ "id": "link-open", "title": "Open link", "side": "client" }])
+        json!([
+            { "id": "link-open", "title": "Open link", "side": "client" },
+            { "id": "paste-screen", "title": "Paste screen into another pane", "side": "client" }
+        ])
+    );
+    // COR-004: the right-click entry of a terminal pane runs the declared `paste-screen` command.
+    assert_eq!(
+        manifest["contributes"]["context_menu"],
+        json!([{
+            "id": "paste-screen",
+            "title": "Paste screen into another pane",
+            "command": "paste-screen",
+            "target": "terminal"
+        }])
     );
 }
 

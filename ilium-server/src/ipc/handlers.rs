@@ -345,37 +345,6 @@ async fn handle_scoped_request(
             // to mutate here.
             false
         }
-        ClientRequest::UpdateTextTriggers { settings } => {
-            if state.text_trigger_config_path.get().is_some() {
-                // Configured servers use the durable file as their authority.
-                // A delayed client's payload must not replace a newer save.
-                match crate::text_trigger_config::refresh(state).await {
-                    Ok(crate::text_trigger_config::RefreshOutcome::Changed) => {}
-                    Ok(crate::text_trigger_config::RefreshOutcome::Unchanged) => {
-                        send_direct(direct_tx, crate::text_trigger_config::snapshot(state).await)
-                            .await;
-                    }
-                    Err(message) => send_direct_error(direct_tx, message).await,
-                }
-                return false;
-            }
-            let candidate =
-                match crate::text_triggers::validate_in_worker(state, settings, None).await {
-                    Ok(candidate) => candidate,
-                    Err(message) => {
-                        send_direct_error(direct_tx, message).await;
-                        return false;
-                    }
-                };
-            match crate::text_trigger_config::accept_candidate(state, candidate).await {
-                Ok(crate::text_trigger_config::RefreshOutcome::Changed) => {}
-                Ok(crate::text_trigger_config::RefreshOutcome::Unchanged) => {
-                    send_direct(direct_tx, crate::text_trigger_config::snapshot(state).await).await;
-                }
-                Err(message) => send_direct_error(direct_tx, message).await,
-            }
-            false
-        }
         ClientRequest::UpdateAgentDetectionSettings {
             request_id,
             settings,
@@ -1585,8 +1554,6 @@ async fn handle_attach(
                     },
                 )
                 .await;
-                let settings = state.text_trigger_settings.read().await.settings.clone();
-                send_direct(direct_tx, ServerEvent::TextTriggersChanged { settings }).await;
                 send_direct(
                     direct_tx,
                     ServerEvent::SessionRecoveryAvailable { pane_count },
@@ -2496,8 +2463,6 @@ async fn admitted_state_synchronization_events(
                     };
                     events.extend(status_replays);
                     drop(statuses);
-                    let settings = state.text_trigger_settings.read().await.settings.clone();
-                    events.push(ServerEvent::TextTriggersChanged { settings });
                     events.push(ServerEvent::BlockingErrorsSnapshot {
                         errors: state.blocking_errors_snapshot(),
                     });
@@ -2669,12 +2634,8 @@ async fn state_synchronization_events(
     };
     events.extend(status_replays);
     drop(statuses);
-    // Rules are server-owned live state, so an attachment or lag recovery
-    // needs them even when no client has changed the list during this stream.
-    let settings = state.text_trigger_settings.read().await.settings.clone();
-    events.push(ServerEvent::TextTriggersChanged { settings });
-    // Mirrors the production builder: blocking errors follow the rules and
-    // precede the attach-only completion events.
+    // Mirrors the production builder: blocking errors precede the attach-only
+    // completion events.
     events.push(ServerEvent::BlockingErrorsSnapshot {
         errors: state.blocking_errors_snapshot(),
     });
@@ -6469,7 +6430,6 @@ async fn forward_output_with_recovery<Recovery>(
 {
     let mut activity_gate = OutputActivityGate::new();
     let mut subscription_cache = TerminalSubscriptionCache::new();
-    let mut text_trigger_tracker = crate::text_triggers::Matcher::default();
     // This is the newest sequence the forwarder already broadcast, or saw
     // while nobody subscribed. Lag recovery starts after it, never at the
     // beginning of the entire bounded journal.
@@ -6478,17 +6438,7 @@ async fn forward_output_with_recovery<Recovery>(
     // silent or closed after lag. No new task, queue or storage bank is added.
     let mut recovery_retry_at = None;
     let mut output_closed = false;
-    let (trigger_delivery_sender, trigger_delivery_receiver) = tokio::sync::mpsc::channel(64);
-    let trigger_delivery_task = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(
-        crate::text_triggers::run_deliveries(
-            std::sync::Arc::clone(&state),
-            pane_id,
-            input.clone(),
-            trigger_delivery_receiver,
-        ),
-    ));
     let mut owner_finished = false;
-    let mut drain_trigger_deliveries = false;
     loop {
         {
             let panes = state.panes.read().await;
@@ -6567,16 +6517,7 @@ async fn forward_output_with_recovery<Recovery>(
                     host.note_screen_changed(pane_id, first_chunk.sequence);
                 }
                 // The PTY reader already parsed and journaled these bytes.
-                // Hidden panes still feed Text Triggers even without clients.
                 if !subscription_cache.has_subscribers(&state, pane_id) {
-                    crate::text_triggers::process_output(
-                        &state,
-                        pane_id,
-                        &mut text_trigger_tracker,
-                        &first_chunk.bytes,
-                        &trigger_delivery_sender,
-                    )
-                    .await;
                     covered_sequence = covered_sequence.max(first_chunk.sequence);
                     continue;
                 }
@@ -6586,9 +6527,6 @@ async fn forward_output_with_recovery<Recovery>(
                         sequence,
                         bytes,
                     } => {
-                        // The visible stream merges extra PTY chunks. Match
-                        // against that complete byte range, otherwise a
-                        // regexp spanning a drained chunk is never observed.
                         if sequence > covered_sequence {
                             if first_sequence == covered_sequence.saturating_add(1) {
                                 state.broadcast(ServerEvent::ScreenUpdate {
@@ -6599,8 +6537,6 @@ async fn forward_output_with_recovery<Recovery>(
                                 });
                                 covered_sequence = sequence;
                             } else if recovery_retry_at.is_none() {
-                                // Preserve the original recovery-before-
-                                // trigger-processing order on the first try.
                                 attempt_forwarder_recovery(
                                     pane_id,
                                     &mut covered_sequence,
@@ -6610,25 +6546,8 @@ async fn forward_output_with_recovery<Recovery>(
                                 .await;
                             }
                         }
-                        crate::text_triggers::process_output(
-                            &state,
-                            pane_id,
-                            &mut text_trigger_tracker,
-                            &bytes,
-                            &trigger_delivery_sender,
-                        )
-                        .await;
                     }
                     OutputBurst::ReplayRequired { skipped } => {
-                        // The pane's own screen already holds these bytes;
-                        // adopt it rather than replaying a partial stream.
-                        crate::text_triggers::resync_after_gap(
-                            &state,
-                            pane_id,
-                            &mut text_trigger_tracker,
-                            &trigger_delivery_sender,
-                        )
-                        .await;
                         tracing::warn!(
                             "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
                         );
@@ -6645,13 +6564,6 @@ async fn forward_output_with_recovery<Recovery>(
                 }
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                crate::text_triggers::resync_after_gap(
-                    &state,
-                    pane_id,
-                    &mut text_trigger_tracker,
-                    &trigger_delivery_sender,
-                )
-                .await;
                 tracing::warn!(
                     "pane {pane_id:?} output forwarder lagged, skipped {skipped} chunk(s)"
                 );
@@ -6672,7 +6584,6 @@ async fn forward_output_with_recovery<Recovery>(
                 }
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                drain_trigger_deliveries = true;
                 output_closed = true;
                 // A final missing tail still needs repair; a closed source
                 // cannot provide another chunk to wake this owner.
@@ -6680,15 +6591,6 @@ async fn forward_output_with_recovery<Recovery>(
                     break;
                 }
             }
-        }
-    }
-    drop(trigger_delivery_sender);
-    if drain_trigger_deliveries {
-        // Natural EOF closes admission and finishes already matched decisions.
-        // Pane replacement/cancellation instead drops the abort-on-drop owner;
-        // the semantic writer also fences its exact original PTY identity.
-        if let Err(error) = trigger_delivery_task.join().await {
-            tracing::error!(pane_id = pane_id.0, %error, "text trigger delivery owner failed during drain");
         }
     }
 }
@@ -7703,65 +7605,6 @@ pub(crate) async fn submit_terminal_text(
     let input_gate = pane_input_gate(state, pane_id).await?;
     let _input_guard = input_gate.lock().await;
     submit_terminal_text_locked(state, pane_id, text, source, &input_gate).await
-}
-
-/// A queued Text Trigger is claimed only after acquiring this pane's input
-/// gate. Edits accepted while it waited invalidate the old occurrence before
-/// any PTY bytes are written, including an A-to-B-to-A settings cycle.
-pub(crate) async fn submit_text_trigger_if_current(
-    state: &ServerState,
-    pane_id: NodeId,
-    trigger_id: &str,
-    message: &str,
-    expected_session: &PtyInput,
-) -> Result<bool, String> {
-    let input_gate = pane_input_gate(state, pane_id).await?;
-    let _input_guard = input_gate.lock().await;
-    {
-        let panes = state.panes.read().await;
-        if !matches!(panes.get(&pane_id), Some(PaneResource::Terminal(runtime))
-            if expected_session.same_session(&runtime.session.input_handle()))
-        {
-            return Ok(false);
-        }
-    }
-    let current_target = {
-        let accepted = state.text_trigger_settings.read().await;
-        // Delayed deliveries outlive unrelated settings edits, so the fence is
-        // the rule itself (identity, enabled, message) rather than the revision.
-        accepted
-            .settings
-            .triggers
-            .iter()
-            .find(|trigger| {
-                trigger.enabled && trigger.id == trigger_id && trigger.message == message
-            })
-            .map(|trigger| trigger.target)
-    };
-    let Some(target) = current_target else {
-        return Ok(false);
-    };
-    let status = state
-        .tree
-        .read()
-        .await
-        .get(pane_id)
-        .and_then(|node| match &node.kind {
-            NodeKind::Pane { status, .. } => Some(status.clone()),
-            _ => None,
-        });
-    if !status.is_some_and(|status| crate::text_triggers::target_matches(target, &status)) {
-        return Ok(false);
-    }
-    submit_terminal_text_locked(
-        state,
-        pane_id,
-        message,
-        PromptSubmissionSource::TextTrigger,
-        &input_gate,
-    )
-    .await?;
-    Ok(true)
 }
 
 fn invalidate_submitted_title_observation(
@@ -12348,78 +12191,6 @@ mod tests {
         .await
         .expect("spawn progress monitor fixture pane");
         (state, pane_id, directory)
-    }
-
-    #[tokio::test]
-    async fn queued_trigger_cannot_cross_pty_replacement_and_fresh_owner_has_real_readback() {
-        let (state, pane_id, _directory) =
-            state_with_one_terminal_pane("trigger-owner-fence").await;
-        let original_input = {
-            let panes = state.panes.read().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-                panic!("terminal fixture");
-            };
-            runtime.session.input_handle()
-        };
-        {
-            let mut accepted = state.text_trigger_settings.write().await;
-            accepted.settings = ilium_ipc::TextTriggerSettings {
-                triggers: vec![ilium_ipc::TextTrigger {
-                    id: "owner-fenced-trigger".into(),
-                    regexp: "never-matched-fixture-marker".into(),
-                    message: "fresh owner literal receipt".into(),
-                    target: ilium_ipc::TextTriggerTarget::Terminals,
-                    ..ilium_ipc::TextTrigger::default()
-                }],
-            };
-            accepted.revision = 1;
-        }
-        let previous = state
-            .panes
-            .write()
-            .await
-            .remove(&pane_id)
-            .expect("original pane");
-        spawn_and_register_pane(
-            &state,
-            pane_id,
-            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
-        )
-        .await
-        .expect("replacement isolated PTY");
-        assert!(!submit_text_trigger_if_current(
-            &state,
-            pane_id,
-            "owner-fenced-trigger",
-            "fresh owner literal receipt",
-            &original_input,
-        )
-        .await
-        .expect("stale semantic decision rejected"));
-        let replacement_input = {
-            let panes = state.panes.read().await;
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
-                panic!("replacement fixture");
-            };
-            runtime.session.input_handle()
-        };
-        assert!(submit_text_trigger_if_current(
-            &state,
-            pane_id,
-            "owner-fenced-trigger",
-            "fresh owner literal receipt",
-            &replacement_input,
-        )
-        .await
-        .expect("fresh semantic decision acknowledged"));
-        wait_for_settled_output_sequence(&state, pane_id).await;
-        let text =
-            crate::pane::read_current_terminal_screen(&state, pane_id, vt100::Screen::contents)
-                .await
-                .expect("authoritative replacement screen");
-        assert!(text.contains("fresh owner literal receipt"), "{text}");
-        teardown_pane_resource(pane_id, previous);
-        teardown_state_panes(&state);
     }
 
     #[tokio::test]

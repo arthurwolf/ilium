@@ -154,11 +154,6 @@ fn contextual_text(app: &App) -> Option<String> {
     use crate::value_dialog::ValueDialogState;
     let modal = match &app.mode {
         Mode::LocationPicker(state) => state.diagnostic_text().map(str::to_owned),
-        Mode::Settings(state) => state
-            .plugin_editor
-            .as_ref()
-            .and_then(|editor| editor.error.clone()),
-        Mode::TextTriggerDialog(state) => state.save_error.clone(),
         Mode::Explorer(state, _)
         | Mode::FolderExplorer(state, _)
         | Mode::ProjectFolderExplorer(state, _)
@@ -173,24 +168,8 @@ fn contextual_text(app: &App) -> Option<String> {
         Mode::AnimationTextPrompt(target, _) => target.error.clone(),
         _ => None,
     };
-    if let Some(text) = app
-        .plugin_permission_session
-        .as_ref()
-        .and_then(|state| state.diagnostic_text())
-    {
-        return Some(match &app.status_message {
-            Some(status) => format!("{text}\n\n{status}"),
-            None => text.to_owned(),
-        });
-    }
     if modal.is_some() {
         return modal;
-    }
-    if let Some(state) = &app.remote_compaction {
-        if let crate::remote_compaction_dialog::RemoteCompactionPhase::Failed(error) = &state.phase
-        {
-            return Some(error.clone());
-        }
     }
     if let Some(popover) = &app.agent_popover {
         if !popover.enabled {
@@ -230,13 +209,6 @@ fn contextual_text(app: &App) -> Option<String> {
         }
     }
     let mut messages = Vec::new();
-    if let Some(bridge) = app.animation_frame.permission_bridge() {
-        if let Ok(status) = bridge.status() {
-            if status.phase() == crate::animation_plugins::review_bridge::ReviewPhase::Failed {
-                messages.push(status.message().to_owned());
-            }
-        }
-    }
     if let Some(error) = app
         .focused_pane_id()
         .or_else(|| app.selected_node_id())
@@ -255,18 +227,6 @@ fn contextual_text(app: &App) -> Option<String> {
     }
     if let Some(error) = &app.statistics_diagnostic {
         messages.push(error.clone());
-    }
-    if matches!(app.mode, Mode::Settings(_)) {
-        messages.extend(app.plugin_panel_model().issue_details);
-        for error in [
-            &app.reset_monitor_state.claude.last_error,
-            &app.reset_monitor_state.codex.last_error,
-        ]
-        .into_iter()
-        .flatten()
-        {
-            messages.push(error.clone());
-        }
     }
     if let Some(message) = &app.status_message {
         messages.push(message.clone());
@@ -433,17 +393,6 @@ mod tests {
         assert!(report.contains("Client process quota"));
         assert!(report.contains("Server responsiveness: not measured"));
         assert!(report.ends_with("original error\nFINALDETAIL"));
-    }
-
-    #[test]
-    fn modal_error_early_return_also_gets_runtime_context() {
-        let mut app = App::new("modal session".into(), "/project/modal".into());
-        let mut dialog = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
-        dialog.save_error = Some("trigger save failure".into());
-        app.mode = Mode::TextTriggerDialog(Box::new(dialog));
-        let report = current_text(&app).unwrap();
-        assert!(report.contains("Session: modal session"));
-        assert!(report.ends_with("trigger save failure"));
     }
 
     #[test]

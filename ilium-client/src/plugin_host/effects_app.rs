@@ -2,18 +2,14 @@
 //!
 //! A child module of `app`, so it can reach the private external-open queue. Each effect maps
 //! onto an existing kernel action: focus goes through `focus_pane`/`select_node`, attention
-//! marks through the attention queue's plugin layer, external opens through the bounded
+//! marks through the `attention-changed` event, external opens through the bounded
 //! external-open service, and Settings pages through the ordinary Settings screen.
 
 use ilium_core::{NodeId, NodeKind};
 use ilium_plugin_api::generated::types::intents::EditorPlacement;
 
 use super::{App, Mode, SettingsTab};
-use crate::attention::{AttentionItem, AttentionKind, AttentionSource, Briefing};
 use crate::plugin_host::effects::ClientEffect;
-
-/// Priority of a plugin's attention mark: above "finished", below questions and blocked goals.
-const PLUGIN_ATTENTION_PRIORITY: u8 = 50;
 
 /// The Settings tab a plugin names: its label, case-insensitively, with `-` for spaces.
 fn settings_tab_named(page: &str) -> Option<SettingsTab> {
@@ -28,10 +24,9 @@ impl App {
     pub(crate) fn apply_plugin_effect(&mut self, plugin: &str, effect: ClientEffect) -> bool {
         match effect {
             ClientEffect::FocusNode(node) => self.plugin_focus_node(plugin, node),
-            ClientEffect::MarkAttention { node, reason } => {
-                self.plugin_mark_attention(plugin, node, reason)
-            }
-            ClientEffect::AckAttention(node) => self.attention.queue.ack_from_plugin(node),
+            // The host reports marks and acknowledgements to the client plugins as
+            // `attention-changed` events; the attention plugin owns the queue.
+            ClientEffect::MarkAttention { .. } | ClientEffect::AckAttention(_) => false,
             ClientEffect::OpenExternal(target) => {
                 self.queue_external_open(target, None);
                 true
@@ -161,34 +156,6 @@ impl App {
         true
     }
 
-    fn plugin_mark_attention(&mut self, plugin: &str, node: NodeId, reason: String) -> bool {
-        let Some(found) = self.tree.get(node) else {
-            return false;
-        };
-        let title = found.name.clone();
-        let now_ms = crate::wall_clock::unix_millis_now();
-        let item = AttentionItem {
-            pane_id: node,
-            project_id: self.tree.project_ancestor(node),
-            title,
-            kind: AttentionKind::Changed,
-            reason: format!("{plugin}: {reason}"),
-            question: None,
-            waiting_on: None,
-            briefing: Briefing::default(),
-            priority: PLUGIN_ATTENTION_PRIORITY,
-            source: AttentionSource::Plugin,
-            fingerprint: crate::attention::fingerprint_parts(&[
-                plugin.as_bytes(),
-                reason.as_bytes(),
-            ]),
-            generation: self.attention.queue.generation(),
-            created_ms: now_ms,
-        };
-        self.attention.queue.mark_from_plugin(item);
-        true
-    }
-
     /// Lets the plugin host report focus and `config.toml` changes (gap G2); every tick. A
     /// plugin's write to the `animations` kernel tab is applied to the live animation here,
     /// and a changed `[padding]` table reaches the padding the next frame draws with. Returns
@@ -242,14 +209,6 @@ impl App {
             return;
         };
         self.settings_select_animation_scene(kind);
-    }
-
-    /// Drops plugin attention marks whose node left the tree.
-    pub(crate) fn prune_plugin_attention(&mut self) {
-        let tree = &self.tree;
-        self.attention
-            .queue
-            .retain_plugin_marks(|node| tree.get(node).is_some());
     }
 }
 

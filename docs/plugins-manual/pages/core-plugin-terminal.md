@@ -67,7 +67,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     "client": [
       "terminal.read-screen", "tree.read", "editor.edit",
       "commands.invoke:ilium.core.editor/*", "ui.panels", "settings.write-kernel:terminal",
-      "open-external",
+      "open-external", "notify.toast",
       "extensions.provide:ilium.core.terminal/open-link",
       "extensions.provide:ilium.core.terminal/link-actions"
     ]
@@ -79,7 +79,11 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
       { "id": "path", "regex": "[^\\s()\\[\\]{},;\"'`]*[^\\s()\\[\\]{},;\"'`.]", "command": "link-open" }
     ],
     "commands": [
-      { "id": "link-open", "title": "Open link", "side": "client" }
+      { "id": "link-open", "title": "Open link", "side": "client" },
+      { "id": "paste-screen", "title": "Paste screen into another pane", "side": "client" }
+    ],
+    "context_menu": [
+      { "id": "paste-screen", "title": "Paste screen into another pane", "command": "paste-screen", "target": "terminal" }
     ],
     "extension_points": [
       {
@@ -250,6 +254,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "ui.panels",
       "settings.write-kernel:terminal",
       "open-external",
+      "notify.toast",
       "extensions.provide:ilium.core.terminal/open-link",
       "extensions.provide:ilium.core.terminal/link-actions"
     ]
@@ -281,6 +286,19 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
         "id": "link-open",
         "title": "Open link",
         "side": "client"
+      },
+      {
+        "id": "paste-screen",
+        "title": "Paste screen into another pane",
+        "side": "client"
+      }
+    ],
+    "context_menu": [
+      {
+        "id": "paste-screen",
+        "title": "Paste screen into another pane",
+        "command": "paste-screen",
+        "target": "terminal"
       }
     ],
     "extension_points": [

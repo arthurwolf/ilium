@@ -8,6 +8,8 @@ pub mod cache_refresh;
 mod chart;
 mod model;
 mod port;
+pub mod reset;
+mod reset_server;
 mod stats_types;
 mod timeline;
 mod tokens;
@@ -21,7 +23,7 @@ use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 
 /// The server side of `ilium.core.cost` (core-plugin-cost.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["service-provider"])]
@@ -30,13 +32,20 @@ pub struct CostServer;
 
 impl Lifecycle for CostServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        let mut api = host();
+        reset_server::start(&mut *api);
         Ok(())
     }
 }
 
 impl Handler for CostServer {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
-        batch.iter().filter_map(port::answer).collect()
+        let mut api = host();
+        let mut submissions: Vec<Submission> = batch.iter().filter_map(port::answer).collect();
+        for event in &batch {
+            submissions.extend(reset_server::on_event(&mut *api, event));
+        }
+        submissions
     }
 }
 

@@ -4,16 +4,11 @@
 use ilium_client::agent_config_writer::{
     read_overrides, AgentConfigTarget, ConfigPaths, FileFingerprint,
 };
-use ilium_client::attention::queue::AttentionQueue;
-use ilium_client::attention::runtime::TurboWorkers;
 use ilium_client::board::checkbox_occurrences;
 use ilium_client::config::TerminalSettings;
 use ilium_client::cost_history::default_cache_path;
 use ilium_client::cost_model::format_quota;
 use ilium_client::naming::extract_icon_field;
-use ilium_client::remote_compaction_native::{
-    agent_kind, default_window_tokens, describe_limit, NativeEvaluation, NativeLimit,
-};
 use ilium_client::session_stats::{ProgressOutcome, SessionStats, TokenTotals, WorkKind};
 use ilium_client::session_stats_timeline::{RibbonCell, WorkRibbon};
 use ilium_client::value_config::{
@@ -21,7 +16,6 @@ use ilium_client::value_config::{
     terminal_engine_memory_spec, terminal_scrollback_spec,
 };
 use ilium_client::value_number::NumberSpec;
-use ilium_compaction_analysis::AgentKind;
 
 // --- cost_model::format_quota ---------------------------------------------
 
@@ -250,104 +244,6 @@ fn has_outcome_ignores_activity_cells() {
     assert!(!ribbon.has_outcome(ProgressOutcome::Success));
 }
 
-// --- remote_compaction_native ---------------------------------------------
-
-fn evaluation(
-    window_tokens: u64,
-    default_trigger_tokens: u64,
-    effective: Option<u64>,
-) -> NativeEvaluation {
-    NativeEvaluation {
-        window_tokens,
-        default_trigger_tokens,
-        effective_trigger_tokens: effective,
-        remote_trigger_tokens: window_tokens / 2,
-        is_remote_shadowed: false,
-    }
-}
-
-#[test]
-fn agent_kind_maps_claude_target_to_claude_code() {
-    assert_eq!(
-        agent_kind(AgentConfigTarget::ClaudeAutoCompactWindow),
-        AgentKind::ClaudeCode
-    );
-}
-
-#[test]
-fn agent_kind_maps_codex_target_to_codex() {
-    assert_eq!(
-        agent_kind(AgentConfigTarget::CodexAutoCompactTokenLimit),
-        AgentKind::Codex
-    );
-}
-
-#[test]
-fn default_window_tokens_is_positive_for_each_target() {
-    assert!(default_window_tokens(AgentConfigTarget::ClaudeAutoCompactWindow) > 0);
-    assert!(default_window_tokens(AgentConfigTarget::CodexAutoCompactTokenLimit) > 0);
-}
-
-#[test]
-fn describe_limit_default_says_not_set() {
-    assert_eq!(describe_limit(NativeLimit::Default), "not set");
-}
-
-#[test]
-fn describe_limit_token_setting_reports_tokens() {
-    assert_eq!(
-        describe_limit(NativeLimit::Setting(180_000)),
-        "180000 tokens"
-    );
-}
-
-#[test]
-fn describe_limit_zero_and_maximum_token_values() {
-    assert_eq!(describe_limit(NativeLimit::Setting(0)), "0 tokens");
-    assert_eq!(
-        describe_limit(NativeLimit::Setting(u64::MAX)),
-        format!("{} tokens", u64::MAX)
-    );
-}
-
-#[test]
-fn describe_limit_percent_reports_share_of_window() {
-    assert_eq!(
-        describe_limit(NativeLimit::PercentOfWindow(80)),
-        "80% of the window"
-    );
-}
-
-#[test]
-fn describe_limit_disabled_says_compaction_is_off() {
-    assert_eq!(
-        describe_limit(NativeLimit::Disabled),
-        "automatic compaction disabled"
-    );
-}
-
-#[test]
-fn effective_percent_is_none_while_native_compaction_is_off() {
-    assert_eq!(evaluation(200_000, 33_000, None).effective_percent(), None);
-}
-
-#[test]
-fn effective_percent_is_share_of_window() {
-    let percent = evaluation(200_000, 33_000, Some(50_000)).effective_percent();
-    assert_eq!(percent, Some(25.0));
-}
-
-#[test]
-fn effective_percent_zero_tokens_is_zero() {
-    let percent = evaluation(200_000, 33_000, Some(0)).effective_percent();
-    assert_eq!(percent, Some(0.0));
-}
-
-#[test]
-fn default_percent_is_share_of_window_for_cli_default_trigger() {
-    assert_eq!(evaluation(200_000, 33_000, None).default_percent(), 16.5);
-}
-
 // --- naming::extract_icon_field -------------------------------------------
 
 #[test]
@@ -408,60 +304,6 @@ fn extract_icon_field_keeps_quote_characters_inside_the_value() {
     let icon =
         extract_icon_field(&parsed, "icon", "tab").expect("quotes are not control characters");
     assert_eq!(icon, "\"x\"");
-}
-
-// --- attention::runtime::TurboWorkers (no worker running) -----------------
-
-#[test]
-fn turbo_workers_default_has_no_running_worker() {
-    let workers = TurboWorkers::default();
-    assert!(!workers.is_running());
-    assert_eq!(workers.current_generation(), None);
-}
-
-#[test]
-fn turbo_cancel_current_without_worker_is_a_no_op() {
-    let mut workers = TurboWorkers::default();
-    workers.cancel_current();
-    assert!(!workers.is_running());
-}
-
-#[test]
-fn turbo_finish_current_without_worker_is_a_no_op() {
-    let mut workers = TurboWorkers::default();
-    workers.finish_current();
-    assert!(!workers.is_running());
-    assert_eq!(workers.reap(), 0);
-}
-
-#[test]
-fn turbo_reap_with_nothing_retiring_reports_zero() {
-    let mut workers = TurboWorkers::default();
-    assert_eq!(workers.reap(), 0);
-}
-
-#[test]
-fn turbo_cancel_all_without_workers_is_a_no_op() {
-    let mut workers = TurboWorkers::default();
-    workers.cancel_all();
-    assert!(!workers.is_running());
-    assert_eq!(workers.reap(), 0);
-}
-
-// --- attention::queue::AttentionQueue::analysed_fingerprints --------------
-
-#[test]
-fn analysed_fingerprints_of_new_queue_is_empty() {
-    let queue = AttentionQueue::new();
-    assert!(queue.analysed_fingerprints().is_empty());
-}
-
-#[test]
-fn analysed_fingerprints_is_stable_across_calls() {
-    let queue = AttentionQueue::new();
-    let first = queue.analysed_fingerprints().len();
-    let second = queue.analysed_fingerprints().len();
-    assert_eq!(first, second, "repeated reads must agree");
 }
 
 // --- agent_config_writer::read_overrides / FileFingerprint::same_content ---

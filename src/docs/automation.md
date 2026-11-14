@@ -565,7 +565,7 @@ Details:
 
 - Each feed is polled **hourly**, with a 12 second request timeout and a 1 MiB response limit. Responses older than six hours, or from the future, are rejected.
 - Labels you may see: "Codex reset in 3h 12m 4s"; "Codex banked reset ..." for a banked reset; "... scheduled - time TBD" when announced without a time; "... due - awaiting confirmation" once the time has passed; and "Possible Codex reset watch window ends in ..." for a forecast window whose end is not a promised reset.
-- The settings page shows per provider: `Off`, `On - checking...`, `On - check failed: ...`, `On - reset announced`, `On - history only` (Claude) or `On - no scheduled reset` (Codex).
+- The Cost plugin reads the feeds and shows the label as one status bar segment. A failed check keeps the last announcement and is written to the plugin log as a warning.
 - Public announcements are separate from your account's rolling usage windows. Ilium cannot predict a private rolling limit or guarantee a reset. Do not plan around a forecast.
 - Turning a monitor off stops its network requests and clears its state.
 

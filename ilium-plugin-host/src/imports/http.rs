@@ -792,6 +792,8 @@ pub struct HttpImport {
     request_controls: Vec<Arc<WorkerControl>>,
     streams: HashMap<u64, StreamEntry>,
     next_stream: u64,
+    /// How long `take-response` waits for a fetch still in flight.
+    patience: Duration,
 }
 
 impl Default for HttpImport {
@@ -818,7 +820,15 @@ impl HttpImport {
             request_controls: Vec::new(),
             streams: HashMap::new(),
             next_stream: 0,
+            patience: TAKE_RESPONSE_PATIENCE,
         }
+    }
+
+    /// An import whose `take-response` never waits: a response that is not ready yet is
+    /// reported as not ready at once. For guests that run inside a render frame (scenes).
+    pub fn without_waiting(mut self) -> Self {
+        self.patience = Duration::ZERO;
+        self
     }
 
     /// How many streams are open (not yet ended or closed).
@@ -893,7 +903,7 @@ impl HostHttp for HttpImport {
         let (lock, ready) = &*slot;
         let guard = lock.lock().ok()?;
         let (mut guard, _) = ready
-            .wait_timeout_while(guard, TAKE_RESPONSE_PATIENCE, |held| held.is_none())
+            .wait_timeout_while(guard, self.patience, |held| held.is_none())
             .ok()?;
         let outcome = guard.take()?;
         drop(guard);

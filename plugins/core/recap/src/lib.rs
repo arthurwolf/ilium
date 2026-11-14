@@ -1,11 +1,26 @@
 //! Core plugin `ilium.core.recap` (manual page core-plugin-recap.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
-//! a minimal real implementation: it activates cleanly and acknowledges events without submissions until the host calls it needs exist.
+//! A recap is a few factual sentences about what one pane is doing, written once short and once
+//! long. The server side owns the `recap` command line, the `recap` service and the `recap-pane`
+//! job; the client side answers the `onboarding-state` client request.
+//!
+//! Pipeline per pane: a goal-aware, redacted evidence digest (`evidence`, `transcript`), a prompt
+//! (`pipeline`), one model call for both lengths (`job`), then parsing with word limits
+//! (`model`), pointer validation (`pointers`) and a stale-session fence (`fence`).
 
+pub mod client;
 pub mod comparison;
 pub mod custody;
+pub mod evidence;
+pub mod fence;
+pub mod job;
+pub mod model;
+pub mod pane_filter;
+pub mod pipeline;
+pub mod pointers;
+pub mod render;
+pub mod server;
+pub mod transcript;
 
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
@@ -13,7 +28,10 @@ use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::{ErrorCode, PluginError};
-use ilium_plugin_sdk::{ilium_plugin, Handler, JobRunner, Lifecycle, ServiceProvider};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, JobRunner, Lifecycle, ServiceProvider};
+use serde_json::json;
+
+use crate::server::ServiceAnswer;
 
 /// The server side of `ilium.core.recap` (core-plugin-recap.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["job-runner", "service-provider"])]
@@ -27,26 +45,49 @@ impl Lifecycle for RecapServer {
 }
 
 impl Handler for RecapServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut handle = host();
+        let api: &mut dyn ilium_plugin_sdk::HostApi = &mut *handle;
+        for event in batch {
+            match event {
+                Event::CliInvoked(invoked) if invoked.name == "recap" => {
+                    server::start_cli(api, invoked.invocation, &invoked.argv, &invoked.cwd);
+                }
+                Event::CliCancelled(invocation) => server::on_cancelled(api, invocation),
+                Event::RequestCompleted(result) => server::on_completed(api, &result),
+                Event::TimerFired(timer) => server::on_timer(api, timer),
+                Event::ClientAttached(client) => server::on_client_attached(client),
+                Event::ClientDetached(client) => server::on_client_detached(client),
+                _ => {}
+            }
+        }
         Vec::new()
     }
 }
 
 impl JobRunner for RecapServer {
-    fn run(&mut self, kind: String, _input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
-        Err(PluginError {
-            code: ErrorCode::Unsupported,
-            message: format!("ilium.core.recap: unknown job kind {kind}"),
-            retry_after_ms: None,
-        })
+    fn run(&mut self, kind: String, input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
+        let mut handle = host();
+        let api: &mut dyn ilium_plugin_sdk::HostApi = &mut *handle;
+        job::run(api, &kind, &input)
     }
+}
+
+fn service_error(code: ErrorCode, message: &str) -> ServiceReply {
+    ServiceReply::Done(json!({"error": code.as_str(), "message": message}).to_string())
 }
 
 impl ServiceProvider for RecapServer {
     fn handle(&mut self, call: ServiceCall) -> ServiceReply {
-        {
-            let _ = &call;
-            ServiceReply::Done(r#"{"error":"unsupported method"}"#.to_string())
+        if call.method != "get" {
+            return service_error(ErrorCode::InvalidArgument, "the only method is get");
+        }
+        let mut handle = host();
+        let api: &mut dyn ilium_plugin_sdk::HostApi = &mut *handle;
+        match server::service_get(api, call.call, &call.payload_json) {
+            Ok(ServiceAnswer::Done(text)) => ServiceReply::Done(text),
+            Ok(ServiceAnswer::Deferred) => ServiceReply::Deferred,
+            Err(error) => service_error(error.code, &error.message),
         }
     }
 }
@@ -63,7 +104,14 @@ impl Lifecycle for RecapClient {
 }
 
 impl Handler for RecapClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut handle = host();
+        let api: &mut dyn ilium_plugin_sdk::HostApi = &mut *handle;
+        for event in batch {
+            if let Event::ClientRequest(request) = event {
+                client::answer(api, request.call, &request.kind);
+            }
+        }
         Vec::new()
     }
 }

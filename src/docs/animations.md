@@ -14,7 +14,6 @@ Ilium can draw a slow Braille-dot animation behind your terminals: a quiet shore
 - [Shared display controls](#shared-display-controls)
 - [All 59 animations](#all-59-animations)
 - [Scene guides](#scene-guides)
-- [Animation packages (.iliumanim)](#animation-packages-iliumanim)
 - [Troubleshooting](#troubleshooting)
 
 ## Quick start
@@ -46,7 +45,6 @@ Row behaviour, shared by every scene control:
 
 A greyed-out choice (for example the GPU renderer when no usable GPU exists) is marked unavailable. `Left`/`Right`, `Enter` and clicks skip it, and resting the pointer on the row explains why. Select a scene row and press `Enter` to jump to its controls. Every scene keeps its own saved values when you select another scene. A help line under the list explains the selected row.
 
-The two source tabs at the top of the scene list are **Native** (the animations built into Ilium) and **Plugin** (installed `.iliumanim` packages). Switch with `Alt+Left` / `Alt+Right`, or click the tab. Browsing the Plugin tab never changes the active animation. See [Animation packages](#animation-packages-iliumanim).
 
 **Scene status** (hosted scenes, Wikipedia and Semantic) is one line reporting what the running scene says about itself: a download in progress, a missing `ffmpeg`, no audio input, an unreadable folder. `OK` means nothing is wrong. The row is always shown for these scenes so the rows below it never shift when a message appears.
 
@@ -405,44 +403,6 @@ Notes:
 
 Related: [Settings](settings.md), [Demos](demos.md) (the recorded animation gallery).
 
-## Animation packages (.iliumanim)
-
-Besides the built-in ("Native") scenes, Ilium can run animation packages: `.iliumanim` archives containing a `manifest.json`, an entry script (`entry.mjs`) and assets. Packages are browsed in **Settings -> Animations -> Plugin**.
-
-Two official packages ship with every release, version 1.0.0:
-
-| Package | Contents |
-| --- | --- |
-| `beach-1.0.0.iliumanim` | The native shoreline algorithms ported to standalone TypeScript. Settings mirror the shoreline controls: Style (classic or rich), Tide reach, Foam width, Sand grains, Wash cycle and the fifteen rich-style sliders. |
-| `carpet-1.0.0.iliumanim` | The native Carpet algorithms ported to TypeScript, with all of Carpet's settings. Declares two capabilities: pointer input over the animation viewport and HTTP access to `https://lichess.org` (for the Lichess TV chess mode). |
-
-Beach supports live and pre-rendered plans for both styles. Carpet supports both modes for Snake, Life, automated chess, DVD ball and planetary orbits; mouse hunters, Lichess TV and both clocks are live-only. Packages declare their own resource limits (heap, per-frame bytes, render time).
-
-How packages are found and run:
-
-1. Ilium searches three directories, in this order: the directory beside the animation helper (the bundled packages; keep the two `.iliumanim` files together with the `ilium`, `ilium-server` and helper executables), the `animation-plugins` folder under the Ilium data directory, and the `animation-plugins` folder under the Ilium config directory (on Linux `~/.local/share/ilium/animation-plugins` and `~/.config/ilium/animation-plugins`). The installer owns these directories; Ilium does not create them.
-2. Only regular files are read: symlinks and nested directories are not followed. The catalogue is limited to 256 packages; bundled packages keep their slots. Invalid archives are reported as catalogue issues and never evaluated. The Plugin tab's **Issues** row summarizes catalogue, package and runtime problems; pause the pointer over that row for about 150 ms to open a popover with package paths and failure details. Moving away dismisses it.
-3. Browsing lists metadata only. Nothing is evaluated until you select a package, and activation re-opens and fully verifies the archive.
-4. The archive's verified files are loaded into RAM on demand. Bundled JavaScript runs under V8 in a separate confined helper process (`ilium-animation-helper`); package files are not extracted into user directories.
-5. If a package asks for a capability (such as network access to an origin), Ilium shows a protected permission review. The choices are **Allow this session**, **Always allow this scope**, **Deny this session** and **Always deny this scope**; the default is deny.
-6. Each package keeps its own settings and mode when you switch between packages.
-
-Plugin packages and the helper need Linux Bubblewrap (`/usr/bin/bwrap`) and a cgroup-v2 delegation that lets Ilium create its own child group; the Linux packages and the requirement are described in [Installation](installation.md) and [Building from source](building-from-source.md). The release process that builds and checks the packages is in [../../release/RELEASING.md](../../release/RELEASING.md).
-
-### Authoring and packaging
-
-Each animation is a separate TypeScript project with a `README.md`, `manifest.json`, `package.json`, `src/index.mts`, any relative `.mts` imports, and optional `assets/`. The Beach and Carpet projects share a sibling `sdk/` directory containing types, development dependencies and the package builder. Install those dependencies with `bun install --cwd ../sdk --frozen-lockfile` from either project, then run:
-
-```sh
-bun run check
-bun run test
-bun run package
-```
-
-The builder bundles relative imports into `entry.mjs` and writes `dist/<id>-<version>.iliumanim`, a ZIP-compatible archive with the manifest and inventoried assets. Every runtime file has a byte count and SHA256 digest; source tests are excluded. Copy the archive into an animation discovery directory listed above.
-
-The entry exports `plan(settings, mode, environment)` and asynchronous `create(host, settings, accepted_plan)`. The plan declares the active mode's inputs, permissions and drawing format. The resulting scene renders into a host-leased frame and calls `frame.present()`; it must release frame references after each callback. `reconfigure` applies settings changes, and `dispose` releases scene-owned work. Scripts use Ilium's host APIs for approved inputs and HTTP requests; the runtime provides neither Node filesystem access nor browser DOM APIs. A package's declared playback modes describe its plans; usable playback also requires matching helper and host support.
-
 ## Troubleshooting
 
 | Symptom | Likely cause and fix |
@@ -454,4 +414,3 @@ The entry exports `plan(settings, mode, environment)` and asynchronous `create(h
 | High CPU use | Set a Frame rate cap (for example 10 fps) or use Loop playback where available. |
 | Semantic shows a "reorganize" status | No recommendation is stored for the selected project or entry. Reorganize the tree. |
 | Video, Earth or map scenes show a status message | Read Scene status: missing `ffmpeg`/`ffprobe`, offline, or a download in progress. See the matching scene guide. |
-| Plugin tab says no packages installed | The bundled `.iliumanim` files are not beside the animation helper. Reinstall or keep the release files together. |

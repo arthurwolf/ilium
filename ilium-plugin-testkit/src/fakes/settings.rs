@@ -2,9 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use ilium_plugin_sdk_core::generated::types::{
-    Event, PluginSide, SettingsChange, SettingsOrigin,
-};
+use ilium_plugin_sdk_core::generated::types::{Event, PluginSide, SettingsChange, SettingsOrigin};
 use ilium_plugin_sdk_core::types::{ErrorCode, PluginError};
 use serde_json::Value;
 
@@ -75,14 +73,21 @@ impl FakeSettings {
         }
     }
 
-    /// Declares the kernel keys that first-party plugins read (`[ui]` toolbar keys and
-    /// `remote_compaction.enabled`) with their defaults; the values are kept if already present.
+    /// Declares the kernel keys that first-party plugins read (the `[ui]` toolbar keys) with their defaults; the
+    /// values are kept if already present.
     pub(crate) fn declare_kernel_keys(&mut self) {
-        for key in ["ui.last_prompt_enabled", "ui.agent_toolbar_enabled", "ui.show_toolbar_labels"] {
+        for key in [
+            "ui.last_prompt_enabled",
+            "ui.agent_toolbar_enabled",
+            "ui.show_toolbar_labels",
+        ] {
             self.declare(key, ValueKind::Bool, Some(Value::Bool(true)));
         }
-        self.declare("ui.last_prompt_max_lines", ValueKind::Number, Some(Value::from(4)));
-        self.declare("remote_compaction.enabled", ValueKind::Bool, Some(Value::Bool(false)));
+        self.declare(
+            "ui.last_prompt_max_lines",
+            ValueKind::Number,
+            Some(Value::from(4)),
+        );
     }
 
     /// Side that owns the keys in `settings-changed`.
@@ -103,8 +108,13 @@ impl FakeSettings {
             return ValueKind::of(existing);
         }
         let lower = key.to_ascii_lowercase();
-        let numeric_suffixes = ["count", "limit", "size", "width", "height", "seconds", "millis"];
-        if numeric_suffixes.iter().any(|suffix| lower.ends_with(suffix)) {
+        let numeric_suffixes = [
+            "count", "limit", "size", "width", "height", "seconds", "millis",
+        ];
+        if numeric_suffixes
+            .iter()
+            .any(|suffix| lower.ends_with(suffix))
+        {
             return ValueKind::Number;
         }
         ValueKind::Any

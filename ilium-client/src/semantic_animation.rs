@@ -82,12 +82,6 @@ fn axes(kind: AnimationKind) -> &'static [&'static str] {
         AnimationKind::Spectrum => &["style", "floor_db"],
         AnimationKind::Clouds => &["coverage", "projection", "history_hours", "land_underlay"],
         AnimationKind::NightLights => &["projection", "terminator", "coastline"],
-        AnimationKind::Carpet => &[
-            "carpet_mode",
-            "carpet_snake_grid",
-            "carpet_snake_step_ms",
-            "carpet_life_generation_ms",
-        ],
         _ => &[],
     }
 }
@@ -272,11 +266,6 @@ fn validate_value(row: &Control, value: &ControlValue) -> Result<(), String> {
             row.id
         ));
     }
-    if row.id == "carpet_snake_grid"
-        && matches!(value, ControlValue::Number(number) if number % 2 != 0)
-    {
-        return Err("carpet_snake_grid must be even".into());
-    }
     Ok(())
 }
 
@@ -441,7 +430,6 @@ fn checked(
     }
     let required: &[&str] = match kind {
         AnimationKind::OpenStreetMap => &["source", "place", "tour"],
-        AnimationKind::Carpet => &["carpet_mode"],
         _ => &[],
     };
     for id in required {
@@ -783,9 +771,6 @@ fn notes(kind: AnimationKind) -> &'static str {
         }
         AnimationKind::OpenStreetMap => {
             "Require source, place and tour. source=0 only. Paris uses place=0,tour=0. Local/custom map inputs are never selected."
-        }
-        AnimationKind::Carpet => {
-            "Require carpet_mode. Mode-specific controls: hunters=0; snake=1; life=2; AI chess=3; piece heights/chess_easing=3 or 4; dvd=5; orbit=6; UTC offset/seconds=7 or 8; 24h=7; tubes=8. Snake grid must be even; initial length <= min(32,grid*grid-1). Easing <= snake step in mode 1, <= min(3000,Life generation) in mode 2, <=900 in mode 7; otherwise <=3000."
         }
         AnimationKind::Graph => {
             "Apply source before mode. OHLC candles require that source's enabled candle choice; rising/falling hues apply only to candles. Poll settings remain authored."

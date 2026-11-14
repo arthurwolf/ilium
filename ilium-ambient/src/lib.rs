@@ -11,7 +11,6 @@ pub mod dither;
 pub mod external;
 pub mod geocode;
 pub mod gpu;
-pub mod live_chess;
 pub mod live_data;
 pub mod location;
 pub mod minecraft;
@@ -42,23 +41,13 @@ pub use scenes::{
     spectrum::SpectrumSettings, stars::StarsSettings, video::VideoSettings,
 };
 
-pub use scenes::vector_td::VectorTdSettings;
 // Pure world/renderer contracts support offline capture and acceptance probes.
 pub use scenes::voxel_landscape;
 pub use scenes::voxel_landscape::VoxelLandscapeSettings;
 
 pub use scenes::topographic_maps::TopographicMapsSettings;
 
-pub use scenes::carpet::CarpetSettings;
-pub use scenes::growth::{GrowthColorMode, GrowthPattern, GrowthSettings};
 pub use scenes::openstreetmap::address_search as openstreetmap_address_search;
 pub use scenes::openstreetmap::{
     AddressProvider, AddressSearchSettings, GeometryMap, OpenStreetMapSettings, SourceElement,
-};
-pub use scenes::wind::WindSettings;
-
-pub use scenes::quiet::{
-    embroidery::EmbroiderySettings,
-    frost::{FrostMode, FrostSettings},
-    hesitating_ink::HesitatingInkSettings,
 };

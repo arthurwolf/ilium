@@ -41,7 +41,6 @@ impl HeapBytes for PromptSubmissionSource {
             | Self::InitialAgentPrompt
             | Self::ToolbarAction
             | Self::AskForUpdate
-            | Self::TextTrigger
             | Self::ProgressResult
             | Self::PluginIntent => 0,
         }
@@ -420,33 +419,6 @@ impl HeapBytes for WorkspacePruneResult {
             .saturating_add(reasons.heap_bytes())
     }
 }
-impl HeapBytes for TextTriggerSettings {
-    fn heap_bytes(&self) -> usize {
-        let TextTriggerSettings { triggers } = self;
-        0usize.saturating_add(triggers.heap_bytes())
-    }
-}
-impl HeapBytes for TextTrigger {
-    fn heap_bytes(&self) -> usize {
-        let TextTrigger {
-            id,
-            enabled,
-            regexp,
-            message,
-            target,
-            sample_text,
-            delay_seconds,
-        } = self;
-        0usize
-            .saturating_add(delay_seconds.heap_bytes())
-            .saturating_add(id.heap_bytes())
-            .saturating_add(enabled.heap_bytes())
-            .saturating_add(regexp.heap_bytes())
-            .saturating_add(message.heap_bytes())
-            .saturating_add(target.heap_bytes())
-            .saturating_add(sample_text.heap_bytes())
-    }
-}
 impl HeapBytes for VoiceTextRejection {
     fn heap_bytes(&self) -> usize {
         let VoiceTextRejection { code, message } = self;
@@ -748,7 +720,6 @@ impl HeapBytes for ServerEvent {
             Self::ProgressMonitorEnabledChanged { enabled } => {
                 0usize.saturating_add(enabled.heap_bytes())
             }
-            Self::TextTriggersChanged { settings } => 0usize.saturating_add(settings.heap_bytes()),
             Self::ProgressMonitorCheckCompleted {
                 request_id,
                 pane_id,
@@ -971,15 +942,6 @@ impl HeapBytes for WorkspacePruneBranchOutcome {
         }
     }
 }
-impl HeapBytes for TextTriggerTarget {
-    fn heap_bytes(&self) -> usize {
-        match self {
-            Self::Agents => 0usize,
-            Self::Terminals => 0usize,
-            Self::Both => 0usize,
-        }
-    }
-}
 impl HeapBytes for VoiceTextRejectionCode {
     fn heap_bytes(&self) -> usize {
         match self {
@@ -1122,18 +1084,7 @@ mod tests {
         assert_eq!(event.retained_bytes(), size_of::<ServerEvent>() + 8192);
     }
     #[test]
-    fn trigger_sample_text_and_unused_vector_capacity_remain_accounted() {
-        let event = ServerEvent::TextTriggersChanged {
-            settings: TextTriggerSettings {
-                triggers: vec![TextTrigger {
-                    sample_text: String::with_capacity(32768),
-                    ..TextTrigger::default()
-                }],
-            },
-        };
-        assert!(
-            event.retained_bytes() >= size_of::<ServerEvent>() + size_of::<TextTrigger>() + 32768
-        );
+    fn terminal_replay_counts_unused_byte_capacity() {
         let bytes = Vec::<u8>::with_capacity(65536);
         let event = ServerEvent::TerminalReplay {
             pane_id: NodeId(9),

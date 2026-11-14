@@ -69,9 +69,9 @@ fn scratch_file(directory: &Path, name: &str) -> String {
 fn cor_004_screen_transfer_pastes_visible_text_only_between_adjacent_terminal_panes() {
     not_implemented(
         "COR-004",
-        "screen transfer is implemented by the terminal plugin (plugins/core/terminal) and the \
-         client context menu (ilium-client/src/terminal_context_menu.rs); ilium-plugin-host has no \
-         entry point for it and does not depend on either crate",
+        "screen transfer is implemented by the terminal plugin (plugins/core/terminal, its \
+         `paste-screen` command and message); ilium-plugin-host has no entry point for it and does \
+         not depend on that crate",
     );
 }
 

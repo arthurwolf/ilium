@@ -47,9 +47,6 @@ pub enum ValueTarget {
     BoardStorage {
         parent_group: NodeId,
     },
-    TriggerScope {
-        draft_id: String,
-    },
     SoundStudio {
         control: crate::onboarding::studio::SoundControl,
         identity: std::sync::Arc<()>,
@@ -57,7 +54,6 @@ pub enum ValueTarget {
         directory: std::path::PathBuf,
     },
     Animation(crate::value_animation::AnimationControlTarget),
-    Plugin(crate::value_plugin::PluginTarget),
     Cost {
         target: crate::value_cost::CostValueTarget,
         directory: std::path::PathBuf,
@@ -389,48 +385,6 @@ impl ValueDialogHost {
         Ok(())
     }
 
-    pub fn trigger_scope(
-        parent: &crate::text_trigger_dialog::TextTriggerDialogState,
-    ) -> Result<Self, String> {
-        let options = ilium_ipc::TextTriggerTarget::ALL
-            .into_iter()
-            .map(|value| ChoiceOption {
-                id: format!("{value:?}"),
-                label: value.label().into(),
-                disabled_reason: None,
-            })
-            .collect();
-        Ok(Self {
-            target: ValueTarget::TriggerScope {
-                draft_id: parent.identity().into(),
-            },
-            dialog: ValueDialogState::Choice(ChoiceDialogState::new(
-                "Text trigger scope",
-                options,
-                Some(format!("{:?}", parent.target)),
-            )?),
-            pending_save: None,
-        })
-    }
-
-    pub fn apply_trigger_scope_choice(
-        &self,
-        parent: &mut crate::text_trigger_dialog::TextTriggerDialogState,
-        id: &str,
-    ) -> Result<(), String> {
-        let ValueTarget::TriggerScope { draft_id } = &self.target else {
-            return Err("This catalog belongs to a different form".into());
-        };
-        if parent.identity() != draft_id {
-            return Err("The text trigger changed; reopen its scope catalog".into());
-        }
-        parent.target = ilium_ipc::TextTriggerTarget::ALL
-            .into_iter()
-            .find(|value| format!("{value:?}") == id)
-            .ok_or("This trigger scope is no longer available")?;
-        Ok(())
-    }
-
     pub fn studio_number(
         control: crate::onboarding::studio::SoundControl,
         studio: &crate::onboarding::studio::SoundStudio,
@@ -655,21 +609,6 @@ impl crate::app::App {
             }
         }
     }
-    pub(crate) fn begin_trigger_scope_dialog(
-        &mut self,
-        parent: Box<crate::text_trigger_dialog::TextTriggerDialogState>,
-    ) {
-        match ValueDialogHost::trigger_scope(&parent) {
-            Ok(host) => self.push_modal_over(
-                crate::app::Mode::TextTriggerDialog(parent),
-                crate::app::Mode::ValueDialog(Box::new(host)),
-            ),
-            Err(error) => {
-                self.status_message = Some(error);
-                self.mode = crate::app::Mode::TextTriggerDialog(parent);
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -719,23 +658,19 @@ mod tests {
     }
 
     #[test]
-    fn board_and_trigger_chrome_paints_the_exact_picker_and_arrow_targets() {
+    fn board_chrome_paints_the_exact_picker_and_arrow_targets() {
         use crate::value_control::{ControlAction, ControlStyles, PointerButton};
         use ratatui::{
             backend::TestBackend,
             layout::{Position, Rect},
             Terminal,
         };
-        let trigger = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
         for (width, height) in [(32, 20), (80, 30), (140, 40)] {
             let area = Rect::new(0, 0, width, height);
-            for control in [
-                crate::modal::create_board_storage_control(
-                    area,
-                    crate::app::BoardStorageKind::Folder.label(),
-                ),
-                crate::text_trigger_dialog::target_control(area, &trigger),
-            ] {
+            for control in [crate::modal::create_board_storage_control(
+                area,
+                crate::app::BoardStorageKind::Folder.label(),
+            )] {
                 let geometry = control.geometry();
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                 terminal
@@ -821,41 +756,6 @@ mod tests {
             parent.storage_kind,
             crate::app::BoardStorageKind::MarkdownFile
         );
-    }
-
-    #[test]
-    fn trigger_scope_catalog_preserves_authored_rule_and_fences_reopened_editor() {
-        let mut parent = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
-        parent.regexp = TextPromptState::new("authored.*λ");
-        parent.message = TextPromptState::new("authored message");
-        parent.regexp.cursor = 3;
-        parent.enabled = false;
-        parent.focus = crate::text_trigger_dialog::TextTriggerFocus::Target;
-        let before = parent.candidate().unwrap();
-        let host = ValueDialogHost::trigger_scope(&parent).unwrap();
-        let ValueDialogState::Choice(choice) = &host.dialog else {
-            panic!("catalog");
-        };
-        assert_eq!(
-            choice.options().len(),
-            ilium_ipc::TextTriggerTarget::ALL.len()
-        );
-        host.apply_trigger_scope_choice(&mut parent, "Agents")
-            .unwrap();
-        let mut expected = before.clone();
-        expected.target = ilium_ipc::TextTriggerTarget::Agents;
-        assert_eq!(parent.candidate().unwrap(), expected);
-        assert_eq!(parent.regexp.cursor, 3);
-        assert_eq!(
-            parent.focus,
-            crate::text_trigger_dialog::TextTriggerFocus::Target
-        );
-        let mut replacement =
-            crate::text_trigger_dialog::TextTriggerDialogState::new(Some((0, &before)));
-        assert!(host
-            .apply_trigger_scope_choice(&mut replacement, "Terminals")
-            .is_err());
-        assert_eq!(replacement.candidate().unwrap(), before);
     }
 
     #[test]

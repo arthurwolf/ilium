@@ -1077,7 +1077,7 @@ pub(crate) async fn create_agent_in_workspace(
             return Err("custom agent provider does not match the workspace request".into());
         }
         let config_dir = state
-            .text_trigger_config_path
+            .config_path
             .get()
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .or_else(|| crate::paths::config_dir().ok())

@@ -3,9 +3,11 @@
 //! The server publishes the rate-limited `screen-changed` topic, renames panes from OSC titles
 //! and provides the `transfer` service; the client opens `path:line` links in the editor. Pure
 //! parts: `links` (link detection), `screen_diff` (repaint planning), `screen_topic` (rate limit
-//! and payload), `transfer` (service requests and paste text).
+//! and payload), `transfer` (service requests and paste text), `paste_screen` (the right-click
+//! "Paste screen into another pane" chooser).
 
 pub mod links;
+pub mod paste_screen;
 pub mod screen_diff;
 pub mod screen_topic;
 pub mod transfer;
@@ -19,13 +21,19 @@ use ilium_plugin_sdk::primitives::{HostTerminal, ScreenPart};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::{
-    EditorOpenSpec, EditorPlacement, ExternalTarget, FsPath, Intent, NodeId, OpenExternalSpec,
-    RenameNodeSpec, RequestRef, RequestResult, Submission, TimerId, TitleOrigin, TitleSource,
+    ActionKind, ActionValue, Area, ContainerKind, EditorOpenSpec, EditorPlacement, ExternalTarget,
+    FsPath, Intent, MessageSpec, MessageTarget, NodeClass, NodeId, OpenExternalSpec, OpenViewSpec,
+    PluginId, PluginSide, RenameNodeSpec, RequestRef, RequestResult, Submission, TimerId,
+    TitleOrigin, TitleSource, ToastSpec, Tone, UiTree, ViewTarget,
 };
-use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
+use std::cell::RefCell;
 
 use screen_topic::{Change, Limiter, Offer};
 use transfer::{Pending, Request};
+
+/// The plugin id, also the target of the client-to-server `paste-screen` message.
+const PLUGIN_ID: &str = "ilium.core.terminal";
 
 /// The server side of `ilium.core.terminal` (core-plugin-terminal.md, world `ilium:server/base@0.1.0`).
 ///
@@ -219,6 +227,12 @@ impl Handler for TerminalServer {
                     revision: change.revision,
                 }),
                 Event::TimerFired(timer) => self.on_timer(timer),
+                Event::Message(message) if message.channel == paste_screen::NAME => {
+                    // The reply is only for service callers; the user sees the paste arrive.
+                    if let Some(answer) = paste_screen::Answer::from_payload(&message.payload) {
+                        let _ = self.send_screen(NodeId(answer.source), NodeId(answer.target));
+                    }
+                }
                 Event::RequestCompleted(result) => {
                     self.on_request_completed(&result, &mut submissions)
                 }
@@ -274,7 +288,7 @@ fn web_url(text: &str) -> Option<&str> {
 }
 
 /// The client side of `ilium.core.terminal` (core-plugin-terminal.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
 pub struct TerminalClient {
     activated: bool,
@@ -285,6 +299,132 @@ impl Lifecycle for TerminalClient {
         let _ = &context;
         self.activated = true;
         Ok(())
+    }
+}
+
+thread_local! {
+    /// The open "Paste screen into another pane" chooser, if any.
+    static CHOOSER: RefCell<Option<paste_screen::Dialog>> = const { RefCell::new(None) };
+}
+
+/// The terminal panes sharing a split view with `pane`, reduced to the chooser's facts. Empty
+/// when the pane is not in a split view, or without the `tree.read` grant.
+fn split_siblings(pane: NodeId) -> Vec<paste_screen::Sibling> {
+    let mut api = host();
+    let Some(parent) = HostTree::get(&mut *api, pane).and_then(|view| view.parent) else {
+        return Vec::new();
+    };
+    let in_split = HostTree::get(&mut *api, parent).is_some_and(|view| {
+        matches!(view.class, NodeClass::Container)
+            && matches!(
+                view.container,
+                Some(ContainerKind::SplitHorizontal | ContainerKind::SplitVertical)
+            )
+    });
+    if !in_split {
+        return Vec::new();
+    }
+    HostTree::children(&mut *api, parent)
+        .into_iter()
+        .filter_map(|id| {
+            let view = HostTree::get(&mut *api, id)?;
+            matches!(view.class, NodeClass::Pane).then(|| paste_screen::Sibling {
+                id: id.0,
+                content_kind: view.content_kind,
+                title: view.title,
+                agent: view.agent.is_some(),
+            })
+        })
+        .collect()
+}
+
+fn message_to_server(answer: paste_screen::Answer) -> Submission {
+    Submission::new(Intent::Message(MessageSpec {
+        to: MessageTarget {
+            plugin: PluginId(PLUGIN_ID.to_string()),
+            side: PluginSide::Server,
+            client: None,
+        },
+        channel: paste_screen::NAME.to_string(),
+        payload: answer.to_payload(),
+    }))
+}
+
+fn notice(text: &str) -> Submission {
+    Submission::new(Intent::Toast(ToastSpec {
+        id: Some("terminal-paste-screen".to_owned()),
+        tone: Tone::Info,
+        title: text.chars().take(60).collect(),
+        body: None,
+        actions: Vec::new(),
+        duration_ms: None,
+    }))
+}
+
+/// Runs the `paste-screen` command: sends at once to the only neighbour, asks among several,
+/// and says so when there is none.
+fn paste_screen_command(source: u64) -> Vec<Submission> {
+    let offered = paste_screen::destinations(source, &split_siblings(NodeId(source)));
+    match offered.as_slice() {
+        [] => vec![notice(paste_screen::NO_DESTINATION)],
+        [only] => vec![message_to_server(paste_screen::Answer {
+            source,
+            target: only.pane,
+        })],
+        _ => {
+            CHOOSER.with(|cell| {
+                *cell.borrow_mut() = Some(paste_screen::Dialog::new(source, offered));
+            });
+            vec![Submission::new(Intent::OpenView(OpenViewSpec {
+                view: paste_screen::view(),
+                focus: true,
+            }))]
+        }
+    }
+}
+
+/// Applies one action of the chooser; when it ends the dialog, returns the message for the
+/// server side (if a paste is wanted) and the intent that closes the popup.
+fn paste_screen_action(
+    key: &str,
+    action_id: &str,
+    kind: ActionKind,
+    value: Option<ActionValue>,
+) -> Vec<Submission> {
+    let step = CHOOSER.with(|cell| {
+        let mut chooser = cell.borrow_mut();
+        let step = chooser
+            .as_mut()
+            .map(|dialog| dialog.act(key, action_id, kind, value));
+        if matches!(
+            step,
+            Some(paste_screen::Step::Paste(_) | paste_screen::Step::Cancel)
+        ) {
+            *chooser = None;
+        }
+        step
+    });
+    let close = || Submission::new(Intent::CloseView(paste_screen::view()));
+    match step {
+        Some(paste_screen::Step::Paste(answer)) => vec![message_to_server(answer), close()],
+        // The kernel already removed a popup it closed itself; every other end closes it here.
+        Some(paste_screen::Step::Cancel) if kind != ActionKind::Closed => vec![close()],
+        _ => Vec::new(),
+    }
+}
+
+impl Views for TerminalClient {
+    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
+        CHOOSER.with(|cell| {
+            cell.borrow().as_ref().map_or_else(
+                || UiTree {
+                    version: 1,
+                    nodes: Vec::new(),
+                    root: 0,
+                },
+                paste_screen::Dialog::render,
+            )
+        })
     }
 }
 
@@ -312,8 +452,26 @@ impl Handler for TerminalClient {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
         let mut submissions = Vec::new();
         for event in batch {
-            let Event::LinkActivated(link) = event else {
-                continue;
+            let link = match event {
+                Event::LinkActivated(link) => link,
+                Event::CommandInvoked(invoked) if invoked.command == paste_screen::NAME => {
+                    let source = paste_screen::node_argument(&invoked.arguments_json)
+                        .or_else(|| invoked.context.pane.map(|pane| pane.0));
+                    if let Some(source) = source {
+                        submissions.extend(paste_screen_command(source));
+                    }
+                    continue;
+                }
+                Event::UiAction(action) if action.view == paste_screen::view() => {
+                    submissions.extend(paste_screen_action(
+                        &action.key,
+                        &action.action_id,
+                        action.kind,
+                        action.value,
+                    ));
+                    continue;
+                }
+                _ => continue,
             };
             let submission = match link.detector_id.as_str() {
                 "path-line" => {

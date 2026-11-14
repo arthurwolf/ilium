@@ -129,8 +129,6 @@ pub(super) fn preflight(app: &App) -> Result<(), String> {
         app.status_message.as_ref(),
         app.voice_settings.input_device_name.as_ref(),
         app.voice_settings.output_device_name.as_ref(),
-        app.reset_monitor_state.claude.last_error.as_ref(),
-        app.reset_monitor_state.codex.last_error.as_ref(),
     ] {
         bytes = bytes.saturating_add(text.map_or(0, String::len));
     }
@@ -497,10 +495,6 @@ fn settings_snapshot(app: &App) -> Value {
             "voice.input_device", "voice.output_device", "voice.output_volume_percent",
             "voice.confirm_terminal_submissions", "voice.pause_media_while_active",
             "voice.custom_prompt",
-            "reset_planning.monitor_claude", "reset_planning.monitor_codex",
-            "reset_planning.time_style",
-            "attention.mode", "attention.press_sorts", "attention.show_briefing", "attention.large_buttons", "attention.turbo_concurrency",
-            "attention.expiry_seconds", "attention.model_override",
             "debug.file_logging_enabled",
             "git.default_where", "git.branch_prefix", "git.worktree_location_template",
             "git.default_base", "git.branch_line", "git.setup_command", "git.default_close_policy"
@@ -660,31 +654,12 @@ fn settings_snapshot(app: &App) -> Value {
         "debug": {
             "file_logging_enabled": app.debug_settings.file_logging_enabled,
         },
-        "reset_planning": {
-            "monitor_claude": app.reset_planning_settings.monitor_claude,
-            "monitor_codex": app.reset_planning_settings.monitor_codex,
-            "time_style": match app.reset_planning_settings.time_style {
-                crate::reset_planning::ResetTimeStyle::Exact => "exact",
-                crate::reset_planning::ResetTimeStyle::Human => "human",
-            },
-            "claude_last_error": app.reset_monitor_state.claude.last_error,
-            "codex_last_error": app.reset_monitor_state.codex.last_error,
-        },
-        "attention": {
-            "mode": app.attention_settings.mode.name(),
-            "press_sorts": app.attention_settings.press_sorts,
-            "show_briefing": app.attention_settings.show_briefing,
-            "turbo_concurrency": app.attention_settings.turbo_concurrency,
-            "expiry_seconds": app.attention_settings.expiry_seconds,
-            "model_override": app.attention_settings.model_override,
-        },
     })
 }
 
 fn right_panel_snapshot(target: &RightPanelTarget) -> Value {
     match target {
         RightPanelTarget::Empty => json!({ "kind": "empty" }),
-        RightPanelTarget::Attention => json!({ "kind": "attention" }),
         RightPanelTarget::PluginView { plugin, kind, name } => {
             json!({ "kind": "plugin-view", "plugin": plugin, "view": kind.as_str(), "name": name })
         }
@@ -733,7 +708,6 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::AgentToolbarModelSubmenu(_) => "agent_toolbar_model_submenu",
         Mode::LastPromptDialog(_) => "last_prompt_dialog",
         Mode::ValueDialog(_) => "value_options",
-        Mode::TextTriggerDialog(_) => "text_trigger_dialog",
         Mode::EditorLineContextMenu(_) => "editor_line_menu",
         Mode::CreateAgentFromLine(_) => "create_agent",
         Mode::CreateAgentWorkspace(_) => "create_agent_workspace",
@@ -749,8 +723,6 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::BoardRenamePrompt(..) => "board_rename_prompt",
         Mode::BoardDeleteConfirm(..) => "board_delete_confirm",
         Mode::ConfirmClose(_) => "confirm_close",
-        Mode::RemoteCompaction => "remote_compaction",
-        Mode::AttentionOverview => "attention_overview",
         Mode::ConfirmRemoveWorkspace(_) => "confirm_remove_workspace",
         Mode::ConfirmSessionRecovery { .. } => "confirm_session_recovery",
         Mode::Settings(_) => "settings",
@@ -792,38 +764,6 @@ mod tests {
         assert!(snapshot["writable_path_patterns"]
             .as_array()
             .is_some_and(|paths| paths.iter().any(|path| path == "inference.title_style")));
-    }
-
-    #[test]
-    fn settings_snapshot_exposes_the_attention_settings_and_their_paths() {
-        let mut app = App::new(
-            "default".to_owned(),
-            std::path::PathBuf::from("/tmp/project"),
-        );
-        let snapshot = settings_snapshot(&app);
-        assert_eq!(snapshot["attention"]["mode"], "shared");
-        assert_eq!(snapshot["attention"]["press_sorts"], true);
-        assert_eq!(snapshot["attention"]["show_briefing"], true);
-        assert_eq!(snapshot["attention"]["turbo_concurrency"], 16);
-        assert_eq!(snapshot["attention"]["expiry_seconds"], 1800);
-        assert!(snapshot["attention"]["model_override"].is_null());
-        app.attention_settings.mode = crate::attention::AttentionMode::Turbo;
-        app.attention_settings.model_override = Some("synthetic-model".into());
-        let snapshot = settings_snapshot(&app);
-        assert_eq!(snapshot["attention"]["mode"], "turbo");
-        assert_eq!(snapshot["attention"]["model_override"], "synthetic-model");
-        let paths = snapshot["writable_path_patterns"].as_array().unwrap();
-        for path in [
-            "attention.mode",
-            "attention.press_sorts",
-            "attention.show_briefing",
-            "attention.large_buttons",
-            "attention.turbo_concurrency",
-            "attention.expiry_seconds",
-            "attention.model_override",
-        ] {
-            assert!(paths.iter().any(|candidate| candidate == path), "{path}");
-        }
     }
 
     #[test]

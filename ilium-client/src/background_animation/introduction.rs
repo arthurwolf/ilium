@@ -25,7 +25,6 @@ impl AnimationKind {
             Self::Spectrum => "A spectrum analyzer draws whatever your system is playing as bars of frequency. It shows the sound of your music or audio in real time.",
             Self::Images => "Colored Braille images come from files, folders or URLs, with a slow pan and zoom. It turns a photo collection into a gentle, moving slideshow.",
             Self::PluginScene => "A scene supplied by an enabled plugin, such as the dithered waves of the Scenes plugin. Pick the scene here and set its own options; colour, dithering and display use the shared rows.",
-            Self::VectorTd => "A tower defense game plays itself, with an AI building, upgrading and unlocking glowing vector towers. It fights waves of monsters, level after level, across several maps.",
             Self::Wikipedia => "Today's Wikipedia articles scroll slowly as readable text or as font-rendered Braille, with images and infoboxes. It turns the day's encyclopedia into a background you can read.",
             Self::VoxelLandscape => "A seeded isometric block world of forests, deserts, villages, caves and ravines drifts past. It can be shown in monochrome or pastel dithering.",
             Self::TopographicMaps => "Contour maps of Earth, the Moon, Mars, Venus, Mercury, Ceres and fictional worlds are drawn from real elevation surveys. They pan slowly across a flat map or turn as a globe, both drawn in Braille dots.",
@@ -33,15 +32,8 @@ impl AnimationKind {
             Self::Earthquakes => "USGS earthquake events of every reported magnitude appear on a coastline map. Pulsing markers and magnitude labels show where the ground has recently moved.",
             Self::Aircraft => "OpenSky's reported airborne positions appear worldwide on a map, updated anonymously every fifteen minutes. It shows the air traffic overhead, as it is reported.",
             Self::Boats => "Received AIS ship positions are drawn on a world coastline, from OpenSeaFeed or Finnish Digitraffic. Coverage is incomplete, so not every vessel at sea appears.",
-            Self::Chess => "The featured Lichess TV game is shown as its actual positions, with dithered piece silhouettes. It follows a live game as it is played.",
             Self::OpenStreetMap => "Real OpenStreetMap streets, buildings, waterways, parks and railways are drawn around ten world places. Braille dots show fixed or panning cameras, so you can explore the map.",
-            Self::Carpet => "Isometric hatch lines lift over hidden moving spheres and tubes that play several small games and simulations. Among them are mouse hunters, Snake, Life, chess, a DVD ball, planets and clocks.",
-            Self::Wind => "Dots are blown across the empty parts of your screen by a fixed or rotating wind. Scrolling and new text push them around.",
-            Self::Growth => "A fungal colony grows from seeded points and branches across the screen. The pointer and foreground text clear parts of it as it spreads.",
             Self::Semantic => "This shows the animation recommended during tree reorganization for the selected project or entry. It follows the structure of your work rather than a fixed choice.",
-            Self::Frost => "Fine branching ice grows and retreats around the screen edges or a foreground character mask. It frosts the border of your view.",
-            Self::Embroidery => "A moving stitch progressively reveals a delicate geometric flower. It looks like a needle slowly completing a pattern.",
-            Self::HesitatingInk => "A gently curling stroke pauses, resumes, fades and begins again. It is a line of ink that moves with hesitation.",
         }
     }
 }

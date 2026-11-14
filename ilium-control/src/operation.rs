@@ -165,10 +165,6 @@ pub enum Operation {
     UpdateDetectionSettings {
         settings: ilium_ipc::AgentDetectionSettings,
     },
-    /// Replace the text triggers (the `[text_triggers]` config table).
-    UpdateTextTriggers {
-        settings: ilium_ipc::TextTriggerSettings,
-    },
     /// Turn the server's debug logging on or off.
     SetDebugLogging { enabled: bool },
     /// Turn the progress-monitor feature on or off for the session.
@@ -373,7 +369,6 @@ impl Operation {
             Self::Unfreeze { .. } => "unfreeze",
             Self::UpdateSoundSettings { .. } => "update_sound_settings",
             Self::UpdateDetectionSettings { .. } => "update_detection_settings",
-            Self::UpdateTextTriggers { .. } => "update_text_triggers",
             Self::SetDebugLogging { .. } => "set_debug_logging",
             Self::SetProgressMonitors { .. } => "set_progress_monitors",
             Self::NewFolder { .. } => "new_folder",
@@ -559,9 +554,6 @@ impl Operation {
                     settings: settings.clone(),
                 }
             }
-            Self::UpdateTextTriggers { settings } => ClientRequest::UpdateTextTriggers {
-                settings: settings.clone(),
-            },
             Self::SetDebugLogging { enabled } => {
                 ClientRequest::UpdateDebugLogging { enabled: *enabled }
             }
@@ -735,7 +727,6 @@ impl Operation {
                 | Self::Unfreeze { .. }
                 | Self::UpdateSoundSettings { .. }
                 | Self::UpdateDetectionSettings { .. }
-                | Self::UpdateTextTriggers { .. }
                 | Self::SetDebugLogging { .. }
                 | Self::SetProgressMonitors { .. }
                 | Self::KillSession
@@ -833,7 +824,6 @@ impl Operation {
             | Self::Unfreeze { .. }
             | Self::UpdateSoundSettings { .. }
             | Self::UpdateDetectionSettings { .. }
-            | Self::UpdateTextTriggers { .. }
             | Self::SetDebugLogging { .. }
             | Self::SetProgressMonitors { .. }
             | Self::KillSession => None,

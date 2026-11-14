@@ -1,0 +1,2 @@
+### Changed
+- Reset planning (the hourly Claude and Codex reset announcement monitor and its status bar label) now lives in the Cost plugin instead of the client. The label appears as a plugin status bar segment, the Reset planning settings tab is contributed by the plugin, and disabling the Cost plugin removes the label, the tab and the network requests. The per-provider status rows and the F9 detail line for reset feed errors are replaced by warnings in the plugin log.

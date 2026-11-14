@@ -89,7 +89,10 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "terminal.write",
       "settings.write-kernel:text-triggers",
       "extensions.provide:ilium.core.text-triggers/rule-packs",
-      "extensions.provide:ilium.core.text-triggers/before-fire"
+      "extensions.provide:ilium.core.text-triggers/before-fire",
+      "terminal.read-screen",
+      "terminal.read-cells",
+      "tree.read"
     ],
     "client": [
       "ui.panels"

@@ -173,9 +173,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     if crate::onboarding::integration::handle_mouse(app, mouse) {
         return;
     }
-    if app.handle_plugin_permission_mouse(mouse) {
-        return;
-    }
     if app.resources.dialog.is_some() || app.resources.help_open {
         app.resource_key(&Event::Mouse(mouse));
         return;
@@ -377,69 +374,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         app.plugin_popup_mouse(state, mouse);
         return;
     }
-    if let Mode::TextTriggerDialog(state) = &app.mode {
-        let delay = crate::text_trigger_dialog::delay_control(app.layout.screen_area, state);
-        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-            && delay.geometry().row.contains(position)
-        {
-            let Mode::TextTriggerDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-            else {
-                unreachable!("matched trigger dialog");
-            };
-            state.focus = crate::text_trigger_dialog::TextTriggerFocus::Delay;
-            if let Some(action) = delay.hit(position, crate::value_control::PointerButton::Left) {
-                if let Err(error) = state.apply_delay_control(action) {
-                    app.status_message = Some(error);
-                }
-            }
-            app.mode = Mode::TextTriggerDialog(state);
-            return;
-        }
-        let control = crate::text_trigger_dialog::target_control(app.layout.screen_area, state);
-        if control.geometry().row.contains(position)
-            && matches!(
-                mouse.kind,
-                MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
-            )
-        {
-            let Mode::TextTriggerDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-            else {
-                unreachable!("matched trigger dialog");
-            };
-            state.focus = crate::text_trigger_dialog::TextTriggerFocus::Target;
-            let button = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Right)) {
-                crate::value_control::PointerButton::Right
-            } else {
-                crate::value_control::PointerButton::Left
-            };
-            match control.hit(position, button) {
-                Some(crate::value_control::ControlAction::OpenChoices) => {
-                    app.begin_trigger_scope_dialog(state)
-                }
-                Some(
-                    action @ (crate::value_control::ControlAction::NextChoice
-                    | crate::value_control::ControlAction::PreviousChoice),
-                ) => {
-                    let choices = ilium_ipc::TextTriggerTarget::ALL;
-                    let index = choices
-                        .iter()
-                        .position(|value| *value == state.target)
-                        .unwrap_or(0);
-                    let direction = if action == crate::value_control::ControlAction::PreviousChoice
-                    {
-                        -1
-                    } else {
-                        1
-                    };
-                    state.target = choices
-                        [(index as i32 + direction).rem_euclid(choices.len() as i32) as usize];
-                    app.mode = Mode::TextTriggerDialog(state);
-                }
-                _ => app.mode = Mode::TextTriggerDialog(state),
-            }
-            return;
-        }
-    }
     if matches!(app.mode, Mode::CreateBoard(_)) {
         let Mode::CreateBoard(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched Mode::CreateBoard");
@@ -519,29 +453,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
-    // The "Needs you" overview owns every pointer event while it is open.
-    if matches!(app.mode, Mode::AttentionOverview) {
-        app.handle_attention_overview_mouse(mouse);
-        return;
-    }
-
-    // The remote-compaction dialog is keyboard-only except for the privacy
-    // banner's close button; every other pointer event is swallowed.
-    if matches!(app.mode, Mode::RemoteCompaction) {
-        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            let close = app
-                .remote_compaction
-                .as_ref()
-                .map(|state| state.banner_close_rect.get())
-                .unwrap_or_default();
-            let position = ratatui::layout::Position::new(mouse.column, mouse.row);
-            if close.width > 0 && close.contains(position) {
-                app.dismiss_remote_compaction_privacy_banner();
-            }
-        }
-        return;
-    }
-
     // The costs-and-stats popover floats over the pane surface, so it claims
     // its own pointer events before the tree or the pane can see them.
     if app.handle_goal_popover_mouse(mouse, position) {
@@ -565,9 +476,7 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     }
 
     if app.layout.pane_area.contains(position) {
-        if matches!(app.right_panel_target, RightPanelTarget::Attention) {
-            app.handle_attention_mouse(mouse, position);
-        } else if matches!(app.right_panel_target, RightPanelTarget::PluginView { .. }) {
+        if matches!(app.right_panel_target, RightPanelTarget::PluginView { .. }) {
             app.handle_plugin_view_mouse(mouse, position);
         } else {
             app.handle_pane_mouse(mouse, position);
@@ -907,26 +816,6 @@ fn handle_tree_mouse(app: &mut App, mouse: MouseEvent, position: Position) {
     }
 
     if matches!(mouse.kind, MouseEventKind::Moved) {
-        return;
-    }
-
-    // The "Next: needs you" button sits above the toolbar; the row exists only
-    // while the attention queue is on. Its `[+]` opens the overview and must
-    // be tested first: the rest of the button jumps to the next agent.
-    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-        && app
-            .attention_plus_rect()
-            .is_some_and(|plus| plus.contains(position))
-    {
-        app.action_open_attention_overview();
-        return;
-    }
-    if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
-        && app
-            .attention_button_rect()
-            .is_some_and(|button| button.contains(position))
-    {
-        app.action_attention_press();
         return;
     }
 
@@ -1972,9 +1861,8 @@ fn update_animation_hover(
     mouse: MouseEvent,
     position: Position,
 ) {
-    let is_animations_controls = state.tab == crate::app::SettingsTab::Animations
-        && !state.animation_fullscreen
-        && state.animation_source_tab == crate::animation_plugins::AnimationSourceTab::Native;
+    let is_animations_controls =
+        state.tab == crate::app::SettingsTab::Animations && !state.animation_fullscreen;
     if !is_animations_controls || !matches!(mouse.kind, MouseEventKind::Moved) {
         app.clear_animation_hover();
         return;
@@ -2461,17 +2349,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
     } else if state.tab != crate::app::SettingsTab::AgentMonitoring {
         state.agent_monitoring_hover = None;
     }
-    // Invalidate before header/sidebar/editor early returns: the issue-row
-    // handler below only sees pointer events inside the content area.
-    if mouse.kind != MouseEventKind::Moved
-        || state.tab != crate::app::SettingsTab::Animations
-        || state.animation_source_tab != crate::animation_plugins::AnimationSourceTab::Plugin
-        || state.animation_fullscreen
-        || state.plugin_editor.is_some()
-        || !layout.content_area.contains(position)
-    {
-        app.clear_plugin_issue_hover();
-    }
     if mouse.kind == MouseEventKind::Down(MouseButton::Left)
         && crate::settings_ui::onboarding_button_area(layout.header_area).contains(position)
     {
@@ -2621,165 +2498,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         }
         app.mode = Mode::Settings(Box::new(state));
         return;
-    }
-
-    if state.tab == crate::app::SettingsTab::Animations && layout.content_area.contains(position) {
-        use crate::animation_plugins::{AnimationSourceTab, PluginEditorKind, PluginPanelRow};
-        if let Some(mut editor) = state.plugin_editor.take() {
-            let mut close = false;
-            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                match crate::animation_settings_ui::plugin_editor_action_at(
-                    layout.content_area,
-                    position,
-                ) {
-                    Some(crate::animation_settings_ui::PluginEditorAction::Apply) => {
-                        match app.submit_plugin_editor(&editor) {
-                            Ok(()) => close = true,
-                            Err(error) => editor.error = Some(error),
-                        }
-                    }
-                    Some(crate::animation_settings_ui::PluginEditorAction::Cancel) => close = true,
-                    None => {}
-                }
-                if let Some(index) = crate::animation_settings_ui::plugin_editor_option_at(
-                    layout.content_area,
-                    &editor,
-                    position,
-                ) {
-                    if let PluginEditorKind::Choice { cursor, .. } = &mut editor.kind {
-                        *cursor = index;
-                    }
-                }
-            }
-            if !close {
-                state.plugin_editor = Some(editor);
-            }
-            app.mode = Mode::Settings(Box::new(state));
-            return;
-        }
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-            if let Some(tab) = crate::animation_plugins::source_tabs(
-                crate::animation_settings_ui::source_tab_area(layout.content_area),
-            )
-            .hit_test(position)
-            {
-                state.animation_source_tab = tab;
-                state.animation_slider_drag = None;
-                if tab == AnimationSourceTab::Plugin {
-                    app.request_plugin_catalogue();
-                }
-                app.mode = Mode::Settings(Box::new(state));
-                return;
-            }
-        }
-        if state.animation_source_tab == AnimationSourceTab::Plugin {
-            let model = app.plugin_panel_model();
-            let area = crate::animation_settings_ui::plugin_panel_area(layout.content_area);
-            if matches!(mouse.kind, MouseEventKind::Moved) {
-                let issue_row = model
-                    .rows
-                    .iter()
-                    .position(|row| *row == crate::animation_plugins::PluginPanelRow::Issues)
-                    .filter(|row| {
-                        crate::animation_plugins::plugin_row_at(
-                            area,
-                            state.plugin_panel.scroll,
-                            model.rows.len(),
-                            position,
-                        ) == Some(*row)
-                    });
-                app.set_plugin_issue_hover(issue_row, Instant::now());
-            } else {
-                app.clear_plugin_issue_hover();
-            }
-            match mouse.kind {
-                MouseEventKind::Down(MouseButton::Left | MouseButton::Right) => {
-                    if let Some(row) = crate::animation_plugins::plugin_row_at(
-                        area,
-                        state.plugin_panel.scroll,
-                        model.rows.len(),
-                        position,
-                    ) {
-                        state.plugin_panel.cursor = row;
-                        if let Some(control) = crate::value_plugin::panel_control(
-                            app,
-                            area,
-                            &model,
-                            &state.plugin_panel,
-                            row,
-                        ) {
-                            use crate::value_control::{ControlAction, PointerButton};
-                            let button = if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
-                                PointerButton::Right
-                            } else {
-                                PointerButton::Left
-                            };
-                            if let Some(action) = control.hit(position, button) {
-                                match action {
-                                    ControlAction::PreviousChoice | ControlAction::Decrement => {
-                                        app.settings_adjust_plugin_row(row, -1)
-                                    }
-                                    ControlAction::NextChoice | ControlAction::Increment => {
-                                        app.settings_adjust_plugin_row(row, 1)
-                                    }
-                                    ControlAction::OpenChoices | ControlAction::EditNumber => {
-                                        if let Some(PluginPanelRow::Common(index)) =
-                                            model.rows.get(row)
-                                        {
-                                            let index = *index;
-                                            app.mode = Mode::Settings(Box::new(state));
-                                            app.begin_animation_value_dialog(index);
-                                            return;
-                                        }
-                                        app.mode = Mode::Settings(Box::new(state));
-                                        app.begin_plugin_value_dialog(row);
-                                        return;
-                                    }
-                                }
-                            }
-                        } else if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
-                            app.settings_adjust_plugin_row(row, -1);
-                        } else {
-                            if let Some(PluginPanelRow::Common(index)) = model.rows.get(row) {
-                                if matches!(
-                                    app.animation_row_model()
-                                        .view(*index)
-                                        .map(|view| &view.kind),
-                                    Some(
-                                        crate::animation_rows::RowKind::Choice
-                                            | crate::animation_rows::RowKind::Slider(_)
-                                    )
-                                ) {
-                                    let index = *index;
-                                    app.mode = Mode::Settings(Box::new(state));
-                                    app.begin_animation_value_dialog(index);
-                                    return;
-                                }
-                            }
-                            if !app.begin_plugin_editor(&mut state, row) {
-                                app.settings_adjust_plugin_row(row, 1);
-                            }
-                        }
-                    }
-                }
-                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                    let delta = usize::from(SETTINGS_WHEEL_SCROLL_LINES);
-                    state.plugin_panel.scroll = if mouse.kind == MouseEventKind::ScrollUp {
-                        state.plugin_panel.scroll.saturating_sub(delta)
-                    } else {
-                        state
-                            .plugin_panel
-                            .scroll
-                            .saturating_add(delta)
-                            .min(model.rows.len().saturating_sub(usize::from(area.height)))
-                    };
-                }
-                _ => {}
-            }
-            app.clear_animation_hover();
-            app.mode = Mode::Settings(Box::new(state));
-            return;
-        }
     }
 
     update_animation_hover(app, &state, &layout, mouse, position);
@@ -2949,10 +2667,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 return;
             }
         }
-        // Remote Compaction has multi-line rows and owns both their painted
-        // controls and pointer geometry in remote_compaction_settings_ui.
-        // Keep the generic flat-row dispatcher out of that page.
-        if state.tab != crate::app::SettingsTab::RemoteCompaction {
+        {
             // A bounded inventory: unrecognized rows retain their own handlers.
             let rows = crate::settings_ui::settings_number_row_count(app, state.tab);
             for row in 0..rows {
@@ -3331,21 +3046,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         crate::app::InferenceRow::Test => app.request_inference_test(),
                     }
                 }
-            } else if state.tab == crate::app::SettingsTab::TextTriggers {
-                if let Some(index) = crate::settings_ui::text_trigger_content_hit(
-                    layout.content_area,
-                    state.scroll,
-                    position,
-                    app,
-                    state.selected_row,
-                ) {
-                    state.selected_row = index;
-                    let editing_index =
-                        (index < app.text_trigger_settings.triggers.len()).then_some(index);
-                    app.mode = Mode::Settings(Box::new(state));
-                    app.open_text_trigger_dialog(editing_index);
-                    return;
-                }
             } else if state.tab == crate::app::SettingsTab::CustomAgents {
                 if layout.content_area.contains(position) && !state.custom_agent_editing {
                     let line =
@@ -3537,59 +3237,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     {
                         app.settings_adjust_cost_row(hit.row, hit.direction);
                     }
-                    return;
-                }
-            } else if state.tab == crate::app::SettingsTab::RemoteCompaction {
-                let pointer_button = match mouse.kind {
-                    MouseEventKind::Down(MouseButton::Right) => {
-                        crate::value_control::PointerButton::Right
-                    }
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        crate::value_control::PointerButton::Left
-                    }
-                    _ => crate::value_control::PointerButton::Other,
-                };
-                if let Some(hit) = crate::remote_compaction_settings_ui::hit_with_button(
-                    layout.content_area,
-                    state.scroll,
-                    position,
-                    pointer_button,
-                    app,
-                ) {
-                    state.selected_row = hit.index;
-                    // A label/banner click only selects the row, but still
-                    // retains the settings mode taken by the mouse dispatcher.
-                    app.mode = Mode::Settings(Box::new(state));
-                    if let crate::remote_compaction_settings_ui::HitAction::Adjust(direction) =
-                        hit.action
-                    {
-                        app.settings_adjust_remote_compaction_row(hit.row, direction);
-                    } else if let crate::remote_compaction_settings_ui::HitAction::OpenChoice(
-                        target,
-                    ) = hit.action
-                    {
-                        app.begin_settings_choice_dialog(
-                            crate::value_settings_choice::SettingsChoice::RemoteTechnique(target),
-                        );
-                    } else if let crate::remote_compaction_settings_ui::HitAction::EditNumber(row) =
-                        hit.action
-                    {
-                        app.begin_settings_number_dialog(
-                            crate::value_settings::SettingsNumber::Remote(row),
-                        );
-                    }
-                    return;
-                }
-            } else if state.tab == crate::app::SettingsTab::ResetPlanning {
-                if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(
-                    layout.content_area,
-                    state.scroll,
-                    position,
-                    3,
-                ) {
-                    state.selected_row = index;
-                    app.mode = Mode::Settings(Box::new(state));
-                    app.settings_adjust_reset_planning_row(index);
                     return;
                 }
             } else if state.tab == crate::app::SettingsTab::Debug {
@@ -3888,7 +3535,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         crate::settings_ui::max_scroll(state.tab, app, state.selected_row, layout.content_area)
     };
     state.scroll = state.scroll.min(max_scroll);
-    app.remote_compaction_sync_native(state.tab == crate::app::SettingsTab::RemoteCompaction);
     app.mode = Mode::Settings(Box::new(state));
 }
 
@@ -5497,427 +5143,6 @@ mod settings_title_choice_mouse_tests {
             panic!("title style list should use a choice dialog");
         };
         assert_eq!(dialog.options().len(), 2);
-    }
-}
-
-#[cfg(test)]
-mod text_trigger_mouse_tests {
-    use super::*;
-    use crate::app::{App, SettingsState, SettingsTab};
-
-    fn click_trigger_line(app: &mut App, line: u16) {
-        let Mode::Settings(state) = &app.mode else {
-            panic!("settings expected")
-        };
-        let mut area =
-            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, state)
-                .content_area;
-        let height = crate::settings_ui::instructions_panel_height(app, state.tab, area);
-        area.y += height;
-        area.height = area.height.saturating_sub(height);
-        let click_row = area.y + line - state.scroll;
-        handle_mouse_event(
-            app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: area.x + 8,
-                row: click_row,
-                modifiers: crossterm::event::KeyModifiers::empty(),
-            },
-        );
-    }
-
-    fn click_rendered_trigger_text(app: &mut App, text: &str) {
-        let Mode::Settings(state) = &app.mode else {
-            panic!("settings expected")
-        };
-        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(
-            app.layout.screen_area.width,
-            app.layout.screen_area.height,
-        ))
-        .unwrap();
-        terminal
-            .draw(|frame| crate::settings_ui::render(frame, frame.area(), app, state))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let row = (0..buffer.area.height)
-            .find(|y| {
-                let rendered: String = (0..buffer.area.width)
-                    .map(|x| buffer[(x, *y)].symbol())
-                    .collect();
-                rendered.contains(text)
-            })
-            .expect("requested trigger text is visibly rendered");
-        let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, state)
-            .content_area;
-        handle_mouse_event(
-            app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: area.x + 8,
-                row,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-    }
-
-    fn settings_app(scroll: u16) -> App {
-        let mut app = App::new("trigger-test".to_owned(), std::env::temp_dir());
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::TextTriggers,
-            scroll,
-            ..SettingsState::default()
-        }));
-        app
-    }
-
-    #[test]
-    fn settings_navigation_wheel_targets_tabs_instead_of_right_content() {
-        // Synthetic navigation only: no setting or persisted value is changed.
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "settings-navigation-wheel".to_owned(),
-            directory.path().into(),
-        );
-        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
-            app.set_screen_area(Rect::new(0, 0, width, height));
-            for (index, tab) in SettingsTab::ALL.into_iter().enumerate() {
-                for (kind, expected_index) in [
-                    (MouseEventKind::ScrollUp, index.saturating_sub(1)),
-                    (
-                        MouseEventKind::ScrollDown,
-                        (index + 1).min(SettingsTab::ALL.len() - 1),
-                    ),
-                ] {
-                    let state = SettingsState {
-                        tab,
-                        ..SettingsState::default()
-                    };
-                    let layout = crate::settings_ui::compute_layout_for_mode(
-                        app.layout.screen_area,
-                        &app,
-                        &state,
-                    );
-                    let position =
-                        Position::new(layout.tab_list_area.x + 1, layout.tab_list_area.y + 1);
-                    assert!(layout.tab_list_area.contains(position));
-                    app.mode = Mode::Settings(Box::new(state));
-                    handle_mouse_event(
-                        &mut app,
-                        MouseEvent {
-                            kind,
-                            column: position.x,
-                            row: position.y,
-                            modifiers: crossterm::event::KeyModifiers::empty(),
-                        },
-                    );
-                    let Mode::Settings(state) = &app.mode else {
-                        panic!("navigation wheel must keep Settings open");
-                    };
-                    assert_eq!(
-                        state.tab,
-                        SettingsTab::ALL[expected_index],
-                        "{tab:?} {kind:?} on {width}x{height}"
-                    );
-                    assert_eq!(
-                        state.scroll, 0,
-                        "navigation wheel must not scroll the right content"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn settings_navigation_scrollbar_click_selects_the_tab_at_the_track_position() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "settings-navigation-scrollbar".to_owned(),
-            directory.path().into(),
-        );
-        let mut overflowing_sizes = 0;
-        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
-            app.set_screen_area(Rect::new(0, 0, width, height));
-            let state = SettingsState {
-                tab: SettingsTab::Appearance,
-                ..SettingsState::default()
-            };
-            let layout =
-                crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &state);
-            let position = Position::new(
-                layout.tab_list_area.right() - 1,
-                layout.tab_list_area.bottom() - 1,
-            );
-            let Some(target) =
-                crate::settings_ui::tab_scrollbar_target(layout.tab_list_area, position)
-            else {
-                // A fitting tab list has no scrollbar; do not treat its last
-                // row as a track click.
-                continue;
-            };
-            overflowing_sizes += 1;
-            assert_eq!(
-                target,
-                SettingsTab::ALL.last().copied().unwrap(),
-                "the bottom navigation track targets the final tab at {width}x{height}"
-            );
-            app.mode = Mode::Settings(Box::new(state));
-            handle_mouse_event(
-                &mut app,
-                MouseEvent {
-                    kind: MouseEventKind::Down(MouseButton::Left),
-                    column: position.x,
-                    row: position.y,
-                    modifiers: crossterm::event::KeyModifiers::empty(),
-                },
-            );
-            let Mode::Settings(state) = &app.mode else {
-                panic!("navigation scrollbar click must keep Settings open");
-            };
-            assert_eq!(
-                state.tab,
-                SettingsTab::Setup,
-                "tab selection at {width}x{height}"
-            );
-            assert_eq!(state.scroll, 0, "right content stays at its top");
-        }
-        assert!(
-            overflowing_sizes > 0,
-            "at least one size must exercise the track"
-        );
-    }
-
-    #[test]
-    fn settings_content_scrollbar_click_and_wheel_move_the_visible_document() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "settings-content-scrollbar".to_owned(),
-            directory.path().into(),
-        );
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.text_trigger_settings.triggers = (0..32)
-            .map(|index| ilium_ipc::TextTrigger {
-                id: format!("synthetic-{index}"),
-                regexp: format!("pattern-{index}"),
-                message: "synthetic response".to_owned(),
-                ..ilium_ipc::TextTrigger::default()
-            })
-            .collect();
-
-        let initial = SettingsState {
-            tab: SettingsTab::TextTriggers,
-            ..SettingsState::default()
-        };
-        let layout =
-            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &initial);
-        let maximum = crate::settings_ui::max_scroll(
-            initial.tab,
-            &app,
-            initial.selected_row,
-            layout.content_area,
-        );
-        assert!(maximum > 3, "fixture must expose a useful scroll range");
-        assert_eq!(layout.content_scrollbar_area.width, 1);
-
-        let wheel_position = Position::new(
-            layout.content_scrollbar_area.x,
-            layout.content_scrollbar_area.y + 1,
-        );
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::TextTriggers,
-            ..SettingsState::default()
-        }));
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::ScrollDown,
-                column: wheel_position.x,
-                row: wheel_position.y,
-                modifiers: crossterm::event::KeyModifiers::empty(),
-            },
-        );
-        let Mode::Settings(after_wheel) = &app.mode else {
-            panic!("scrollbar wheel must keep Settings open");
-        };
-        assert_eq!(after_wheel.scroll, 3);
-
-        let bottom = layout.content_scrollbar_area.bottom() - 1;
-        app.mode = Mode::Settings(Box::new(SettingsState {
-            tab: SettingsTab::TextTriggers,
-            ..SettingsState::default()
-        }));
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: layout.content_scrollbar_area.x,
-                row: bottom,
-                modifiers: crossterm::event::KeyModifiers::empty(),
-            },
-        );
-        let Mode::Settings(after_click) = &app.mode else {
-            panic!("scrollbar click must keep Settings open");
-        };
-        assert_eq!(after_click.scroll, maximum);
-    }
-
-    #[test]
-    fn settings_wheel_on_header_and_frames_preserves_content_scroll() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "settings-wheel-boundaries".to_owned(),
-            directory.path().into(),
-        );
-        app.text_trigger_settings.triggers = (0..32)
-            .map(|index| ilium_ipc::TextTrigger {
-                id: format!("synthetic-{index}"),
-                regexp: format!("pattern-{index}"),
-                message: "synthetic response".to_owned(),
-                ..ilium_ipc::TextTrigger::default()
-            })
-            .collect();
-        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
-            app.set_screen_area(Rect::new(0, 0, width, height));
-            let initial = SettingsState {
-                tab: SettingsTab::TextTriggers,
-                scroll: 1,
-                ..SettingsState::default()
-            };
-            let layout =
-                crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &initial);
-            assert!(
-                crate::settings_ui::max_scroll(
-                    initial.tab,
-                    &app,
-                    initial.selected_row,
-                    layout.content_area,
-                ) > initial.scroll,
-                "fixture must have scrollable content"
-            );
-            for position in [
-                Position::new(layout.header_area.x, layout.header_area.y),
-                Position::new(
-                    layout.navigation_frame_area.x + 1,
-                    layout.navigation_frame_area.y,
-                ),
-                Position::new(layout.content_frame_area.x + 1, layout.content_frame_area.y),
-                Position::new(
-                    layout.content_frame_area.x + 1,
-                    layout.content_frame_area.bottom() - 1,
-                ),
-            ] {
-                assert!(!layout.content_area.contains(position));
-                assert!(!layout.tab_list_area.contains(position));
-                for kind in [MouseEventKind::ScrollUp, MouseEventKind::ScrollDown] {
-                    app.mode = Mode::Settings(Box::new(SettingsState {
-                        tab: initial.tab,
-                        scroll: initial.scroll,
-                        ..SettingsState::default()
-                    }));
-                    handle_mouse_event(
-                        &mut app,
-                        MouseEvent {
-                            kind,
-                            column: position.x,
-                            row: position.y,
-                            modifiers: crossterm::event::KeyModifiers::empty(),
-                        },
-                    );
-                    let Mode::Settings(state) = &app.mode else {
-                        panic!("frame wheel must keep Settings open");
-                    };
-                    assert_eq!(state.tab, initial.tab);
-                    assert_eq!(
-                        state.scroll, initial.scroll,
-                        "{kind:?} at {position:?} on {width}x{height} must stay outside content"
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn clicking_add_opens_editor_and_escape_returns_to_settings() {
-        let mut app = settings_app(0);
-        click_rendered_trigger_text(&mut app, "[ Add text trigger ]");
-        assert!(
-            matches!(&app.mode, Mode::TextTriggerDialog(state) if state.editing_index.is_none())
-        );
-        crate::keys::handle_event(
-            &mut app,
-            crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-                crossterm::event::KeyCode::Esc,
-                crossterm::event::KeyModifiers::empty(),
-            )),
-        );
-        assert!(matches!(app.mode, Mode::Settings(_)));
-    }
-
-    #[test]
-    fn wheel_scrolling_a_long_list_then_clicking_edits_the_visible_rule() {
-        let mut app = settings_app(0);
-        app.set_screen_area(Rect::new(0, 0, 80, 24));
-        app.text_trigger_settings.triggers = (0..32)
-            .map(|index| ilium_ipc::TextTrigger {
-                id: format!("rule-{index}"),
-                regexp: format!("pattern-{index}"),
-                message: "reply".to_owned(),
-                ..ilium_ipc::TextTrigger::default()
-            })
-            .collect();
-        let Mode::Settings(state) = &app.mode else {
-            panic!("settings expected")
-        };
-        let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
-            .content_area;
-        handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::ScrollDown,
-                column: area.x + 8,
-                row: area.y + 4,
-                modifiers: crossterm::event::KeyModifiers::empty(),
-            },
-        );
-        let Mode::Settings(state) = &app.mode else {
-            panic!("settings expected")
-        };
-        assert!(state.scroll > 0);
-        click_rendered_trigger_text(&mut app, "Match: pattern-1");
-        assert!(
-            matches!(&app.mode, Mode::TextTriggerDialog(state) if state.editing_index == Some(1) && state.regexp.buf == "pattern-1")
-        );
-    }
-
-    #[test]
-    fn clicking_headers_spacers_and_hint_does_not_open_an_editor() {
-        for line in [0, 1, 2, 4, 5] {
-            let mut app = settings_app(0);
-            click_trigger_line(&mut app, line);
-            assert!(
-                matches!(app.mode, Mode::Settings(_)),
-                "line {line} is inert"
-            );
-            assert!(app.take_outbound_requests().is_empty());
-        }
-    }
-
-    #[test]
-    fn clicking_existing_scrolled_rule_opens_edit_without_mutation() {
-        let mut app = settings_app(2);
-        let rule = ilium_ipc::TextTrigger {
-            id: "stable-rule".to_owned(),
-            regexp: "test".to_owned(),
-            message: "reply".to_owned(),
-            ..ilium_ipc::TextTrigger::default()
-        };
-        app.text_trigger_settings.triggers.push(rule.clone());
-        click_trigger_line(&mut app, 3);
-        assert!(
-            matches!(&app.mode, Mode::TextTriggerDialog(state) if state.editing_index == Some(0) && state.regexp.buf == "test")
-        );
-        assert_eq!(app.text_trigger_settings.triggers, vec![rule]);
     }
 }
 

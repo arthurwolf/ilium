@@ -20,7 +20,6 @@ mod protocol;
 pub mod resource;
 mod startup;
 mod terminal_bytes;
-mod text_trigger;
 mod voice_text;
 
 pub use bounded_decode::{deserialize_allocation_checked, AllocationDecodeError, BoundedMessage};
@@ -52,10 +51,6 @@ pub use protocol::{
 pub use startup::{
     clear_startup_progress, publish_startup_progress, read_startup_progress, startup_progress_path,
     StartupProgress,
-};
-pub use text_trigger::{
-    TextTrigger, TextTriggerSettings, TextTriggerTarget, DEFAULT_TEXT_TRIGGER_DELAY_SECONDS,
-    MAX_TEXT_TRIGGER_DELAY_SECONDS,
 };
 pub use voice_text::{
     normalize_voice_sentences, VoiceTextAccepted, VoiceTextPhase, VoiceTextRejection,
@@ -344,11 +339,6 @@ mod tests {
                     source: SoundSourceKind::Generated,
                     ..SoundSettings::default()
                 },
-            },
-            ClientRequest::SubmitTerminalText {
-                pane_id: NodeId(2),
-                text: "Explain this codebase".to_string(),
-                source: PromptSubmissionSource::TextTrigger,
             },
             ClientRequest::SubmitTerminalText {
                 pane_id: NodeId(2),

@@ -11,21 +11,27 @@
 
 pub mod atlantic_dusk;
 pub mod box_machine;
+pub mod carpet;
 pub mod cube_clock;
 pub mod dither_water;
 pub mod dithered_waves;
 pub mod dithr_patterns;
 pub mod fbm_clouds;
 pub mod galactic_empires;
+pub mod growth;
 pub mod hex_expedition;
 pub mod kit;
+pub mod live_chess;
 pub mod machine_screen;
 pub mod pi_digits;
 pub mod pipes;
 pub mod quiet;
 pub mod registry;
 pub mod scenes2;
+pub mod scenes_c2;
 pub mod solar_system;
+pub mod vector_td;
+pub mod wind;
 
 // The kit modules at the crate root, so the scenes moved here keep their `crate::raster::...`
 // style paths.
@@ -38,7 +44,7 @@ use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Lifecycle, NativeRenderer, SceneField, SceneProgram};
 use kit::raster::Raster;
-use kit::scene::{Frame, Scene, SceneEnv, SceneLocation};
+use kit::scene::{Frame, OccupancyMask, Scene, SceneEnv, SceneLocation};
 use kit::style::ScenePalette;
 use serde_json::Value;
 use std::time::{Duration, UNIX_EPOCH};
@@ -197,6 +203,7 @@ impl ScenesScene {
         cell_colors.clear();
         cell_colors.resize(cell_count, [255, 255, 255]);
         let time = Duration::from_millis(frame.time_millis);
+        Self::deliver_inputs(scene, field);
         {
             let mut kit_frame = Frame {
                 raster,
@@ -224,6 +231,40 @@ impl ScenesScene {
                 if let Some(character) = scene.native_glyph(column, row) {
                     field.put_glyph(column, row, character);
                 }
+            }
+        }
+    }
+
+    /// Hands the pointer and the screen occupancy the host put into `field` to a kit scene that
+    /// asked for them (`Scene::wants_pointer`, `Scene::wants_occupancy`). The pointer becomes
+    /// normalized screen coordinates, the occupancy an `OccupancyMask` with its character
+    /// anchors.
+    fn deliver_inputs(scene: &mut dyn Scene, field: &SceneField) {
+        if scene.wants_pointer() {
+            let position = field.pointer.map(|pointer| {
+                let columns = f32::from(field.columns.max(1));
+                let rows = f32::from(field.rows.max(1));
+                [
+                    (f32::from(pointer.column) + (f32::from(pointer.sub_x) + 0.5) / 2.0) / columns,
+                    (f32::from(pointer.row) + (f32::from(pointer.sub_y) + 0.5) / 4.0) / rows,
+                ]
+            });
+            scene.pointer(position);
+        }
+        if scene.wants_occupancy() {
+            if let Some(grid) = &field.occupancy {
+                let mut mask = OccupancyMask::empty(grid.columns, grid.rows);
+                for row in 0..grid.rows {
+                    for column in 0..grid.columns {
+                        if grid.is_occupied(column, row) {
+                            mask.set(column, row, true);
+                        }
+                        if grid.is_character(column, row) {
+                            mask.set_character(column, row, true);
+                        }
+                    }
+                }
+                scene.occupancy(&mask);
             }
         }
     }
@@ -284,6 +325,14 @@ impl SceneProgram for ScenesScene {
 
     fn uses_cell_colors(&self) -> bool {
         matches!(&self.drawing, Drawing::Kit(scene) if scene.uses_cell_colors())
+    }
+
+    fn wants_pointer(&self) -> bool {
+        matches!(&self.drawing, Drawing::Kit(scene) if scene.wants_pointer())
+    }
+
+    fn wants_occupancy(&self) -> bool {
+        matches!(&self.drawing, Drawing::Kit(scene) if scene.wants_occupancy())
     }
 
     fn status(&self) -> Option<String> {

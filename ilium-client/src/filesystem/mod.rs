@@ -4,7 +4,6 @@ pub mod editor;
 pub(crate) mod editor_snapshot;
 pub mod editors;
 pub mod ordered;
-pub(crate) mod plugin_permissions;
 
 pub(crate) mod board_app;
 pub(crate) mod boards;
@@ -25,5 +24,3 @@ pub(crate) mod integrations;
 pub(crate) mod sidebar;
 pub(crate) mod startup;
 pub(crate) mod transcript_baseline;
-
-pub(crate) mod plugin_permission_controller;

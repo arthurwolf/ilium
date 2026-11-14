@@ -99,6 +99,11 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
     "client": ["ui.panels"]
   },
   "contributes": {
+    "context_menu": [
+      { "id": "schedule-input", "title": "Hit key(s) X time from now", "target": "tree-node", "command": "schedule-input", "when": "pane.kind == \"terminal\"" },
+      { "id": "queue-prompt", "title": "Queue prompt...", "target": "tree-node", "command": "queue-prompt", "when": "pane.kind == \"terminal\"" },
+      { "id": "clear-prompt-queue", "title": "Clear prompt queue", "target": "tree-node", "command": "clear-prompt-queue", "when": "pane.kind == \"terminal\"" }
+    ],
     "extension_points": [
       { "id": "schedule-sources", "kind": "collect", "version": "0.1.0" },
       { "id": "before-send-scheduled", "kind": "hook", "mode": "veto", "version": "0.1.0" }
@@ -148,6 +153,29 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     ]
   },
   "contributes": {
+    "context_menu": [
+      {
+        "id": "schedule-input",
+        "title": "Hit key(s) X time from now",
+        "target": "tree-node",
+        "command": "schedule-input",
+        "when": "pane.kind == \"terminal\""
+      },
+      {
+        "id": "queue-prompt",
+        "title": "Queue prompt...",
+        "target": "tree-node",
+        "command": "queue-prompt",
+        "when": "pane.kind == \"terminal\""
+      },
+      {
+        "id": "clear-prompt-queue",
+        "title": "Clear prompt queue",
+        "target": "tree-node",
+        "command": "clear-prompt-queue",
+        "when": "pane.kind == \"terminal\""
+      }
+    ],
     "extension_points": [
       {
         "id": "schedule-sources",

@@ -729,7 +729,6 @@ impl AnimationRow {
     pub fn help_id(&self, scene_controls: &[Control]) -> String {
         match self {
             Self::Scene(AnimationKind::Wikipedia) => "AN-54".to_owned(),
-            Self::Scene(AnimationKind::VectorTd) => "AN-51".to_owned(),
             Self::Scene(AnimationKind::VoxelLandscape) => "AN-52".to_owned(),
             Self::Scene(AnimationKind::TopographicMaps) => "AN-56".to_owned(),
             Self::Scene(AnimationKind::OpenStreetMap) => "AN-55".to_owned(),
@@ -737,14 +736,7 @@ impl AnimationRow {
             Self::Scene(AnimationKind::Earthquakes) => "AN-59".to_owned(),
             Self::Scene(AnimationKind::Aircraft) => "AN-60".to_owned(),
             Self::Scene(AnimationKind::Boats) => "AN-61".to_owned(),
-            Self::Scene(AnimationKind::Chess) => "AN-62".to_owned(),
-            Self::Scene(AnimationKind::Carpet) => "AN-63".to_owned(),
             Self::Scene(AnimationKind::Semantic) => "AN-64".to_owned(),
-            Self::Scene(AnimationKind::Wind) => "AN-66".to_owned(),
-            Self::Scene(AnimationKind::Frost) => "AN-71".to_owned(),
-            Self::Scene(AnimationKind::Embroidery) => "AN-74".to_owned(),
-            Self::Scene(AnimationKind::HesitatingInk) => "AN-79".to_owned(),
-            Self::Scene(AnimationKind::Growth) => "AN-84".to_owned(),
             // The scenes after the ones that moved into the Scenes plugin (3D pipes, Atlantic
             // dusk, Machine screen, Hex expedition) keep the topic numbers they had.
             Self::Scene(AnimationKind::Stars) => "AN-12".to_owned(),

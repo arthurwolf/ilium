@@ -55,7 +55,7 @@ const NAMED_SCENE_TOPICS: [(&str, &str); 38] = [
     ("earthquakes", "AN-59"),
     ("aircraft", "AN-60"),
     ("boats", "AN-61"),
-    ("chess", "AN-62"),
+    ("live_chess", "AN-62"),
     ("carpet", "AN-63"),
     ("semantic", "AN-64"),
     ("wind", "AN-66"),

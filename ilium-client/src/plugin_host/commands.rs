@@ -29,12 +29,6 @@ pub(crate) const DEBUG_LOG_COMMAND: &str = "ilium.core.diagnostics/show-debug-lo
 /// 64 KiB by the host, so the newest entries that fit are sent.
 const DEBUG_LOG_ARGUMENT_BUDGET_BYTES: usize = 56 * 1024;
 
-/// The Scheduler plugin's commands for a terminal pane; the kernel passes the pane and the
-/// plugin draws its own dialogs and keeps the schedules and queues.
-pub(crate) const SCHEDULE_INPUT_COMMAND: &str = "ilium.core.scheduler/schedule-input";
-pub(crate) const QUEUE_PROMPT_COMMAND: &str = "ilium.core.scheduler/queue-prompt";
-pub(crate) const CLEAR_PROMPT_QUEUE_COMMAND: &str = "ilium.core.scheduler/clear-prompt-queue";
-
 /// The Settings plugin's "Editor line display" command; it opens the clip or wrap choice.
 pub(crate) const EDITOR_LINE_DISPLAY_COMMAND: &str = "ilium.core.settings/editor-line-display";
 
@@ -105,18 +99,6 @@ impl App {
             .map_or_else(|| "agent".to_string(), |node| node.name.clone());
         let arguments = debug_log_arguments(pane_id, &pane_name, dropped_entry_count, entries);
         self.invoke_plugin_command(DEBUG_LOG_COMMAND, arguments, CommandOrigin::Menu);
-    }
-
-    /// Runs one of the Scheduler plugin's pane commands (`SCHEDULE_INPUT_COMMAND` and its
-    /// siblings) for `pane`.
-    pub(crate) fn action_scheduler_command(
-        &mut self,
-        command: &str,
-        pane: ilium_core::NodeId,
-        origin: CommandOrigin,
-    ) {
-        let arguments = serde_json::json!({ "pane": pane.0 }).to_string();
-        self.invoke_plugin_command(command, arguments, origin);
     }
 
     /// "Search the workspace" from the key binding, the tree toolbar or the context menu.

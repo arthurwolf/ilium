@@ -1,5 +1,5 @@
 //! Finds the panes of every running Ilium session on this machine, for the
-//! commands that act across projects (`ilium panes`, `ilium broadcast`).
+//! commands that act across projects (`ilium ctl`, `ilium close-pane`).
 //!
 //! Each project session has its own server and socket, so there is no
 //! central registry to ask. The scan lists the live sockets in the session
@@ -17,8 +17,7 @@ use ilium_client::connection::Connection;
 use ilium_core::{NodeId, Tree};
 use ilium_ipc::{ClientRequest, ServerEvent};
 
-use crate::pane_filter::{pane_facts, PaneFacts};
-use crate::{pane_identity_from_env, CliError};
+use crate::CliError;
 
 /// How long one session may take to deliver its attach-time tree.
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -33,17 +32,6 @@ pub(crate) struct AttachedSession {
 }
 
 impl AttachedSession {
-    /// The session's panes, with the calling pane marked.
-    pub(crate) fn panes(&self, caller: Option<&CallerPane>) -> Vec<PaneFacts> {
-        let mut panes = pane_facts(&self.tree, &self.session_name);
-        if let Some(caller) = caller.filter(|caller| caller.is_in(&self.socket_path)) {
-            for pane in &mut panes {
-                pane.is_self = pane.pane_id == caller.pane_id;
-            }
-        }
-        panes
-    }
-
     /// Requests only selected shell screens; never subscribes to retained journals.
     /// One request/reply at a time bounds memory and leaves per-pane failures explicit.
     pub(crate) async fn collect_shell_screens(
@@ -90,30 +78,6 @@ impl AttachedSession {
     }
 }
 
-/// The pane this command runs in, when it runs inside Ilium.
-pub(crate) struct CallerPane {
-    socket_path: PathBuf,
-    pane_id: NodeId,
-}
-
-impl CallerPane {
-    pub(crate) fn from_env() -> Option<Self> {
-        let identity = pane_identity_from_env().ok()?;
-        Some(Self {
-            socket_path: canonical_or_raw(&identity.socket_path),
-            pane_id: identity.pane_id,
-        })
-    }
-
-    fn is_in(&self, socket_path: &Path) -> bool {
-        canonical_or_raw(socket_path) == self.socket_path
-    }
-}
-
-fn canonical_or_raw(path: &Path) -> PathBuf {
-    ilium_platform::paths::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-}
-
 /// Every live session socket, or a typed error when the socket directory
 /// cannot be read.
 pub(crate) fn live_sockets() -> Result<Vec<LiveSessionSocket>, CliError> {
@@ -131,15 +95,6 @@ pub(crate) struct PaneEvidence {
 
 pub(crate) async fn attach(socket: &LiveSessionSocket) -> Result<AttachedSession, String> {
     attach_inner(socket, None).await
-}
-
-/// Like [`attach`], also returning the attach-time pane evidence.
-pub(crate) async fn attach_with_evidence(
-    socket: &LiveSessionSocket,
-) -> Result<(AttachedSession, PaneEvidence), String> {
-    let mut evidence = PaneEvidence::default();
-    let attached = attach_inner(socket, Some(&mut evidence)).await?;
-    Ok((attached, evidence))
 }
 
 async fn attach_inner(

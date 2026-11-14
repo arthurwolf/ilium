@@ -1,21 +1,116 @@
 //! Core plugin `ilium.core.attention` (manual page core-plugin-attention.md).
 //!
-//! Skeleton of the tests-first phase: one struct per side declared in `manifest.json`, each
-//! implementing the lifecycle, the handler and the exports its manifest lists. Minimal conforming bodies: no contributions are produced until the feature logic moves here.
+//! The attention queue as a plugin. The client side keeps the queue: it derives the instant items
+//! from the agent panes, merges the model's answers, remembers visits, draws the panel and the
+//! overview, reports the count in the chrome and takes the user to the next agent that needs
+//! them. The server side runs the `analyse` job: it reads the recent screen of each changed agent
+//! and asks the host inference call to classify it.
 
+pub mod analyse;
+pub mod client;
+pub mod instant;
 pub mod item;
 pub mod parse;
+pub mod queue;
+pub mod refresh;
+pub mod runner;
+pub mod settings;
+pub mod state;
+pub mod turbo;
+pub mod view;
 
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
+use ilium_plugin_sdk::generated::types::layout::Area;
+use ilium_plugin_sdk::generated::types::ui::{UiTree, ViewTarget};
+use ilium_plugin_sdk::host::HostJobs;
 use ilium_plugin_sdk::types::Activation;
-use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle};
+use ilium_plugin_sdk::types::{
+    ErrorCode, Intent, MessageSpec, MessageTarget, Outcome, PluginError, PluginId, PluginSide,
+    RequestId, RequestRef,
+};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, HostApi, JobRunner, Lifecycle, Views};
+
+use crate::turbo::TurboLimiter;
 
 /// The server side of `ilium.core.attention` (core-plugin-attention.md, world `ilium:server/base@0.1.0`).
-#[ilium_plugin(side = "server", exports = [])]
-#[derive(Default)]
-pub struct AttentionServer;
+#[ilium_plugin(side = "server", exports = ["job-runner"])]
+pub struct AttentionServer {
+    /// The concurrency window of the model calls; it outlives a job so a throttled provider keeps
+    /// its smaller window for the next one.
+    limiter: TurboLimiter,
+    /// The `analyse` job in flight, if any; one at a time.
+    job: Option<RequestId>,
+}
+
+impl Default for AttentionServer {
+    fn default() -> Self {
+        Self {
+            limiter: TurboLimiter::new(turbo::DEFAULT_CONCURRENCY),
+            job: None,
+        }
+    }
+}
+
+impl AttentionServer {
+    fn to_client(channel: &str, payload: Vec<u8>) -> Submission {
+        Submission::new(Intent::Message(MessageSpec {
+            to: MessageTarget {
+                plugin: PluginId(client::PLUGIN_ID.to_string()),
+                side: PluginSide::Client,
+                client: None,
+            },
+            channel: channel.to_string(),
+            payload,
+        }))
+    }
+
+    fn failed(message: &str) -> Submission {
+        Self::to_client(
+            "failed",
+            serde_json::json!({ "message": message })
+                .to_string()
+                .into_bytes(),
+        )
+    }
+
+    fn start(&mut self, payload: &[u8], out: &mut Vec<Submission>) {
+        if self.job.is_some() {
+            out.push(Self::failed("an analysis is already running"));
+            return;
+        }
+        let mut handle = host();
+        let api: &mut dyn HostApi = &mut *handle;
+        match HostJobs::start(api, "analyse".to_string(), payload.to_vec()) {
+            Ok(job) => self.job = Some(job),
+            Err(error) => out.push(Self::failed(&error.message)),
+        }
+    }
+
+    fn finish(&mut self, job: RequestId, outcome: Outcome, out: &mut Vec<Submission>) {
+        if self.job != Some(job) {
+            return;
+        }
+        self.job = None;
+        let mut handle = host();
+        let api: &mut dyn HostApi = &mut *handle;
+        match outcome {
+            Outcome::Failed(error) | Outcome::Refused(error) => {
+                let message = if error.code == ErrorCode::Cancelled {
+                    "The analysis was cancelled.".to_string()
+                } else {
+                    error.message
+                };
+                out.push(Self::failed(&message));
+            }
+            other if !other.is_ok() => out.push(Self::failed("The analysis did not finish.")),
+            _ => match HostJobs::take_output(api, job) {
+                Some(bytes) => out.push(Self::to_client("reply", bytes)),
+                None => out.push(Self::failed("The analysis returned no result.")),
+            },
+        }
+    }
+}
 
 impl Lifecycle for AttentionServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
@@ -24,25 +119,61 @@ impl Lifecycle for AttentionServer {
 }
 
 impl Handler for AttentionServer {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut out = Vec::new();
+        for event in batch {
+            match event {
+                Event::Message(message)
+                    if message.from_side == PluginSide::Client && message.channel == "analyse" =>
+                {
+                    self.start(&message.payload, &mut out);
+                }
+                Event::RequestCompleted(result) => {
+                    if let RequestRef::Call(request) = result.request {
+                        self.finish(request, result.outcome, &mut out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+}
+
+impl JobRunner for AttentionServer {
+    fn run(&mut self, kind: String, input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
+        match kind.as_str() {
+            "analyse" => runner::run_analyse(&mut self.limiter, &input),
+            other => Err(PluginError::invalid_argument(format!(
+                "unknown job kind: {other}"
+            ))),
+        }
     }
 }
 
 /// The client side of `ilium.core.attention` (core-plugin-attention.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
-pub struct AttentionClient;
+pub struct AttentionClient {
+    client: client::Client,
+}
 
 impl Lifecycle for AttentionClient {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        self.client.activate();
         Ok(())
     }
 }
 
 impl Handler for AttentionClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        self.client.on_events(batch)
+    }
+}
+
+impl Views for AttentionClient {
+    fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
+        self.client.render(&view, area)
     }
 }
 

@@ -80,87 +80,13 @@ fn create_process_quota() -> QuotaGroup {
             // General result capacity grew for ambient replacement overlap;
             // retain both codec directions' dedicated 128 MiB headroom too.
             result_bytes: GENERAL_RESULT_BYTES + 2 * 128 * MIB,
-            worker_threads: PROCESS_WORKER_THREADS
-                + ilium_animation_js::helper::HelperLimits::default().worker_capacity(),
-            // Shared ceiling for selected charged owners; retiring native
-            // helpers must retain and compete for their original debit.
+            worker_threads: PROCESS_WORKER_THREADS,
+            // Shared ceiling for selected charged owners.
             // This is a declaration ceiling, not measured process RSS.
             worker_bytes: PROCESS_WORKER_BYTES,
         },
         move || wake.notify_waiters(),
     )
-}
-
-/// The admitting composition root owns the cadence identity; the animation
-/// worker only initializes it when an accepted plugin needs a source owner.
-pub(crate) struct NativeSourceCadenceOwner {
-    quota: QuotaGroup,
-    slot: Mutex<Option<Arc<ilium_animation_js::native_source_host::SourceCadence>>>,
-}
-
-/// One cadence ledger for every native source consumer in this client process,
-/// including preview. It owns no bank, thread or independent quota.
-pub(crate) fn native_source_cadence_owner(
-    quota: &QuotaGroup,
-) -> Result<Arc<NativeSourceCadenceOwner>, String> {
-    #[cfg(not(test))]
-    static CADENCE: OnceLock<Arc<NativeSourceCadenceOwner>> = OnceLock::new();
-    #[cfg(not(test))]
-    {
-        let owner = Arc::clone(CADENCE.get_or_init(|| {
-            Arc::new(NativeSourceCadenceOwner {
-                quota: process_quota(),
-                slot: Mutex::new(None),
-            })
-        }));
-        if !owner.quota.shares_root(quota) {
-            return Err("Foreign native source cadence".to_owned());
-        }
-        Ok(owner)
-    }
-    #[cfg(test)]
-    {
-        thread_local! {
-            static CADENCES: std::cell::RefCell<Vec<Arc<NativeSourceCadenceOwner>>> =
-                const { std::cell::RefCell::new(Vec::new()) };
-        }
-        // A libtest thread models one composition root. Explicit isolated
-        // roots keep their own ledger across sequential admitted owners too.
-        Ok(CADENCES.with(|owners| {
-            let mut owners = owners.borrow_mut();
-            if let Some(owner) = owners.iter().find(|owner| owner.quota.shares_root(quota)) {
-                return Arc::clone(owner);
-            }
-            let owner = Arc::new(NativeSourceCadenceOwner {
-                quota: quota.clone(),
-                slot: Mutex::new(None),
-            });
-            owners.push(Arc::clone(&owner));
-            owner
-        }))
-    }
-}
-
-pub(crate) fn native_source_cadence(
-    owner: &NativeSourceCadenceOwner,
-    quota: &QuotaGroup,
-) -> Result<Arc<ilium_animation_js::native_source_host::SourceCadence>, String> {
-    if !owner.quota.shares_root(quota) {
-        return Err("Foreign native source cadence".to_owned());
-    }
-    let mut slot = owner
-        .slot
-        .lock()
-        .map_err(|_| "Native source cadence lock poisoned".to_owned())?;
-    if let Some(cadence) = slot.as_ref() {
-        return Ok(Arc::clone(cadence));
-    }
-    let cadence = Arc::new(
-        ilium_animation_js::native_source_host::SourceCadence::new(owner.quota.clone())
-            .map_err(|error| error.to_string())?,
-    );
-    *slot = Some(Arc::clone(&cadence));
-    Ok(cadence)
 }
 
 /// Real process bootstrap, before logging or other platform-owned workers.

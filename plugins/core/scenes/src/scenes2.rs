@@ -186,7 +186,7 @@ pub fn create(scene_id: &str, spec: &Value, env: &SceneEnv) -> Option<Box<dyn Sc
             spec,
             env
         ),
-        _ => None,
+        _ => crate::scenes_c2::create(scene_id, spec, env),
     }
 }
 

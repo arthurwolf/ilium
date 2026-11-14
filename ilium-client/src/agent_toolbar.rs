@@ -933,9 +933,8 @@ pub fn action_at(
 /// When `hovered` names a button in this toolbar, also draws its tooltip:
 /// inline after the last button when there's room in `area` itself, or as a
 /// transient overlay on `below_row` (the live terminal content's first row)
-/// otherwise -- painted after normal content, exactly like
-/// `draw_screen_transfer_controls`, so it never reserves permanent space or
-/// resizes the PTY just because the pointer moved.
+/// otherwise -- painted after normal content, so it never reserves permanent
+/// space or resizes the PTY just because the pointer moved.
 pub fn render(
     frame: &mut Frame,
     area: Rect,

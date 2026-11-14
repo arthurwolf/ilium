@@ -35,18 +35,26 @@
       "extensions.provide:ilium.core.compaction/techniques",
       "extensions.provide:ilium.core.compaction/before-compact",
       "fs.read:agent-sessions:claude",
-      "fs.read:agent-sessions:codex"
+      "fs.read:agent-sessions:codex",
+      "panes.read",
+      "panes.signal",
+      "agent.read",
+      "notify.toast",
+      "messages.peer:ilium.core.agent-toolbar"
     ],
     "client": [
       "open-external",
       "ui.panels",
-      "agent.read"
+      "agent.read",
+      "keys.intercept"
     ]
   },
   "activation": [
     "event:agent-activity-changed",
     "service:compact",
-    "view:ilium.core.compaction/optimizer"
+    "view:ilium.core.compaction/optimizer",
+    "command:ilium.core.compaction/compact",
+    "view:ilium.core.compaction/remote-compaction"
   ],
   "contributes": {
     "extension_points": [
@@ -118,6 +126,11 @@
         "kind": "scan",
         "deadline_ms": 600000,
         "memory_mib": 512
+      },
+      {
+        "kind": "compact-session",
+        "deadline_ms": 900000,
+        "memory_mib": 512
       }
     ],
     "commands": [
@@ -135,6 +148,241 @@
         "id": "optimizer",
         "title": "Compaction",
         "modal": false
+      },
+      {
+        "id": "remote-compaction",
+        "title": "Remote compaction",
+        "modal": true
+      }
+    ],
+    "settings": [
+      {
+        "kind": "tab",
+        "id": "compaction-remote",
+        "title": "Remote compaction",
+        "sections": [
+          {
+            "id": "remote-run",
+            "title": "When to compact",
+            "scope": "server",
+            "rows": [
+              {
+                "type": "toggle",
+                "key": "enabled",
+                "title": "Compact through a summarizing model",
+                "default": false
+              },
+              {
+                "type": "toggle",
+                "key": "automatic",
+                "title": "Compact automatically near the context limit",
+                "default": false
+              },
+              {
+                "type": "number",
+                "key": "threshold_percent",
+                "title": "Automatic threshold",
+                "minimum": 30,
+                "maximum": 88,
+                "step": 1,
+                "default": 65,
+                "unit": "%"
+              },
+              {
+                "type": "number",
+                "key": "pause_timeout_seconds",
+                "title": "Wait for a safe pause",
+                "minimum": 10,
+                "maximum": 1800,
+                "step": 10,
+                "default": 120,
+                "unit": "s"
+              },
+              {
+                "type": "number",
+                "key": "cooldown_minutes",
+                "title": "Cooldown between automatic runs",
+                "minimum": 1,
+                "maximum": 240,
+                "step": 1,
+                "default": 10,
+                "unit": "min"
+              },
+              {
+                "type": "number",
+                "key": "keep_backups",
+                "title": "Backups to keep",
+                "minimum": 1,
+                "maximum": 20,
+                "step": 1,
+                "default": 3
+              }
+            ]
+          },
+          {
+            "id": "remote-technique",
+            "title": "How to summarize",
+            "scope": "server",
+            "rows": [
+              {
+                "type": "choice",
+                "key": "claude_technique",
+                "title": "Claude Code technique",
+                "default": "claude_code",
+                "options": [
+                  {
+                    "value": "claude_code",
+                    "title": "Claude Code"
+                  },
+                  {
+                    "value": "codex",
+                    "title": "Codex"
+                  },
+                  {
+                    "value": "opencode",
+                    "title": "opencode"
+                  },
+                  {
+                    "value": "gemini_cli",
+                    "title": "Gemini CLI"
+                  },
+                  {
+                    "value": "best_of_all_worlds",
+                    "title": "Best of all worlds"
+                  },
+                  {
+                    "value": "custom",
+                    "title": "Custom prompt"
+                  }
+                ]
+              },
+              {
+                "type": "choice",
+                "key": "codex_technique",
+                "title": "Codex technique",
+                "default": "codex",
+                "options": [
+                  {
+                    "value": "claude_code",
+                    "title": "Claude Code"
+                  },
+                  {
+                    "value": "codex",
+                    "title": "Codex"
+                  },
+                  {
+                    "value": "opencode",
+                    "title": "opencode"
+                  },
+                  {
+                    "value": "gemini_cli",
+                    "title": "Gemini CLI"
+                  },
+                  {
+                    "value": "best_of_all_worlds",
+                    "title": "Best of all worlds"
+                  },
+                  {
+                    "value": "custom",
+                    "title": "Custom prompt"
+                  }
+                ]
+              },
+              {
+                "type": "choice",
+                "key": "other_technique",
+                "title": "Other agents technique",
+                "default": "claude_code",
+                "options": [
+                  {
+                    "value": "claude_code",
+                    "title": "Claude Code"
+                  },
+                  {
+                    "value": "codex",
+                    "title": "Codex"
+                  },
+                  {
+                    "value": "opencode",
+                    "title": "opencode"
+                  },
+                  {
+                    "value": "gemini_cli",
+                    "title": "Gemini CLI"
+                  },
+                  {
+                    "value": "best_of_all_worlds",
+                    "title": "Best of all worlds"
+                  },
+                  {
+                    "value": "custom",
+                    "title": "Custom prompt"
+                  }
+                ]
+              },
+              {
+                "type": "text-area",
+                "key": "custom_prompt",
+                "title": "Custom prompt",
+                "default": "",
+                "max_length": 20000
+              }
+            ]
+          },
+          {
+            "id": "remote-size",
+            "title": "What is kept and what is sent",
+            "scope": "server",
+            "rows": [
+              {
+                "type": "number",
+                "key": "tail_tokens",
+                "title": "Recent conversation kept verbatim",
+                "minimum": 2000,
+                "maximum": 100000,
+                "step": 1000,
+                "default": 20000,
+                "unit": "tokens"
+              },
+              {
+                "type": "number",
+                "key": "protected_recent_tool_tokens",
+                "title": "Recent tool output kept whole",
+                "minimum": 0,
+                "maximum": 200000,
+                "step": 5000,
+                "default": 40000,
+                "unit": "tokens"
+              },
+              {
+                "type": "number",
+                "key": "tool_result_chars",
+                "title": "Older tool output cut to",
+                "minimum": 200,
+                "maximum": 20000,
+                "step": 100,
+                "default": 2000,
+                "unit": "chars"
+              },
+              {
+                "type": "number",
+                "key": "summarizer_context_tokens",
+                "title": "Summarizer context size",
+                "minimum": 8000,
+                "maximum": 900000,
+                "step": 1000,
+                "default": 120000,
+                "unit": "tokens"
+              },
+              {
+                "type": "toggle",
+                "key": "redact_secrets",
+                "title": "Mask secrets before summarizing",
+                "default": true
+              }
+            ]
+          }
+        ]
       }
     ]
   },

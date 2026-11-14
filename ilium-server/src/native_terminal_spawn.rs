@@ -197,10 +197,7 @@ fn spawn_cost(
         request.cwd.capacity(),
         state.session_name.len(),
         state.socket_path.as_os_str().len(),
-        state
-            .text_trigger_config_path
-            .get()
-            .map_or(0, |path| path.capacity()),
+        state.config_path.get().map_or(0, |path| path.capacity()),
         worktree_root.map_or(0, |path| path.capacity()),
         request
             .repository
@@ -364,7 +361,7 @@ pub(crate) async fn spawn(
             socket_path: state.socket_path.clone(),
             worktree_root,
             config_dir: state
-                .text_trigger_config_path
+                .config_path
                 .get()
                 .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
                 .or_else(|| crate::paths::config_dir().ok()),

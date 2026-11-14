@@ -18,14 +18,18 @@ use ilium_plugin_sdk::types::{
 use ilium_plugin_sdk::{host, ilium_plugin, Handler, HostApi, JobRunner, Lifecycle, Views};
 
 pub mod analysis;
+mod monitor;
 mod optimize;
 mod panel;
 mod redact;
 pub mod remote;
+mod remote_dialog;
+mod remote_flow;
 mod remote_settings;
 mod report;
 mod runner;
 mod scan;
+mod session_job;
 
 /// The server side of `ilium.core.compaction` (core-plugin-compaction.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["job-runner"])]
@@ -109,6 +113,8 @@ impl CompactionServer {
 
 impl Lifecycle for CompactionServer {
     fn activate(&mut self, _context: Activation) -> Result<(), PluginError> {
+        // What a previous run left in the durable state is undone by its watchdog timer.
+        remote_flow::reset();
         Ok(())
     }
 }
@@ -117,6 +123,11 @@ impl Handler for CompactionServer {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
         let mut out = Vec::new();
         for event in batch {
+            {
+                let mut handle = host();
+                let api: &mut dyn HostApi = &mut *handle;
+                remote_flow::on_event(api, &event, &mut out);
+            }
             match event {
                 Event::PaneFocused(pane) => self.focused = pane,
                 Event::Message(message)
@@ -140,6 +151,7 @@ impl JobRunner for CompactionServer {
     fn run(&mut self, kind: String, input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
         match kind.as_str() {
             "compact" => runner::run_compact(&input, self.focused),
+            session_job::JOB_KIND => session_job::run(&input),
             "scan" => optimize::run_scan_job(&input),
             other => Err(PluginError::invalid_argument(format!(
                 "unknown job kind: {other}"
@@ -161,13 +173,22 @@ impl Lifecycle for CompactionClient {
 
 impl Handler for CompactionClient {
     fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
-        batch.into_iter().flat_map(panel::on_event).collect()
+        let mut out = Vec::new();
+        for event in batch {
+            remote_dialog::on_event(&event, &mut out);
+            out.extend(panel::on_event(event));
+        }
+        out
     }
 }
 
 impl Views for CompactionClient {
     fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
-        panel::render(&view, area)
+        if view == ViewTarget::Panel(remote_dialog::PANEL.to_string()) {
+            remote_dialog::render(&view, area)
+        } else {
+            panel::render(&view, area)
+        }
     }
 }
 
@@ -242,14 +263,16 @@ mod spec_tests {
 
     /// REQ: COR-050
     #[test]
-    fn manifest_lists_the_three_activation_triggers() {
+    fn manifest_lists_the_activation_triggers() {
         let manifest = load_manifest();
         assert_eq!(
             manifest["activation"],
             json!([
                 "event:agent-activity-changed",
                 "service:compact",
-                "view:ilium.core.compaction/optimizer"
+                "view:ilium.core.compaction/optimizer",
+                "command:ilium.core.compaction/compact",
+                "view:ilium.core.compaction/remote-compaction"
             ])
         );
     }

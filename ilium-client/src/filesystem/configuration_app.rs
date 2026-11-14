@@ -397,20 +397,6 @@ impl App {
                             self.refresh_agent_setup_statuses();
                             self.reconcile_agent_setup_prompts();
                         }
-                        ConfigurationSaved::TextTriggers(settings) => {
-                            self.queue_request(ilium_ipc::ClientRequest::UpdateTextTriggers {
-                                settings,
-                            });
-                            if let Some(ConfigurationIntent::TextTriggers {
-                                dialog: Some(expected),
-                            }) = &intent
-                            {
-                                if matches!(&self.mode,Mode::TextTriggerDialog(state) if state.candidate().as_ref()==Ok(expected))
-                                {
-                                    self.pop_modal();
-                                }
-                            }
-                        }
                         ConfigurationSaved::CustomAgents(settings) => {
                             self.custom_agents = settings;
                             self.reconcile_toolbar_custom_agents();
@@ -488,9 +474,6 @@ impl App {
                         Some(ConfigurationIntent::Plain { label, success }) => success
                             .map(str::to_owned)
                             .unwrap_or_else(|| format!("{label} saved to disk")),
-                        Some(ConfigurationIntent::TextTriggers { .. }) => {
-                            "Text Triggers saved to disk".into()
-                        }
                         Some(ConfigurationIntent::CustomAgents) => {
                             "Custom agents saved to disk".into()
                         }
@@ -570,11 +553,6 @@ impl App {
                         {
                             if let Some(observed) = failure.observed_agent_setup {
                                 self.agent_setup_settings = observed;
-                            }
-                        }
-                        Some(ConfigurationIntent::TextTriggers { .. }) => {
-                            if let Mode::TextTriggerDialog(state) = &mut self.mode {
-                                state.save_error = Some(failure.message.clone());
                             }
                         }
                         Some(ConfigurationIntent::CustomAgents) => {

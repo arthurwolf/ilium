@@ -38,14 +38,12 @@ pub mod agent_monitoring_cards;
 pub mod agent_prompt_transcript;
 pub mod agent_toolbar;
 mod animation_hover;
-mod animation_plugins;
 mod animation_rows;
 mod animation_settings_ui;
 mod animation_visibility;
 pub mod antigravity_model_statusline;
 pub mod app;
 pub mod ascii_chart;
-pub mod attention;
 #[cfg(test)]
 mod background_acceptance;
 pub mod background_animation;
@@ -113,7 +111,6 @@ pub mod padding;
 pub mod padding_app;
 pub mod padding_dialog;
 pub mod padding_ui;
-pub mod pane_title;
 mod paste_cursor;
 pub mod paths;
 pub mod plugin_host;
@@ -133,21 +130,11 @@ pub mod recap_state;
 pub mod recap_ui;
 pub mod recap_worker;
 mod redraw_schedule;
-pub mod release_animation;
 pub mod release_embedding;
-pub mod remote_compaction_app;
-pub mod remote_compaction_dialog;
-pub mod remote_compaction_flow;
-pub mod remote_compaction_native;
-pub mod remote_compaction_settings;
-pub mod remote_compaction_settings_ui;
-pub mod remote_compaction_worker;
 pub mod render_cache;
-pub mod reset_planning;
+pub mod replacement_focus;
 pub mod resource_queue;
 pub mod restructure;
-pub mod wall_clock;
-pub mod screen_transfer;
 pub mod section_frame;
 pub mod selectable_cards;
 mod semantic_animation;
@@ -197,7 +184,6 @@ pub mod terminal_selection;
 pub mod terminal_title_inference;
 pub mod terminal_view;
 pub mod text_prompt;
-pub mod text_trigger_dialog;
 pub mod theme;
 pub mod tick;
 pub mod title_inference;
@@ -225,7 +211,6 @@ pub mod value_inference;
 pub mod value_keyboard;
 pub mod value_manager;
 pub mod value_number;
-pub mod value_plugin;
 pub mod value_scene;
 pub mod value_settings;
 pub mod value_settings_choice;
@@ -235,6 +220,7 @@ mod voice_preparation;
 mod voice_presentation;
 mod voice_retirement;
 pub mod voice_settings;
+pub mod wall_clock;
 pub mod worktree_dialog;
 pub mod worktree_manager;
 
@@ -682,8 +668,7 @@ fn apply_presented_frame(
                         .as_micros() as u64,
                     "animation frame emitted"
                 );
-                app.animation_frame
-                    .acknowledge(animation, presented.flush_proof.take());
+                app.animation_frame.acknowledge(animation);
             }
         }
     }
@@ -768,16 +753,6 @@ async fn run_inner(
     } = audio_catalogue;
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
     app.configure_paste_retirement(execution.retirement());
-    let text_trigger_preview_client = execution
-        .client_when_ready(crate::text_trigger_dialog::preview_limits())
-        .await
-        .map_err(|error| {
-            ClientError::TerminalSetup(std::io::Error::other(format!(
-                "text trigger preview startup: {error:?}"
-            )))
-        })?;
-    let text_trigger_preview_notification =
-        app.configure_text_trigger_preview(text_trigger_preview_client);
     let sound_preview_client = execution
         .client_when_ready(crate::onboarding::sound_preview::limits())
         .await
@@ -798,23 +773,6 @@ async fn run_inner(
         })?;
     app.outbound_admission = Some(outbound_admission.clone());
     app.location_search_client = Some(execution.location_search());
-    let catalogue_client = execution
-        .client_when_ready(ilium_execution::ClientLimits {
-            jobs: 1,
-            service_jobs: 0,
-            input_bytes: 4 * 1024 * 1024,
-            result_bytes: 64 * 1024 * 1024,
-        })
-        .await
-        .map_err(|error| {
-            ClientError::TerminalSetup(std::io::Error::other(format!(
-                "animation catalogue startup: {error:?}"
-            )))
-        })?;
-    let catalogue_preparation =
-        crate::animation_plugins::preparation::CataloguePreparation::new(catalogue_client);
-    let catalogue_notification = catalogue_preparation.notification();
-    app.plugin_catalogue_preparation = Some(catalogue_preparation);
     // The WebAssembly plugin host. Loading and activation run on the host's own thread, so
     // this neither delays the first frame nor is awaited anywhere in the event loop.
     app.wasm_plugins = options.plugins.clone().and_then(|start| {
@@ -1060,10 +1018,6 @@ async fn run_inner(
         })?;
     // These owners cross the interaction future boundary so shutdown can
     // cancel and collect their accepted work after the UI loop exits.
-    let mut remote_compaction_notification: Option<std::sync::Arc<tokio::sync::Notify>> = None;
-    let mut remote_compaction_workers: Option<
-        crate::remote_compaction_worker::RemoteCompactionWorkers,
-    > = None;
     let result = async {
     let mut presentation_frame_id = 0_u64;
     let mut presentation_layout_revision = 0_u64;
@@ -1111,17 +1065,13 @@ async fn run_inner(
     app.apply_notification_settings(config.notifications);
     app.apply_inference_settings(config.inference);
     app.apply_trigger_settings(config.triggers);
-    app.apply_text_trigger_settings(config.text_triggers);
     app.apply_agent_setup_settings(config.agent_setup);
     app.apply_terminal_settings(config.terminal);
     app.apply_editor_settings(config.editor);
     app.apply_session_settings(config.session);
     app.apply_git_settings(config.git);
     app.apply_voice_settings(config.voice);
-    app.apply_reset_planning_settings(config.reset_planning);
-    app.apply_attention_settings(config.attention);
     app.apply_cost_settings(config.cost);
-    app.apply_remote_compaction_settings(config.remote_compaction);
     app.apply_debug_settings(config.debug);
     app.apply_api_settings(config.api);
     app.request_debug_logging_reconciliation();
@@ -1214,55 +1164,7 @@ async fn run_inner(
         app.onboarding_revision,
         app.onboarding.is_none() && app.onboarding_progress.automatic_ai_allowed(),
     );
-    let compaction_notification = std::sync::Arc::new(tokio::sync::Notify::new());
-    let remote_compaction_wake = std::sync::Arc::clone(&compaction_notification);
-    let remote_compaction_client = execution
-        .client_when_ready(ilium_execution::ClientLimits {
-            jobs: 1,
-            service_jobs: 0,
-            input_bytes: 512 * 1024 * 1024,
-            result_bytes: 2 * 1024 * 1024,
-        }).await
-        .map_err(|error| {
-            ClientError::TerminalSetup(std::io::Error::other(format!(
-                "remote compaction worker startup: {error:?}"
-            )))
-        })?
-        .with_completion_wake(move || {
-            remote_compaction_wake.notify_one();
-        });
-    remote_compaction_notification = Some(std::sync::Arc::clone(&compaction_notification));
-    remote_compaction_workers = Some(crate::remote_compaction_worker::RemoteCompactionWorkers::new(
-        remote_compaction_client,
-        std::sync::Arc::clone(&compaction_notification),
-    ));
-    let reset_notification = std::sync::Arc::new(tokio::sync::Notify::new());
-    let reset_wake = std::sync::Arc::clone(&reset_notification);
-    let reset_client = execution
-        .client_when_ready(ilium_execution::ClientLimits {
-            jobs: 1,
-            service_jobs: 0,
-            input_bytes: 16 * 1024 * 1024,
-            result_bytes: 64 * 1024,
-        }).await
-        .map_err(|error| {
-            ClientError::TerminalSetup(std::io::Error::other(format!(
-                "reset planning worker startup: {error:?}"
-            )))
-        })?
-        .with_completion_wake(move || {
-            reset_wake.notify_one();
-        });
     let icon_search_notification = icon_search_workers.notification();
-    let (reset_events_tx, mut reset_events_rx) = mpsc::channel(4);
-    let (reset_settings_tx, reset_settings_rx) =
-        tokio::sync::watch::channel(app.reset_planning_settings.clone());
-    let reset_monitor = crate::reset_planning::spawn_monitor(
-        reset_settings_rx,
-        reset_events_tx,
-        reset_client,
-        reset_notification,
-    );
     let control_client = execution.client_when_ready(ilium_execution::ClientLimits {
         jobs: 20, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 256 * 1024 * 1024,
     }).await.map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("control preparation startup: {error:?}"))))?;
@@ -1332,9 +1234,6 @@ async fn run_inner(
     // has arrived; start from blank cells.
     startup_dialog.clear();
     app.startup_progress_path = Some(ilium_ipc::startup_progress_path(&options.socket_path));
-    // Pane ids are session-local, so the queue file is keyed by the session's socket.
-    app.attach_attention_store(attention::store::store_path_for_session(&options.socket_path));
-    app.attach_attention_events(naming_events_tx.clone());
 
     // Set so the very first pass through the loop always draws (there's
     // nothing on screen yet); every branch below that actually changes
@@ -1383,14 +1282,6 @@ async fn run_inner(
                 acknowledgement.map_err(ClientError::TerminalSetup)?,
                 &mut animation_presentations,
             )?;
-        }
-        if remote_compaction_workers
-            .as_mut()
-            .expect("remote compaction owner is initialized before the event loop")
-            .collect(|event| app.apply_remote_compaction_worker_event(event))
-        {
-            needs_redraw = true;
-            needs_immediate_redraw = true;
         }
         app.begin_editor_capture_turn();
         if let Err(failure) = app.retry_native_terminal_paste() {
@@ -1534,7 +1425,6 @@ async fn run_inner(
         }
         if let Some(delay) = app.plugin_edit_delay(now) { tick_delay = tick_delay.min(delay); }
         if let Some(delay) = app.source_window_retry_delay(now) { tick_delay = tick_delay.min(delay); }
-        if let Some(delay) = app.text_trigger_preview_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if let Some(delay) = app.sound_studio_preview_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if crate::onboarding::integration::is_animating(&app) || last_onboarding_animation_active {
             tick_delay = tick_delay.min(Duration::from_millis(33));
@@ -1547,12 +1437,6 @@ async fn run_inner(
         }
         if needs_redraw && presenter.outstanding_frames() == 0 {
             tick_delay = tick_delay.min(redraw_schedule.delay(needs_immediate_redraw, now));
-        }
-        if let Some(interval) = app
-            .reset_monitor_state
-            .display_tick_interval(&app.reset_planning_settings)
-        {
-            tick_delay = tick_delay.min(interval);
         }
         if let Some(delay) = crate::background_composition::animation_frame_delay(
             &app,
@@ -1581,9 +1465,7 @@ async fn run_inner(
             _ = context_notification.notified() => { needs_redraw=true; }
             _ = external_open_notification.notified() => { needs_redraw |= app.collect_external_open(); }
             _ = document_notification.notified() => { needs_redraw = true; }
-            _ = text_trigger_preview_notification.notified() => { needs_redraw |= app.reconcile_text_trigger_preview(); }
             _ = sound_preview_notification.notified() => { needs_redraw |= app.reconcile_sound_studio_preview(); }
-            _ = catalogue_notification.notified() => { needs_redraw |= app.collect_plugin_catalogue(); }
             _ = wasm_plugin_notification.notified() => { needs_redraw |= app.collect_wasm_plugin_outputs(); }
             _ = statistics_notification.notified() => {
                 needs_redraw |= app.session_stats.drain_events();
@@ -1600,7 +1482,7 @@ async fn run_inner(
                 app.projection_admission_wake = None;
                 app.projection_busy_retry_at = None;
             }
-            _ = filesystem_admission_notification.notified() => {needs_redraw |= app.collect_editor_files(); naming_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation(); needs_redraw |= app.reconcile_text_trigger_preview(); needs_redraw |= app.reconcile_sound_studio_preview();}
+            _ = filesystem_admission_notification.notified() => {needs_redraw |= app.collect_editor_files(); naming_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation(); needs_redraw |= app.reconcile_sound_studio_preview();}
             completion = app.debug_logging.next_completion() => {
                 apply_debug_logging_completion(&mut app, completion);
                 needs_redraw = true;
@@ -1684,14 +1566,6 @@ async fn run_inner(
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
-            _ = compaction_notification.notified() => {
-                let collected = remote_compaction_workers
-                    .as_mut()
-                    .expect("remote compaction owner is initialized before the event loop")
-                    .collect(|event| app.apply_remote_compaction_worker_event(event));
-                needs_redraw |= collected;
-                needs_immediate_redraw |= collected;
-            }
             _=provider_notification.notified()=>{naming_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation();},
             _ = icon_search_notification.notified() => {
                 if let Some(event) = icon_search_workers.poll() {
@@ -1699,11 +1573,6 @@ async fn run_inner(
                     needs_redraw = true;
                     needs_immediate_redraw = true;
                 }
-            }
-            Some(reset_event) = reset_events_rx.recv() => {
-                app.reset_monitor_state.apply(reset_event, &app.reset_planning_settings);
-                needs_redraw = true;
-                needs_immediate_redraw = true;
             }
             demo_event = next_demo_voice_event(&mut onboarding_voice, &mut pending_demo_event, demo_event_retry_at) => {
                 match demo_event {
@@ -1773,13 +1642,6 @@ async fn run_inner(
                 ) {
                     needs_redraw = true;
                 }
-                if app
-                    .reset_monitor_state
-                    .display_tick_interval(&app.reset_planning_settings)
-                    .is_some()
-                {
-                    needs_redraw = true;
-                }
             }
         }
 
@@ -1794,11 +1656,6 @@ async fn run_inner(
         needs_redraw |=
             app.tick_completed_progress_display(crate::wall_clock::unix_millis_now());
 
-        if *reset_settings_tx.borrow() != app.reset_planning_settings {
-            let _ = reset_settings_tx.send(app.reset_planning_settings.clone());
-        }
-
-        needs_redraw |= app.reconcile_text_trigger_preview();
         needs_redraw |= app.reconcile_sound_studio_preview();
         dispatch_pending_app_work(
             &mut app,
@@ -1876,24 +1733,6 @@ async fn run_inner(
                 pane_ids: streamed_pane_order.into_iter().flatten().collect(),
             }) {
                 last_streamed_pane_order = Some(streamed_pane_order);
-        }
-
-        if app.take_pending_remote_compaction_cancel() {
-            remote_compaction_workers
-                .as_mut()
-                .expect("remote compaction owner is initialized before the event loop")
-                .cancel();
-        }
-        if let Some(job) = app.take_pending_remote_compaction_job() {
-            if let Err(event) = remote_compaction_workers
-                .as_mut()
-                .expect("remote compaction owner is initialized before the event loop")
-                .spawn(job)
-            {
-                app.apply_remote_compaction_worker_event(*event);
-                needs_redraw = true;
-                needs_immediate_redraw = true;
-            }
         }
 
         if app.publish_outbound_requests(&connection.requests).is_err() {
@@ -2035,7 +1874,6 @@ async fn run_inner(
                 terminal.current_buffer_mut().reset();
                 let mut frame = terminal.get_frame();
                 let cursor = crate::ui::draw_at_with_cursor(&mut frame, &mut app, animation_elapsed);
-                crate::text_trigger_dialog::draw_save_error(&mut frame, &app);
                 crate::terminal_guard::skip_bottom_right_cell(&mut frame, cfg!(windows));
                 let buffer = frame.buffer_mut().clone();
                 presentation_frame_id = presentation_frame_id.checked_add(1)
@@ -2070,7 +1908,6 @@ async fn run_inner(
         }
     }
     input_rx.close();
-    reset_monitor.abort();
 
     // Settle accepted state replies and their following semantic actions while
     // their original voice actor and the outbound terminal consumers remain alive.
@@ -2195,7 +2032,7 @@ async fn run_inner(
                         drop(presented.frame.take_animation());
                         app.animation_frame.reject_output(reason);
                     } else if let Some(animation) = presented.frame.take_animation() {
-                        app.animation_frame.acknowledge(animation, presented.flush_proof.take());
+                        app.animation_frame.acknowledge(animation);
                     }
                     app.animation_frame.collect();
                 },
@@ -2466,8 +2303,7 @@ async fn run_inner(
                         drop(presented.frame.take_animation());
                         app.animation_frame.reject_output(reason);
                     } else if let Some(animation) = presented.frame.take_animation() {
-                        app.animation_frame
-                            .acknowledge(animation, presented.flush_proof.take());
+                        app.animation_frame.acknowledge(animation);
                     }
                 }
                 _ => {
@@ -2507,11 +2343,7 @@ async fn run_inner(
     app.session_models.cancel_pending();
     app.cost_tracker.cancel_pending();
     app.model_catalog_preparation.close();
-    app.close_text_trigger_preview();
     app.close_sound_studio_preview();
-    if let Some(workers) = remote_compaction_workers.as_mut() {
-        workers.cancel();
-    }
     // Completed/cancelled receipts retain retirement storage until collected.
     // Reconcile them while the shared owner enforces its physical-exit deadline.
     let gpu_probe_result = match gpu_probe
@@ -2531,38 +2363,13 @@ async fn run_inner(
     let execution_shutdown = execution.shutdown();
     tokio::pin!(execution_shutdown);
     let execution_result = loop {
-        app.collect_closed_text_trigger_preview();
         app.collect_closed_sound_studio_preview();
         tokio::select! {
             result = &mut execution_shutdown => break result,
-            _ = text_trigger_preview_notification.notified() => {},
             _ = sound_preview_notification.notified() => {},
             _ = filesystem_admission_notification.notified() => {},
-            _ = async {
-                match remote_compaction_notification.as_ref() {
-                    Some(notification) => notification.notified().await,
-                    None => std::future::pending().await,
-                }
-            } => {
-                if let Some(workers) = remote_compaction_workers.as_mut() {
-                    workers.collect(|event| app.apply_remote_compaction_worker_event(event));
-                }
-            },
         }
     };
-    let remote_compaction_result = if let Some(workers) = remote_compaction_workers.as_mut() {
-        workers.collect(|event| app.apply_remote_compaction_worker_event(event));
-        if workers.is_running() {
-            Err(ClientError::TerminalSetup(std::io::Error::other(
-                "remote compaction receipt remained unsettled after execution shutdown",
-            )))
-        } else {
-            Ok(())
-        }
-    } else {
-        Ok(())
-    };
-    app.collect_closed_text_trigger_preview();
     app.collect_closed_sound_studio_preview();
     let sound_preview_result = if app.sound_studio_preview_settled() {
         Ok(())
@@ -2570,17 +2377,6 @@ async fn run_inner(
         Err(ClientError::TerminalSetup(std::io::Error::other(
             "sound studio preview receipt remained unsettled after execution shutdown",
         )))
-    };
-    let text_trigger_preview_result = match app.text_trigger_preview.as_ref() {
-        Some(preview) if preview.settlement_issue().is_some() => Err(ClientError::TerminalSetup(
-            std::io::Error::other(preview.settlement_issue().unwrap().message()),
-        )),
-        Some(preview) if !preview.is_settled() => {
-            Err(ClientError::TerminalSetup(std::io::Error::other(
-                "text trigger preview receipts remain unsettled after execution shutdown",
-            )))
-        }
-        _ => Ok(()),
     };
     let result = shutdown_result
         .and(normal_shutdown_result)
@@ -2592,8 +2388,6 @@ async fn run_inner(
         .and(icon_shutdown_result)
         .and(animation_receipt_result)
         .and(animation_shutdown_result)
-        .and(remote_compaction_result)
-        .and(text_trigger_preview_result)
         .and(sound_preview_result)
         .and(logging_result)
         .and(filesystem_result)
@@ -2677,8 +2471,7 @@ async fn settle_presentation_receipts(
                 drop(presented.frame.take_animation());
                 app.animation_frame.reject_output(reason);
             } else if let Some(animation) = presented.frame.take_animation() {
-                app.animation_frame
-                    .acknowledge(animation, presented.flush_proof.take());
+                app.animation_frame.acknowledge(animation);
             }
             app.animation_frame.collect();
         }

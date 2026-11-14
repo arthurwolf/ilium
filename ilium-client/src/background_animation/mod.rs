@@ -17,7 +17,6 @@ mod host;
 mod introduction;
 mod pack_simd;
 mod parameters;
-mod plugin_backend;
 mod raster;
 mod scenes;
 mod shoreline;
@@ -71,7 +70,7 @@ pub enum AnimationKind {
     /// A scene a plugin supplies (the Scene row picks which). A saved selection of a scene
     /// that moved into the Scenes plugin (`dithered_waves`, `pipes`, `atlantic_dusk`,
     /// `machine_screen`, `hex_expedition`, and the quiet scenes such as `aurora`, `pollen` and
-    /// `wallpaper`, and `cube_clock`, `dither_water`, `fbm_clouds`) loads as this kind.
+    /// `wallpaper`, and `cube_clock`, `dither_water`, `fbm_clouds`, `carpet` and `chess`) loads as this kind.
     #[serde(
         alias = "dithered_waves",
         alias = "pi",
@@ -99,10 +98,17 @@ pub enum AnimationKind {
         alias = "box_machine",
         alias = "dithr_patterns",
         alias = "galactic_empires",
-        alias = "solar_system"
+        alias = "solar_system",
+        alias = "wind",
+        alias = "growth",
+        alias = "frost",
+        alias = "embroidery",
+        alias = "hesitating_ink",
+        alias = "carpet",
+        alias = "chess",
+        alias = "vector_td"
     )]
     PluginScene,
-    VectorTd,
     Wikipedia,
     VoxelLandscape,
     TopographicMaps,
@@ -110,19 +116,12 @@ pub enum AnimationKind {
     Earthquakes,
     Aircraft,
     Boats,
-    Chess,
     OpenStreetMap,
-    Carpet,
-    Wind,
-    Growth,
     Semantic,
-    Frost,
-    Embroidery,
-    HesitatingInk,
 }
 
 impl AnimationKind {
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 26] = [
         Self::Shoreline,
         Self::MoonlitWater,
         Self::SleepingRidge,
@@ -140,7 +139,6 @@ impl AnimationKind {
         Self::Spectrum,
         Self::Images,
         Self::PluginScene,
-        Self::VectorTd,
         Self::Wikipedia,
         Self::VoxelLandscape,
         Self::TopographicMaps,
@@ -148,15 +146,8 @@ impl AnimationKind {
         Self::Earthquakes,
         Self::Aircraft,
         Self::Boats,
-        Self::Chess,
         Self::OpenStreetMap,
-        Self::Carpet,
-        Self::Wind,
-        Self::Growth,
         Self::Semantic,
-        Self::Frost,
-        Self::Embroidery,
-        Self::HesitatingInk,
     ];
 
     /// The hosted `ilium-ambient` engine behind this kind, or `None` for the
@@ -165,17 +156,10 @@ impl AnimationKind {
         match self {
             Self::TopographicMaps => Some(AmbientKind::TopographicMaps),
             Self::OpenStreetMap => Some(AmbientKind::OpenStreetMap),
-            Self::Carpet => Some(AmbientKind::Carpet),
-            Self::Wind => Some(AmbientKind::Wind),
-            Self::Growth => Some(AmbientKind::Growth),
-            Self::Frost => Some(AmbientKind::Frost),
-            Self::Embroidery => Some(AmbientKind::Embroidery),
-            Self::HesitatingInk => Some(AmbientKind::HesitatingInk),
             Self::Graph => Some(AmbientKind::Graph),
             Self::Earthquakes => Some(AmbientKind::Earthquakes),
             Self::Aircraft => Some(AmbientKind::Aircraft),
             Self::Boats => Some(AmbientKind::Boats),
-            Self::Chess => Some(AmbientKind::Chess),
             Self::Stars => Some(AmbientKind::Stars),
             Self::NightLights => Some(AmbientKind::NightLights),
             Self::Clouds => Some(AmbientKind::Clouds),
@@ -183,7 +167,6 @@ impl AnimationKind {
             Self::Spectrum => Some(AmbientKind::Spectrum),
             Self::Images => Some(AmbientKind::Images),
             Self::PluginScene => Some(AmbientKind::Plugin),
-            Self::VectorTd => Some(AmbientKind::VectorTd),
             Self::VoxelLandscape => Some(AmbientKind::VoxelLandscape),
             _ => None,
         }
@@ -318,8 +301,6 @@ pub enum AnimationPlaybackMode {
 pub struct AnimationSettings {
     pub enabled: bool,
     pub kind: AnimationKind,
-    pub source: crate::animation_plugins::AnimationSourceTab,
-    pub plugin: crate::animation_plugins::PluginPreferences,
     pub semantic_scope: SemanticScope,
     pub playback_mode: AnimationPlaybackMode,
     pub loop_seconds: u16,
@@ -359,8 +340,6 @@ impl Default for AnimationSettings {
         Self {
             enabled: false,
             kind: AnimationKind::default(),
-            source: Default::default(),
-            plugin: Default::default(),
             semantic_scope: SemanticScope::default(),
             playback_mode: AnimationPlaybackMode::Loop,
             loop_seconds: 60,

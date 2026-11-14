@@ -253,15 +253,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ("explorer-files", ilium_client::app::Mode::Normal),
             ("folder-explorer", ilium_client::app::Mode::Normal),
             ("board-path-picker", ilium_client::app::Mode::Normal),
-            ("text-trigger-dialog", ilium_client::app::Mode::Normal),
-            (
-                "remote-compaction-running",
-                ilium_client::app::Mode::RemoteCompaction,
-            ),
-            (
-                "remote-compaction-failed",
-                ilium_client::app::Mode::RemoteCompaction,
-            ),
             (
                 "command-prompt",
                 ilium_client::app::Mode::CommandPrompt(
@@ -473,10 +464,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     ilium_client::app::Mode::BoardPathPicker(Box::new(overlay))
                 };
                 app.mode = mode;
-            } else if name == "text-trigger-dialog" {
-                app.mode = ilium_client::app::Mode::TextTriggerDialog(Box::new(
-                    ilium_client::text_trigger_dialog::TextTriggerDialogState::new(None),
-                ));
             } else if name.starts_with("stats-") {
                 let group = app
                     .tree
@@ -540,8 +527,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 )?;
             } else if name.starts_with("terminal-") {
                 configure_synthetic_terminals(&mut app, name, width, height)?;
-            } else if name.starts_with("remote-compaction-") {
-                configure_synthetic_remote_compaction(&mut app, name == "remote-compaction-failed");
             } else if name.starts_with("inference-") {
                 app.mode = ilium_client::app::Mode::Settings(SettingsState {
                     tab: SettingsTab::Inference,
@@ -603,8 +588,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     "Synthetic cached onboarding step; no provider requests, saves, audio, voice or practice actions; no actual audio playback or live keyboard input is tested",
                 "board-populated-first" | "board-populated-last" | "board-details-title" | "board-details-notes" =>
                     "Synthetic Markdown board loaded from new fixture input; no board saves, server requests, font or live input are tested",
-                "remote-compaction-running" | "remote-compaction-failed" =>
-                    "Synthetic compaction presentation only; no worker, provider request, transcript or process operation; font and live input are not tested",
                 "save-as-prompt" =>
                     "Synthetic prompt without a real pane or populated parent; terminal font and live input are not tested",
                 "worktree-close-waiting" | "worktree-close-no-workspace" |
@@ -810,38 +793,6 @@ fn service_output_directory() -> Result<PathBuf, Box<dyn Error>> {
         return Err("capture target must belong to the identified ni-build remote job".into());
     }
     Ok(target.join("ui-chrome-captures"))
-}
-
-/// Exercise the composed dialog without submitting a compaction worker job.
-fn configure_synthetic_remote_compaction(app: &mut App, failed: bool) {
-    use ilium_client::remote_compaction_dialog::{
-        RemoteCompactionDialogState, RemoteCompactionPhase, RemoteCompactionPlan,
-    };
-    let mut state = RemoteCompactionDialogState::new(RemoteCompactionPlan {
-        pane_id: ilium_core::ROOT_ID,
-        provider: ilium_core::BuiltinAgentProvider::Claude,
-        agent: ilium_remote_compaction::AgentKind::Claude,
-        session_id: "synthetic-session".to_owned(),
-        project_cwd: PathBuf::from("/synthetic/project"),
-        transcript_path: PathBuf::from("/synthetic/project/transcript.jsonl"),
-        technique: ilium_remote_compaction::Technique::ClaudeCode,
-        destination: "Synthetic provider / synthetic model".to_owned(),
-        is_automatic: false,
-    });
-    state.phase = RemoteCompactionPhase::Compacting;
-    state.is_agent_stopped = true;
-    state.current_step = 3;
-    state.progress = 0.6;
-    for index in 0..40 {
-        state.push_log(format!(
-            "Synthetic log {index:02}: transcript section prepared for summarization"
-        ));
-    }
-    if failed {
-        state.fail("Synthetic provider failure: the session can be resumed safely".to_owned());
-    }
-    app.remote_compaction = Some(Box::new(state));
-    app.mode = ilium_client::app::Mode::RemoteCompaction;
 }
 
 /// A real cached BoardPane in the compositor, without a server or a board save.

@@ -27,14 +27,11 @@ const WHEEL_ROWS: i32 = 3;
 
 impl App {
     /// Whether popovers may currently be shown or interacted with. Any modal
-    /// dialog covers them, and a resource or attention view replaces the pane surface.
+    /// dialog covers them, and a resource view replaces the pane surface.
     fn stats_ui_active(&self) -> bool {
         self.modal_stack.is_empty()
             && matches!(self.mode, Mode::Normal)
-            && !matches!(
-                self.right_panel_target,
-                RightPanelTarget::Resource { .. } | RightPanelTarget::Attention
-            )
+            && !matches!(self.right_panel_target, RightPanelTarget::Resource { .. })
     }
 
     /// The pane whose second header icon sits under `position`, when that

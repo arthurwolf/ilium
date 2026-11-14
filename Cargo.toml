@@ -1,14 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "ilium-animation-js",
     "ilium-wikipedia",
     "ilium-ambient",
     "ilium-agent-debug",
     "ilium-agent-session",
     "ilium-client",
     "ilium-control",
-    "ilium-compaction-analysis",
     "ilium-core",
     "ilium-detect",
     "ilium-execution",
@@ -23,7 +21,6 @@ members = [
     "ilium-platform",
     "ilium-prompts",
     "ilium-pty",
-    "ilium-remote-compaction",
     "ilium-test-fixtures",
     "ilium-transport",
     "ilium-server",

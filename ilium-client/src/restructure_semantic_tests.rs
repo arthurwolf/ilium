@@ -46,7 +46,6 @@ fn semantic_contract_prompt_includes_every_concrete_animation() {
         "video",
         "spectrum",
         "images",
-        "vector_td",
         "wikipedia",
         "voxel_landscape",
         "topographic_maps",
@@ -54,9 +53,7 @@ fn semantic_contract_prompt_includes_every_concrete_animation() {
         "earthquakes",
         "aircraft",
         "boats",
-        "chess",
         "open_street_map",
-        "carpet",
     ] {
         assert!(
             catalog
@@ -68,10 +65,6 @@ fn semantic_contract_prompt_includes_every_concrete_animation() {
     assert!(
         catalog.contains("Paris"),
         "the model can choose the existing offline Paris map"
-    );
-    assert!(
-        catalog.contains("Snake"),
-        "the model can choose Carpet's Snake subanimation"
     );
 }
 
@@ -106,7 +99,7 @@ fn semantic_contract_rejects_invented_animation_instead_of_ignoring_it() {
 }
 
 fn valid_response() -> serde_json::Value {
-    serde_json::json!({"animations":{"definitions":[{"key":"map","recommendation":{"kind":"open_street_map","resources":"catalog","parameters":[{"id":"source","value":{"Index":0}},{"id":"place","value":{"Index":0}},{"id":"tour","value":{"Index":0}}]}},{"key":"snake","recommendation":{"kind":"carpet","resources":"catalog","parameters":[{"id":"carpet_mode","value":{"Index":1}}]}}],"project":"map"},"children":[{"kind":"group","title":"Paris work","animation":"map","children":[{"kind":"pane","id":1,"title":"Paris transport","animation":"snake"}]}]})
+    serde_json::json!({"animations":{"definitions":[{"key":"map","recommendation":{"kind":"open_street_map","resources":"catalog","parameters":[{"id":"source","value":{"Index":0}},{"id":"place","value":{"Index":0}},{"id":"tour","value":{"Index":0}}]}},{"key":"snake","recommendation":{"kind":"graph","resources":"catalog","parameters":[{"id":"source","value":{"Index":1}}]}}],"project":"map"},"children":[{"kind":"group","title":"Paris work","animation":"map","children":[{"kind":"pane","id":1,"title":"Paris transport","animation":"snake"}]}]})
 }
 fn parse_value(value: &serde_json::Value) -> anyhow::Result<RecommendedRestructurePlan> {
     parse_restructure_response(
@@ -129,7 +122,7 @@ fn semantic_contract_resolves_project_group_and_leaf() {
             .collect::<Vec<_>>(),
         vec![vec![0], vec![0, 0]]
     );
-    assert_eq!(plan.entries[1].recommendation.kind, "carpet");
+    assert_eq!(plan.entries[1].recommendation.kind, "graph");
     assert_eq!(plan.expected_animation_generation, 0);
 }
 #[test]
@@ -300,7 +293,6 @@ fn semantic_contract_budget_retains_fixed_group_and_all_leaf_ids() {
         RestructurePromptPolicy {
             instructions: &ilium_inference::PromptInstructions::default(),
             prompt_token_limit: ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
-            include_attention: false,
         },
         &contexts,
         &"y".repeat(30_000),
@@ -318,65 +310,4 @@ fn semantic_contract_budget_retains_fixed_group_and_all_leaf_ids() {
         assert!(prompt.contains(&format!("<item id=\"{}\"", item.id.0)));
     }
     assert!(prompt.contains(crate::semantic_animation::catalog().unwrap()));
-}
-
-fn prompt_with_attention(include_attention: bool) -> String {
-    render_restructure_prompt_with_instructions(
-        TitleStyle::Summarization,
-        RestructurePromptPolicy {
-            instructions: &ilium_inference::PromptInstructions::default(),
-            prompt_token_limit: ilium_inference::DEFAULT_RESTRUCTURE_PROMPT_TOKEN_LIMIT,
-            include_attention,
-        },
-        &[context()],
-        "",
-        &[],
-        None,
-        &RecommendationContext::default(),
-    )
-    .expect("the small real project context renders")
-}
-
-#[test]
-fn attention_prompt_section_appears_only_when_requested() {
-    assert!(prompt_with_attention(true).contains("<attention-queue>"));
-    assert!(!prompt_with_attention(false).contains("attention-queue"));
-}
-
-#[test]
-fn attention_list_never_fails_or_alters_the_sort_parse() {
-    for attention in [
-        serde_json::json!([{"id": 1, "kind": "question", "reason": "asks"}]),
-        serde_json::json!("garbage"),
-        serde_json::json!([{"id": "x"}, 7, null]),
-        serde_json::json!({"unexpected": true}),
-    ] {
-        let mut value = valid_response();
-        value["attention"] = attention;
-        let (plan, raw) = parse_restructure_response(
-            &value.to_string(),
-            &[context()],
-            &[],
-            TitleStyle::Summarization,
-            &RecommendationContext::default(),
-        )
-        .map(|inference| (inference.plan, inference.attention))
-        .expect("the attention key must not affect the strict sort parse");
-        assert!(raw.is_some());
-        let plain = parse_value(&valid_response()).unwrap();
-        assert_eq!(
-            plan.structure.children.len(),
-            plain.structure.children.len()
-        );
-    }
-    let (_, raw) = parse_restructure_response(
-        &valid_response().to_string(),
-        &[context()],
-        &[],
-        TitleStyle::Summarization,
-        &RecommendationContext::default(),
-    )
-    .map(|inference| (inference.plan, inference.attention))
-    .unwrap();
-    assert!(raw.is_none(), "a reply without the key is normal");
 }

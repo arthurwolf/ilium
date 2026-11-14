@@ -5,14 +5,21 @@
 //! Bodies follow the manual; behaviour beyond activation is driven by host events.
 
 pub mod board;
+pub mod client;
+pub mod io;
+pub mod model;
+pub mod store;
+pub mod view;
 
 use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
+use ilium_plugin_sdk::generated::types::layout::Area;
+use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::types::UiTree;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider};
+use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider, Views};
 
 /// The kernel Settings tab this plugin owns (core-plugin-kanban.md "Kernel tabs this plugin owns").
 const KERNEL_TAB: &str = "kanban-board";
@@ -81,19 +88,30 @@ fn error_reply(code: &str, message: &str) -> String {
 }
 
 /// The client side of `ilium.core.kanban` (core-plugin-kanban.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
 pub struct KanbanClient;
 
 impl Lifecycle for KanbanClient {
     fn activate(&mut self, context: Activation) -> Result<(), PluginError> {
-        validate_settings(&context.settings_json)
+        validate_settings(&context.settings_json)?;
+        client::reset(&context.settings_json);
+        Ok(())
     }
 }
 
 impl Handler for KanbanClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        client::on_events(batch)
+    }
+}
+
+impl Views for KanbanClient {
+    fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
+        match view {
+            ViewTarget::Pane(node) => client::render(node.0, area),
+            _ => empty_tree(),
+        }
     }
 }
 
@@ -175,7 +193,7 @@ mod spec_tests {
         assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
         assert_eq!(
             manifest["activation"],
-            serde_json::json!(["pane-kind:board"])
+            serde_json::json!(["pane-kind:board", "command:ilium.core.kanban/new-board"])
         );
         let _client = KanbanClient;
     }
@@ -254,6 +272,7 @@ mod spec_tests {
         let grants = capability_list(&manifest, "client");
         for expected in [
             "panes.provide-kind",
+            "keys.intercept",
             "fs.read:project",
             "fs.write:project",
             "fs.watch",
@@ -269,7 +288,7 @@ mod spec_tests {
                 "missing client grant {expected}"
             );
         }
-        assert_eq!(grants.len(), 10);
+        assert_eq!(grants.len(), 11);
     }
 
     /// REQ: COR-050

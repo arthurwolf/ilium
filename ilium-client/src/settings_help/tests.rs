@@ -133,8 +133,6 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "PAD", 1, 3);
     add_range(&mut ids, "SND", 1, 9);
     add_range(&mut ids, "VOICE", 1, 14);
-    add_range(&mut ids, "RESET", 1, 3);
-    add_range(&mut ids, "ATT", 1, 7);
     add_range(&mut ids, "COST", 1, 23);
     add_range(&mut ids, "RCOMP", 1, 17);
     add_range(&mut ids, "OPT", 1, 14);
@@ -147,7 +145,6 @@ fn expected_ids() -> BTreeSet<String> {
     ids.insert("TITLE-01".to_owned());
     ids.insert("TITLE-02".to_owned());
     add_range(&mut ids, "TRIGGER", 1, 8);
-    ids.insert("TEXTTRIGGER-01".to_owned());
     ids.insert("TOOLBAR-01".to_owned());
     ids.insert("CUSTOMAGENT-01".to_owned());
     ids
@@ -211,24 +208,8 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-60".to_owned()
         } else if kind == AnimationKind::Boats {
             "AN-61".to_owned()
-        } else if kind == AnimationKind::Chess {
-            "AN-62".to_owned()
-        } else if kind == AnimationKind::Carpet {
-            "AN-63".to_owned()
-        } else if kind == AnimationKind::Wind {
-            "AN-66".to_owned()
-        } else if kind == AnimationKind::Frost {
-            "AN-71".to_owned()
-        } else if kind == AnimationKind::Embroidery {
-            "AN-74".to_owned()
-        } else if kind == AnimationKind::HesitatingInk {
-            "AN-79".to_owned()
-        } else if kind == AnimationKind::Growth {
-            "AN-84".to_owned()
         } else if kind == AnimationKind::Semantic {
             "AN-64".to_owned()
-        } else if kind == AnimationKind::VectorTd {
-            "AN-51".to_owned()
         } else if kind == AnimationKind::Stars {
             "AN-12".to_owned()
         } else if kind == AnimationKind::NightLights {

@@ -61,7 +61,7 @@ The tabs appear in this order:
 | Animations | Ambient backgrounds and their shared look | project `.ilium/config.yaml` |
 | Sound | Alert sound source, per-event sounds, desktop notifications | `[sound]`, `[notifications]` |
 | Voice control | Voice model, devices, input mode, confirmation policy | `[voice]` |
-| Reset planning | Public Claude and Codex reset announcement monitoring | `[reset_planning]` |
+| Reset planning (Cost plugin) | Public Claude and Codex reset announcement monitoring | `[reset_planning]` |
 | Inference | AI provider, models, credentials, restructure budget | `[inference]` |
 | LLM Instructions | All seven custom instruction inputs in one place | `[inference.instructions]`, `[voice]` |
 | Titles | Title style and entry-naming instructions | `[inference]` |
@@ -388,7 +388,7 @@ The file is a set of tables. Only the tables and keys you want to change need to
 | `[voice]` | See [Voice](voice.md) |
 | `[debug]` | `file_logging_enabled` |
 | `[api]` | `port` |
-| `[reset_planning]` | Reset monitoring options |
+| `[reset_planning]` | Reset monitoring options (read by the Cost plugin) |
 | `[cost]` | Cost indicator thresholds |
 | `[onboarding]` | Guided-setup progress; no credentials are stored here |
 | `[detection]` | `working_poll_seconds`, `idle_poll_seconds`, `auto_answer_interstitial_prompts`, `[[detection.custom_signatures]]` |

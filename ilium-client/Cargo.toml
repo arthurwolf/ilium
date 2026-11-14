@@ -13,7 +13,6 @@ path = "src/lib.rs"
 [features]
 # Optional GPU rendering for the GPU-capable background scenes (pulls in wgpu).
 gpu = ["ilium-gpu/gpu"]
-qualification-test-support = ["ilium-animation-js/qualification-test-support"]
 # Exposes test-only terminal fixtures to the ui_chrome_capture example.
 ui-capture = []
 
@@ -32,9 +31,7 @@ emoji = "0.2.1"
 fastembed = { version = "5.17.3", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
 ilium-agent-debug = { version = "0.1.1", path = "../ilium-agent-debug" }
 ilium-agent-session = { version = "0.1.1", path = "../ilium-agent-session" }
-ilium-compaction-analysis = { version = "0.1.1", path = "../ilium-compaction-analysis" }
 ilium-ambient = { version = "0.1.1", path = "../ilium-ambient" }
-ilium-animation-js = { version = "0.1.1", path = "../ilium-animation-js" }
 ilium-gpu = { version = "0.1.1", path = "../ilium-gpu" }
 ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
 ilium-core = { version = "0.1.1", path = "../ilium-core" }
@@ -44,7 +41,6 @@ ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host" }
 ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
 ilium-inference = { version = "0.1.1", path = "../ilium-inference" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
-ilium-remote-compaction = { version = "0.1.1", path = "../ilium-remote-compaction" }
 ilium-sound = { version = "0.1.1", path = "../ilium-sound" }
 ilium-transport = { version = "0.1.1", path = "../ilium-transport" }
 ilium-voice = { version = "0.1.1", path = "../ilium-voice" }
@@ -74,7 +70,6 @@ two-face = "0.5.1"
 syntect = { version = "5.3.0", default-features = false, features = ["default-onig", "parsing", "dump-load"] }
 unicode-width = "0.2.2"
 unicode-segmentation = "1.12"
-ureq = { version = "3.2.0", features = ["json"] }
 zbus = { version = "5.18.0", default-features = false, features = ["tokio"] }
 uuid = { version = "1.23.5", features = ["v4"] }
 

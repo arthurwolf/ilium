@@ -200,17 +200,6 @@ pub(crate) struct ProgressSetRequestCache {
     pub completed_order: VecDeque<u64>,
 }
 
-/// One accepted rule set and its execution generation. A queued delivery
-/// belongs to the generation that matched it, even if settings later cycle
-/// back to identical values.
-#[derive(Default)]
-pub struct VersionedTextTriggerSettings {
-    pub settings: ilium_ipc::TextTriggerSettings,
-    pub revision: u64,
-    // The original accepted allocation stays charged until replacement/drop.
-    pub(crate) retention: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
-}
-
 /// Plugin metadata on tree nodes, by `(plugin id, node id)`.
 pub(crate) type PluginNodeMetadata =
     std::sync::Mutex<std::collections::BTreeMap<(String, u64), Vec<u8>>>;
@@ -288,14 +277,9 @@ pub struct ServerState {
     /// Live cache policy; subscribers are notified when the shared file changes.
     pub(crate) cache_keepalive: watch::Sender<ilium_core::cache_keepalive::CacheKeepaliveSettings>,
     pub sound_settings: RwLock<Arc<crate::sounds::SharedSoundSettings>>,
-    /// Last server-accepted Text Trigger configuration. Execution state is
-    /// added separately so a rejected candidate never replaces this value.
-    pub text_trigger_settings: RwLock<VersionedTextTriggerSettings>,
-    /// Set before restored panes or IPC consumers can execute.
-    pub(crate) text_trigger_config_path: std::sync::OnceLock<PathBuf>,
-    /// Serializes source read, validation, mutation, and publication.
-    /// Acquire before text_trigger_settings; never while holding tree/panes.
-    pub(crate) text_trigger_settings_transaction: Mutex<()>,
+    /// The user config file this session reads, set before restored panes or IPC consumers
+    /// can execute. Its folder holds the sibling configuration files.
+    pub(crate) config_path: std::sync::OnceLock<PathBuf>,
     pub sound_requests: PlaybackSender,
     pub tree: std::sync::Arc<RwLock<Tree>>,
     pub panes: std::sync::Arc<RwLock<PaneRegistry>>,
@@ -563,9 +547,7 @@ impl ServerState {
             notifications_config: RwLock::new(options.notifications_config),
             cache_keepalive: watch::channel(Default::default()).0,
             sound_settings: RwLock::new(options.sound_settings),
-            text_trigger_settings: RwLock::new(VersionedTextTriggerSettings::default()),
-            text_trigger_config_path: std::sync::OnceLock::new(),
-            text_trigger_settings_transaction: Mutex::new(()),
+            config_path: std::sync::OnceLock::new(),
             sound_requests: options.sound_requests,
             tree: std::sync::Arc::new(RwLock::new(tree)),
             panes: std::sync::Arc::new(RwLock::new(HashMap::new())),

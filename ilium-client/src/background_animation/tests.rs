@@ -198,7 +198,6 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
         "spectrum",
         "images",
         "plugin_scene",
-        "vector_td",
         "wikipedia",
         "voxel_landscape",
         "topographic_maps",
@@ -206,15 +205,8 @@ fn catalog_has_unique_serializable_scenes_in_user_order() {
         "earthquakes",
         "aircraft",
         "boats",
-        "chess",
         "open_street_map",
-        "carpet",
-        "wind",
-        "growth",
         "semantic",
-        "frost",
-        "embroidery",
-        "hesitating_ink",
     ];
     assert_eq!(expected.len(), AnimationKind::ALL.len());
     for (kind, id) in AnimationKind::ALL.into_iter().zip(expected) {
@@ -1295,12 +1287,12 @@ fn hosted_scene_takes_new_settings_in_place_or_is_rebuilt() {
                 applied: factory_applied.clone(),
             })
         }));
-        let kind = ilium_ambient::AmbientKind::Carpet;
+        let kind = ilium_ambient::AmbientKind::TopographicMaps;
         let mut settings = ilium_ambient::AmbientSettings::default();
         let first = host.sync(kind, &settings, Duration::ZERO);
         // The same settings change nothing.
         assert_eq!(host.sync(kind, &settings, Duration::from_secs(1)), first);
-        settings.carpet.seed += 1;
+        settings.topographic_maps.fictional_seed += 1;
         let second = host.sync(kind, &settings, Duration::from_secs(5));
         assert_ne!(
             first, second,
@@ -1328,8 +1320,6 @@ fn hosted_scene_takes_new_settings_in_place_or_is_rebuilt() {
     }
 }
 
-#[path = "carpet_tests.rs"]
-mod carpet_tests;
 #[path = "openstreetmap_tests.rs"]
 mod openstreetmap_tests;
 

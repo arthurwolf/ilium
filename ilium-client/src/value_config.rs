@@ -160,11 +160,9 @@ pub enum ScalarNumber {
     WorkingPollSeconds,
     IdlePollSeconds,
     NotificationCoalesce,
-    AttentionTurboConcurrency,
-    AttentionExpirySeconds,
 }
 impl ScalarNumber {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 10] = [
         Self::AutoFreezeAfter,
         Self::VoiceVolume,
         Self::LastPromptLines,
@@ -175,8 +173,6 @@ impl ScalarNumber {
         Self::WorkingPollSeconds,
         Self::IdlePollSeconds,
         Self::NotificationCoalesce,
-        Self::AttentionTurboConcurrency,
-        Self::AttentionExpirySeconds,
     ];
     pub fn spec(self) -> NumberSpec {
         let (minimum, maximum) = match self {
@@ -194,14 +190,6 @@ impl ScalarNumber {
             Self::ApiPort => (1, i128::from(u16::MAX)),
             Self::InferenceTokenBudget => (1, i128::from(u32::MAX)),
             Self::WorkingPollSeconds | Self::IdlePollSeconds => (0, i128::from(i64::MAX)),
-            Self::AttentionTurboConcurrency => (
-                i128::from(crate::attention::settings::TURBO_CONCURRENCY_MIN),
-                i128::from(crate::attention::settings::TURBO_CONCURRENCY_MAX),
-            ),
-            Self::AttentionExpirySeconds => (
-                i128::from(crate::attention::settings::EXPIRY_SECONDS_MIN),
-                i128::from(crate::attention::settings::EXPIRY_SECONDS_MAX),
-            ),
             Self::NotificationCoalesce => (
                 0,
                 i128::from(ilium_sound::NotificationSettings::MAX_TASK_COALESCE_SECONDS),

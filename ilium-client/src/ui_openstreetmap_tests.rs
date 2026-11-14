@@ -111,15 +111,6 @@ fn ordinary_osm_credit_survives_final_composition_with_pty_footer_and_voice() {
         app.panes
             .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
         app.right_panel_target = RightPanelTarget::Pane { pane_id };
-        if width == 120 {
-            let now = chrono::Utc::now();
-            app.reset_monitor_state.codex.scheduled = Some(crate::reset_planning::ScheduledReset {
-                announced_at: now,
-                scheduled_for: Some(now + chrono::Duration::hours(2)),
-                source_url: "https://example.invalid/reset".to_owned(),
-                is_banked: false,
-            });
-        }
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("backend");
         draw_loaded_map(&mut terminal, &mut app);
         let buffer = terminal.backend().buffer();
@@ -136,9 +127,6 @@ fn ordinary_osm_credit_survives_final_composition_with_pty_footer_and_voice() {
         assert_eq!(buffer[(content.x + 6, content.y)].symbol(), "█");
         let footer = row_text(buffer, app.layout.voice_control_area, height - 1);
         assert!(footer.contains("VOICE"), "{width}x{height}: {footer}");
-        if width == 120 {
-            assert!(row_text(buffer, app.layout.status_area, height - 1).contains("Codex reset in"));
-        }
         app.animation_settings
             .ambient
             .openstreetmap

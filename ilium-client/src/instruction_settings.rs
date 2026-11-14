@@ -15,9 +15,6 @@ pub enum InstructionField {
     SharedContext,
     ProjectNaming,
     AskForUpdate,
-    /// Custom remote-compaction prompt. Edited from the Remote compaction tab
-    /// only, so it is deliberately not part of `ALL` / the LLM tab lists.
-    CompactionPrompt,
 }
 impl InstructionField {
     pub const ALL: [Self; 6] = [
@@ -36,7 +33,6 @@ impl InstructionField {
             Self::SharedContext => "Shared naming and organization context",
             Self::ProjectNaming => "Project naming instructions",
             Self::AskForUpdate => "Ask for update instructions",
-            Self::CompactionPrompt => "Remote compaction custom prompt",
         }
     }
     pub fn compact_label(self) -> &'static str {
@@ -47,7 +43,6 @@ impl InstructionField {
             Self::SharedContext => "Shared naming + grouping",
             Self::ProjectNaming => "Project naming",
             Self::AskForUpdate => "Ask for update",
-            Self::CompactionPrompt => "Compaction prompt",
         }
     }
     pub fn compact_description(self) -> &'static str {
@@ -58,7 +53,6 @@ impl InstructionField {
             Self::SharedContext => "Vocabulary for names + groups.",
             Self::ProjectNaming => "Project names and acronyms.",
             Self::AskForUpdate => "What status updates emphasize.",
-            Self::CompactionPrompt => "Summary instructions.",
         }
     }
     pub fn description(self) -> &'static str {
@@ -73,10 +67,6 @@ impl InstructionField {
             }
             Self::ProjectNaming => "Preferred language and abbreviations for project names.",
             Self::AskForUpdate => "What agents should emphasize when asked for a status update.",
-            Self::CompactionPrompt => {
-                "Instructions the summarizer follows for the Custom compaction technique. \
-Empty uses the built-in Claude Code prompt."
-            }
         }
     }
     pub fn value(self, app: &App) -> &str {
@@ -88,7 +78,6 @@ Empty uses the built-in Claude Code prompt."
             Self::SharedContext => &i.naming_and_organization,
             Self::ProjectNaming => &i.project_naming,
             Self::AskForUpdate => &i.ask_for_update,
-            Self::CompactionPrompt => &app.remote_compaction_settings.custom_prompt,
         }
     }
 }
@@ -217,10 +206,6 @@ impl App {
             self.settings_commit_voice_prompt(value);
             return;
         }
-        if field == InstructionField::CompactionPrompt {
-            self.settings_commit_remote_compaction_prompt(value);
-            return;
-        }
         let mut settings = self.inference_settings.clone();
         let i = &mut settings.instructions;
         match field {
@@ -229,7 +214,7 @@ impl App {
             InstructionField::SharedContext => i.naming_and_organization = value,
             InstructionField::ProjectNaming => i.project_naming = value,
             InstructionField::AskForUpdate => i.ask_for_update = value,
-            InstructionField::Voice | InstructionField::CompactionPrompt => unreachable!(),
+            InstructionField::Voice => unreachable!(),
         };
         self.apply_and_persist_inference_settings(settings);
     }

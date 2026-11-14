@@ -8,11 +8,17 @@
   "license": "MIT",
   "server": {
     "entry": "server.wasm",
-    "world": "ilium:server/base@0.1.0"
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "job-runner"
+    ]
   },
   "client": {
     "entry": "client.wasm",
-    "world": "ilium:client/base@0.1.0"
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
   },
   "capabilities": {
     "server": [
@@ -20,11 +26,17 @@
       "tree.read",
       "terminal.read-screen",
       "inference",
+      "jobs.run",
       "extensions.provide:ilium.core.attention/item-sources"
     ],
     "client": [
       "ui.panels",
       "ui.chrome",
+      "agent.read",
+      "tree.read",
+      "panes.read",
+      "keys.intercept",
+      "notify.toast",
       "settings.read-kernel:icons",
       "extensions.provide:ilium.core.attention/before-jump"
     ]
@@ -149,16 +161,17 @@
                 "key": "show_briefing",
                 "title": "Show briefing on arrival",
                 "default": true
-              },
-              {
-                "type": "text",
-                "key": "model_override",
-                "title": "Model for attention",
-                "default": ""
               }
             ]
           }
         ]
+      }
+    ],
+    "jobs": [
+      {
+        "kind": "analyse",
+        "deadline_ms": 600000,
+        "memory_mib": 256
       }
     ],
     "extension_points": [

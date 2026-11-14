@@ -14,7 +14,10 @@
 //! thread; each confirmed path becomes a `picked/<n>` scope of this instance, opened by
 //! `fs.read:picked` or `fs.write:picked`. `agent-config.propose:<agent>` applies a new agent session
 //! transcript (`projects/<project>/<id>.jsonl`, revision none, so an existing file is never replaced) to
-//! the agent's configuration folder; every other proposed file is rejected with a reason.
+//! the agent's configuration folder. It also applies the three changes of a transcript compaction to an
+//! agent's session folder: the replacement of an existing transcript whose content still matches the
+//! revision the plugin read, the creation of a `<transcript>.pre-compaction-<stamp>.bak` backup beside it and
+//! the removal of such a backup. Every other proposed file is rejected with a reason.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -675,6 +678,7 @@ fn new_transcript_parts(path: &str) -> Option<(&str, &str)> {
 /// of a new session transcript under the agent's `projects` folder; the rest is rejected with its
 /// reason in the history.
 fn apply_agent_config_changes(
+    agent: &str,
     root: Option<&Path>,
     title: &str,
     changes: &[ConfigChange],
@@ -683,7 +687,7 @@ fn apply_agent_config_changes(
     let mut rejected = Vec::new();
     let mut history = format!("{title}\n");
     for change in changes {
-        match apply_new_transcript(root, change) {
+        match apply_session_change(agent, root, change) {
             Ok(()) => {
                 history.push_str(&format!("applied {}\n", change.path));
                 applied.push(change.path.clone());
@@ -699,6 +703,183 @@ fn apply_agent_config_changes(
         rejected,
         history,
     }
+}
+
+/// The text a compaction backup of a transcript carries between the transcript's name and `.bak`.
+const BACKUP_MARKER: &str = ".pre-compaction-";
+
+/// What a session-folder path names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionFileKind {
+    /// A session transcript, `<name>.jsonl`.
+    Transcript,
+    /// A compaction backup, `<name>.jsonl.pre-compaction-<stamp>.bak`.
+    Backup,
+}
+
+/// Whether `name` is a plain file or folder name of a session folder.
+fn plain_session_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && !name.starts_with('.')
+        && name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
+        && !name.contains("..")
+}
+
+/// The folder parts and the kind of a session file path of `agent`: `projects/<project>/<name>` for Claude
+/// Code, `sessions/<year>/<month>/<day>/<name>` for Codex. `None` for every other path.
+fn session_file_parts<'a>(agent: &str, path: &'a str) -> Option<(Vec<&'a str>, SessionFileKind)> {
+    let parts: Vec<&str> = path.split('/').collect();
+    let (folders, file) = parts.split_at(parts.len().checked_sub(1)?);
+    let file = *file.first()?;
+    let shape_ok = match agent {
+        "claude" => {
+            folders.len() == 2
+                && folders[0] == "projects"
+                && plain_session_name(folders[1])
+                && !folders[1].contains('.')
+        }
+        "codex" => {
+            let digits = |text: &str, length: usize| {
+                text.len() == length && text.chars().all(|character| character.is_ascii_digit())
+            };
+            folders.len() == 4
+                && folders[0] == "sessions"
+                && digits(folders[1], 4)
+                && digits(folders[2], 2)
+                && digits(folders[3], 2)
+        }
+        _ => false,
+    };
+    if !shape_ok || !plain_session_name(file) {
+        return None;
+    }
+    let kind = if file.ends_with(".jsonl") {
+        SessionFileKind::Transcript
+    } else if file.ends_with(".bak")
+        && file
+            .split_once(BACKUP_MARKER)
+            .is_some_and(|(transcript, _)| transcript.ends_with(".jsonl"))
+    {
+        SessionFileKind::Backup
+    } else {
+        return None;
+    };
+    Some((folders.to_vec(), kind))
+}
+
+/// Applies one change of a proposal to an agent's session folder; see the module comment for the shapes.
+fn apply_session_change(
+    agent: &str,
+    root: Option<&Path>,
+    change: &ConfigChange,
+) -> Result<(), String> {
+    // A whole new Claude Code transcript keeps its own, stricter path.
+    if agent == "claude" && change.revision.is_none() && change.content.is_some() {
+        if new_transcript_parts(&change.path).is_some() {
+            return apply_new_transcript(root, change);
+        }
+    }
+    let root = root.ok_or("the agent's configuration folder is not available")?;
+    let (folders, kind) = session_file_parts(agent, &change.path).ok_or(
+        "only a session transcript or a compaction backup of the agent's session folder is accepted",
+    )?;
+    let file = change
+        .path
+        .rsplit('/')
+        .next()
+        .ok_or("the path has no file name")?;
+    let mut folder = root.to_path_buf();
+    for part in &folders {
+        folder.push(part);
+    }
+    let canonical_folder = fs::canonicalize(&folder).map_err(|error| error.to_string())?;
+    let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    if !canonical_folder.starts_with(&canonical_root) {
+        return Err("the session folder leaves the configuration folder through a link".to_owned());
+    }
+    let target = canonical_folder.join(file);
+    match (kind, &change.content, &change.revision) {
+        (SessionFileKind::Transcript, Some(content), Some(token)) => {
+            replace_session_transcript(&target, content, token)
+        }
+        (SessionFileKind::Backup, Some(content), None) => {
+            if content.len() > NEW_TRANSCRIPT_MAX_BYTES {
+                return Err(format!(
+                    "the backup of {} bytes is over the {NEW_TRANSCRIPT_MAX_BYTES} byte cap",
+                    content.len()
+                ));
+            }
+            let mut output = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&target)
+                .map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::AlreadyExists {
+                        "conflict: the backup exists".to_owned()
+                    } else {
+                        error.to_string()
+                    }
+                })?;
+            output
+                .write_all(content)
+                .and_then(|()| output.sync_all())
+                .map_err(|error| error.to_string())
+        }
+        (SessionFileKind::Backup, None, None) => match fs::symlink_metadata(&target) {
+            Ok(metadata) if metadata.is_file() => {
+                fs::remove_file(&target).map_err(|error| error.to_string())
+            }
+            Ok(_) => Err("the backup is not a regular file".to_owned()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.to_string()),
+        },
+        _ => Err(
+            "a transcript is replaced with its revision, a backup is created or removed without one"
+                .to_owned(),
+        ),
+    }
+}
+
+/// Replaces an existing session transcript with `content` when its current bytes still have the revision
+/// `token` the plugin read; the replacement is a sibling temporary file renamed over the transcript.
+fn replace_session_transcript(target: &Path, content: &[u8], token: &str) -> Result<(), String> {
+    if content.len() > NEW_TRANSCRIPT_MAX_BYTES {
+        return Err(format!(
+            "the transcript of {} bytes is over the {NEW_TRANSCRIPT_MAX_BYTES} byte cap",
+            content.len()
+        ));
+    }
+    match fs::symlink_metadata(target) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return Err("the transcript is not a regular file".to_owned()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err("conflict: the transcript no longer exists".to_owned())
+        }
+        Err(error) => return Err(error.to_string()),
+    }
+    let current = fs::read(target).map_err(|error| error.to_string())?;
+    if revision_of(&current) != token {
+        return Err("conflict: the transcript changed since it was read".to_owned());
+    }
+    let file_name = target
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let temporary =
+        target.with_file_name(format!(".{file_name}.tmp-{}-{stamp}", std::process::id()));
+    let outcome = fs::File::create(&temporary)
+        .and_then(|mut file| file.write_all(content).and_then(|()| file.sync_all()))
+        .and_then(|()| fs::rename(&temporary, target));
+    if outcome.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    outcome.map_err(|error| error.to_string())
 }
 
 fn apply_new_transcript(root: Option<&Path>, change: &ConfigChange) -> Result<(), String> {
@@ -1669,7 +1850,7 @@ impl HostFs for FsImport {
                 .get(&format!("agent-config:{agent}"))
                 .cloned()
         });
-        let result = apply_agent_config_changes(root.as_deref(), &title, &changes);
+        let result = apply_agent_config_changes(&agent, root.as_deref(), &title, &changes);
         Ok(self.with_state(|state| {
             let id = state.allocate_request();
             state.proposals.insert(id, result);
@@ -2219,5 +2400,86 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(error_code_of(result), Some(ErrorCode::NotPermitted));
+    }
+    mod session_changes {
+        use super::super::{apply_session_change, revision_of};
+        use ilium_plugin_api::generated::host::fs::ConfigChange;
+
+        fn change(path: &str, content: Option<&[u8]>, revision: Option<String>) -> ConfigChange {
+            ConfigChange {
+                path: path.to_owned(),
+                content: content.map(<[u8]>::to_vec),
+                revision,
+                summary: "test".to_owned(),
+            }
+        }
+
+        #[test]
+        fn a_transcript_is_replaced_only_while_its_revision_matches() {
+            let root = tempfile::tempdir().expect("root");
+            let folder = root.path().join("projects").join("proj");
+            std::fs::create_dir_all(&folder).unwrap();
+            let transcript = folder.join("abc.jsonl");
+            std::fs::write(&transcript, b"old\n").unwrap();
+            let stale = revision_of(b"other\n");
+            let refused = apply_session_change(
+                "claude",
+                Some(root.path()),
+                &change("projects/proj/abc.jsonl", Some(b"new\n"), Some(stale)),
+            );
+            assert!(refused.unwrap_err().starts_with("conflict"));
+            assert_eq!(std::fs::read(&transcript).unwrap(), b"old\n");
+            apply_session_change(
+                "claude",
+                Some(root.path()),
+                &change(
+                    "projects/proj/abc.jsonl",
+                    Some(b"new\n"),
+                    Some(revision_of(b"old\n")),
+                ),
+            )
+            .unwrap();
+            assert_eq!(std::fs::read(&transcript).unwrap(), b"new\n");
+        }
+
+        #[test]
+        fn a_backup_is_created_once_and_removed() {
+            let root = tempfile::tempdir().expect("root");
+            let folder = root.path().join("sessions/2026/11/14");
+            std::fs::create_dir_all(&folder).unwrap();
+            let path = "sessions/2026/11/14/rollout-1.jsonl.pre-compaction-20261114.bak";
+            apply_session_change("codex", Some(root.path()), &change(path, Some(b"x"), None))
+                .unwrap();
+            assert!(apply_session_change(
+                "codex",
+                Some(root.path()),
+                &change(path, Some(b"y"), None)
+            )
+            .unwrap_err()
+            .starts_with("conflict"));
+            apply_session_change("codex", Some(root.path()), &change(path, None, None)).unwrap();
+            assert!(!folder
+                .join("rollout-1.jsonl.pre-compaction-20261114.bak")
+                .exists());
+        }
+
+        #[test]
+        fn paths_outside_the_session_shapes_are_rejected() {
+            let root = tempfile::tempdir().expect("root");
+            for (agent, path) in [
+                ("claude", "settings.json"),
+                ("claude", "projects/../x.jsonl"),
+                ("claude", "projects/p/evil.sh"),
+                ("codex", "sessions/2026/11/rollout.jsonl"),
+                ("gemini", "projects/p/a.jsonl"),
+            ] {
+                let outcome = apply_session_change(
+                    agent,
+                    Some(root.path()),
+                    &change(path, Some(b"x"), Some(revision_of(b"x"))),
+                );
+                assert!(outcome.is_err(), "{agent} {path}");
+            }
+        }
     }
 }

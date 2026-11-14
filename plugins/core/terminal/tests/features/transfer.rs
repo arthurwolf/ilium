@@ -3,7 +3,10 @@
 
 use ilium_plugin_sdk::exports::ServiceReply;
 use ilium_plugin_sdk::testing::FakeSession;
-use ilium_plugin_sdk::types::{Delivery, Intent, NodeId, SendInputSpec, Submission};
+use ilium_plugin_sdk::types::{
+    ClientId, Delivery, Event, Intent, MessageEvent, NodeId, PluginId, PluginSide, SendInputSpec,
+    Submission,
+};
 
 use crate::common::workspace_root;
 
@@ -228,4 +231,48 @@ fn feature_017_a_version_range_the_service_does_not_satisfy_is_not_found() {
         reply.expect_err("no provider").code,
         ilium_plugin_sdk::types::ErrorCode::NotFound
     );
+}
+
+fn paste_screen_message(payload: &[u8]) -> Event {
+    Event::Message(MessageEvent {
+        from: PluginId(PLUGIN.to_string()),
+        from_side: PluginSide::Client,
+        from_client: Some(ClientId(1)),
+        channel: "paste-screen".to_string(),
+        payload: payload.to_vec(),
+    })
+}
+
+/// REQ: COR-004
+#[test]
+fn cor_004_the_paste_screen_message_pastes_the_source_screen_into_the_target() {
+    let mut session = session();
+    session
+        .server(PLUGIN)
+        .terminal()
+        .set_screen(3, &["$ cargo test", "ok"], 5);
+    session
+        .server(PLUGIN)
+        .deliver_one(paste_screen_message(br#"{"source":3,"target":4}"#));
+    let _ = session.pump();
+    let sent = submitted(&mut session);
+    assert_eq!(sent.len(), 1);
+    assert!(matches!(
+        &sent[0].intent,
+        Intent::SendInput(spec) if spec.pane == NodeId(4) && spec.delivery == Delivery::Pasted
+    ));
+}
+
+/// REQ: COR-004
+#[test]
+fn cor_004_a_paste_screen_message_from_a_pane_to_itself_or_malformed_pastes_nothing() {
+    let mut session = session();
+    session.server(PLUGIN).terminal().set_screen(3, &["x"], 1);
+    for payload in [&br#"{"source":3,"target":3}"#[..], b"nonsense", b"{}"] {
+        session
+            .server(PLUGIN)
+            .deliver_one(paste_screen_message(payload));
+    }
+    let _ = session.pump();
+    assert!(submitted(&mut session).is_empty());
 }

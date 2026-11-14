@@ -18,7 +18,6 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use ilium_inference::InferenceSettings;
-use ilium_ipc::TextTriggerSettings;
 use ilium_platform::{file_lock::ExclusiveFileLock, secure_fs};
 use ilium_sound::{NotificationSettings, SoundSettings};
 use ilium_voice::{ReasoningEffort, VadEagerness, VoiceInputMode, VoiceModel, VoiceName};
@@ -36,8 +35,6 @@ use crate::layout::{
     DEFAULT_UNFOCUSED_TREE_WIDTH, MAXIMUM_TERMINAL_WIDTH, MAX_TREE_WIDTH, MINIMUM_TERMINAL_WIDTH,
     MIN_TREE_WIDTH,
 };
-use crate::remote_compaction_settings::RemoteCompactionSettings;
-use crate::reset_planning::ResetPlanningSettings;
 use crate::theme::{ColorScheme, Theme};
 use crate::trigger_settings::TriggerSettings;
 
@@ -71,8 +68,6 @@ pub struct ClientConfig {
     pub inference: InferenceSettings,
     /// Automatic event-to-LLM-action mappings shown in the Triggers tab.
     pub triggers: TriggerSettings,
-    /// Regex-driven terminal responses shown in the Text Triggers tab.
-    pub text_triggers: TextTriggerSettings,
     /// Managed agent-instruction targets and durable startup-prompt choices.
     pub agent_setup: AgentSetupSettings,
     /// Custom-agent environment values are stored as plaintext in the private config file.
@@ -92,14 +87,8 @@ pub struct ClientConfig {
     pub debug: DebugSettings,
     /// Loopback HTTP API listener configuration read by the detached server.
     pub api: ApiSettings,
-    /// Public reset-announcement polling and status-bar presentation.
-    pub reset_planning: ResetPlanningSettings,
-    /// Attention queue: mode, press-to-sort, turbo width, expiry, model.
-    pub attention: crate::attention::AttentionSettings,
     /// Agent-spend indicators and how "expensive" is decided.
     pub cost: CostSettings,
-    /// Summarizing a session through the Inference model and resuming from it.
-    pub remote_compaction: RemoteCompactionSettings,
     pub onboarding: crate::onboarding::progress::OnboardingProgress,
 }
 
@@ -116,7 +105,6 @@ impl Default for ClientConfig {
             padding: crate::padding::PaddingSettings::default(),
             inference: InferenceSettings::default(),
             triggers: TriggerSettings::default(),
-            text_triggers: TextTriggerSettings::default(),
             agent_setup: AgentSetupSettings::default(),
             custom_agents: CustomAgentSettings::default(),
             terminal: TerminalSettings::default(),
@@ -126,10 +114,7 @@ impl Default for ClientConfig {
             voice: VoiceSettings::default(),
             debug: DebugSettings::default(),
             api: ApiSettings::default(),
-            reset_planning: ResetPlanningSettings::default(),
-            attention: crate::attention::AttentionSettings::default(),
             cost: CostSettings::default(),
-            remote_compaction: RemoteCompactionSettings::default(),
             onboarding: crate::onboarding::progress::OnboardingProgress::default(),
         }
     }
@@ -1282,8 +1267,6 @@ struct RawClientConfig {
     #[serde(default)]
     triggers: TriggerSettings,
     #[serde(default)]
-    text_triggers: TextTriggerSettings,
-    #[serde(default)]
     agent_setup: AgentSetupSettings,
     #[serde(default)]
     custom_agents: CustomAgentSettings,
@@ -1302,13 +1285,7 @@ struct RawClientConfig {
     #[serde(default)]
     api: ApiSettings,
     #[serde(default)]
-    reset_planning: ResetPlanningSettings,
-    #[serde(default)]
-    attention: crate::attention::AttentionSettings,
-    #[serde(default)]
     cost: CostSettings,
-    #[serde(default)]
-    remote_compaction: RemoteCompactionSettings,
     #[serde(default)]
     onboarding: crate::onboarding::progress::OnboardingProgress,
 }
@@ -1591,8 +1568,6 @@ pub enum ConfigSaveError {
     Write(std::io::Error),
     #[error("existing [session] config is not a TOML table")]
     InvalidSessionTable,
-    #[error("{0}")]
-    TextTrigger(String),
 }
 
 /// Loads `<config_dir>/config.toml`'s `[keybindings]`, `[keyboard]`, `[theme]`,
@@ -1722,7 +1697,6 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         padding: raw.padding,
         inference: raw.inference,
         triggers: raw.triggers.normalized(),
-        text_triggers: raw.text_triggers,
         agent_setup: raw.agent_setup,
         custom_agents: raw.custom_agents,
         terminal,
@@ -1732,10 +1706,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         voice: raw.voice,
         debug: raw.debug,
         api: raw.api,
-        reset_planning: raw.reset_planning,
-        attention: raw.attention.normalized(),
         cost: raw.cost.sanitized(),
-        remote_compaction: raw.remote_compaction.sanitized(),
         onboarding: raw.onboarding,
     })
 }
@@ -2458,45 +2429,12 @@ pub fn save_git_settings(config_dir: &Path, settings: &GitSettings) -> Result<()
     save_table(config_dir, "git", value)
 }
 
-pub fn save_reset_planning_settings(
-    config_dir: &Path,
-    settings: &ResetPlanningSettings,
-) -> Result<(), ClientError> {
-    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
-        path: config_dir.join("config.toml"),
-        source: Box::new(ConfigSaveError::Serialize(source)),
-    })?;
-    save_table(config_dir, "reset_planning", value)
-}
-pub fn save_attention_settings(
-    config_dir: &Path,
-    settings: &crate::attention::AttentionSettings,
-) -> Result<(), ClientError> {
-    let value = toml::Value::try_from(settings.clone().normalized()).map_err(|source| {
-        ClientError::ConfigSave {
-            path: config_dir.join("config.toml"),
-            source: Box::new(ConfigSaveError::Serialize(source)),
-        }
-    })?;
-    save_table(config_dir, "attention", value)
-}
 pub fn save_cost_settings(config_dir: &Path, settings: &CostSettings) -> Result<(), ClientError> {
     let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
         path: config_dir.join("config.toml"),
         source: Box::new(ConfigSaveError::Serialize(source)),
     })?;
     save_table(config_dir, "cost", value)
-}
-
-pub fn save_remote_compaction_settings(
-    config_dir: &Path,
-    settings: &RemoteCompactionSettings,
-) -> Result<(), ClientError> {
-    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
-        path: config_dir.join("config.toml"),
-        source: Box::new(ConfigSaveError::Serialize(source)),
-    })?;
-    save_table(config_dir, "remote_compaction", value)
 }
 
 pub fn save_editor_settings(
@@ -2730,157 +2668,6 @@ pub fn save_trigger_settings(
     })?;
     table.insert("triggers".to_owned(), value);
     write_toml_document(&path, &document)
-}
-
-/// Replaces an explicitly edited full list only when its durable baseline still matches.
-pub fn save_text_trigger_settings(
-    config_dir: &Path,
-    expected: &TextTriggerSettings,
-    settings: &TextTriggerSettings,
-) -> Result<(), ClientError> {
-    let path = config_dir.join("config.toml");
-    let mut document = read_toml_document(&path)?;
-    let current = text_trigger_settings_from_document(&path, &document)?;
-    if current != *expected {
-        return Err(text_trigger_save_error(
-            &path,
-            "Text Trigger list changed; cancel and reopen to review it",
-        ));
-    }
-    publish_text_trigger_settings(&path, &mut document, settings)
-}
-
-/// Applies one stable-ID edit against the latest durable list, preserving foreign rules and ordering.
-pub fn save_text_trigger_edit(
-    config_dir: &Path,
-    expected: Option<&ilium_ipc::TextTrigger>,
-    replacement: Option<&ilium_ipc::TextTrigger>,
-) -> Result<TextTriggerSettings, ClientError> {
-    let path = config_dir.join("config.toml");
-    let mut document = read_toml_document(&path)?;
-    let mut current = text_trigger_settings_from_document(&path, &document)?;
-    if let Some(expected) = expected {
-        let Some(index) = current
-            .triggers
-            .iter()
-            .position(|rule| rule.id == expected.id)
-        else {
-            return Err(text_trigger_save_error(
-                &path,
-                "This Text Trigger was deleted; cancel and reopen to review the list",
-            ));
-        };
-        if current.triggers[index] != *expected {
-            return Err(text_trigger_save_error(
-                &path,
-                "This Text Trigger changed; cancel and reopen to review its new value",
-            ));
-        }
-        if let Some(replacement) = replacement {
-            if replacement.id != expected.id {
-                return Err(text_trigger_save_error(
-                    &path,
-                    "An edit cannot change a Text Trigger identity",
-                ));
-            }
-            current.triggers[index] = replacement.clone();
-        } else {
-            current.triggers.remove(index);
-        }
-    } else {
-        let Some(replacement) = replacement else {
-            return Err(text_trigger_save_error(
-                &path,
-                "No Text Trigger edit was supplied",
-            ));
-        };
-        if current
-            .triggers
-            .iter()
-            .any(|rule| rule.id == replacement.id)
-        {
-            return Err(text_trigger_save_error(
-                &path,
-                "The new Text Trigger identity already exists",
-            ));
-        }
-        current.triggers.push(replacement.clone());
-    }
-    publish_text_trigger_settings(&path, &mut document, &current)?;
-    Ok(current)
-}
-
-fn text_trigger_save_error(path: &Path, message: &str) -> ClientError {
-    ClientError::ConfigSave {
-        path: path.to_path_buf(),
-        source: Box::new(ConfigSaveError::TextTrigger(message.to_owned())),
-    }
-}
-
-fn text_trigger_settings_from_document(
-    path: &Path,
-    document: &ConfigDocument,
-) -> Result<TextTriggerSettings, ClientError> {
-    let Some(value) = document.get("text_triggers") else {
-        return Ok(TextTriggerSettings::default());
-    };
-    if value.get("triggers").is_none() {
-        return Err(text_trigger_save_error(
-            path,
-            "[text_triggers] must contain an explicit triggers list",
-        ));
-    }
-    let settings: TextTriggerSettings =
-        value
-            .clone()
-            .try_into()
-            .map_err(|source| ClientError::ConfigSave {
-                path: path.to_path_buf(),
-                source: Box::new(ConfigSaveError::Parse(source)),
-            })?;
-    validate_text_trigger_settings(path, &settings)?;
-    Ok(settings)
-}
-
-fn validate_text_trigger_settings(
-    path: &Path,
-    settings: &TextTriggerSettings,
-) -> Result<(), ClientError> {
-    settings
-        .validate_identities()
-        .map_err(|message| text_trigger_save_error(path, &message))?;
-    for rule in &settings.triggers {
-        if rule.regexp.is_empty() || rule.message.contains(['\r', '\n']) {
-            return Err(text_trigger_save_error(
-                path,
-                "Enter a nonempty regexp and a one-line message",
-            ));
-        }
-        if regex::Regex::new(&rule.regexp).is_err() {
-            return Err(text_trigger_save_error(
-                path,
-                "Enter a valid regexp before saving",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn publish_text_trigger_settings(
-    path: &Path,
-    document: &mut ConfigDocument,
-    settings: &TextTriggerSettings,
-) -> Result<(), ClientError> {
-    validate_text_trigger_settings(path, settings)?;
-    let value = toml::Value::try_from(settings).map_err(|source| ClientError::ConfigSave {
-        path: path.to_path_buf(),
-        source: Box::new(ConfigSaveError::Serialize(source)),
-    })?;
-    document
-        .as_table_mut()
-        .expect("TOML document root")
-        .insert("text_triggers".to_owned(), value);
-    write_toml_document(path, document)
 }
 
 /// Saves custom profiles while retaining unrelated configuration tables.
@@ -4035,7 +3822,6 @@ mod tests {
             TriggerEvent::AgentFinishedWork,
             TriggerAction::RestructureProject
         ));
-        assert!(config.text_triggers.triggers.is_empty());
         assert_eq!(
             config.inference.title_style,
             ilium_inference::TitleStyle::Labeling
@@ -4164,34 +3950,6 @@ mod tests {
         let saved = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(saved.contains("[detection]"));
         assert_eq!(load(&dir).unwrap().triggers, triggers);
-    }
-
-    #[test]
-    fn text_trigger_settings_round_trip_without_replacing_server_tables() {
-        let dir = scratch_dir();
-        std::fs::write(
-            dir.join("config.toml"),
-            "[detection]\nworking_poll_seconds = 5\n",
-        )
-        .unwrap();
-        let settings = TextTriggerSettings {
-            triggers: vec![ilium_ipc::TextTrigger {
-                id: "notify-ready".to_owned(),
-                enabled: true,
-                regexp: "(?i)ready".to_owned(),
-                message: "continue".to_owned(),
-                target: ilium_ipc::TextTriggerTarget::Agents,
-                sample_text: "Ready for the next task".to_owned(),
-                delay_seconds: 60,
-            }],
-        };
-
-        save_text_trigger_settings(&dir, &TextTriggerSettings::default(), &settings).unwrap();
-
-        let saved = std::fs::read_to_string(dir.join("config.toml")).unwrap();
-        assert!(saved.contains("[detection]"));
-        assert!(saved.contains("[[text_triggers.triggers]]"));
-        assert_eq!(load(&dir).unwrap().text_triggers, settings);
     }
 
     #[test]
@@ -4908,78 +4666,6 @@ mod tests {
     }
 
     #[test]
-    fn reset_planning_defaults_on_and_round_trips_independently() {
-        let dir = scratch_dir();
-        assert!(load(&dir).unwrap().reset_planning.monitor_claude);
-        assert!(load(&dir).unwrap().reset_planning.monitor_codex);
-        std::fs::write(
-            dir.join("config.toml"),
-            "[ui]\nshow_context_menu_icons = false\n",
-        )
-        .unwrap();
-        let settings = ResetPlanningSettings {
-            monitor_claude: false,
-            monitor_codex: true,
-            time_style: crate::reset_planning::ResetTimeStyle::Human,
-        };
-        save_reset_planning_settings(&dir, &settings).unwrap();
-        let loaded = load(&dir).unwrap();
-        assert_eq!(loaded.reset_planning, settings);
-        assert!(!loaded.ui.show_context_menu_icons);
-    }
-
-    #[test]
-    fn attention_settings_default_shared_and_round_trip_beside_other_tables() {
-        use crate::attention::{AttentionMode, AttentionSettings};
-        let dir = scratch_dir();
-        assert_eq!(load(&dir).unwrap().attention, AttentionSettings::default());
-        assert!(load(&dir).unwrap().attention.large_buttons);
-        std::fs::write(
-            dir.join("config.toml"),
-            "[ui]\nshow_context_menu_icons = false\n\n[attention]\nlarge_buttons = false\n",
-        )
-        .unwrap();
-        assert!(!load(&dir).unwrap().attention.large_buttons);
-        let settings = AttentionSettings {
-            mode: AttentionMode::Turbo,
-            press_sorts: false,
-            large_buttons: true,
-            show_briefing: false,
-            turbo_concurrency: 4,
-            expiry_seconds: 900,
-            model_override: Some("some-model".to_owned()),
-        };
-        save_attention_settings(&dir, &settings).unwrap();
-        let loaded = load(&dir).unwrap();
-        assert_eq!(loaded.attention, settings);
-        assert!(!loaded.ui.show_context_menu_icons);
-    }
-
-    #[test]
-    fn attention_settings_are_clamped_on_load_and_on_save() {
-        use crate::attention::AttentionSettings;
-        let dir = scratch_dir();
-        std::fs::write(
-            dir.join("config.toml"),
-            "[attention]\nturbo_concurrency = 200\nexpiry_seconds = 5\nmodel_override = \"\"\n",
-        )
-        .unwrap();
-        let loaded = load(&dir).unwrap().attention;
-        assert_eq!(loaded.turbo_concurrency, 64);
-        assert_eq!(loaded.expiry_seconds, 60);
-        assert_eq!(loaded.model_override, None);
-        let wild = AttentionSettings {
-            turbo_concurrency: 0,
-            expiry_seconds: u32::MAX,
-            ..AttentionSettings::default()
-        };
-        save_attention_settings(&dir, &wild).unwrap();
-        let reloaded = load(&dir).unwrap().attention;
-        assert_eq!(reloaded.turbo_concurrency, 1);
-        assert_eq!(reloaded.expiry_seconds, 86_400);
-    }
-
-    #[test]
     fn cost_settings_default_to_a_hover_meter_and_round_trip_beside_other_tables() {
         use crate::cost_model::Calibration;
         use crate::cost_settings::{CostDisplay, CostRow, CostVisibility};
@@ -5026,68 +4712,6 @@ mod tests {
         assert_eq!(loaded.budget_usd, defaults.budget_usd);
         assert_eq!(loaded.sparkline_window_minutes, 1);
         assert_eq!(loaded.fixed_cuts, defaults.fixed_cuts);
-    }
-
-    #[test]
-    fn remote_compaction_settings_default_off_and_round_trip_beside_other_tables() {
-        use crate::remote_compaction_settings::{RemoteCompactionRow, TechniqueTarget};
-        use ilium_remote_compaction::Technique;
-
-        let dir = scratch_dir();
-        let defaults = load(&dir).unwrap().remote_compaction;
-        assert_eq!(defaults, RemoteCompactionSettings::default());
-        assert!(!defaults.enabled);
-        assert!(!defaults.privacy_banner_dismissed);
-
-        std::fs::write(
-            dir.join("config.toml"),
-            "[ui]\nshow_context_menu_icons = false\n",
-        )
-        .unwrap();
-        let mut settings = RemoteCompactionSettings::default();
-        settings.adjust(RemoteCompactionRow::Enabled, 0);
-        settings.adjust(RemoteCompactionRow::Automatic, 0);
-        settings.adjust(RemoteCompactionRow::Threshold, -1);
-        settings.adjust(RemoteCompactionRow::Technique(TechniqueTarget::Other), 1);
-        settings.adjust(RemoteCompactionRow::RedactSecrets, 0);
-        settings.set_custom_prompt("Keep the schema.\nSecond line \"quoted\" 🦀".into());
-        settings.dismiss_privacy_banner();
-        settings.codex_technique = Technique::GeminiCli;
-        save_remote_compaction_settings(&dir, &settings).unwrap();
-
-        let loaded = load(&dir).unwrap();
-        assert_eq!(loaded.remote_compaction, settings);
-        assert!(
-            !loaded.ui.show_context_menu_icons,
-            "other tables survive the save"
-        );
-        let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
-        assert!(text.contains("[remote_compaction]"), "{text}");
-    }
-
-    #[test]
-    fn hand_edited_remote_compaction_settings_are_repaired_on_load() {
-        let dir = scratch_dir();
-        std::fs::write(
-            dir.join("config.toml"),
-            "[remote_compaction]\nenabled = true\nthreshold_percent = 99\ntail_tokens = 5\n\
-             tool_result_chars = 1\nsummarizer_context_tokens = 1\npause_timeout_seconds = 0\n\
-             cooldown_minutes = 100000\nkeep_backups = 0\nprotected_recent_tool_tokens = 999999999\n",
-        )
-        .unwrap();
-        let loaded = load(&dir).unwrap().remote_compaction;
-        let defaults = RemoteCompactionSettings::default();
-        assert!(loaded.enabled, "valid values are kept");
-        assert_eq!(loaded.threshold_percent, 88);
-        assert_eq!(loaded.tail_tokens, 2_000);
-        assert_eq!(loaded.tool_result_chars, 200);
-        assert_eq!(loaded.summarizer_context_tokens, 8_000);
-        assert_eq!(loaded.pause_timeout_seconds, 10);
-        assert_eq!(loaded.cooldown_minutes, 240);
-        assert_eq!(loaded.keep_backups, 1);
-        assert_eq!(loaded.protected_recent_tool_tokens, 200_000);
-        assert_eq!(loaded.claude_technique, defaults.claude_technique);
-        assert_eq!(loaded.redact_secrets, defaults.redact_secrets);
     }
 
     #[test]
@@ -6018,7 +5642,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod text_trigger_config_exclusion_tests {
+mod shared_document_transaction_tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
@@ -6042,21 +5666,7 @@ mod text_trigger_config_exclusion_tests {
             workers.push(std::thread::spawn(move || {
                 started.send(()).expect("report writer start");
                 let result = if is_trigger {
-                    save_text_trigger_settings(
-                        &directory,
-                        &TextTriggerSettings::default(),
-                        &TextTriggerSettings {
-                            triggers: vec![ilium_ipc::TextTrigger {
-                                id: "synthetic-concurrent-rule".to_owned(),
-                                enabled: true,
-                                regexp: "synthetic-ready".to_owned(),
-                                message: "synthetic-continue".to_owned(),
-                                target: ilium_ipc::TextTriggerTarget::Agents,
-                                sample_text: "synthetic-ready".to_owned(),
-                                delay_seconds: 60,
-                            }],
-                        },
-                    )
+                    save_trigger_settings(&directory, &TriggerSettings::default())
                 } else {
                     save_ui_settings(
                         &directory,
@@ -6087,9 +5697,9 @@ mod text_trigger_config_exclusion_tests {
             "settings save published while server document transaction remained held"
         );
         assert_eq!(
-            final_config.text_triggers.triggers.len(),
-            1,
-            "unrelated UI save lost durable rule"
+            final_config.triggers,
+            TriggerSettings::default().normalized(),
+            "unrelated UI save lost the trigger table"
         );
         assert!(
             final_config.ui.use_stable_glyphs,

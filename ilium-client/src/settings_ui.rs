@@ -512,10 +512,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             state.trigger_action_cursor,
             state.scroll,
         ),
-        SettingsTab::TextTriggers => {
-            let view = text_trigger_view(app, state.selected_row, layout.content_area.width);
-            render_scrollable(frame, layout.content_area, view.lines, state.scroll);
-        }
         SettingsTab::CustomAgents => {
             render_scrollable(
                 frame,
@@ -554,12 +550,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             session_lines(&app.session_settings, state.selected_row),
             state.scroll,
         ),
-        SettingsTab::Attention => render_scrollable(
-            frame,
-            layout.content_area,
-            attention_lines(&app.attention_settings, state.selected_row),
-            state.scroll,
-        ),
         SettingsTab::Git => render_scrollable(
             frame,
             layout.content_area,
@@ -594,12 +584,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             voice_view(app, state.selected_row, layout.content_area.width).lines,
             state.scroll,
         ),
-        SettingsTab::ResetPlanning => render_scrollable(
-            frame,
-            layout.content_area,
-            reset_planning_lines(app, state.selected_row),
-            state.scroll,
-        ),
         SettingsTab::AgentMonitoring => {
             if let Some(editor) = &app.custom_status_rules_editor {
                 crate::status_rules_editor::render(frame, layout.content_area, app, editor);
@@ -619,13 +603,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             }
         }
         SettingsTab::Cost => crate::cost_settings_ui::render(
-            frame,
-            layout.content_area,
-            app,
-            state.selected_row,
-            state.scroll,
-        ),
-        SettingsTab::RemoteCompaction => crate::remote_compaction_settings_ui::render(
             frame,
             layout.content_area,
             app,
@@ -694,16 +671,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             &app.animation_row_model(),
             crate::animation_settings_ui::Scrolls::of(state),
         );
-        if state.animation_source_tab == crate::animation_plugins::AnimationSourceTab::Plugin {
-            let model = app.plugin_panel_model();
-            crate::animation_plugins::draw_plugin_issue_popover(
-                frame,
-                layout.content_area,
-                app,
-                &model,
-                &state.plugin_panel,
-            );
-        }
     }
 }
 
@@ -804,15 +771,6 @@ pub fn settings_help_anchors(
                 push_help_anchor(&mut anchors, layout, topic_id, line, state.scroll, selected);
             }
         }
-        SettingsTab::RemoteCompaction => {
-            let all_rows = crate::remote_compaction_settings_ui::rows(app);
-            for (topic_id, line, row) in
-                crate::remote_compaction_settings_ui::help_anchors(app, layout.content_area.width)
-            {
-                let selected = all_rows.get(state.selected_row) == Some(&row);
-                push_help_anchor(&mut anchors, layout, topic_id, line, state.scroll, selected);
-            }
-        }
         SettingsTab::Animations => {
             let model = app.animation_row_model();
             for row in 0..model.len() {
@@ -871,18 +829,6 @@ pub fn settings_help_anchors(
         }
         SettingsTab::Editor => {
             for (i, id) in simple_rows("ED-", 6) {
-                push_help_anchor(
-                    &mut anchors,
-                    layout,
-                    &id,
-                    1 + i as u16 * 3,
-                    state.scroll,
-                    state.selected_row == i,
-                );
-            }
-        }
-        SettingsTab::Attention => {
-            for (i, id) in simple_rows("ATT-", 7) {
                 push_help_anchor(
                     &mut anchors,
                     layout,
@@ -972,18 +918,6 @@ pub fn settings_help_anchors(
                 );
             }
         }
-        SettingsTab::ResetPlanning => {
-            for (i, id) in simple_rows("RESET-", 3) {
-                push_help_anchor(
-                    &mut anchors,
-                    layout,
-                    &id,
-                    1 + i as u16 * 3,
-                    state.scroll,
-                    state.selected_row == i,
-                );
-            }
-        }
         SettingsTab::Debug => {
             let view = debug_view(
                 &app.debug_settings,
@@ -1007,27 +941,6 @@ pub fn settings_help_anchors(
             state.scroll,
             state.selected_row == 0,
         ),
-        SettingsTab::TextTriggers => {
-            let view = text_trigger_view(app, state.selected_row, layout.content_area.width);
-            for i in 0..app.text_trigger_settings.triggers.len() {
-                push_help_anchor(
-                    &mut anchors,
-                    layout,
-                    "TEXTTRIGGER-01",
-                    view.row_lines[i].0 as u16,
-                    state.scroll,
-                    state.selected_row == i,
-                );
-            }
-            push_help_anchor(
-                &mut anchors,
-                layout,
-                "TEXTTRIGGER-01",
-                view.add_line as u16,
-                state.scroll,
-                state.selected_row == app.text_trigger_settings.triggers.len(),
-            );
-        }
         SettingsTab::CustomAgents => push_help_anchor(
             &mut anchors,
             layout,
@@ -1409,23 +1322,19 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::Toolbar => "☷",
         SettingsTab::AgentMonitoring => "◉",
         SettingsTab::Cost => "¤",
-        SettingsTab::RemoteCompaction => "⇥",
         SettingsTab::Keyboard => "⌨",
         SettingsTab::Terminal => "❯",
         SettingsTab::Editor => "✎",
         SettingsTab::Session => "▣",
-        SettingsTab::Attention => "◎",
         SettingsTab::Git => "⑂",
         SettingsTab::KanbanBoard => "▥",
         SettingsTab::Animations => "▷",
         SettingsTab::Sound => "♪",
         SettingsTab::VoiceControl => "🎙",
-        SettingsTab::ResetPlanning => "↻",
         SettingsTab::Inference => "⚡",
         SettingsTab::LlmInstructions => "≡",
         SettingsTab::Titles => "≔",
         SettingsTab::Triggers => "⚑",
-        SettingsTab::TextTriggers => "¶",
         SettingsTab::CustomAgents => "✦",
         SettingsTab::Debug => "⌕",
         SettingsTab::Api => "⇄",
@@ -1439,16 +1348,12 @@ fn compact_tab_label(tab: SettingsTab) -> &'static str {
     match tab {
         SettingsTab::Appearance => "Display",
         SettingsTab::AgentMonitoring => "Agents",
-        SettingsTab::Attention => "Queue",
         SettingsTab::Cost => "Cost",
-        SettingsTab::RemoteCompaction => "Remote",
         SettingsTab::KanbanBoard => "Kanban",
         SettingsTab::Animations => "Motion",
         SettingsTab::VoiceControl => "Voice",
-        SettingsTab::ResetPlanning => "Reset",
         SettingsTab::Inference => "Models",
         SettingsTab::LlmInstructions => "LLM text",
-        SettingsTab::TextTriggers => "Triggers",
         SettingsTab::CustomAgents => "Custom",
         _ => tab.label(),
     }
@@ -1713,37 +1618,6 @@ pub(crate) fn content_scrollbar_target(
     let track_row = u64::from(position.y.saturating_sub(area.y));
     let scroll = track_row.saturating_mul(u64::from(max_scroll)) / track_height;
     u16::try_from(scroll).ok()
-}
-
-/// Maps the same measured wrapped rows used by [`text_trigger_view`] to an
-/// edit index. Header, instructions, and spacer lines stay inert.
-pub(crate) fn text_trigger_content_hit(
-    area: Rect,
-    scroll: u16,
-    position: Position,
-    app: &App,
-    selected_row: usize,
-) -> Option<usize> {
-    if !area.contains(position) {
-        return None;
-    }
-    let line = usize::from(position.y - area.y) + usize::from(scroll);
-    let view = text_trigger_view(app, selected_row, area.width);
-    if let Some((index, _)) = view
-        .row_lines
-        .iter()
-        .enumerate()
-        .find(|(_, (start, end))| line >= *start && line < *end)
-    {
-        return Some(index);
-    }
-    (line == view.add_line).then_some(app.text_trigger_settings.triggers.len())
-}
-
-struct TextTriggerView {
-    lines: Vec<Line<'static>>,
-    row_lines: Vec<(usize, usize)>,
-    add_line: usize,
 }
 
 /// Rendered custom-agent settings plus the line each selectable row sits on,
@@ -2040,84 +1914,6 @@ pub(crate) fn custom_agent_max_scroll(app: &App, state: &SettingsState, area: Re
         .saturating_sub(area.height)
 }
 
-/// Readable, measured list surface for server-executed regexp responses.
-/// Each rule has a distinct status/target heading and wrapped match/reply rows.
-fn text_trigger_view(app: &App, selected_row: usize, width: u16) -> TextTriggerView {
-    let mut lines = vec![Line::from(Span::styled(
-        "TEXT TRIGGERS",
-        Style::new()
-            .fg(theme::accent_bg())
-            .add_modifier(Modifier::BOLD),
-    ))];
-    lines.extend(
-        wrapped_setting_description(
-            "Match each completed output line and send a literal reply plus Enter.",
-            width,
-        )
-        .into_iter()
-        .map(|line| Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))),
-    );
-    lines.push(Line::from(""));
-    let mut row_lines = Vec::with_capacity(app.text_trigger_settings.triggers.len());
-    for (index, trigger) in app.text_trigger_settings.triggers.iter().enumerate() {
-        let cursor = if index == selected_row { "›" } else { " " };
-        let enabled = on_off(trigger.enabled);
-        let row_start = lines.len();
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{cursor} {enabled}"),
-                if index == selected_row {
-                    theme::selected_style().add_modifier(Modifier::BOLD)
-                } else {
-                    Style::new().add_modifier(Modifier::BOLD)
-                },
-            ),
-            Span::raw(" "),
-            Span::styled(
-                format!("[{}]", trigger.target.label()),
-                Style::new().add_modifier(Modifier::DIM),
-            ),
-        ]));
-        for description in [
-            format!("Match: {}", trigger.regexp),
-            format!("Reply: {}", trigger.message),
-        ] {
-            lines.extend(
-                wrapped_setting_description(&description, width)
-                    .into_iter()
-                    .map(Line::from),
-            );
-        }
-        row_lines.push((row_start, lines.len()));
-        lines.push(Line::from(""));
-    }
-    let add_cursor = if selected_row == app.text_trigger_settings.triggers.len() {
-        "›"
-    } else {
-        " "
-    };
-    let add_line = lines.len();
-    lines.push(Line::from(Span::styled(
-        format!("{add_cursor} [ Add text trigger ]"),
-        Style::new()
-            .fg(theme::accent_bg())
-            .add_modifier(Modifier::BOLD),
-    )));
-    lines.extend(
-        wrapped_setting_description(
-            "Enter edits; Delete removes; the editor previews every sample line.",
-            width,
-        )
-        .into_iter()
-        .map(|line| Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))),
-    );
-    TextTriggerView {
-        lines,
-        row_lines,
-        add_line,
-    }
-}
-
 /// Renders unwrapped rows with a scrollbar in the reserved column immediately
 /// after `area`, leaving its rightmost text cell untouched.
 pub(crate) fn render_scrollable(
@@ -2218,9 +2014,6 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
                 0,
             );
         }
-        SettingsTab::TextTriggers => text_trigger_view(app, selected_row, content_area.width)
-            .lines
-            .len() as u16,
         SettingsTab::CustomAgents => match &app.mode {
             crate::app::Mode::Settings(state) => custom_agent_view(app, state).lines.len() as u16,
             _ => 0,
@@ -2246,9 +2039,6 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::Terminal => terminal_lines(&app.terminal_settings, selected_row).len() as u16,
         SettingsTab::Editor => editor_lines(&app.editor_settings, selected_row).len() as u16,
         SettingsTab::Session => session_lines(&app.session_settings, selected_row).len() as u16,
-        SettingsTab::Attention => {
-            attention_lines(&app.attention_settings, selected_row).len() as u16
-        }
         SettingsTab::Git => git_lines(
             &app.git_settings,
             app.git_settings_error.as_deref(),
@@ -2267,7 +2057,6 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         SettingsTab::VoiceControl => voice_view(app, selected_row, content_area.width)
             .lines
             .len() as u16,
-        SettingsTab::ResetPlanning => reset_planning_lines(app, selected_row).len() as u16,
         SettingsTab::AgentMonitoring => {
             agent_monitoring_view(app, selected_row, content_area.width, None)
                 .lines
@@ -2275,13 +2064,6 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
         }
         SettingsTab::Cost => {
             return crate::cost_settings_ui::max_scroll(app, selected_row, content_area);
-        }
-        SettingsTab::RemoteCompaction => {
-            return crate::remote_compaction_settings_ui::max_scroll(
-                app,
-                selected_row,
-                content_area,
-            );
         }
         SettingsTab::Debug => debug_view(&app.debug_settings, selected_row, content_area.width)
             .lines
@@ -5331,18 +5113,6 @@ fn settings_control_row(
 ) -> Option<(Rect, String, u16)> {
     use crate::value_config::BoardNumber;
     let (virtual_y, label, label_width) = match state.tab {
-        SettingsTab::RemoteCompaction => {
-            let current = *crate::remote_compaction_settings_ui::rows(app).get(row)?;
-            let view =
-                crate::remote_compaction_settings_ui::view(app, state.selected_row, area.width);
-            let span = view.rows.iter().find(|span| span.row == current)?;
-            (
-                usize::from(span.control_line),
-                current.label().to_owned(),
-                span.control_x.saturating_sub(ROW_LEFT_INSET + 1),
-            )
-        }
-
         SettingsTab::Appearance => {
             let current_row =
                 *AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode).get(row)?;
@@ -5430,12 +5200,6 @@ fn settings_control_row(
                     BoardNumber::MinimumColumnWidth,
                 )) => "Minimum column width",
                 Some(crate::value_settings::SettingsNumber::ApiPort) => "HTTP API port",
-                Some(crate::value_settings::SettingsNumber::AttentionTurboConcurrency) => {
-                    "Turbo parallel calls"
-                }
-                Some(crate::value_settings::SettingsNumber::AttentionExpirySeconds) => {
-                    "Forget stale items after"
-                }
                 _ => crate::value_settings_choice::SettingsChoice::at(app, state.tab, row)?.title(),
             };
             (
@@ -5471,32 +5235,11 @@ pub(crate) fn settings_number_control(
 )> {
     use crate::value_control::{ControlKind, ControlSpec, ValueControl};
     let field = crate::value_settings::SettingsNumber::at(app, state.tab, row)?;
-    if state.tab == SettingsTab::RemoteCompaction {
-        let current = *crate::remote_compaction_settings_ui::rows(app).get(row)?;
-        let view = crate::remote_compaction_settings_ui::view(app, state.selected_row, area.width);
-        let span = view.rows.iter().find(|span| span.row == current)?;
-        return crate::remote_compaction_settings_ui::value_control(area, state.scroll, span, app)
-            .map(|control| (field, control));
-    }
     let (row_area, label, label_width) = settings_control_row(area, app, state, row)?;
     let (spec, text) = field.snapshot(app);
     let value = match field {
-        crate::value_settings::SettingsNumber::Remote(row) => {
-            use crate::remote_compaction_settings::RemoteCompactionRow;
-            match row {
-                RemoteCompactionRow::Threshold => format!("{text}%"),
-                RemoteCompactionRow::PauseTimeout => format!("{text} s"),
-                RemoteCompactionRow::Cooldown => format!("{text} min"),
-                RemoteCompactionRow::TailTokens
-                | RemoteCompactionRow::ProtectedToolTokens
-                | RemoteCompactionRow::SummarizerContextTokens => format!("{text} tokens"),
-                RemoteCompactionRow::ToolResultChars => format!("{text} chars"),
-                _ => text.clone(),
-            }
-        }
         crate::value_settings::SettingsNumber::VoiceVolume => format!("{text}%"),
-        crate::value_settings::SettingsNumber::NotificationCoalesce
-        | crate::value_settings::SettingsNumber::AttentionExpirySeconds => format!("{text} s"),
+        crate::value_settings::SettingsNumber::NotificationCoalesce => format!("{text} s"),
         crate::value_settings::SettingsNumber::TerminalScrollback => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::TerminalEngineMemory => format!("{text} MiB"),
         crate::value_settings::SettingsNumber::EditorAutosaveDelay => format!("{text} ms"),
@@ -5541,13 +5284,6 @@ pub(crate) fn settings_choice_control(
 )> {
     use crate::value_control::{ControlKind, ControlSpec, ValueControl};
     let field = crate::value_settings_choice::SettingsChoice::at(app, state.tab, row)?;
-    if state.tab == SettingsTab::RemoteCompaction {
-        let current = *crate::remote_compaction_settings_ui::rows(app).get(row)?;
-        let view = crate::remote_compaction_settings_ui::view(app, state.selected_row, area.width);
-        let span = view.rows.iter().find(|span| span.row == current)?;
-        return crate::remote_compaction_settings_ui::value_control(area, state.scroll, span, app)
-            .map(|control| (field, control));
-    }
     let (row_area, label, label_width) = settings_control_row(area, app, state, row)?;
     if matches!(
         field,
@@ -5637,19 +5373,16 @@ pub(crate) fn settings_number_row_count(app: &App, tab: SettingsTab) -> usize {
         SettingsTab::Titles => 2,
         SettingsTab::VoiceControl => crate::voice_settings::VoiceRow::ALL.len(),
         SettingsTab::Sound => SoundRow::ALL.len(),
-        SettingsTab::ResetPlanning => 3,
         SettingsTab::Appearance => {
             AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode).len()
         }
         SettingsTab::AgentMonitoring => agent_monitoring_rows(app).len(),
         SettingsTab::Terminal => crate::app::TerminalRow::ALL.len(),
         SettingsTab::Session => crate::app::SessionRow::ALL.len(),
-        SettingsTab::Attention => crate::app::AttentionRow::ALL.len(),
         SettingsTab::Git => crate::app::GitRow::ALL.len(),
         SettingsTab::Editor => crate::app::EditorRow::ALL.len(),
         SettingsTab::KanbanBoard => KanbanBoardRow::ALL.len(),
         SettingsTab::Api => crate::app::ApiRow::ALL.len(),
-        SettingsTab::RemoteCompaction => crate::remote_compaction_settings_ui::rows(app).len(),
         _ => 0,
     }
 }
@@ -5686,12 +5419,6 @@ pub(crate) fn settings_status_icon_control(
 }
 
 fn render_number_controls(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
-    // Remote Compaction owns its multi-line row geometry and paints/hits
-    // controls from the same RowSpan values. Do not layer the generic flat-row
-    // overlay on top of that page.
-    if state.tab == SettingsTab::RemoteCompaction {
-        return;
-    }
     let row_count = settings_number_row_count(app, state.tab);
     for row in 0..row_count {
         if let Some(control) = settings_status_icon_control(area, app, state, row)
@@ -5971,69 +5698,6 @@ fn session_lines(settings: &SessionSettings, selected: usize) -> Vec<Line<'stati
     )
 }
 
-fn attention_lines(
-    settings: &crate::attention::AttentionSettings,
-    selected: usize,
-) -> Vec<Line<'static>> {
-    let mut lines = setting_lines(
-        &[
-            (
-                "Attention mode",
-                settings.mode.label().to_string(),
-                "Instant only calls no LLM and uses only what agent detection already knows; Shared adds the question to Sort; Turbo asks one call per agent.",
-            ),
-            (
-                "Sort refreshes attention",
-                on_off(settings.press_sorts),
-                "Pressing Sort also refreshes the attention queue.",
-            ),
-            (
-                "Turbo parallel calls",
-                settings.turbo_concurrency.to_string(),
-                "Most LLM calls in flight at once in Turbo mode (1 to 64).",
-            ),
-            (
-                "Forget stale items after",
-                format!("{} s", settings.expiry_seconds),
-                "An item the live state no longer supports is dropped after this long (60 to 86400).",
-            ),
-            (
-                "Attention model",
-                settings
-                    .model_override
-                    .clone()
-                    .unwrap_or_else(|| "Same as titles".to_string()),
-                "Model used for attention calls; Same as titles follows the title naming model.",
-            ),
-            (
-                "Show briefing on arrival",
-                on_off(settings.show_briefing),
-                "Reaching an agent from the attention queue shows a box at its top saying why you were brought there.",
-            ),
-            (
-                "Large attention buttons",
-                on_off(settings.large_buttons),
-                "Use three centered rows for Next: needs you and a five-column overview button.",
-            ),
-        ],
-        selected,
-    );
-    if let Some(heading) = lines.first_mut() {
-        *heading = Line::from(Span::styled(
-            "  QUEUE AND ARRIVAL",
-            Style::new().add_modifier(Modifier::BOLD),
-        ));
-    }
-    let divider_line = 1 + 4 * usize::from(APPEARANCE_ROW_HEIGHT) + 2;
-    if let Some(divider) = lines.get_mut(divider_line) {
-        *divider = Line::from(Span::styled(
-            "  ── ARRIVAL PRESENTATION ──",
-            theme::border_style(false),
-        ));
-    }
-    lines
-}
-
 fn git_lines(settings: &GitSettings, error: Option<&str>, selected: usize) -> Vec<Line<'static>> {
     let rows = [
         (
@@ -6240,74 +5904,6 @@ fn plugin_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
             Style::new().add_modifier(Modifier::DIM),
         )));
     }
-    lines
-}
-
-fn reset_planning_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
-    use crate::reset_planning::{ResetProvider, ResetTimeStyle};
-
-    let settings = &app.reset_planning_settings;
-    let codex_status = &app.reset_monitor_state.codex;
-    let claude_status = &app.reset_monitor_state.claude;
-    let status_label = |provider: ResetProvider, enabled: bool| {
-        if !enabled {
-            return on_off(false);
-        }
-        let status = app.reset_monitor_state.provider(provider);
-        if let Some(error) = &status.last_error {
-            return format!("{} · F9 details · check failed: {error}", on_off(true));
-        }
-        if status.last_checked.is_none() {
-            return format!("{} · checking…", on_off(true));
-        }
-        if status.scheduled.is_some() {
-            return format!("{} · reset announced", on_off(true));
-        }
-        match provider {
-            ResetProvider::Claude => format!("{} · history only", on_off(true)),
-            ResetProvider::Codex => format!("{} · no scheduled reset", on_off(true)),
-        }
-    };
-    let mut lines = setting_lines(
-        &[
-            (
-                "Monitor Claude resets",
-                status_label(ResetProvider::Claude, settings.monitor_claude),
-                "Checks the public Claude reset feed hourly. It currently supplies history, not future reset times.",
-            ),
-            (
-                "Monitor Codex resets",
-                status_label(ResetProvider::Codex, settings.monitor_codex),
-                "Checks announced public resets hourly. An exact countdown appears only when the announcement gives a time.",
-            ),
-            (
-                "Time display",
-                match settings.time_style {
-                    ResetTimeStyle::Exact => "Exact · d h m s".to_owned(),
-                    ResetTimeStyle::Human => "Human · rounded".to_owned(),
-                },
-                "Switch between a live seconds countdown and rounded wording such as 'tomorrow' or '3 hours'.",
-            ),
-        ],
-        selected,
-    );
-    lines.push(Line::from(""));
-    lines.push(Line::from(format!(
-        "Claude feed: {} · Codex feed: {}",
-        if claude_status.last_checked.is_some() {
-            "checked"
-        } else {
-            "pending"
-        },
-        if codex_status.last_checked.is_some() {
-            "checked"
-        } else {
-            "pending"
-        },
-    )));
-    lines.push(Line::from(
-        "Public announcements are separate from your account's rolling usage windows.",
-    ));
     lines
 }
 
@@ -7270,7 +6866,6 @@ mod number_control_tests {
             for tab in [
                 SettingsTab::Appearance,
                 SettingsTab::AgentMonitoring,
-                SettingsTab::RemoteCompaction,
                 SettingsTab::Terminal,
                 SettingsTab::Editor,
                 SettingsTab::KanbanBoard,
@@ -7383,7 +6978,6 @@ mod number_control_tests {
             for tab in [
                 SettingsTab::Appearance,
                 SettingsTab::AgentMonitoring,
-                SettingsTab::RemoteCompaction,
                 SettingsTab::Terminal,
                 SettingsTab::Editor,
                 SettingsTab::KanbanBoard,
@@ -7586,14 +7180,11 @@ mod number_control_tests {
             SettingsTab::Session,
             SettingsTab::Appearance,
             SettingsTab::AgentMonitoring,
-            SettingsTab::RemoteCompaction,
             SettingsTab::Terminal,
             SettingsTab::Editor,
             SettingsTab::VoiceControl,
             SettingsTab::Sound,
             SettingsTab::Titles,
-            SettingsTab::ResetPlanning,
-            SettingsTab::Attention,
         ]
         .into_iter()
         .map(|tab| (tab, app.inference_settings.selected_provider))
@@ -7690,14 +7281,11 @@ mod number_control_tests {
             SettingsTab::Session,
             SettingsTab::Appearance,
             SettingsTab::AgentMonitoring,
-            SettingsTab::RemoteCompaction,
             SettingsTab::Titles,
             SettingsTab::Terminal,
             SettingsTab::Editor,
             SettingsTab::VoiceControl,
             SettingsTab::Sound,
-            SettingsTab::ResetPlanning,
-            SettingsTab::Attention,
         ]
         .into_iter()
         .map(|tab| (tab, app.inference_settings.selected_provider))
@@ -7844,40 +7432,6 @@ mod tests {
     }
 
     #[test]
-    fn attention_page_adds_hierarchy_without_changing_row_geometry() {
-        let lines = attention_lines(&crate::attention::AttentionSettings::default(), 0);
-        assert_eq!(
-            lines.len(),
-            1 + crate::app::AttentionRow::ALL.len() * usize::from(APPEARANCE_ROW_HEIGHT)
-        );
-        let heading = lines[0]
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
-        assert!(heading.contains("QUEUE AND ARRIVAL"));
-
-        let arrival_divider = 1 + 4 * usize::from(APPEARANCE_ROW_HEIGHT) + 2;
-        let divider = lines[arrival_divider]
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
-        assert!(divider.contains("ARRIVAL PRESENTATION"));
-
-        let content = Rect::new(0, 0, 100, 30);
-        assert_eq!(
-            simple_content_hit(
-                content,
-                0,
-                Position::new(LABEL_COLUMN_WIDTH + ROW_LEFT_INSET + 1, 1),
-                crate::app::AttentionRow::ALL.len(),
-            ),
-            Some((0, -1))
-        );
-    }
-
-    #[test]
     fn plugin_pages_on_the_rail_draw_and_hit_on_the_same_rows() {
         use crate::plugin_host::settings_rail::{RailLabel, PLUGIN_PAGE_ICON};
         let mut labels: Vec<RailLabel> = SettingsTab::ALL
@@ -7936,7 +7490,7 @@ mod tests {
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
             "◐", "▢", "▦", "☷", "◉", "◎", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪",
-            "🎙", "↻", "⚡", "≡", "≔", "⚑", "¶", "✦", "⌕", "⇄", "⬡", "ⓘ", "⚙",
+            "🎙", "⚡", "≡", "≔", "⚑", "✦", "⌕", "⇄", "⬡", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
@@ -10785,72 +10339,6 @@ mod tests {
         assert!(text.contains("+ or Enter opens all models"));
         assert!(text.contains("E types a model name"));
         assert!(text.contains("https://api.openai.com/v1/models"));
-    }
-
-    #[test]
-    fn text_trigger_rows_fit_narrow_panels_without_losing_rule_text() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new("text-trigger-layout".into(), directory.path().into());
-        let regexp = "match-token-".repeat(5);
-        let message = "send-this-response-".repeat(5);
-        app.text_trigger_settings = ilium_ipc::TextTriggerSettings {
-            triggers: vec![ilium_ipc::TextTrigger {
-                regexp: regexp.clone(),
-                message: message.clone(),
-                ..Default::default()
-            }],
-        };
-
-        for width in [22, 40] {
-            let view = text_trigger_view(&app, 0, width);
-            assert!(
-                view.lines
-                    .iter()
-                    .all(|line| line.width() <= usize::from(width)),
-                "Text Trigger rows must wrap within a {width}-cell panel"
-            );
-            let rendered_text = view
-                .lines
-                .iter()
-                .map(ToString::to_string)
-                .collect::<String>();
-            let rendered_text = rendered_text
-                .chars()
-                .filter(|character| !character.is_whitespace())
-                .collect::<String>();
-            let expected_regexp = regexp
-                .chars()
-                .filter(|character| !character.is_whitespace())
-                .collect::<String>();
-            let expected_message = message
-                .chars()
-                .filter(|character| !character.is_whitespace())
-                .collect::<String>();
-            assert!(rendered_text.contains(&expected_regexp));
-            assert!(rendered_text.contains(&expected_message));
-        }
-
-        let view = text_trigger_view(&app, 0, 22);
-        let area = Rect::new(3, 5, 22, 8);
-        let (row_start, row_end) = view.row_lines[0];
-        for line in row_start..row_end {
-            assert_eq!(
-                text_trigger_content_hit(area, line as u16, Position::new(area.x, area.y), &app, 0,),
-                Some(0),
-                "every visible line in a wrapped rule selects that rule"
-            );
-        }
-        assert_eq!(
-            text_trigger_content_hit(
-                area,
-                view.add_line as u16,
-                Position::new(area.x, area.y),
-                &app,
-                0,
-            ),
-            Some(1),
-            "the Add row remains clickable after wrapped rules"
-        );
     }
 
     #[test]

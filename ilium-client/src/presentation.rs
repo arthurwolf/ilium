@@ -8,7 +8,6 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::background_animation::ComposedPresentation;
-use ilium_animation_js::replay::ReplayFlushedProof;
 use ilium_execution::{QuotaGroup, StorageAdmission};
 use ilium_platform::owned_worker::{
     reserve_owned_worker, OwnedWorker, StopToken, WorkerExit, WorkerKind, WorkerTicket,
@@ -374,12 +373,9 @@ pub struct PresentedFrame {
     /// A native grant changed before the first backend call. No terminal bytes
     /// for this frame were submitted, and the previous diff base stays valid.
     pub rejection: Option<String>,
-    /// Terminal bytes may have been emitted, but no complete flush proof exists.
-    /// The exact replay admission remains in frame.animation for UI custody.
+    /// Terminal bytes may have been emitted, but the flush did not complete.
+    /// The exact lease remains in frame.animation for UI custody.
     pub uncertainty: Option<String>,
-    /// Original broker proof retained with this exact successful terminal ACK.
-    /// The current procedural plugin path has no protected source dots.
-    pub flush_proof: Option<ReplayFlushedProof>,
 }
 
 struct Queue {
@@ -740,36 +736,23 @@ fn emit_frames<B: Backend<Error = io::Error>>(
         health.written_bytes.store(0, Ordering::Relaxed);
         health.phase(2);
         let started = Instant::now();
-        let committed = match frame.animation.as_mut() {
-            Some(animation) => {
-                match emitted_cell_mask(emitted.as_ref().map(|buffer| &***buffer), &frame.buffer)
-                    .and_then(|mask| {
-                        animation.restrict_to_emitted_cells(&mask)?;
-                        animation.begin_output()
-                    }) {
-                    Ok(committed) => committed,
-                    Err(reason) => {
-                        acknowledgements
-                            .try_send(Ok(PresentedFrame {
-                                frame,
-                                emitted_at: Instant::now(),
-                                emission_duration: started.elapsed(),
-                                rejection: Some(reason),
-                                uncertainty: None,
-                                flush_proof: None,
-                            }))
-                            .map_err(|_| {
-                                io::Error::other("presentation rejection channel unavailable")
-                            })?;
-                        continue;
-                    }
-                }
+        if let Some(animation) = frame.animation.as_mut() {
+            if let Err(reason) =
+                emitted_cell_mask(emitted.as_ref().map(|buffer| &***buffer), &frame.buffer)
+                    .and_then(|mask| animation.restrict_to_emitted_cells(&mask))
+            {
+                acknowledgements
+                    .try_send(Ok(PresentedFrame {
+                        frame,
+                        emitted_at: Instant::now(),
+                        emission_duration: started.elapsed(),
+                        rejection: Some(reason),
+                        uncertainty: None,
+                    }))
+                    .map_err(|_| io::Error::other("presentation rejection channel unavailable"))?;
+                continue;
             }
-            None => None,
-        };
-        // This token is the native commitment to the exact queued frame. It
-        // remains alive throughout physical output. Revocation after begin_output
-        // cannot retroactively deny bytes already in flight.
+        }
         let output_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             emit_one(
                 &mut backend,
@@ -778,58 +761,19 @@ fn emit_frames<B: Backend<Error = io::Error>>(
             )
         }))
         .unwrap_or_else(|_| Err(io::Error::other("Terminal backend panicked during output")));
-        let flush_proof = match output_result {
-            Ok(()) => {
-                if let Some(committed) = committed {
-                    match committed.backend_flushed() {
-                        Ok(proof) => Some(proof),
-                        Err(error) => {
-                            let reason = format!(
-                                "Terminal flushed but original broker settlement failed: {error}"
-                            );
-                            acknowledgements
-                                .try_send(Ok(PresentedFrame {
-                                    frame,
-                                    emitted_at: Instant::now(),
-                                    emission_duration: started.elapsed(),
-                                    rejection: None,
-                                    uncertainty: Some(reason.clone()),
-                                    flush_proof: None,
-                                }))
-                                .map_err(|_| {
-                                    io::Error::other("uncertain presentation receipt unavailable")
-                                })?;
-                            return Err(io::Error::other(reason));
-                        }
-                    }
-                } else {
-                    None
-                }
-            }
-            Err(error) => {
-                let reason = if let Some(committed) = committed {
-                    match committed.backend_failed_uncertain() {
-                        Ok(()) => format!("Partial terminal output possible: {error}"),
-                        Err(settlement_error) => format!(
-                            "{error}; original uncertain-emission settlement failed: {settlement_error}"
-                        ),
-                    }
-                } else {
-                    format!("Partial terminal output possible: {error}")
-                };
-                acknowledgements
-                    .try_send(Ok(PresentedFrame {
-                        frame,
-                        emitted_at: Instant::now(),
-                        emission_duration: started.elapsed(),
-                        rejection: None,
-                        uncertainty: Some(reason.clone()),
-                        flush_proof: None,
-                    }))
-                    .map_err(|_| io::Error::other("uncertain presentation receipt unavailable"))?;
-                return Err(io::Error::new(error.kind(), reason));
-            }
-        };
+        if let Err(error) = output_result {
+            let reason = format!("Partial terminal output possible: {error}");
+            acknowledgements
+                .try_send(Ok(PresentedFrame {
+                    frame,
+                    emitted_at: Instant::now(),
+                    emission_duration: started.elapsed(),
+                    rejection: None,
+                    uncertainty: Some(reason.clone()),
+                }))
+                .map_err(|_| io::Error::other("uncertain presentation receipt unavailable"))?;
+            return Err(io::Error::new(error.kind(), reason));
+        }
         health.phase(5);
         // Only a complete successful backend flush establishes the next diff base.
         emitted = Some(frame.buffer.clone());
@@ -839,7 +783,6 @@ fn emit_frames<B: Backend<Error = io::Error>>(
             emission_duration: started.elapsed(),
             rejection: None,
             uncertainty: None,
-            flush_proof,
         };
         acknowledgements
             .try_send(Ok(acknowledgement))
@@ -1214,7 +1157,6 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("forced partial stream failure"));
-        assert!(uncertain.flush_proof.is_none());
         let acknowledgement = presenter.acknowledgements.recv().await.unwrap();
         let ack_error = match acknowledgement {
             Err(error) => error,
@@ -1419,7 +1361,6 @@ mod tests {
         assert_eq!(uncertain.frame.frame_id, 1);
         assert!(uncertain.uncertainty.is_some());
         assert!(uncertain.rejection.is_none());
-        assert!(uncertain.flush_proof.is_none());
         drop(uncertain);
         assert!(presenter.acknowledgements.recv().await.unwrap().is_err());
         assert!(presenter.shutdown().await.is_err());

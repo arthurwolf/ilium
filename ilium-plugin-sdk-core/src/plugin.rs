@@ -319,6 +319,71 @@ pub struct SceneField {
     /// as `(column, row, character)`. Cleared before every frame; the component glue writes it
     /// with `write-glyphs`. Colours come from `cell_colors`.
     pub glyphs: Vec<(u16, u16, char)>,
+    /// The pointer over the field, set by the component glue before `render` when the program
+    /// reports `wants_pointer` and the pointer is inside the field; `None` otherwise.
+    pub pointer: Option<FieldPointer>,
+    /// What the workspace draws under the field (true where text is drawn), set by the
+    /// component glue before `render` when the program reports `wants_occupancy`; `None`
+    /// otherwise.
+    pub occupancy: Option<FieldOccupancy>,
+}
+
+/// The pointer a scene sees: its cell, the dot inside the cell and whether a button is down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FieldPointer {
+    pub column: u16,
+    pub row: u16,
+    /// Horizontal dot inside the cell, 0..2.
+    pub sub_x: u8,
+    /// Vertical dot inside the cell, 0..4.
+    pub sub_y: u8,
+    pub pressed: bool,
+}
+
+/// What the workspace draws under the field. `cells` holds the occupied plane (one value per
+/// terminal cell, row by row, true where something other than empty space is drawn) and, when
+/// it is twice as long, a second plane of the same shape marking the cells that hold a
+/// foreground character anchor.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FieldOccupancy {
+    pub columns: u16,
+    pub rows: u16,
+    pub cells: Vec<bool>,
+}
+
+impl FieldOccupancy {
+    /// Cells per plane.
+    fn plane(&self) -> usize {
+        usize::from(self.columns) * usize::from(self.rows)
+    }
+
+    /// Whether something is drawn in cell (`column`, `row`); false outside the field.
+    pub fn is_occupied(&self, column: u16, row: u16) -> bool {
+        column < self.columns
+            && row < self.rows
+            && self
+                .cells
+                .get(usize::from(row) * usize::from(self.columns) + usize::from(column))
+                .copied()
+                .unwrap_or(false)
+    }
+
+    /// Whether cell (`column`, `row`) holds a foreground character anchor; false when the host
+    /// sent no second plane.
+    pub fn is_character(&self, column: u16, row: u16) -> bool {
+        column < self.columns
+            && row < self.rows
+            && self.cells.len() >= 2 * self.plane()
+            && self
+                .cells
+                .get(
+                    self.plane()
+                        + usize::from(row) * usize::from(self.columns)
+                        + usize::from(column),
+                )
+                .copied()
+                .unwrap_or(false)
+    }
 }
 
 impl SceneField {

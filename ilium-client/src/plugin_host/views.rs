@@ -257,11 +257,7 @@ impl App {
     ) -> super::when::WhenContext {
         let view_focused = matches!(self.right_panel_target, RightPanelTarget::PluginView { .. })
             && matches!(self.focus, FocusTarget::Pane);
-        let display_mode = if matches!(self.right_panel_target, RightPanelTarget::Attention) {
-            "attention"
-        } else {
-            "normal"
-        };
+        let display_mode = "normal";
         let mut context = super::when::WhenContext {
             pane_primitive: Some("none".to_owned()),
             view_focused: Some(view_focused.to_string()),

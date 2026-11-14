@@ -494,18 +494,6 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
                 count.class(&signature.class);
             }
         }
-        R::UpdateTextTriggers { settings } => {
-            count.vector(&settings.triggers);
-            for trigger in &settings.triggers {
-                if !count.visit() {
-                    break;
-                }
-                count.string(&trigger.id);
-                count.string(&trigger.regexp);
-                count.string(&trigger.message);
-                count.string(&trigger.sample_text);
-            }
-        }
         R::RecordAgentDebugEvent {
             expected_session_id,
             event,

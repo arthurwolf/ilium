@@ -44,9 +44,7 @@ use crate::keymap::{self, Action, KeyBinding, KeymapPreset};
 use crate::layout::{TreeWidthAnimation, UiLayout};
 use crate::naming_workers::TitleTrigger;
 use crate::popover::AgentPopover;
-use crate::reset_planning::{ResetMonitorState, ResetPlanningSettings, ResetTimeStyle};
 use crate::restructure::LeafContext;
-use crate::screen_transfer::ScreenTransfer;
 use crate::split_layout::{self, PaneViewport};
 use crate::terminal_activity::{
     TerminalActivityCause, TerminalActivityTracker, VisibleTextEvidence,
@@ -85,15 +83,6 @@ pub(crate) fn terminal_parser_retry_order(
 
 #[path = "app_semantic_animation.rs"]
 mod semantic_presentation;
-// A child module of `app` so it can use the private restructure request path.
-#[path = "app_attention.rs"]
-mod attention_app;
-// Glue between the pure overview dialog and the live queue.
-#[path = "app_attention_dialog.rs"]
-mod attention_dialog_app;
-// Glue between the pure briefing box and the live queue.
-#[path = "app_attention_briefing.rs"]
-mod attention_briefing_app;
 // Client effects of plugin intents (focus, attention, external opens); a child module so it
 // can use the private external-open queue.
 #[path = "plugin_host/effects_app.rs"]
@@ -102,7 +91,6 @@ mod plugin_effects_app;
 // overlay with the App's execution client.
 #[path = "plugin_host/devices_app.rs"]
 mod plugin_devices_app;
-use ilium_ipc::TextTriggerSettings;
 
 /// Rows scrolled per wheel notch over a terminal pane's own scrollback --
 /// matches `tree_state.scroll_up(3)`/`scroll_down(3)`'s existing per-notch
@@ -264,10 +252,6 @@ pub enum RightPanelTarget {
         project_id: NodeId,
         resource_id: ilium_core::resource_queue::ResourceId,
     },
-    /// The global attention queue: every agent that needs the user, listed in
-    /// the order the "Next: needs you" button visits them. It
-    /// owns no PTY, snapshot or split-view slot.
-    Attention,
     /// A panel, a settings page or an onboarding step a plugin contributes (foundation
     /// contract section 19.1). The plugin renders its tree; the client only places it.
     PluginView {
@@ -289,7 +273,6 @@ impl RightPanelTarget {
         match self {
             Self::Empty
             | Self::Resource { .. }
-            | Self::Attention
             | Self::PluginView { .. }
             | Self::SplitView {
                 active_pane_id: None,
@@ -377,9 +360,6 @@ pub enum Mode {
     AgentToolbarModelSubmenu(AgentToolbarModelSubmenuState),
     /// Full, untruncated text of a pane's displayed last prompt.
     LastPromptDialog(crate::last_prompt_toolbar::LastPromptDialogState),
-    /// Form for one server-owned terminal input countdown.
-    /// Multiline prompt collected for the server-owned completion queue.
-    TextTriggerDialog(Box<crate::text_trigger_dialog::TextTriggerDialogState>),
     /// A mouse-anchored action menu for one physical editor source line.
     EditorLineContextMenu(EditorLineContextMenu),
     /// Agent selector and editable task prompt opened from an editor line.
@@ -419,12 +399,6 @@ pub enum Mode {
     /// Read-only explanation and animated specimen opened from a Settings row.
     /// The parent Settings state remains on the modal stack for exact return.
     SettingsHelp(crate::settings_help::dialog::SettingsHelpState),
-    /// Progress dialog over a frozen agent pane while its conversation is
-    /// compacted by a remote model. State lives in `App::remote_compaction`.
-    RemoteCompaction,
-    /// The "Needs you" overview over the attention queue. State lives in
-    /// `App::attention.dialog` (see `crate::attention::dialog`).
-    AttentionOverview,
 }
 
 /// Which animation control a `Mode::AnimationTextPrompt` edits, and what to
@@ -500,7 +474,6 @@ pub enum SettingsTab {
     LlmInstructions,
     Titles,
     Triggers,
-    TextTriggers,
     CustomAgents,
     Icons,
     Toolbar,
@@ -516,15 +489,9 @@ pub enum SettingsTab {
     KanbanBoard,
     Sound,
     VoiceControl,
-    ResetPlanning,
     AgentMonitoring,
-    /// Attention queue: mode, press-to-sort, turbo width, expiry and model.
-    Attention,
     /// Agent spend indicators and how "expensive" is decided.
     Cost,
-    /// Summarizing a session through the Inference model (the Remote
-    /// compaction tab).
-    RemoteCompaction,
     Debug,
     Api,
     /// The WebAssembly plugins of this installation, each with an on/off switch.
@@ -688,15 +655,13 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 29] = [
+    pub const ALL: [SettingsTab; 25] = [
         Self::Appearance,
         Self::Padding,
         Self::Icons,
         Self::Toolbar,
         Self::AgentMonitoring,
-        Self::Attention,
         Self::Cost,
-        Self::RemoteCompaction,
         Self::Keyboard,
         Self::Terminal,
         Self::Editor,
@@ -706,12 +671,10 @@ impl SettingsTab {
         Self::Animations,
         Self::Sound,
         Self::VoiceControl,
-        Self::ResetPlanning,
         Self::Inference,
         Self::LlmInstructions,
         Self::Titles,
         Self::Triggers,
-        Self::TextTriggers,
         Self::CustomAgents,
         Self::Debug,
         Self::Api,
@@ -727,7 +690,6 @@ impl SettingsTab {
             Self::LlmInstructions => "LLM Instructions",
             Self::Titles => "Titles",
             Self::Triggers => "Triggers",
-            Self::TextTriggers => "Text Triggers",
             Self::CustomAgents => "Custom Agents",
             Self::Icons => "Icons",
             Self::Toolbar => "Toolbar",
@@ -742,11 +704,8 @@ impl SettingsTab {
             Self::KanbanBoard => "Kanban Board",
             Self::Sound => "Sound",
             Self::VoiceControl => "Voice control",
-            Self::ResetPlanning => "Reset planning",
             Self::AgentMonitoring => "Agent Monitoring",
-            Self::Attention => "Attention",
             Self::Cost => "Agent Cost",
-            Self::RemoteCompaction => "Remote compaction",
             Self::Debug => "Debug",
             Self::Api => "API",
             Self::Plugins => "Plugins",
@@ -950,30 +909,6 @@ impl TerminalRow {
         Self::ScrollbackBudget,
         Self::NewPaneDirectory,
         Self::EngineMemoryBudget,
-    ];
-}
-/// Rows of the Attention settings tab, in display order. All six are generic
-/// choice/number rows (`SettingsChoice` / `SettingsNumber`), so keyboard,
-/// mouse and dialogs need no tab-specific handlers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttentionRow {
-    Mode,
-    PressSorts,
-    TurboConcurrency,
-    ExpirySeconds,
-    Model,
-    ShowBriefing,
-    LargeButtons,
-}
-impl AttentionRow {
-    pub const ALL: [Self; 7] = [
-        Self::Mode,
-        Self::PressSorts,
-        Self::TurboConcurrency,
-        Self::ExpirySeconds,
-        Self::Model,
-        Self::ShowBriefing,
-        Self::LargeButtons,
     ];
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1205,10 +1140,6 @@ pub struct SettingsState {
     pub animation_detail_show_help: bool,
     /// Scroll offset for the expanded selected-control help pane.
     pub animation_detail_scroll: u16,
-    /// Browsing a subtab never changes the persisted/effective animation source.
-    pub animation_source_tab: crate::animation_plugins::AnimationSourceTab,
-    pub plugin_panel: crate::animation_plugins::PluginPanelState,
-    pub plugin_editor: Option<crate::animation_plugins::PluginEditor>,
     /// Whether the Icons preview renders the current session tree or the
     /// complete dummy specimen tree.
     pub icons_preview_real: bool,
@@ -1349,9 +1280,6 @@ impl SettingsState {
             animation_activity_scroll_from_top: None,
             animation_detail_show_help: false,
             animation_detail_scroll: 0,
-            animation_source_tab: crate::animation_plugins::AnimationSourceTab::Native,
-            plugin_panel: crate::animation_plugins::PluginPanelState::default(),
-            plugin_editor: None,
             icons_preview_real: false,
             tree_layout_editor: None,
             toolbar_picker: None,
@@ -1395,9 +1323,6 @@ pub enum ContextMenuAction {
     Search,
     FocusPane,
     CreateBoardFromMarkdown,
-    SchedulePaneInput,
-    QueuePrompt,
-    ClearPromptQueue,
     Freeze,
     Unfreeze,
     ShowSplitView,
@@ -1466,9 +1391,6 @@ impl ContextMenuAction {
             Self::FocusPane | Self::ShowSplitView => (0, 0),
             Self::ToggleGroup => (0, 1),
             Self::CreateBoardFromMarkdown => (0, 2),
-            Self::QueuePrompt => (1, 1),
-            Self::SchedulePaneInput => (1, 2),
-            Self::ClearPromptQueue => (1, 3),
             Self::Freeze | Self::Unfreeze => (1, 4),
             Self::NewTerminal => (2, 0),
             Self::NewEditor => (2, 1),
@@ -1528,9 +1450,7 @@ impl ContextMenuAction {
             Self::Plugin(_) => IconTarget::Project,
             Self::FocusPane | Self::NewTerminal => IconTarget::Terminal,
             Self::CreateBoardFromMarkdown => IconTarget::Board,
-            Self::SchedulePaneInput => IconTarget::WaitingBackground,
-            Self::QueuePrompt => IconTarget::GoalActive,
-            Self::ClearPromptQueue | Self::Close => IconTarget::RowClose,
+            Self::Close => IconTarget::RowClose,
             Self::Freeze => IconTarget::Lock,
             Self::Unfreeze => IconTarget::FrozenAgent,
             Self::ShowSplitView | Self::NewSplitView => IconTarget::SplitVertical,
@@ -1571,9 +1491,6 @@ impl ContextMenuAction {
             Self::Plugin(_) => "Plugin action".to_string(),
             Self::FocusPane => "Focus pane".to_string(),
             Self::CreateBoardFromMarkdown => "Create board from Markdown".to_string(),
-            Self::SchedulePaneInput => "Schedule keystrokes…".to_string(),
-            Self::QueuePrompt => "Queue prompt…".to_string(),
-            Self::ClearPromptQueue => "Clear prompt queue".to_string(),
             Self::Freeze => "Freeze agent".to_string(),
             Self::Unfreeze => "Unfreeze agent".to_string(),
             Self::ShowSplitView => "Show split view".to_string(),
@@ -1929,9 +1846,6 @@ pub struct PendingRestructureRequest {
     /// Session and generation stamped for every agent pane at request time,
     /// so the batch recaps the reply carries are fenced against later work.
     pub recap_stamps: HashMap<NodeId, (String, u64)>,
-    /// Shared attention mode: the prompt also asks for the optional
-    /// `attention` list, which rides back on the worker result.
-    pub include_attention: bool,
 }
 
 /// Distinguishes an explicit user action from a passive lifecycle trigger.
@@ -2151,10 +2065,6 @@ pub struct App {
     pub animation_settings: crate::background_animation::AnimationSettings,
     pub(crate) committed_animation_settings: Option<crate::background_animation::AnimationSettings>,
     pub(crate) failed_animation_settings: Option<crate::background_animation::AnimationSettings>,
-    pub(crate) plugin_catalogue_preparation:
-        Option<crate::animation_plugins::preparation::CataloguePreparation>,
-    pub(crate) plugin_catalogue:
-        Option<ilium_execution::Retained<crate::animation_plugins::PluginCatalogue>>,
     /// The WebAssembly plugin host of this client, when plugins are on. Named apart from the
     /// animation plugin fields around it, which are a different, older mechanism.
     pub(crate) wasm_plugins: Option<crate::plugin_host::host::ClientPlugins>,
@@ -2181,8 +2091,6 @@ pub struct App {
     /// Immutable view shared by background and Settings preview. The service
     /// owns all scenes, rendering and loop-cache generation off the UI thread.
     pub animation_frame: crate::background_animation::AnimationSurface,
-    pub(crate) plugin_permission_session:
-        Option<crate::animation_plugins::review_bridge::ReviewSession>,
     /// Structural row transitions live beside the render-cache mirror, never
     /// in the authoritative server tree or the IPC protocol.
     pub(crate) tree_transitions: TreeTransitions,
@@ -2252,8 +2160,6 @@ pub struct App {
     /// Live event-to-actions routing table. Detection is server/render-cache
     /// owned; this client value decides which LLM work enters the outboxes.
     pub trigger_settings: TriggerSettings,
-    /// Configured regex-driven responses, executed by the detached server.
-    pub text_trigger_settings: TextTriggerSettings,
     /// Managed instruction targets and durable setup-prompt suppression.
     pub agent_setup_settings: AgentSetupSettings,
     /// Filesystem status refreshed at explicit lifecycle boundaries, never
@@ -2278,27 +2184,13 @@ pub struct App {
     /// actor remains owned by `crate::run`, following the same outbox pattern
     /// used for IPC and background workers.
     pub voice_settings: VoiceSettings,
-    pub reset_planning_settings: ResetPlanningSettings,
-    /// Attention-queue mode, press-to-sort, turbo width, expiry and model.
-    pub attention_settings: crate::attention::AttentionSettings,
-    /// Live attention queue, refresh gate, persistence and arrival state.
-    pub attention: crate::attention::state::AttentionState,
     /// Agent-spend indicator settings (the Agent Cost tab).
     pub cost_settings: CostSettings,
     /// Text being typed into the sparkline-window field of the Agent Cost
     /// tab (`Enter` on that row), or `None` while it is not being edited.
     pub cost_window_input: Option<String>,
-    /// Remote compaction settings (the Remote compaction tab).
-    pub remote_compaction_settings: crate::remote_compaction_settings::RemoteCompactionSettings,
-    /// When numeric Remote compaction rows were last changed plus the
-    /// debounce; `None` while nothing is waiting to be saved.
-    pub remote_compaction_save_deadline: Option<Instant>,
-    /// Native compaction triggers read from the agents' configuration while
-    /// the Remote compaction tab is open.
-    pub remote_compaction_native: crate::remote_compaction_native::NativeSnapshot,
     /// Derived per-agent spend and the overlay the tree draws.
     pub(crate) cost_tracker: crate::cost_tracker::CostTracker,
-    pub reset_monitor_state: ResetMonitorState,
     /// Server-authoritative adaptive detection settings. None until the
     /// attach handshake sends its initial settings event.
     pub agent_detection_settings: Option<ilium_ipc::AgentDetectionSettings>,
@@ -2420,7 +2312,6 @@ pub struct App {
     /// Settings -> Animations: the row with disabled options the pointer
     /// rests on (see `animation_hover`).
     pub(crate) animation_hover: Option<crate::animation_hover::AnimationHover>,
-    pub(crate) plugin_issue_hover: Option<crate::animation_hover::AnimationHover>,
     next_workspace_request_id: u64,
     active_workspace_dialog_query: Option<(u64, NodeId)>,
     active_workspace_popover_query: Option<(u64, NodeId)>,
@@ -2538,7 +2429,6 @@ pub struct App {
     pending_pane_focuses: Vec<PendingPaneFocus>,
     pub markdown_picker: ratatui_image::picker::Picker,
     pub document_preparation: Option<crate::document_preparation::DocumentPreparation>,
-    pub(crate) text_trigger_preview: Option<crate::text_trigger_dialog::TextTriggerPreview>,
     pub(crate) sound_studio_preview: Option<crate::onboarding::sound_preview::SoundStudioPreview>,
     pub(crate) paste_retirement: Option<ilium_execution::RetirementHandle>,
     pub(crate) source_window_preparation:
@@ -2644,18 +2534,9 @@ pub struct App {
     pub(crate) frozen_screen_holds: HashMap<NodeId, ilium_execution::Retention>,
     /// Pane-instance fences for pending frozen-screen reads and parsing.
     pub(crate) frozen_screen_restore_identities: HashMap<NodeId, Arc<()>>,
-    /// The active remote-compaction dialog, if any (see `Mode::RemoteCompaction`).
-    pub remote_compaction:
-        Option<Box<crate::remote_compaction_dialog::RemoteCompactionDialogState>>,
-    /// Remote-compaction worker job the event loop must start.
-    pub pending_remote_compaction_job: Option<crate::remote_compaction_worker::RemoteCompactionJob>,
-    /// Set when the user cancels a running remote compaction.
-    pub pending_remote_compaction_cancel: bool,
-    /// Cooldown and failure bookkeeping of the automatic trigger.
-    pub remote_compaction_monitor: crate::remote_compaction_flow::RemoteCompactionMonitor,
     /// Position of a pane being swapped for its converted replacement, and
     /// whether the user was looking at it, so the replacement can take over.
-    pub pending_replacement_focus: Option<crate::remote_compaction_flow::ReplacementFocus>,
+    pub pending_replacement_focus: Option<crate::replacement_focus::ReplacementFocus>,
     /// Exact detected process owning each verified agent session. Kept beside
     /// `agent_session_ids` because title prompts need the PID while process
     /// discovery remains server-owned.
@@ -2898,15 +2779,12 @@ impl App {
             animation_settings: Default::default(),
             committed_animation_settings: None,
             failed_animation_settings: None,
-            plugin_catalogue_preparation: None,
-            plugin_catalogue: None,
             wasm_plugins: None,
             settings_plugin_page: None,
             plugin_onboarding_queue: std::collections::VecDeque::new(),
             plugin_view_cursor: Default::default(),
             plugin_pane_cursors: Default::default(),
             animation_frame: Default::default(),
-            plugin_permission_session: None,
             semantic_presentation: semantic_presentation::SemanticPresentation::new(
                 session_cwd.clone(),
             ),
@@ -2952,7 +2830,6 @@ impl App {
             inference_save_state: Default::default(),
             restructure_budget_identity: None,
             trigger_settings: TriggerSettings::default(),
-            text_trigger_settings: TextTriggerSettings::default(),
             agent_setup_settings: AgentSetupSettings::default(),
             agent_setup_statuses: HashMap::new(),
             pending_agent_setup_prompts: VecDeque::new(),
@@ -2966,17 +2843,9 @@ impl App {
             git_settings: GitSettings::default(),
             git_settings_error: None,
             voice_settings: VoiceSettings::default(),
-            reset_planning_settings: ResetPlanningSettings::default(),
-            attention_settings: crate::attention::AttentionSettings::default(),
-            attention: crate::attention::state::AttentionState::default(),
             cost_settings: CostSettings::default(),
             cost_window_input: None,
-            remote_compaction_settings:
-                crate::remote_compaction_settings::RemoteCompactionSettings::default(),
-            remote_compaction_save_deadline: None,
-            remote_compaction_native: crate::remote_compaction_native::NativeSnapshot::default(),
             cost_tracker: crate::cost_tracker::CostTracker::default(),
-            reset_monitor_state: ResetMonitorState::default(),
             agent_detection_settings: None,
             agent_detection_settings_error: None,
             agent_detection_settings_pending: false,
@@ -3049,7 +2918,6 @@ impl App {
             agent_popover: None,
             agent_popover_last_visible: false,
             animation_hover: None,
-            plugin_issue_hover: None,
             next_workspace_request_id: 1,
             active_workspace_dialog_query: None,
             active_workspace_popover_query: None,
@@ -3094,7 +2962,6 @@ impl App {
             // support and supplies the Picker from the real entry point.
             markdown_picker: ratatui_image::picker::Picker::halfblocks(),
             document_preparation: None,
-            text_trigger_preview: None,
             sound_studio_preview: None,
             paste_retirement: None,
             source_window_preparation: None,
@@ -3257,11 +3124,6 @@ impl App {
             frozen_screens: HashMap::new(),
             frozen_screen_holds: HashMap::new(),
             frozen_screen_restore_identities: HashMap::new(),
-            remote_compaction: None,
-            pending_remote_compaction_job: None,
-            pending_remote_compaction_cancel: false,
-            remote_compaction_monitor:
-                crate::remote_compaction_flow::RemoteCompactionMonitor::default(),
             pending_replacement_focus: None,
             agent_process_ids: HashMap::new(),
             agent_process_identity_inode: HashMap::new(),
@@ -3393,9 +3255,6 @@ impl App {
                         }
                         Some(Mode::CreateAgentWorkspace(parent)) => {
                             host.apply_workspace_choice(parent, &id)
-                        }
-                        Some(Mode::TextTriggerDialog(parent)) => {
-                            host.apply_trigger_scope_choice(parent, &id)
                         }
                         _ => Err("The parent form changed; reopen its options".into()),
                     }
@@ -3648,23 +3507,12 @@ impl App {
     /// return flag or a freshly reconstructed parent screen.
     pub(crate) fn pop_modal(&mut self) {
         // Input handlers move the active mode out; their Esc path cancels explicitly.
-        let closing_trigger = match &self.mode {
-            Mode::TextTriggerDialog(state) => Some(state.identity().to_owned()),
-            _ => None,
-        };
-        if let Some(draft_id) = closing_trigger.as_deref() {
-            self.cancel_text_trigger_preview(draft_id);
-        }
         self.mode = self.modal_stack.pop().unwrap_or(Mode::Normal);
-        let _ = self.reconcile_text_trigger_preview();
     }
 
     /// Finishes a nested interaction whose successful action exits the whole
     /// flow, such as creating a board from a file-picker action menu.
     pub(crate) fn close_modal_flow(&mut self) {
-        if let Some(preview) = &mut self.text_trigger_preview {
-            preview.cancel_all();
-        }
         self.modal_stack.clear();
         self.mode = Mode::Normal;
     }
@@ -4467,7 +4315,6 @@ impl App {
         match self.right_panel_target {
             RightPanelTarget::Empty
             | RightPanelTarget::Resource { .. }
-            | RightPanelTarget::Attention
             | RightPanelTarget::PluginView { .. } => [None; 4],
             RightPanelTarget::Pane { pane_id } => [Some(pane_id), None, None, None],
             RightPanelTarget::SplitView { split_id, .. } => {
@@ -4524,7 +4371,6 @@ impl App {
             }
             RightPanelTarget::Empty
             | RightPanelTarget::Resource { .. }
-            | RightPanelTarget::Attention
             | RightPanelTarget::PluginView { .. } => false,
         }
     }
@@ -4681,7 +4527,6 @@ impl App {
         let viewports = match self.right_panel_target {
             RightPanelTarget::Empty
             | RightPanelTarget::Resource { .. }
-            | RightPanelTarget::Attention
             | RightPanelTarget::PluginView { .. } => Vec::new(),
             RightPanelTarget::Pane { pane_id } => split_layout::allocate_viewports(
                 self.layout.pane_area,
@@ -4750,7 +4595,6 @@ impl App {
                 } else {
                     viewport
                 };
-                let viewport = self.with_briefing_slot(viewport);
                 let viewport = if self.shows_progress_footer(viewport.pane_id) {
                     viewport.with_progress_reserved(
                         crate::progress_bar::reserved_height(
@@ -4795,29 +4639,6 @@ impl App {
         } else {
             viewport
         }
-    }
-
-    /// Reserves the briefing box's rows right below the prompt banner. The
-    /// rows come from the same pure function the drawing uses, so the
-    /// terminal's size and the box can never disagree. The box asks for what
-    /// is left after the terminal's minimum height and the progress footer.
-    fn with_briefing_slot(&self, viewport: PaneViewport) -> PaneViewport {
-        let minimum_progress_rows = if self.shows_progress_footer(viewport.pane_id) {
-            2.min(viewport.content_area.height.saturating_sub(2))
-        } else {
-            0
-        };
-        let keep_free_rows = if minimum_progress_rows > 0 {
-            minimum_progress_rows + 1
-        } else {
-            0
-        };
-        let frames = self.ui_settings.section_frames_enabled;
-        let spare_rows = viewport.content_area.height.saturating_sub(
-            crate::attention::briefing::MINIMUM_TERMINAL_ROWS + keep_free_rows + u16::from(frames),
-        );
-        let rows = self.briefing_rows(viewport.pane_id, viewport.content_area.width, spare_rows);
-        viewport.with_briefing_reserved(rows, keep_free_rows, frames)
     }
 
     /// Whether the already-reserved toolbar slot displays controls. Terminal
@@ -5484,39 +5305,6 @@ impl App {
         }
     }
 
-    /// Returns every currently actionable transfer across a visible split
-    /// separator. A transfer is available only when both panes have live
-    /// terminal runtimes, which includes ordinary shells and detected agents
-    /// but excludes editors, boards, and still-loading pane placeholders.
-    pub(crate) fn screen_transfers(&self) -> Vec<ScreenTransfer> {
-        split_layout::adjacent_pane_directions(&self.pane_viewports())
-            .into_iter()
-            .filter(|transfer| {
-                self.is_live_terminal_pane(transfer.source_pane_id)
-                    && self.is_live_terminal_pane(transfer.destination_pane_id)
-            })
-            .map(|transfer| ScreenTransfer {
-                source_pane_id: transfer.source_pane_id,
-                destination_pane_id: transfer.destination_pane_id,
-                direction: transfer.direction,
-                control_area: transfer.control_area,
-            })
-            .collect()
-    }
-
-    /// Resolves a pointer position against the exact separator cells rendered
-    /// as screen-transfer controls. The runtime eligibility above keeps a
-    /// border next to an editor from behaving like a terminal paste target.
-    pub(crate) fn screen_transfer_at(&self, position: Position) -> Option<ScreenTransfer> {
-        self.screen_transfers()
-            .into_iter()
-            .find(|transfer| transfer.control_area.contains(position))
-    }
-
-    fn is_live_terminal_pane(&self, pane_id: NodeId) -> bool {
-        matches!(self.panes.get(&pane_id), Some(PaneRuntime::Terminal(_)))
-    }
-
     pub(crate) fn frozen_dialog_layout(
         &self,
         viewport: PaneViewport,
@@ -5578,8 +5366,6 @@ impl App {
                     resource_id,
                 }
             }
-            // Turning the feature off closes its panel.
-            RightPanelTarget::Attention if self.attention_enabled() => RightPanelTarget::Attention,
             // The view goes away with its plugin: the host reports that as `ViewClosed`.
             RightPanelTarget::PluginView { plugin, kind, name }
                 if self
@@ -5998,28 +5784,6 @@ impl App {
         self.voice_settings = settings;
     }
 
-    pub fn apply_reset_planning_settings(&mut self, settings: ResetPlanningSettings) {
-        self.reset_planning_settings = settings;
-    }
-
-    /// Installs loaded or edited attention settings, clamped into range.
-    pub fn apply_attention_settings(&mut self, settings: crate::attention::AttentionSettings) {
-        self.attention_settings = settings.normalized();
-        self.sync_attention_mode();
-    }
-
-    /// Stores and persists one attention-settings edit made by a Settings row
-    /// or the control API.
-    pub fn save_attention_settings(&mut self, settings: crate::attention::AttentionSettings) {
-        self.apply_attention_settings(settings);
-        self.persist_configuration(
-            crate::filesystem::configuration::ConfigurationChange::Attention(
-                self.attention_settings.clone(),
-            ),
-            "attention settings",
-        );
-    }
-
     pub fn apply_cost_settings(&mut self, settings: CostSettings) {
         self.cost_settings = settings;
     }
@@ -6065,34 +5829,6 @@ impl App {
         self.cost_window_input = None;
         self.cost_settings.set_window_minutes(minutes);
         self.persist_cost_settings();
-    }
-
-    pub fn settings_adjust_reset_planning_row(&mut self, row: usize) {
-        let mut settings = self.reset_planning_settings.clone();
-        match row {
-            0 => {
-                settings.monitor_claude = !settings.monitor_claude;
-                self.reset_monitor_state.claude = Default::default();
-            }
-            1 => {
-                settings.monitor_codex = !settings.monitor_codex;
-                self.reset_monitor_state.codex = Default::default();
-            }
-            2 => {
-                settings.time_style = match settings.time_style {
-                    ResetTimeStyle::Exact => ResetTimeStyle::Human,
-                    ResetTimeStyle::Human => ResetTimeStyle::Exact,
-                }
-            }
-            _ => return,
-        }
-        self.reset_planning_settings = settings;
-        self.persist_configuration(
-            crate::filesystem::configuration::ConfigurationChange::ResetPlanning(
-                self.reset_planning_settings.clone(),
-            ),
-            "reset planning settings",
-        );
     }
 
     /// Installs startup diagnostics policy. The process writer is owned by the
@@ -7034,12 +6770,6 @@ impl App {
         self.trigger_settings = triggers.normalized();
     }
 
-    /// Installs a server-acknowledged Text Trigger list without persisting or
-    /// echoing a second update request back to the detached server.
-    pub fn apply_text_trigger_settings(&mut self, settings: TextTriggerSettings) {
-        self.text_trigger_settings = settings;
-    }
-
     /// Installs the durable setup policy loaded before the terminal starts.
     /// Prompting is queued separately so startup recovery dialogs retain
     /// precedence over these optional offers.
@@ -7527,43 +7257,6 @@ impl App {
         true
     }
 
-    /// Persists an explicit full-list replacement; attaching never calls this method.
-    pub fn apply_and_persist_text_trigger_settings(
-        &mut self,
-        settings: TextTriggerSettings,
-    ) -> Result<(), String> {
-        let directory = self
-            .config_dir
-            .clone()
-            .ok_or_else(|| "No durable configuration directory is available".to_owned())?;
-        self.enqueue_configuration(
-            directory,
-            crate::filesystem::configuration::ConfigurationChange::TextTriggers {
-                previous: self.text_trigger_settings.clone(),
-                desired: settings,
-            },
-            crate::filesystem::configurations::ConfigurationIntent::TextTriggers { dialog: None },
-        )
-    }
-
-    pub(crate) fn configure_text_trigger_preview(
-        &mut self,
-        client: ilium_execution::Client,
-    ) -> std::sync::Arc<tokio::sync::Notify> {
-        debug_assert!(
-            self.text_trigger_preview.is_none(),
-            "text trigger preview is configured once at client startup"
-        );
-
-        let preview = crate::text_trigger_dialog::TextTriggerPreview::new(client);
-
-        let notification = preview.notification();
-
-        self.text_trigger_preview = Some(preview);
-
-        notification
-    }
-
     pub(crate) fn configure_sound_studio_preview(
         &mut self,
         client: ilium_execution::Client,
@@ -7646,152 +7339,6 @@ impl App {
             "paste retirement is configured once at client startup"
         );
         self.paste_retirement = Some(retirement);
-    }
-
-    fn text_trigger_dialog_mut(
-        &mut self,
-    ) -> Option<&mut crate::text_trigger_dialog::TextTriggerDialogState> {
-        if let Mode::TextTriggerDialog(state) = &mut self.mode {
-            return Some(state);
-        }
-
-        self.modal_stack
-            .iter_mut()
-            .rev()
-            .find_map(|mode| match mode {
-                Mode::TextTriggerDialog(state) => Some(state.as_mut()),
-                _ => None,
-            })
-    }
-
-    pub(crate) fn reconcile_text_trigger_preview(&mut self) -> bool {
-        let Some(mut preview) = self.text_trigger_preview.take() else {
-            let Some(state) = self.text_trigger_dialog_mut() else {
-                return false;
-            };
-
-            return state.preview_unavailable_current(
-                crate::text_trigger_dialog::TextTriggerPreviewIssue::Unconfigured,
-            );
-        };
-
-        let changed = match self.text_trigger_dialog_mut() {
-            Some(state) => preview.request(state),
-            None => preview.collect(),
-        };
-
-        self.text_trigger_preview = Some(preview);
-
-        changed
-    }
-
-    pub(crate) fn text_trigger_preview_retry_delay(&self, now: Instant) -> Option<Duration> {
-        self.text_trigger_preview
-            .as_ref()
-            .and_then(|preview| preview.retry_delay(now))
-    }
-
-    pub(crate) fn cancel_text_trigger_preview(&mut self, draft_id: &str) {
-        if let Some(preview) = &mut self.text_trigger_preview {
-            preview.cancel_draft(draft_id);
-        }
-    }
-
-    pub(crate) fn close_text_trigger_preview(&mut self) {
-        fn release(mode: &mut Mode) {
-            if let Mode::TextTriggerDialog(state) = mode {
-                state.release_preview();
-            }
-        }
-        release(&mut self.mode);
-        for mode in &mut self.modal_stack {
-            release(mode);
-        }
-        if let Some(preview) = &mut self.text_trigger_preview {
-            preview.close();
-        }
-    }
-
-    pub(crate) fn collect_closed_text_trigger_preview(&mut self) {
-        if let Some(preview) = &mut self.text_trigger_preview {
-            preview.collect();
-        }
-    }
-
-    pub fn open_text_trigger_dialog(&mut self, index: Option<usize>) {
-        let existing = index.and_then(|index| {
-            self.text_trigger_settings
-                .triggers
-                .get(index)
-                .map(|trigger| (index, trigger))
-        });
-        if index.is_some() && existing.is_none() {
-            self.status_message = Some("The selected Text Trigger is no longer present".to_owned());
-            return;
-        }
-        self.push_modal(Mode::TextTriggerDialog(Box::new(
-            crate::text_trigger_dialog::TextTriggerDialogState::new(existing),
-        )));
-        let _ = self.reconcile_text_trigger_preview();
-    }
-
-    pub fn commit_text_trigger(
-        &mut self,
-        editing_id: Option<&str>,
-        editing_base: Option<&ilium_ipc::TextTrigger>,
-        mut trigger: ilium_ipc::TextTrigger,
-    ) -> Result<(), String> {
-        if editing_id != editing_base.map(|rule| rule.id.as_str()) {
-            return Err("Text Trigger edit identity does not match its original rule".into());
-        }
-        if let Some(editing_id) = editing_id {
-            if !self
-                .text_trigger_settings
-                .triggers
-                .iter()
-                .any(|rule| rule.id == editing_id)
-            {
-                return Err(
-                    "This Text Trigger was deleted; cancel and reopen to review the list".into(),
-                );
-            }
-        }
-        if let Some(editing_id) = editing_id {
-            trigger.id = editing_id.to_owned();
-        }
-        let directory = self
-            .config_dir
-            .clone()
-            .ok_or_else(|| "No durable configuration directory is available".to_owned())?;
-        self.enqueue_configuration(
-            directory,
-            crate::filesystem::configuration::ConfigurationChange::TextTriggerEdit {
-                previous: editing_base.cloned(),
-                desired: Some(trigger.clone()),
-            },
-            crate::filesystem::configurations::ConfigurationIntent::TextTriggers {
-                dialog: Some(trigger),
-            },
-        )
-    }
-
-    pub fn delete_text_trigger(&mut self, index: usize) {
-        let Some(expected) = self.text_trigger_settings.triggers.get(index).cloned() else {
-            self.status_message = Some("The selected Text Trigger is no longer present".into());
-            return;
-        };
-        let Some(directory) = self.config_dir.clone() else {
-            self.status_message = Some("No durable configuration directory is available".into());
-            return;
-        };
-        let _ = self.enqueue_configuration(
-            directory,
-            crate::filesystem::configuration::ConfigurationChange::TextTriggerEdit {
-                previous: Some(expected),
-                desired: None,
-            },
-            crate::filesystem::configurations::ConfigurationIntent::TextTriggers { dialog: None },
-        );
     }
 
     pub fn apply_and_persist_trigger_settings(&mut self, triggers: TriggerSettings) {
@@ -8825,20 +8372,6 @@ impl App {
         self.effective_animation_row_context()
     }
 
-    pub(crate) fn request_plugin_catalogue(&mut self) {
-        if self.plugin_catalogue.is_some() {
-            return;
-        }
-        let result = self
-            .plugin_catalogue_preparation
-            .as_mut()
-            .ok_or_else(|| "Animation package discovery is not initialized".to_owned())
-            .and_then(|owner| owner.request());
-        if let Err(error) = result {
-            self.status_message = Some(error);
-        }
-    }
-
     /// Carries out what the WebAssembly plugin host asked for since the last call: requests
     /// go to the server through the ordinary queue, a toast becomes the status line, and a
     /// changed view asks for a redraw. Returns whether to redraw.
@@ -9037,291 +8570,6 @@ impl App {
         self.mirror_plugin_keymap();
     }
 
-    pub(crate) fn collect_plugin_catalogue(&mut self) -> bool {
-        let Some(result) = self
-            .plugin_catalogue_preparation
-            .as_mut()
-            .and_then(|owner| owner.collect())
-        else {
-            return false;
-        };
-        match result {
-            Ok(catalogue) => {
-                self.plugin_catalogue = Some(catalogue);
-                self.status_message = None;
-            }
-            Err(error) => self.status_message = Some(error),
-        }
-        true
-    }
-
-    pub(crate) fn plugin_panel_model(&self) -> crate::animation_plugins::PluginPanelModel {
-        use crate::animation_plugins::{PluginPanelModel, PluginPanelRow};
-        let effective_settings = self
-            .committed_animation_settings
-            .as_ref()
-            .unwrap_or(&self.animation_settings);
-        let has_active_plugin = effective_settings.source
-            == crate::animation_plugins::AnimationSourceTab::Plugin
-            && effective_settings.plugin.selected.is_some();
-        let mut model = if let Some(catalogue) = &self.plugin_catalogue {
-            let active = has_active_plugin
-                .then(|| {
-                    effective_settings
-                        .plugin
-                        .selected
-                        .as_ref()
-                        .map(|selection| selection.package_id.as_str())
-                })
-                .flatten();
-            PluginPanelModel::with_active(catalogue.view(), &self.animation_settings.plugin, active)
-        } else {
-            let preparation_status = self
-                .plugin_catalogue_preparation
-                .as_ref()
-                .and_then(|owner| owner.status.clone());
-            let status = preparation_status
-                .clone()
-                .unwrap_or_else(|| "Open Plugin to discover animation packages".into());
-            let issue_details = preparation_status
-                .filter(|status| !status.starts_with("Loading animation packages"))
-                .map(|status| vec![format!("Animation catalogue: {status}")])
-                .unwrap_or_default();
-            PluginPanelModel {
-                rows: vec![PluginPanelRow::Status],
-                labels: vec![status],
-                issue_details,
-            }
-        };
-        if !model.issue_details.is_empty() && !model.rows.contains(&PluginPanelRow::Issues) {
-            model.rows.push(PluginPanelRow::Issues);
-            model.labels.push(format!(
-                "{} package/runtime issue(s)",
-                model.issue_details.len()
-            ));
-        }
-        let native = self.animation_row_model();
-        for (index, row) in native.rows().iter().enumerate() {
-            if let crate::animation_rows::AnimationRow::Common(id) = row {
-                if matches!(*id, "playback" | "loop_seconds") {
-                    continue;
-                }
-                if let Some(view) = native.view(index) {
-                    model.rows.push(PluginPanelRow::Common(index));
-                    model.labels.push(format!("{}: {}", view.label, view.value));
-                }
-            }
-        }
-        if has_active_plugin {
-            if let Some(error) = self.animation_frame.status() {
-                let detail: String = error
-                    .chars()
-                    .filter(|character| !character.is_control())
-                    .collect();
-                model.issue_details.push(format!("Runtime: {detail}"));
-                if let Some(index) = model
-                    .rows
-                    .iter()
-                    .position(|row| *row == PluginPanelRow::Issues)
-                {
-                    model.labels[index] =
-                        format!("{} package/runtime issue(s)", model.issue_details.len());
-                } else {
-                    model.rows.push(PluginPanelRow::Issues);
-                    model.labels.push("1 package/runtime issue(s)".into());
-                }
-            }
-        }
-        model
-    }
-
-    pub(crate) fn settings_select_plugin(&mut self, package_id: &str) {
-        let Some(descriptor) = self
-            .plugin_catalogue
-            .as_ref()
-            .and_then(|catalogue| catalogue.view().find(package_id))
-            .cloned()
-        else {
-            self.status_message = Some("Animation package is no longer installed".into());
-            return;
-        };
-        self.settings_edit_animation(|settings| {
-            let selection = settings.plugin.selection_for(&descriptor)?;
-            settings.plugin.activate_selection(&descriptor, selection)?;
-            settings.source = crate::animation_plugins::AnimationSourceTab::Plugin;
-            Ok(true)
-        });
-    }
-
-    pub(crate) fn settings_adjust_plugin_row(&mut self, row: usize, direction: i32) {
-        use crate::animation_plugins::{PluginControlEdit, PluginPanelRow};
-        let Some(row) = self.plugin_panel_model().rows.get(row).cloned() else {
-            return;
-        };
-        if let PluginPanelRow::Common(index) = row {
-            self.settings_adjust_animation_row(index, direction);
-            return;
-        }
-        if let PluginPanelRow::Package(package_id) = row {
-            self.settings_select_plugin(&package_id);
-            return;
-        }
-        if matches!(row, PluginPanelRow::Status | PluginPanelRow::Issues) {
-            return;
-        }
-        if matches!(row, PluginPanelRow::Permissions) {
-            self.status_message = Some(
-                "Permission review is requested by activation before any privileged input starts"
-                    .into(),
-            );
-            return;
-        }
-        let Some(selection) = self.animation_settings.plugin.selected.clone() else {
-            return;
-        };
-        let Some(descriptor) = self
-            .plugin_catalogue
-            .as_ref()
-            .and_then(|catalogue| catalogue.view().find(&selection.package_id))
-            .cloned()
-        else {
-            return;
-        };
-        match row {
-            PluginPanelRow::Playback => {
-                self.settings_edit_animation(|settings| {
-                    let next = crate::animation_plugins::adjacent_mode(
-                        &descriptor,
-                        &selection,
-                        direction,
-                    )?;
-                    settings.plugin.activate_selection(&descriptor, next)?;
-                    Ok(true)
-                });
-            }
-            PluginPanelRow::Control(id) => match crate::animation_plugins::adjust_control(
-                &descriptor.manifest.settings,
-                &selection.settings,
-                &id,
-                direction,
-            ) {
-                Ok(PluginControlEdit::Values(values)) => {
-                    self.settings_edit_animation(|settings| {
-                        let next = crate::animation_plugins::PluginSelection::new(
-                            &descriptor,
-                            selection.mode,
-                            values,
-                        )?;
-                        settings.plugin.activate_selection(&descriptor, next)?;
-                        Ok(true)
-                    });
-                }
-                Ok(PluginControlEdit::TextPrompt { .. }) => {}
-                Err(error) => self.status_message = Some(error),
-            },
-            _ => {}
-        }
-    }
-
-    pub(crate) fn plugin_value_package_digest(&self, package_id: &str) -> Option<String> {
-        self.animation_frame
-            .plugin_package_digest(package_id)
-            .map(str::to_owned)
-    }
-
-    pub(crate) fn begin_plugin_editor(&mut self, state: &mut SettingsState, row: usize) -> bool {
-        let Some(crate::animation_plugins::PluginPanelRow::Control(id)) =
-            self.plugin_panel_model().rows.get(row).cloned()
-        else {
-            return false;
-        };
-        if let Some(selection) = &self.animation_settings.plugin.selected {
-            if let Some(descriptor) = self
-                .plugin_catalogue
-                .as_ref()
-                .and_then(|catalogue| catalogue.view().find(&selection.package_id))
-            {
-                if crate::animation_plugins::project_controls(
-                    &descriptor.manifest.settings,
-                    &selection.settings,
-                )
-                .ok()
-                .and_then(|controls| controls.into_iter().find(|control| control.id == id))
-                .is_some_and(|control| {
-                    matches!(
-                        control.kind,
-                        crate::animation_plugins::PluginControlKind::Toggle
-                    )
-                }) {
-                    return false;
-                }
-            }
-        }
-        let opened = (|| {
-            let selection = self
-                .animation_settings
-                .plugin
-                .selected
-                .as_ref()
-                .ok_or("No plugin selected")?;
-            let descriptor = self
-                .plugin_catalogue
-                .as_ref()
-                .and_then(|catalogue| catalogue.view().find(&selection.package_id))
-                .ok_or("Plugin package changed")?;
-            let digest = self
-                .animation_frame
-                .plugin_package_digest(&selection.package_id)
-                .map(str::to_owned)
-                .ok_or("The selected plugin is still loading; retry when ready")?;
-            let fence = crate::animation_plugins::PluginControlFence::new(
-                digest,
-                descriptor,
-                &self.animation_settings.plugin,
-            )?;
-            crate::animation_plugins::PluginEditor::new(fence, &id)
-        })();
-        match opened {
-            Ok(editor) => {
-                state.plugin_editor = Some(editor);
-                true
-            }
-            Err(error) => {
-                self.status_message = Some(error);
-                // This was an editor action; a refusal must not fall through
-                // to a stepper and mutate settings behind the failed fence.
-                true
-            }
-        }
-    }
-
-    pub(crate) fn submit_plugin_editor(
-        &mut self,
-        editor: &crate::animation_plugins::PluginEditor,
-    ) -> Result<(), String> {
-        if !self.prepare_animation_edit() {
-            return Err("Animation settings are not ready to edit".into());
-        }
-        let descriptor = self
-            .plugin_catalogue
-            .as_ref()
-            .and_then(|catalogue| catalogue.view().find(&editor.fence.selection.package_id))
-            .ok_or("Plugin package changed")?;
-        let digest = self
-            .animation_frame
-            .plugin_package_digest(&descriptor.manifest.id)
-            .ok_or("Plugin execution identity is unavailable")?;
-        let mut settings = self.animation_settings.clone();
-        editor.fence.commit(
-            digest,
-            descriptor,
-            &mut settings.plugin,
-            &editor.control_id,
-            editor.value()?,
-        )?;
-        self.try_save_animation(settings)
-    }
-
     /// The row list every Animations surface (render, keys, mouse, scroll,
     /// help anchors) derives from.
     pub fn animation_row_model(&self) -> crate::animation_rows::RowModel {
@@ -9346,15 +8594,11 @@ impl App {
         if !self.prepare_animation_edit() {
             return;
         }
-        if self.animation_settings.kind == kind
-            && self.animation_settings.source
-                == crate::animation_plugins::AnimationSourceTab::Native
-        {
+        if self.animation_settings.kind == kind {
             return;
         }
         let mut settings = self.animation_settings.clone();
         settings.kind = kind;
-        settings.source = crate::animation_plugins::AnimationSourceTab::Native;
         self.settings_save_animation(settings);
     }
 
@@ -10123,7 +9367,6 @@ impl App {
                 ilium_plugin_api::generated::types::CommandOrigin::Menu,
             ),
             AgentToolbarAction::CycleEffort => self.step_agent_effort(pane_id, false),
-            AgentToolbarAction::Compact if self.action_remote_compact(pane_id, false) => {}
             AgentToolbarAction::CodexModelTier(_) => {}
             _ => {
                 let Some(provider) = self.agent_toolbar_provider(pane_id) else {
@@ -10134,16 +9377,6 @@ impl App {
                     return;
                 };
                 self.send_staged_terminal_keystrokes(pane_id, stages);
-                if action == AgentToolbarAction::Compact && self.remote_compaction_settings.enabled
-                {
-                    // Remote compaction is on but this pane cannot use it yet
-                    // (session or transcript not resolved, or another dialog
-                    // is open): say why the native command ran instead.
-                    self.status_message = Some(
-                        "Remote compaction unavailable for this pane; sent the native /compact"
-                            .into(),
-                    );
-                }
             }
         }
     }
@@ -14033,8 +13266,7 @@ impl App {
         let selection = self
             .terminal_selection
             .filter(|selection| selection.pane_id == pane_id && !selection.is_empty());
-        let screen_transfer_actions = self.screen_transfer_actions_from(pane_id);
-        let mut actions = Vec::with_capacity(7 + screen_transfer_actions.len());
+        let mut actions = Vec::with_capacity(7);
         // Preserve the existing agent-debug entry point when explicitly enabled. The
         // activation itself still verifies that this exact pane is an agent.
         if self.ui_settings.agent_debug_menu_enabled && self.is_known_agent_pane(pane_id) {
@@ -14093,7 +13325,6 @@ impl App {
             TerminalContextAction::CopyFullTerminalHistoryToClipboard,
             TerminalContextAction::PasteClipboard,
         ]);
-        actions.extend(screen_transfer_actions);
         let key = crate::terminal_context_preparation::ContextKey {
             pane_id,
             identity,
@@ -14301,11 +13532,7 @@ impl App {
             TerminalContextAction::CopySelectionToClipboard => text.selection_text.is_some(),
             _ => true,
         });
-        let insert = blueprint
-            .actions
-            .iter()
-            .position(|action| matches!(action, TerminalContextAction::PasteScreenInto { .. }))
-            .unwrap_or(blueprint.actions.len());
+        let insert = blueprint.actions.len();
         if let Some(target) = text.open_target {
             let mut extra = Vec::new();
             if let Some(path) = target.file_path() {
@@ -14432,8 +13659,7 @@ impl App {
             view.osc8_link_at(&source_line_text, click_column)
                 .and_then(|url| crate::open_target::resolve_url(&url))
         });
-        let screen_transfer_actions = self.screen_transfer_actions_from(pane_id);
-        let mut actions = Vec::with_capacity(7 + screen_transfer_actions.len());
+        let mut actions = Vec::with_capacity(7);
         // Preserve the existing agent-debug entry point when explicitly enabled. The
         // activation itself still verifies that this exact pane is an agent.
         if self.ui_settings.agent_debug_menu_enabled && self.is_known_agent_pane(pane_id) {
@@ -14502,7 +13728,6 @@ impl App {
             }
             actions.push(TerminalContextAction::OpenExternally(open_target));
         }
-        actions.extend(screen_transfer_actions);
         actions.sort_by_key(TerminalContextAction::menu_order);
         let label_width = actions
             .iter()
@@ -14584,16 +13809,6 @@ impl App {
                     "History file path copied to clipboard",
                 ),
             TerminalContextAction::PasteClipboard => self.paste_clipboard_to_terminal(menu.pane_id),
-            TerminalContextAction::PasteScreenInto {
-                destination_pane_id,
-                direction,
-                destination_label,
-            } => self.paste_visible_terminal_screen(
-                menu.pane_id,
-                destination_pane_id,
-                direction,
-                &destination_label,
-            ),
             TerminalContextAction::ShowAgentDebugLog => self.open_agent_debug_log(menu.pane_id),
             TerminalContextAction::ToggleAgentToolbar { .. } => {
                 self.settings_toggle_agent_toolbar()
@@ -14671,67 +13886,6 @@ impl App {
             .unwrap_or_else(|| self.group_for_new_node());
         self.request_new_editor(parent_group, path.clone());
         self.status_message = Some(format!("Opening {} in editor", path.display()));
-    }
-
-    /// Builds the context-menu entries from the same separator model used by
-    /// rendering and mouse hit testing, so a menu never advertises a transfer
-    /// that lacks a corresponding visible split relationship.
-    fn screen_transfer_actions_from(&self, source_pane_id: NodeId) -> Vec<TerminalContextAction> {
-        self.screen_transfers()
-            .into_iter()
-            .filter(|transfer| transfer.source_pane_id == source_pane_id)
-            .map(|transfer| TerminalContextAction::PasteScreenInto {
-                destination_pane_id: transfer.destination_pane_id,
-                direction: transfer.direction,
-                destination_label: self
-                    .screen_transfer_destination_label(transfer.destination_pane_id),
-            })
-            .collect()
-    }
-
-    fn screen_transfer_destination_label(&self, pane_id: NodeId) -> String {
-        let Some(node) = self.tree.get(pane_id) else {
-            return "terminal".to_string();
-        };
-        match &node.kind {
-            NodeKind::Pane {
-                content: PaneContentKind::Terminal,
-                status: PaneStatus::Agent(agent),
-                ..
-            } => format!("{} agent", agent.class.label()),
-            NodeKind::Pane {
-                content: PaneContentKind::Terminal,
-                status: PaneStatus::AgentUnavailable(recovery),
-                ..
-            } => format!("former {} agent", recovery.process.class.label()),
-            _ => "terminal".to_string(),
-        }
-    }
-
-    /// Takes the source pane's current visible terminal screen at activation
-    /// time, then writes it to the adjacent destination with the already
-    /// negotiated atomic paste path. Capturing late avoids stale content when
-    /// a terminal updates while its context menu remains open.
-    pub(crate) fn paste_visible_terminal_screen(
-        &mut self,
-        source_pane_id: NodeId,
-        destination_pane_id: NodeId,
-        direction: split_layout::PaneDirection,
-        destination_label: &str,
-    ) {
-        let Some(PaneRuntime::Terminal(source_view)) = self.panes.get(&source_pane_id) else {
-            self.status_message = Some("The source pane is no longer a terminal".to_string());
-            return;
-        };
-        let visible_contents = source_view.with_screen(|screen| screen.contents());
-        if self.forward_terminal_paste(destination_pane_id, &visible_contents) {
-            self.status_message = Some(format!(
-                "Screen pasted into {destination_label} {}",
-                direction.label()
-            ));
-        } else {
-            self.status_message = Some("The destination pane is no longer a terminal".to_string());
-        }
     }
 
     /// Uses the host clipboard for terminal text while keeping UI feedback at
@@ -15688,9 +14842,6 @@ impl App {
                 ..
             }) => {
                 actions.insert(0, ContextMenuAction::FocusPane);
-                actions.insert(1, ContextMenuAction::SchedulePaneInput);
-                actions.insert(2, ContextMenuAction::QueuePrompt);
-                actions.insert(3, ContextMenuAction::ClearPromptQueue);
                 if self.frozen_panes.contains(&target) {
                     actions.insert(0, ContextMenuAction::Unfreeze);
                 } else if self.agent_session_ids.contains_key(&target) {
@@ -15796,21 +14947,6 @@ impl App {
             ContextMenuAction::CreateBoardFromMarkdown => {
                 self.request_board_from_markdown_editor(target)
             }
-            ContextMenuAction::SchedulePaneInput => self.action_scheduler_command(
-                crate::plugin_host::commands::SCHEDULE_INPUT_COMMAND,
-                target,
-                ilium_plugin_api::generated::types::CommandOrigin::Menu,
-            ),
-            ContextMenuAction::QueuePrompt => self.action_scheduler_command(
-                crate::plugin_host::commands::QUEUE_PROMPT_COMMAND,
-                target,
-                ilium_plugin_api::generated::types::CommandOrigin::Menu,
-            ),
-            ContextMenuAction::ClearPromptQueue => self.action_scheduler_command(
-                crate::plugin_host::commands::CLEAR_PROMPT_QUEUE_COMMAND,
-                target,
-                ilium_plugin_api::generated::types::CommandOrigin::Menu,
-            ),
             ContextMenuAction::Freeze => self.action_freeze_agent(target),
             ContextMenuAction::Unfreeze => self.action_unfreeze_agent(target),
             ContextMenuAction::ShowSplitView => self.show_split_view(target),
@@ -16487,7 +15623,6 @@ impl App {
         let next_deadline = autosave_deadline
             .into_iter()
             .chain(self.restructure_budget_autosave_deadline)
-            .chain(self.remote_compaction_save_deadline)
             .chain(self.custom_status_rules_save_deadline)
             .chain(self.next_integration_maintenance_at)
             .min();
@@ -16838,11 +15973,6 @@ impl App {
 
     pub fn handle_pane_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::{KeyCode, KeyModifiers};
-        self.dismiss_attention_arrival();
-        if matches!(self.right_panel_target, RightPanelTarget::Attention) {
-            self.handle_attention_key(key);
-            return;
-        }
         if matches!(self.right_panel_target, RightPanelTarget::PluginView { .. }) {
             self.handle_plugin_view_key(key);
             return;
@@ -17699,42 +16829,13 @@ impl App {
         self.request_project_restructure(project_id, RestructureRequestOrigin::Automatic);
     }
 
-    /// Returns whether a worker request was queued, like the `_with_attention`
-    /// form it wraps.
+    /// Queues one restructure call for `project_id`. Returns whether a
+    /// worker request was queued.
     fn request_project_restructure(
         &mut self,
         project_id: NodeId,
         request_origin: RestructureRequestOrigin,
     ) -> bool {
-        let attention = self.default_restructure_attention();
-        self.request_project_restructure_with_attention(project_id, request_origin, attention)
-    }
-
-    /// Queues one restructure call for `project_id`. With `attention` set the
-    /// same call also asks for the attention list; `apply_plan: false` makes
-    /// it an attention-only call that skips the "nothing changed" shortcut,
-    /// shows no restructure job and discards the sort plan. Returns whether a
-    /// worker request was queued.
-    fn request_project_restructure_with_attention(
-        &mut self,
-        project_id: NodeId,
-        request_origin: RestructureRequestOrigin,
-        attention: Option<attention_app::AttentionRequest>,
-    ) -> bool {
-        let is_attention_only = attention.is_some_and(|request| !request.apply_plan);
-        // The worker silently ignores a second request for a project it is
-        // already working on, so two calls for one project must never overlap.
-        if self
-            .attention
-            .shared_calls
-            .get(&project_id)
-            .is_some_and(|call| is_attention_only || !call.apply_plan)
-        {
-            if !request_origin.is_automatic() {
-                self.status_message = Some("That project is already restructuring".to_string());
-            }
-            return false;
-        }
         if self
             .project_restructure_jobs
             .get(&project_id)
@@ -17780,7 +16881,7 @@ impl App {
             .tree
             .project_has_complete_animation_recommendations(project_id)
             .unwrap_or(false);
-        if !is_attention_only && !has_unrestructured_activity && has_recommendations {
+        if !has_unrestructured_activity && has_recommendations {
             self.project_restructure_jobs.insert(
                 project_id,
                 ProjectRestructureJob {
@@ -17847,7 +16948,6 @@ impl App {
             }
         };
         if request_origin.is_automatic()
-            && !is_attention_only
             && !self.automatic_restructure_retry_allows(
                 project_id,
                 input_fingerprint,
@@ -17857,9 +16957,6 @@ impl App {
             return false;
         }
         if contexts.is_empty() {
-            if is_attention_only {
-                return false;
-            }
             self.project_restructure_jobs.insert(
                 project_id,
                 ProjectRestructureJob {
@@ -17872,24 +16969,15 @@ impl App {
             self.refresh_structure_loading();
             return false;
         }
-        let include_attention = match attention {
-            Some(request) => self.register_shared_attention_call(project_id, request),
-            None => false,
-        };
-        if is_attention_only && !include_attention {
-            return false;
-        }
-        if !is_attention_only {
-            self.project_restructure_jobs.insert(
-                project_id,
-                ProjectRestructureJob {
-                    project_name: project_name.clone(),
-                    state: ProjectRestructureState::Queued,
-                    request_origin,
-                    input_fingerprint,
-                },
-            );
-        }
+        self.project_restructure_jobs.insert(
+            project_id,
+            ProjectRestructureJob {
+                project_name: project_name.clone(),
+                state: ProjectRestructureState::Queued,
+                request_origin,
+                input_fingerprint,
+            },
+        );
         let title_observations = self.capture_title_observations(&contexts);
         let recap_stamps = self.stamp_batch_recaps(&contexts);
         self.pending_restructure_requests
@@ -17904,7 +16992,6 @@ impl App {
                 recommendation_snapshot,
                 inference_activity_revisions,
                 recap_stamps,
-                include_attention,
             });
         self.refresh_structure_loading();
         true
@@ -18111,10 +17198,6 @@ impl App {
     /// Cancellation must not enter failure memory, so a later opt-in can
     /// request a fresh plan with the same input.
     pub fn cancel_project_restructure_after_ai_decision(&mut self, project_id: NodeId) {
-        self.complete_shared_attention(
-            project_id,
-            crate::attention::runtime::SharedOutcome::Failed,
-        );
         self.project_restructure_jobs.remove(&project_id);
         self.refresh_structure_loading();
     }
@@ -18122,10 +17205,6 @@ impl App {
     /// Records a failure that happened before a restructure worker could be
     /// started, where no inference-time hierarchy snapshot exists to compare.
     pub fn fail_project_restructure(&mut self, project_id: NodeId, error: anyhow::Error) {
-        self.complete_shared_attention(
-            project_id,
-            crate::attention::runtime::SharedOutcome::Failed,
-        );
         let Some(job) = self.project_restructure_jobs.get(&project_id) else {
             return;
         };
@@ -18245,22 +17324,6 @@ impl App {
     /// sub-regions, a terminal pane's coordinates (already pane-content-
     /// relative) become a `MouseInput` request.
     pub fn handle_pane_mouse(&mut self, mouse: crossterm::event::MouseEvent, position: Position) {
-        if matches!(
-            mouse.kind,
-            crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
-        ) {
-            if let Some(transfer) = self.screen_transfer_at(position) {
-                let destination_label =
-                    self.screen_transfer_destination_label(transfer.destination_pane_id);
-                self.paste_visible_terminal_screen(
-                    transfer.source_pane_id,
-                    transfer.destination_pane_id,
-                    transfer.direction,
-                    &destination_label,
-                );
-                return;
-            }
-        }
         let Some(viewport) = self.pane_viewport_at(position) else {
             self.hovered_progress = None;
             self.hovered_goal_resume = None;
@@ -18342,9 +17405,6 @@ impl App {
             .is_some_and(|(hovered_id, _)| hovered_id == id)
         {
             self.hovered_last_prompt_button = None;
-        }
-        if self.handle_briefing_mouse(id, viewport.briefing_area, mouse, position) {
-            return;
         }
         if viewport
             .plugin_footer_area
@@ -19789,97 +18849,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_panel_exposes_sanitized_complete_runtime_error_details() {
-        use crate::background_animation::test_support::{fake_host, FakeProbe};
-
-        let mut app = app();
-        app.animation_settings.source = crate::animation_plugins::AnimationSourceTab::Plugin;
-        app.animation_settings.plugin.selected = Some(crate::animation_plugins::PluginSelection {
-            package_id: "test.runtime".into(),
-            mode: ilium_animation_js::manifest::AnimationMode::Live,
-            settings: serde_json::json!({}),
-        });
-        let probe = FakeProbe::new();
-        *probe.status.lock().unwrap() =
-            Some(format!("runtime failed\n{}\u{1b}[31m", "x".repeat(600)));
-        *app.animation_frame.host_mut() = fake_host(&probe);
-
-        // Runtime status belongs to a completed surface receipt, not the
-        // unrendered injection adapter. Use the real service publication path.
-        app.animation_frame.render(
-            &crate::background_animation::AnimationSettings {
-                enabled: true,
-                kind: crate::background_animation::AnimationKind::Shoreline,
-                ..Default::default()
-            },
-            80,
-            24,
-            Duration::ZERO,
-        );
-        app.committed_animation_settings = Some(app.animation_settings.clone());
-
-        let model = app.plugin_panel_model();
-        let issue_row = model
-            .rows
-            .iter()
-            .position(|row| *row == crate::animation_plugins::PluginPanelRow::Issues)
-            .expect("runtime failures appear in the Plugin issues row");
-
-        assert_eq!(model.labels[issue_row], "1 package/runtime issue(s)");
-        assert_eq!(model.issue_details.len(), 1);
-        assert!(model.issue_details[0].ends_with(&format!("{}[31m", "x".repeat(600))));
-        assert!(model.issue_details[0].starts_with("Runtime: runtime failed"));
-        assert!(!model.issue_details[0].contains('\n'));
-        assert!(!model.issue_details[0].contains('\u{1b}'));
-
-        app.plugin_issue_hover = Some(crate::animation_hover::AnimationHover {
-            row: issue_row,
-            since: Instant::now(),
-            is_shown: true,
-        });
-        let mut terminal =
-            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
-        terminal
-            .draw(|frame| {
-                crate::animation_plugins::draw_plugin_issue_popover(
-                    frame,
-                    frame.area(),
-                    &app,
-                    &model,
-                    &crate::animation_plugins::PluginPanelState::default(),
-                );
-            })
-            .expect("draw Plugin issue details");
-        let rendered: String = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect();
-        assert!(rendered.contains("Plugin issue details"));
-        // Narrow side popovers wrap the prefix and error across physical
-        // rows; keep real painted-word coverage alongside exact model checks.
-        for word in ["Runtime:", "runtime", "failed"] {
-            assert!(
-                rendered.contains(word),
-                "missing rendered runtime error word {word}: {rendered}"
-            );
-        }
-
-        app.animation_settings.source = crate::animation_plugins::AnimationSourceTab::Native;
-        assert!(
-            !app.plugin_panel_model().issue_details.is_empty(),
-            "an authored choice cannot retire the still-committed runtime"
-        );
-        let path = app
-            .animation_write_path()
-            .expect("fixture animation configuration path");
-        app.acknowledge_animation_settings(&path, app.animation_settings.clone(), None);
-        assert!(app.plugin_panel_model().issue_details.is_empty());
-    }
-
-    #[test]
     fn model_icon_setting_fences_live_statusline_actions_and_waits_for_disable_completion() {
         let (mut execution, client) = native_paste_bank();
         let mut app = app();
@@ -21313,58 +20282,6 @@ mod tests {
     }
 
     #[test]
-    fn editing_text_trigger_preserves_its_id_persists_and_queues_live_update() {
-        let directory = tempfile::tempdir().expect("text trigger config directory");
-        let mut app = App::new("test-session".to_owned(), directory.path().to_path_buf());
-        app.config_dir = Some(directory.path().to_path_buf());
-        app.apply_text_trigger_settings(ilium_ipc::TextTriggerSettings {
-            triggers: vec![ilium_ipc::TextTrigger {
-                id: "stable-rule-id".to_owned(),
-                enabled: true,
-                regexp: "old".to_owned(),
-                message: "old reply".to_owned(),
-                target: ilium_ipc::TextTriggerTarget::Both,
-                sample_text: String::new(),
-                delay_seconds: 60,
-            }],
-        });
-
-        let baseline = app.text_trigger_settings.clone();
-        crate::config::save_text_trigger_settings(
-            directory.path(),
-            &TextTriggerSettings::default(),
-            &baseline,
-        )
-        .unwrap();
-        app.commit_text_trigger(
-            Some("stable-rule-id"),
-            Some(&baseline.triggers[0]),
-            ilium_ipc::TextTrigger {
-                id: String::new(),
-                enabled: false,
-                regexp: "new".to_owned(),
-                message: "new reply".to_owned(),
-                target: ilium_ipc::TextTriggerTarget::Agents,
-                sample_text: "new sample".to_owned(),
-                delay_seconds: 60,
-            },
-        )
-        .expect("durable stable-ID edit");
-
-        app.settle_filesystem_for_test();
-        let persisted = crate::config::load(directory.path()).expect("read text trigger config");
-        assert_eq!(app.text_trigger_settings, baseline);
-        app.apply_text_trigger_settings(persisted.text_triggers.clone());
-        assert_eq!(persisted.text_triggers, app.text_trigger_settings);
-        assert_eq!(app.text_trigger_settings.triggers[0].id, "stable-rule-id");
-        assert!(matches!(
-            app.take_outbound_requests().as_slice(),
-            [ilium_ipc::ClientRequest::UpdateTextTriggers { settings }]
-                if settings == &app.text_trigger_settings
-        ));
-    }
-
-    #[test]
     fn successful_editor_and_board_edits_report_node_activity() {
         let directory = tempfile::tempdir().expect("create client activity directory");
         let mut app = app();
@@ -22490,30 +21407,6 @@ mod tests {
     }
 
     #[test]
-    fn scheduled_input_action_is_available_only_for_terminal_panes() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = app
-            .tree
-            .add_pane(group, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        let editor = app
-            .tree
-            .add_pane(group, "notes", PaneContentKind::Editor)
-            .unwrap();
-
-        assert!(app
-            .context_actions_for(terminal)
-            .contains(&ContextMenuAction::SchedulePaneInput));
-        assert!(!app
-            .context_actions_for(editor)
-            .contains(&ContextMenuAction::SchedulePaneInput));
-        assert!(!app
-            .context_actions_for(group)
-            .contains(&ContextMenuAction::SchedulePaneInput));
-    }
-
-    #[test]
     fn every_persisted_tree_item_can_toggle_its_context_menu_bookmark() {
         let mut app = app();
         let project = app
@@ -23157,33 +22050,6 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(config_dir);
-    }
-
-    #[test]
-    fn scheduler_menu_actions_without_a_plugin_host_name_the_scheduler_plugin() {
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let terminal = app
-            .tree
-            .add_pane(group, "shell", PaneContentKind::Terminal)
-            .unwrap();
-        for action in [
-            ContextMenuAction::SchedulePaneInput,
-            ContextMenuAction::QueuePrompt,
-            ContextMenuAction::ClearPromptQueue,
-        ] {
-            app.status_message = None;
-            app.execute_context_action(action, terminal);
-            assert_eq!(
-                app.status_message.as_deref(),
-                Some("ilium.core.scheduler is not running, so this action is unavailable")
-            );
-            assert!(matches!(app.mode, Mode::Normal));
-            assert!(app.take_outbound_requests().is_empty());
-        }
-        assert!(app
-            .context_actions_for(terminal)
-            .contains(&ContextMenuAction::ClearPromptQueue));
     }
 
     #[test]
@@ -26697,185 +25563,6 @@ mod tests {
     }
 
     #[test]
-    fn split_terminal_menu_pastes_the_live_source_screen_into_an_adjacent_terminal() {
-        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let source_pane_id = app
-            .tree
-            .add_pane(group, "source", PaneContentKind::Terminal)
-            .unwrap();
-        let destination_pane_id = app
-            .tree
-            .add_pane(group, "destination", PaneContentKind::Terminal)
-            .unwrap();
-        let split_id = app
-            .tree
-            .create_split_view(
-                group,
-                "split",
-                SplitOrientation::Vertical,
-                &[source_pane_id, destination_pane_id],
-            )
-            .unwrap();
-        app.tree
-            .set_pane_status(
-                destination_pane_id,
-                PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
-            )
-            .unwrap();
-        let mut source_view = TerminalView::new(12, 40);
-        source_view.feed(b"screen contents to transfer");
-        let mut destination_view = TerminalView::new(12, 40);
-        destination_view.feed(b"\x1b[?2004h");
-        app.panes
-            .insert(source_pane_id, PaneRuntime::Terminal(Box::new(source_view)));
-        app.panes.insert(
-            destination_pane_id,
-            PaneRuntime::Terminal(Box::new(destination_view)),
-        );
-        app.right_panel_target = RightPanelTarget::SplitView {
-            split_id,
-            active_pane_id: Some(source_pane_id),
-        };
-        app.focus = FocusTarget::Pane;
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let source_viewport = app.pane_viewport(source_pane_id).unwrap();
-        let position = Position::new(
-            source_viewport.content_area.x + 3,
-            source_viewport.content_area.y + 1,
-        );
-        let expected_screen = match app.panes.get(&source_pane_id) {
-            Some(PaneRuntime::Terminal(view)) => view.with_screen(|screen| screen.contents()),
-            _ => panic!("source terminal should remain available"),
-        };
-        app.take_outbound_requests();
-
-        app.handle_pane_mouse(
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Right),
-                column: position.x,
-                row: position.y,
-                modifiers: KeyModifiers::NONE,
-            },
-            position,
-        );
-        let Mode::TerminalPaneContextMenu(menu) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("right click should open the terminal menu");
-        };
-        let action = menu
-            .actions
-            .iter()
-            .find(|action| {
-                matches!(
-                    action,
-                    TerminalContextAction::PasteScreenInto {
-                        destination_pane_id: target,
-                        direction: split_layout::PaneDirection::Right,
-                        ..
-                    } if *target == destination_pane_id
-                )
-            })
-            .cloned()
-            .expect("adjacent destination should have a screen-transfer action");
-        assert_eq!(
-            action.label(),
-            "Paste screen into Codex agent on the right".to_string()
-        );
-
-        app.execute_terminal_context_action(action, menu);
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::UserKeyInput {
-                pane_id: destination_pane_id,
-                bytes: encode_bracketed_paste(&expected_screen),
-                submission: None,
-                prompt_epoch: None,
-            }]
-        );
-    }
-
-    #[test]
-    fn split_separator_transfer_control_pastes_only_from_its_adjacent_source() {
-        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-
-        let mut app = app();
-        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
-        let source_pane_id = app
-            .tree
-            .add_pane(group, "source", PaneContentKind::Terminal)
-            .unwrap();
-        let destination_pane_id = app
-            .tree
-            .add_pane(group, "destination", PaneContentKind::Terminal)
-            .unwrap();
-        let split_id = app
-            .tree
-            .create_split_view(
-                group,
-                "split",
-                SplitOrientation::Horizontal,
-                &[source_pane_id, destination_pane_id],
-            )
-            .unwrap();
-        let mut source_view = TerminalView::new(12, 40);
-        source_view.feed(b"send downward");
-        app.panes
-            .insert(source_pane_id, PaneRuntime::Terminal(Box::new(source_view)));
-        app.panes.insert(
-            destination_pane_id,
-            PaneRuntime::Terminal(Box::new(TerminalView::new(12, 40))),
-        );
-        app.right_panel_target = RightPanelTarget::SplitView {
-            split_id,
-            active_pane_id: Some(source_pane_id),
-        };
-        app.set_screen_area(Rect::new(0, 0, 120, 40));
-        let transfer = app
-            .screen_transfers()
-            .into_iter()
-            .find(|transfer| {
-                transfer.source_pane_id == source_pane_id
-                    && transfer.destination_pane_id == destination_pane_id
-                    && transfer.direction == split_layout::PaneDirection::Down
-            })
-            .expect("top-to-bottom terminal separator should be actionable");
-        let expected_screen = match app.panes.get(&source_pane_id) {
-            Some(PaneRuntime::Terminal(view)) => view.with_screen(|screen| screen.contents()),
-            _ => panic!("source terminal should remain available"),
-        };
-        app.take_outbound_requests();
-        let position = Position::new(transfer.control_area.x, transfer.control_area.y);
-
-        app.handle_pane_mouse(
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: position.x,
-                row: position.y,
-                modifiers: KeyModifiers::NONE,
-            },
-            position,
-        );
-
-        assert_eq!(
-            app.take_outbound_requests(),
-            vec![ClientRequest::UserKeyInput {
-                pane_id: destination_pane_id,
-                bytes: expected_screen.into_bytes(),
-                submission: None,
-                prompt_epoch: None,
-            }]
-        );
-        assert_eq!(
-            app.status_message.as_deref(),
-            Some("Screen pasted into terminal below")
-        );
-    }
-
-    #[test]
     fn opening_debug_log_asks_the_server_for_the_retained_history_and_waits_for_the_snapshot() {
         let mut app = app();
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -27244,16 +25931,10 @@ mod tests {
         assert_eq!(SettingsTab::Padding.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::Toolbar);
-        assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Attention);
-        assert_eq!(SettingsTab::Attention.next(), SettingsTab::Cost);
-        assert_eq!(SettingsTab::Cost.previous(), SettingsTab::Attention);
-        assert_eq!(SettingsTab::Cost.next(), SettingsTab::RemoteCompaction);
-        assert_eq!(SettingsTab::RemoteCompaction.next(), SettingsTab::Keyboard);
-        assert_eq!(
-            SettingsTab::Keyboard.previous(),
-            SettingsTab::RemoteCompaction
-        );
-        assert_eq!(SettingsTab::RemoteCompaction.previous(), SettingsTab::Cost);
+        assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Cost);
+        assert_eq!(SettingsTab::Cost.previous(), SettingsTab::AgentMonitoring);
+        assert_eq!(SettingsTab::Cost.next(), SettingsTab::Keyboard);
+        assert_eq!(SettingsTab::Keyboard.previous(), SettingsTab::Cost);
         assert_eq!(SettingsTab::Keyboard.next(), SettingsTab::Terminal);
         assert_eq!(SettingsTab::Terminal.next(), SettingsTab::Editor);
         assert_eq!(SettingsTab::Editor.next(), SettingsTab::Session);
@@ -27261,13 +25942,11 @@ mod tests {
         assert_eq!(SettingsTab::Git.next(), SettingsTab::KanbanBoard);
         assert_eq!(SettingsTab::KanbanBoard.next(), SettingsTab::Animations);
         assert_eq!(SettingsTab::Sound.next(), SettingsTab::VoiceControl);
-        assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::ResetPlanning);
-        assert_eq!(SettingsTab::ResetPlanning.next(), SettingsTab::Inference);
+        assert_eq!(SettingsTab::VoiceControl.next(), SettingsTab::Inference);
         assert_eq!(SettingsTab::Inference.next(), SettingsTab::LlmInstructions);
         assert_eq!(SettingsTab::LlmInstructions.next(), SettingsTab::Titles);
         assert_eq!(SettingsTab::Titles.next(), SettingsTab::Triggers);
-        assert_eq!(SettingsTab::Triggers.next(), SettingsTab::TextTriggers);
-        assert_eq!(SettingsTab::TextTriggers.next(), SettingsTab::CustomAgents);
+        assert_eq!(SettingsTab::Triggers.next(), SettingsTab::CustomAgents);
         assert_eq!(SettingsTab::CustomAgents.next(), SettingsTab::Debug);
         assert_eq!(SettingsTab::Debug.next(), SettingsTab::Api);
         assert_eq!(SettingsTab::Api.next(), SettingsTab::Plugins);
@@ -27275,143 +25954,6 @@ mod tests {
         assert_eq!(SettingsTab::About.next(), SettingsTab::Setup);
         assert_eq!(SettingsTab::Setup.next(), SettingsTab::Appearance);
         assert_eq!(SettingsTab::Appearance.previous(), SettingsTab::Setup);
-    }
-
-    #[test]
-    fn reset_planning_controls_are_independent_and_persist_immediately() {
-        let config_dir = tempfile::tempdir().unwrap();
-        let mut app = app();
-        app.config_dir = Some(config_dir.path().to_path_buf());
-        assert!(app.reset_planning_settings.monitor_claude);
-        assert!(app.reset_planning_settings.monitor_codex);
-
-        app.settings_adjust_reset_planning_row(0);
-        app.settings_adjust_reset_planning_row(2);
-        assert!(!app.reset_planning_settings.monitor_claude);
-        assert!(app.reset_planning_settings.monitor_codex);
-        assert_eq!(
-            app.reset_planning_settings.time_style,
-            ResetTimeStyle::Human
-        );
-        app.settle_filesystem_for_test();
-        assert_eq!(
-            crate::config::load(config_dir.path())
-                .unwrap()
-                .reset_planning,
-            app.reset_planning_settings
-        );
-    }
-
-    #[test]
-    fn attention_rows_persist_immediately_and_reject_out_of_range_numbers() {
-        use crate::attention::AttentionMode;
-        use crate::value_settings::SettingsNumber;
-        use crate::value_settings_choice::SettingsChoice;
-
-        let config_dir = tempfile::tempdir().unwrap();
-        let mut app = app();
-        app.config_dir = Some(config_dir.path().to_path_buf());
-        let directory = config_dir.path().to_path_buf();
-        assert_eq!(app.attention_settings.mode, AttentionMode::Shared);
-
-        // The Attention tab exposes six rows and the closed catalogs resolve each.
-        for (index, row) in AttentionRow::ALL.into_iter().enumerate() {
-            let choice = SettingsChoice::at(&app, SettingsTab::Attention, index);
-            let number = SettingsNumber::at(&app, SettingsTab::Attention, index);
-            assert_eq!(
-                (choice.is_some(), number.is_some()),
-                match row {
-                    AttentionRow::TurboConcurrency | AttentionRow::ExpirySeconds => (false, true),
-                    _ => (true, false),
-                },
-                "{row:?}"
-            );
-        }
-
-        app.save_settings_choice(
-            SettingsChoice::AttentionMode,
-            "InstantOnly",
-            directory.clone(),
-            None,
-        )
-        .unwrap();
-        app.save_settings_choice(
-            SettingsChoice::AttentionPressSorts,
-            "false",
-            directory.clone(),
-            None,
-        )
-        .unwrap();
-        assert!(app.attention_settings.show_briefing);
-        app.save_settings_choice(
-            SettingsChoice::AttentionShowBriefing,
-            "false",
-            directory.clone(),
-            None,
-        )
-        .unwrap();
-        assert!(!app.attention_settings.show_briefing);
-        app.save_settings_number(
-            SettingsNumber::AttentionTurboConcurrency,
-            "7",
-            directory.clone(),
-            None,
-        )
-        .unwrap();
-        app.save_settings_number(
-            SettingsNumber::AttentionExpirySeconds,
-            "900",
-            directory.clone(),
-            None,
-        )
-        .unwrap();
-        app.attention_settings.model_override = Some("synthetic-model".into());
-        app.save_settings_choice(
-            SettingsChoice::AttentionModel,
-            "synthetic-model",
-            directory.clone(),
-            None,
-        )
-        .unwrap();
-        assert!(app
-            .save_settings_number(
-                SettingsNumber::AttentionTurboConcurrency,
-                "65",
-                directory.clone(),
-                None
-            )
-            .is_err());
-        assert!(app
-            .save_settings_number(
-                SettingsNumber::AttentionExpirySeconds,
-                "59",
-                directory.clone(),
-                None
-            )
-            .is_err());
-        assert_eq!(app.attention_settings.turbo_concurrency, 7);
-        assert_eq!(app.attention_settings.expiry_seconds, 900);
-
-        app.settle_filesystem_for_test();
-        let loaded = crate::config::load(config_dir.path()).unwrap().attention;
-        assert_eq!(loaded, app.attention_settings);
-        assert_eq!(loaded.mode, AttentionMode::InstantOnly);
-        assert!(!loaded.press_sorts);
-        assert!(!loaded.show_briefing);
-        assert_eq!(loaded.model_override.as_deref(), Some("synthetic-model"));
-
-        // Choosing "Same as titles" clears the override again.
-        app.save_settings_choice(SettingsChoice::AttentionModel, "none", directory, None)
-            .unwrap();
-        app.settle_filesystem_for_test();
-        assert_eq!(app.attention_settings.model_override, None);
-        assert_eq!(
-            crate::config::load(config_dir.path())
-                .unwrap()
-                .attention
-                .model_override,
-            None
-        );
     }
 
     #[test]
@@ -28266,109 +26808,6 @@ mod tests {
 }
 
 #[cfg(test)]
-mod text_trigger_concurrency_tests {
-    use super::App;
-    use ilium_ipc::{TextTrigger, TextTriggerSettings};
-
-    #[test]
-    fn saving_a_deleted_rule_does_not_overwrite_the_rule_at_its_old_index() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "trigger-concurrency".to_owned(),
-            directory.path().to_path_buf(),
-        );
-        app.config_dir = Some(directory.path().to_path_buf());
-        let edited = TextTrigger {
-            id: "edited-rule".to_owned(),
-            regexp: "edited-pattern".to_owned(),
-            message: "edited-message".to_owned(),
-            ..TextTrigger::default()
-        };
-        let retained = TextTrigger {
-            id: "retained-rule".to_owned(),
-            regexp: "retained-pattern".to_owned(),
-            message: "retained-message".to_owned(),
-            ..TextTrigger::default()
-        };
-        app.text_trigger_settings = TextTriggerSettings {
-            triggers: vec![edited.clone(), retained.clone()],
-        };
-        let mut editor =
-            crate::text_trigger_dialog::TextTriggerDialogState::new(Some((0, &edited)));
-        editor.message.buf = "new-edited-message".to_owned();
-        // A settings update from another client deletes the edited rule and
-        // shifts a different authored rule into the editor's original index.
-        app.text_trigger_settings = TextTriggerSettings {
-            triggers: vec![retained.clone()],
-        };
-        crate::config::save_text_trigger_settings(
-            directory.path(),
-            &TextTriggerSettings::default(),
-            &app.text_trigger_settings,
-        )
-        .unwrap();
-        assert!(app
-            .commit_text_trigger(
-                editor.editing_id.as_deref(),
-                editor.editing_base.as_ref(),
-                editor.candidate().unwrap()
-            )
-            .is_err());
-
-        assert_eq!(app.text_trigger_settings.triggers, vec![retained]);
-        assert!(app.take_outbound_requests().is_empty());
-    }
-
-    #[test]
-    fn saving_a_reordered_rule_updates_its_id_and_preserves_the_other_rule() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new(
-            "trigger-concurrency".to_owned(),
-            directory.path().to_path_buf(),
-        );
-        app.config_dir = Some(directory.path().to_path_buf());
-        let edited = TextTrigger {
-            id: "edited-rule".to_owned(),
-            regexp: "edited-pattern".to_owned(),
-            message: "edited-message".to_owned(),
-            ..TextTrigger::default()
-        };
-        let retained = TextTrigger {
-            id: "retained-rule".to_owned(),
-            regexp: "retained-pattern".to_owned(),
-            message: "retained-message".to_owned(),
-            ..TextTrigger::default()
-        };
-        let mut editor =
-            crate::text_trigger_dialog::TextTriggerDialogState::new(Some((0, &edited)));
-        editor.message.buf = "new-edited-message".to_owned();
-        app.text_trigger_settings = TextTriggerSettings {
-            triggers: vec![retained.clone(), edited.clone()],
-        };
-        crate::config::save_text_trigger_settings(
-            directory.path(),
-            &TextTriggerSettings::default(),
-            &app.text_trigger_settings,
-        )
-        .unwrap();
-        app.commit_text_trigger(
-            editor.editing_id.as_deref(),
-            editor.editing_base.as_ref(),
-            editor.candidate().unwrap(),
-        )
-        .expect("save by stable ID");
-        app.settle_filesystem_for_test();
-        let saved = crate::config::load(directory.path()).unwrap().text_triggers;
-        app.apply_text_trigger_settings(saved);
-
-        let mut expected = edited;
-        expected.message = "new-edited-message".to_owned();
-        assert_eq!(app.text_trigger_settings.triggers, vec![retained, expected]);
-        assert_eq!(app.take_outbound_requests().len(), 1);
-    }
-}
-
-#[cfg(test)]
 mod exact_prompt_delivery_tests {
     use super::*;
     use crate::naming_workers::{NamingWorkerEvent, NamingWorkers};
@@ -28450,113 +26889,6 @@ mod exact_prompt_delivery_tests {
             assert_eq!(last_prompt.as_ptr(), pointers[index]);
             assert_eq!(last_prompt, "synthetic exact\nworker prompt  ");
         }
-    }
-}
-
-impl App {
-    pub(crate) fn reconcile_plugin_permission_review(&mut self) {
-        let Some(bridge) = self.animation_frame.permission_bridge() else {
-            self.plugin_permission_session = None;
-            return;
-        };
-        if self
-            .plugin_permission_session
-            .as_ref()
-            .is_some_and(|session| bridge.is_current(session))
-        {
-            return;
-        }
-        self.plugin_permission_session = None;
-        match bridge.session() {
-            Ok(session) => self.plugin_permission_session = session,
-            Err(error) => self.status_message = Some(error),
-        }
-    }
-    pub(crate) fn handle_plugin_permission_event(
-        &mut self,
-        event: &crossterm::event::Event,
-    ) -> bool {
-        self.reconcile_plugin_permission_review();
-        let Some(session) = self.plugin_permission_session.as_mut() else {
-            return false;
-        };
-        let Some(bridge) = self.animation_frame.permission_bridge() else {
-            return true;
-        };
-        let crossterm::event::Event::Key(key) = event else {
-            return true;
-        };
-        let navigation = matches!(
-            key.code,
-            crossterm::event::KeyCode::Up
-                | crossterm::event::KeyCode::Down
-                | crossterm::event::KeyCode::Left
-                | crossterm::event::KeyCode::Right
-                | crossterm::event::KeyCode::PageUp
-                | crossterm::event::KeyCode::PageDown
-        );
-        let should_handle = key.kind == crossterm::event::KeyEventKind::Press
-            || (key.kind == crossterm::event::KeyEventKind::Repeat && navigation);
-        if !should_handle {
-            return true;
-        }
-        if let Err(error) = session.handle_key(&bridge, key.code) {
-            if let Err(admission_error) = session.set_error(&error) {
-                self.status_message = Some(admission_error);
-            }
-        }
-        true // Protected review consumes paste/keys instead of forwarding them.
-    }
-    pub(crate) fn handle_plugin_permission_mouse(
-        &mut self,
-        mouse: crossterm::event::MouseEvent,
-    ) -> bool {
-        self.reconcile_plugin_permission_review();
-        let Some(session) = self.plugin_permission_session.as_mut() else {
-            return false;
-        };
-        let Some(bridge) = self.animation_frame.permission_bridge() else {
-            return true;
-        };
-        if let Err(error) = session.handle_mouse(&bridge, self.layout.screen_area, mouse) {
-            if let Err(admission_error) = session.set_error(&error) {
-                self.status_message = Some(admission_error);
-            }
-        }
-        true
-    }
-    pub(crate) fn draw_plugin_permission_review(&mut self, frame: &mut ratatui::Frame<'_>) -> bool {
-        self.reconcile_plugin_permission_review();
-        let Some(session) = self.plugin_permission_session.as_mut() else {
-            let Some(bridge) = self.animation_frame.permission_bridge() else {
-                return false;
-            };
-            let Ok(status) = bridge.status() else {
-                return false;
-            };
-            if matches!(
-                status.phase(),
-                crate::animation_plugins::review_bridge::ReviewPhase::Inactive
-                    | crate::animation_plugins::review_bridge::ReviewPhase::Ready
-            ) || frame.area().height == 0
-            {
-                return false;
-            }
-            let screen = frame.area();
-            let rect = self.layout.status_area.intersection(screen);
-            if rect.width == 0 || rect.height == 0 {
-                return false;
-            }
-            self.animation_frame.occlude_composed(screen, rect);
-            frame.render_widget(
-                ratatui::widgets::Paragraph::new(format!("F9 details · {}", status.message())),
-                rect,
-            );
-            return false;
-        };
-        self.animation_frame.discard_composed_receipt();
-        session.draw(frame, frame.area(), ratatui::style::Style::default());
-        true
     }
 }
 
@@ -29040,120 +27372,6 @@ mod board_handoff_tests {
                 .join_until_background(Instant::now() + Duration::from_secs(5))
                 .unwrap()
                 .shutdown_complete
-        );
-    }
-}
-
-#[cfg(test)]
-mod text_trigger_receipt_tests {
-    use super::*;
-
-    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-
-    use crate::app::Mode;
-    use crate::text_trigger_dialog::TextTriggerFocus;
-
-    fn app(directory: &std::path::Path) -> App {
-        let mut app = App::new("synthetic-text-trigger".into(), directory.to_path_buf());
-
-        app.config_dir = Some(directory.to_path_buf());
-
-        app
-    }
-
-    fn press(app: &mut App, code: KeyCode) {
-        crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-    }
-
-    #[test]
-    fn acknowledged_exact_text_trigger_save_still_closes_only_its_dialog() {
-        let directory = tempfile::tempdir().unwrap();
-
-        let mut app = app(directory.path());
-
-        app.open_text_trigger_dialog(None);
-
-        let Mode::TextTriggerDialog(state) = &mut app.mode else {
-            panic!("text trigger dialog");
-        };
-
-        state.regexp = crate::text_prompt::TextPromptState::new("^saved$");
-
-        state.message = crate::text_prompt::TextPromptState::new("reply");
-
-        state.sample = ratatui_textarea::TextArea::from(vec!["saved".to_owned()]);
-
-        state.mark_preview_dirty();
-        state.focus = TextTriggerFocus::Save;
-
-        press(&mut app, KeyCode::Enter);
-
-        assert!(
-            matches!(app.mode, Mode::TextTriggerDialog(_)),
-            "Save must wait for durable receipt"
-        );
-
-        app.settle_filesystem_for_test();
-        let persisted = crate::config::load(directory.path()).unwrap().text_triggers;
-        assert_eq!(persisted.triggers.len(), 1);
-        assert_eq!(persisted.triggers[0].regexp, "^saved$");
-
-        assert_eq!(persisted.triggers[0].message, "reply");
-        assert!(
-            matches!(app.mode, Mode::Normal),
-            "matching durable receipt must close the exact dialog"
-        );
-    }
-
-    #[test]
-    fn edit_after_save_preserves_new_draft_and_fences_old_durable_dismissal() {
-        let directory = tempfile::tempdir().unwrap();
-
-        let mut app = app(directory.path());
-
-        app.open_text_trigger_dialog(None);
-
-        let Mode::TextTriggerDialog(state) = &mut app.mode else {
-            panic!("text trigger dialog");
-        };
-
-        state.regexp = crate::text_prompt::TextPromptState::new("^saved$");
-
-        state.message = crate::text_prompt::TextPromptState::new("original");
-
-        state.mark_preview_dirty();
-        state.focus = TextTriggerFocus::Save;
-
-        press(&mut app, KeyCode::Enter);
-
-        let Mode::TextTriggerDialog(state) = &mut app.mode else {
-            panic!("saving text trigger dialog");
-        };
-
-        state.focus = TextTriggerFocus::Message;
-
-        press(&mut app, KeyCode::Char('x'));
-
-        app.settle_filesystem_for_test();
-        let persisted = crate::config::load(directory.path()).unwrap().text_triggers;
-        assert_eq!(persisted.triggers.len(), 1);
-        assert_eq!(persisted.triggers[0].regexp, "^saved$");
-
-        assert_eq!(persisted.triggers[0].message, "original");
-        let Mode::TextTriggerDialog(state) = &app.mode else {
-            panic!("older durable receipt incorrectly dismissed newer draft");
-        };
-
-        assert_eq!(state.message.buf, "originalx");
-
-        assert!(
-            state.save_error.is_none(),
-            "successful older write must not become a save failure"
-        );
-
-        assert!(
-            state.preview_revision() > 0,
-            "semantic edit must also fence preview publication"
         );
     }
 }

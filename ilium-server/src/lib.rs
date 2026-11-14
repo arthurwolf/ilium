@@ -59,8 +59,6 @@ mod startup_progress;
 mod state;
 mod status_screen_watch;
 mod task_guard;
-mod text_trigger_config;
-mod text_triggers;
 mod title_eligibility;
 mod unrestored;
 mod voice_relay;
@@ -284,12 +282,9 @@ pub async fn run_with_plugins(
     if let Some(path) = &options.sound_config_path {
         // Invariant: this fresh ServerState has not been shared with consumers.
         state
-            .text_trigger_config_path
+            .config_path
             .set(path.clone())
-            .expect("a fresh server has no Text Trigger source");
-        if let Err(error) = text_trigger_config::refresh(&state).await {
-            tracing::warn!(%error, "Text Triggers startup load failed; retaining accepted rules");
-        }
+            .expect("a fresh server has no config source");
     }
     state.set_session_backups_enabled(options.session_backups_enabled);
 

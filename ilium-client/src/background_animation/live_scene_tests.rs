@@ -1,13 +1,12 @@
-//! Real project persistence and native presentation for the five live scenes.
+//! Real project persistence and native presentation for the four live scenes.
 use super::super::{AnimationKind, AnimationSettings};
 use ilium_ambient::{ControlKind, ControlValue};
 
-const LIVE_KINDS: [AnimationKind; 5] = [
+const LIVE_KINDS: [AnimationKind; 4] = [
     AnimationKind::Graph,
     AnimationKind::Earthquakes,
     AnimationKind::Aircraft,
     AnimationKind::Boats,
-    AnimationKind::Chess,
 ];
 
 #[test]

@@ -5,7 +5,8 @@
 //! specific to the scene"): an `integer` or `number` property becomes a slider, a `boolean` a
 //! toggle, a `string` with `enum` a choice (`enum_titles` are the labels) and any other
 //! `string` a free text row. `title`, `help` (or `description`), `minimum`, `maximum`, `step`,
-//! `unit`, `default` and `order` shape the row; properties without an `order` follow the
+//! `unit`, `default` and `order` shape the row; `visible_when` (`{"key": <choice property>,
+//! "in": [<enum string>, ...]}`) shows the row only while that choice has one of those values; properties without an `order` follow the
 //! ordered ones, alphabetically. The edited values live in the project settings
 //! (`ilium_ambient::external::SceneValues`), and [`SceneControlSchema::settings_json`] is the
 //! `settings` object the guest receives in its spec and in `reconfigure`.
@@ -15,7 +16,7 @@ use ilium_ambient::external::{intern, SceneValues};
 use serde_json::{json, Map, Value};
 
 /// Properties a scene may declare, at most; a manifest with more is cut here.
-const MAXIMUM_ROWS: usize = 32;
+const MAXIMUM_ROWS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RowKind {
@@ -45,6 +46,8 @@ struct Row {
     label: String,
     help: String,
     kind: RowKind,
+    /// Shown only while the choice row `key` has one of the `enum` strings `values`.
+    visible_when: Option<(String, Vec<String>)>,
 }
 
 /// The rows of one scene.
@@ -163,11 +166,22 @@ impl SceneControlSchema {
             },
             _ => return None,
         };
+        let visible_when = property.get("visible_when").and_then(|rule| {
+            let controlling = rule.get("key")?.as_str()?.to_owned();
+            let values = rule
+                .get("in")?
+                .as_array()?
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_owned))
+                .collect();
+            Some((controlling, values))
+        });
         Some(Row {
             key: key.to_owned(),
             label,
             help,
             kind,
+            visible_when,
         })
     }
 
@@ -202,6 +216,30 @@ impl SceneControlSchema {
         }
     }
 
+    /// Whether `row` shows with `values`: a row with no rule always does, a row whose rule
+    /// names a missing or non-choice row never does.
+    fn visible(&self, row: &Row, values: &SceneValues) -> bool {
+        let Some((controlling, wanted)) = &row.visible_when else {
+            return true;
+        };
+        self.rows
+            .iter()
+            .find(|other| &other.key == controlling)
+            .is_some_and(
+                |other| match (&other.kind, Self::effective(other, values)) {
+                    (
+                        RowKind::Choice {
+                            values: options, ..
+                        },
+                        ControlValue::Index(index),
+                    ) => options
+                        .get(index)
+                        .is_some_and(|option| wanted.contains(option)),
+                    _ => false,
+                },
+            )
+    }
+
     fn default_value(row: &Row) -> ControlValue {
         Self::effective(row, &SceneValues::new())
     }
@@ -210,6 +248,7 @@ impl SceneControlSchema {
     pub(crate) fn controls(&self, values: &SceneValues) -> Vec<Control> {
         self.rows
             .iter()
+            .filter(|row| self.visible(row, values))
             .map(|row| {
                 let id = intern(&row.key);
                 let label = intern(&row.label);
@@ -402,5 +441,30 @@ mod tests {
         assert_eq!(rows[0].value, ControlValue::Bool(false));
         assert_eq!(rows[1].value, ControlValue::Number(50));
         assert_eq!(rows[2].value, ControlValue::Index(1));
+    }
+
+    #[test]
+    fn a_row_with_visible_when_shows_only_for_its_choices_but_stays_in_the_spec() {
+        let schema = SceneControlSchema::from_schema(&json!({
+            "type": "object",
+            "properties": {
+                "mode": {"type": "string", "enum": ["a", "b"], "order": 1},
+                "depth": {"type": "integer", "minimum": 1, "maximum": 9, "default": 3,
+                          "order": 2, "visible_when": {"key": "mode", "in": ["b"]}},
+                "orphan": {"type": "boolean", "order": 3,
+                           "visible_when": {"key": "missing", "in": ["b"]}}
+            }
+        }));
+        let mut values = SceneValues::new();
+        let ids = |values: &SceneValues| -> Vec<&'static str> {
+            schema.controls(values).iter().map(|row| row.id).collect()
+        };
+        assert_eq!(ids(&values), ["mode"]);
+        schema
+            .set_control(&mut values, "mode", ControlValue::Index(1))
+            .unwrap();
+        assert_eq!(ids(&values), ["mode", "depth"]);
+        assert_eq!(schema.settings_json(&values)["orphan"], json!(false));
+        assert_eq!(schema.settings_json(&values)["depth"], json!(3));
     }
 }

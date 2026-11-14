@@ -27,9 +27,7 @@ impl App {
             && matches!(self.mode, Mode::Normal)
             && !matches!(
                 self.right_panel_target,
-                RightPanelTarget::Resource { .. }
-                    | RightPanelTarget::Attention
-                    | RightPanelTarget::PluginView { .. }
+                RightPanelTarget::Resource { .. } | RightPanelTarget::PluginView { .. }
             )
     }
 

@@ -4,8 +4,6 @@ use super::worker::{
     RenderRequest,
 };
 use super::{AnimationCacheStatus, AnimationSettings};
-use ilium_animation_js::replay::{PendingEmission, ReplayFlushedProof};
-use ilium_animation_js::runtime::CommittedFrameEmission;
 use ratatui::layout::Rect;
 use std::collections::VecDeque;
 use std::io;
@@ -22,7 +20,6 @@ enum Configuration {
 pub struct ComposedPresentation {
     lease: PresentationLease,
     surviving: Option<Vec<u8>>,
-    pending_replay: Option<PendingEmission>,
     composed_at: Instant,
 }
 impl ComposedPresentation {
@@ -49,28 +46,10 @@ impl ComposedPresentation {
         }
         Ok(())
     }
-    pub(crate) fn begin_output(&mut self) -> Result<Option<CommittedFrameEmission>, String> {
-        if self.lease.has_replay() {
-            let surviving = self
-                .surviving
-                .as_deref()
-                .ok_or("Final compositor provenance unavailable for replay output")?;
-            self.pending_replay = self.lease.prepare_replay(surviving)?;
-        }
-        self.lease.begin_output()
-    }
-}
-
-enum UnsettledReplay {
-    Uncertain { _pending: PendingEmission },
-    Validation { _pending: PendingEmission },
-    History { _emitted: PendingEmission },
 }
 
 struct UnsettledOutput {
     _presentation: ComposedPresentation,
-    _proof: Option<ReplayFlushedProof>,
-    _world_emissions: Vec<ilium_animation_js::native_worlds::WorldEmission>,
 }
 
 pub struct AnimationSurface {
@@ -81,7 +60,6 @@ pub struct AnimationSurface {
     desired: Option<(AnimationSettings, u16, u16)>,
     configurations: VecDeque<Configuration>,
     receipts: VecDeque<EmissionReceipt>,
-    blocked_replay: Option<UnsettledReplay>,
     blocked_output: Option<UnsettledOutput>,
     display: Option<Arc<FrameSnapshot>>,
     last_request: Option<(u64, Duration, Option<[f32; 2]>, u64)>,
@@ -117,7 +95,6 @@ impl Default for AnimationSurface {
             desired: None,
             configurations: VecDeque::new(),
             receipts: VecDeque::new(),
-            blocked_replay: None,
             blocked_output: None,
             display: None,
             last_request: None,
@@ -135,26 +112,6 @@ impl Default for AnimationSurface {
     }
 }
 impl AnimationSurface {
-    /// Identity belongs to the loaded immutable frame and the current desired
-    /// selection. A catalogue descriptor or superseded frame cannot supply it.
-    pub fn plugin_package_digest(&self, package_id: &str) -> Option<&str> {
-        let (settings, _, _) = self.desired.as_ref()?;
-        if settings.source != crate::animation_plugins::AnimationSourceTab::Plugin
-            || settings.plugin.selected.as_ref()?.package_id != package_id
-        {
-            return None;
-        }
-        let frame = self.display.as_ref()?;
-        if frame.revision != self.revision {
-            return None;
-        }
-        let identity = frame.plugin_identity()?;
-        if identity.package_id != package_id {
-            return None;
-        }
-        frame.plugin_package_digest()
-    }
-
     pub fn configure_resources(&mut self, resources: ilium_ambient::resources::AmbientResources) {
         self.resources = Some(resources);
     }
@@ -432,8 +389,7 @@ impl AnimationSurface {
         // A discarded, never-emitted composition is safely retired without credit.
         self.composition = None;
         self.composed_bits.clear();
-        if self.blocked_replay.is_some()
-            || self.blocked_output.is_some()
+        if self.blocked_output.is_some()
             || !self.configurations.is_empty()
             || !self.receipts.is_empty()
         {
@@ -469,114 +425,33 @@ impl AnimationSurface {
         self.composition.take().map(|lease| ComposedPresentation {
             lease,
             surviving,
-            pending_replay: None,
             composed_at: Instant::now(),
         })
     }
-    pub fn acknowledge(
-        &mut self,
-        mut presentation: ComposedPresentation,
-        mut proof: Option<ReplayFlushedProof>,
-    ) {
-        let mut world_emissions = Vec::new();
-        if let Some(mut pending) = presentation.pending_replay.take() {
-            let Some(proof) = proof.take() else {
-                self.blocked_replay = Some(UnsettledReplay::Uncertain { _pending: pending });
-                self.reject_output("replay flush proof missing after output");
-                return;
-            };
-            if let Err(error) = pending.after_host_emission(proof) {
-                self.blocked_replay = Some(UnsettledReplay::Validation { _pending: pending });
-                self.reject_output(&format!("original replay flush validation failed: {error}"));
-                return;
-            }
-            if let Err(error) = pending.settle() {
-                self.blocked_replay = Some(UnsettledReplay::History { _emitted: pending });
-                self.reject_output(&format!("original replay history uncertain: {error}"));
-                return;
-            }
-        } else {
-            if presentation.lease.snapshot().plugin_identity().is_some() != proof.is_some() {
-                self.retain_unsettled_output(
-                    presentation,
-                    proof,
-                    Vec::new(),
-                    "terminal proof did not match its original frame",
-                );
-                return;
-            }
-            if let Some(error) = proof
-                .as_ref()
-                .and_then(|proof| presentation.lease.validate_output_proof(proof).err())
-            {
-                self.retain_unsettled_output(
-                    presentation,
-                    proof,
-                    Vec::new(),
-                    &format!("terminal proof validation failed: {error}"),
-                );
-                return;
-            }
-            let emission_result = match (presentation.surviving.as_deref(), proof.as_ref()) {
-                (Some(bits), Some(proof)) => Some(presentation.lease.world_emissions(bits, proof)),
-                _ => None,
-            };
-            match emission_result {
-                Some(Ok(emissions)) => world_emissions = emissions,
-                Some(Err(error)) => {
-                    self.retain_unsettled_output(
-                        presentation,
-                        proof,
-                        Vec::new(),
-                        &format!("world emission validation failed: {error}"),
-                    );
-                    return;
-                }
-                None => {}
-            }
-            // Live plugin frames have no replay source projection. Their broker
-            // proof remains owned until receipt construction succeeds.
-        }
+    pub fn acknowledge(&mut self, presentation: ComposedPresentation) {
         if let Some(bits) = presentation.surviving {
             let composed_at = presentation.composed_at;
-            match presentation
-                .lease
-                .receipt_with_world_emissions(bits, world_emissions)
-            {
-                Ok(receipt) => {
-                    drop(proof);
-                    self.receipts.push_back(receipt);
-                }
+            match presentation.lease.receipt(bits) {
+                Ok(receipt) => self.receipts.push_back(receipt),
                 Err(rejected) => {
-                    let (lease, surviving, world_emissions) = rejected.value;
+                    let (lease, surviving) = rejected.value;
                     self.retain_unsettled_output(
                         ComposedPresentation {
                             lease,
                             surviving: Some(surviving),
-                            pending_replay: None,
                             composed_at,
                         },
-                        proof,
-                        world_emissions,
                         "invalid animation emission receipt after terminal output",
                     );
                 }
             }
-        } else {
-            drop(proof);
         }
         self.flush();
     }
-    pub fn uncertain_output(&mut self, mut presentation: ComposedPresentation, reason: &str) {
-        if let Some(pending) = presentation.pending_replay.take() {
-            self.blocked_replay = Some(UnsettledReplay::Uncertain { _pending: pending });
-        } else {
-            self.blocked_output = Some(UnsettledOutput {
-                _presentation: presentation,
-                _proof: None,
-                _world_emissions: Vec::new(),
-            });
-        }
+    pub fn uncertain_output(&mut self, presentation: ComposedPresentation, reason: &str) {
+        self.blocked_output = Some(UnsettledOutput {
+            _presentation: presentation,
+        });
         self.reject_output(reason);
     }
 
@@ -588,17 +463,9 @@ impl AnimationSurface {
         self.ready.notify_one();
     }
 
-    fn retain_unsettled_output(
-        &mut self,
-        presentation: ComposedPresentation,
-        proof: Option<ReplayFlushedProof>,
-        world_emissions: Vec<ilium_animation_js::native_worlds::WorldEmission>,
-        reason: &str,
-    ) {
+    fn retain_unsettled_output(&mut self, presentation: ComposedPresentation, reason: &str) {
         self.blocked_output = Some(UnsettledOutput {
             _presentation: presentation,
-            _proof: proof,
-            _world_emissions: world_emissions,
         });
         self.reject_output(reason);
     }
@@ -618,7 +485,7 @@ impl AnimationSurface {
         loop {
             self.flush();
             let Some(service) = &self.service else {
-                return if self.blocked_replay.is_some() || self.blocked_output.is_some() {
+                return if self.blocked_output.is_some() {
                     Err(io::Error::other(
                         "Original animation output remains unsettled",
                     ))
@@ -646,7 +513,7 @@ impl AnimationSurface {
             self.ready.notified().await;
         }
         self.service = None;
-        if self.blocked_replay.is_some() || self.blocked_output.is_some() {
+        if self.blocked_output.is_some() {
             return Err(io::Error::other(
                 "Original animation output remains unsettled",
             ));
@@ -754,12 +621,6 @@ impl AnimationSurface {
     pub fn frames_per_second(&self) -> Option<u32> {
         self.display.as_ref()?.frames_per_second
     }
-    pub(crate) fn permission_bridge(
-        &self,
-    ) -> Option<Arc<crate::animation_plugins::review_bridge::ReviewBridge>> {
-        self.service.as_ref()?.permission_bridge()
-    }
-
     pub fn status(&self) -> Option<String> {
         self.error
             .clone()
@@ -1171,7 +1032,7 @@ mod tests {
         assert_eq!(emitted.frame.frame_id, 42);
         let mut completed_frame = emitted.frame;
         let animation = completed_frame.take_animation().unwrap();
-        surface.acknowledge(animation, emitted.flush_proof);
+        surface.acknowledge(animation);
         surface.settle_for_test();
         assert_eq!(
             receipts.recv_timeout(Duration::from_secs(3)).unwrap(),
@@ -1204,10 +1065,7 @@ mod tests {
                 .unwrap();
         assert!(emitted.rejection.is_none() && emitted.uncertainty.is_none());
         let mut completed_frame = emitted.frame;
-        surface.acknowledge(
-            completed_frame.take_animation().unwrap(),
-            emitted.flush_proof,
-        );
+        surface.acknowledge(completed_frame.take_animation().unwrap());
         surface.settle_for_test();
         if let Ok(owners) = receipts.try_recv() {
             assert!(

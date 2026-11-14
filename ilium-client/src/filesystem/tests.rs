@@ -43,46 +43,6 @@ fn frozen_agent_icon_capacity_is_included_in_ui_configuration_admission() {
 }
 
 #[test]
-fn text_trigger_modal_waits_for_real_durable_writer_and_server_request() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut app = App::new("filesystem-fixture".into(), directory.path().to_path_buf());
-    app.config_dir = Some(directory.path().to_path_buf());
-    let trigger = ilium_ipc::TextTrigger {
-        id: "authored-worker".into(),
-        regexp: "ready$".into(),
-        message: "continue".into(),
-        ..Default::default()
-    };
-    let state = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
-    let mut state = state;
-    state.regexp.buf = trigger.regexp.clone();
-    state.message.buf = trigger.message.clone();
-    let trigger = state.candidate().unwrap();
-    app.mode = Mode::TextTriggerDialog(Box::new(state));
-    let lock = ExclusiveFileLock::acquire(&directory.path().join(".agent-detection-settings.lock"))
-        .unwrap();
-    let started = Instant::now();
-    app.commit_text_trigger(None, None, trigger).unwrap();
-    app.collect_editor_files();
-    assert!(started.elapsed() < Duration::from_secs(1));
-    assert!(matches!(app.mode, Mode::TextTriggerDialog(_)));
-    assert!(!app
-        .take_outbound_requests()
-        .iter()
-        .any(|request| matches!(request, ilium_ipc::ClientRequest::UpdateTextTriggers { .. })));
-    drop(lock);
-    app.settle_filesystem_for_test();
-    assert!(!matches!(app.mode, Mode::TextTriggerDialog(_)));
-    assert!(app
-        .take_outbound_requests()
-        .iter()
-        .any(|request| matches!(request, ilium_ipc::ClientRequest::UpdateTextTriggers { .. })));
-    let saved = crate::config::load(directory.path()).unwrap();
-    assert_eq!(saved.text_triggers.triggers.len(), 1);
-    assert_eq!(saved.text_triggers.triggers[0].regexp, "ready$");
-}
-
-#[test]
 fn board_async_detail_typing_admits_a_bounded_burst_before_collecting_writes() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("board.md");
@@ -1246,37 +1206,4 @@ fn frozen_screen_save_reports_durable_writer_failure() {
             .unwrap()
             .shutdown_complete
     );
-}
-
-#[test]
-fn older_valid_trigger_receipt_does_not_close_a_later_invalid_draft() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut app = App::new(
-        "trigger-receipt-fixture".into(),
-        directory.path().to_path_buf(),
-    );
-    app.config_dir = Some(directory.path().to_path_buf());
-    let mut state = crate::text_trigger_dialog::TextTriggerDialogState::new(None);
-    state.regexp.buf = "ready$".into();
-    state.message.buf = "continue".into();
-    let accepted = state.candidate().unwrap();
-    app.mode = Mode::TextTriggerDialog(Box::new(state));
-    let lock = ExclusiveFileLock::acquire(&directory.path().join(".agent-detection-settings.lock"))
-        .unwrap();
-    app.commit_text_trigger(None, None, accepted.clone())
-        .unwrap();
-    let Mode::TextTriggerDialog(editor) = &mut app.mode else {
-        panic!("missing editor")
-    };
-    editor.delay.buf = "99999999999999999999".into();
-    drop(lock);
-    app.settle_filesystem_for_test();
-    let Mode::TextTriggerDialog(editor) = &app.mode else {
-        panic!("an older receipt closed the invalid draft")
-    };
-    assert_eq!(editor.delay.buf, "99999999999999999999");
-    let saved = crate::config::load(directory.path()).unwrap().text_triggers;
-    assert_eq!(saved.triggers, vec![accepted]);
-    assert!(matches!(app.take_outbound_requests().as_slice(),
-        [ilium_ipc::ClientRequest::UpdateTextTriggers { settings }] if settings == &saved));
 }

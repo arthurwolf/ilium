@@ -498,27 +498,6 @@ animation:
         assert_eq!(load(first.path()).unwrap().animation, settings);
     }
 
-    #[test]
-    fn plugin_source_mode_and_remembered_values_survive_project_reload() {
-        use crate::animation_plugins::{AnimationSourceTab, PluginPreferences, PluginSelection};
-        let project = tempfile::tempdir().unwrap();
-        let selection = PluginSelection {
-            package_id: "beach".into(),
-            mode: ilium_animation_js::manifest::AnimationMode::PreRendered,
-            settings: serde_json::json!({"cycle_seconds": 20}),
-        };
-        let settings = crate::background_animation::AnimationSettings {
-            source: AnimationSourceTab::Plugin,
-            plugin: PluginPreferences {
-                selected: Some(selection.clone()),
-                remembered: BTreeMap::from([("beach".into(), selection)]),
-            },
-            ..Default::default()
-        };
-        set_animation(project.path(), settings.clone()).unwrap();
-        assert_eq!(load(project.path()).unwrap().animation, settings);
-    }
-
     fn scratch_dir() -> std::path::PathBuf {
         let path = std::env::temp_dir()
             .join("ilium-project-config-tests")
@@ -749,52 +728,6 @@ animation:
         let reloaded = load(project.path()).unwrap().animation;
         assert_eq!(reloaded, settings);
         assert!((reloaded.ambient.location.latitude - 69.65).abs() < 1e-9);
-    }
-
-    #[test]
-    fn all_seventeen_quiet_scenes_preserve_independent_controls_across_project_reload() {
-        use crate::background_animation::{AnimationKind, AnimationSettings};
-
-        let kinds = [
-            AnimationKind::Frost,
-            AnimationKind::Embroidery,
-            AnimationKind::HesitatingInk,
-        ];
-        let project = tempfile::tempdir().unwrap();
-        let mut settings = AnimationSettings {
-            enabled: true,
-            ..Default::default()
-        };
-        // Change every scene before selecting any: switching the selection must
-        // not silently reset the independently retained blocks.
-        for kind in kinds {
-            let ambient_kind = kind.ambient().unwrap();
-            let before = settings.ambient.scene_key(ambient_kind);
-            let control = settings
-                .ambient
-                .controls(ambient_kind)
-                .into_iter()
-                .find(|control| control.stepped(1).is_some())
-                .unwrap();
-            assert!(settings
-                .ambient
-                .set_control(ambient_kind, control.id, control.stepped(1).unwrap())
-                .unwrap());
-            assert_ne!(settings.ambient.scene_key(ambient_kind), before, "{kind:?}");
-        }
-        let expected = settings.ambient.clone();
-        for kind in kinds {
-            settings.kind = kind;
-            set_animation(project.path(), settings.clone()).unwrap();
-            update(project.path(), |config| {
-                config.project_name = Some("Quiet scenes".to_owned())
-            })
-            .unwrap();
-            let reloaded = load(project.path()).unwrap();
-            assert_eq!(reloaded.animation.kind, kind);
-            assert_eq!(reloaded.animation.ambient, expected, "{kind:?}");
-            assert_eq!(reloaded.project_name.as_deref(), Some("Quiet scenes"));
-        }
     }
 
     #[test]

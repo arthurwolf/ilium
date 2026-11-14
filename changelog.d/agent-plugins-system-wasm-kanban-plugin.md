@@ -1,0 +1,2 @@
+### Added
+- Kanban plugin (`ilium.core.kanban`): the board model (selection, card and column edits, detail panel, card moves), the folder and Markdown storage rules, the board pane view and the board keys now live in the plugin. A board pane is opened with the `ilium.core.kanban/new-board` command (`{ "path", "kind" }`); the Markdown file is written with a revision check so an edit made outside Ilium is reloaded instead of overwritten.

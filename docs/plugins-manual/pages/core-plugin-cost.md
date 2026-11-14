@@ -142,6 +142,54 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
             ]
           }
         ]
+      },
+      {
+        "kind": "tab",
+        "id": "reset-planning",
+        "title": "Reset planning",
+        "sections": [
+          {
+            "id": "reset-feeds",
+            "title": "Public reset feeds",
+            "scope": "server",
+            "rows": [
+              {
+                "type": "toggle",
+                "key": "monitor_claude",
+                "title": "Monitor Claude resets",
+                "default": true,
+                "kernel_tab": "reset-planning",
+                "kernel_key": "monitor_claude"
+              },
+              {
+                "type": "toggle",
+                "key": "monitor_codex",
+                "title": "Monitor Codex resets",
+                "default": true,
+                "kernel_tab": "reset-planning",
+                "kernel_key": "monitor_codex"
+              },
+              {
+                "type": "choice",
+                "key": "time_style",
+                "title": "Time display",
+                "default": "exact",
+                "kernel_tab": "reset-planning",
+                "kernel_key": "time_style",
+                "options": [
+                  {
+                    "value": "exact",
+                    "title": "Exact (d h m s)"
+                  },
+                  {
+                    "value": "human",
+                    "title": "Human (rounded)"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ],
     "panels": [
@@ -156,8 +204,8 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
       "agent.read",
       "agent.transcript",
       "tree.decorate",
-      "http:status.anthropic.com",
-      "http:status.openai.com",
+      "http:claude-resets.com",
+      "http:codex-resets.com",
       "services.provide:ilium.core.cost/usage",
       "settings.contribute:agent-cost",
       "settings.write-kernel:agent-cost"
@@ -201,8 +249,8 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
       "agent.read",
       "agent.transcript",
       "tree.decorate",
-      "http:status.anthropic.com",
-      "http:status.openai.com",
+      "http:claude-resets.com",
+      "http:codex-resets.com",
       "services.provide:ilium.core.cost/usage",
       "settings.contribute:agent-cost",
       "settings.write-kernel:agent-cost",
@@ -354,6 +402,54 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
               {
                 "value": "status",
                 "title": "Status bar"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "tab",
+        "id": "reset-planning",
+        "title": "Reset planning",
+        "sections": [
+          {
+            "id": "reset-feeds",
+            "title": "Public reset feeds",
+            "scope": "server",
+            "rows": [
+              {
+                "type": "toggle",
+                "key": "monitor_claude",
+                "title": "Monitor Claude resets",
+                "default": true,
+                "kernel_tab": "reset-planning",
+                "kernel_key": "monitor_claude"
+              },
+              {
+                "type": "toggle",
+                "key": "monitor_codex",
+                "title": "Monitor Codex resets",
+                "default": true,
+                "kernel_tab": "reset-planning",
+                "kernel_key": "monitor_codex"
+              },
+              {
+                "type": "choice",
+                "key": "time_style",
+                "title": "Time display",
+                "default": "exact",
+                "kernel_tab": "reset-planning",
+                "kernel_key": "time_style",
+                "options": [
+                  {
+                    "value": "exact",
+                    "title": "Exact (d h m s)"
+                  },
+                  {
+                    "value": "human",
+                    "title": "Human (rounded)"
+                  }
+                ]
               }
             ]
           }

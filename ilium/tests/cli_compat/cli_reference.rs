@@ -626,11 +626,7 @@ fn cor_041_progress_check_without_a_pane_fails_before_running_the_probe() {
 #[test]
 fn f_111_hidden_commands_are_not_listed_in_help() {
     let help = Sandbox::new().ilium(&["--help"]).stdout;
-    for hidden in [
-        "clipboard-helper",
-        "release-embedding-probe",
-        "release-animation-probe",
-    ] {
+    for hidden in ["clipboard-helper", "release-embedding-probe"] {
         assert!(!help.contains(hidden), "{hidden} must stay hidden");
     }
 }
@@ -639,11 +635,7 @@ fn f_111_hidden_commands_are_not_listed_in_help() {
 #[test]
 fn f_111_hidden_commands_still_parse() {
     let sandbox = Sandbox::new();
-    for hidden in [
-        "clipboard-helper",
-        "release-embedding-probe",
-        "release-animation-probe",
-    ] {
+    for hidden in ["clipboard-helper", "release-embedding-probe"] {
         let run = sandbox.ilium(&[hidden, "--help"]);
         assert_eq!(run.code, 0, "{hidden}: {}", run.stderr);
     }

@@ -309,7 +309,7 @@ fn recommendation(kind: &str) -> AnimationRecommendation {
             ("place", 0, "Paris"),
             ("tour", 0, "Selected place"),
         ],
-        "carpet" => &[("carpet_mode", 1, "Autonomous Snake")],
+        "stars" => &[("projection", 1, "Panorama (horizon strip)")],
         _ => unreachable!("fixture uses only two offline scenes"),
     };
     let mut recommendation = AnimationRecommendation {
@@ -363,7 +363,7 @@ async fn apply_recommendations(
                 project: recommendation("open_street_map"),
                 entries: vec![PlanAnimationEntry {
                     path: vec![0],
-                    recommendation: recommendation("carpet"),
+                    recommendation: recommendation("stars"),
                 }],
             },
         })
@@ -459,8 +459,8 @@ fn retain_screen(tui: &PtySession, name: &str) {
 }
 
 #[tokio::test]
-async fn project_paris_and_entry_carpet_render_through_actual_recommendation_transport() {
-    for (scope, expected) in [("project", "OpenStreetMap"), ("entry", "Carpet")] {
+async fn project_paris_and_entry_stars_render_through_actual_recommendation_transport() {
+    for (scope, expected) in [("project", "OpenStreetMap"), ("entry", "Stars overhead")] {
         let mut fixture = Fixture::new(scope, true);
         let authored_before = serde_json::to_value(
             ilium_client::project_config::load(&fixture.project)
@@ -495,7 +495,7 @@ async fn project_paris_and_entry_carpet_render_through_actual_recommendation_tra
                 .as_ref()
                 .unwrap()
                 .kind,
-            "carpet"
+            "stars"
         );
         // The animation-only request supplies no title grant. Select the
         // preserved authored pane label after its old group was removed.
@@ -575,7 +575,7 @@ async fn project_paris_and_entry_carpet_render_through_actual_recommendation_tra
             if scope == "project" {
                 "place=Paris"
             } else {
-                "carpet_mode=Autonomous Snake"
+                "projection=Panorama (horizon strip)"
             },
         )
         .await;

@@ -492,10 +492,7 @@ pub(crate) fn sync_active_scrolls(app: &mut App) {
     let crate::app::Mode::Settings(state) = &app.mode else {
         return;
     };
-    if state.tab != crate::app::SettingsTab::Animations
-        || state.animation_source_tab != crate::animation_plugins::AnimationSourceTab::Native
-        || state.animation_fullscreen
-    {
+    if state.tab != crate::app::SettingsTab::Animations || state.animation_fullscreen {
         return;
     }
     let mut area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, state)
@@ -1121,136 +1118,6 @@ fn draw_scene_nav(frame: &mut Frame, area: Rect, model: &RowModel, app: &App, in
     );
 }
 
-pub fn source_tab_area(area: Rect) -> Rect {
-    layout(area).scene_heading
-}
-
-pub fn plugin_panel_area(area: Rect) -> Rect {
-    let panel = layout(area).panel;
-    Rect::new(
-        panel.x,
-        panel.y.saturating_add(panel.height.min(2)),
-        panel.width,
-        panel.height.saturating_sub(3),
-    )
-}
-
-pub fn plugin_editor_option_at(
-    area: Rect,
-    editor: &crate::animation_plugins::PluginEditor,
-    position: Position,
-) -> Option<usize> {
-    let crate::animation_plugins::PluginEditorKind::Choice { options, cursor } = &editor.kind
-    else {
-        return None;
-    };
-    let panel = layout(area).panel;
-    let body = plugin_editor_body(panel);
-    let scroll = cursor.saturating_sub(usize::from(body.height).saturating_sub(1));
-    crate::animation_plugins::plugin_row_at(body, scroll, options.len(), position)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginEditorAction {
-    Apply,
-    Cancel,
-}
-
-fn plugin_editor_body(panel: Rect) -> Rect {
-    let inner = crate::theme::block(true).inner(panel);
-    Rect::new(
-        inner.x,
-        inner.y,
-        inner.width,
-        inner.height.saturating_sub(2),
-    )
-}
-
-fn plugin_editor_action_row(panel: Rect) -> Rect {
-    let inner = crate::theme::block(true).inner(panel);
-    Rect::new(
-        inner.x,
-        inner.bottom().saturating_sub(1),
-        inner.width,
-        u16::from(inner.height > 0),
-    )
-}
-
-pub fn plugin_editor_action_at(area: Rect, position: Position) -> Option<PluginEditorAction> {
-    let panel = layout(area).panel;
-    let row = plugin_editor_action_row(panel);
-    if row.height == 0 {
-        return None;
-    }
-    let apply = Rect::new(row.x, row.y, row.width.min(7), 1);
-    let cancel = Rect::new(
-        row.x.saturating_add(9),
-        row.y,
-        row.width.saturating_sub(9).min(8),
-        1,
-    );
-    if apply.contains(position) {
-        Some(PluginEditorAction::Apply)
-    } else if cancel.contains(position) {
-        Some(PluginEditorAction::Cancel)
-    } else {
-        None
-    }
-}
-
-fn render_plugin_editor(
-    frame: &mut Frame,
-    panel: Rect,
-    editor: &crate::animation_plugins::PluginEditor,
-    ink: Style,
-) {
-    let block = crate::theme::block(true).title(crate::theme::chrome_title(&editor.label));
-    let inner = block.inner(panel);
-    let body = plugin_editor_body(panel);
-    let action_row = plugin_editor_action_row(panel);
-    frame.render_widget(Clear, panel);
-    frame.render_widget(block, panel);
-    match &editor.kind {
-        crate::animation_plugins::PluginEditorKind::Choice { options, cursor } => {
-            let scroll = cursor.saturating_sub(usize::from(body.height).saturating_sub(1));
-            for (index, option) in options
-                .iter()
-                .enumerate()
-                .skip(scroll)
-                .take(usize::from(body.height))
-            {
-                if let Some(rectangle) =
-                    crate::animation_plugins::plugin_row_rect(body, scroll, index)
-                {
-                    let style = if index == *cursor {
-                        ink.add_modifier(Modifier::REVERSED)
-                    } else {
-                        ink
-                    };
-                    frame.render_widget(
-                        Paragraph::new(option.label.as_str()).style(style),
-                        rectangle,
-                    );
-                }
-            }
-        }
-        _ => {
-            frame.render_widget(Paragraph::new(editor.input.as_str()).style(ink), body);
-        }
-    }
-    if inner.height >= 2 {
-        frame.render_widget(
-            Paragraph::new(editor.error.as_deref().map_or_else(
-                || "Enter applies · Esc cancels".to_owned(),
-                |error| format!("F9 details · {error}"),
-            ))
-            .style(ink),
-            Rect::new(inner.x, action_row.y.saturating_sub(1), inner.width, 1),
-        );
-        frame.render_widget(Paragraph::new("[Apply]  [Cancel]").style(ink), action_row);
-    }
-}
-
 pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -1262,61 +1129,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let scrolls = Scrolls::of(state).clamped(area, &model);
     frame.render_widget(Clear, panel);
     frame.render_widget(Block::default().style(ink), panel);
-    if state.animation_source_tab == crate::animation_plugins::AnimationSourceTab::Plugin {
-        crate::animation_plugins::draw_source_tabs(
-            frame,
-            source_tab_area(area),
-            state.animation_source_tab,
-            ink,
-        );
-        let model = app.plugin_panel_model();
-        crate::animation_plugins::draw_plugin_panel(
-            frame,
-            plugin_panel_area(area),
-            &model,
-            &state.plugin_panel,
-            ink,
-        );
-        let controls_area = plugin_panel_area(area);
-        let values = crate::value_plugin::PanelValues::new(app);
-        for row in state.plugin_panel.scroll
-            ..state
-                .plugin_panel
-                .scroll
-                .saturating_add(usize::from(controls_area.height))
-                .min(model.rows.len())
-        {
-            if let Some(control) = values.control(controls_area, &model, &state.plugin_panel, row) {
-                let style = if state.plugin_panel.cursor == row {
-                    ink.add_modifier(Modifier::REVERSED)
-                } else {
-                    ink
-                };
-                control.render(frame, value_styles(style));
-            }
-        }
-        if area.height > 0 {
-            frame.render_widget(
-                Paragraph::new("Alt+←/→ tabs · ←/→ step · + catalog · * number · f preview")
-                    .style(ink),
-                Rect::new(panel.x, panel.bottom().saturating_sub(1), panel.width, 1),
-            );
-        }
-        if let Some(editor) = &state.plugin_editor {
-            render_plugin_editor(frame, panel, editor, ink);
-        }
-        return;
-    }
-
     draw_column_divider(frame, area, layout);
 
     let bold = ink.add_modifier(Modifier::BOLD);
     if layout.scene_heading.height > 0 {
-        crate::animation_plugins::draw_source_tabs(
-            frame,
+        frame.render_widget(
+            Paragraph::new(fit("Scene", usize::from(layout.scene_heading.width))).style(bold),
             layout.scene_heading,
-            state.animation_source_tab,
-            bold,
         );
     }
     if layout.global_heading.height > 0 {
@@ -1828,18 +1647,8 @@ mod tests {
             ],
             AnimationKind::Stars => &["lens", "look_altitude", "star_size"],
             AnimationKind::TopographicMaps => &["tide_seconds"],
-            AnimationKind::VectorTd => &["hue", "saturation", "scheme"],
             AnimationKind::Video => &["scene_seconds", "seed", "slowed_percent"],
             AnimationKind::Wikipedia => &["wiki_zoom"],
-            AnimationKind::Wind => &["gravity_strength", "merge_threshold", "rotation_speed"],
-            AnimationKind::Growth => &[
-                "density",
-                "growth_rate",
-                "pattern",
-                "color_mode",
-                "reserve_edge",
-                "reseed_seconds",
-            ],
             _ => &[],
         };
         let visible_ids: HashSet<_> = variants
@@ -3086,161 +2895,6 @@ mod tests {
             std::time::Duration::ZERO,
         );
         app.animation_frame.settle_for_test();
-    }
-
-    #[test]
-    fn plugin_editor_uses_shared_frame_and_keeps_actions_inside_it() {
-        for area in [Rect::new(0, 0, 80, 24), Rect::new(0, 0, 40, 12)] {
-            let panel = layout(area).panel;
-            let inner = crate::theme::block(true).inner(panel);
-            let action_y = inner.bottom().saturating_sub(1);
-            let editor = crate::animation_plugins::PluginEditor {
-                fence: crate::animation_plugins::PluginControlFence {
-                    package_digest: "0".repeat(64),
-                    selection: crate::animation_plugins::PluginSelection {
-                        package_id: "synthetic-plugin".into(),
-                        mode: ilium_animation_js::manifest::AnimationMode::Live,
-                        settings: serde_json::json!({}),
-                    },
-                    schema: serde_json::json!({}),
-                },
-                control_id: "synthetic-control".into(),
-                label: "Dither strength".into(),
-                kind: crate::animation_plugins::PluginEditorKind::Text { max_length: 16 },
-                input: "0.5".into(),
-                error: None,
-            };
-            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
-            terminal
-                .draw(|frame| render_plugin_editor(frame, panel, &editor, Style::new()))
-                .unwrap();
-            let buffer = terminal.backend().buffer();
-            assert_eq!(
-                buffer[(panel.x, panel.y)].symbol(),
-                "╭",
-                "the editor needs the shared rounded frame at {area:?}",
-            );
-            let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
-            assert!(
-                rendered.contains("Dither strength"),
-                "the editor title must remain visible at {area:?}",
-            );
-            assert_eq!(
-                plugin_editor_action_at(area, Position::new(panel.x, action_y)),
-                None,
-                "the left border must not activate Apply at {area:?}",
-            );
-            assert_eq!(
-                plugin_editor_action_at(area, Position::new(inner.x, action_y)),
-                Some(PluginEditorAction::Apply),
-            );
-            assert_eq!(
-                plugin_editor_action_at(area, Position::new(inner.x + 9, action_y)),
-                Some(PluginEditorAction::Cancel),
-            );
-            assert_eq!(
-                plugin_editor_action_at(area, Position::new(panel.right() - 1, action_y)),
-                None,
-                "the right border must remain inert at {area:?}",
-            );
-            crate::ui_capture::save(
-                &format!("plugin-editor-framed-{}x{}", area.width, area.height),
-                &terminal,
-            );
-        }
-    }
-
-    #[test]
-    fn plugin_common_projection_uses_shared_choice_ink_pointer_and_number_star() {
-        for width in [100, 140] {
-            let (mut app, _probe, _project) = settings_app(width, 60);
-            let native = app.animation_row_model();
-            let choice = native
-                .rows()
-                .iter()
-                .position(|row| *row == AnimationRow::Common("dither"))
-                .unwrap();
-            let number = native
-                .rows()
-                .iter()
-                .position(|row| *row == AnimationRow::Common("density"))
-                .unwrap();
-            if let Mode::Settings(state) = &mut app.mode {
-                state.animation_source_tab = crate::animation_plugins::AnimationSourceTab::Plugin;
-            }
-            let model = app.plugin_panel_model();
-            let choice_row = model
-                .rows
-                .iter()
-                .position(|row| *row == crate::animation_plugins::PluginPanelRow::Common(choice))
-                .unwrap();
-            if let Mode::Settings(state) = &mut app.mode {
-                state.plugin_panel.cursor = choice_row;
-            }
-            let area = plugin_panel_area(content_area(&app));
-            let Mode::Settings(state) = &app.mode else {
-                panic!("plugin panel");
-            };
-            let control = crate::value_plugin::panel_control(
-                &app,
-                area,
-                &model,
-                &state.plugin_panel,
-                choice_row,
-            )
-            .unwrap();
-            let geometry = control.geometry();
-            let rendered = draw(&mut app, width, 60);
-            for (rect, glyph) in [
-                (geometry.previous, "←"),
-                (geometry.open, "+"),
-                (geometry.next, "→"),
-            ] {
-                assert_eq!(
-                    rendered.backend().buffer()[(rect.x, rect.y)].symbol(),
-                    glyph
-                );
-            }
-            let original = app.animation_settings.dither;
-            pointer(
-                &mut app,
-                MouseEventKind::Down(MouseButton::Left),
-                geometry.value.x,
-                geometry.value.y,
-            );
-            assert_ne!(app.animation_settings.dither, original);
-            app.settle_filesystem_for_test();
-            pointer(
-                &mut app,
-                MouseEventKind::Down(MouseButton::Right),
-                geometry.value.x,
-                geometry.value.y,
-            );
-            app.settle_filesystem_for_test();
-            assert_eq!(app.animation_settings.dither, original);
-            key(&mut app, KeyCode::Char(' '));
-            assert!(matches!(&app.mode, Mode::ValueDialog(host)
-                if matches!(host.dialog, crate::value_dialog::ValueDialogState::Choice(_))));
-            key(&mut app, KeyCode::Esc);
-            assert!(matches!(&app.mode, Mode::Settings(state)
-                if state.plugin_editor.is_none()));
-            let number_row = model
-                .rows
-                .iter()
-                .position(|row| *row == crate::animation_plugins::PluginPanelRow::Common(number))
-                .unwrap();
-            if let Mode::Settings(state) = &mut app.mode {
-                state.plugin_panel.cursor = number_row;
-            }
-            key(&mut app, KeyCode::Char('*'));
-            assert!(
-                matches!(&app.mode, Mode::ValueDialog(host) if matches!(host.dialog, crate::value_dialog::ValueDialogState::Number(_)))
-            );
-            key(&mut app, KeyCode::Esc);
-            key(&mut app, KeyCode::Char(' '));
-            assert!(matches!(&app.mode, Mode::ValueDialog(host)
-                if matches!(host.dialog, crate::value_dialog::ValueDialogState::Number(_))));
-        }
     }
 
     #[test]
@@ -4859,8 +4513,7 @@ mod tests {
             let joined = text.join("\n");
             let wide = width >= 120;
             for needle in [
-                "Native",
-                "Plugin",
+                "Scene",
                 "Prev",
                 "Next",
                 "Look and display",

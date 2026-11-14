@@ -1,4 +1,4 @@
-//! The kernel `[ui]` keys and `remote_compaction.enabled` this plugin reads (flat dotted keys).
+//! The kernel `[ui]` keys this plugin reads (flat dotted keys).
 
 use ilium_plugin_sdk::host;
 use serde_json::Value;
@@ -7,7 +7,6 @@ use serde_json::Value;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct UiSettings {
     pub last_prompt_enabled: bool,
-    pub remote_compaction: bool,
 }
 
 fn flag(map: &serde_json::Map<String, Value>, key: &str, default: bool) -> bool {
@@ -22,7 +21,6 @@ impl UiSettings {
         let map = parsed.as_ref().and_then(Value::as_object).unwrap_or(&empty);
         UiSettings {
             last_prompt_enabled: flag(map, "ui.last_prompt_enabled", true),
-            remote_compaction: flag(map, "remote_compaction.enabled", false),
         }
     }
 }
