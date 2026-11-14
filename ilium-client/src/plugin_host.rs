@@ -9,6 +9,8 @@ pub mod keybindings;
 pub mod popup;
 pub(crate) mod remote;
 pub mod screens_rig;
+pub mod settings_rows;
+pub mod ui_state;
 pub mod view;
 pub mod views;
 pub mod widget_rig;

@@ -1882,6 +1882,20 @@ impl ClientPlugins {
             .collect()
     }
 
+    /// `(plugin id, manifest text)` of every enabled plugin, in catalogue order.
+    pub(crate) fn enabled_manifests(&self) -> Vec<(String, String)> {
+        self.catalogue
+            .iter()
+            .filter(|plugin| {
+                !self
+                    .server_states
+                    .get(&plugin.id)
+                    .is_some_and(|state| wiring::is_disabled_state(state))
+            })
+            .map(|plugin| (plugin.id.clone(), plugin.manifest.clone()))
+            .collect()
+    }
+
     /// The rows of the Settings plugin list.
     pub(crate) fn rows(&self) -> Vec<PluginRow> {
         let disabled = self
