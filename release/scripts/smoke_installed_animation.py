@@ -141,6 +141,8 @@ def validate_receipt(receipt: dict, *, target: dict, tag: str, package_format: s
 
 MACOS_REFUSAL_MESSAGE = ('macOS animation helper Seatbelt/resource isolation is not qualified; '
                          'unverified packages are disabled')
+WINDOWS_REFUSAL_MESSAGE = ('Windows animation helper AppContainer/Job isolation is not qualified; '
+                           'unverified packages are disabled')
 REFUSAL_FIELDS = {
     'schema', 'state', 'publication_allowed', 'scope', 'format', 'target', 'tag', 'version',
     'installed_root', 'launcher_command', 'native_audit_sha256', 'source_files',
@@ -148,12 +150,13 @@ REFUSAL_FIELDS = {
     'stderr_sha256', 'expected_refusal', 'catalogue'}
 
 
-def parse_refusal_output(stdout: str, stderr: str, exit_code: int) -> dict:
+def parse_refusal_output(stdout: str, stderr: str, exit_code: int,
+                         message: str = MACOS_REFUSAL_MESSAGE) -> dict:
     """The macOS contract: the probe lists both packages, renders none, and refuses on the sandbox."""
     require(isinstance(exit_code, int) and exit_code != 0,
             'macOS animation probe must refuse (non-zero exit), not succeed')
-    require(MACOS_REFUSAL_MESSAGE in stderr,
-            'macOS animation refusal message differs from the product contract')
+    require(message in stderr,
+            'animation refusal message differs from the product contract')
     require(stdout.endswith('\n') and len(stdout.encode('utf-8')) <= 65536,
             'macOS animation probe output is unbounded or incomplete')
     rows = [json.loads(line) for line in stdout.splitlines()]

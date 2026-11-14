@@ -34,7 +34,7 @@ pub(crate) struct LivePaneVerdict<'a> {
 /// the right panel. Captured once per render so every pane row reads the
 /// same view.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct PaneViewFacts {
+pub struct PaneViewFacts {
     /// The tree row under the cursor (`App::selected_node_id`).
     pub selected_node_id: Option<NodeId>,
     /// The right panel's terminals (`App::displayed_pane_slots`).

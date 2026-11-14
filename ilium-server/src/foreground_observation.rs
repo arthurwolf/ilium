@@ -368,7 +368,9 @@ mod tests {
             observe_with(
                 &client,
                 empty_request(),
-                Duration::from_millis(50),
+                // The deadline must expire while the callback is blocked, not
+                // before a loaded runner starts it (which drops `started_tx`).
+                Duration::from_secs(1),
                 move |_, _| {
                     let _ = started_tx.send(());
                     release_rx
@@ -465,7 +467,9 @@ mod tests {
             observe_with(
                 &client,
                 empty_request(),
-                Duration::from_millis(50),
+                // The deadline must expire while the callback is blocked, not
+                // before a loaded runner starts it (which drops `started_tx`).
+                Duration::from_secs(1),
                 move |_, _| {
                     let _ = started_tx.send(());
                     release_rx

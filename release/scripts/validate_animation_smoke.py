@@ -135,7 +135,7 @@ def bounded_jsonl(path, limit=8_000_000):
     return [json.loads(line) for line in data.splitlines()]
 
 
-def windows_events(rows, audit, expected_inputs, source_files):
+def windows_events(rows, audit, expected_inputs, source_files, animation_contract='render'):
     require(rows and all(isinstance(row, dict) for row in rows) and
             rows[-1].get('type') == 'result' and rows[-1].get('state') == 'passed',
             'Windows native installer smoke has no passing terminal result')
@@ -151,6 +151,7 @@ def windows_events(rows, audit, expected_inputs, source_files):
                                              for name in windows_installers.INSTALLER_NAMES} and
             rows[-1].get('version') == audit['version'] and
             rows[-1].get('native_exe_msi') is True and
+            rows[-1].get('animation_contract', 'render') == animation_contract and
             rows[-1].get('public_release_verified') is False,
             'Windows smoke run did not consume the sealed installer, archive and audit bytes')
     accounts = [row for row in rows if row.get('type') == 'account-before']
@@ -169,6 +170,23 @@ def windows_events(rows, audit, expected_inputs, source_files):
             exits[row.get('label')] = row
         elif kind == 'format-result' and row.get('state') == 'passed':
             formats.add(row.get('format'))
+        elif kind == 'installed-animation-refusal' and animation_contract == 'refusal':
+            label = row.get('label')
+            exit_row = exits.get(label + '-animation') if isinstance(label, str) else None
+            require(isinstance(exit_row, dict) and row.get('job_empty') is True and
+                    row.get('stdout_sha256') == hashlib.sha256(exit_row.get('stdout', '').encode()).hexdigest(),
+                    'Windows animation refusal lacks its owned command')
+            catalogue = animation.parse_refusal_output(exit_row['stdout'], exit_row.get('stderr', ''),
+                                                       exit_row.get('returncode'), animation.WINDOWS_REFUSAL_MESSAGE)
+            command = row.get('command')
+            client = PureWindowsPath(command[0]) if isinstance(command, list) and len(command) == 2 else None
+            require(client == installed / 'ilium.exe' and command[1] == 'release-animation-probe' and
+                    catalogue == row.get('catalogue') and
+                    catalogue.get('client_sha256') == audit['files']['ilium.exe'] and
+                    catalogue.get('helper_sha256') == audit['files']['ilium-animation-helper.exe'],
+                    'Windows animation refusal used another installed image')
+            proofs.append({'label': label, 'command': command, 'stdout': exit_row['stdout'],
+                           'stdout_sha256': row['stdout_sha256']})
         elif kind == 'installed-animation':
             label = row.get('label')
             exit_row = exits.get(label + '-animation') if isinstance(label, str) else None
@@ -357,7 +375,7 @@ def validate(marker, *, target, tag, audit_path, source_root, packages, archive_
     common = {'schema', 'state', 'publication_allowed', 'target', 'tag',
               'archive_sha256', 'native_audit_sha256', 'source_files',
               'package_files', 'native_identity'}
-    detail = ({'journal', 'proofs'} if target['os'] == 'windows' else
+    detail = ({'journal', 'proofs', *(('animation_contract',) if 'animation_contract' in marker else ())} if target['os'] == 'windows' else
               {'containers', 'host', 'container_events', 'host_events', 'appimage_fuse',
                'native_sandbox', 'native_sandbox_artifact', 'native_sandbox_artifact_sha256'})
     require(isinstance(marker, dict) and set(marker) == common | detail,
@@ -392,7 +410,8 @@ def validate(marker, *, target, tag, audit_path, source_root, packages, archive_
                            'receipt': sha(Path(packages) / windows_installers.RECEIPT_NAME),
                            **package_files}
         require(marker.get('proofs') == windows_events(rows, audit, expected_inputs,
-                                                       marker['source_files']),
+                                                       marker['source_files'],
+                                                       marker.get('animation_contract', 'render')),
                 'Windows animation smoke journal differs')
     else:
         artifact = marker.get('native_sandbox_artifact')
@@ -459,13 +478,15 @@ def seal(arguments):
     if target['os'] == 'windows':
         rows = bounded_jsonl(arguments.windows_journal)
         marker['journal'] = rows
+        if getattr(arguments, 'animation_contract', 'render') != 'render':
+            marker['animation_contract'] = arguments.animation_contract  # Render markers keep the schema-1 shape.
         expected_inputs = {'archive': marker['archive_sha256'],
                            'audit': marker['native_audit_sha256'],
                            'manifest': sha(arguments.manifest),
                            'receipt': sha(arguments.packages / windows_installers.RECEIPT_NAME),
                            **marker['package_files']}
         marker['proofs'] = windows_events(rows, audit, expected_inputs,
-                                          marker['source_files'])
+                                          marker['source_files'], getattr(arguments, 'animation_contract', 'render'))
         name = WINDOWS_NAME
     else:
         require(arguments.native_sandbox_receipt is not None,
@@ -513,6 +534,7 @@ def main():
     for name in ('workspace', 'manifest', 'audit', 'archive', 'packages',
                  'windows-journal', 'container-log', 'host-log', 'native-sandbox-receipt'):
         parser.add_argument('--' + name, type=Path)
+    parser.add_argument('--animation-contract', choices=('render', 'refusal'), default='render')
     parser.add_argument('--target', required=True)
     parser.add_argument('--tag', required=True)
     args = parser.parse_args()

@@ -97,7 +97,8 @@ def bind_inputs(arguments: argparse.Namespace, evidence: journal) -> dict:  # Va
     source_files = animation_seal.source_hashes(Path(__file__).resolve().parents[2])
     evidence.record('binding', tag=arguments.tag, version=version, paths={name: str(path) for name, path in paths.items()}, sha256=hashes, package_files=files, source_files=source_files)  # Retain the exact authority chain.
     return {'version': version, 'paths': paths, 'hashes': hashes, 'files': files,
-            'source_files': source_files}  # Keep native run source provenance.
+            'source_files': source_files,
+            'animation_contract': getattr(arguments, 'animation_contract', 'render')}  # Keep native run source provenance.
 #
 def inventory(directory: Path, files: dict[str, str], kind: str) -> dict[str, str]:  # Rehash the complete flat installation.
     plain(directory, directory=True)  # An installed junction is never accepted.
@@ -130,6 +131,14 @@ def isolated_environment(root: Path, directory: Path, system: Path) -> dict[str,
         destination = root / name.lower()  # Names are fixed and cannot escape the owned root.
         destination.mkdir()  # Refuse stale state instead of reusing it.
         environment[name] = str(destination)  # Apply overrides only to child processes.
+    # Known folders (SHGetKnownFolderPath, used by the product's ProjectDirs) expand
+    # %USERPROFILE%\AppData\{Roaming,Local} and fail when those folders do not exist,
+    # so give the isolated profile the standard layout and point the variables at it.
+    profile = Path(environment['USERPROFILE'])
+    for name, relative in (('APPDATA', ('AppData', 'Roaming')), ('LOCALAPPDATA', ('AppData', 'Local'))):
+        folder = profile.joinpath(*relative)
+        folder.mkdir(parents=True)  # A fresh profile; never reuse prior state.
+        environment[name] = str(folder)
     environment.update(PATH=str(directory) + ';' + str(system), COMSPEC=str(system / 'cmd.exe'), SHELL=str(system / 'cmd.exe'), HF_HUB_OFFLINE='1', TERM='xterm-256color', COLORTERM='truecolor')  # Exclude checkout/build tools from executable resolution.
     return environment  # No persistent environment variable is changed.
 #
@@ -146,7 +155,7 @@ def probe(directory: Path, binding: dict, kind: str, label: str, evidence: journ
     project = root / 'project'  # The supported --cwd contract supplies the session identity.
     project.mkdir()  # Ensure the native CLI sees an absolute existing project.
     evidence.record('execution-scope', label=label, project=str(project), path=environment['PATH'], source_resolution='absolute-installed-images-and-system-only-PATH', physical_source_hiding=False)  # Do not overclaim filesystem isolation.
-    job, server, pane, primary, failures = windows_job(evidence.root, label), None, None, None, []  # Hold custody through final retirement.
+    job, server, panes, primary, failures = windows_job(evidence.root, label), None, [], None, []  # Hold custody through final retirement.
     try:  # Always release this private job, including partial startup.
         observed = inventory(directory, binding['files'], kind)  # Recheck installed bytes immediately before execution.
         evidence.record('installed-files', label=label, files=observed)  # Separate payload from generated metadata by its names.
@@ -155,37 +164,57 @@ def probe(directory: Path, binding: dict, kind: str, label: str, evidence: journ
             require(release_tool.version_identity(name, result['stdout'], binding['version']) == name.removesuffix('.exe') + ' ' + binding['version'] and not result['stderr'], 'wrong exact installed version: ' + name)  # Parse the helper JSONL and reject false identities.
             require(job.active_count() == 0, '--version left a descendant running')  # Version probing must not start a hidden service.
         animation_command = [str(directory / 'ilium.exe'), 'release-animation-probe']
-        animation_result = checked_run(job, animation_command, environment, project, evidence,
-                                       label + '-animation', timeout=300)
-        require(not animation_result['stderr'] and job.active_count() == 0,
-                'installed animation probe left diagnostics or owned descendants')
-        catalogue, renders = animation_gate.parse_probe_output(animation_result['stdout'])
-        require(catalogue.get('client_path') == str(directory / 'ilium.exe') and
-                catalogue.get('helper_path') == str(directory / 'ilium-animation-helper.exe') and
-                catalogue.get('client_sha256') == observed['ilium.exe'] and
-                catalogue.get('helper_sha256') == observed['ilium-animation-helper.exe'] and
-                all(row['archive_sha256'] == observed[next(name for name in release_tool.APPROVED_PACKAGES
-                                                             if name.startswith(row['package'] + '-'))]
-                    for row in renders), 'installed animation did not use the audited client, helper and archives')
-        evidence.record('installed-animation', label=label, command=animation_command,
-                        stdout_sha256=release_tool.digest(animation_result['stdout'].encode('utf-8')),
-                        catalogue=catalogue, renders=renders, job_empty=True)
+        if binding.get('animation_contract') == 'refusal':
+            # Preview contract: the product refuses add-on animations on Windows until
+            # AppContainer/Job isolation is qualified. Assert that real refusal.
+            evidence.record('command-start', label=label + '-animation', command=animation_command, cwd=str(project), timeout_seconds=300)
+            refused = job.run(animation_command, environment, project, 300)
+            evidence.record('command-exit', label=label + '-animation', **refused)
+            catalogue = animation_gate.parse_refusal_output(refused['stdout'], refused['stderr'], refused['returncode'],
+                                                            animation_gate.WINDOWS_REFUSAL_MESSAGE)
+            require(job.active_count() == 0 and catalogue.get('client_path') == str(directory / 'ilium.exe') and
+                    catalogue.get('helper_path') == str(directory / 'ilium-animation-helper.exe') and
+                    catalogue.get('client_sha256') == observed['ilium.exe'] and
+                    catalogue.get('helper_sha256') == observed['ilium-animation-helper.exe'],
+                    'installed animation refusal used another image or left descendants')
+            evidence.record('installed-animation-refusal', label=label, command=animation_command,
+                            stdout_sha256=release_tool.digest(refused['stdout'].encode('utf-8')),
+                            catalogue=catalogue, job_empty=True)
+        else:
+            animation_result = checked_run(job, animation_command, environment, project, evidence,
+                                           label + '-animation', timeout=300)
+            require(not animation_result['stderr'] and job.active_count() == 0,
+                    'installed animation probe left diagnostics or owned descendants')
+            catalogue, renders = animation_gate.parse_probe_output(animation_result['stdout'])
+            require(catalogue.get('client_path') == str(directory / 'ilium.exe') and
+                    catalogue.get('helper_path') == str(directory / 'ilium-animation-helper.exe') and
+                    catalogue.get('client_sha256') == observed['ilium.exe'] and
+                    catalogue.get('helper_sha256') == observed['ilium-animation-helper.exe'] and
+                    all(row['archive_sha256'] == observed[next(name for name in release_tool.APPROVED_PACKAGES
+                                                                 if name.startswith(row['package'] + '-'))]
+                        for row in renders), 'installed animation did not use the audited client, helper and archives')
+            evidence.record('installed-animation', label=label, command=animation_command,
+                            stdout_sha256=release_tool.digest(animation_result['stdout'].encode('utf-8')),
+                            catalogue=catalogue, renders=renders, job_empty=True)
         marker, nonce = project / 'pane-marker.txt', uuid.uuid4().hex  # The shell must produce this run's marker.
         command = [str(directory / 'ilium.exe'), '--cwd', str(project)]  # Use only the packet's public CLI.
         checked_run(job, command + ['new-pane', '--', str(system / 'cmd.exe'), '/d', '/q', '/k', 'echo ' + nonce + '>pane-marker.txt'], environment, project, evidence, label + '-new-pane')  # /k leaves the real Windows shell alive in its PTY.
         server = job.hold_image(directory / 'ilium-server.exe')  # Acquire a live original handle after job-membership verification.
         wait_until(lambda: marker.is_file(), 30, 'pane did not create its marker')  # Startup/readiness must produce actual evidence.
         require(plain(marker).read_text(encoding='ascii').strip() == nonce, 'pane marker differs')  # A stale or wrong project cannot pass.
-        pane = job.hold_image(system / 'cmd.exe')  # Require the system shell inside this private job.
-        require(server.alive() and pane.alive(), 'server or pane exited before readiness')  # Marker creation alone is insufficient.
-        evidence.record('owned-processes', label=label, server=server.identity, pane=pane.identity, server_sha256=package.sha(directory / 'ilium-server.exe'), marker=nonce)  # Record handle-bound native identity.
+        # A pane runs its command through the user's shell (COMSPEC: `cmd.exe /C <line>`), so the
+        # pane owns exactly two system cmd.exe processes: that shell and the `/k` shell it started.
+        panes = job.hold_images(system / 'cmd.exe', 2)  # Require both inside this private job, and no others.
+        require(server.alive() and all(item.alive() for item in panes), 'server or pane exited before readiness')  # Marker creation alone is insufficient.
+        evidence.record('owned-processes', label=label, server=server.identity, pane=[item.identity for item in panes], server_sha256=package.sha(directory / 'ilium-server.exe'), marker=nonce)  # Record handle-bound native identity.
         listed = checked_run(job, command + ['ls'], environment, project, evidence, label + '-ls')  # Retain the supported human-readable listing unchanged.
-        require(bool(listed['stdout'].strip()) and server.alive() and pane.alive(), 'installed listing/liveness failed')  # Do not invent an undocumented listing parser.
+        require(bool(listed['stdout'].strip()) and server.alive() and all(item.alive() for item in panes), 'installed listing/liveness failed')  # Do not invent an undocumented listing parser.
         checked_run(job, command + ['kill-session', 'default'], environment, project, evidence, label + '-kill-session')  # Only an established task-owned session may be retired.
-        require(server.wait(30) and pane.wait(30), 'original server or pane did not exit')  # Wait on retained handles, never a later PID lookup.
-        evidence.record('retirement-readback', label=label, server=server.identity, pane=pane.identity, original_handles_signaled=True)  # Record original identity before releasing references.
+        require(server.wait(30) and all(item.wait(30) for item in panes), 'original server or pane did not exit')  # Wait on retained handles, never a later PID lookup.
+        evidence.record('retirement-readback', label=label, server=server.identity, pane=[item.identity for item in panes], original_handles_signaled=True)  # Record original identity before releasing references.
         server.close()  # Keep exited-process references from delaying job accounting.
-        pane.close()  # Both original exit observations remain in retained evidence.
+        for item in panes:  # Every original exit observation remains in retained evidence.
+            item.close()
         wait_until(lambda: job.active_count() == 0, 10, 'session left owned descendants running')  # Graceful success requires the complete job to empty.
         require(inventory(directory, binding['files'], kind) == observed, 'installed files changed during lifecycle')  # Include uninstaller custody in the within-run invariant.
         evidence.record('lifecycle', label=label, state='passed', original_server_exited=True, original_pane_exited=True, job_empty=True)  # This row follows graceful readbacks only.
@@ -193,7 +222,7 @@ def probe(directory: Path, binding: dict, kind: str, label: str, evidence: journ
         primary = error  # Cleanup cannot replace this primary error.
     finally:  # Never signal a foreign process by PID or image name.
         attempt(label + '-job-retirement', job.terminate_and_close, failures, evidence)  # Force only the private job on failure.
-        for owned in (server, pane):  # Retained process handles outlive PID reuse.
+        for owned in (server, *panes):  # Retained process handles outlive PID reuse.
             if owned is not None:  # Partial startup may not have acquired both handles.
                 attempt(label + '-handle-close', owned.close, failures, evidence)  # Close only handles acquired by this gate.
         transaction['uncertain'] |= bool(failures)  # Do not uninstall while process retirement is unverified.
@@ -425,7 +454,7 @@ def smoke(arguments: argparse.Namespace) -> None:  # Entry point used by the exi
         import validate_animation_smoke as animation_seal
         require(animation_seal.source_hashes(Path(__file__).resolve().parents[2]) ==
                 binding['source_files'], 'Windows smoke source changed during native execution')
-        evidence.record('result', command='smoke', state='passed', version=binding['version'], installers={name: binding['hashes'][name] for name in package.INSTALLER_NAMES}, input_sha256=binding['hashes'], source_files=binding['source_files'], native_exe_msi=True, public_release_verified=False)  # Successful source/native smoke never claims public publication.
+        evidence.record('result', command='smoke', state='passed', version=binding['version'], installers={name: binding['hashes'][name] for name in package.INSTALLER_NAMES}, input_sha256=binding['hashes'], source_files=binding['source_files'], native_exe_msi=True, animation_contract=binding['animation_contract'], public_release_verified=False)  # Successful source/native smoke never claims public publication.
     except BaseException as error:  # Preserve all failure classes for the calling CLI.
         try:  # Evidence failure must not replace the operational failure.
             evidence.record('result', command='smoke', state='failed', error=type(error).__name__ + ': ' + str(error), notes=getattr(error, '__notes__', []), public_release_verified=False)  # Retain primary and attached cleanup errors.

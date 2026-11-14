@@ -921,6 +921,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
     let tree_visibility = app.active_tree_projection(std::time::Instant::now());
     // Owned once per frame so the render options can borrow it.
     let blocking_error_facts = app.blocking_error_facts();
+    // Computed before `tree_state` is borrowed mutably by the render call.
     let pane_view_facts = crate::custom_status_live::PaneViewFacts::from_app(app);
     let mut painted_rows = tree_ui::render(
         frame,

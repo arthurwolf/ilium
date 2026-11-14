@@ -21,11 +21,15 @@ fn bindings(slug: &str) -> Vec<serde_json::Value> {
         serde_json::json!({"id":"synthetic-resource","slug":slug,"title":"Synthetic GPU","description":"Fixture only","rules":"Release after cleanup"}),
     ]
 }
+// Linux-only helper: used only by the Linux-only resource queue tests.
+#[cfg(target_os = "linux")]
 fn yaml(project: &Path) -> serde_norway::Value {
     serde_norway::from_str(&std::fs::read_to_string(project.join(".ilium/config.yaml")).unwrap())
         .unwrap()
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[test]
 fn structured_binding_readback_preserves_unknown_yaml_and_installed_revision() {
     let project = project_directory();
@@ -61,6 +65,8 @@ fn structured_binding_readback_preserves_unknown_yaml_and_installed_revision() {
     );
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[test]
 fn metadata_writer_uses_the_existing_client_lock() {
     let project = project_directory();
@@ -80,6 +86,8 @@ fn metadata_writer_uses_the_existing_client_lock() {
     assert_eq!(yaml(project.path())["new preference"].as_bool(), Some(true));
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[test]
 fn deleting_final_link_keeps_unrelated_metadata() {
     let project = project_directory();
@@ -106,6 +114,8 @@ fn missing_projects_are_not_recreated_by_maintenance() {
     assert!(!missing.exists());
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[test]
 fn provider_target_policy_creates_only_default_project_instructions() {
     let project = project_directory();
@@ -124,6 +134,8 @@ fn provider_target_policy_creates_only_default_project_instructions() {
     assert!(text.contains("gpu"));
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[test]
 fn existing_provider_targets_and_local_slugs_are_updated() {
     let project = project_directory();
@@ -196,6 +208,8 @@ fn malformed_instruction_target_prevents_installed_revision_receipt() {
     assert!(!project.path().join(".ilium/config.yaml").exists());
 }
 
+// Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+#[cfg(target_os = "linux")]
 #[test]
 fn identical_metadata_maintenance_does_not_replace_file() {
     let project = project_directory();

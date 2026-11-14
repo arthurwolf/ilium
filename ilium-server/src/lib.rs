@@ -19,9 +19,21 @@ mod agent_delivery;
 mod agent_identity_guard;
 mod agent_prompt;
 mod antigravity_statusline_delivery;
+// Staged cache-wait observation and refresh (not yet wired into the server loop);
+// remove this allowance when the detection loop calls it.
+#[allow(dead_code)]
 mod cache_refresh_request;
+// Staged cache-wait observation and refresh (not yet wired into the server loop);
+// remove this allowance when the detection loop calls it.
+#[allow(dead_code)]
 mod cache_refresh_transport;
+// Staged cache-wait observation and refresh (not yet wired into the server loop);
+// remove this allowance when the detection loop calls it.
+#[allow(dead_code)]
 mod cache_wait_evidence;
+// Staged cache-wait observation and refresh (not yet wired into the server loop);
+// remove this allowance when the detection loop calls it.
+#[allow(dead_code)]
 mod cache_wait_observation;
 mod chatroom_router;
 pub mod config;

@@ -12123,13 +12123,24 @@ mod tests {
 
         let (direct_tx, _direct_rx) = DirectEventSender::channel(16);
         handle_set_pane_focus(&state, pane_id, true, &direct_tx).await;
-        assert!(matches!(
-            events.recv().await,
-            Ok(ServerEvent::NodeFocusCheckpointChanged {
-                node_id,
-                activity_revision: received_revision,
-            }) if node_id == pane_id && received_revision == activity_revision
-        ));
+        // Other broadcasts (for example the activity projection) may precede
+        // the checkpoint; skip them, but name them if the checkpoint never comes.
+        let mut skipped = Vec::new();
+        let checkpoint = loop {
+            match tokio::time::timeout(std::time::Duration::from_secs(5), events.recv()).await {
+                Ok(Ok(ServerEvent::NodeFocusCheckpointChanged {
+                    node_id,
+                    activity_revision: received_revision,
+                })) => break Some((node_id, received_revision)),
+                Ok(Ok(other)) if skipped.len() < 16 => skipped.push(format!("{other:?}")),
+                _ => break None,
+            }
+        };
+        assert_eq!(
+            checkpoint,
+            Some((pane_id, activity_revision)),
+            "focus checkpoint after skipping {skipped:?}"
+        );
         {
             let tree = state.tree.read().await;
             assert!(

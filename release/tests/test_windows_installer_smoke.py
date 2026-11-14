@@ -39,6 +39,7 @@ class command_job:  # Execute the real probe control flow with synthetic process
         self.fault, self.events, self.commands, self.running = fault, [], [], False  # Keep command order and liveness separate.
         self.server = held_process('ilium-server.exe', self.events, fault != 'retirement')  # Retain the first server identity.
         self.pane = held_process('cmd.exe', self.events)  # Retain the pane shell independently.
+        self.pane_shell = held_process('cmd.exe', self.events)  # The shell the pane command runs through.
     def run(self, command, environment, cwd, timeout):  # No native executable is invoked by this fixture.
         self.commands.append((list(command), dict(environment), cwd, timeout))  # Retain exact executable resolution and bounds.
         output, error, code = '', '', 0  # Successful command defaults are adjusted by the named defect.
@@ -89,6 +90,10 @@ class command_job:  # Execute the real probe control flow with synthetic process
         return int(self.running)  # Nonzero remains nonzero until graceful shutdown succeeds.
     def hold_image(self, image):  # Hand back the same original observation on each request.
         return self.server if image.name == 'ilium-server.exe' else self.pane  # Native membership is tested in test_windows_job.
+    def hold_images(self, image, count):  # The pane's launching shell and its /k shell are both system cmd.exe.
+        if image.name != 'cmd.exe' or count != 2:  # Only the pane shell pair is requested as a set.
+            raise OSError('unexpected image set request')
+        return [self.pane, self.pane_shell]  # Two distinct observations, both retired by kill-session.
     def terminate_and_close(self):  # Model task-private failure cleanup only.
         self.events.append(('cleanup',))  # Prove the finalizer was reached.
         if self.fault == 'cleanup':  # Independent cleanup failure must block acceptance.
@@ -210,7 +215,7 @@ class smoke_tests(unittest.TestCase):  # Test source contracts on every native r
         self.assertEqual({item[3] for item in job.commands}, {60, 300})  # Bound the longer installed render gate separately.
         self.assertIn(str(self.system / 'cmd.exe'), job.commands[4][0])  # Use the native Windows shell contract.
         self.assertEqual(job.commands[-1][0][-2:], ['kill-session', 'default'])  # Stop only the established project session.
-        self.assertEqual(job.events, [('wait', 'ilium-server.exe', 30), ('wait', 'cmd.exe', 30), ('cleanup',)])  # Wait on both original observations with explicit bounds.
+        self.assertEqual(job.events, [('wait', 'ilium-server.exe', 30), ('wait', 'cmd.exe', 30), ('wait', 'cmd.exe', 30), ('cleanup',)])  # Wait on the server and both pane shells with explicit bounds.
         self.assertFalse(transaction['uncertain'])  # Clean retirement leaves no custody uncertainty.
         self.assertEqual(os.environ, before)  # Child isolation never changes persistent or parent environment state.
         self.assertEqual([row['state'] for row in self.evidence.rows if row['type'] == 'lifecycle'], ['passed'])  # Success follows all readbacks.

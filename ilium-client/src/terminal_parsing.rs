@@ -1222,14 +1222,10 @@ impl Job for ParserJob {
                 return cancellation_report(&shared);
             }
             retire_dropped_engines(&mut engines, &shared);
-            // Declared before the guard so swept commands drop after the queue lock is released.
-            let mut swept_commands: Vec<Command> = Vec::new();
-            let mut queue = shared
-                .queue
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
             // Deferred commands keep their active debit and their engine claim; a released
-            // pane's deferred command is never selected, so sweep it here.
+            // pane's deferred command is never selected, so sweep it here. Declared before
+            // the guard so swept commands drop after the queue lock is released.
+            let mut swept_commands: Vec<Command> = Vec::new();
             let mut deferred_index = 0;
             while deferred_index < deferred.len() {
                 if deferred[deferred_index]
@@ -1240,10 +1236,34 @@ impl Job for ParserJob {
                     deferred_index += 1;
                     continue;
                 }
-                let command = deferred.remove(deferred_index).expect("index is in range");
+                swept_commands.push(deferred.remove(deferred_index).expect("index is in range"));
+            }
+            // A swept suspended command reports the same release audit as one the
+            // selection path cancels, so the outcome never depends on which path
+            // saw the invalidation first. Reported before the queue lock is taken,
+            // since publishing a result may wait for room.
+            for command in &swept_commands {
+                if command.target.suspended_output.load(Ordering::Acquire) {
+                    push_result(
+                        &shared,
+                        ParseResult::Error {
+                            target: command.target.clone(),
+                            message: format!(
+                                "Confirmed pane invalidation canceled admitted terminal ordinal{} after{} bytes; remaining original command explicitly released",
+                                command.ordinal, command.cursor.consumed
+                            ),
+                        },
+                        &context,
+                    )?;
+                }
+            }
+            let mut queue = shared
+                .queue
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            for command in &swept_commands {
                 queue.active_bytes -= command.bytes;
                 queue.active_commands -= 1;
-                swept_commands.push(command);
             }
             let eligible = |queue: &Queue, deferred: &VecDeque<Command>| {
                 best_priority_index(

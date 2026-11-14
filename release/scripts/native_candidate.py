@@ -210,11 +210,12 @@ def build(arguments):
     profile = getattr(arguments, 'qualification_profile', 'full')
     preview_targets = {'linux-x86-preview': 'x86_64-unknown-linux-gnu',
                        'linux-arm64-preview': 'aarch64-unknown-linux-gnu',
-                       'macos-arm64-preview': 'aarch64-apple-darwin'}
+                       'macos-arm64-preview': 'aarch64-apple-darwin',
+                       'windows-x86-preview': 'x86_64-pc-windows-msvc'}
     require(profile == 'full' or profile in preview_targets, 'Unknown native qualification profile')
     if profile in preview_targets:
         require(arguments.target == preview_targets[profile] and
-                re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-' + ('preview' if profile.startswith('macos') else 'linux') + r'\.[0-9]+', arguments.tag),
+                re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-' + ('preview' if profile.startswith(('macos', 'windows')) else 'linux') + r'\.[0-9]+', arguments.tag),
                 'Preview profile requires its matching target and preview tag')
     require(arguments.output_directory.is_absolute() and not arguments.output_directory.exists(), 'Output must be a new absolute owned directory')
     require(arguments.build_directory.is_absolute() and arguments.build_directory.is_dir() and not arguments.build_directory.is_symlink(), 'Explicit native build directory required')
@@ -298,7 +299,7 @@ def build(arguments):
 
 def parser():
     result = JsonArgumentParser(description=__doc__, allow_abbrev=False)
-    result.add_argument('--qualification-profile', choices=('full', 'linux-x86-preview', 'linux-arm64-preview', 'macos-arm64-preview'), default='full')
+    result.add_argument('--qualification-profile', choices=('full', 'linux-x86-preview', 'linux-arm64-preview', 'macos-arm64-preview', 'windows-x86-preview'), default='full')
     for name in ('manifest', 'workspace', 'build-directory', 'output-directory', 'dependency-inventory', 'ort-source-archive', 'model-directory'):
         result.add_argument('--' + name, type=Path, required=True)
     for name in ('tag', 'target', 'runner-identity'):

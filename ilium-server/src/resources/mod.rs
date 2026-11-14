@@ -91,7 +91,8 @@ impl ResourceService {
         }
     }
 }
-#[cfg(test)]
+// Used only by the Linux-only resource queue tests.
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) async fn hold_catalog_access_for_test(
     state: &ServerState,
 ) -> tokio::sync::MutexGuard<'_, ()> {

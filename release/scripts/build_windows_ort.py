@@ -97,7 +97,29 @@ def logged_command(command, cwd, environment, log_path):
                                 stdout=log, stderr=subprocess.STDOUT, check=False)
     emit({"type": "artifact", "path": str(Path(log_path).resolve()),
           "sha256": digest(Path(log_path).read_bytes())})
+    if result.returncode != 0:
+        print_failure_excerpt(log_path)
     require(result.returncode == 0, f"native build failed exit={result.returncode}; complete log: {log_path}")
+
+
+def failure_excerpt(text, context_lines=20, max_errors=10, tail_lines=60):
+    """Compiler error blocks plus the log tail, so a failed native build is diagnosable from the job log."""
+    lines = [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in text.splitlines()]
+    starts = [index for index, line in enumerate(lines)
+              if line.startswith("error") or ": error " in line or ": fatal error " in line][:max_errors]
+    excerpt = []
+    for start in starts:
+        excerpt.extend(lines[start:start + context_lines])
+        excerpt.append("---")
+    excerpt.append(f"--- last {tail_lines} log lines ---")
+    excerpt.extend(lines[-tail_lines:])
+    return "\n".join(excerpt)
+
+
+def print_failure_excerpt(log_path):
+    text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+    print(f"Failure excerpt of {log_path}:", file=sys.stderr)
+    print(failure_excerpt(text), file=sys.stderr, flush=True)
 
 
 def parse_cmake_cache(path):
@@ -219,7 +241,7 @@ def resolve_msvc_toolchain(probe_directory):
         "vswhere_compiler": compiler_result,
         "selection": {"installation_path": str(installation), "installation_version": versions[0],
                       "toolset_version": toolset_version, "compiler_path": str(compiler)},
-        "cl": command_identity([str(compiler), "/nologo", "/Bv", "/c", str(probe_source), "/Fo" + str(probe_object)]),
+        "cl": command_identity([str(compiler), "/Bv", "/c", str(probe_source), "/Fo" + str(probe_object)]),
         "cmake": command_identity(["cmake", "--version"]),
         "rustc": command_identity(["rustc", "-Vv"]),
         "cargo": command_identity(["cargo", "--version"]),

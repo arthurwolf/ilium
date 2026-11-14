@@ -98,7 +98,7 @@ pub fn resolve_project_session(cwd: &Path, session_name: &str) -> Result<Project
     let socket_dir = runtime_socket_dir()?;
     let socket_key = socket_key_in(&socket_dir, &project_root, session_name);
     let socket_path = socket_dir.join(format!("{socket_key}.sock"));
-    if socket_path.as_os_str().len() >= MAX_SOCKET_PATH_BYTES {
+    if !socket_path_fits(&socket_path) {
         // Only reachable when the digest, the session name, and `.sock` alone
         // overflow the budget -- an empty slug cannot shrink any further.
         return Err(CliError::SocketPathTooLong(socket_path));
@@ -220,6 +220,16 @@ pub fn socket_path_in(socket_dir: &Path, project_root: &Path, session_name: &str
 /// directory, one separator, the twelve-character digest, its two separators,
 /// the session name, and `.sock`. Whatever remains is the slug's, which may be
 /// nothing at all.
+/// Whether `socket_path` can address a session endpoint on this platform.
+///
+/// Only a Unix-domain socket is bound by `sockaddr_un`. On Windows the path is
+/// an identity whose digest names the pipe (`\\.\pipe\ilium-<digest>`), so a
+/// deep `%LOCALAPPDATA%` (a long user name or a redirected profile) must not
+/// make the session unreachable.
+fn socket_path_fits(socket_path: &Path) -> bool {
+    !cfg!(unix) || socket_path.as_os_str().len() < MAX_SOCKET_PATH_BYTES
+}
+
 fn slug_budget(socket_dir: &Path, session_name: &str) -> usize {
     const DIGEST_PREFIX_BYTES: usize = 12;
     const SEPARATOR_BYTES: usize = 3; // one after the directory, two in the key
@@ -890,6 +900,13 @@ fn is_process_running(process_id: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_unix_socket_paths_are_bounded_by_sockaddr_un() {
+        let deep = PathBuf::from("x".repeat(MAX_SOCKET_PATH_BYTES + 20));
+        assert_eq!(socket_path_fits(&deep), !cfg!(unix));
+        assert!(socket_path_fits(Path::new("short.sock")));
+    }
 
     #[test]
     fn session_name_candidates_recover_the_name_from_any_socket_key() {

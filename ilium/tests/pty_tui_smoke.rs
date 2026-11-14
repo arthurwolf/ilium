@@ -127,6 +127,22 @@ const PROJECT_NAME: &str = "Smoketest";
 /// Sends `keys`, and re-sends them when `condition` stays false for 10 s,
 /// because a loaded Windows/macOS runner can refuse input during a repaint.
 /// Only for keys whose repeat is harmless once the first send was missed.
+/// On Windows, run the TUI tests of this binary one at a time. Several
+/// ConPTY-hosted TUIs at once on a small runner starve ConPTY and drop or
+/// shift cells; each test still runs every step and assertion.
+async fn windows_pty_serial_guard() -> Option<tokio::sync::MutexGuard<'static, ()>> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    if cfg!(windows) {
+        Some(
+            LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+                .lock()
+                .await,
+        )
+    } else {
+        None
+    }
+}
+
 async fn write_until(tui: &PtySession, keys: &[u8], mut condition: impl FnMut() -> bool) -> bool {
     for _ in 0..4 {
         tui.write(keys).expect("send keys");
@@ -135,6 +151,31 @@ async fn write_until(tui: &PtySession, keys: &[u8], mut condition: impl FnMut() 
         }
     }
     false
+}
+
+/// Whether the full-screen Settings view is showing.
+fn settings_open(screen: &str) -> bool {
+    screen.contains("\u{2699} Settings")
+}
+
+/// `wait_until` for a single TUI's screen.
+async fn wait_screen(
+    _tui: &PtySession,
+    condition: impl FnMut() -> bool,
+    timeout: Duration,
+) -> bool {
+    wait_until(condition, timeout).await
+}
+
+/// Types `keys` one key at a time with a short gap, as a person would. A
+/// burst of keys written at once into ConPTY occasionally lost one on the
+/// Windows runner. Each key is still delivered and checked.
+async fn write_keys_paced(tui: &PtySession, keys: &[&[u8]], what: &str) {
+    for key in keys {
+        tui.write(key)
+            .unwrap_or_else(|error| panic!("{what}: {error}"));
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    }
 }
 
 async fn wait_until(condition: impl FnMut() -> bool, timeout: Duration) -> bool {
@@ -1171,6 +1212,7 @@ fn install_raw_codex_stage_recorder(directory: &Path, transcript_path: &Path) ->
 #[cfg(unix)]
 #[tokio::test]
 async fn completed_progress_footer_expires_during_continuous_pty_output() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create expiry tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("isolate expiry runtime");
     let project_dir = temp_root.path().join("progress-expiry");
@@ -1428,6 +1470,7 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
 
 #[tokio::test]
 async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_help_keystroke() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_keyboard_config(&xdg);
@@ -1483,7 +1526,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // attached to, the tree snapshot round-tripped over IPC, and
     // rendering produced real screen content -- not just that the
     // process didn't crash.
-    let rendered = wait_until(
+    let rendered = wait_screen(
+        &tui,
         || {
             let screen = tui.screen_text();
             screen.contains(PROJECT_NAME) && screen.contains("default")
@@ -1508,7 +1552,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // frame's own borders say whether the client's layout fits the terminal
     // it was given.
     assert!(
-        wait_until(|| tui.screen_text().contains("VOICE"), WAIT_TIMEOUT).await,
+        wait_screen(&tui, || tui.screen_text().contains("VOICE"), WAIT_TIMEOUT).await,
         "expected the footer's voice control on the plain frame. terminal is \
          {:?}, the frame's top border is on row(s) {:?} and its bottom border \
          on row(s) {:?}, bottom rows are {:#?}",
@@ -1545,7 +1589,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .expect("writing Ctrl+B then w (FocusTree)");
     tui.write(b"j").expect("selecting the first tree entry");
     tui.write(b"l").expect("expanding the selected tree entry");
-    let pane_listed = wait_until(
+    let pane_listed = wait_screen(
+        &tui,
         || {
             let screen = tui.screen_text();
             screen.contains(IDLE_PANE_LABEL) && screen.contains(TERMINAL_ICON)
@@ -1558,7 +1603,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the \"cat\" pane to appear in the tree after expanding its group, got: {:?}",
         tui.screen_text()
     );
-    let focused_footer_shown = wait_until(|| tui.screen_text().contains("🎚️"), WAIT_TIMEOUT).await;
+    let focused_footer_shown =
+        wait_screen(&tui, || tui.screen_text().contains("🎚️"), WAIT_TIMEOUT).await;
     assert!(
         focused_footer_shown,
         "expected the settings sliders to be visible while the tree has keyboard focus, got: {:?}",
@@ -1574,22 +1620,41 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // the historical close happened on the next periodic maintenance tick,
     // when the workspace-search poll replaced every non-search mode with
     // Normal while merely checking whether a debounced scan was due.
-    let (_, settings_row) = tui
-        .with_screen(|screen| first_cell_containing(screen, "🎚️"))
-        .expect("rendered settings toolbar icon should have a concrete row");
+    // Both cells come from the one capture that satisfied the wait: a
+    // separate later capture can land while the host is mid-way through
+    // rewriting a row.
+    let mut toolbar_cells = None;
+    wait_until(
+        || {
+            toolbar_cells = tui.with_screen(|screen| {
+                Some((
+                    first_cell_containing(screen, "🎚")?,
+                    first_cell_containing(screen, "┬")?,
+                ))
+            });
+            toolbar_cells.is_some()
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    let ((_, settings_row), _) = toolbar_cells.unwrap_or_else(|| {
+        panic!(
+            "rendered settings toolbar icon should have a concrete row: {:?}",
+            tui.screen_text()
+        )
+    });
     // The emoji's vt100 payload can occupy a different cell than ratatui's
     // Unicode-width calculation under load. The Settings hit box is anchored
     // to the tree's right edge, so click its stable interior cell two columns
     // left of the rendered tree/pane divider instead of deriving x from the
     // grapheme-storage cell.
-    let (tree_divider_column, _) = tui
-        .with_screen(|screen| first_cell_containing(screen, "┬"))
-        .expect("tree/pane divider should have a concrete cell");
+    let (_, (tree_divider_column, _)) =
+        toolbar_cells.expect("tree/pane divider should have a concrete cell");
     let settings_column = tree_divider_column.saturating_sub(2);
     tui.write(&sgr_mouse_down(0, settings_column, settings_row))
         .expect("pressing the settings toolbar icon");
     assert!(
-        wait_until(|| tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
+        wait_screen(&tui, || settings_open(&tui.screen_text()), WAIT_TIMEOUT).await,
         "expected the settings press to open Settings, got: {:?}",
         tui.screen_text()
     );
@@ -1599,7 +1664,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // more than one cycle proves maintenance no longer destroys Settings.
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert!(
-        tui.screen_text().contains("⚙ Settings"),
+        settings_open(&tui.screen_text()),
         "Settings closed after the opening click and maintenance ticks: {:?}",
         tui.screen_text()
     );
@@ -1609,7 +1674,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // is still here with Settings open, only the tab navigated to below can
     // have displaced it.
     assert!(
-        tui.screen_text().contains("VOICE"),
+        wait_screen(&tui, || tui.screen_text().contains("VOICE"), WAIT_TIMEOUT).await,
         "the footer's voice control vanished when Settings opened. rows written \
          to their last column are {:?} (a written last cell wraps, and on the \
          last row scrolls), bottom rows are {:#?}",
@@ -1625,7 +1690,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         ilium_client::app::SettingsTab::VoiceControl,
     ))
     .expect("navigating to Voice control settings");
-    let voice_settings_shown = wait_until(
+    let voice_settings_shown = wait_screen(
+        &tui,
         || {
             let screen = tui.screen_text();
             screen.contains("Voice control")
@@ -1645,7 +1711,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // the Voice tab's frame is still arriving can miss it (the failing CI run
     // showed it present on a later read of the same screen). Wait for the
     // frame instead of sampling one partial frame.
-    let global_voice_footer_shown = wait_until(
+    let global_voice_footer_shown = wait_screen(
+        &tui,
         || {
             let screen = tui.screen_text();
             screen.contains("VOICE OFF") && screen.contains("F8")
@@ -1670,7 +1737,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"jjjjjjjjjjjj")
         .expect("navigate to the lower Voice control settings");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
                 screen.contains("Confirm terminal submissions") && screen.contains("Custom prompt")
@@ -1684,7 +1752,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"kkkkkkkkkkkk")
         .expect("return to the first Voice control setting");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || tui.screen_text().contains("OpenAI API key"),
             WAIT_TIMEOUT
         )
@@ -1697,10 +1766,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"j\r")
         .expect("opening the voice API-key child dialog");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
-                screen.contains("⚙ Settings")
+                settings_open(&screen)
                     && screen.contains("Voice control")
                     && screen.contains("Protected value")
                     && screen.contains("Keep existing")
@@ -1728,10 +1798,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(&sgr_mouse_up(replace_column, replace_button.y))
         .expect("release Replace in the nested API-key dialog");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
-                screen.contains("⚙ Settings")
+                settings_open(&screen)
                     && screen.contains("Voice control")
                     && !screen.contains("Keep existing")
             },
@@ -1745,12 +1816,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\x1b")
         .expect("closing mouse-opened Settings with Esc");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
-                !screen.contains("⚙ Settings")
-                    && screen.contains("VOICE OFF")
-                    && screen.contains("F8")
+                !settings_open(&screen) && screen.contains("VOICE OFF") && screen.contains("F8")
             },
             WAIT_TIMEOUT,
         )
@@ -1773,7 +1843,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     tui.write(&sgr_mouse_move(8, terminal_rows[0]))
         .expect("moving the pointer over the terminal row");
-    let row_actions_shown = wait_until(
+    let row_actions_shown = wait_screen(
+        &tui,
         || {
             tui.with_screen(|screen| {
                 !rows_containing_in_order(screen, &["✏️", "🔼", "🔽", "🚫", "♻️"]).is_empty()
@@ -1806,7 +1877,12 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(&sgr_mouse_release(2, context_column, default_rows[0]))
         .expect("releasing the right button over the default group");
     assert!(
-        wait_until(|| tui.screen_text().contains("Order by"), WAIT_TIMEOUT).await,
+        wait_screen(
+            &tui,
+            || tui.screen_text().contains("Order by"),
+            WAIT_TIMEOUT
+        )
+        .await,
         "expected Order by in the tree context menu, got: {:?}",
         tui.screen_text()
     );
@@ -1817,7 +1893,12 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\x1b")
         .expect("pressing Escape over the tree context menu");
     assert!(
-        wait_until(|| !tui.screen_text().contains("Tree actions"), WAIT_TIMEOUT).await,
+        wait_screen(
+            &tui,
+            || !tui.screen_text().contains("Tree actions"),
+            WAIT_TIMEOUT
+        )
+        .await,
         "Escape should dismiss the tree context menu, got: {:?}",
         tui.screen_text()
     );
@@ -1827,7 +1908,12 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(&sgr_mouse_release(2, context_column, default_rows[0]))
         .expect("releasing the right button after Escape");
     assert!(
-        wait_until(|| tui.screen_text().contains("Order by"), WAIT_TIMEOUT).await,
+        wait_screen(
+            &tui,
+            || tui.screen_text().contains("Order by"),
+            WAIT_TIMEOUT
+        )
+        .await,
         "expected the tree context menu after Escape, got: {:?}",
         tui.screen_text()
     );
@@ -1851,7 +1937,12 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(&sgr_mouse_up(dismiss_column, dismiss_row))
         .expect("releasing outside the tree context menu");
     assert!(
-        wait_until(|| !tui.screen_text().contains("Tree actions"), WAIT_TIMEOUT).await,
+        wait_screen(
+            &tui,
+            || !tui.screen_text().contains("Tree actions"),
+            WAIT_TIMEOUT
+        )
+        .await,
         "clicking outside the tree context menu should dismiss it. the click was \
          sent to column {dismiss_column} row {dismiss_row}, and the client \
          received these mouse events:\n{}\ngot: {:?}",
@@ -1865,7 +1956,12 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(&sgr_mouse_release(2, context_column, default_rows[0]))
         .expect("releasing the right button over the default group again");
     assert!(
-        wait_until(|| tui.screen_text().contains("Order by"), WAIT_TIMEOUT).await,
+        wait_screen(
+            &tui,
+            || tui.screen_text().contains("Order by"),
+            WAIT_TIMEOUT
+        )
+        .await,
         "expected the tree context menu to reopen, got: {:?}",
         tui.screen_text()
     );
@@ -1911,7 +2007,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(&sgr_mouse_up(order_label_column, order_row))
         .expect("releasing the Order by entry");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
                 // The check mark and the label are asserted separately because
@@ -1953,7 +2050,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // navigation contract without that ambiguous prefix.
     tui.write(b"jjj\r")
         .expect("selecting Age down from the Order by submenu");
-    let age_order_persisted = wait_until(
+    let age_order_persisted = wait_screen(
+        &tui,
         || {
             std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .unwrap_or_default()
@@ -1977,7 +2075,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // frame, not just that *a* frame renders.
     tui.write(b"\x02?")
         .expect("writing the leader+help keystroke to the pty");
-    let help_shown = wait_until(
+    let help_shown = wait_screen(
+        &tui,
         || {
             let screen = tui.screen_text();
             screen.contains("keyboard reference") && screen.contains("Ctrl+B ?")
@@ -1998,7 +2097,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // than only config/keymap units.
     tui.write(b"\x1b").expect("closing Help with Esc");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || !tui.screen_text().contains("keyboard reference"),
             WAIT_TIMEOUT
         )
@@ -2007,17 +2107,15 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     tui.write(b"\x02:")
         .expect("opening Settings with Ctrl+B then :");
-    let settings_shown = wait_until(
-        || tui.screen_text().contains("\u{2699} Settings"),
-        WAIT_TIMEOUT,
-    )
-    .await;
+    let settings_shown =
+        wait_screen(&tui, || settings_open(&tui.screen_text()), WAIT_TIMEOUT).await;
     assert!(
         settings_shown,
         "expected Settings to open, got: {:?}",
         tui.screen_text()
     );
-    let agent_controls_shown = wait_until(
+    let agent_controls_shown = wait_screen(
+        &tui,
         || {
             let screen = tui.screen_text();
             screen.contains("Fixed")
@@ -2039,7 +2137,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"?")
         .expect("opening help for the selected Appearance setting");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
                 screen.contains("Left panel sizing mode")
@@ -2055,7 +2154,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\x1b")
         .expect("closing Settings help back to the same Settings screen");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || tui.screen_text().contains("Left panel sizing")
                 && tui.screen_text().contains("Focused width"),
             WAIT_TIMEOUT,
@@ -2067,7 +2167,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"l")
         .expect("selecting the width-dependent sizing card");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
                 let config =
@@ -2097,7 +2198,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let settings_navigation = format!("{}ll", "j".repeat(agent_identifier_row));
     tui.write(settings_navigation.as_bytes())
         .expect("selecting icon mode for agent identifiers");
-    let agent_controls_persisted = wait_until(
+    let agent_controls_persisted = wait_screen(
+        &tui,
         || {
             let config = std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .unwrap_or_default();
@@ -2118,7 +2220,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         ilium_client::app::SettingsTab::Icons,
     ))
     .expect("switching to the Icons settings tab");
-    let icons_tab_shown = wait_until(
+    let icons_tab_shown = wait_screen(
+        &tui,
         || {
             let screen = tui.screen_text();
             screen.contains("Icon assignments")
@@ -2139,7 +2242,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"lr")
         .expect("changing the group icon and switching the preview to the real tree");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .is_ok_and(|config| config.contains("group = \"📂\"")),
             WAIT_TIMEOUT,
@@ -2150,7 +2254,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\r")
         .expect("opening the full-screen icon catalogue");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
                 screen.contains("Icon catalogue")
@@ -2168,7 +2273,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"v")
         .expect("switching the catalogue to its single-column inspection view");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || tui.with_screen(selected_catalogue_view) == Some("Single column"),
             WAIT_TIMEOUT
         )
@@ -2179,7 +2285,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"v")
         .expect("restoring the default multi-column catalogue view");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || tui.with_screen(selected_catalogue_view) == Some("Multi-column"),
             WAIT_TIMEOUT
         )
@@ -2194,7 +2301,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         ilium_client::app::SettingsTab::Keyboard,
     ))
     .expect("switching to the Keyboard settings tab");
-    let keyboard_tab_shown = wait_until(
+    let keyboard_tab_shown = wait_screen(
+        &tui,
         || {
             let screen = tui.screen_text();
             screen.contains("General prefix")
@@ -2213,7 +2321,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"l")
         .expect("changing the general prefix to Ctrl+C");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .is_ok_and(|config| config
                     .lines()
@@ -2226,7 +2335,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"h")
         .expect("restoring the Ctrl+B general prefix");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .is_ok_and(|config| config
                     .lines()
@@ -2253,7 +2363,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     ))
     .expect("switching to the Kanban Board settings tab");
     assert!(
-        wait_until(
+        wait_screen(&tui,
             || {
                 tui.with_screen(|screen| {
                     !rows_containing_in_order(
@@ -2277,7 +2387,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"l")
         .expect("increase board card previews to four lines");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .is_ok_and(|config| config.contains("card_preview_lines = 4")),
             WAIT_TIMEOUT,
@@ -2288,7 +2399,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"*")
         .expect("opening direct entry for the card preview line count");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || tui.screen_text().contains("Value: 4")
                 && tui.screen_text().contains("Enter applies"),
             WAIT_TIMEOUT,
@@ -2300,7 +2412,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\x7f5\r")
         .expect("replacing the preview line count with an exact value");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .is_ok_and(|config| config.contains("card_preview_lines = 5")),
             WAIT_TIMEOUT,
@@ -2325,7 +2438,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         ilium_client::app::SettingsTab::Sound,
     ))
     .expect("switching to the Sound settings tab");
-    let sound_tab_shown = wait_until(
+    let sound_tab_shown = wait_screen(
+        &tui,
         || {
             let screen = tui.screen_text();
             screen.contains("Sound source")
@@ -2340,9 +2454,15 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the Sound settings tab, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"jjj ")
-        .expect("moving to and toggling Agent finished");
-    let sound_event_disabled = wait_until(
+    // One key at a time: a burst of keys into ConPTY occasionally lost one,
+    // which moved the toggle onto the Preview row instead.
+    for key in [b"j", b"j", b"j", b" "] {
+        tui.write(key)
+            .expect("moving to and toggling Agent finished");
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    let sound_event_disabled = wait_screen(
+        &tui,
         || {
             let config = std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .unwrap_or_default();
@@ -2365,7 +2485,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     ))
     .expect("switching to the Titles settings tab");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
                 screen.contains("AGENT WORK BEING NAMED")
@@ -2381,7 +2502,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\x1b[D")
         .expect("selecting Labeling with the keyboard selector");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .is_ok_and(|config| config.contains("title_style = \"labeling\"")),
             WAIT_TIMEOUT,
@@ -2389,21 +2511,36 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .await,
         "expected Labeling to persist"
     );
-    let (summary_column, summary_row) = tui
-        .with_screen(|screen| {
-            let row = rows_containing(screen, "Title style")
-                .into_iter()
-                .find(|row| column_of_text_in_row(screen, *row, "→").is_some())?;
-            let column = column_of_text_in_row(screen, row, "→")?;
-            Some((column, row))
-        })
-        .expect("Title style next control should be visible");
+    // Read the control from a settled frame: the Labeling write above repaints
+    // this row, and a one-shot capture can land mid-rewrite.
+    let mut summary_control = None;
+    wait_until(
+        || {
+            summary_control = tui.with_screen(|screen| {
+                let row = rows_containing(screen, "Title style")
+                    .into_iter()
+                    .find(|row| column_of_text_in_row(screen, *row, "→").is_some())?;
+                let column = column_of_text_in_row(screen, row, "→")?;
+                Some((column, row))
+            });
+            summary_control.is_some()
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    let (summary_column, summary_row) = summary_control.unwrap_or_else(|| {
+        panic!(
+            "Title style next control should be visible: {:?}",
+            tui.screen_text()
+        )
+    });
     tui.write(&sgr_mouse_down(0, summary_column, summary_row))
         .expect("clicking Summarization");
     tui.write(&sgr_mouse_up(summary_column, summary_row))
         .expect("releasing Summarization click");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .is_ok_and(|config| config.contains("title_style = \"summarization\"")),
             WAIT_TIMEOUT,
@@ -2418,7 +2555,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\t")
         .expect("switching to the Triggers settings tab");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
                 screen.contains("AUTOMATION ROUTER")
@@ -2433,7 +2571,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     tui.write(b"l ")
         .expect("enabling the startup all-project restructure trigger");
-    let startup_trigger_persisted = wait_until(
+    let startup_trigger_persisted = wait_screen(
+        &tui,
         || {
             let config = std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
                 .unwrap_or_default();
@@ -2450,7 +2589,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"jjjjjj")
         .expect("moving to the Agent finishes work trigger event");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
                 screen.contains("Agent finishes work")
@@ -2471,7 +2611,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\t\t\t")
         .expect("switching to the Debug settings tab");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let screen = tui.screen_text();
                 screen.contains("Debug")
@@ -2503,7 +2644,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
 
     tui.write(b" ").expect("enabling Debug file logging");
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || {
                 let config =
                     std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
@@ -2531,7 +2673,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         String::from_utf8_lossy(&logged_action.stderr)
     );
     assert!(
-        wait_until(
+        wait_screen(
+            &tui,
             || std::fs::read_to_string(&active_log_path)
                 .is_ok_and(|log| log.contains("request_name=\"new_pane\"")),
             WAIT_TIMEOUT,
@@ -2582,6 +2725,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
 /// session to verify that both settings reload from their authoritative file.
 #[tokio::test]
 async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create universal-selector tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("universal-selectors-project");
@@ -2638,11 +2782,7 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         .write(b"\x02:")
         .expect("open Settings with the default Tmux leader binding");
     assert!(
-        wait_until(
-            || first_client.screen_text().contains("⚙ Settings"),
-            WAIT_TIMEOUT
-        )
-        .await,
+        wait_until(|| settings_open(&first_client.screen_text()), WAIT_TIMEOUT).await,
         "expected Settings to open, got: {:?}",
         first_client.screen_text()
     );
@@ -2678,9 +2818,12 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         "the PTY catalog should render all six Tree order choices: {:?}",
         first_client.screen_text()
     );
-    first_client
-        .write(b"\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\r")
-        .expect("choose Name Z-A, several entries beyond the current value");
+    write_keys_paced(
+        &first_client,
+        &[b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\x1b[B", b"\r"],
+        "choose Name Z-A, several entries beyond the current value",
+    )
+    .await;
     assert!(
         wait_until(
             || {
@@ -3047,9 +3190,25 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
     // actual city and duration controls. The bundled default catalog is
     // offline; the test makes no service/provider call or agent request.
     let osm_label = ilium_client::background_animation::AnimationKind::OpenStreetMap.label();
-    let (scene_column, scene_row) = first_client
-        .with_screen(|screen| animation_scene_label_cell(screen, default_animation.kind.label()))
-        .expect("initial scene is visible in the scene list");
+    // Wait for the scene list to settle after the palette dialog closes; a
+    // single capture can land mid-repaint (seen under ConPTY).
+    let mut scene_cell = None;
+    wait_until(
+        || {
+            scene_cell = first_client.with_screen(|screen| {
+                animation_scene_label_cell(screen, default_animation.kind.label())
+            });
+            scene_cell.is_some()
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
+    let (scene_column, scene_row) = scene_cell.unwrap_or_else(|| {
+        panic!(
+            "initial scene is visible in the scene list: {:?}",
+            first_client.screen_text()
+        )
+    });
     for _ in 0..ilium_client::background_animation::AnimationKind::ALL.len() {
         if first_client
             .with_screen(|screen| animation_scene_label_cell(screen, osm_label))
@@ -3241,13 +3400,15 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         "numeric scene editor should show the saved duration: {:?}",
         first_client.screen_text()
     );
-    let exact_dwell_keys = vec![0x7f; initial_dwell.to_string().len()]
-        .into_iter()
-        .chain(b"137\r".iter().copied())
+    let exact_dwell_keys = std::iter::repeat_n(&b"\x7f"[..], initial_dwell.to_string().len())
+        .chain([&b"1"[..], b"3", b"7", b"\r"])
         .collect::<Vec<_>>();
-    first_client
-        .write(&exact_dwell_keys)
-        .expect("enter exact off-step duration 137 seconds");
+    write_keys_paced(
+        &first_client,
+        &exact_dwell_keys,
+        "enter exact off-step duration 137 seconds",
+    )
+    .await;
     assert!(
         wait_until(
             || ilium_client::project_config::load(&animation_home)
@@ -3263,7 +3424,8 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
             WAIT_TIMEOUT,
         )
         .await,
-        "exact off-step duration did not persist"
+        "exact off-step duration did not persist: {:?}",
+        first_client.screen_text()
     );
     assert!(
         wait_until(
@@ -3314,11 +3476,7 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
         .write(b"\x02:")
         .expect("open Settings in fresh client");
     assert!(
-        wait_until(
-            || fresh_client.screen_text().contains("⚙ Settings"),
-            WAIT_TIMEOUT,
-        )
-        .await,
+        wait_until(|| settings_open(&fresh_client.screen_text()), WAIT_TIMEOUT,).await,
         "fresh client should open Settings before row navigation"
     );
     fresh_client
@@ -3687,6 +3845,7 @@ async fn universal_settings_catalog_and_exact_number_survive_fresh_client_reload
 /// then verifies the selected prefix is read from disk by a fresh client.
 #[tokio::test]
 async fn onboarding_keyboard_prefix_catalog_survives_fresh_client_reload() {
+    let _windows_serial = windows_pty_serial_guard().await;
     use ilium_client::onboarding::{
         progress::OnboardingProgress,
         state::{AiChoice, KeyboardChoice, SoundChoice, Step},
@@ -3849,6 +4008,7 @@ async fn onboarding_keyboard_prefix_catalog_survives_fresh_client_reload() {
 #[cfg(unix)]
 #[tokio::test]
 async fn toolbar_model_strength_and_effort_catalog_use_only_fake_providers() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create fake-toolbar tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_keyboard_config(&xdg);
@@ -4107,6 +4267,7 @@ fn write_restart_shim(staged_path: &Path, final_path: &Path) -> PathBuf {
 /// process loads the replacement before reattaching to the untouched server.
 #[tokio::test]
 async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_keyboard_config(&xdg);
@@ -4242,13 +4403,21 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     let menu_column = 8;
     tui.write(&sgr_mouse_click(2, menu_column, default_rows[0]))
         .expect("right-click default group");
+    // The row comes from the capture that satisfied the wait; a separate
+    // later capture can land mid-way through a row rewrite.
+    let mut restart_rows = Vec::new();
     assert!(
-        wait_until(|| tui.screen_text().contains("Restart"), WAIT_TIMEOUT).await,
-        "expected Restart in the real context menu, got: {:?}",
+        wait_until(
+            || {
+                restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
+                restart_rows.len() == 1
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected exactly one Restart row in the real context menu, got: {:?}",
         tui.screen_text()
     );
-    let restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
-    assert_eq!(restart_rows.len(), 1, "expected one rendered Restart row");
     // Restart owns exactly one press/release gesture. The general helper also
     // sends a second legacy release, which is unrelated input after exit and
     // must correctly remain in custody rather than silently disappearing.
@@ -4348,6 +4517,7 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
 /// connected when two live terminal streams share the right panel.
 #[tokio::test]
 async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("split-project");
@@ -4497,7 +4667,14 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     let both_routed = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains("left-route") && screen.contains("right-route")
+            // The first child already showed "left-route" in full above. ConPTY's
+            // incremental repaint of the tree rows holding the wide pager emoji can
+            // shift the row by one cell and overwrite the first character next to
+            // the split border (seen on the Windows runner), so after the second
+            // route accept the first child's text without that one cell.
+            let left_visible =
+                screen.contains("left-route") || (cfg!(windows) && screen.contains("eft-route"));
+            left_visible && screen.contains("right-route")
         },
         WAIT_TIMEOUT,
     )
@@ -5054,6 +5231,7 @@ fn sgr_mouse_move(column: u16, row: u16) -> Vec<u8> {
 /// toolbar's exact pixel position at this pty's fixed size.
 #[tokio::test]
 async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_create_burst() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("project");
@@ -5429,6 +5607,7 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
 /// child process without invoking any real installed agent or network access.
 #[tokio::test]
 async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("project");
@@ -5663,6 +5842,7 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
 /// canonical writer syntax, and creation must leave both files untouched.
 #[tokio::test]
 async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("board-project");
@@ -6375,6 +6555,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
 /// observed only after the server writes the scheduled text plus Enter.
 #[tokio::test]
 async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("scheduled-input-project");
@@ -6552,6 +6733,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
 /// into the enclosing group immediately before that former parent.
 #[tokio::test]
 async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_tree_row_management_controls(&xdg);
@@ -6627,14 +6809,69 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         .expect("press nested group row");
     tui.write(&sgr_mouse_up(8, nested_row))
         .expect("release nested group row");
-    tui.write(b"\x1b[C\x02c")
-        .expect("expand nested group and create its pane");
+    // Wait for each step to land before the next key. An empty group has no
+    // expander, so create the child first and expand the group afterwards if
+    // it rendered collapsed (seen under ConPTY, where the keys raced).
+    let nested_selected = |screen: &str| {
+        screen
+            .lines()
+            .any(|line| line.contains("nested") && line.contains('\u{270f}'))
+    };
+    assert!(
+        wait_until(|| nested_selected(&tui.screen_text()), WAIT_TIMEOUT).await,
+        "expected the click to select the nested group, got: {:?}",
+        tui.screen_text()
+    );
+    // The edit icons can come from hover too; give the click itself time to land.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    tui.write(b"\x02c").expect("create the nested group's pane");
+    let nested_marker = |marker: char| {
+        tui.screen_text()
+            .lines()
+            .any(|line| line.contains("nested") && line.contains(marker))
+    };
+    assert!(
+        wait_until(
+            || nested_marker('\u{25b6}') || nested_marker('\u{25bc}'),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "expected the nested group to gain its pane, got: {:?}",
+        tui.screen_text()
+    );
+    // A left click on a group row toggles it, so click exactly once and give
+    // that click the full timeout: retrying a toggle lets a late first click
+    // and a retry cancel each other out.
+    if !wait_until(|| nested_marker('\u{25bc}'), Duration::from_secs(2)).await {
+        // Past the client's 400 ms double-click window, so this is no rename.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let nested_row = tui
+            .with_screen(|screen| rows_containing(screen, "nested"))
+            .first()
+            .copied()
+            .unwrap_or_else(|| panic!("nested group row: {:?}", tui.screen_text()));
+        tui.write(&sgr_mouse_down(0, 8, nested_row))
+            .expect("press collapsed nested group row");
+        tui.write(&sgr_mouse_up(8, nested_row))
+            .expect("release collapsed nested group row");
+        assert!(
+            wait_until(|| nested_marker('\u{25bc}'), WAIT_TIMEOUT).await,
+            "expected one click to expand the nested group, got: {:?}",
+            tui.screen_text()
+        );
+    }
+    // Read both rows from the same settled frame that satisfied the wait; a
+    // later separate capture can land mid-repaint (seen under ConPTY).
+    let mut rows_before = None;
     assert!(
         wait_until(
             || {
-                tui.with_screen(|screen| {
-                    rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]).len() == 1
-                })
+                rows_before = tui.with_screen(|screen| {
+                    let shells = rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]);
+                    let nested = rows_containing(screen, "nested");
+                    (shells.len() == 1 && !nested.is_empty()).then(|| (nested[0], shells[0]))
+                });
+                rows_before.is_some()
             },
             WAIT_TIMEOUT,
         )
@@ -6642,10 +6879,8 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
         "expected one shell inside nested group, got: {:?}",
         tui.screen_text()
     );
-
-    let nested_row_before = tui.with_screen(|screen| rows_containing(screen, "nested"))[0];
-    let shell_row_before =
-        tui.with_screen(|screen| rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]))[0];
+    let (nested_row_before, shell_row_before) =
+        rows_before.expect("the wait above returned only after capturing both rows");
     assert!(
         nested_row_before < shell_row_before,
         "fixture pane must begin below its nested parent: {:?}",
@@ -6742,6 +6977,7 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
 /// makes the first level appear but breaks at the next directory.
 #[tokio::test]
 async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("folder-project");
@@ -6936,6 +7172,7 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
 /// them, and Save follows the same active policy.
 #[tokio::test]
 async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_agent_debug_config(&xdg);
@@ -7376,6 +7613,7 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
 )]
 #[tokio::test]
 async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("last-prompt-project");
@@ -7554,6 +7792,7 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
 /// banner would waste it for no reason.
 #[tokio::test]
 async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correction() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("typed-prompt-project");
@@ -7726,6 +7965,7 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
 /// Its text occupies the first row while terminal content keeps its position.
 #[tokio::test]
 async fn last_prompt_banner_keeps_fixed_slot_for_a_short_prompt() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("short-prompt-project");
@@ -7854,6 +8094,7 @@ async fn last_prompt_banner_keeps_fixed_slot_for_a_short_prompt() {
 /// the popover must say it is still waiting for one rather than show numbers.
 #[tokio::test]
 async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create tempdir");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     let project_dir = temp_root.path().join("stats-popover-project");
@@ -8054,8 +8295,16 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
     tui.write(&sgr_mouse_move(icon_column + 60, 42))
         .expect("wander away from the pinned popover");
     tokio::time::sleep(Duration::from_millis(400)).await;
+    // An unpinned preview is already gone by now (the dismissal above takes
+    // one frame) and nothing reopens it, so finding the popover in any
+    // capture of the next second proves it stayed open. A single capture
+    // could land mid-way through a row rewrite.
     assert!(
-        tui.screen_text().contains("Costs & stats"),
+        wait_until(
+            || tui.screen_text().contains("Costs & stats"),
+            Duration::from_secs(1)
+        )
+        .await,
         "a pinned popover must stay open: {:?}",
         tui.screen_text()
     );
@@ -8112,6 +8361,7 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
 #[cfg(unix)]
 #[tokio::test]
 async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_input() {
+    let _windows_serial = windows_pty_serial_guard().await;
     let temp_root = tempfile::tempdir().expect("create isolated root");
     let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");
     seed_keyboard_config(&xdg);
@@ -8537,7 +8787,7 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
     tui.write(&sgr_mouse_up(settings_column, settings_row))
         .expect("release worktree context menu Settings click");
     assert!(
-        wait_until(|| tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
+        wait_until(|| settings_open(&tui.screen_text()), WAIT_TIMEOUT).await,
         "Settings did not open: {:?}",
         tui.screen_text()
     );
@@ -8592,6 +8842,7 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
 /// The answering case also proves the conditional keyboard Push/Pop custody.
 #[tokio::test]
 async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_terminals() {
+    let _windows_serial = windows_pty_serial_guard().await;
     for terminal_answers in [false, true] {
         let temp_root = tempfile::tempdir().expect("create isolated image-probe root");
         let xdg = IsolatedXdgDirs::under(temp_root.path()).expect("create isolated XDG dirs");

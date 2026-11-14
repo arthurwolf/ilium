@@ -2002,8 +2002,10 @@ mod tests {
 
     #[test]
     fn image_background_monotone_preserves_image_tone_and_inversion() {
-        let mut look = ilium_ambient::style::Appearance::default();
-        look.mode = ilium_ambient::style::ColorMode::Monotone;
+        let mut look = ilium_ambient::style::Appearance {
+            mode: ilium_ambient::style::ColorMode::Monotone,
+            ..Default::default()
+        };
         let ink = Some((240, 120, 60));
         let dark = image_background(ink, Some((32, 32, 32)), Some(8), &look).unwrap();
         let light = image_background(ink, Some((224, 224, 224)), Some(8), &look).unwrap();

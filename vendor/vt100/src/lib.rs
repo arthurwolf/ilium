@@ -56,9 +56,11 @@ mod perform;
 mod row;
 mod screen;
 mod term;
+mod width;
 
 pub use attrs::Color;
 pub use callbacks::Callbacks;
 pub use cell::Cell;
 pub use parser::Parser;
 pub use screen::{MouseProtocolEncoding, MouseProtocolMode, Screen};
+pub use width::WidthPolicy;

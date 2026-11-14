@@ -21723,7 +21723,20 @@ mod tests {
         let now = Instant::now();
         let mut workers =
             crate::search_workers::SearchWorkers::new(crate::execution::test_client());
-        crate::tick::on_tick(&mut app, now, false, &mut workers);
+        // Background collectors (session stats, models, goals, cost) finish on
+        // their own threads and may request one redraw late on a slow machine.
+        // Settle on three consecutive quiet ticks so the baseline measures only
+        // the prompt update below.
+        let settle_deadline = Instant::now() + std::time::Duration::from_secs(10);
+        let mut quiet_ticks = 0;
+        while quiet_ticks < 3 && Instant::now() < settle_deadline {
+            if crate::tick::on_tick(&mut app, now, false, &mut workers) {
+                quiet_ticks = 0;
+            } else {
+                quiet_ticks += 1;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         assert!(!crate::tick::on_tick(&mut app, now, false, &mut workers));
         let tail = PromptTail::new("session".into(), now);
         let binding = Arc::clone(&tail.binding);

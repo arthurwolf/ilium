@@ -5,6 +5,7 @@ param([string]$Installer, [switch]$TransactionRegressionsOnly)
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 leaves $PSScriptRoot empty inside a param() default.
 if (-not $Installer) { $Installer = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) '../install.ps1' }
+$animationPackages = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) '../../ilium-animation-js/assets/packages'
 $tokens = $null; $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { @{type='error';stage='parse';errors=@($parseErrors | ForEach-Object {$_.Message})} | ConvertTo-Json -Compress; exit 1 }
@@ -43,8 +44,9 @@ function New-ContractZip([string]$Mode) {
     $file = [IO.File]::Open($path, 'CreateNew')
     $zip = New-Object IO.Compression.ZipArchive($file, [IO.Compression.ZipArchiveMode]::Create)
     try {
-        $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium-server.exe', 'ilium.exe')
-        if ($Mode -eq 'partial') { $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium.exe') }
+        # Every member install.ps1 requires: client, server, animation helper and the two bundled packs.
+        $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium-server.exe', 'ilium.exe', 'ilium-animation-helper.exe', 'beach-1.0.0.iliumanim', 'carpet-1.0.0.iliumanim')
+        if ($Mode -eq 'partial') { $names = @('VERSION', 'THIRD-PARTY.txt', 'ilium.exe', 'ilium-animation-helper.exe', 'beach-1.0.0.iliumanim', 'carpet-1.0.0.iliumanim') }
         if ($Mode -eq 'traversal') { $names += '../outside' }
         if ($Mode -eq 'absolute') { $names += '/outside' }
         if ($Mode -eq 'duplicate') { $names += 'ilium.exe' }
@@ -62,7 +64,10 @@ function New-ContractZip([string]$Mode) {
                 $text = 'fixture'
                 if ($name -eq 'VERSION') { $text = "1.0.0`n" }
                 if ($name -eq 'VERSION' -and $Mode -eq 'version') { $text = "2.0.0`n" }
-                $data = [Text.Encoding]::UTF8.GetBytes($text); $stream.Write($data, 0, $data.Length)
+                $data = [Text.Encoding]::UTF8.GetBytes($text)
+                # install.ps1 pins the bundled animation packs to their compiled hashes, so the fixture carries the real pack bytes.
+                if ($name -like '*.iliumanim') { $data = [IO.File]::ReadAllBytes((Join-Path $animationPackages $name)) }
+                $stream.Write($data, 0, $data.Length)
             } finally { $stream.Dispose() }
         }
     } finally { $zip.Dispose(); $file.Dispose() }

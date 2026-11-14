@@ -154,6 +154,14 @@ class test_windows_job(unittest.TestCase):  # Behavioral contracts operate throu
         self.assertEqual(original.identity['created'], 9701)  # Retain the original creation identity.
         self.assertEqual(self.api.OpenProcess.call_count, 1)  # Retirement performs no fresh PID lookup.
         self.assertTrue(all(call.args[0] == 701 for call in self.api.WaitForSingleObject.call_args_list))  # Every liveness read uses the held handle.
+    def test_image_set_requires_the_exact_count_and_releases_partial_matches(self) -> None:  # A pane shell pair cannot be satisfied by one process.
+        self.wait_results[701] = 258  # The single job-owned process is live.
+        with self.assertRaises(OSError):  # One live match is not the two requested.
+            self.job.hold_images(self.image, 2)
+        self.api.CloseHandle.assert_any_call(701)  # The unaccepted observation is released, never signaled.
+        self.api.TerminateProcess.assert_not_called()  # Refusing custody signals nothing.
+        with self.assertRaises(ValueError):  # An empty set would prove nothing.
+            self.job.hold_images(self.image, 0)
     def test_reused_foreign_pid_is_closed_without_identity_or_signal(self) -> None:  # Membership must be checked after OpenProcess.
         self.pid_handles[7] = 702  # The enumerated PID now identifies a foreign process.
         self.assertEqual(self.job.query(), [])  # Foreign membership cannot supply installed-server evidence.

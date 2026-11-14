@@ -687,7 +687,7 @@ impl InputReservation {
             .worker
             .spawn(
                 "ilium-terminal-input",
-                WorkerKind::SynchronousIo,
+                WorkerKind::terminal_input(),
                 shared.stop.clone(),
                 move || wake.wake(),
                 move |_| {
