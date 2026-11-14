@@ -199,7 +199,8 @@ def probe(directory: Path, binding: dict, kind: str, label: str, evidence: journ
                             catalogue=catalogue, renders=renders, job_empty=True)
         marker, nonce = project / 'pane-marker.txt', uuid.uuid4().hex  # The shell must produce this run's marker.
         command = [str(directory / 'ilium.exe'), '--cwd', str(project)]  # Use only the packet's public CLI.
-        checked_run(job, command + ['new-pane', '--', str(system / 'cmd.exe'), '/d', '/q', '/k', 'echo ' + nonce + '>pane-marker.txt'], environment, project, evidence, label + '-new-pane')  # /k leaves the real Windows shell alive in its PTY.
+        (project / 'marker.cmd').write_text('@echo ' + nonce + '>pane-marker.txt\r\n', encoding='ascii')  # SCRATCH ONLY: quote-free marker for the pre-fix native artifact.
+        checked_run(job, command + ['new-pane', '--', str(system / 'cmd.exe'), '/d', '/q', '/k', str(project / 'marker.cmd')], environment, project, evidence, label + '-new-pane')  # /k leaves the real Windows shell alive in its PTY.
         server = job.hold_image(directory / 'ilium-server.exe')  # Acquire a live original handle after job-membership verification.
         try:  # SCRATCH DIAGNOSTIC ONLY (never on the release branch): capture the pane screen on failure.
             wait_until(lambda: marker.is_file(), 30, 'pane did not create its marker')  # Startup/readiness must produce actual evidence.

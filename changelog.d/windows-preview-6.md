@@ -2,6 +2,7 @@
 - Windows x86_64 preview downloads in prerelease v0.1.1-preview.6: per-user setup EXE, MSI and ZIP, built and installer-tested natively on GitHub Actions. They are unsigned, so SmartScreen warns. The release also carries the Linux files of v0.1.1-linux.3 and the macOS files of v0.1.1-preview.5 unchanged.
 
 ### Fixed
+- On Windows, pane commands that contain a quoted argument (for example `ilium new-pane -- claude "fix the bug"`) now run as written. Previously, `cmd.exe` received C-runtime escaped quotes (`\"`) and reported the command as not recognised.
 - On Windows, a deep `%LOCALAPPDATA%` (a long user name or a redirected profile) no longer stops Ilium with "project session socket path is too long". That limit belongs to Unix sockets; Windows sessions use named pipes named by a digest.
 - Uninstalling the Windows MSI now restores the user PATH exactly as it was, including a trailing `;` that the previous WiX Environment entry dropped. The MSI records the original value at install time, as the setup EXE already did.
 - On Windows, connecting to a busy session server now keeps retrying for up to 5 seconds instead of giving up after 20 attempts (about half a second), so a client connecting while the server is still restoring panes no longer fails with "every named pipe instance stayed busy".
