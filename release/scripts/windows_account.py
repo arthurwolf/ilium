@@ -138,7 +138,8 @@ class windows_account:  # Encapsulate narrowly scoped account access.
         products, custom, inno = registrations['msi_products'], registrations['msi_key'], registrations['inno']  # Bind the relevant registration groups.
         if kind.upper() == 'MSI':  # Validate the single authored MSI product.
             require(len(products) == 1 and products[0]['state'] == 5, 'MSI must have exactly one currently installed product')  # Reject advertised or other-user products.
-            require(products[0]['version'] == version, 'MSI VersionString differs from the audited release')  # Reject incorrect registered product versions.
+            from build_windows_installers import msi_product_version  # MSI registers the numeric ProductVersion.
+            require(products[0]['version'] == msi_product_version(version), 'MSI VersionString differs from the audited release')  # Reject incorrect registered product versions.
             require(custom['exists'], 'MSI InstallDirectory registration is absent')  # Require the authored key path.
             value = custom['values']['InstallDirectory']  # Retain its typed raw value.
             require(value['exists'] and value['type'] == self.winreg.REG_SZ and normalized_path(value['value']) == normalized_path(str(directory)), 'MSI InstallDirectory readback differs')  # Bind registration to installed files.

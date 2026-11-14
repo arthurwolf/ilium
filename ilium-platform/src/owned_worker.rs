@@ -57,6 +57,25 @@ pub enum WorkerKind {
     SynchronousIo,
 }
 
+impl WorkerKind {
+    /// The kind for a thread that reads the controlling terminal through
+    /// crossterm with a bounded poll, checking its stop token between polls.
+    ///
+    /// On Windows that read must stop cooperatively: crossterm waits on the
+    /// console handle with a timeout, so it never blocks past one poll, while
+    /// `CancelSynchronousIo` aborting its `ReadConsoleInputW` makes
+    /// `crossterm_winapi` unwrap `ERROR_OPERATION_ABORTED` (995) and panic,
+    /// which turned a client restart into an input failure. Elsewhere
+    /// synchronous-I/O cancellation is a no-op, so the kind is unchanged.
+    pub const fn terminal_input() -> Self {
+        if cfg!(windows) {
+            Self::Cooperative
+        } else {
+            Self::SynchronousIo
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkerExit {
     Joined,
@@ -726,6 +745,16 @@ mod supervisor_panic_retirement_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_input_is_never_cancelled_through_synchronous_io_on_windows() {
+        let expected = if cfg!(windows) {
+            WorkerKind::Cooperative
+        } else {
+            WorkerKind::SynchronousIo
+        };
+        assert_eq!(WorkerKind::terminal_input(), expected);
+    }
 
     #[test]
     fn completion_hint_follows_physical_join_and_custody_retirement() {

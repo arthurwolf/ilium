@@ -10,7 +10,9 @@
 
 Linux preview: [v0.1.1-linux.3](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.3) provides Linux x86_64 (six formats) and Linux ARM64 (four formats) from one source commit, with one `SHA256SUMS` covering all ten files. The public downloads have been checked against their checksums. This prerelease is not marked as `latest`; the full cross-platform v0.1.1 release remains pending.
 
-**Not yet available for this preview:** two of six Linux ARM64 formats (rpm, Snap), macOS Intel and Windows. The macOS Apple Silicon packages are unsigned and not notarized, so Gatekeeper warns: right-click and choose Open, or run `xattr -dr com.apple.quarantine <file>`. Plugins are an unsupported development preview.
+Windows preview: [v0.1.1-preview.6](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-preview.6) adds the Windows x86_64 setup EXE, MSI and ZIP, and carries the Linux and macOS files unchanged, with one `SHA256SUMS` covering all seventeen files.
+
+**Not yet available for this preview:** two of six Linux ARM64 formats (rpm, Snap) and macOS Intel. The macOS Apple Silicon packages are unsigned and not notarized, so Gatekeeper warns: right-click and choose Open, or run `xattr -dr com.apple.quarantine <file>`. The Windows files are unsigned, so Microsoft Defender SmartScreen warns: choose More info, then Run anyway, after checking the SHA-256. Plugins are an unsupported development preview.
 
 Plugin code is present for future integration and is not yet available for use.
 
@@ -22,23 +24,23 @@ curl --proto '=https' --tlsv1.2 -LsSf https://ilium-setup.pages.dev/install.sh |
 
 The Linux installer supports x86_64 and ARM64 (aarch64); ARM64 has been verified in an emulated guest only.
 
-Windows PowerShell **(coming soon: the Windows package is not yet available)**:
+Windows PowerShell **(coming soon: the one-line installer does not yet install the preview; use the direct downloads below)**:
 
 ```powershell
 irm https://ilium-setup.pages.dev/install.ps1 | iex
 ```
 
-Windows downloads are **not yet available**: per-user setup `.exe`, `.msi`, and ZIP.
+Windows downloads (per-user setup `.exe`, `.msi` and ZIP; no administrator rights needed) are in the table below.
 
-Direct downloads (Linux x86_64 preview; other systems not yet available):
+Direct downloads:
 
 | System | Downloads / availability |
 | --- | --- |
 | Linux x86_64 (6 of 6 available and verified) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.deb) · [rpm](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.rpm) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.AppImage) · [Snap](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.snap) · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-x86_64.flatpak) |
 | Linux ARM64 (4 of 6 available and verified; emulated QEMU, not native hardware) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-aarch64.tar.gz) · [deb](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-aarch64.deb) · [AppImage](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-aarch64.AppImage) · rpm **(coming soon: only a limited `--nodeps` install was tested)** · Snap **(coming soon: install not verified)** · [Flatpak](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-linux.3/ilium-linux-aarch64.flatpak) |
-| macOS Apple Silicon (4 of 4 available and verified; native macOS build, tests and installed-package checks; unsigned, not notarized; animations disabled) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.dmg) |
+| macOS Apple Silicon (4 of 4 available and verified; native macOS build, tests and installed-package checks; unsigned, not notarized; animation add-ons disabled) | [tar.gz](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.tar.gz) · [ZIP](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.zip) · [PKG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.pkg) · [DMG](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.5/ilium-macos-aarch64.dmg) |
 | macOS Intel | tar.gz, ZIP, PKG, DMG **(coming soon; not yet available)** |
-| Windows x86_64 | setup `.exe`, MSI, ZIP **(coming soon; not yet available)** |
+| Windows x86_64 (3 of 3 available and verified; native Windows build, tests and installer checks; unsigned, SmartScreen warns; animation add-ons disabled) | [setup EXE](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64-setup.exe) · [MSI](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64.msi) · [ZIP](https://github.com/arthurwolf/ilium/releases/download/v0.1.1-preview.6/ilium-windows-x86_64.zip) |
 
 **Linux ARM64: 4 of 6 ARM64 formats available and verified.** The tar.gz, deb, AppImage and Flatpak ran in an emulated ARM64 (QEMU) guest; no native ARM64 hardware has been tested. Both architectures are in the same prerelease, [v0.1.1-linux.3](https://github.com/arthurwolf/ilium/releases/tag/v0.1.1-linux.3).
 

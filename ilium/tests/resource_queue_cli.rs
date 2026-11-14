@@ -223,9 +223,8 @@ async fn reserve_retries_explicit_busy_and_retains_request_identity_over_real_tr
     let socket = directory.path().join("resource.sock");
     let endpoint = ilium_transport::SessionEndpoint::from_path(&socket);
     let mut listener = endpoint.bind().await.unwrap();
-    let path = directory
-        .path()
-        .canonicalize()
+    // The CLI canonicalizes its project the same way (no `\\?\` verbatim prefix on Windows).
+    let path = ilium_platform::paths::canonicalize(directory.path())
         .unwrap()
         .to_string_lossy()
         .into_owned();

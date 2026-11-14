@@ -613,7 +613,8 @@ impl AudioEngine {
     fn build(
         input_device_name: Option<&str>,
         output_device_name: Option<&str>,
-        input_mode: VoiceInputMode,
+        // Every mode starts with the gate closed; the realtime session applies the mode.
+        _input_mode: VoiceInputMode,
         output_volume_percent: u8,
         quota: &QuotaGroup,
         custody: &AudioCustody,

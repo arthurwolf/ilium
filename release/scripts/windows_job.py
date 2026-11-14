@@ -166,17 +166,22 @@ class windows_job:  # A private, unnamed, non-inheritable Windows process contai
                     primary.add_note('inventory close: ' + str(close_error))  # Retain each unavailable close readback.
             raise  # Preserve the discovery failure as the primary cause.
     def hold_image(self, expected: Path) -> owned_process:  # Require one live owned process at the exact expected image path.
+        return self.hold_images(expected, 1)[0]  # A missing, exited or duplicate image fails custody establishment.
+    def hold_images(self, expected: Path, count: int) -> list[owned_process]:  # Require exactly `count` live owned processes at the exact image path.
         if not expected.is_absolute():  # Relative paths cannot establish installed executable provenance.
             raise ValueError('expected image must be absolute')  # Refuse implicit current-directory lookup.
+        if count < 1:  # An empty requirement would prove nothing.
+            raise ValueError('expected image count must be positive')
         wanted = os.path.normcase(str(expected.resolve(strict=True)))  # Native filesystem resolution normalizes installed absolute paths.
         observations = self.query()  # Every candidate carries a membership-verified retained handle.
         matches = [item for item in observations if item.alive() and os.path.normcase(str(Path(item.identity['image']).resolve(strict=True))) == wanted]  # Readiness cannot be satisfied by a source binary or a terminated process.
-        for item in observations:  # Keep only a unique accepted image observation.
-            if len(matches) != 1 or item is not matches[0]:  # Ambiguity must not choose an arbitrary server.
-                item.close()  # Release unmatched or ambiguous handles without signaling them.
-        if len(matches) != 1:  # A missing, exited or duplicate server fails custody establishment.
-            raise OSError('expected exactly one live job-owned image: ' + str(expected))  # Never fall back to an account-wide PID/name search.
-        return matches[0]  # This same original handle must later prove server retirement.
+        accepted = len(matches) == count  # Ambiguity must not choose an arbitrary subset.
+        for item in observations:  # Keep only an exact accepted image set.
+            if not accepted or not any(item is match for match in matches):  # Release unmatched or ambiguous handles without signaling them.
+                item.close()
+        if not accepted:  # A missing, exited or extra process fails custody establishment.
+            raise OSError('expected exactly %d live job-owned image(s): %s (found %d)' % (count, expected, len(matches)))  # Never fall back to an account-wide PID/name search.
+        return matches  # These same original handles must later prove retirement.
     def run(self, command: list[str], environment: dict[str, str], cwd: Path, timeout: int = 60) -> dict[str, Any]:  # Launch a bounded child only after its job custody is established.
         self.started = False  # Validation, creation and suspended-assignment failures cannot authorize account cleanup.
         if not self.handle or not command or not Path(command[0]).is_absolute() or not cwd.is_absolute() or not 1 <= timeout <= 1800:  # Enforce live custody, explicit installed/tool paths and finite waits.

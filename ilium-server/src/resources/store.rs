@@ -320,6 +320,8 @@ mod tests {
         );
         assert!(catalog.retained_bytes() < MAX_CATALOG_RETAINED_BYTES);
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn corruption_is_not_empty_catalog() {
         let dir = durable_test_directory();
@@ -338,6 +340,8 @@ mod tests {
         file.set_len(MAX_CATALOG_BYTES + 1).unwrap();
         assert!(ResourceStore::new(path).unwrap().snapshot().is_err());
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn replacement_lock_is_stable() {
         let dir = durable_test_directory();
@@ -352,9 +356,14 @@ mod tests {
 #[cfg(test)]
 mod process_tests {
     use super::*;
+    // Process helpers serve only the Linux-only queue tests.
+    #[cfg(target_os = "linux")]
     use std::{
-        io::{BufRead, Read},
+        io::BufRead,
         process::{Command, Stdio},
+    };
+    use std::{
+        io::Read,
         time::{SystemTime, UNIX_EPOCH},
     };
     fn context(label: &str, user: bool) -> MutationContext {
@@ -388,6 +397,8 @@ mod process_tests {
             label: label.into(),
         }
     }
+    // Linux-only helper: used only by the Linux-only resource queue tests.
+    #[cfg(target_os = "linux")]
     fn create(store: &ResourceStore) {
         store
             .transact(
@@ -470,6 +481,8 @@ mod process_tests {
         }
         panic!("cross-process lock admission exhausted");
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn independent_processes_serialize_ownership() {
         let dir = durable_test_directory();
@@ -528,6 +541,8 @@ mod process_tests {
             5
         );
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn acknowledged_commit_roundtrips_and_retries() {
         let dir = durable_test_directory();
@@ -547,6 +562,8 @@ mod process_tests {
         assert_eq!(again.revision, first.revision);
         assert!(again.result.reused);
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn process_exit_before_response_preserves_durable_grant() {
         let dir = durable_test_directory();
@@ -597,6 +614,8 @@ mod process_tests {
         assert_eq!(retried.catalog, catalog);
     }
 
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn two_new_boot_processes_fence_old_claims_before_reserving() {
         let directory = durable_test_directory();
@@ -684,6 +703,8 @@ mod process_tests {
             }
         }
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn concurrent_cancel_and_grant_never_drop_an_acquired_owner() {
         let directory = durable_test_directory();
@@ -757,6 +778,8 @@ mod process_tests {
         }
     }
 
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn wrong_project_and_compound_invocation_cannot_mutate_authority() {
         let directory = durable_test_directory();
@@ -809,6 +832,8 @@ mod process_tests {
         assert_eq!(store.snapshot().unwrap(), owned.catalog);
     }
 
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn concurrent_guarded_revoke_and_release_cannot_clear_a_new_owner() {
         let directory = durable_test_directory();
@@ -890,6 +915,8 @@ mod process_tests {
             Err(error) => panic!("unexpected guarded revoke race failure: {error}"),
         }
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn corrupt_truncated_and_unsupported_catalogs_refuse_every_mutation() {
         let source = durable_test_directory();
@@ -981,6 +1008,8 @@ mod process_tests {
             );
         }
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn invalid_create_plus_link_is_atomically_absent() {
         let directory = durable_test_directory();
@@ -1013,6 +1042,8 @@ mod process_tests {
             "invalid create cannot leave a half-created authoritative catalog"
         );
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn fixed_seed_thousand_repository_interleavings_read_back_every_result() {
         const SEED: u64 = 0x5245_534f_5552_4345;
@@ -1270,6 +1301,8 @@ mod process_tests {
         )
         .unwrap();
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn simultaneous_first_use_processes_retain_both_claims_and_one_owner() {
         let directory = durable_test_directory();
@@ -1392,6 +1425,8 @@ mod process_tests {
             Err(error) => panic!("unexpected fingerprint race failure: {error}"),
         }
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn concurrent_process_create_and_edit_preserve_physical_identity_uniqueness() {
         for mode in ["create", "edit"] {

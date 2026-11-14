@@ -228,6 +228,41 @@ function Get-IliumChecksum([string]$Path, [hashtable]$Target) {
     return $selected
 }
 
+function Get-IliumPartialChecksum([string]$Path, [string]$AvailabilityPath, [hashtable]$Target, [string]$Version) {
+    $content = [IO.File]::ReadAllText($AvailabilityPath)
+    if ($content.Length -gt 16384 -or -not $content.EndsWith("`n")) { throw 'Malformed availability inventory.' }
+    $lines = $content.Substring(0, $content.Length - 1).Split("`n")
+    if ($lines.Count -ne ($Target.checksum_archives.Count + 5) -or
+        $lines[0] -cne 'ilium-availability-v1' -or $lines[1] -cne ('tag v' + $Version) -or
+        $lines[2] -cnotmatch '\Acommit [0-9a-f]{40}\z' -or
+        $lines[3] -cnotmatch '\Aselection-sha256 [0-9a-f]{64}\z' -or
+        $lines[4] -cne ('checksums-sha256 ' + (Get-IliumHash $Path))) { throw 'Malformed or mismatched availability inventory.' }
+    $states = New-Object 'Collections.Generic.Dictionary[string,string]' ([StringComparer]::Ordinal)
+    foreach ($line in $lines[5..($lines.Count - 1)]) {
+        if ($line -cnotmatch '\A(available|omitted) ([A-Za-z0-9._-]+)\z') { throw 'Malformed availability record.' }
+        $state = $Matches[1]; $name = $Matches[2]
+        if ($name -cnotin $Target.checksum_archives -or $states.ContainsKey($name)) { throw 'Unknown or duplicate availability archive.' }
+        $states.Add($name, $state)
+    }
+    $available = @($states.Keys | Where-Object { $states[$_] -ceq 'available' })
+    if (-not @($available | Where-Object { $_ -clike 'ilium-linux-*' }).Count -or
+        -not @($available | Where-Object { $_ -clike 'ilium-windows-*' }).Count) { throw 'Partial release requires Linux and Windows archives.' }
+    $sums = [IO.File]::ReadAllText($Path)
+    if ($sums.Length -gt 16384 -or -not $sums.EndsWith("`n")) { throw 'Malformed checksum manifest.' }
+    $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $selected = $null
+    foreach ($line in $sums.Substring(0, $sums.Length - 1).Split("`n")) {
+        if ($line -cnotmatch '\A([0-9a-f]{64})  ([A-Za-z0-9._-]+)\z') { throw 'Malformed checksum record.' }
+        $hash = $Matches[1]; $name = $Matches[2]
+        if (-not $states.ContainsKey($name) -or $states[$name] -cne 'available' -or -not $seen.Add($name)) { throw 'Unexpected or duplicate checksum archive.' }
+        if ($name -ceq $Target.archive) { $selected = $hash }
+    }
+    if ($seen.Count -ne $available.Count) { throw 'Missing release checksum records.' }
+    if ($states[$Target.archive] -ceq 'omitted') { throw 'This platform is not ready yet for the requested release.' }
+    if (-not $selected) { throw 'Missing release checksum record for this platform.' }
+    return $selected
+}
+
 function Expand-IliumValidatedZip([string]$Archive, [string]$Destination, [string]$Prefix, [string]$Version) {
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -674,10 +709,17 @@ function Invoke-IliumInstall {
         if ([Enum]::GetNames([Net.SecurityProtocolType]) -contains 'Tls13') { $secureTls = $secureTls -bor [Net.SecurityProtocolType]::Tls13 }
         [Net.ServicePointManager]::SecurityProtocol = $secureTls
         if ($Version -ceq 'latest') { $Version = Get-IliumLatestVersion }
+        # A later retry must keep the release resolved for this attempt.
+        $recoveryArguments.Version = $Version
         $origin = 'https://github.com/arthurwolf/ilium/releases/download/v' + $Version
         $checksums = Join-Path $work 'SHA256SUMS'; $archive = Join-Path $work 'archive.zip'
         Save-IliumDownload ($origin + '/SHA256SUMS') $checksums
-        $expectedHash = Get-IliumChecksum $checksums $selected
+        try { $expectedHash = Get-IliumChecksum $checksums $selected }
+        catch {
+            $availability = Join-Path $work 'AVAILABILITY'
+            Save-IliumDownload ($origin + '/AVAILABILITY') $availability
+            $expectedHash = Get-IliumPartialChecksum $checksums $availability $selected $Version
+        }
         Save-IliumDownload ($origin + '/' + $selected.archive) $archive
         $stage = 'checksum'
         if ((Get-IliumHash $archive) -cne $expectedHash) { throw 'Archive checksum mismatch; previous installation remains selected.' }

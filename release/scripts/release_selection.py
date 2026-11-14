@@ -51,7 +51,10 @@ def require_committed_policy(root: Path, path: Path, commit: str) -> bytes:
     """Return policy bytes only when they match the named checkout commit."""
     require(re.fullmatch(r'[0-9a-f]{40}', commit) is not None, 'policy commit is invalid')
     root = root.resolve()
+    # Resolve only the parent: it normalises Windows 8.3 short names (RUNNER~1)
+    # the same way as the root, without following a final-component symlink.
     path = path.absolute()
+    path = path.parent.resolve() / path.name
     try:
         relative = path.relative_to(root)
     except ValueError as error:

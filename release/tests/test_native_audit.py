@@ -73,14 +73,14 @@ class NativeAuditTests(unittest.TestCase):
                 "vswhere_version": {"command": [vswhere, "-latest", "-version", "[17.0,18.0)", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationVersion"], "stdout": "17.11.35222.181\n", "stderr": ""},
                 "vswhere_compiler": {"command": [vswhere, "-latest", "-version", "[17.0,18.0)", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-find", "VC/Tools/MSVC/**/bin/Hostx64/x64/cl.exe"], "stdout": compiler + "\n", "stderr": ""},
                 "selection": {"installation_path": str(installation), "installation_version": "17.11.35222.181", "toolset_version": "14.40.33807", "compiler_path": compiler},
-                "cl": {"command": [compiler, "/nologo", "/Bv", "/c", str(native / "msvc-identity-probe.c"), "/Fo" + str(native / "msvc-identity-probe.obj")], "stdout": "Microsoft (R) C/C++ Optimizing Compiler Version 19.40 for x64\n", "stderr": ""},
+                "cl": {"command": [compiler, "/Bv", "/c", str(native / "msvc-identity-probe.c"), "/Fo" + str(native / "msvc-identity-probe.obj")], "stdout": "Microsoft (R) C/C++ Optimizing Compiler Version 19.40 for x64\n", "stderr": ""},
                 "cmake": {"command": ["cmake", "--version"], "stdout": "cmake version 3.31.0\n", "stderr": ""},
                 "rustc": {"command": ["rustc", "-Vv"], "stdout": "rustc 1.91.0\nhost: x86_64-pc-windows-msvc\n", "stderr": ""},
                 "cargo": {"command": ["cargo", "--version"], "stdout": "cargo 1.91.0\n", "stderr": ""},
                 "python": "3.11.9 fixture",
             },
             "cmake_cache": {"path": str(cache), "sha256": "e" * 64, "values": {"CMAKE_GENERATOR": "Visual Studio 17 2022", "CMAKE_GENERATOR_INSTANCE": str(installation), "CMAKE_GENERATOR_TOOLSET": "host=x64,version=14.40.33807", "CMAKE_C_COMPILER": compiler, "CMAKE_CXX_COMPILER": compiler, "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>", "CMAKE_HOME_DIRECTORY": str(native / f"source/onnxruntime-{commit}/cmake")}},
-            "ort_environment": {"CMAKE_GENERATOR_INSTANCE": str(installation)},
+            "ort_environment": {"CMAKE_GENERATOR": "Visual Studio 17 2022", "CMAKE_GENERATOR_INSTANCE": str(installation)},
             "ort_command": ort_command,
             "ort_invocation": ["cmd.exe", "/d", "/c", *ort_command],
             "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", str(native / "workspace/Cargo.toml"), "--target", "x86_64-pc-windows-msvc", "--bin", "ilium", "--bin", "ilium-server", "--bin", "ilium-animation-helper"],
@@ -107,9 +107,29 @@ class NativeAuditTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             audit.validate_closure("windows", {"ilium.exe": ["KERNEL32.dll"], "ilium-server.exe": []}, inventory, {"ilium.exe", "ilium-server.exe"})
 
+    def test_retained_windows_cmake_cache_accepts_generated_compiler_identity_only(self):
+        pipeline = self.module("release_pipeline")
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / "CMakeCache.txt"
+            cache.write_text("CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022\n"
+                             "CMAKE_MSVC_RUNTIME_LIBRARY:STRING=MultiThreaded\n", encoding="utf-8")
+            digest = hashlib.sha256(cache.read_bytes()).hexdigest()
+            values = {"CMAKE_GENERATOR": "Visual Studio 17 2022",
+                      "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
+                      "CMAKE_C_COMPILER": "C:/VS/bin/Hostx64/x64/cl.exe",
+                      "CMAKE_CXX_COMPILER": "C:/VS/bin/Hostx64/x64/cl.exe"}
+            receipt = Path(directory) / "receipt.json"
+            receipt.write_text(json.dumps({"cmake_cache": {"sha256": digest, "values": values}}), encoding="utf-8")
+            self.assertEqual(pipeline.validate_retained_windows_cmake(receipt, cache)["sha256"], digest)
+            for name, value in (("CMAKE_MSVC_RUNTIME_LIBRARY", "MultiThreadedDLL"), ("CMAKE_GENERATOR_INSTANCE", "C:/VS")):
+                with self.subTest(name=name):
+                    receipt.write_text(json.dumps({"cmake_cache": {"sha256": digest, "values": dict(values, **{name: value})}}), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "values differ"):
+                        pipeline.validate_retained_windows_cmake(receipt, cache)
+
     def test_windows_source_build_allows_reviewed_os_edges_but_never_crt_edges(self):
         audit = self.module("audit_native")
-        for name in ("dbghelp.dll", "dxgi.dll"):
+        for name in ("dbghelp.dll", "dxgi.dll", "BCRYPTPRIMITIVES.dll", "PSAPI.DLL", "USERENV.dll"):
             with self.subTest(name=name):
                 self.assertTrue(audit.system_dependency("windows", name))
         for name in ("MSVCP140.dll", "msvcp140_1.dll", "VCRUNTIME140.dll",

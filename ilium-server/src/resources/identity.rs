@@ -101,6 +101,8 @@ fn read_config_identity(path: &Path) -> Result<Option<ResourceProjectId>, Resour
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn identity_survives_project_move_and_malformed_settings() {
         let directory = super::super::store::durable_test_directory();
@@ -113,6 +115,8 @@ mod tests {
         std::fs::rename(&original, &moved).unwrap();
         assert_eq!(project_identity(&moved).unwrap(), first);
     }
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[test]
     fn configured_uuid_is_adopted_and_durable() {
         let directory = super::super::store::durable_test_directory();

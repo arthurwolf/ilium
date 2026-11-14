@@ -367,7 +367,29 @@ mod tests {
             );
             assert!(rendered.contains("(●) Normal"));
             assert!(rendered.contains("( ) Custom"));
-            assert!(rendered.contains("Two icons"), "width {width}: {rendered}");
+            // The description wraps inside the card, so read the first card's
+            // own column (its first `card_width` cells) as one flowing text.
+            let first_card: String = block
+                .lines
+                .iter()
+                .map(|line| {
+                    let mut used = 0;
+                    text(line)
+                        .chars()
+                        .take_while(|character| {
+                            used += unicode_width::UnicodeWidthChar::width(*character).unwrap_or(0);
+                            used <= usize::from(card_width)
+                        })
+                        .collect::<String>()
+                        .replace('│', " ")
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let first_card = first_card.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                first_card.contains("Two icons per agent"),
+                "width {width}: {rendered}"
+            );
         }
     }
 

@@ -1,5 +1,4 @@
 use crate::term::BufWrite as _;
-use unicode_width::UnicodeWidthChar as _;
 
 const MODE_APPLICATION_KEYPAD: u8 = 0b0000_0001;
 const MODE_APPLICATION_CURSOR: u8 = 0b0000_0010;
@@ -62,6 +61,8 @@ pub struct Screen {
     modes: u8,
     mouse_protocol_mode: MouseProtocolMode,
     mouse_protocol_encoding: MouseProtocolEncoding,
+
+    width_policy: crate::WidthPolicy,
 }
 
 impl Screen {
@@ -78,7 +79,21 @@ impl Screen {
             modes: 0,
             mouse_protocol_mode: MouseProtocolMode::default(),
             mouse_protocol_encoding: MouseProtocolEncoding::default(),
+
+            width_policy: crate::WidthPolicy::default(),
         }
+    }
+
+    /// The width table this screen counts cells with.
+    #[must_use]
+    pub fn width_policy(&self) -> crate::WidthPolicy {
+        self.width_policy
+    }
+
+    /// Counts cells with `policy` from now on. Defaults to
+    /// [`crate::WidthPolicy::default`].
+    pub fn set_width_policy(&mut self, policy: crate::WidthPolicy) {
+        self.width_policy = policy;
     }
 
     /// Resizes the terminal.
@@ -813,7 +828,7 @@ impl Screen {
         let size = self.grid().size();
         let attrs = self.attrs;
 
-        let width = c.width();
+        let width = self.width_policy.char_width(c);
         if width.is_none() && (u32::from(c)) < 256 {
             // don't even try to draw control characters
             return;
@@ -852,6 +867,9 @@ impl Screen {
         let pos = self.grid().pos();
 
         if width == 0 {
+            if c == '\u{FE0F}' && self.widen_for_emoji_presentation(pos, size) {
+                return;
+            }
             if pos.col > 0 {
                 let mut prev_cell = self
                     .grid_mut()
@@ -974,7 +992,7 @@ impl Screen {
                     // wide character, so it must have the second half of the
                     // wide character after it.
                     .unwrap();
-                next_cell.set(' ', attrs);
+                next_cell.set(' ', attrs, false);
             }
 
             let cell = self
@@ -985,7 +1003,7 @@ impl Screen {
                 // called col_wrap() immediately before this, which ensures
                 // that self.grid().pos().col has a valid value.
                 .unwrap();
-            cell.set(c, attrs);
+            cell.set(c, attrs, width > 1);
             self.grid_mut().col_inc(1);
             if width > 1 {
                 let pos = self.grid().pos();
@@ -1045,6 +1063,62 @@ impl Screen {
                 self.grid_mut().col_inc(1);
             }
         }
+    }
+
+    /// VS16 after a one-cell symbol that has a two-cell emoji presentation:
+    /// widen that cell in place and advance the cursor, as the programs that
+    /// print it (and the Windows console host) do. Returns false, leaving
+    /// the selector to be appended as an ordinary zero-width character, when
+    /// the previous cell is not such a symbol or the row has no room left.
+    fn widen_for_emoji_presentation(
+        &mut self,
+        pos: crate::grid::Pos,
+        size: crate::grid::Size,
+    ) -> bool {
+        if pos.col == 0 || pos.col >= size.cols {
+            return false;
+        }
+        let base_pos = crate::grid::Pos {
+            row: pos.row,
+            col: pos.col - 1,
+        };
+        let Some(base) = self.grid().drawing_cell(base_pos) else {
+            return false;
+        };
+        if base.is_wide() || base.is_wide_continuation() {
+            return false;
+        }
+        let mut chars = base.contents().chars();
+        let (Some(first), None) = (chars.next(), chars.next()) else {
+            return false;
+        };
+        if !crate::width::widens_with_emoji_presentation(first) {
+            return false;
+        }
+        // The cell the emoji now covers may hold the first half of another
+        // wide character; clear its orphaned second half too.
+        let covered_is_wide = self
+            .grid()
+            .drawing_cell(pos)
+            .is_some_and(crate::Cell::is_wide);
+        if covered_is_wide && pos.col + 1 < size.cols {
+            if let Some(orphan) = self.grid_mut().drawing_cell_mut(crate::grid::Pos {
+                row: pos.row,
+                col: pos.col + 1,
+            }) {
+                orphan.clear(crate::attrs::Attrs::default());
+            }
+        }
+        if let Some(base) = self.grid_mut().drawing_cell_mut(base_pos) {
+            base.append('\u{FE0F}');
+            base.set_wide(true);
+        }
+        if let Some(covered) = self.grid_mut().drawing_cell_mut(pos) {
+            covered.clear(crate::attrs::Attrs::default());
+            covered.set_wide_continuation(true);
+        }
+        self.grid_mut().col_inc(1);
+        true
     }
 
     // control codes

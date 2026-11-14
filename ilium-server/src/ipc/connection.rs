@@ -3041,6 +3041,8 @@ mod text_trigger_writer_tests {
         (state, Task(sound_task))
     }
 
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn attach_seed_does_not_wait_for_locked_resource_catalog() {
         let root = std::env::var_os("ILIUM_RESOURCE_TEST_ROOT")
@@ -3112,6 +3114,8 @@ mod text_trigger_writer_tests {
         reader.joined().await;
     }
 
+    // Linux-only: the resource queue ledger needs Linux durable filesystem guarantees and refuses other platforms (see resource_fs unsupported_platform_tests)
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn attach_retries_resource_snapshot_after_shared_catalog_contention() {
         let root = std::env::var_os("ILIUM_RESOURCE_TEST_ROOT")

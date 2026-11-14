@@ -44,6 +44,15 @@ MAX_DOWNLOAD = 1_073_741_824
 PTY_TESTS = ('attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_help_keystroke', 'right_click_restart_reloads_only_the_client_and_preserves_the_server')
 
 
+# Suites that drive GNU/Linux host tooling (POSIX shell fixtures, the Linux
+# tarball qualification gate with euid and Bubblewrap checks, QEMU guest
+# configuration with POSIX host paths). Both Linux native lanes run them in full.
+LINUX_HOST_SUITES = {
+    'test_posix_install.py': 'GNU/Linux fixture transport; covered by both Linux native lanes',
+    'test_linux_tarball.py': 'GNU/Linux tarball qualification host gate; covered by both Linux native lanes',
+    'test_linux_vm.py': 'GNU/Linux QEMU guest smoke host; covered by both Linux native lanes',
+}
+
 def require(condition, message):
     if not condition:
         raise release_tool.ReleaseError(message)
@@ -129,8 +138,14 @@ def validate_retained_windows_cmake(receipt_path, cache_path):
     from build_windows_ort import parse_cmake_cache
     actual = parse_cmake_cache(cache_path)
     recorded = cache.get('values')
+    # Visual Studio generators do not cache the compiler; the build receipt
+    # takes it from CMake's generated CMake{C,CXX}Compiler.cmake files, which
+    # the audit checks against the selected cl.exe. Only those two keys may be
+    # absent from the retained cache; every value the cache does hold must match.
+    generated_only = {'CMAKE_C_COMPILER', 'CMAKE_CXX_COMPILER'}
     require(isinstance(recorded, dict) and recorded and
-            all(actual.get(name) == value for name, value in recorded.items()),
+            all(actual.get(name) == value or (name in generated_only and not actual.get(name))
+                for name, value in recorded.items()),
             'retained Windows CMake cache values differ from source receipt')
     return {'path': 'evidence/windows-ort-CMakeCache.txt', 'sha256': sha(cache_path)}
 
@@ -309,6 +324,7 @@ PREVIEW_TARGETS = {
     'linux-x86-preview': 'x86_64-unknown-linux-gnu',
     'linux-arm64-preview': 'aarch64-unknown-linux-gnu',
     'macos-arm64-preview': 'aarch64-apple-darwin',
+    'windows-x86-preview': 'x86_64-pc-windows-msvc',
 }
 
 
@@ -339,7 +355,7 @@ def native(arguments):
     profile = getattr(arguments, 'qualification_profile', 'full')
     native_workspace_scope(profile, arguments.target)
     if profile in PREVIEW_TARGETS:
-        require(re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-' + ('preview' if profile.startswith('macos') else 'linux') + r'\.[0-9]+', arguments.tag),
+        require(re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+-' + ('preview' if profile.startswith(('macos', 'windows')) else 'linux') + r'\.[0-9]+', arguments.tag),
                 'Preview profile requires a matching preview tag')
     expected_system = {'linux': 'Linux', 'windows': 'Windows', 'macos': 'Darwin'}[target['os']]
     expected_machines = {'x86_64': {'x86_64', 'AMD64'}, 'aarch64': {'aarch64', 'arm64', 'ARM64'}}[target['arch']]
@@ -487,8 +503,8 @@ def native(arguments):
     # require GNU/Linux tools; their Linux lanes run the complete fixture suite.
     # Portable archive/manifest/source/evidence contracts run on every lane.
     for test_module in sorted((root / 'release/tests').glob('test_*.py')):
-        if test_module.name == 'test_posix_install.py' and target['os'] != 'linux':
-            emit('result', suite=test_module.name, applicability='GNU/Linux fixture transport; covered by both Linux native lanes')
+        if test_module.name in LINUX_HOST_SUITES and target['os'] != 'linux':
+            emit('result', suite=test_module.name, applicability=LINUX_HOST_SUITES[test_module.name])
             continue
         logged([sys.executable, '-m', 'unittest', 'discover', '-s', 'release/tests', '-p', test_module.name], root, work / (test_module.stem + '.log'), environment)
     if target['os'] == 'windows':
