@@ -841,6 +841,34 @@ impl HostRuntime {
             .collect()
     }
 
+    /// Delivers one batch to every active plugin that holds at least one of `grants`; returns
+    /// the failures. For events whose subscription is a grant (`screen-changed` needs a terminal
+    /// read grant, reference-events-and-intents.md): a plugin without it never sees them.
+    pub fn broadcast_to_holders(&mut self, batch: &[Event], grants: &[&str]) -> Vec<RuntimeError> {
+        let holders: Vec<String> = self
+            .plugins
+            .iter()
+            .filter(|(_, record)| record.state == PluginState::Active)
+            .filter(|(_, record)| {
+                grants
+                    .iter()
+                    .any(|grant| crate::imports::env::grants_allow(&record.granted, grant))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        holders
+            .into_iter()
+            .filter_map(|id| self.deliver(&id, batch.to_vec()).err())
+            .collect()
+    }
+
+    /// Whether `plugin` is loaded and holds `grant` (directly or through a wildcard grant).
+    pub fn holds_grant(&self, plugin: &str, grant: &str) -> bool {
+        self.plugins
+            .get(plugin)
+            .is_some_and(|record| crate::imports::env::grants_allow(&record.granted, grant))
+    }
+
     /// Queues one topic message that the kernel publishes under a plugin's topic name, for a
     /// feature whose source of truth the kernel still hosts (the Progress monitors). Only the
     /// plugins that hold `topics.subscribe:<topic>` receive it, on the next `pump`.
@@ -997,6 +1025,12 @@ impl HostRuntime {
                 &format!("plugin journal {} not loaded: {error}", path.display()),
             );
         }
+    }
+
+    /// The journal of this runtime; the clone shares its entries and its file. The server
+    /// answers the journal calls of client-side plugins from it (`ClientRequest::PluginCall`).
+    pub fn journal(&self) -> JournalBook {
+        self.journal.clone()
     }
 
     /// Copies the durable timers of every held book into the store and writes the file when

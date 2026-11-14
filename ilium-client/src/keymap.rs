@@ -1273,7 +1273,7 @@ pub fn is_leader_key(key: &KeyEvent, base: ShortcutBase) -> bool {
 }
 
 /// Looks up the action bound to a key pressed right after the leader.
-/// `crate::keys`/`crate::help` always pass `&App::keybindings` -- the one
+/// `crate::keys` always passes `&App::keybindings` -- the one
 /// live, possibly-user-remapped table (see this module's doc comment) --
 /// while `crate::config`'s tests pass a freshly merged table without
 /// needing an `App` at all.

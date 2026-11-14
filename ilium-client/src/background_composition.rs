@@ -1820,7 +1820,7 @@ mod tests {
         app.ui_settings.motion_level = MotionLevel::Off;
         assert!(ambient_is_visible(&app));
         assert_eq!(animation_frame_delay(&app, Duration::ZERO), None);
-        app.mode = Mode::Help;
+        app.mode = Mode::Move;
         assert!(!ambient_is_visible(&app));
         assert_eq!(animation_frame_delay(&app, Duration::ZERO), None);
         app.mode = Mode::Settings(Box::new(SettingsState {
@@ -1833,7 +1833,7 @@ mod tests {
             animation_frame_delay(&app, Duration::ZERO).is_some(),
             "the opened preview stays live even with ambient disabled and Motion Off"
         );
-        app.modal_stack.push(Mode::Help);
+        app.modal_stack.push(Mode::Move);
         assert_eq!(animation_frame_delay(&app, Duration::ZERO), None);
     }
 
@@ -2135,7 +2135,7 @@ mod tests {
         app.animation_settings.kind = AnimationKind::Spectrum;
         compose_at(&mut app, 5);
         assert_eq!(probe.alive(), 1);
-        app.mode = Mode::Help;
+        app.mode = Mode::Move;
         compose_at(&mut app, 6);
         assert_eq!(probe.alive(), 0, "no surface shows the field");
         app.mode = Mode::Normal;

@@ -288,6 +288,17 @@ impl PaddingSettings {
         }
         Ok(())
     }
+
+    /// The settings of a `[padding]` table read back from `config.toml`, checked like the
+    /// start-up load checks them. Missing keys take their defaults; an empty table is the
+    /// default configuration.
+    pub fn from_table(table: &toml::Table) -> Result<Self, String> {
+        let settings = toml::Value::Table(table.clone())
+            .try_into::<Self>()
+            .map_err(|error| format!("padding does not parse: {error}"))?;
+        settings.validate()?;
+        Ok(settings)
+    }
 }
 
 /// Packed tree padding: one byte per side (left, right, top, bottom).
@@ -334,6 +345,24 @@ mod tests {
             PaddingSides::NONE
         );
         assert_eq!(settings.validate(), Ok(()));
+    }
+
+    #[test]
+    fn a_table_read_back_from_the_config_file_parses_and_is_checked() {
+        let table: toml::Table =
+            toml::from_str("mode = \"enabled\"\nwidth_threshold = 120\n").expect("toml");
+        let settings = PaddingSettings::from_table(&table).expect("valid table");
+        assert_eq!(settings.mode, PaddingMode::Enabled);
+        assert_eq!(settings.width_threshold, 120);
+        assert_eq!(settings.tree, PaddingSettings::default().tree);
+        assert_eq!(
+            PaddingSettings::from_table(&toml::Table::new()),
+            Ok(PaddingSettings::default())
+        );
+        let out_of_range: toml::Table = toml::from_str("width_threshold = 5\n").expect("toml");
+        assert!(PaddingSettings::from_table(&out_of_range).is_err());
+        let wrong_type: toml::Table = toml::from_str("mode = 3\n").expect("toml");
+        assert!(PaddingSettings::from_table(&wrong_type).is_err());
     }
 
     #[test]

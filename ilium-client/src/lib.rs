@@ -94,7 +94,6 @@ pub mod execution;
 pub mod explorer_overlay;
 mod external_open;
 pub mod filesystem;
-pub mod help;
 pub mod icon_search_workers;
 pub mod icon_settings;
 mod incoming_projection;

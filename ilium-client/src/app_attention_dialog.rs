@@ -298,9 +298,9 @@ mod tests {
     #[test]
     fn opening_does_nothing_while_the_feature_is_off_or_another_dialog_is_open() {
         let (mut app, _, _) = app_with_two_waiting_agents();
-        app.mode = Mode::Help;
+        app.mode = Mode::Move;
         app.action_open_attention_overview();
-        assert!(matches!(app.mode, Mode::Help));
+        assert!(matches!(app.mode, Mode::Move));
         assert!(app.attention.dialog.is_none());
     }
 

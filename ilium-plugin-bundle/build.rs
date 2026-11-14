@@ -460,14 +460,18 @@ fn build_side(
     }
     command.arg("--features").arg(features.join(","));
     scrub_environment(&mut command);
+    // The diagnostics are captured, not inherited: cargo shows a build script's standard error
+    // only when the script fails, so in lenient mode the reason a component was not built
+    // would otherwise never be visible.
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::piped());
 
     let output = command.output().map_err(|error| {
         format!("cannot start the nested cargo for the {side} components: {error}")
     })?;
+    report_diagnostics(target_directory, side, &output.stderr);
     let mut built = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let Ok(message) = serde_json::from_str::<serde_json::Value>(line) else {
@@ -508,6 +512,58 @@ fn build_side(
         ));
     }
     Ok(built)
+}
+
+/// Most error lines of one nested build repeated as `cargo:warning=`; the rest stay in the log.
+const DIAGNOSTIC_WARNING_LIMIT: usize = 40;
+
+/// Makes the nested build's diagnostics visible: the whole text goes to this script's standard
+/// error (shown when the script fails, or with `-vv`) and to `nested-<side>.log` in the nested
+/// target directory, and each `error` line with the `-->` location under it becomes a cargo
+/// warning, which cargo shows even when the script succeeds.
+fn report_diagnostics(target_directory: &Path, side: &str, stderr: &[u8]) {
+    let text = String::from_utf8_lossy(stderr);
+    eprint!("{text}");
+    let log = target_directory.join(format!("nested-{side}.log"));
+    if std::fs::create_dir_all(target_directory)
+        .and_then(|()| std::fs::write(&log, text.as_bytes()))
+        .is_err()
+    {
+        println!(
+            "cargo:warning=ilium-plugin-bundle: cannot write {}",
+            log.display()
+        );
+    }
+    for warning in error_summaries(&text)
+        .into_iter()
+        .take(DIAGNOSTIC_WARNING_LIMIT)
+    {
+        println!("cargo:warning=ilium-plugin-bundle ({side}): {warning}");
+    }
+}
+
+/// `error...` lines of rendered rustc and cargo diagnostics, each joined with the location
+/// line (`--> file:line:column`) that follows it. Lines without colour codes are expected
+/// (the nested cargo writes to a pipe).
+fn error_summaries(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut summaries = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if !line.starts_with("error") {
+            continue;
+        }
+        let location = lines
+            .iter()
+            .skip(index + 1)
+            .take(3)
+            .map(|candidate| candidate.trim_start())
+            .find(|candidate| candidate.starts_with("-->"));
+        summaries.push(match location {
+            Some(location) => format!("{line} {location}"),
+            None => (*line).to_owned(),
+        });
+    }
+    summaries
 }
 
 /// Removes what cargo set for this build script and would misdirect a nested build for

@@ -271,6 +271,16 @@ async fn handle_scoped_request(
             }
             false
         }
+        // A server-backed import of a client-side plugin (the journal). Without plugins the
+        // call is still answered, so the client never waits on a reply that cannot come.
+        ClientRequest::PluginCall(call) => {
+            let reply = match state.plugins.get() {
+                Some(host) => host.plugin_call(call),
+                None => crate::plugin_host::refused_call(call, "plugins are off"),
+            };
+            let _ = direct_tx.send(reply).await;
+            false
+        }
         ClientRequest::TerminalHistory {
             pane_id,
             before_sequence,
@@ -4963,6 +4973,11 @@ async fn handle_set_pane_focus(
         });
         state.request_snapshot_save();
     }
+    // Plugins hear `pane-focused` whenever the focused pane changes, whether or not the tree
+    // recorded a new focus checkpoint for it.
+    if let Some(host) = state.plugins.get() {
+        host.pane_focus(pane_id, focused);
+    }
 
     // The focused pane's current screen goes out on the direct channel, which
     // the connection writer serves ahead of the ordered output backlog, so a
@@ -6728,6 +6743,11 @@ async fn forward_output_with_recovery<Recovery>(
                 // The wake has its own spacing, and its cheap read-lock peek
                 // returns at once for every pane outside the idle agent tier.
                 wake_idle_agent_detection(&state, pane_id, &input).await;
+                // Plugins that read screens learn of the change through the rate-limited
+                // `screen-changed` feed; marking the pane takes one short lock, never a wait.
+                if let Some(host) = state.plugins.get() {
+                    host.note_screen_changed(pane_id, first_chunk.sequence);
+                }
                 // The PTY reader already parsed and journaled these bytes.
                 // Hidden panes still feed Text Triggers even without clients.
                 if !subscription_cache.has_subscribers(&state, pane_id) {

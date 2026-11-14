@@ -110,6 +110,12 @@ impl RuntimeLinker {
     pub fn linker(&self) -> &Linker<StoreData> {
         &self.linker
     }
+
+    /// The Wasmtime linker, for a guest kind that adds its own resource imports on a
+    /// linker of its own (`scene_guest` defines `frame-surface` per scene).
+    pub(crate) fn linker_mut(&mut self) -> &mut Linker<StoreData> {
+        &mut self.linker
+    }
 }
 
 /// Builds the linker of a process: WASI under the host policy and the generated import

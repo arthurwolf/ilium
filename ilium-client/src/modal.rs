@@ -1,7 +1,7 @@
 //! Small, centered popup widgets shared by every blocking prompt: a
 //! single-line text input (rename, run-command) and a Yes/No confirmation
 //! (close). Both draw over a `Clear`+`Block` exactly like the existing
-//! context-menu/help/explorer overlays in `ui.rs`/`help.rs`, so every modal
+//! context-menu/help/explorer overlays in `ui.rs`, so every modal
 //! in ilium reads as one visual language instead of three.
 
 use ratatui::layout::{Alignment, Constraint, Direction, Flex, Layout, Position, Rect};

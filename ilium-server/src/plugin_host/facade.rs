@@ -32,8 +32,9 @@ use ilium_plugin_api::generated::types::{
     PluginSide, SplitDirection,
 };
 use ilium_plugin_api::kernel::{
-    Cell, FacadeError, IntentResult, KernelFacade, Origin, PaneRead, SessionAccess, TerminalAccess,
-    TreeAnnotations, TreeNode, TreeRead, WorkspaceAccess,
+    Cell, FacadeError, ForegroundProcess, IntentResult, KernelFacade, Origin, PaneRead,
+    ScreenState, SessionAccess, TerminalAccess, TreeAnnotations, TreeNode, TreeRead,
+    WorkspaceAccess,
 };
 use ilium_plugin_api::platform::ProcessKind;
 use ilium_plugin_api::side::Side;
@@ -91,6 +92,8 @@ pub(crate) struct ServerFacade {
     notify_coalescer: Mutex<intent_routing::NotifyCoalescer>,
     /// The basic pane kinds of the catalogue, set once when the host starts (gap G14a).
     pane_kinds: std::sync::OnceLock<Arc<super::pane_kinds::PaneKinds>>,
+    /// The pane a client last reported as focused (`SetPaneFocus`), `None` after it lost focus.
+    focused: Mutex<Option<NodeId>>,
 }
 
 /// Most nodes one plugin keeps metadata on.
@@ -279,6 +282,20 @@ pub(crate) fn tree_views(tree: &Tree) -> BTreeMap<u64, TreeNode> {
         .collect()
 }
 
+/// The focused pane after a client reported that `pane` gained (`focused`) or lost focus.
+fn next_focus(before: Option<NodeId>, pane: NodeId, focused: bool) -> Option<NodeId> {
+    match (focused, before) {
+        (true, _) => Some(pane),
+        (false, Some(current)) if current == pane => None,
+        (false, other) => other,
+    }
+}
+
+/// The plugin view of one node, for the events feed when a single pane changed.
+pub(crate) fn single_view(tree: &Tree, id: ilium_core::NodeId) -> Option<TreeNode> {
+    node_view(tree, id)
+}
+
 /// Where a pane's title came from: the user's own name, or one the kernel set (a terminal
 /// title or an inferred one; the tree does not tell those two apart).
 pub(crate) fn title_origin(
@@ -411,7 +428,18 @@ impl ServerFacade {
             input_stages: Mutex::new(tokio::task::JoinSet::new()),
             notify_coalescer: Mutex::new(intent_routing::NotifyCoalescer::default()),
             pane_kinds: std::sync::OnceLock::new(),
+            focused: Mutex::new(None),
         }
+    }
+
+    /// Records a client's focus report and returns `pane-focused` when the focused pane changed.
+    /// Losing focus clears the record only for the pane it names, so the late "unfocused" of the
+    /// previous pane after a switch does not erase the new focus.
+    pub(crate) fn set_focus(&self, pane: NodeId, focused: bool) -> Option<Event> {
+        let mut current = self.focused.lock().ok()?;
+        let before = *current;
+        *current = next_focus(before, pane, focused);
+        ilium_plugin_host::runtime::events_feed::focus_event(before, *current)
     }
 
     /// Hands the facade the catalogue's pane kinds; only the first call counts.
@@ -1033,6 +1061,10 @@ impl KernelFacade for ServerFacade {
     fn settings(&self) -> Option<&dyn ilium_plugin_api::kernel::KernelSettings> {
         Some(&self.settings)
     }
+
+    fn focused_pane(&self) -> Option<NodeId> {
+        self.focused.lock().ok().and_then(|focused| *focused)
+    }
 }
 
 impl TreeRead for ServerFacade {
@@ -1089,6 +1121,65 @@ impl PaneRead for ServerFacade {
         self.screen(pane, |screen| {
             let (rows, columns) = screen.size();
             (columns, rows)
+        })
+    }
+
+    /// The cursor of the screen and the pane's output sequence as the revision. The sequence
+    /// is read after the screen, so the screen never reflects output beyond the revision.
+    fn screen_state(&self, pane: NodeId) -> Option<ScreenState> {
+        let (cursor_row, cursor_column) = self.screen(pane, |screen| screen.cursor_position())?;
+        let revision =
+            self.with_terminal(pane, |runtime| runtime.session.output_head_sequence())?;
+        Some(ScreenState {
+            cursor_row,
+            cursor_column,
+            revision,
+        })
+    }
+
+    /// The agent process detection identified in the pane, else the pane's own process: its
+    /// name and working directory. The kernel does not read process arguments, so the command
+    /// line stays empty.
+    fn foreground_process(&self, pane: NodeId) -> Option<ForegroundProcess> {
+        let (process_id, detected_name) = self.with_terminal(pane, |runtime| match &runtime
+            .detection_schedule
+            .cached_identity
+        {
+            Some(identity) => Some((identity.pid, Some(identity.process_name.clone()))),
+            None => runtime.session.process_id().map(|id| (id, None)),
+        })??;
+        let name = detected_name.or_else(|| {
+            ilium_platform::process_info::executable_path(process_id).and_then(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+        })?;
+        Some(ForegroundProcess {
+            name,
+            command_line: Vec::new(),
+            cwd: ilium_platform::process_info::working_directory(process_id)
+                .map(|path| path.display().to_string()),
+        })
+    }
+}
+
+impl ServerFacade {
+    /// Reads the terminal runtime of a pane; `None` for a pane without a live terminal.
+    fn with_terminal<R>(
+        &self,
+        pane: NodeId,
+        read: impl FnOnce(&crate::pane::TerminalPaneRuntime) -> R,
+    ) -> Option<R> {
+        let state = self.state.upgrade()?;
+        // Like `screen`: a pane registry held too long gives no answer, never a stuck plugin.
+        self.tokio.block_on(async {
+            let panes = tokio::time::timeout(SCREEN_BUDGET, state.panes.read())
+                .await
+                .ok()?;
+            match panes.get(&to_core(pane)) {
+                Some(crate::pane::PaneResource::Terminal(runtime)) => Some(read(runtime)),
+                _ => None,
+            }
         })
     }
 }
@@ -1248,6 +1339,28 @@ impl BasicBackend for ServerFacade {
 
     fn basic_size(&self, _plugin: &str, pane: NodeId) -> Option<(u16, u16)> {
         PaneRead::size(self, pane)
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::next_focus;
+    use ilium_plugin_api::generated::types::NodeId;
+
+    #[test]
+    fn gaining_focus_moves_it_and_losing_it_clears_only_the_named_pane() {
+        assert_eq!(next_focus(None, NodeId(1), true), Some(NodeId(1)));
+        assert_eq!(
+            next_focus(Some(NodeId(1)), NodeId(2), true),
+            Some(NodeId(2))
+        );
+        // The late "unfocused" of pane 1 after the switch to pane 2 keeps pane 2.
+        assert_eq!(
+            next_focus(Some(NodeId(2)), NodeId(1), false),
+            Some(NodeId(2))
+        );
+        assert_eq!(next_focus(Some(NodeId(2)), NodeId(2), false), None);
+        assert_eq!(next_focus(None, NodeId(3), false), None);
     }
 }
 

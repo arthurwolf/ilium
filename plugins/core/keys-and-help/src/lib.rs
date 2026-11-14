@@ -7,13 +7,33 @@
 pub mod key_reference;
 
 use ilium_plugin_sdk::generated::types::events::Event;
-use ilium_plugin_sdk::generated::types::intents::Submission;
+use ilium_plugin_sdk::generated::types::intents::{Intent, OpenViewSpec, Submission};
 use ilium_plugin_sdk::generated::types::layout::Area;
 use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
+use ilium_plugin_sdk::host::{HostKernelSettings, HostKeymap, HostUiHost};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
+use ilium_plugin_sdk::{host, ilium_plugin, Handler, Lifecycle, Views};
+
+/// The plugin id (manifest `id`); its commands arrive as `<id>/<command>`.
+pub const PLUGIN_ID: &str = "ilium.core.keys-and-help";
+
+/// The panel of the key reference.
+pub const KEYS_PANEL: &str = "keys";
+
+/// The panel of the plugin manager.
+pub const PLUGINS_PANEL: &str = "plugins";
+
+/// The panel a command of this plugin opens: `show-keys` the key reference (`F1` after the
+/// prefix, the palette, or the Keyboard tab's `?` row), `show-plugins` the plugin manager.
+fn panel_of(command: &str) -> Option<&'static str> {
+    match command.strip_prefix(PLUGIN_ID)?.strip_prefix('/')? {
+        "show-keys" => Some(KEYS_PANEL),
+        "show-plugins" => Some(PLUGINS_PANEL),
+        _ => None,
+    }
+}
 
 /// The client side of `ilium.core.keys-and-help` (core-plugin-keys-and-help.md, world `ilium:client/base@0.1.0`).
 #[ilium_plugin(side = "client", exports = ["views"])]
@@ -27,15 +47,57 @@ impl Lifecycle for KeysAndHelpClient {
 }
 
 impl Handler for KeysAndHelpClient {
-    fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-        Vec::new()
+    fn on_events(&mut self, batch: Vec<Event>) -> Vec<Submission> {
+        let mut submissions = Vec::new();
+        let mut redraw = false;
+        for event in batch {
+            match event {
+                Event::CommandInvoked(invoked) => {
+                    if let Some(panel) = panel_of(&invoked.command) {
+                        submissions.push(Submission::new(Intent::OpenView(OpenViewSpec {
+                            view: ViewTarget::Panel(panel.to_owned()),
+                            focus: true,
+                        })));
+                    }
+                }
+                // A remap, or a new prefix or preset, changes what the key reference shows.
+                Event::KeymapChanged => redraw = true,
+                Event::KernelSettingsChanged(changed) if changed.tab == "keyboard" => {
+                    redraw = !changed.keys.is_empty() || redraw;
+                }
+                _ => {}
+            }
+        }
+        if redraw {
+            HostUiHost::invalidate(&mut *host(), ViewTarget::Panel(KEYS_PANEL.to_owned()));
+        }
+        submissions
     }
 }
 
 impl Views for KeysAndHelpClient {
-    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
-        empty_tree()
+    fn render(&mut self, view: ViewTarget, area: Area) -> UiTree {
+        match view {
+            ViewTarget::Panel(panel) if panel == KEYS_PANEL => key_reference_view(area),
+            _ => empty_tree(),
+        }
     }
+}
+
+/// The key reference, read fresh from the keymap import and the Keyboard tab at each render.
+fn key_reference_view(area: Area) -> UiTree {
+    let mut api = host();
+    let bindings = HostKeymap::bindings(&mut *api);
+    let footer = HostKernelSettings::read(&mut *api, "keyboard".to_owned())
+        .ok()
+        .and_then(|json| key_reference::footer(&json));
+    let lines = key_reference::reference_lines(
+        &bindings,
+        |chord| HostKeymap::chord_label(&mut *api, chord.to_owned()),
+        footer,
+        area.columns,
+    );
+    key_reference::reference_tree(lines)
 }
 
 /// Activation succeeds when the settings JSON is an object (an empty string means no settings).

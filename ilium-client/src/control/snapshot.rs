@@ -725,7 +725,6 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::AgentSetupPrompt(_) => "agent_setup_prompt",
         Mode::VoicePromptEditor(_) => "voice_prompt_editor",
         Mode::SaveAs(..) => "save_as",
-        Mode::Help => "help",
         Mode::Explorer(..) => "file_picker",
         Mode::ExplorerFileMenu(_) => "file_actions",
         Mode::FolderExplorer(..) => "folder_picker",

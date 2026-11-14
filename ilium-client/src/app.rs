@@ -409,7 +409,6 @@ pub enum Mode {
     VoicePromptEditor(Box<VoicePromptEditorState>),
     /// In-progress "Save As" filename prompt for the editor pane `NodeId`.
     SaveAs(NodeId, TextPromptState),
-    Help,
     /// A file-picker overlay is open. Unlike the pre-client/server `App`,
     /// the `NodeId` here is the *destination group* the picked file's new
     /// editor pane will be created under -- there is no placeholder tree
@@ -2722,7 +2721,6 @@ pub struct App {
     /// movement) collapses it back to nothing.
     pub terminal_selection: Option<crate::terminal_selection::TerminalSelection>,
     terminal_selection_source: Option<(NodeId, crate::terminal_view::PaintedTerminal)>,
-    help_leader_pending: bool,
     /// The session's project directory. Every new terminal pane spawns
     /// here (server-side), and the file-picker overlay always opens
     /// rooted here.
@@ -3358,7 +3356,6 @@ impl App {
             pending_staged_keystrokes: None,
             terminal_selection: None,
             terminal_selection_source: None,
-            help_leader_pending: false,
             animation_home: session_cwd.clone(),
             session_cwd,
             project_name: None,
@@ -18461,14 +18458,6 @@ impl App {
         self.tree_drag_in_progress
     }
 
-    pub(crate) fn help_leader_pending(&self) -> bool {
-        self.help_leader_pending
-    }
-
-    pub(crate) fn set_help_leader_pending(&mut self, pending: bool) {
-        self.help_leader_pending = pending;
-    }
-
     /// Row hover highlight used by `tree_ui::render`'s hover-only row
     /// action controls (edit/move/close).
     pub fn set_hovered_tree_node(&mut self, hit: Option<TreeNodeHit>) {
@@ -22049,7 +22038,7 @@ mod tests {
             let (mut execution, client) = native_paste_bank();
             let mut app = app();
             app.outbound_admission = Some(client);
-            app.modal_stack.push(Mode::Help);
+            app.modal_stack.push(Mode::Move);
             let state = draft(&mut app);
             let original = (&*state) as *const CreateAgentFromLineState;
             execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
@@ -22058,7 +22047,7 @@ mod tests {
                 panic!("preserve draft");
             };
             assert_eq!((&**state) as *const CreateAgentFromLineState, original);
-            assert!(matches!(app.modal_stack.as_slice(), [Mode::Help]));
+            assert!(matches!(app.modal_stack.as_slice(), [Mode::Move]));
             assert!(app.status_message.as_deref().unwrap().contains("Closed"));
             assert!(app.outbox.is_empty());
             assert!(app.pending_pane_focuses.is_empty());

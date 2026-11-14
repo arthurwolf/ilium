@@ -46,8 +46,9 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         | app.tick_custom_status_rules_save(now);
     let chatroom_changed = app.tick_chatroom_projects(now);
     let attention_changed = app.tick_attention() | app.tick_attention_dialog();
-    // Focus and `config.toml` changes reach the plugins (gap G2); no redraw of its own.
-    app.tick_wasm_plugin_feed();
+    // Focus and `config.toml` changes reach the plugins (gap G2); a reloaded `[padding]` or
+    // `[animations]` table redraws.
+    let config_reloaded = app.tick_wasm_plugin_feed();
     let session_stats_changed = app.tick_session_stats(now);
     let session_models_changed = app.tick_session_models(now);
     let session_goals_changed = app.tick_session_goals(now);
@@ -88,6 +89,7 @@ pub fn on_tick(app: &mut App, now: Instant, was_animating: bool) -> bool {
         || budget_saved
         || chatroom_changed
         || attention_changed
+        || config_reloaded
         || session_stats_changed
         || session_models_changed
         || session_goals_changed

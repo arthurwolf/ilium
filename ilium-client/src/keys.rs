@@ -162,7 +162,6 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
     }
 
     match std::mem::replace(&mut app.mode, Mode::Normal) {
-        Mode::Help => handle_help_event(app, &event),
         Mode::Explorer(overlay, target) => handle_explorer_event(app, overlay, target, &event),
         Mode::ExplorerFileMenu(menu) => handle_explorer_file_menu_event(app, menu, &event),
         Mode::FolderExplorer(overlay, target) => {
@@ -1030,10 +1029,9 @@ fn execute_action(app: &mut App, action: Action) {
         Action::Search => {
             app.action_open_search(ilium_plugin_api::generated::types::CommandOrigin::Keybinding)
         }
-        // Only reachable when Help *wasn't* already open (see
-        // `handle_help_event`, which intercepts everything while it is),
-        // so this always means "open it".
-        Action::Help => app.mode = Mode::Help,
+        Action::Help => {
+            app.action_open_help(ilium_plugin_api::generated::types::CommandOrigin::Keybinding)
+        }
         Action::Detach => {
             app.request_client_exit(ClientExitReason::Quit);
         }
@@ -1164,36 +1162,6 @@ fn compute_outdent_target(tree: &Tree, id: NodeId) -> Option<(NodeId, Option<usi
         .iter()
         .position(|&sibling| sibling == current_group)?;
     Some((grandparent, Some(group_index + 1)))
-}
-
-/// While `Mode::Help` is active: only `Esc`, or the configured shortcut base
-/// followed by the currently configured Help key,
-/// closes it -- every other key (including other leader letters) is
-/// swallowed and Help stays open.
-fn handle_help_event(app: &mut App, event: &Event) {
-    app.mode = Mode::Help;
-    let Event::Key(key) = event else {
-        return;
-    };
-    if !is_press(key) {
-        return;
-    }
-
-    if app.help_leader_pending() {
-        app.set_help_leader_pending(false);
-        if crate::keymap::BindingKey::from_key_event(key).is_some_and(|binding_key| {
-            crate::keymap::action_for_table(&app.keybindings, binding_key) == Some(Action::Help)
-        }) {
-            app.mode = Mode::Normal;
-        }
-        return;
-    }
-
-    if key.code == KeyCode::Esc {
-        app.mode = Mode::Normal;
-    } else if keymap::is_leader_key(key, app.keyboard_settings.shortcut_base) {
-        app.set_help_leader_pending(true);
-    }
 }
 
 fn handle_settings_help_event(
@@ -4837,7 +4805,7 @@ mod indent_outdent_tests {
                 crate::execution::test_client(),
                 Arc::clone(&ready),
             ));
-            app.mode = Mode::Help;
+            app.mode = Mode::Move;
             app.push_modal(Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Inference,
                 selected_row: 4,
@@ -4868,7 +4836,7 @@ mod indent_outdent_tests {
                 matches!(&app.mode, Mode::InferenceSettingPrompt(field, state) if *field == InferenceSettingField::RestructurePromptTokenLimit && state.buf == expected)
             );
             assert_eq!(app.modal_stack.len(), 2);
-            assert!(matches!(&app.modal_stack[0], Mode::Help));
+            assert!(matches!(&app.modal_stack[0], Mode::Move));
             assert!(
                 matches!(&app.modal_stack[1], Mode::Settings(state) if state.tab == SettingsTab::Inference && state.selected_row == 4 && state.scroll == 3)
             );
@@ -4878,7 +4846,7 @@ mod indent_outdent_tests {
                 matches!(&app.mode, Mode::Settings(state) if state.tab == SettingsTab::Inference && state.selected_row == 4 && state.scroll == 3)
             );
             assert_eq!(app.modal_stack.len(), 1);
-            assert!(matches!(&app.modal_stack[0], Mode::Help));
+            assert!(matches!(&app.modal_stack[0], Mode::Move));
         }
         async fn completion(app: &mut App, ready: &tokio::sync::Notify) -> Completion {
             let admission = crate::execution::admission_notification();
@@ -5103,9 +5071,9 @@ mod indent_outdent_tests {
                     .0
                     .starts_with("Saved"));
                 key(&mut app, KeyCode::Enter);
-                app.push_modal(Mode::Help);
+                app.push_modal(Mode::Move);
                 drain(&mut app, &ready).await;
-                assert!(matches!(&app.mode, Mode::Help));
+                assert!(matches!(&app.mode, Mode::Move));
                 assert_eq!(app.modal_stack.len(), 3);
                 app.pop_modal();
                 prompt(&app, "123456");

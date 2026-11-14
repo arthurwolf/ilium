@@ -604,12 +604,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         return;
     }
 
-    // Help is a read-only full-screen reference rather than an action
-    // dialog, so pointer events stay inert until it has scroll controls.
-    if matches!(app.mode, Mode::Help) {
-        return;
-    }
-
     // The costs-and-stats popover floats over the pane surface, so it claims
     // its own pointer events before the tree or the pane can see them.
     if app.handle_goal_popover_mouse(mouse, position) {

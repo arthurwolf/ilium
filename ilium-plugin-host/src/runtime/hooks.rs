@@ -228,6 +228,41 @@ impl HostRuntime {
         failures
     }
 
+    /// Runs a hook chain the kernel itself starts, such as `ilium.core.sessions/before-restore`
+    /// before a restore (EXT-056), and returns how it ended: the outcome and the folded reply
+    /// (none for observe and veto points). The kernel waits for this once, so contributors that
+    /// are still loaded start first instead of being skipped as on a plugin's repeated hook
+    /// (LIF-274). An undeclared point ends `not-found` and runs nothing.
+    pub fn run_kernel_hook(
+        &mut self,
+        point: &str,
+        payload_json: String,
+    ) -> (Outcome, Option<String>, Vec<RuntimeError>) {
+        let handlers = {
+            let registry = lock(&self.contributions);
+            hook_handlers(&registry, &self.extension_book, point)
+        };
+        let mut failures = Vec::new();
+        for handler in handlers {
+            if self.state(&handler.plugin) == Some(PluginState::Loaded) {
+                if let Err(error) = self.activate(&handler.plugin) {
+                    failures.push(error);
+                }
+            }
+        }
+        let hook = PendingHook {
+            // The kernel is the caller: no plugin receives a `take-reply` for this chain.
+            caller: String::new(),
+            request: 0,
+            point: point.to_owned(),
+            payload_json,
+            stack: Vec::new(),
+        };
+        let (end, mut failed) = self.run_chain(&hook);
+        failures.append(&mut failed);
+        (end.outcome, end.reply, failures)
+    }
+
     fn run_chain(&mut self, hook: &PendingHook) -> (ChainEnd, Vec<RuntimeError>) {
         let declared = {
             let registry = lock(&self.contributions);
@@ -890,6 +925,42 @@ mod tests {
         let (outcome, taken) = run(&mut runtime, "{}");
         assert_eq!(outcome, Outcome::Ok);
         assert_eq!(taken, None);
+    }
+
+    #[test]
+    fn a_kernel_hook_runs_the_handlers_and_completes_at_no_plugin() {
+        let mut runtime = runtime();
+        add_plugin(
+            &mut runtime,
+            OWNER,
+            Tier::T1,
+            owner_manifest(json!({"mode": "observe"})),
+        );
+        let handler = add_plugin(
+            &mut runtime,
+            "com.example.a",
+            Tier::T2,
+            contributor_manifest("com.example.a", 10, false),
+        );
+        let payload = r#"{"session":"default","pane_count":3}"#;
+        let (outcome, reply, failures) = runtime.run_kernel_hook(POINT, payload.to_owned());
+        assert_eq!(outcome, Outcome::Ok);
+        assert_eq!(reply, None, "an observe point folds no reply");
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(handler.lock().expect("lock").seen, vec![payload.to_owned()]);
+        assert!(
+            lock_results(&runtime).is_empty(),
+            "no plugin asked, so no request completes"
+        );
+    }
+
+    #[test]
+    fn a_kernel_hook_on_an_undeclared_point_runs_nothing() {
+        let mut runtime = runtime();
+        let (outcome, reply, _) =
+            runtime.run_kernel_hook("com.example.gone/before-restore", "{}".to_owned());
+        assert!(matches!(outcome, Outcome::Failed(_)), "{outcome:?}");
+        assert_eq!(reply, None);
     }
 
     #[test]

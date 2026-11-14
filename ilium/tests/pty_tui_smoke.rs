@@ -21,7 +21,7 @@
 //!    `[keyboard]` table) is then
 //!    written to the pty, proving input routing and rendering are both
 //!    alive end-to-end: the screen must change to show
-//!    `ilium_client::help`'s overlay text.
+//!    key reference panel of the Keys and help plugin.
 //!
 //! Isolation: `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, and `XDG_RUNTIME_DIR`
 //! are all pointed at one tempdir for every spawned process (the real
@@ -1970,24 +1970,24 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // Structural assertion #2: input routing. `Ctrl+B` (0x02, selected in
     // this test's isolated config -- `ilium_client::keymap::is_leader_key`)
     // followed by `?` (`ilium_client::keymap::Action::Help`'s bound
-    // letter) must flip the render to show
-    // `ilium_client::help::render`'s overlay -- proof that keystrokes
-    // typed into this pty actually reach the input-dispatch state
-    // machine and that its effect actually reaches the next rendered
-    // frame, not just that *a* frame renders.
+    // letter) must open the key reference panel of the Keys and help plugin
+    // (`ilium.core.keys-and-help/show-keys`) -- proof that keystrokes typed
+    // into this pty actually reach the input-dispatch state machine and the
+    // plugin host, and that the effect reaches the next rendered frame, not
+    // just that *a* frame renders.
     tui.write(b"\x02?")
         .expect("writing the leader+help keystroke to the pty");
     let help_shown = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains("keyboard reference") && screen.contains("Ctrl+B ?")
+            screen.contains("Key reference") && screen.contains("Prefix  ?")
         },
         WAIT_TIMEOUT,
     )
     .await;
     assert!(
         help_shown,
-        "expected the help overlay after Ctrl+B then ?, got: {:?}",
+        "expected the key reference panel after Ctrl+B then ?, got: {:?}",
         tui.screen_text()
     );
 
@@ -1995,16 +1995,10 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // agent identifier, exercise the dedicated icon editor, then switch to
     // Keyboard and reapply the tmux preset. These
     // assertions cover actual rendered controls and persisted config rather
-    // than only config/keymap units.
-    tui.write(b"\x1b").expect("closing Help with Esc");
-    assert!(
-        wait_until(
-            || !tui.screen_text().contains("keyboard reference"),
-            WAIT_TIMEOUT
-        )
-        .await,
-        "expected Help to close before opening Settings"
-    );
+    // than only config/keymap units. The key reference is a panel, so Esc
+    // only hands the focus back to the tree; Settings opens over it.
+    tui.write(b"\x1b")
+        .expect("leaving the key reference with Esc");
     tui.write(b"\x02:")
         .expect("opening Settings with Ctrl+B then :");
     let settings_shown = wait_until(

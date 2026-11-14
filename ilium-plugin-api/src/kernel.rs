@@ -2,6 +2,7 @@
 //! Traits only; the server implements them.
 
 pub use crate::generated::primitives::terminal::Cell;
+pub use crate::generated::primitives::terminal::ForegroundProcess;
 pub use crate::generated::types::tree::NodeView as TreeNode;
 
 use crate::generated::types::{Intent, NodeId, Outcome, PluginId};
@@ -53,6 +54,28 @@ pub trait PaneRead: Send + Sync {
     fn size(&self, _pane: NodeId) -> Option<(u16, u16)> {
         None
     }
+    /// The cursor and the revision of the visible screen, when this process knows them. The
+    /// revision grows with every output the screen took in, so a plugin that classifies the
+    /// screen (agent detection) can tell a new screen from one it already read.
+    fn screen_state(&self, _pane: NodeId) -> Option<ScreenState> {
+        None
+    }
+    /// The process that runs in the pane: the agent the kernel detected there, else the pane's
+    /// own process. `None` when this process cannot inspect processes.
+    fn foreground_process(&self, _pane: NodeId) -> Option<ForegroundProcess> {
+        None
+    }
+}
+
+/// The cursor and revision of a pane's visible screen (`ilium:primitives/terminal` `screen`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ScreenState {
+    /// The cursor row, from 0.
+    pub cursor_row: u16,
+    /// The cursor column, from 0.
+    pub cursor_column: u16,
+    /// Grows with every output the screen took in.
+    pub revision: u64,
 }
 
 /// What the plugin host needs from the kernel (reference-host-architecture.md).

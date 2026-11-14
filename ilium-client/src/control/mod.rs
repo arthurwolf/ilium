@@ -532,9 +532,9 @@ mod tests {
             .begin_invocation(
                 &mut app,
                 VoiceToolInvocation {
-                    call_id: "help-a".into(),
+                    call_id: "settings-a".into(),
                     name: tools::UI_TOOL_NAME.into(),
-                    arguments_json: r#"{"action":"open_help"}"#.into(),
+                    arguments_json: r#"{"action":"open_settings"}"#.into(),
                 }
             )
             .is_none());
@@ -552,8 +552,8 @@ mod tests {
             cached.allocation_hold.as_ref().unwrap()
         ));
         let action = prepared_output(&mut plane, &mut app);
-        assert_eq!(action.call_id, "help-a");
-        assert!(matches!(app.mode, crate::app::Mode::Help));
+        assert_eq!(action.call_id, "settings-a");
+        assert!(matches!(app.mode, crate::app::Mode::Settings(_)));
         assert!(!plane.has_pending_preparation());
     }
 

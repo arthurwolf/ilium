@@ -154,6 +154,19 @@ impl WasmGuest {
         })
     }
 
+    /// The engine, store, instance and limits, for a guest kind that calls resource
+    /// exports itself (`scene_guest`), after the same import checks and instantiation.
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        Arc<PluginEngine>,
+        Store<StoreData>,
+        Instance,
+        ResolvedLimits,
+    ) {
+        (self.engine, self.store, self.instance, self.limits)
+    }
+
     /// The store data, for the runtime to adjust the import set between calls.
     pub fn store_data_mut(&mut self) -> &mut StoreData {
         self.store.data_mut()
@@ -386,7 +399,7 @@ fn encode(value: &impl Serialize, interface: &str, function: &str) -> Result<Val
     serde_json::to_value(value).map_err(|_| trap("trap.abi", interface, function))
 }
 
-fn trap(code: &'static str, interface: &str, function: &str) -> Trap {
+pub(crate) fn trap(code: &'static str, interface: &str, function: &str) -> Trap {
     Trap {
         code: Code::from_static(code),
         interface: interface.into(),
@@ -663,7 +676,7 @@ impl Wake for ThreadWake {
 
 // No imports can wait for external I/O. Epoch yields reschedule the fiber by
 // waking this thread. park/unpark retains a wake occurring before park.
-fn block_on<F: Future>(future: F) -> F::Output {
+pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
     let waker = Waker::from(Arc::new(ThreadWake(std::thread::current())));
     let mut context = Context::from_waker(&waker);
     let mut future = std::pin::pin!(future);

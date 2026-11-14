@@ -1151,6 +1151,10 @@ pub enum ClientRequest {
         pane_id: NodeId,
         signal: PaneSignal,
     },
+    /// A host import of a client-side plugin that the server backs (the journal). Answered
+    /// with a `Plugin` envelope carrying a `ClientReply`. Appended to preserve all prior
+    /// request discriminants.
+    PluginCall(crate::plugin::PluginCall),
 }
 
 /// Which client path produced a stored recap.
@@ -1172,6 +1176,7 @@ impl ClientRequest {
             Self::SetStatusScreenWatches { .. } => "set_status_screen_watches",
             Self::Resource { .. } => "resource",
             Self::Plugin(_) => "plugin",
+            Self::PluginCall(_) => "plugin_call",
             Self::TerminalHistory { .. } => "terminal_history",
             Self::GetPaneRecapScreen { .. } => "get_pane_recap_screen",
             Self::ApplyRecap { .. } => "apply_recap",

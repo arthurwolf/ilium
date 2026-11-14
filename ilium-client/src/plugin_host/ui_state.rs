@@ -32,18 +32,18 @@ fn debounce(milliseconds: u32) -> Duration {
 }
 
 /// Bidirectional controls a paste must not smuggle into a value (the bidi fixture of the manual).
-fn is_bidi_control(character: char) -> bool {
+pub(crate) fn is_bidi_control(character: char) -> bool {
     matches!(character, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
-fn previous_boundary(text: &str, caret: usize) -> usize {
+pub(crate) fn previous_boundary(text: &str, caret: usize) -> usize {
     text[..caret]
         .grapheme_indices(true)
         .next_back()
         .map_or(0, |(start, _)| start)
 }
 
-fn next_boundary(text: &str, caret: usize) -> usize {
+pub(crate) fn next_boundary(text: &str, caret: usize) -> usize {
     text[caret..]
         .graphemes(true)
         .next()
@@ -51,7 +51,7 @@ fn next_boundary(text: &str, caret: usize) -> usize {
 }
 
 /// Start of the word before the caret: trailing blanks first, then the word itself.
-fn word_start(text: &str, caret: usize) -> usize {
+pub(crate) fn word_start(text: &str, caret: usize) -> usize {
     let mut start = caret;
     let mut seen_word = false;
     for (index, character) in text[..caret].char_indices().rev() {
@@ -800,6 +800,8 @@ pub(crate) enum DueChange {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct WidgetStates {
     pub texts: BTreeMap<String, TextEdit>,
+    /// Multi-line `text-area`s; their changes reach the plugin as `DueChange::Text`.
+    pub areas: BTreeMap<String, super::text_area::AreaEdit>,
     pub numbers: BTreeMap<String, NumberEdit>,
     pub scrolls: BTreeMap<String, ScrollState>,
     /// Divider positions in per mille.
@@ -813,6 +815,11 @@ impl WidgetStates {
     pub(crate) fn take_due(&mut self, now: Instant) -> Vec<DueChange> {
         let mut released = Vec::new();
         for (key, edit) in &mut self.texts {
+            if let Some(text) = edit.take_due(now) {
+                released.push(DueChange::Text(key.clone(), text));
+            }
+        }
+        for (key, edit) in &mut self.areas {
             if let Some(text) = edit.take_due(now) {
                 released.push(DueChange::Text(key.clone(), text));
             }
@@ -832,6 +839,13 @@ impl WidgetStates {
         if let Some(text) = self.texts.get_mut(key).and_then(TextEdit::flush) {
             return Some(DueChange::Text(key.to_owned(), text));
         }
+        if let Some(text) = self
+            .areas
+            .get_mut(key)
+            .and_then(super::text_area::AreaEdit::flush)
+        {
+            return Some(DueChange::Text(key.to_owned(), text));
+        }
         let spec = self.number_specs.get(key)?;
         let value = self.numbers.get_mut(key)?.flush(spec)?;
         Some(DueChange::Number(key.to_owned(), value))
@@ -842,6 +856,11 @@ impl WidgetStates {
         self.texts
             .values()
             .filter_map(TextEdit::next_due)
+            .chain(
+                self.areas
+                    .values()
+                    .filter_map(super::text_area::AreaEdit::next_due),
+            )
             .chain(self.numbers.values().filter_map(NumberEdit::next_due))
             .min()
     }

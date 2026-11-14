@@ -102,6 +102,28 @@ pub struct PluginEnvelope {
     pub body: EnvelopeBody,
 }
 
+/// A host import a client-side plugin calls that the server backs, because the store it reads
+/// lives in the server (the journal, `ilium:host/journal`). The server answers with a
+/// [`ServerEvent::Plugin`](crate::ServerEvent::Plugin) envelope for `plugin` whose body is
+/// [`EnvelopeBody::ClientReply`] quoting `call_id`; its payload is the JSON of the import's
+/// return value (`{"ok": ...}` or `{"err": plugin-error}`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginCall {
+    /// The calling plugin; the server stamps entries with it, never with an id in `args_json`.
+    pub plugin: String,
+    /// Chosen by the client; the reply quotes it.
+    pub call_id: u64,
+    /// The WIT interface, for example `journal`.
+    pub interface: String,
+    /// The WIT function, for example `log-event`.
+    pub function: String,
+    /// The arguments as one JSON object named like the WIT parameters.
+    pub args_json: Vec<u8>,
+}
+
+/// Largest `args_json` of a [`PluginCall`] the server reads (a journal payload is 4 KiB).
+pub const MAX_PLUGIN_CALL_ARGS_BYTES: usize = 64 * 1024;
+
 /// The bodies of an envelope, in manual order, with later bodies appended (HST-101).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EnvelopeBody {

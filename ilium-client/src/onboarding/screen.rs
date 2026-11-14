@@ -211,7 +211,23 @@ impl Geometry {
 }
 
 pub fn render_shell(frame: &mut Frame, area: Rect, step: Step) -> Geometry {
+    render_wizard_shell(frame, area, step, false)
+}
+
+/// The shell of the wizard. With `plugin_steps` the step row ends with the contributed
+/// plugin step ([`Step::Plugin`]), and Voice continues to it instead of finishing.
+pub fn render_wizard_shell(
+    frame: &mut Frame,
+    area: Rect,
+    step: Step,
+    plugin_steps: bool,
+) -> Geometry {
     let geometry = Geometry::new(area);
+    let shown: Vec<Step> = Step::ALL
+        .into_iter()
+        .chain((plugin_steps || step == Step::Plugin).then_some(Step::Plugin))
+        .collect();
+    let last = step == Step::Plugin || (step == Step::Voice && !plugin_steps);
     frame.render_widget(Clear, area);
     frame.render_widget(Block::default().style(Style::new().bg(CANVAS)), area);
     frame.render_widget(
@@ -228,20 +244,20 @@ pub fn render_shell(frame: &mut Frame, area: Rect, step: Step) -> Geometry {
         ])),
         geometry.header,
     );
-    let full_width = Step::ALL
+    let full_width = shown
         .iter()
         .map(|candidate| candidate.title().chars().count() + 5)
         .sum::<usize>();
-    let short_width = Step::ALL
+    let short_width = shown
         .iter()
         .map(|candidate| short_title(*candidate).chars().count() + 5)
         .sum::<usize>();
     let available = usize::from(geometry.steps.width);
     let wide = available >= full_width;
     let compact = available < short_width;
-    let dense = available < Step::ALL.len() * 4;
+    let dense = available < shown.len() * 4;
     let mut spans = Vec::new();
-    for candidate in Step::ALL {
+    for candidate in shown.iter().copied() {
         let selected = candidate == step;
         let background = if selected {
             ACCENT
@@ -283,7 +299,7 @@ pub fn render_shell(frame: &mut Frame, area: Rect, step: Step) -> Geometry {
         (geometry.skip, "Skip\nCtrl+S"),
         (
             geometry.next,
-            if step == Step::Voice {
+            if last {
                 "Finish ›\nCtrl+Enter"
             } else {
                 "Continue ›\nCtrl+Enter"
@@ -429,6 +445,7 @@ fn short_title(step: Step) -> &'static str {
         Step::KeyboardChoice => "Keys",
         Step::KeyboardPractice => "Play",
         Step::Voice => "Voice",
+        Step::Plugin => "Plugins",
     }
 }
 
@@ -483,6 +500,42 @@ mod tests {
                 .collect::<String>();
             assert_eq!(row.matches('▶').count(), 7, "width {width}: {row}");
             assert!(row.contains('7'), "last step missing at width {width}");
+        }
+    }
+
+    fn buffer_text(terminal: &Terminal<TestBackend>) -> String {
+        let buffer = terminal.backend().buffer();
+        let area = buffer.area;
+        (area.y..area.bottom())
+            .map(|y| {
+                (area.x..area.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn contributed_plugin_steps_add_an_eighth_chevron_and_move_finish_to_it() {
+        for width in 40..=160 {
+            for (step, finish) in [(Step::Voice, false), (Step::Plugin, true)] {
+                let mut terminal = Terminal::new(TestBackend::new(width, 16)).unwrap();
+                terminal
+                    .draw(|frame| {
+                        render_wizard_shell(frame, frame.area(), step, true);
+                    })
+                    .unwrap();
+                let geometry = Geometry::new(Rect::new(0, 0, width, 16));
+                let buffer = terminal.backend().buffer();
+                let row = (geometry.steps.x..geometry.steps.right())
+                    .map(|x| buffer[(x, geometry.steps.y)].symbol())
+                    .collect::<String>();
+                assert_eq!(row.matches('▶').count(), 8, "width {width}: {row}");
+                assert!(row.contains('8'), "plugin step missing at width {width}");
+                let text = buffer_text(&terminal);
+                assert_eq!(text.contains("Finish"), finish, "{step:?} at {width}");
+            }
         }
     }
 

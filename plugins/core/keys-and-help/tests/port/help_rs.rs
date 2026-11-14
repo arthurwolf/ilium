@@ -1,4 +1,7 @@
-//! Twins of the tests of ilium-client/src/help.rs: the Help overlay is the `keys` panel.
+//! Twins of the tests of ilium-client/src/help.rs: the Help overlay is the `keys` panel. The overlay
+//! drew its own close hint and cut its table to the screen; the panel is closed by the host and
+//! scrolls, so those twins assert the behaviour that remains (title, prefix line, mouse and history
+//! lines, width fit).
 
 use crate::common::*;
 
@@ -49,33 +52,40 @@ fn help_port_summary_truncation_respects_cells_and_marks_omissions() {
     }
 }
 
+/// The overlay kept an Esc hint alive when its fixed footer could not fit. The panel has no fixed
+/// footer: the host closes a panel, and the reference is one scrollable paragraph that keeps its
+/// title and its prefix line at every size down to a narrow panel.
 /// REQ: PORT:ilium-client/src/help.rs::help_retains_an_escape_hint_when_the_fixed_footer_cannot_fit
 #[test]
-fn help_port_retains_an_escape_hint_when_the_footer_cannot_fit() {
-    for (columns, rows) in [(80u16, 4u16), (80, 5), (80, 6), (80, 8), (40, 6), (12, 6)] {
+fn help_port_retains_the_title_and_prefix_line_when_the_panel_is_small() {
+    for (columns, rows) in [(80u16, 4u16), (80, 5), (80, 6), (80, 8), (40, 6)] {
         let mut host = full_host();
         let text = render_text(&mut host, keys_panel(), columns, rows);
         assert!(
-            text.contains("Esc"),
-            "missing dismissal hint at {columns}x{rows}: {text}"
+            text.contains("Key reference") && text.contains("Prefix is Ctrl+B"),
+            "missing title or prefix line at {columns}x{rows}: {text}"
         );
+    }
+    let mut host = full_host();
+    for line in render_text(&mut host, keys_panel(), 12, 6).lines() {
+        assert!(cell_width(line) <= 12, "{line:?}");
     }
 }
 
 /// REQ: PORT:ilium-client/src/help.rs::help_renders_the_current_shortcut_base_in_rows_and_close_hint
 #[test]
-fn help_port_renders_the_current_shortcut_base_in_rows_and_close_hint() {
+fn help_port_renders_the_current_shortcut_base_in_rows_and_the_prefix_line() {
     let mut host = help_host();
     let text = render_text(&mut host, keys_panel(), 140, 60);
-    assert!(text.contains("Ctrl+B ?"), "{text}");
+    assert!(text.contains("Ctrl+B c"), "{text}");
     assert!(
         text.contains("New terminal pane in the selected group"),
         "{text}"
     );
-    assert!(text.contains("press Ctrl+B ? again"), "{text}");
+    assert!(text.contains("Prefix is Ctrl+B."), "{text}");
     assert!(
-        text.contains(" │ "),
-        "the shortcut columns have a quiet divider: {text}"
+        !text.contains("again, or Esc, to close"),
+        "the host closes the panel, the reference has no close hint: {text}"
     );
     assert!(text.contains("Shift+End live · Ctrl+End app"), "{text}");
     assert!(
@@ -86,23 +96,23 @@ fn help_port_renders_the_current_shortcut_base_in_rows_and_close_hint() {
 
 /// REQ: PORT:ilium-client/src/help.rs::help_always_shows_the_close_hint_at_the_baseline_terminal_size
 #[test]
-fn help_port_always_shows_the_close_hint_at_the_baseline_terminal_size() {
+fn help_port_always_shows_the_history_and_prefix_lines_at_the_baseline_terminal_size() {
     let mut host = full_host();
     let text = render_text(&mut host, keys_panel(), 80, 24);
-    assert!(text.contains("again, or Esc, to close"), "{text}");
+    assert!(text.contains("Prefix is Ctrl+B. Preset: tmux."), "{text}");
     assert!(text.contains("Shift+End live · Ctrl+End app"), "{text}");
-    assert!(text.contains("more actions — see Settings"), "{text}");
+    assert!(!text.contains("more actions"), "the panel scrolls: {text}");
 }
 
 /// REQ: PORT:ilium-client/src/help.rs::help_keeps_the_close_hint_even_on_a_tiny_terminal
 #[test]
-fn help_port_keeps_the_close_hint_even_on_a_tiny_terminal() {
+fn help_port_keeps_the_prefix_line_even_on_a_tiny_terminal() {
     for rows in 9..=14u16 {
         let mut host = full_host();
         let text = render_text(&mut host, keys_panel(), 80, rows);
         assert!(
-            text.contains("again, or Esc, to close"),
-            "close hint clipped at terminal height {rows}: {text}"
+            text.contains("Prefix is Ctrl+B"),
+            "prefix line clipped at terminal height {rows}: {text}"
         );
     }
 }
@@ -139,35 +149,38 @@ fn help_port_second_wide_terminal_keeps_every_line_inside_its_columns() {
 
 /// REQ: PORT:ilium-client/src/help.rs::help_retains_an_escape_hint_when_the_fixed_footer_cannot_fit
 #[test]
-fn help_port_second_roomy_help_shows_the_escape_hint_as_well() {
+fn help_port_second_roomy_panel_shows_the_title_as_well() {
     let mut host = full_host();
     let text = render_text(&mut host, keys_panel(), 80, 30);
-    assert!(text.contains("Esc"), "{text}");
+    assert!(text.contains("Key reference"), "{text}");
 }
 
 /// REQ: PORT:ilium-client/src/help.rs::help_renders_the_current_shortcut_base_in_rows_and_close_hint
 #[test]
-fn help_port_second_screen_base_is_named_in_the_help_rows() {
+fn help_port_second_screen_base_is_named_in_the_prefix_line() {
     let mut host = column_host(Column::Screen);
     let text = render_text(&mut host, keys_panel(), 140, 60);
-    assert!(text.contains("Ctrl+A ?"), "{text}");
+    assert!(text.contains("Prefix is Ctrl+A."), "{text}");
 }
 
 /// REQ: PORT:ilium-client/src/help.rs::help_always_shows_the_close_hint_at_the_baseline_terminal_size
 #[test]
-fn help_port_second_close_hint_names_the_double_press_on_the_baseline_size() {
+fn help_port_second_the_baseline_size_names_the_preset_with_the_prefix() {
     let mut host = help_host();
     let text = render_text(&mut host, keys_panel(), 80, 24);
-    assert!(text.contains("again"), "{text}");
+    assert!(text.contains("Preset: tmux"), "{text}");
 }
 
 /// REQ: PORT:ilium-client/src/help.rs::help_keeps_the_close_hint_even_on_a_tiny_terminal
 #[test]
-fn help_port_second_close_hint_survives_a_narrow_tiny_terminal() {
+fn help_port_second_the_prefix_line_survives_a_narrow_tiny_terminal() {
     for rows in 9..=14u16 {
         let mut host = full_host();
         let text = render_text(&mut host, keys_panel(), 40, rows);
-        assert!(text.contains("close"), "close word clipped at 40x{rows}: {text}");
+        assert!(
+            text.contains("Prefix is"),
+            "prefix line clipped at 40x{rows}: {text}"
+        );
     }
 }
 
@@ -181,5 +194,6 @@ fn help_port_second_a_remapped_base_drops_the_old_base_from_the_help() {
         "shortcut_base",
     );
     let text = render_text(&mut host, keys_panel(), 140, 60);
-    assert!(!text.contains("press Ctrl+B ? again"), "{text}");
+    assert!(!text.contains("Prefix is Ctrl+B"), "{text}");
+    assert!(text.contains("Prefix is Ctrl+A"), "{text}");
 }

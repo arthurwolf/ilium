@@ -165,13 +165,13 @@ pub enum ColorScheme {
 /// path, not just a one-time install. `keymap`'s live binding table takes
 /// the opposite approach -- `App::keybindings`, an ordinary field the
 /// settings screen mutates directly -- because its consumers (`keys.rs`'s
-/// dispatch, `help.rs`'s render) already receive `&App`/its fields, unlike
+/// dispatch) already receive `&App`/its fields, unlike
 /// this module's render call sites below.
 ///
 /// Still a legitimate use of a global, not a smell: ilium-client is a
 /// single-process TUI with exactly one render loop, so a `RwLock` guarding
 /// a plain `Copy` value never contends, and every render call site
-/// (`ui.rs`/`tree_ui.rs`/`modal.rs`/`help.rs`/`explorer_overlay.rs`) already
+/// (`ui.rs`/`tree_ui.rs`/`modal.rs`/`explorer_overlay.rs`) already
 /// calls straight into this module's free functions with no `&App`/state
 /// threaded through them -- adding a `&Theme` parameter to every one of
 /// those call sites across every render module would be a large,

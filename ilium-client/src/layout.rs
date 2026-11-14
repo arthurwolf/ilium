@@ -318,7 +318,7 @@ impl UiLayout {
 
 /// Standard ratatui "centered popup" layout helper: `percent_x` /
 /// `percent_y` of `area`, centered on both axes. Shared by every
-/// percentage-sized overlay (`ui::draw`'s explorer popup, `help::render`)
+/// percentage-sized overlay (`ui::draw`'s explorer popup)
 /// so their geometry can never drift apart from each other.
 ///
 /// Clamps each percentage to 100 first -- a caller-supplied value above 100

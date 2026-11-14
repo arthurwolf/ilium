@@ -147,6 +147,7 @@ pub fn client_plugin_start() -> Option<ilium_client::plugin_host::host::ClientPl
             .flat_map(|plugin| plugin.schemas)
             .map(|schema| (schema.service.to_owned(), schema.text.to_owned()))
             .collect(),
+        scenes: bundled_catalogue("scene"),
     })
 }
 

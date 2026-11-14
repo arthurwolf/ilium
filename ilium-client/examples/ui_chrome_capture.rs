@@ -298,7 +298,6 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 "agent-debug-history-newest",
                 ilium_client::app::Mode::Normal,
             ),
-            ("help", ilium_client::app::Mode::Help),
             (
                 "command-prompt",
                 ilium_client::app::Mode::CommandPrompt(

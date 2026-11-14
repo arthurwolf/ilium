@@ -22,8 +22,8 @@ use ilium_plugin_api::generated::types::text::{
 };
 use ilium_plugin_api::generated::types::ui::{
     ActionKind, ActionValue, ButtonRole, ChoiceStyle, NodeFlags, NumberSpec, NumberStyle,
-    ProgressState, ScrollViewSpec, SplitSpec, TextInputSpec, UiAction, UiNode, UiTree, ViewTarget,
-    Widget,
+    ParagraphSpec, ProgressState, ScrollViewSpec, SplitSpec, TextAreaSpec, TextInputSpec, UiAction,
+    UiNode, UiTree, ViewTarget, Widget,
 };
 use ilium_plugin_host::render::sanitize_plugin_text;
 use ratatui::layout::{Position, Rect};
@@ -32,6 +32,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use super::text_area::{self, AreaEdit, AreaView};
 use super::ui_state::{
     bounds, format_number, scroll_offset, DueChange, EditOutcome, NumberEdit, NumberOutcome,
     ScrollState, TextEdit, WidgetStates,
@@ -64,7 +65,19 @@ pub(crate) struct Hit {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum InputKind {
     Text(TextInputSpec),
+    /// A multi-line `text-area`; its `field` is the text without the line-number gutter.
+    TextArea(TextAreaSpec),
     Number(NumberSpec),
+}
+
+impl InputSlot {
+    /// The view of a text area: the cells of its field.
+    fn area_view(&self) -> AreaView {
+        AreaView {
+            width: self.field.width,
+            rows: self.field.height,
+        }
+    }
 }
 
 /// An editable widget of a scene, tied to the hit that gives it the keyboard.
@@ -330,6 +343,7 @@ fn measure(tree: &UiTree, index: u32, width: u16, depth: usize) -> u16 {
         | Widget::Badge(_)
         | Widget::Spinner(_)
         | Widget::Icon(_) => 1,
+        Widget::TextArea(spec) => text_area::wanted_rows(spec),
         Widget::ScrollView(spec) => match spec.content_rows {
             0 => children(width),
             rows => u16::try_from(rows).unwrap_or(u16::MAX),
@@ -743,14 +757,39 @@ impl Composer<'_> {
                 .map(|child| measure(self.tree, *child, width, depth + 1))
                 .fold(0u16, u16::saturating_add),
             rows => u16::try_from(rows).unwrap_or(u16::MAX),
-        }
-        .max(1);
+        };
+        self.scrolled(
+            key,
+            area,
+            bar,
+            content,
+            spec.follow_tail,
+            |composer, inner| {
+                composer.stack(children, inner, depth);
+            },
+        );
+    }
+
+    /// Lays `fill` out at `content` rows and clips it to `area` (less the scrollbar column when
+    /// `bar`) at the offset the host keeps for `key`: the one scroll mechanism of scroll views
+    /// and scrollable paragraphs.
+    fn scrolled(
+        &mut self,
+        key: &str,
+        area: Rect,
+        bar: bool,
+        content: u16,
+        follow_tail: bool,
+        fill: impl FnOnce(&mut Self, Rect),
+    ) {
+        let width = area.width - u16::from(bar);
+        let content = content.max(1);
         let max_offset = content.saturating_sub(area.height);
-        let offset = scroll_offset(self.states.scrolls.get(key), spec.follow_tail, max_offset);
+        let offset = scroll_offset(self.states.scrolls.get(key), follow_tail, max_offset);
         let viewport = Rect::new(area.x, area.y, width, area.height);
         let slot = self.scene.scrolls.len();
         let mark = self.mark();
-        self.stack(children, Rect::new(area.x, area.y, width, content), depth);
+        fill(self, Rect::new(area.x, area.y, width, content));
         self.clip(&mark, viewport, offset, slot);
         let bar_area = bar.then(|| Rect::new(area.x + width, area.y, 1, area.height));
         if let Some(bar_area) = bar_area {
@@ -864,6 +903,93 @@ impl Composer<'_> {
         });
     }
 
+    /// The lines of a paragraph, rich lines when it has only those.
+    fn paragraph(&mut self, paragraph: &ParagraphSpec, area: Rect) {
+        let base = style(&paragraph.style);
+        match &paragraph.rich {
+            Some(lines) if paragraph.lines.is_empty() => {
+                for (row, line) in lines.iter().enumerate() {
+                    self.text(area, rows(row), rich(line).patch_style(base));
+                }
+            }
+            _ => {
+                for (row, line) in paragraph.lines.iter().enumerate() {
+                    self.text(area, rows(row), styled(line).patch_style(base));
+                }
+            }
+        }
+    }
+
+    /// A text area: the rows of the edit state (the plugin's `initial` until the first
+    /// interaction) after a muted line-number gutter, or the muted placeholder while empty. The
+    /// whole area takes clicks; the keyboard edits it once it has the cursor.
+    fn text_area(&mut self, spec: &TextAreaSpec, key: &str, area: Rect, enabled: bool) {
+        let seeded;
+        let edit = match self.states.areas.get(key) {
+            Some(edit) => edit,
+            None => {
+                seeded = AreaEdit::seeded(&spec.initial);
+                &seeded
+            }
+        };
+        let gutter = edit.gutter(spec).min(area.width.saturating_sub(1));
+        let field = Rect::new(area.x + gutter, area.y, area.width - gutter, area.height);
+        let view = AreaView {
+            width: field.width,
+            rows: field.height,
+        };
+        let layout = edit.layout(spec, view);
+        let muted = Style::new().add_modifier(Modifier::DIM);
+        let base = if enabled { Style::new() } else { muted };
+        let number_cells = usize::from(gutter.saturating_sub(2));
+        let placeholder = spec
+            .placeholder
+            .as_deref()
+            .filter(|_| edit.text().is_empty())
+            .map(|hint| fit(&clean(hint), usize::from(field.width)));
+        for (row, shown) in layout.rows.iter().enumerate() {
+            let mut spans = Vec::new();
+            if gutter > 0 {
+                let number = shown
+                    .number
+                    .map(|number| number.to_string())
+                    .unwrap_or_default();
+                spans.push(Span::styled(
+                    fit(&format!("{number:>number_cells$}  "), usize::from(gutter)),
+                    muted,
+                ));
+            }
+            match &placeholder {
+                Some(hint) if row == 0 => spans.push(Span::styled(hint.clone(), muted)),
+                _ => spans.extend(shown.cells.iter().map(|cell| {
+                    let cell_style = if cell.selected {
+                        base.add_modifier(Modifier::REVERSED)
+                    } else {
+                        base
+                    };
+                    Span::styled(cell.text.clone(), cell_style)
+                })),
+            }
+            self.text(area, rows(row), Line::from(spans));
+        }
+        if enabled && !key.is_empty() {
+            self.scene.hits.push(Hit {
+                area,
+                key: key.to_owned(),
+                action_id: String::new(),
+                kind: ActionKind::Changed,
+                value: None,
+                scroll: None,
+            });
+            self.scene.inputs.push(InputSlot {
+                hit: self.scene.hits.len() - 1,
+                key: key.to_owned(),
+                field,
+                kind: InputKind::TextArea(spec.clone()),
+            });
+        }
+    }
+
     fn place(&mut self, index: u32, area: Rect, depth: usize) {
         let tree = self.tree;
         let Some(node) = node(tree, index).filter(|node| !is_hidden(node)) else {
@@ -945,18 +1071,18 @@ impl Composer<'_> {
                 }
             }
             Widget::Paragraph(paragraph) => {
-                let base = style(&paragraph.style);
-                match &paragraph.rich {
-                    Some(lines) if paragraph.lines.is_empty() => {
-                        for (row, line) in lines.iter().enumerate() {
-                            self.text(area, rows(row), rich(line).patch_style(base));
-                        }
-                    }
-                    _ => {
-                        for (row, line) in paragraph.lines.iter().enumerate() {
-                            self.text(area, rows(row), styled(line).patch_style(base));
-                        }
-                    }
+                let content = match &paragraph.rich {
+                    Some(lines) if paragraph.lines.is_empty() => rows(lines.len()),
+                    _ => rows(paragraph.lines.len()),
+                };
+                // A scrollable paragraph longer than its room scrolls like a scroll view with a
+                // scrollbar; the wheel and PageUp/PageDown move it when it has a key.
+                if paragraph.scrollable && content > area.height && area.width > 1 {
+                    self.scrolled(&key, area, true, content, false, |composer, inner| {
+                        composer.paragraph(paragraph, inner);
+                    });
+                } else {
+                    self.paragraph(paragraph, area);
                 }
             }
             // Markdown is shown as its source text until the client's Markdown view is shared.
@@ -1235,6 +1361,7 @@ impl Composer<'_> {
             }
             Widget::Number(number) => self.number(number, &key, area, enabled),
             Widget::TextInput(input) => self.text_input(input, &key, area, enabled),
+            Widget::TextArea(spec) => self.text_area(spec, &key, area, enabled),
             Widget::Badge(badge) => {
                 let mut text = badge.label.as_deref().map(clean).unwrap_or_default();
                 if let Some(count) = badge.count {
@@ -1358,10 +1485,33 @@ pub(crate) fn draw(frame: &mut Frame, scene: &Scene, cursor: &ViewCursor, focuse
         frame.render_widget(Paragraph::new(line.clone()), *area);
     }
     if focused {
-        if let Some(hit) = scene.hits.get(cursor.focus) {
+        let focused_slot = scene.inputs.iter().find(|slot| slot.hit == cursor.focus);
+        // A text area shows the terminal caret instead of a highlight over all its rows.
+        let is_area = focused_slot.is_some_and(|slot| matches!(slot.kind, InputKind::TextArea(_)));
+        if let Some(hit) = scene.hits.get(cursor.focus).filter(|_| !is_area) {
             frame
                 .buffer_mut()
                 .set_style(hit.area, theme::selected_style());
+        }
+        if let Some(slot) =
+            focused_slot.filter(|slot| slot.field.width > 0 && slot.field.height > 0)
+        {
+            if let InputKind::TextArea(spec) = &slot.kind {
+                let seeded;
+                let edit = match cursor.states.areas.get(&slot.key) {
+                    Some(edit) => edit,
+                    None => {
+                        seeded = AreaEdit::seeded(&spec.initial);
+                        &seeded
+                    }
+                };
+                if let Some((row, column)) = edit.layout(spec, slot.area_view()).caret {
+                    frame.set_cursor_position(Position::new(
+                        slot.field.x.saturating_add(column),
+                        slot.field.y.saturating_add(row),
+                    ));
+                }
+            }
         }
         if let Some((slot, InputKind::Text(spec))) = scene
             .inputs
@@ -1639,6 +1789,15 @@ fn click_input(
                 .or_insert_with(|| TextEdit::seeded(&spec.initial))
                 .place_caret(spec, usize::from(slot.field.width), column);
         }
+        InputKind::TextArea(spec) => {
+            let row = position.y - slot.field.y;
+            cursor
+                .states
+                .areas
+                .entry(slot.key.clone())
+                .or_insert_with(|| AreaEdit::seeded(&spec.initial))
+                .place_caret(spec, slot.area_view(), column, row);
+        }
         InputKind::Number(spec) => {
             cursor
                 .states
@@ -1794,6 +1953,19 @@ pub(crate) fn wheel(
     notches: i32,
 ) -> Vec<UiAction> {
     let mut out = Vec::new();
+    // A text area under the pointer scrolls its own rows; the plugin hears nothing.
+    if let Some((slot, spec)) = scene.inputs.iter().find_map(|slot| match &slot.kind {
+        InputKind::TextArea(spec) if slot.field.contains(position) => Some((slot, spec)),
+        _ => None,
+    }) {
+        cursor
+            .states
+            .areas
+            .entry(slot.key.clone())
+            .or_insert_with(|| AreaEdit::seeded(&spec.initial))
+            .scroll_by(spec, slot.area_view(), notches.saturating_mul(3));
+        return out;
+    }
     let innermost = scene
         .scrolls
         .iter()
@@ -1824,16 +1996,26 @@ pub(crate) fn paste(
     now: Instant,
 ) -> Option<Vec<UiAction>> {
     let slot = scene.inputs.iter().find(|slot| slot.hit == cursor.focus)?;
-    let InputKind::Text(spec) = &slot.kind else {
-        return None;
-    };
     let mut out = Vec::new();
-    cursor
-        .states
-        .texts
-        .entry(slot.key.clone())
-        .or_insert_with(|| TextEdit::seeded(&spec.initial))
-        .paste(pasted, spec, now);
+    match &slot.kind {
+        InputKind::Text(spec) => {
+            cursor
+                .states
+                .texts
+                .entry(slot.key.clone())
+                .or_insert_with(|| TextEdit::seeded(&spec.initial))
+                .paste(pasted, spec, now);
+        }
+        InputKind::TextArea(spec) => {
+            cursor
+                .states
+                .areas
+                .entry(slot.key.clone())
+                .or_insert_with(|| AreaEdit::seeded(&spec.initial))
+                .paste(pasted, spec, slot.area_view(), now);
+        }
+        InputKind::Number(_) => return None,
+    }
     release_due(view, cursor, now, &mut out);
     Some(out)
 }
@@ -1911,6 +2093,23 @@ pub(crate) fn key(
                             ActionKind::Submitted,
                             Some(ActionValue::Text(text)),
                         ));
+                        return out;
+                    }
+                }
+            }
+            // Enter inserts a line, so a text area never submits.
+            InputKind::TextArea(spec) => {
+                let view_of = slot.area_view();
+                let edit = cursor
+                    .states
+                    .areas
+                    .entry(slot.key.clone())
+                    .or_insert_with(|| AreaEdit::seeded(&spec.initial));
+                match edit.apply_key(event, spec, view_of, now) {
+                    EditOutcome::Ignored => {}
+                    EditOutcome::Moved | EditOutcome::Submitted => return out,
+                    EditOutcome::Edited => {
+                        release_due(view, cursor, now, &mut out);
                         return out;
                     }
                 }
@@ -1995,8 +2194,7 @@ mod tests {
     use crossterm::event::KeyModifiers;
     use ilium_plugin_api::generated::types::layout::{Alignment, Flex, Margin, Spacing};
     use ilium_plugin_api::generated::types::ui::{
-        ButtonSpec, ChoiceSpec, DisabledMarker, LayoutSpec, ParagraphSpec, PopupSpec, ToggleSpec,
-        ToggleStyle,
+        ButtonSpec, ChoiceSpec, DisabledMarker, LayoutSpec, PopupSpec, ToggleSpec, ToggleStyle,
     };
     use std::time::Duration;
 
@@ -2421,6 +2619,149 @@ mod tests {
         assert!(wheel(&scene, &view, &mut cursor, Position::new(2, 1), -1).is_empty());
         // A position outside the view scrolls nothing.
         assert!(wheel(&scene, &view, &mut cursor, Position::new(30, 1), 1).is_empty());
+    }
+
+    fn text_area_widget(initial: &str, tab_moves_focus: bool) -> Widget {
+        Widget::TextArea(TextAreaSpec {
+            initial: initial.to_owned(),
+            wrap: true,
+            line_numbers: true,
+            tab_moves_focus,
+            ..TextAreaSpec::default()
+        })
+    }
+
+    #[test]
+    fn a_text_area_takes_enter_as_a_line_and_reports_after_its_debounce() {
+        let view = ViewTarget::Panel("panel".to_owned());
+        let tree = column(vec![
+            (Some("notes"), text_area_widget("one", true), vec![]),
+            (Some("more"), text_area_widget("", true), vec![]),
+        ]);
+        let area = Rect::new(0, 0, 30, 10);
+        let mut cursor = ViewCursor::default();
+        let scene = compose_with(&tree, area, &cursor.states);
+        // A muted gutter numbers the lines; an area asks for at least three rows.
+        assert_eq!(row_text(&scene, 0), "1  one");
+        assert_eq!(scene.inputs.len(), 2);
+        assert_eq!(scene.inputs[0].field, Rect::new(3, 0, 27, 3));
+        assert_eq!(scene.hits[1].area.y, 3);
+        let sent = key(
+            &scene,
+            &view,
+            &mut cursor,
+            press(KeyCode::Enter),
+            Instant::now(),
+        );
+        assert!(sent.is_empty());
+        let scene = compose_with(&tree, area, &cursor.states);
+        type_text(&scene, &view, &mut cursor, "two");
+        assert_eq!(cursor.states.areas["notes"].text(), "one\ntwo");
+        let scene = compose_with(&tree, area, &cursor.states);
+        assert_eq!(row_text(&scene, 1), "2  two");
+        // Nothing goes out before the 600 ms default debounce, then one `changed`.
+        assert!(tick(&view, &mut cursor, Instant::now()).is_empty());
+        let due = next_due(&cursor).expect("an edit is waiting");
+        let sent = tick(&view, &mut cursor, due);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].kind, ActionKind::Changed);
+        assert_eq!(
+            sent[0].value,
+            Some(ActionValue::Text("one\ntwo".to_owned()))
+        );
+        // With tab-moves-focus, Tab leaves the area; nothing is ever submitted.
+        let sent = key(
+            &scene,
+            &view,
+            &mut cursor,
+            press(KeyCode::Tab),
+            Instant::now(),
+        );
+        assert!(sent
+            .iter()
+            .all(|action| action.kind != ActionKind::Submitted));
+        assert_eq!(cursor.focus, 1);
+    }
+
+    #[test]
+    fn a_click_places_the_caret_in_a_text_area_and_the_wheel_scrolls_it() {
+        let view = ViewTarget::Panel("panel".to_owned());
+        let tree = column(vec![(
+            Some("notes"),
+            text_area_widget("a\nb\nc\nd\ne", false),
+            vec![],
+        )]);
+        let area = Rect::new(0, 0, 20, 3);
+        let mut cursor = ViewCursor::default();
+        let scene = compose_with(&tree, area, &cursor.states);
+        let slot = scene.inputs[0].clone();
+        let InputKind::TextArea(spec) = &slot.kind else {
+            panic!("the text area is an input");
+        };
+        assert_eq!(slot.field, Rect::new(3, 0, 17, 3));
+        click(
+            &scene,
+            &view,
+            &mut cursor,
+            Position::new(slot.field.x + 1, 1),
+            Instant::now(),
+        );
+        let edit = &cursor.states.areas["notes"];
+        assert_eq!(edit.layout(spec, slot.area_view()).caret, Some((1, 1)));
+        // The wheel scrolls the rows of the area and tells the plugin nothing.
+        assert!(wheel(&scene, &view, &mut cursor, Position::new(5, 1), 1).is_empty());
+        let scene = compose_with(&tree, area, &cursor.states);
+        assert_eq!(row_text(&scene, 0), "3  c");
+        // A paste is one edit; line breaks are normalised.
+        let pasted = paste(&scene, &view, &mut cursor, "X\r\nY", Instant::now());
+        assert_eq!(pasted, Some(Vec::new()));
+        assert_eq!(cursor.states.areas["notes"].text(), "a\nbX\nY\nc\nd\ne");
+    }
+
+    fn long_paragraph(count: usize, scrollable: bool) -> Widget {
+        Widget::Paragraph(ParagraphSpec {
+            lines: (0..count)
+                .map(|index| span(&format!("line {index}")))
+                .collect(),
+            rich: None,
+            wrap: None,
+            alignment: Alignment::Left,
+            style: PluginStyle::default(),
+            scrollable,
+        })
+    }
+
+    #[test]
+    fn a_scrollable_paragraph_gets_a_scrollbar_and_the_wheel_moves_it() {
+        let view = ViewTarget::Panel("panel".to_owned());
+        let area = Rect::new(0, 0, 20, 4);
+        let tree = column(vec![(Some("log"), long_paragraph(10, true), vec![])]);
+        let mut cursor = ViewCursor::default();
+        let scene = compose_with(&tree, area, &cursor.states);
+        assert_eq!(scene.scrolls.len(), 1);
+        assert_eq!(scene.scrolls[0].max_offset, 6);
+        assert_eq!(scene.scrolls[0].bar, Some(Rect::new(19, 0, 1, 4)));
+        assert_eq!(row_text(&scene, 0), "line 0");
+        let scrolled = first(wheel(&scene, &view, &mut cursor, Position::new(1, 1), 1));
+        assert_eq!(scrolled.kind, ActionKind::Scrolled);
+        assert_eq!(scrolled.value, Some(ActionValue::Index(3)));
+        let scene = compose_with(&tree, area, &cursor.states);
+        assert_eq!(row_text(&scene, 0), "line 3");
+        // PageDown scrolls it from the keyboard too.
+        key(
+            &scene,
+            &view,
+            &mut cursor,
+            press(KeyCode::PageDown),
+            Instant::now(),
+        );
+        let scene = compose_with(&tree, area, &cursor.states);
+        assert_eq!(row_text(&scene, 0), "line 6");
+        // A paragraph that is not scrollable is cut, with no scrollbar.
+        let fixed = column(vec![(Some("log"), long_paragraph(10, false), vec![])]);
+        assert!(compose_with(&fixed, area, &WidgetStates::default())
+            .scrolls
+            .is_empty());
     }
 
     #[test]

@@ -837,11 +837,12 @@ impl App {
             .wasm_plugins
             .as_ref()
             .and_then(|plugins| plugins.view_tree(&plugin, &target))?;
-        let scene = view::compose_with(
-            &tree,
-            inner(self.layout.pane_area),
-            &self.plugin_view_cursor.states,
-        );
+        // An onboarding step the wizard shows lies in the wizard's content frame.
+        let area = self
+            .plugin_onboarding_step_area()
+            .filter(|_| matches!(target, ViewTarget::OnboardingStep(_)))
+            .unwrap_or_else(|| inner(self.layout.pane_area));
+        let scene = view::compose_with(&tree, area, &self.plugin_view_cursor.states);
         Some((plugin, target, scene))
     }
 
@@ -853,24 +854,29 @@ impl App {
         }
     }
 
-    /// Mirrors the leader key table into the plugin host, so `keymap.bindings` answers with
-    /// what the user really has. Commands are named `ilium/<action>`; chords are the config
-    /// spelling of the key after the leader.
+    /// Mirrors the key table into the plugin host, so `keymap.bindings` answers with what the
+    /// user really has: the leader table first (commands named `ilium/<action>`, context
+    /// `leader`), then the enabled plugins' contributed bindings (gap G1). Every chord is the
+    /// full grammar text (`shift+c`, `ctrl+shift+f`, `f1`), which `chord_label` shows as
+    /// `Shift+C` or `F1`.
     pub(crate) fn mirror_plugin_keymap(&self) {
         let Some(plugins) = self.wasm_plugins.as_ref() else {
             return;
         };
-        let bindings = self
+        let mut bindings: Vec<_> = self
             .keybindings
             .iter()
             .map(|binding| ilium_plugin_api::kernel::KeyBinding {
                 command: format!("ilium/{}", crate::keymap::action_name(binding.action)),
-                chords: vec![binding.key.config_value()],
+                chords: vec![super::keybindings::kernel_chord_text(binding.key)],
                 context: "leader".to_owned(),
                 // The client does not track which bindings the user changed.
                 is_default: false,
             })
             .collect();
+        bindings.extend(super::keybindings::contributed_keymap(
+            &plugins.contributed_bindings(),
+        ));
         plugins.sync_keymap(bindings);
     }
 
@@ -1136,6 +1142,13 @@ pub(crate) fn draw(frame: &mut Frame, area: Rect, app: &App) {
     let Some((plugin, target)) = app.shown_plugin_view() else {
         return;
     };
+    // The wizard draws an onboarding step in its own frame (`onboarding_steps::draw`); drawing
+    // it here too would report two sizes for one view.
+    if matches!(target, ViewTarget::OnboardingStep(_))
+        && app.plugin_onboarding_step_area().is_some()
+    {
+        return;
+    }
     let Some(plugins) = app.wasm_plugins.as_ref() else {
         return;
     };

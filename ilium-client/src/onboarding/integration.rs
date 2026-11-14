@@ -31,8 +31,37 @@ pub fn open(app: &mut App, from_explicit_entry: bool) {
     if from_explicit_entry {
         app.onboarding_progress.wizard.step = Step::AiChoice;
     }
+    app.onboarding_progress.wizard.plugin_steps = app.has_plugin_onboarding_steps();
     app.onboarding = Some(step_ui(app));
     app.request_sound_studio_preview();
+    // A wizard resumed on the plugin step shows its steps again. Before the plugin catalogue
+    // has loaded it shows a line instead, and Finish still ends the wizard.
+    if app.onboarding_progress.wizard.step == Step::Plugin
+        && app.onboarding_progress.wizard.plugin_steps
+    {
+        app.begin_plugin_onboarding_steps();
+    }
+    persist(app);
+}
+
+/// Marks the wizard finished; the screen closes once the progress is saved.
+fn finish_wizard(app: &mut App) {
+    app.end_plugin_onboarding_steps();
+    app.onboarding_progress.finish();
+    app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
+    app.onboarding_dismiss_pending = true;
+}
+
+/// The plugins closed their last contributed step while the wizard showed them: the wizard
+/// finishes as Finish on that step would.
+pub(crate) fn finish_after_plugin_steps(app: &mut App) {
+    if app.onboarding.is_none()
+        || app.onboarding_dismiss_pending
+        || app.onboarding_progress.wizard.step != Step::Plugin
+    {
+        return;
+    }
+    finish_wizard(app);
     persist(app);
 }
 
@@ -190,7 +219,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         return;
     };
     let step = app.onboarding_progress.wizard.step;
-    let geometry = screen::render_shell(frame, area, step);
+    let geometry = screen::render_wizard_shell(
+        frame,
+        area,
+        step,
+        app.onboarding_progress.wizard.plugin_steps,
+    );
     if let Some(message) = &app.status_message {
         frame.render_widget(
             Paragraph::new(format!("F9 details · {message}"))
@@ -210,7 +244,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             1 => (geometry.skip, "Skip"),
             _ => (
                 geometry.next,
-                if step == Step::Voice {
+                if app.onboarding_progress.wizard.is_last_step() {
                     "Finish ›"
                 } else {
                     "Continue ›"
@@ -228,6 +262,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
     if is_choice(step) {
         screen::render_choices(frame, &geometry, step, ui);
+        return;
+    }
+    if step == Step::Plugin {
+        crate::plugin_host::onboarding_steps::draw(frame, geometry.content, app);
         return;
     }
     if step == Step::SoundConfiguration {
@@ -419,13 +457,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
 fn activate(app: &mut App, hit: Hit) {
     let step = app.onboarding_progress.wizard.step;
+    app.onboarding_progress.wizard.plugin_steps = app.has_plugin_onboarding_steps();
     match hit {
         Hit::DefaultPreview => {
             let mut settings = app.sound_settings.clone();
             settings.source = ilium_sound::SoundSourceKind::BundledChirping;
             app.request_sound_preview(settings, "Ilium signature sound preview requested");
         }
-        Hit::Back => app.onboarding_progress.wizard.back(),
+        Hit::Back => {
+            if step == Step::Plugin {
+                app.end_plugin_onboarding_steps();
+            }
+            app.onboarding_progress.wizard.back();
+        }
         Hit::Continue => {
             if step == Step::SoundConfiguration
                 && app.onboarding_progress.wizard.sound == Some(SoundChoice::Custom)
@@ -433,13 +477,13 @@ fn activate(app: &mut App, hit: Hit) {
                 apply_studio_action(app, super::studio_ui::StudioAction::Save);
             }
             match app.onboarding_progress.wizard.advance() {
-                Ok(Navigation::Finish) => {
-                    app.onboarding_progress.finish();
-                    app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
-                    app.onboarding_dismiss_pending = true;
-                    app.begin_plugin_onboarding_steps();
+                // Finish on the plugin step leaves the steps not yet shown.
+                Ok(Navigation::Finish) => finish_wizard(app),
+                Ok(Navigation::Moved) => {
+                    if app.onboarding_progress.wizard.step == Step::Plugin {
+                        app.begin_plugin_onboarding_steps();
+                    }
                 }
-                Ok(Navigation::Moved) => {}
                 Err(_) => {
                     app.status_message = Some("Choose an option to continue".into());
                     return;
@@ -450,12 +494,12 @@ fn activate(app: &mut App, hit: Hit) {
             app.onboarding_progress.choose_ai(AiChoice::Disabled);
             app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
         }
-        Hit::Skip if step == Step::Voice => {
-            app.onboarding_progress.finish();
-            app.onboarding_revision = app.onboarding_revision.wrapping_add(1);
-            app.onboarding_dismiss_pending = true;
+        // Skipping voice still offers the plugins' steps; skipping those finishes.
+        Hit::Skip if step == Step::Voice && app.onboarding_progress.wizard.plugin_steps => {
+            app.onboarding_progress.wizard.step = Step::Plugin;
             app.begin_plugin_onboarding_steps();
         }
+        Hit::Skip if matches!(step, Step::Voice | Step::Plugin) => finish_wizard(app),
         Hit::Skip if matches!(step, Step::SoundChoice | Step::SoundConfiguration) => {
             app.settings_select_sound_source(ilium_sound::SoundSourceKind::Muted);
             app.onboarding_progress.wizard.step = Step::KeyboardChoice;
@@ -705,6 +749,11 @@ pub fn handle_event(app: &mut App, event: &Event) -> bool {
     let wizard_navigation_key = matches!(key.code, KeyCode::Esc)
         || (key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Enter)
         || (key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Left);
+    if step == Step::Plugin && !wizard_navigation_key {
+        // The contributed step owns the keyboard, as a plugin view in the right-hand area does.
+        app.handle_plugin_view_key(*key);
+        return true;
+    }
     if step == Step::Voice && !wizard_navigation_key {
         let control = app
             .onboarding
@@ -1018,6 +1067,10 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> bool {
         if let Some(request) = request {
             apply_keyboard_request(app, request);
         }
+        return true;
+    }
+    if step == Step::Plugin && geometry.content.contains(position) {
+        app.handle_plugin_view_mouse(mouse, position);
         return true;
     }
     if step == Step::Voice && geometry.content.contains(position) {
@@ -1874,6 +1927,69 @@ mod tests {
                 assert!(!text.contains("fixture-secret-do-not-render"));
             }
         }
+    }
+
+    #[test]
+    fn the_plugin_step_draws_inside_the_wizard_and_finishes_it() {
+        use ratatui::{backend::TestBackend, Terminal};
+        // A wizard resumed on the plugin step before any plugin is loaded.
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(Step::Plugin);
+        app.config_dir = Some(directory.path().to_path_buf());
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app))
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains("From your plugins"), "{text}");
+        assert!(text.contains("nothing more to set up"), "{text}");
+        assert!(text.contains("Finish"), "{text}");
+        // The wizard frame is where an onboarding step view is placed.
+        assert_eq!(
+            app.plugin_onboarding_step_area(),
+            Some(Geometry::new(app.layout.screen_area).content)
+        );
+        // Alt+Left goes back to Voice; Continue there finishes, as no plugin adds steps.
+        handle_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT)),
+        );
+        assert_eq!(app.onboarding_progress.wizard.step, Step::Voice);
+        assert_eq!(app.plugin_onboarding_step_area(), None);
+        handle_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
+        );
+        assert!(app.onboarding_progress.completed);
+        assert!(app.onboarding_dismiss_pending);
+    }
+
+    #[test]
+    fn finish_on_the_plugin_step_ends_the_wizard() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(Step::Plugin);
+        app.config_dir = Some(directory.path().to_path_buf());
+        handle_event(
+            &mut app,
+            &Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)),
+        );
+        assert!(app.onboarding_progress.completed);
+        assert!(app.onboarding_dismiss_pending);
+        // The last contributed step closing finishes it too; a second time does nothing.
+        let mut app = app_at(Step::Plugin);
+        app.config_dir = Some(directory.path().to_path_buf());
+        app.open_next_plugin_onboarding_step();
+        assert!(app.onboarding_dismiss_pending);
+        assert!(app.onboarding_progress.completed);
+        let revision = app.onboarding_revision;
+        finish_after_plugin_steps(&mut app);
+        assert_eq!(app.onboarding_revision, revision);
     }
 
     #[test]

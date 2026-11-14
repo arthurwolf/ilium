@@ -1,8 +1,8 @@
 //! Top-level layout: a left tree column, the focused pane's content on
-//! the right, and a bottom status bar -- with the Explorer file-picker or
-//! Help reference drawn as an overlay on top of everything else when
-//! active. It consumes the shared animated `App::layout`; everything it
-//! draws is delegated to `tree_ui`, `help`, or the pane runtimes themselves.
+//! the right, and a bottom status bar -- with the Explorer file-picker
+//! drawn as an overlay on top of everything else when active. It consumes
+//! the shared animated `App::layout`; everything it draws is delegated to
+//! `tree_ui` or the pane runtimes themselves.
 
 use std::time::{Duration, Instant};
 
@@ -26,8 +26,8 @@ use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::icon_settings::IconTarget;
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::{
-    editor_chrome, editor_toolbar, explorer_overlay, help, markdown, minimap, modal,
-    terminal_selection, terminal_view, theme, tree_ui,
+    editor_chrome, editor_toolbar, explorer_overlay, markdown, minimap, modal, terminal_selection,
+    terminal_view, theme, tree_ui,
 };
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -1155,13 +1155,6 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                 menu.area,
             );
         }
-        Mode::Help => help::render(
-            frame,
-            area,
-            app.keyboard_settings.shortcut_base,
-            app.keyboard_settings.navigation_shortcut_base,
-            &app.keybindings,
-        ),
         Mode::SettingsHelp(state) => {
             let Some(topic) = crate::settings_help::catalog::by_id(&state.topic_id) else {
                 crate::settings_help::dialog::render_missing(frame, area, &state.topic_id);
@@ -3573,7 +3566,6 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::AgentSetupPrompt(_) => "AGENT SETUP",
         Mode::VoicePromptEditor(_) => "VOICE PROMPT",
         Mode::SaveAs(..) => "SAVE AS",
-        Mode::Help => "HELP",
         Mode::Explorer(..) => "FILE PICKER",
         Mode::ExplorerFileMenu(_) => "FILE ACTIONS",
         Mode::FolderExplorer(..) => "FOLDER PICKER",
@@ -5299,10 +5291,11 @@ mod source_touch_provenance_tests {
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("touch provenance".into(), project.path().to_path_buf());
         assert!(late_layers_are_source_transparent(&app));
-        app.mode = Mode::Help;
+        app.mode = Mode::ConfirmSessionRecovery { pane_count: 1 };
         assert!(!late_layers_are_source_transparent(&app));
         app.mode = Mode::Normal;
-        app.modal_stack.push(Mode::Help);
+        app.modal_stack
+            .push(Mode::ConfirmSessionRecovery { pane_count: 1 });
         assert!(!late_layers_are_source_transparent(&app));
     }
 }

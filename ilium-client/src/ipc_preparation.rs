@@ -256,6 +256,12 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         R::Attach { session, .. } | R::AttachInteractive { session, .. } => count.string(session),
         // Plugin envelopes are bounded by the plugin IPC limits (HST-104), not counted here.
         R::Plugin(_) => {}
+        R::PluginCall(call) => {
+            count.string(&call.plugin);
+            count.string(&call.interface);
+            count.string(&call.function);
+            count.vector(&call.args_json);
+        }
         R::Resource { request, .. } => {
             use ilium_core::AllocationSize;
             use ilium_ipc::resource::ResourceOperation;

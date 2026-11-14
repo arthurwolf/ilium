@@ -1,7 +1,10 @@
-//! Behaviour of the original Help screen (ilium-client help.rs) that the plugin form must
-//! reproduce: the close hint is always visible, shrinking at narrow widths, and a live remap shows
-//! in the action table.
+//! Behaviour the plugin's `keys` panel keeps from the kernel Help screen it replaced: the mouse
+//! and history lines, a live remap that shows at once, a footer that follows the prefix, and a
+//! table that scrolls instead of being cut. What the screen had for itself and the panel does not
+//! need is gone with it: the host closes a panel, so the reference carries no close hint, and a
+//! scrollable paragraph never has to say how many actions it left out.
 
+use ilium_plugin_core_keys_and_help::key_reference::{command_label, TITLE};
 use ilium_plugin_sdk::prelude::*;
 
 use crate::common::*;
@@ -20,20 +23,37 @@ fn host_with_help_key() -> ilium_plugin_sdk::testing::FakeHost {
     host
 }
 
-/// REQ: F-010
-#[test]
-fn overlay_010_the_close_hint_names_the_prefix_and_the_help_key() {
-    let mut host = host_with_help_key();
-    assert!(host
-        .render(keys_panel(), 80, 24)
-        .text()
-        .contains("press Ctrl+B ? again, or Esc, to close"));
+fn host_with_every_action() -> ilium_plugin_sdk::testing::FakeHost {
+    let mut host = seeded_host();
+    let bindings: Vec<_> = action_rows()
+        .iter()
+        .map(|row| action_binding(row, &row.tmux))
+        .collect();
+    host.keymap().set_bindings(bindings);
+    host.deliver_one(Event::KeymapChanged);
+    host.settle();
+    host
 }
 
 /// REQ: F-010
 #[test]
-fn overlay_010_the_close_hint_follows_a_changed_prefix() {
+fn overlay_010_the_panel_carries_no_close_hint_because_the_host_closes_it() {
     let mut host = host_with_help_key();
+    for (columns, rows) in [(80u16, 24u16), (40, 24), (12, 6)] {
+        let text = host.render(keys_panel(), columns, rows).text();
+        assert!(!text.contains("to close"), "{columns}x{rows}: {text}");
+        assert!(!text.contains("Esc closes"), "{columns}x{rows}: {text}");
+    }
+}
+
+/// REQ: F-010
+#[test]
+fn overlay_010_the_footer_follows_a_changed_prefix() {
+    let mut host = host_with_help_key();
+    assert!(host
+        .render(keys_panel(), 80, 24)
+        .text()
+        .contains("Prefix is Ctrl+B. Preset: tmux."));
     host.kernel_settings().set_tab(
         "keyboard",
         serde_json::json!({"shortcut_base": "ctrl+a", "navigation_shortcut_base": "ctrl+b", "preset": "screen"}),
@@ -45,76 +65,40 @@ fn overlay_010_the_close_hint_follows_a_changed_prefix() {
         },
     ));
     host.settle();
-    assert!(host
-        .render(keys_panel(), 80, 24)
-        .text()
-        .contains("press Ctrl+A ? again, or Esc, to close"));
+    let text = host.render(keys_panel(), 80, 24).text();
+    assert!(
+        text.contains("Prefix is Ctrl+A. Preset: GNU Screen."),
+        "{text}"
+    );
+    assert!(!text.contains("Prefix is Ctrl+B"), "{text}");
 }
 
 /// REQ: F-010
 #[test]
-fn overlay_010_a_remapped_help_key_appears_in_the_close_hint() {
-    let mut host = host_with_help_key();
-    host.keymap().set_label("prefix+h", "h");
+fn overlay_010_a_remapped_help_key_shows_after_the_prefix_label() {
+    let mut host = seeded_host();
+    host.keymap().set_label("h", "h");
     host.keymap()
-        .set_bindings(vec![binding("Help", "Help", "prefix+h", false)]);
+        .set_bindings(vec![binding("prefix", "Help", "h", false)]);
     host.deliver_one(Event::KeymapChanged);
     host.settle();
-    assert!(host
-        .render(keys_panel(), 80, 24)
-        .text()
-        .contains("press Ctrl+B h again, or Esc, to close"));
+    let text = host.render(keys_panel(), 80, 24).text();
+    assert!(text.contains("Prefix  h"), "{text}");
+    assert!(!text.contains("Prefix  ?"), "{text}");
 }
 
 /// REQ: F-010
 #[test]
-fn overlay_010_the_close_hint_fits_exactly_at_40_columns() {
-    let mut host = host_with_help_key();
-    // 38 cells of text between two border cells.
-    assert!(host
-        .render(keys_panel(), 40, 24)
-        .text()
-        .contains("press Ctrl+B ? again, or Esc, to close"));
-}
-
-/// REQ: F-010
-#[test]
-fn overlay_010_one_cell_narrower_the_hint_shrinks_to_esc_closes() {
-    let mut host = host_with_help_key();
-    let text = host.render(keys_panel(), 39, 24).text();
-    assert!(text.contains("Esc closes"), "{text}");
-    assert!(!text.contains("again, or Esc, to close"));
-}
-
-/// REQ: F-010
-#[test]
-fn overlay_010_below_ten_inner_cells_the_hint_is_just_esc() {
-    let mut host = host_with_help_key();
-    let text = host.render(keys_panel(), 11, 24).text();
-    assert!(!text.contains("Esc closes"), "{text}");
-    assert!(text.contains("Esc"), "{text}");
-}
-
-/// REQ: F-010
-#[test]
-fn overlay_010_ten_inner_cells_still_show_esc_closes() {
-    let mut host = host_with_help_key();
-    assert!(host
-        .render(keys_panel(), 12, 24)
-        .text()
-        .contains("Esc closes"));
-}
-
-/// REQ: F-010
-#[test]
-fn overlay_010_the_close_hint_stays_the_last_visible_row_on_a_short_terminal() {
-    for height in 4..=12u16 {
-        let mut host = host_with_help_key();
-        let screen = host.render(keys_panel(), 80, height);
-        assert!(
-            screen.text().contains("again, or Esc, to close"),
-            "close hint clipped at terminal height {height}"
-        );
+fn overlay_010_every_line_fits_the_width_down_to_the_narrowest_panel() {
+    let mut host = host_with_every_action();
+    for columns in [20u16, 39, 40, 59, 62, 80, 140] {
+        let text = host.render(keys_panel(), columns, 24).text();
+        for line in text.lines() {
+            assert!(
+                unicode_width::UnicodeWidthStr::width(line) <= usize::from(columns),
+                "{columns}: {line:?}"
+            );
+        }
     }
 }
 
@@ -137,6 +121,7 @@ fn overlay_010_a_live_remap_shows_the_new_chord_and_not_the_old_one() {
 fn overlay_010_the_tree_and_mouse_hints_are_present_at_wide_widths() {
     let mut host = host_with_help_key();
     let text = host.render(keys_panel(), 140, 40).text();
+    assert!(text.contains("Mouse: pane focus · tree expand/reorder · context menus"));
     assert!(
         text.contains("Terminal history: wheel / Shift+PgUp/PgDn · Shift+End live · Ctrl+End app")
     );
@@ -144,41 +129,30 @@ fn overlay_010_the_tree_and_mouse_hints_are_present_at_wide_widths() {
 
 /// REQ: F-010
 #[test]
-fn overlay_010_narrow_widths_use_the_short_history_line() {
+fn overlay_010_narrow_widths_use_the_short_mouse_and_history_lines() {
     let mut host = host_with_help_key();
     let text = host.render(keys_panel(), 50, 40).text();
+    assert!(text.contains("Mouse: focus · menus · tree reorder"));
     assert!(text.contains("History: wheel / Shift+PgUp/PgDn"));
+    assert!(!text.contains("Shift+End live"));
 }
 
 /// REQ: F-010
 #[test]
-fn overlay_010_a_truncated_table_says_how_many_actions_are_hidden() {
-    let mut host = seeded_host();
-    let bindings: Vec<_> = action_rows()
-        .iter()
-        .map(|row| action_binding(row, &row.tmux))
-        .collect();
-    host.keymap().set_bindings(bindings);
-    host.deliver_one(Event::KeymapChanged);
-    host.settle();
+fn overlay_010_a_long_table_is_complete_and_scrolls_instead_of_being_cut() {
+    let mut host = host_with_every_action();
+    // Far fewer rows than the 35 actions: the panel still holds every one of them.
     let text = host.render(keys_panel(), 80, 14).text();
-    assert!(
-        text.contains("more actions — see Settings → Keyboard for the full list"),
-        "{text}"
-    );
-}
-
-/// REQ: F-010
-#[test]
-fn overlay_010_a_narrow_truncated_table_uses_the_short_notice() {
-    let mut host = seeded_host();
-    let bindings: Vec<_> = action_rows()
+    assert!(!text.contains("more actions"), "{text}");
+    let rows = action_rows();
+    let shown = rows
         .iter()
-        .map(|row| action_binding(row, &row.tmux))
-        .collect();
-    host.keymap().set_bindings(bindings);
-    host.deliver_one(Event::KeymapChanged);
-    host.settle();
-    let text = host.render(keys_panel(), 50, 14).text();
-    assert!(text.contains("more: Settings → Keyboard"), "{text}");
+        .filter(|row| row.tmux != "unbound")
+        .filter(|row| text.contains(&command_label(&row.command)))
+        .count();
+    assert_eq!(
+        shown,
+        rows.iter().filter(|row| row.tmux != "unbound").count()
+    );
+    assert!(text.contains(TITLE), "{text}");
 }

@@ -177,6 +177,61 @@ pub(crate) fn find_binding<'a>(
         .find(|binding| binding.chord == *chord && accepts(&binding.mode))
 }
 
+impl BindingMode {
+    /// The context `keymap.bindings` names for this mode: `global`, `prefix` or `pane:<kind>`.
+    pub(crate) fn context(&self) -> String {
+        match self {
+            Self::Global => "global".to_owned(),
+            Self::Prefix => "prefix".to_owned(),
+            Self::Pane(kind) => format!("pane:{kind}"),
+        }
+    }
+}
+
+/// The chord grammar text of a kernel key pressed after the leader (`?`, `shift+c`,
+/// `page-up`), so the keymap import names every key the way the manual's grammar does.
+pub(crate) fn kernel_chord_text(key: crate::keymap::BindingKey) -> String {
+    use crate::keymap::BindingKey;
+    let (shift, key) = match key {
+        BindingKey::Character(character) if character.is_uppercase() => (
+            true,
+            ChordKey::Character(character.to_lowercase().next().unwrap_or(character)),
+        ),
+        BindingKey::Character(character) => (false, ChordKey::Character(character)),
+        BindingKey::Up => (false, ChordKey::Up),
+        BindingKey::Down => (false, ChordKey::Down),
+        BindingKey::Left => (false, ChordKey::Left),
+        BindingKey::Right => (false, ChordKey::Right),
+        BindingKey::PageUp => (false, ChordKey::PageUp),
+        BindingKey::PageDown => (false, ChordKey::PageDown),
+    };
+    Chord {
+        ctrl: false,
+        alt: false,
+        shift,
+        super_key: false,
+        key,
+    }
+    .canonical()
+}
+
+/// The `keymap.bindings` entries of the enabled plugins' contributed bindings, in catalogue
+/// order: the global command id, the full chord text (`ctrl+shift+f`, `f1`) and the mode as
+/// the context. A contributed binding is the plugin's shipped default.
+pub(crate) fn contributed_keymap(
+    bindings: &[PluginBinding],
+) -> Vec<ilium_plugin_api::kernel::KeyBinding> {
+    bindings
+        .iter()
+        .map(|binding| ilium_plugin_api::kernel::KeyBinding {
+            command: binding.command.clone(),
+            chords: vec![binding.chord.canonical()],
+            context: binding.mode.context(),
+            is_default: true,
+        })
+        .collect()
+}
+
 impl App {
     /// Runs the plugin command bound to the key pressed after the leader, if an enabled plugin
     /// binds it with mode `prefix`. The caller has already found that no kernel or user binding
@@ -360,6 +415,58 @@ mod tests {
         assert!(find_binding(&bindings, &chord("ctrl+w"), |mode| *mode
             == BindingMode::Global)
         .is_none());
+    }
+
+    #[test]
+    fn contributed_bindings_reach_the_keymap_with_their_full_chord_and_mode() {
+        let entries = contributed_keymap(&plugin_bindings("acme", MANIFEST));
+        let read: Vec<(&str, &str, &str)> = entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.command.as_str(),
+                    entry.chords[0].as_str(),
+                    entry.context.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(read[0], ("acme/new-agent", "w", "prefix"));
+        assert_eq!(read[1], ("acme/find", "ctrl+f", "global"));
+        assert_eq!(read[2], ("acme/top", "page-up", "prefix"));
+        assert_eq!(read[5], ("acme/fold", "alt+z", "pane:editor"));
+        assert!(entries.iter().all(|entry| entry.is_default));
+        // The keys-and-help manifest writes `F1`; it binds and reads back as `f1`.
+        let keys_and_help = r#"{"contributes":{"keybindings":[
+            {"command":"show-keys","chord":"F1","mode":"prefix"}]}}"#;
+        let entries =
+            contributed_keymap(&plugin_bindings("ilium.core.keys-and-help", keys_and_help));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "ilium.core.keys-and-help/show-keys");
+        assert_eq!(entries[0].chords, vec!["f1".to_owned()]);
+        assert_eq!(entries[0].context, "prefix");
+    }
+
+    #[test]
+    fn f1_after_the_leader_finds_the_keys_and_help_binding() {
+        let manifest = include_str!("../../../plugins/core/keys-and-help/manifest.json");
+        let bindings = plugin_bindings("ilium.core.keys-and-help", manifest);
+        let pressed =
+            chord_of_key(&KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)).expect("F1 is a chord");
+        let found = find_binding(&bindings, &pressed, |mode| *mode == BindingMode::Prefix);
+        assert_eq!(
+            found.map(|binding| binding.command.as_str()),
+            Some("ilium.core.keys-and-help/show-keys")
+        );
+    }
+
+    #[test]
+    fn kernel_keys_read_in_the_chord_grammar() {
+        use crate::keymap::BindingKey;
+        assert_eq!(kernel_chord_text(BindingKey::Character('?')), "?");
+        assert_eq!(kernel_chord_text(BindingKey::Character('C')), "shift+c");
+        assert_eq!(kernel_chord_text(BindingKey::Character('+')), "plus");
+        assert_eq!(kernel_chord_text(BindingKey::PageDown), "page-down");
+        assert_eq!(kernel_chord_text(BindingKey::Up), "up");
     }
 
     #[test]

@@ -109,6 +109,22 @@ fn signal_pane_process_and_plugin_pane_kind_round_trip() {
 }
 
 #[test]
+fn plugin_call_is_the_request_appended_after_signal_pane_process() {
+    let signal = round_trip(&ClientRequest::SignalPaneProcess {
+        pane_id: NodeId(4),
+        signal: PaneSignal::Interrupt,
+    });
+    let call = round_trip(&ClientRequest::PluginCall(ilium_ipc::plugin::PluginCall {
+        plugin: "com.example.notes".into(),
+        call_id: 11,
+        interface: "journal".into(),
+        function: "log-event".into(),
+        args_json: br#"{"kind":"note","payload-json":"{}"}"#.to_vec(),
+    }));
+    assert_eq!(index_of(&call), index_of(&signal) + 1);
+}
+
+#[test]
 fn protocol_version_is_two() {
     assert_eq!(PLUGIN_PROTOCOL_VERSION, 2);
 }

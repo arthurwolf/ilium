@@ -9,6 +9,10 @@
 //! and caret of an input and the value of a number, exactly as a panel view does
 //! (`ui_state`). Escape and a click outside always close the popup here, whatever the plugin
 //! does, so a stuck or trapped plugin can never hold the screen.
+//!
+//! Content longer than the screen scrolls: the rows follow the cursor, and the wheel, the
+//! scrollbar column, PageUp/PageDown, Home/End (and the arrows on a text-only panel such as a
+//! briefing, a queue or a help text) scroll them independently until the cursor moves again.
 
 use std::time::{Duration, Instant};
 
@@ -58,6 +62,10 @@ pub struct PopupState {
     pub page: Option<String>,
     /// Text, caret and number state of the editable rows, by widget key.
     pub(crate) edits: WidgetStates,
+    /// First content row the user scrolled to (wheel, scrollbar, PageUp/PageDown, or Up/Down
+    /// on a popup without focusable rows); `None` keeps the cursor row in view. Moving the
+    /// cursor goes back to following it.
+    pub(crate) scroll: Option<usize>,
 }
 
 impl PopupState {
@@ -69,6 +77,7 @@ impl PopupState {
             button: None,
             page: None,
             edits: WidgetStates::default(),
+            scroll: None,
         }
     }
 }
@@ -216,6 +225,8 @@ pub(crate) struct Geometry {
     pub start: usize,
     pub end: usize,
     pub buttons: Vec<Rect>,
+    /// The scrollbar column at the right of the content rows, when they do not all fit.
+    pub bar: Option<Rect>,
 }
 
 impl Geometry {
@@ -228,9 +239,27 @@ impl Geometry {
         Some(Rect::new(
             self.inner.x.saturating_add(MARKER_CELLS),
             self.inner.y.saturating_add(offset),
-            self.inner.width.saturating_sub(MARKER_CELLS),
+            self.content().width.saturating_sub(MARKER_CELLS),
             1,
         ))
+    }
+
+    /// The cells of the content rows: the inner area less the blank row, the button row and
+    /// the scrollbar column.
+    fn content(&self) -> Rect {
+        Rect::new(
+            self.inner.x,
+            self.inner.y,
+            self.inner
+                .width
+                .saturating_sub(self.bar.map_or(0, |bar| bar.width)),
+            self.inner.height.saturating_sub(2),
+        )
+    }
+
+    /// The first row a scrolled popup can start at.
+    fn max_start(&self, rows: usize) -> usize {
+        rows.saturating_sub(self.end - self.start)
     }
 }
 
@@ -285,6 +314,7 @@ pub(crate) fn sync(model: &PopupModel, state: &mut PopupState) {
         state.page = page;
         state.row = 0;
         state.button = None;
+        state.scroll = None;
     }
     state.row = state.row.min(focusable_rows(model).len().saturating_sub(1));
     // A typed number entry is parsed with the spec of the row it belongs to.
@@ -316,10 +346,22 @@ pub(crate) fn geometry(model: &PopupModel, state: &PopupState, screen: Rect) -> 
     // The last two inner rows are the blank row and the button row.
     let capacity = usize::from(inner.height.saturating_sub(2));
     let cursor = focusable_rows(model).get(state.row).copied().unwrap_or(0);
-    let start = cursor
-        .saturating_sub(capacity / 2)
-        .min(model.rows.len().saturating_sub(capacity));
+    let max_start = model.rows.len().saturating_sub(capacity);
+    let start = match state.scroll {
+        Some(top) => top.min(max_start),
+        None => cursor.saturating_sub(capacity / 2).min(max_start),
+    };
     let end = (start + capacity).min(model.rows.len());
+    let bar = (model.rows.len() > capacity && capacity > 0 && inner.width > MARKER_CELLS + 1).then(
+        || {
+            Rect::new(
+                inner.right().saturating_sub(1),
+                inner.y,
+                1,
+                u16::try_from(capacity).unwrap_or(u16::MAX),
+            )
+        },
+    );
     let button_row = inner.bottom().saturating_sub(1);
     let mut column = inner.x.saturating_add(1);
     let mut buttons = Vec::with_capacity(model.buttons.len());
@@ -334,7 +376,51 @@ pub(crate) fn geometry(model: &PopupModel, state: &PopupState, screen: Rect) -> 
         start,
         end,
         buttons,
+        bar,
     }
+}
+
+/// Scrolls the content rows by `delta` rows. Returns whether the shown rows moved.
+fn scroll_by(model: &PopupModel, state: &mut PopupState, screen: Rect, delta: i64) -> bool {
+    let geometry = geometry(model, state, screen);
+    let max_start = geometry.max_start(model.rows.len());
+    let target = i64::try_from(geometry.start)
+        .unwrap_or(i64::MAX)
+        .saturating_add(delta)
+        .clamp(0, i64::try_from(max_start).unwrap_or(i64::MAX));
+    let target = usize::try_from(target).unwrap_or(max_start);
+    state.scroll = Some(target);
+    target != geometry.start
+}
+
+/// The thumb of a scrollbar `track` rows long over `total` rows of which `shown` start at
+/// `start`: its first row and its length.
+fn thumb(track: u16, total: usize, shown: usize, start: usize) -> (u16, u16) {
+    let track_rows = usize::from(track);
+    let total = total.max(track_rows).max(1);
+    let length = (track_rows * shown.min(total) / total).clamp(1, track_rows.max(1));
+    let travel = track_rows - length;
+    let max_start = total.saturating_sub(shown).max(1);
+    let first = start.min(max_start) * travel / max_start;
+    (
+        u16::try_from(first).unwrap_or(0),
+        u16::try_from(length).unwrap_or(1),
+    )
+}
+
+/// The wheel over a popup scrolls its content rows three per notch; elsewhere it does nothing.
+pub(crate) fn wheel_reaction(
+    model: &PopupModel,
+    state: &mut PopupState,
+    screen: Rect,
+    position: Position,
+    notches: i64,
+) -> Reaction {
+    sync(model, state);
+    if geometry(model, state, screen).popup.contains(position) {
+        scroll_by(model, state, screen, notches.saturating_mul(3));
+    }
+    Reaction::Stay
 }
 
 fn focused_button(model: &PopupModel, state: &PopupState) -> usize {
@@ -558,6 +644,7 @@ fn number_key(
 pub(crate) fn key_reaction(
     model: &PopupModel,
     state: &mut PopupState,
+    screen: Rect,
     event: KeyEvent,
     now: Instant,
 ) -> Reaction {
@@ -579,9 +666,37 @@ pub(crate) fn key_reaction(
     let plain_key = !event
         .modifiers
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+    let page = i64::try_from(
+        geometry(model, state, screen)
+            .content()
+            .height
+            .saturating_sub(1)
+            .max(1),
+    )
+    .unwrap_or(1);
     match event.code {
         KeyCode::Esc => return Reaction::Dismiss,
+        // Without a row to move to, the arrows read the text: they scroll it.
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j')
+            if plain_key && focusable == 0 =>
+        {
+            let down = matches!(event.code, KeyCode::Down | KeyCode::Char('j'));
+            scroll_by(model, state, screen, if down { 1 } else { -1 });
+        }
+        KeyCode::PageDown => {
+            scroll_by(model, state, screen, page);
+        }
+        KeyCode::PageUp => {
+            scroll_by(model, state, screen, -page);
+        }
+        KeyCode::Home if plain_key => {
+            scroll_by(model, state, screen, i64::MIN / 2);
+        }
+        KeyCode::End if plain_key => {
+            scroll_by(model, state, screen, i64::MAX / 2);
+        }
         KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') if plain_key => {
+            state.scroll = None;
             if let Some(key) = focused_row(model, state).and_then(Row::key) {
                 flush_row(state, key, &mut out);
             }
@@ -693,6 +808,14 @@ pub(crate) fn click_reaction(
         state.button = Some(index);
         flush_all(state, &mut out);
         out.extend(button_action(model, state, index));
+        return finish(out);
+    }
+    if let Some(bar) = geometry.bar.filter(|bar| bar.contains(position)) {
+        // A click on the scrollbar shows the rows at that share of the content.
+        let max_start = geometry.max_start(model.rows.len());
+        let travel = usize::from(bar.height.saturating_sub(1)).max(1);
+        let row = usize::from(position.y - bar.y);
+        state.scroll = Some((row * max_start).div_ceil(travel).min(max_start));
         return finish(out);
     }
     if !geometry.inner.contains(position) {
@@ -876,13 +999,25 @@ pub(crate) fn draw(frame: &mut Frame, screen: Rect, state: &PopupState, app: &Ap
             }
         })
         .collect();
-    let content = Rect::new(
-        geometry.inner.x,
-        geometry.inner.y,
-        geometry.inner.width,
-        geometry.inner.height.saturating_sub(2),
-    );
-    frame.render_widget(Paragraph::new(lines), content);
+    frame.render_widget(Paragraph::new(lines), geometry.content());
+    if let Some(bar) = geometry.bar {
+        let (first, length) = thumb(
+            bar.height,
+            model.rows.len(),
+            geometry.end - geometry.start,
+            geometry.start,
+        );
+        let glyphs: Vec<Line> = (0..bar.height)
+            .map(|row| {
+                if row >= first && row < first + length {
+                    Line::from("┃")
+                } else {
+                    Line::styled("│", Style::new().add_modifier(Modifier::DIM))
+                }
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(glyphs), bar);
+    }
     if let Some(caret) = caret {
         frame.set_cursor_position(caret);
     }
@@ -934,7 +1069,13 @@ impl App {
     /// One key press while a plugin popup is open. The caller took the state out of `mode`.
     pub(crate) fn plugin_popup_key(&mut self, mut state: PopupState, key: KeyEvent) {
         let reaction = match self.plugin_popup_model(&state) {
-            Some(model) => key_reaction(&model, &mut state, key, Instant::now()),
+            Some(model) => key_reaction(
+                &model,
+                &mut state,
+                self.layout.screen_area,
+                key,
+                Instant::now(),
+            ),
             // No view yet: only Escape does anything.
             None if key.code == KeyCode::Esc => Reaction::Dismiss,
             None => Reaction::Stay,
@@ -953,12 +1094,25 @@ impl App {
 
     /// One mouse event while a plugin popup is open. The caller took the state out of `mode`.
     pub(crate) fn plugin_popup_mouse(&mut self, mut state: PopupState, mouse: MouseEvent) {
+        let position = Position::new(mouse.column, mouse.row);
+        let screen = self.layout.screen_area;
+        let notches = match mouse.kind {
+            MouseEventKind::ScrollUp => -1,
+            MouseEventKind::ScrollDown => 1,
+            _ => 0,
+        };
+        if notches != 0 {
+            let reaction = match self.plugin_popup_model(&state) {
+                Some(model) => wheel_reaction(&model, &mut state, screen, position, notches),
+                None => Reaction::Stay,
+            };
+            self.apply_popup_reaction(state, reaction);
+            return;
+        }
         if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             self.mode = Mode::PluginPopup(state);
             return;
         }
-        let position = Position::new(mouse.column, mouse.row);
-        let screen = self.layout.screen_area;
         let reaction = match self.plugin_popup_model(&state) {
             Some(model) => click_reaction(&model, &mut state, screen, position, Instant::now()),
             None => Reaction::Dismiss,
@@ -1132,6 +1286,107 @@ mod tests {
         PopupState::new("ilium.core.layout".to_owned(), "new-split".to_owned())
     }
 
+    /// The screen the key tests react on; tall enough that small dialogs never scroll.
+    const SCREEN: Rect = Rect {
+        x: 0,
+        y: 0,
+        width: 120,
+        height: 40,
+    };
+
+    /// A text-only panel (a briefing or help text): many message lines and the two buttons.
+    fn briefing(lines: usize) -> UiTree {
+        let mut spec = dialog(None);
+        spec.message = Some(
+            (0..lines)
+                .map(|index| span(&format!("line {index}")))
+                .collect(),
+        );
+        UiTree {
+            version: 1,
+            root: 0,
+            nodes: vec![node(Some("briefing"), Widget::Dialog(spec), Vec::new())],
+        }
+    }
+
+    #[test]
+    fn a_long_text_popup_scrolls_with_keys_the_wheel_and_its_scrollbar() {
+        let model = model(&briefing(30)).expect("dialog");
+        let mut state = state();
+        // Ten rows of screen: eight inner rows, six of them for content.
+        let screen = Rect::new(0, 0, 80, 10);
+        let first = geometry(&model, &state, screen);
+        assert_eq!((first.start, first.end), (0, 6));
+        let bar = first
+            .bar
+            .expect("the rows do not fit, so a scrollbar shows");
+        assert_eq!(bar.height, 6);
+        assert_eq!(bar.x, first.inner.right() - 1);
+        // Without focusable rows the arrows scroll the text.
+        let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(
+            key_reaction(&model, &mut state, screen, down, Instant::now()),
+            Reaction::Stay
+        );
+        assert_eq!(geometry(&model, &state, screen).start, 1);
+        // PageDown moves a page less one row; End reaches the last page and stays inside it.
+        let page_down = KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE);
+        key_reaction(&model, &mut state, screen, page_down, Instant::now());
+        assert_eq!(geometry(&model, &state, screen).start, 6);
+        let end = KeyEvent::new(KeyCode::End, KeyModifiers::NONE);
+        key_reaction(&model, &mut state, screen, end, Instant::now());
+        let last = geometry(&model, &state, screen);
+        assert_eq!((last.start, last.end), (24, 30));
+        // The wheel scrolls three rows per notch, only over the popup.
+        let inside = Position::new(last.inner.x + 2, last.inner.y);
+        wheel_reaction(&model, &mut state, screen, inside, -1);
+        assert_eq!(geometry(&model, &state, screen).start, 21);
+        wheel_reaction(&model, &mut state, screen, Position::new(0, 0), -1);
+        assert_eq!(geometry(&model, &state, screen).start, 21);
+        // A click at the top of the scrollbar goes back to the first rows.
+        let top = Position::new(bar.x, bar.y);
+        assert_eq!(
+            click_reaction(&model, &mut state, screen, top, Instant::now()),
+            Reaction::Stay
+        );
+        assert_eq!(geometry(&model, &state, screen).start, 0);
+        // Escape still closes a scrolled popup.
+        assert_eq!(react(&model, &mut state, KeyCode::Esc), Reaction::Dismiss);
+    }
+
+    #[test]
+    fn moving_the_cursor_brings_a_scrolled_away_row_back_into_view() {
+        let mut tree = briefing(30);
+        let list = CheckListSpec {
+            items: ["only"]
+                .iter()
+                .map(|id| CheckItem {
+                    id: (*id).to_owned(),
+                    label: span(id),
+                    state: TriState::Off,
+                    disabled_reason: None,
+                    children: Vec::new(),
+                })
+                .collect(),
+            ..CheckListSpec::default()
+        };
+        tree.nodes[0].children = vec![1];
+        tree.nodes
+            .push(node(Some("picks"), Widget::CheckList(list), Vec::new()));
+        let model = model(&tree).expect("dialog");
+        let mut state = state();
+        let screen = Rect::new(0, 0, 80, 10);
+        // The only check row is the last row; the cursor keeps it in view.
+        assert_eq!(geometry(&model, &state, screen).end, 31);
+        let page_up = KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE);
+        key_reaction(&model, &mut state, screen, page_up, Instant::now());
+        assert!(geometry(&model, &state, screen).end < 31);
+        let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+        key_reaction(&model, &mut state, screen, up, Instant::now());
+        assert_eq!(state.scroll, None);
+        assert_eq!(geometry(&model, &state, screen).end, 31);
+    }
+
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
@@ -1150,7 +1405,7 @@ mod tests {
     }
 
     fn react(model: &PopupModel, state: &mut PopupState, code: KeyCode) -> Reaction {
-        key_reaction(model, state, press(code), Instant::now())
+        key_reaction(model, state, SCREEN, press(code), Instant::now())
     }
 
     #[test]

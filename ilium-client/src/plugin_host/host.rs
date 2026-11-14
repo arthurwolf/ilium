@@ -79,6 +79,9 @@ pub struct ClientPluginStart {
     /// The schema files of the services the catalogue provides: (service, file text). Every
     /// service call is checked against them (gap G13).
     pub schemas: Vec<(String, String)>,
+    /// The same plugins with their scene components (`ilium:anim`); each declared scene is
+    /// registered as an external background scene (`plugin_scenes`).
+    pub scenes: Vec<CataloguePlugin>,
 }
 
 /// One help topic a plugin ships. Its global id is `<plugin>/<id>`.
@@ -1510,6 +1513,48 @@ struct KnownConfig {
 /// The kernel tab id of the Animations tab, whose `[animations]` table plugins write.
 const ANIMATIONS_TAB: &str = "animations";
 
+/// The `config.toml` table of the panel padding. The Padding tab is not one of the frozen
+/// kernel tab ids, so no `kernel-settings-changed` names it; the table diff decides.
+const PADDING_TABLE: &str = "padding";
+
+/// The tables one reading of `config.toml` changed that the App applies to live state.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct ConfigReload {
+    /// The new `[animations]` table, when a `kernel-settings-changed` named that tab.
+    pub(crate) animations: Option<toml::Table>,
+    /// The new `[padding]` table (empty when the table was removed), when it changed.
+    pub(crate) padding: Option<toml::Table>,
+}
+
+impl ConfigReload {
+    /// What changed between two readings; `events` are the `config_events` of the same pair.
+    pub(crate) fn between(before: &toml::Table, after: &toml::Table, events: &[Event]) -> Self {
+        let table_of = |name: &str| {
+            after
+                .get(name)
+                .and_then(toml::Value::as_table)
+                .cloned()
+                .unwrap_or_default()
+        };
+        let animations = events
+            .iter()
+            .any(|event| {
+                matches!(event, Event::KernelSettingsChanged(change) if change.tab == ANIMATIONS_TAB)
+            })
+            .then(|| {
+                ilium_plugin_host::config_settings::table_of_tab(ANIMATIONS_TAB)
+                    .map(table_of)
+                    .unwrap_or_default()
+            });
+        let padding = (before.get(PADDING_TABLE) != after.get(PADDING_TABLE))
+            .then(|| table_of(PADDING_TABLE));
+        Self {
+            animations,
+            padding,
+        }
+    }
+}
+
 /// The modification time and length of a file, `None` when it cannot be read.
 fn file_stamp(path: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
     let metadata = std::fs::metadata(path).ok()?;
@@ -1647,6 +1692,8 @@ impl ClientPlugins {
         if let Ok(mut hidden) = shared.disabled.lock() {
             hidden.extend(disabled.iter().map(ToString::to_string));
         }
+        let scenes = super::plugin_scenes::register_bundled(&engine, &start.scenes, &disabled);
+        tracing::info!("{scenes} plugin scenes registered");
         let log: Arc<dyn LogSink> = Arc::new(TracingLog);
         let port = OutputPort {
             shared: Arc::downgrade(&shared),
@@ -1823,12 +1870,13 @@ impl ClientPlugins {
     /// at most every two seconds, `config.toml` (kernel settings, theme and keymap). Cheap
     /// when nothing changed; the event loop calls it on every tick.
     ///
-    /// Returns the new `[animations]` table when this reading found it changed. A plugin
-    /// writes it through `kernel-settings` (tab `animations`), and the caller applies it to
-    /// the live animation settings, which the plugin host itself does not own.
-    pub(crate) fn observe(&mut self, focused: Option<ilium_core::NodeId>) -> Option<toml::Table> {
+    /// Returns the tables this reading found changed that the App applies live: the
+    /// `[animations]` table a plugin writes through `kernel-settings` (tab `animations`), and
+    /// the `[padding]` table the tree geometry reads while a frame is drawn. The plugin host
+    /// owns neither, so the caller applies them.
+    pub(crate) fn observe(&mut self, focused: Option<ilium_core::NodeId>) -> ConfigReload {
         let mut batch = Vec::new();
-        let mut animations = None;
+        let mut reload = ConfigReload::default();
         let focused = focused.map(to_plugin);
         if let Some(event) = events_feed::focus_event(self.known_focus, focused) {
             batch.push(event);
@@ -1858,17 +1906,7 @@ impl ClientPlugins {
                     known.stamp = stamp;
                     let table = events_feed::read_config(&known.path);
                     let events = events_feed::config_events(&known.table, &table);
-                    if events.iter().any(|event| {
-                        matches!(event, Event::KernelSettingsChanged(change) if change.tab == ANIMATIONS_TAB)
-                    }) {
-                        animations = Some(
-                            ilium_plugin_host::config_settings::table_of_tab(ANIMATIONS_TAB)
-                                .and_then(|name| table.get(name))
-                                .and_then(toml::Value::as_table)
-                                .cloned()
-                                .unwrap_or_default(),
-                        );
-                    }
+                    reload = ConfigReload::between(&known.table, &table, &events);
                     batch.extend(events);
                     known.table = table;
                 }
@@ -1876,13 +1914,13 @@ impl ClientPlugins {
             Some(_) => {}
         }
         if batch.is_empty() {
-            return animations;
+            return reload;
         }
         self.shared.post(move |runtime| {
             log_errors("event delivery", runtime.broadcast(&batch));
             log_errors("pump", runtime.pump());
         });
-        animations
+        reload
     }
 
     /// Routes plugin traffic from the server. Returns whether the plugin list changed.
@@ -2618,6 +2656,16 @@ impl ClientPlugins {
         chord: &ilium_plugin_host::imports::keys::Chord,
         accepts: impl Fn(&super::keybindings::BindingMode) -> bool,
     ) -> Option<String> {
+        let bindings = self.contributed_bindings();
+        super::keybindings::find_binding(&bindings, chord, accepts)
+            .map(|binding| binding.command.clone())
+    }
+
+    /// The contributed bindings of every enabled plugin, in catalogue order; parsed once per
+    /// enabled set (gap G1). The key path and the keymap mirror both read them.
+    pub(crate) fn contributed_bindings(
+        &self,
+    ) -> std::sync::Arc<[super::keybindings::PluginBinding]> {
         let enabled = self
             .catalogue
             .iter()
@@ -2628,15 +2676,13 @@ impl ClientPlugins {
                     .is_some_and(|state| wiring::is_disabled_state(state))
             })
             .map(|plugin| (plugin.id.as_str(), plugin.manifest.as_str()));
-        let bindings = match self.binding_cache.lock() {
+        match self.binding_cache.lock() {
             Ok(mut cache) => cache.bindings(enabled),
             Err(_) => enabled
                 .flat_map(|(id, manifest)| super::keybindings::plugin_bindings(id, manifest))
                 .collect::<Vec<_>>()
                 .into(),
-        };
-        super::keybindings::find_binding(&bindings, chord, accepts)
-            .map(|binding| binding.command.clone())
+        }
     }
 
     /// Offers a pressed key to the plugins' key grabs (gap G1). When a grab takes it, its
@@ -2776,5 +2822,29 @@ mod tests {
         assert_eq!(root.parent, None);
         assert!(matches!(root.class, NodeClass::Container));
         assert_eq!(root.content_kind, None);
+    }
+
+    fn config(text: &str) -> toml::Table {
+        toml::from_str(text).expect("the test config parses")
+    }
+
+    #[test]
+    fn a_config_reading_reloads_animations_and_padding_only_when_they_changed() {
+        let before = config("[padding]\nmode = \"disabled\"\n[animations]\nkind = \"pipes\"\n");
+        let after = config("[padding]\nmode = \"enabled\"\n[animations]\nkind = \"stars\"\n");
+        let events = events_feed::config_events(&before, &after);
+        let reload = ConfigReload::between(&before, &after, &events);
+        assert_eq!(reload.padding, Some(config("mode = \"enabled\"\n")));
+        assert_eq!(reload.animations, Some(config("kind = \"stars\"\n")));
+
+        let unchanged = ConfigReload::between(&after, &after, &[]);
+        assert_eq!(unchanged, ConfigReload::default());
+
+        // Removing the table reloads the defaults: an empty table.
+        let removed = config("[animations]\nkind = \"stars\"\n");
+        let events = events_feed::config_events(&after, &removed);
+        let reload = ConfigReload::between(&after, &removed, &events);
+        assert_eq!(reload.padding, Some(toml::Table::new()));
+        assert_eq!(reload.animations, None);
     }
 }

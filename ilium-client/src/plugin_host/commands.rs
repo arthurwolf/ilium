@@ -16,6 +16,9 @@ pub(crate) const NEW_SPLIT_COMMAND: &str = "ilium.core.layout/new-split";
 /// The Search plugin's "Search the workspace" command; it opens the search panel.
 pub(crate) const SEARCH_COMMAND: &str = "ilium.core.search/open";
 
+/// The Keys and help plugin's "Show the key reference" command; it opens the `keys` panel.
+pub(crate) const HELP_COMMAND: &str = "ilium.core.keys-and-help/show-keys";
+
 impl App {
     /// Runs a plugin command. Tells the user when no plugin host is running; a command that
     /// no enabled plugin contributes is reported by the host as a toast.
@@ -47,6 +50,12 @@ impl App {
     /// "Search the workspace" from the key binding, the tree toolbar or the context menu.
     pub(crate) fn action_open_search(&mut self, origin: CommandOrigin) {
         self.invoke_plugin_command(SEARCH_COMMAND, "{}".to_owned(), origin);
+    }
+
+    /// "Help" from the key binding or the control surface: the key reference the Keys and help
+    /// plugin draws. Without that plugin there is no key reference.
+    pub(crate) fn action_open_help(&mut self, origin: CommandOrigin) {
+        self.invoke_plugin_command(HELP_COMMAND, "{}".to_owned(), origin);
     }
 
     /// The arguments of `new-split`: the group the selection points at. The plugin reads the
@@ -82,6 +91,17 @@ mod tests {
             Some("ilium.core.search is not running, so this action is unavailable")
         );
         assert!(!matches!(app.mode, crate::app::Mode::Settings(_)));
+    }
+
+    #[test]
+    fn the_help_action_without_a_plugin_host_names_the_keys_and_help_plugin() {
+        let mut app = App::new("test".to_string(), std::env::temp_dir());
+        app.action_open_help(CommandOrigin::Keybinding);
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("ilium.core.keys-and-help is not running, so this action is unavailable")
+        );
+        assert!(matches!(app.mode, crate::app::Mode::Normal));
     }
 
     #[test]

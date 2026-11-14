@@ -61,6 +61,7 @@ pub mod resolve;
 pub mod retention;
 pub mod review;
 pub mod runtime;
+pub mod scene_guest;
 pub mod scheduler;
 pub mod schemas;
 pub mod secrets;

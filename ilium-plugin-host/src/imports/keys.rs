@@ -130,8 +130,12 @@ fn parse_key(text: &str) -> Option<ChordKey> {
     if let Some((_, key)) = NAMED_KEYS.iter().find(|(name, _)| *name == text) {
         return Some(*key);
     }
+    // `F1` is read as `f1`: a function key name has no shifted form to confuse it with, and the
+    // core keys-and-help manifest and the G1 plan both write it that way.
     if let Some(number) = text
         .strip_prefix('f')
+        .or_else(|| text.strip_prefix('F'))
+        .filter(|digits| digits.bytes().all(|byte| byte.is_ascii_digit()))
         .and_then(|digits| digits.parse::<u8>().ok())
     {
         if (1..=24).contains(&number) && text.len() > 1 {
@@ -469,6 +473,15 @@ mod tests {
             parse_chord("f12").map(|chord| chord.key),
             Some(ChordKey::Function(12))
         );
+        // A function key may be written `F1`, as the keys-and-help manifest does.
+        assert_eq!(
+            parse_chord("F1").map(|chord| chord.canonical()).as_deref(),
+            Some("f1")
+        );
+        assert_eq!(
+            parse_chord("alt+F24").map(|chord| chord.key),
+            Some(ChordKey::Function(24))
+        );
         assert_eq!(
             parse_chord("page-up")
                 .map(|chord| chord.canonical())
@@ -483,6 +496,9 @@ mod tests {
             "A",
             "f25",
             "f0",
+            "F25",
+            "F",
+            "f+1",
             "ab",
             "ctrl++",
         ] {

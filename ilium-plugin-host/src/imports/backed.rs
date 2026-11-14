@@ -991,8 +991,8 @@ impl KernelTerminal {
 }
 
 impl HostTerminal for KernelTerminal {
-    /// The visible rows or the last `max_rows` lines of history. The pane reader does not
-    /// report the cursor or a screen revision, so both read 0.
+    /// The visible rows or the last `max_rows` lines of history, with the cursor and the screen
+    /// revision the pane reader reports (both 0 when it reports none).
     fn read_screen(&mut self, pane: NodeId, part: ScreenPart, max_rows: u32) -> Option<Screen> {
         let (screen, history, _) = self.reads;
         let permitted = match part {
@@ -1013,13 +1013,14 @@ impl HostTerminal for KernelTerminal {
             ScreenPart::Scrollback => panes.history(pane, max_rows)?,
         };
         let columns = panes.size(pane).map_or(0, |(columns, _)| columns);
+        let state = panes.screen_state(pane).unwrap_or_default();
         Some(Screen {
             columns,
             rows,
-            cursor_row: 0,
-            cursor_column: 0,
+            cursor_row: state.cursor_row,
+            cursor_column: state.cursor_column,
             title: self.kernel.tree().node(pane).map(|node| node.title),
-            revision: 0,
+            revision: state.revision,
         })
     }
 
@@ -1083,7 +1084,7 @@ impl HostTerminal for KernelTerminal {
             first_row,
             columns: panes.size(pane).map_or(0, |(columns, _)| columns),
             rows,
-            revision: 0,
+            revision: panes.screen_state(pane).map_or(0, |state| state.revision),
         })
     }
 
@@ -1091,8 +1092,16 @@ impl HostTerminal for KernelTerminal {
         self.rest.modes(pane)
     }
 
+    /// The process the kernel reports for the pane; part of `terminal.read-cells`
+    /// (primitives-terminal-reads.md).
     fn get_foreground_process(&mut self, pane: NodeId) -> Option<ForegroundProcess> {
-        self.rest.get_foreground_process(pane)
+        if !self.reads.2 {
+            return None;
+        }
+        self.kernel
+            .panes()
+            .foreground_process(pane)
+            .or_else(|| self.rest.get_foreground_process(pane))
     }
 
     fn freeze_snapshot(&mut self, pane: NodeId) -> Result<u64, PluginError> {

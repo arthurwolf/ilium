@@ -4,8 +4,10 @@
 //! its own thread and queues loading and startup activation as the first job, so `run()` never
 //! waits for a component to compile. Everything the rest of the server does with plugins is a
 //! job posted to that thread: tokio tasks post and never block on it, and the thread reaches
-//! the server only through the facade. Terminal output never enters this module, so a trapped
-//! or stalled plugin cannot delay a PTY (COR-218).
+//! the server only through the facade. Terminal output bytes never enter this module, so a
+//! trapped or stalled plugin cannot delay a PTY (COR-218): a pane's output forwarder only marks
+//! the pane in [`ScreenChanges`] (one short lock, no await), and the feed task turns the marks
+//! into `screen-changed` events at most ten times a second.
 //!
 //! After each job the host publishes what changed: contribution increments as
 //! `ServerEvent::Contributions` and plugin state changes as plugin control envelopes.
@@ -14,6 +16,7 @@ mod cli_bridge;
 mod facade;
 mod http_routes;
 pub(crate) mod pane_kinds;
+mod plugin_calls;
 mod remote;
 mod signatures;
 
@@ -35,7 +38,7 @@ use ilium_plugin_api::generated::types::events::MessageEvent;
 use ilium_plugin_api::generated::types::{
     ErrorCode, Event, Intent, NodeId, Outcome, PluginError, PluginId, PluginSide,
 };
-use ilium_plugin_api::kernel::{KernelFacade, Origin};
+use ilium_plugin_api::kernel::{KernelFacade, Origin, TreeNode};
 use ilium_plugin_api::platform::ProcessKind;
 use ilium_plugin_api::side::Side;
 use ilium_plugin_host::contributions::ContributionOp;
@@ -70,6 +73,54 @@ const SUBMISSION_WAIT: Duration = Duration::from_secs(35);
 const PENDING_EVENT_LIMIT: usize = 1024;
 /// The epoch tick of the server engine in milliseconds.
 const EPOCH_TICK_MS: u64 = 10;
+/// The shortest gap between two `screen-changed` flushes: each pane is reported at most ten
+/// times a second (reference-events-and-intents.md, `screen-changed`).
+const SCREEN_CHANGED_INTERVAL: Duration = Duration::from_millis(100);
+/// A plugin receives `screen-changed` only with `terminal.read-cells`
+/// (reference-events-and-intents.md, primitives-terminal-reads.md).
+const SCREEN_CHANGED_GRANTS: [&str; 1] = ["terminal.read-cells"];
+/// The observe hook a restore runs first (core-plugin-sessions.md, EXT-056).
+const BEFORE_RESTORE_POINT: &str = "ilium.core.sessions/before-restore";
+/// How long a restore waits for the before-restore chain: 8 handlers at the point's 20 ms
+/// deadline fit many times over, plus the host finishing the job it is running.
+const BEFORE_RESTORE_WAIT: Duration = Duration::from_secs(2);
+
+/// Panes whose screen changed since the feed last reported them, with the newest output
+/// sequence of each. The pane output forwarders write it without awaiting anything; the feed
+/// task drains it at most every [`SCREEN_CHANGED_INTERVAL`], so a burst of output becomes one
+/// event per pane and the last change of a burst is never lost.
+#[derive(Default)]
+pub(crate) struct ScreenChanges {
+    pending: Mutex<BTreeMap<u64, u64>>,
+    wake: tokio::sync::Notify,
+}
+
+impl ScreenChanges {
+    /// Marks `pane` as changed at output sequence `revision`; a later mark keeps the larger.
+    pub(crate) fn note(&self, pane: u64, revision: u64) {
+        if let Ok(mut pending) = self.pending.lock() {
+            let entry = pending.entry(pane).or_insert(revision);
+            *entry = (*entry).max(revision);
+        }
+        self.wake.notify_one();
+    }
+
+    /// Takes every mark made since the last call.
+    fn take(&self) -> BTreeMap<u64, u64> {
+        self.pending
+            .lock()
+            .map(|mut pending| std::mem::take(&mut *pending))
+            .unwrap_or_default()
+    }
+}
+
+/// When the next `screen-changed` flush may run: now, or one interval after the last flush.
+fn next_screen_flush(
+    now: tokio::time::Instant,
+    last_flush: Option<tokio::time::Instant>,
+) -> tokio::time::Instant {
+    last_flush.map_or(now, |last| now.max(last + SCREEN_CHANGED_INTERVAL))
+}
 
 /// What the composition root hands the server to run plugins.
 pub struct PluginStart {
@@ -258,6 +309,16 @@ pub(crate) struct PluginHostHandle {
     signatures: Mutex<signatures::ContributedSignatures>,
     /// The basic pane kinds of the catalogue plugins (gap G14a): what a plugin pane may be.
     pane_kinds: Arc<pane_kinds::PaneKinds>,
+    /// Panes whose screen changed since the last `screen-changed` flush.
+    screen_changes: ScreenChanges,
+    /// The runtime's journal, shared: client-side plugins write and read it through
+    /// `ClientRequest::PluginCall` without a trip through the host thread.
+    journal: ilium_plugin_host::imports::journal::JournalBook,
+}
+
+/// The answer to a `PluginCall` when the server runs no plugin host.
+pub(crate) fn refused_call(call: ilium_ipc::plugin::PluginCall, why: &str) -> ServerEvent {
+    plugin_calls::reply_event(&call, 0, plugin_calls::refusal(ErrorCode::Busy, why))
 }
 
 fn log_errors(what: &str, errors: Vec<ilium_plugin_host::runtime::RuntimeError>) {
@@ -365,6 +426,7 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
     // The plugin journal belongs to the session: it sits beside the session snapshot, so its
     // entries survive a restart of this session's server (capability-journal-read).
     runtime.set_journal_file(state.snapshot_path.with_extension("plugin-journal.jsonl"));
+    let journal = runtime.journal();
     // Every service call is checked against the provider's schema file (gap G13).
     for schema in start
         .catalogue
@@ -443,6 +505,8 @@ pub(crate) fn start(state: &Arc<ServerState>, start: PluginStart) -> Option<Arc<
         http,
         signatures: Mutex::new(contributed),
         pane_kinds,
+        screen_changes: ScreenChanges::default(),
+        journal,
     }))
 }
 
@@ -537,6 +601,93 @@ impl PluginHostHandle {
         if !posted {
             self.feed_scheduled.store(false, Ordering::Release);
         }
+    }
+
+    /// Marks a pane's screen as changed. Called by the pane's output forwarder for every output
+    /// chunk; it never awaits and never reaches the runtime, the feed task reports the change.
+    pub(crate) fn note_screen_changed(&self, pane: ilium_core::NodeId, revision: u64) {
+        self.screen_changes.note(pane.0, revision);
+    }
+
+    /// Hands `screen-changed` events to the plugins that hold `terminal.read-cells` and to no
+    /// other plugin.
+    fn feed_screen_changes(&self, batch: Vec<Event>) {
+        if batch.is_empty() {
+            return;
+        }
+        self.post(move |runtime| {
+            log_errors(
+                "screen-changed delivery",
+                runtime.broadcast_to_holders(&batch, &SCREEN_CHANGED_GRANTS),
+            );
+            log_errors("pump", runtime.pump());
+        });
+    }
+
+    /// A client reported that its pane view gained or lost focus (`SetPaneFocus`). Plugins
+    /// hear `pane-focused` when the focused pane changed; the last report of any client wins.
+    pub(crate) fn pane_focus(&self, pane: ilium_core::NodeId, focused: bool) {
+        if let Some(event) = self.facade.set_focus(NodeId(pane.0), focused) {
+            self.feed(vec![event]);
+        }
+    }
+
+    /// Tells plugins that the attention mark of a node changed (`attention-changed`).
+    pub(super) fn attention_changed(&self, node: NodeId, reason: Option<String>, by: Option<&str>) {
+        self.feed(vec![
+            ilium_plugin_host::runtime::events_feed::attention_event(node, reason, by),
+        ]);
+    }
+
+    /// Runs the `ilium.core.sessions/before-restore` chain (observe, payload `session`,
+    /// `pane_count`) and waits until it ends, so a restore starts only after it completed
+    /// (EXT-056). Bounded by `BEFORE_RESTORE_WAIT`: a host that is stopping or busy delays a
+    /// restore by at most that long and never stops it. Returns whether the chain ran to its end.
+    pub(crate) async fn before_restore(&self, pane_count: usize) -> bool {
+        use ilium_plugin_api::kernel::WorkspaceAccess as _;
+        let payload = serde_json::json!({
+            "session": self.facade.session_name().unwrap_or_default(),
+            "pane_count": pane_count,
+        })
+        .to_string();
+        let (reply, result) = tokio::sync::oneshot::channel();
+        let posted = self.post(move |runtime| {
+            let (outcome, _reply, failures) =
+                runtime.run_kernel_hook(BEFORE_RESTORE_POINT, payload);
+            log_errors("before-restore", failures);
+            let _ = reply.send(outcome);
+        });
+        if !posted {
+            return false;
+        }
+        match tokio::time::timeout(BEFORE_RESTORE_WAIT, result).await {
+            Ok(Ok(Outcome::Ok)) => true,
+            Ok(Ok(outcome)) => {
+                // A missing sessions plugin ends `not-found`; the restore goes on without it.
+                tracing::debug!("before-restore ended {outcome:?}");
+                false
+            }
+            Ok(Err(_)) => false,
+            Err(_) => {
+                tracing::warn!(
+                    "before-restore did not end within {BEFORE_RESTORE_WAIT:?}; restoring anyway"
+                );
+                false
+            }
+        }
+    }
+
+    /// Answers a server-backed import call of a client-side plugin (`ClientRequest::PluginCall`):
+    /// the journal, read and written in the server's store.
+    pub(crate) fn plugin_call(&self, call: ilium_ipc::plugin::PluginCall) -> ServerEvent {
+        // Only an installed plugin writes entries: an unknown id is never stamped as a source.
+        let payload = if self.versions.contains_key(&call.plugin) {
+            plugin_calls::answer(&self.journal, &call)
+        } else {
+            plugin_calls::refusal(ErrorCode::NotFound, "no such plugin")
+        };
+        let seq = self.publisher.next_envelope.fetch_add(1, Ordering::Relaxed);
+        plugin_calls::reply_event(&call, seq, payload)
     }
 
     /// Routes one plugin envelope a client sent (`ClientRequest::Plugin`).
@@ -812,10 +963,52 @@ fn file_stamp(path: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
     Some((metadata.modified().ok()?, metadata.len()))
 }
 
+/// The `screen-changed` events of one flush: every visible row of each changed pane, with the
+/// newest output sequence as the revision. A pane that is gone, or whose screen does not answer
+/// within the budget, is left out; its next output marks it again.
+async fn screen_changed_events(state: &ServerState, changed: BTreeMap<u64, u64>) -> Vec<Event> {
+    use ilium_plugin_api::generated::types::events::ScreenChangedEvent;
+    let mut batch = Vec::with_capacity(changed.len());
+    for (pane, revision) in changed {
+        let read =
+            crate::pane::read_current_terminal_screen(state, ilium_core::NodeId(pane), |screen| {
+                screen.size().0
+            });
+        let Ok(Some(rows)) = tokio::time::timeout(PANE_SIZE_BUDGET, read).await else {
+            continue;
+        };
+        batch.push(Event::ScreenChanged(ScreenChangedEvent {
+            pane: NodeId(pane),
+            first_row: 0,
+            last_row: u32::from(rows.saturating_sub(1)),
+            revision,
+        }));
+    }
+    batch
+}
+
+/// The pane, title, agent, activity and goal events between the feed's last reading of the
+/// tree and `tree`, which becomes the new reading.
+fn view_events(
+    views: &mut BTreeMap<u64, TreeNode>,
+    current: BTreeMap<u64, TreeNode>,
+    tree: &ilium_core::Tree,
+    focused: Option<NodeId>,
+) -> Vec<Event> {
+    let events =
+        ilium_plugin_host::runtime::events_feed::node_events(views, &current, focused, |id| {
+            facade::title_origin(tree, id)
+        });
+    *views = current;
+    events
+}
+
 /// Forwards kernel changes to the plugins until the event bus closes or the task is aborted:
-/// tree changes with the pane, title and agent events derived from them, and the kernel
-/// settings, theme and keymap changes of `config.toml` (gap G2). Terminal output and every
-/// other high-rate event are dropped here, before the host.
+/// tree changes with the pane, title and agent events derived from them (from full snapshots
+/// and from single-pane changes alike, so every activity and goal transition is seen), the
+/// kernel settings, theme and keymap changes of `config.toml` (gap G2), and `screen-changed`
+/// for the panes the output forwarders marked, at most ten a second per pane. Terminal output
+/// itself and every other high-rate event are dropped here, before the host.
 pub(crate) fn spawn_feed(
     state: Arc<ServerState>,
     host: Arc<PluginHostHandle>,
@@ -836,9 +1029,28 @@ pub(crate) fn spawn_feed(
             .unwrap_or_default();
         let mut config_check = tokio::time::interval(CONFIG_CHECK_INTERVAL);
         config_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // When the next `screen-changed` flush runs, while one is due.
+        let mut screen_due: Option<tokio::time::Instant> = None;
+        let mut screen_last_flush: Option<tokio::time::Instant> = None;
         loop {
             let received = tokio::select! {
                 received = events.recv() => received,
+                () = host.screen_changes.wake.notified(), if screen_due.is_none() => {
+                    screen_due = Some(next_screen_flush(
+                        tokio::time::Instant::now(),
+                        screen_last_flush,
+                    ));
+                    continue;
+                }
+                () = tokio::time::sleep_until(
+                    screen_due.unwrap_or_else(tokio::time::Instant::now)
+                ), if screen_due.is_some() => {
+                    screen_due = None;
+                    screen_last_flush = Some(tokio::time::Instant::now());
+                    let batch = screen_changed_events(&state, host.screen_changes.take()).await;
+                    host.feed_screen_changes(batch);
+                    continue;
+                }
                 _ = config_check.tick() => {
                     let Some(path) = config_path.as_deref() else {
                         continue;
@@ -857,18 +1069,15 @@ pub(crate) fn spawn_feed(
                     continue;
                 }
             };
+            let focused = host.facade.focused_pane();
             let batch = match received {
                 Ok(event) => match &*event {
                     ServerEvent::TreeSnapshot(tree) => {
                         let current = facade::tree_marks(tree);
                         let mut batch = facade::tree_delta(&known, &current);
                         known = current;
-                        let current_views = facade::tree_views(tree);
                         let mut node_events =
-                            events_feed::node_events(&views, &current_views, None, |id| {
-                                facade::title_origin(tree, id)
-                            });
-                        views = current_views;
+                            view_events(&mut views, facade::tree_views(tree), tree, focused);
                         fill_pane_sizes(&state, &mut node_events).await;
                         batch.extend(node_events);
                         batch
@@ -877,15 +1086,50 @@ pub(crate) fn spawn_feed(
                         // The fingerprint is unknown until the next snapshot, which then
                         // names the node once more: a change is never lost, only repeated.
                         known.insert(node.id.0, 0);
-                        vec![Event::TreeChanged(vec![NodeId(node.id.0)])]
+                        let mut batch = vec![Event::TreeChanged(vec![NodeId(node.id.0)])];
+                        // A single-pane change is how detection publishes an agent's activity,
+                        // goal and title; those events are derived from it here, not left for a
+                        // snapshot that may never come.
+                        let mut node_events = {
+                            let tree = state.tree.read().await;
+                            match facade::single_view(&tree, node.id) {
+                                Some(view) => {
+                                    let id = node.id.0;
+                                    let mut before: BTreeMap<u64, TreeNode> = views
+                                        .get(&id)
+                                        .map(|was| (id, was.clone()))
+                                        .into_iter()
+                                        .collect();
+                                    let events = view_events(
+                                        &mut before,
+                                        BTreeMap::from([(id, view.clone())]),
+                                        &tree,
+                                        focused,
+                                    );
+                                    views.insert(id, view);
+                                    events
+                                }
+                                None => Vec::new(),
+                            }
+                        };
+                        fill_pane_sizes(&state, &mut node_events).await;
+                        batch.extend(node_events);
+                        batch
                     }
                     _ => Vec::new(),
                 },
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    let tree = state.tree.read().await;
-                    known = facade::tree_marks(&tree);
-                    views = facade::tree_views(&tree);
-                    vec![Event::TreeChanged(Vec::new())]
+                    // Missed events: everything may have changed, and the agent, title and
+                    // goal transitions in between are recovered by diffing the views.
+                    let mut node_events = {
+                        let tree = state.tree.read().await;
+                        known = facade::tree_marks(&tree);
+                        view_events(&mut views, facade::tree_views(&tree), &tree, focused)
+                    };
+                    fill_pane_sizes(&state, &mut node_events).await;
+                    let mut batch = vec![Event::TreeChanged(Vec::new())];
+                    batch.extend(node_events);
+                    batch
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
@@ -936,6 +1180,47 @@ fn settings_changed_event(keys: Vec<String>) -> Event {
         origin: ilium_plugin_api::generated::types::SettingsOrigin::User,
         side: PluginSide::Client,
     })
+}
+
+#[cfg(test)]
+mod screen_changed_tests {
+    use super::{next_screen_flush, ScreenChanges, SCREEN_CHANGED_INTERVAL};
+    use std::time::Duration;
+
+    #[test]
+    fn marks_of_one_pane_coalesce_to_the_newest_revision() {
+        let changes = ScreenChanges::default();
+        changes.note(7, 3);
+        changes.note(7, 9);
+        changes.note(7, 5);
+        changes.note(8, 1);
+        let taken = changes.take();
+        assert_eq!(taken.get(&7), Some(&9));
+        assert_eq!(taken.get(&8), Some(&1));
+        assert!(changes.take().is_empty(), "a take empties the ledger");
+    }
+
+    #[test]
+    fn a_flush_waits_one_interval_after_the_last_and_runs_at_once_after_a_quiet_spell() {
+        let now = tokio::time::Instant::now();
+        assert_eq!(next_screen_flush(now, None), now);
+        let recent = now - Duration::from_millis(30);
+        assert_eq!(
+            next_screen_flush(now, Some(recent)),
+            recent + SCREEN_CHANGED_INTERVAL
+        );
+        let long_ago = now - Duration::from_secs(5);
+        assert_eq!(next_screen_flush(now, Some(long_ago)), now);
+    }
+
+    #[tokio::test]
+    async fn a_mark_made_before_anyone_waits_still_wakes_the_feed() {
+        let changes = ScreenChanges::default();
+        changes.note(1, 1);
+        tokio::time::timeout(Duration::from_secs(1), changes.wake.notified())
+            .await
+            .expect("the stored permit wakes the first waiter");
+    }
 }
 
 #[cfg(test)]

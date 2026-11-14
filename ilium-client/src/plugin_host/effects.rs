@@ -53,6 +53,70 @@ pub(crate) enum ClientEffect {
     OpenSettings(String),
     /// Remove the toast with this id if it is still shown.
     DismissToast(String),
+    /// Set one presentation option of an editor pane (`kernel.set-editor-option`); `None`
+    /// names the focused pane.
+    SetEditorOption {
+        pane: Option<ilium_core::NodeId>,
+        option: EditorOption,
+    },
+}
+
+/// The kernel command that sets an option of an editor pane:
+/// `{"pane": <id>?, "option": "<name>", "value": <value>}`.
+pub(crate) const SET_EDITOR_OPTION_COMMAND: &str = "kernel.set-editor-option";
+
+/// A per-pane editor option and its wanted value. Each is a toggle of the editor toolbar, so
+/// it changes presentation only, never the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditorOption {
+    /// `line-display`: `"clip"` or `"wrap"`.
+    LineDisplay(crate::config::LineDisplay),
+    /// `line-numbers`: a boolean.
+    LineNumbers(bool),
+    /// `minimap`: a boolean.
+    Minimap(bool),
+    /// `autosave`: a boolean.
+    Autosave(bool),
+}
+
+/// The pane and option of a `kernel.set-editor-option` invocation, or why it is refused.
+pub(crate) fn editor_option_argument(
+    arguments_json: &str,
+) -> Result<(Option<ilium_core::NodeId>, EditorOption), String> {
+    const USAGE: &str =
+        "kernel.set-editor-option takes {\"pane\": <id>, \"option\": <name>, \"value\": <value>}";
+    let value: serde_json::Value =
+        serde_json::from_str(arguments_json).map_err(|_| USAGE.to_owned())?;
+    let fields = value.as_object().ok_or_else(|| USAGE.to_owned())?;
+    let pane = match fields.get("pane") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(pane) => Some(ilium_core::NodeId(
+            pane.as_u64()
+                .ok_or_else(|| "the pane is a node id".to_owned())?,
+        )),
+    };
+    let option = fields
+        .get("option")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| USAGE.to_owned())?;
+    let wanted = fields.get("value").ok_or_else(|| USAGE.to_owned())?;
+    let flag = || {
+        wanted
+            .as_bool()
+            .ok_or_else(|| format!("{option} takes true or false"))
+    };
+    let option = match option {
+        "line-display" => match wanted.as_str() {
+            Some("clip") => EditorOption::LineDisplay(crate::config::LineDisplay::Clip),
+            Some("wrap") => EditorOption::LineDisplay(crate::config::LineDisplay::Wrap),
+            _ => return Err("line-display takes \"clip\" or \"wrap\"".to_owned()),
+        },
+        "line-numbers" => EditorOption::LineNumbers(flag()?),
+        "minimap" => EditorOption::Minimap(flag()?),
+        "autosave" => EditorOption::Autosave(flag()?),
+        other => return Err(format!("{other} is not an editor option")),
+    };
+    Ok((pane, option))
 }
 
 /// How the client treats one intent.
@@ -121,6 +185,12 @@ fn kernel_command(spec: &InvokeCommandSpec) -> Classified {
                 ErrorCode::InvalidArgument,
                 "kernel.focus-node takes {\"node\": <id>}",
             ),
+        },
+        SET_EDITOR_OPTION_COMMAND => match editor_option_argument(&spec.arguments_json) {
+            Ok((pane, option)) => {
+                Classified::Effect(ClientEffect::SetEditorOption { pane, option })
+            }
+            Err(reason) => refused(ErrorCode::InvalidArgument, reason),
         },
         other => refused(
             ErrorCode::NotFound,
@@ -289,6 +359,52 @@ mod tests {
             classify_here(intent),
             Classified::Effect(ClientEffect::FocusNode(ilium_core::NodeId(3)))
         ));
+    }
+
+    fn set_editor_option(arguments_json: &str) -> Classified {
+        classify_here(Intent::InvokeCommand(InvokeCommandSpec {
+            command: SET_EDITOR_OPTION_COMMAND.to_owned(),
+            arguments_json: arguments_json.to_owned(),
+        }))
+    }
+
+    #[test]
+    fn set_editor_option_names_a_pane_option_and_value() {
+        assert!(matches!(
+            set_editor_option(r#"{"pane": 9, "option": "line-display", "value": "wrap"}"#),
+            Classified::Effect(ClientEffect::SetEditorOption {
+                pane: Some(ilium_core::NodeId(9)),
+                option: EditorOption::LineDisplay(crate::config::LineDisplay::Wrap),
+            })
+        ));
+        assert!(matches!(
+            set_editor_option(r#"{"option": "minimap", "value": false}"#),
+            Classified::Effect(ClientEffect::SetEditorOption {
+                pane: None,
+                option: EditorOption::Minimap(false),
+            })
+        ));
+        assert_eq!(
+            editor_option_argument(r#"{"option": "line-numbers", "value": true}"#),
+            Ok((None, EditorOption::LineNumbers(true)))
+        );
+        assert_eq!(
+            editor_option_argument(r#"{"option": "autosave", "value": false}"#),
+            Ok((None, EditorOption::Autosave(false)))
+        );
+        for refused in [
+            r#"{"option": "line-display", "value": "fold"}"#,
+            r#"{"option": "minimap", "value": "yes"}"#,
+            r#"{"option": "font-size", "value": 3}"#,
+            r#"{"pane": "nine", "option": "minimap", "value": true}"#,
+            r#"{"option": "minimap"}"#,
+            "not json",
+        ] {
+            assert!(
+                matches!(set_editor_option(refused), Classified::Refused(_)),
+                "{refused} must be refused"
+            );
+        }
     }
 
     #[test]

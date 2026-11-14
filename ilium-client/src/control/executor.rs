@@ -252,7 +252,7 @@ fn execute_ui(app: &mut App, command: UiCommand) -> Result<ExecutionReceipt, Str
             ))
         }
         UiAction::OpenHelp => {
-            app.mode = Mode::Help;
+            app.action_open_help(ilium_plugin_api::generated::types::CommandOrigin::Voice);
             Ok(ExecutionReceipt::immediate(
                 ilium_prompts::voice::VOICE_EXECUTOR_OPENED_HELP,
             ))

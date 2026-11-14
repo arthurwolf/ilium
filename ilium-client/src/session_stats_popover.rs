@@ -482,7 +482,7 @@ mod tests {
         let (mut app, pane_id) = agent_app();
         let icon = theme::chrome_stats_cell(app.pane_viewport(pane_id).unwrap().outer_area);
         send(&mut app, MouseEventKind::Down(MouseButton::Left), icon);
-        app.mode = Mode::Help;
+        app.mode = Mode::Move;
         assert!(!send(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),

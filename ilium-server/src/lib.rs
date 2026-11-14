@@ -704,6 +704,12 @@ async fn restore_snapshot_data(
         .get()
         .and_then(startup_progress::Publisher::begin);
     let pane_count = snapshot.panes.len();
+    // EXT-056: plugins hear `before-restore` and it completes before anything is replaced or
+    // respawned. At server start plugins load after the restore, so only later restores (a
+    // recovery the user confirmed) reach a running host here.
+    if let Some(host) = state.plugins.get() {
+        host.before_restore(pane_count).await;
+    }
     let persisted_progress_monitors = std::mem::take(&mut snapshot.progress_monitors);
     let persisted_close_preferences = std::mem::take(&mut snapshot.workspace_close_preferences);
     let persisted_recaps = std::mem::take(&mut snapshot.recaps);

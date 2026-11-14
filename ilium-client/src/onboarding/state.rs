@@ -14,9 +14,14 @@ pub enum Step {
     KeyboardChoice,
     KeyboardPractice,
     Voice,
+    /// The steps enabled plugins contribute (`contributes.onboarding_steps`), shown one after
+    /// the other inside the wizard. Reached only when at least one plugin contributes a step.
+    Plugin,
 }
 
 impl Step {
+    /// The built-in steps, in order. [`Step::Plugin`] follows them when plugins contribute
+    /// steps, so it is not in this list.
     pub const ALL: [Self; 7] = [
         Self::AiChoice,
         Self::AiConfiguration,
@@ -36,6 +41,7 @@ impl Step {
             Self::KeyboardChoice => 5,
             Self::KeyboardPractice => 6,
             Self::Voice => 7,
+            Self::Plugin => 8,
         }
     }
 
@@ -48,6 +54,7 @@ impl Step {
             Self::KeyboardChoice => "Your controls",
             Self::KeyboardPractice => "Playground",
             Self::Voice => "Voice control",
+            Self::Plugin => "From your plugins",
         }
     }
 }
@@ -109,6 +116,10 @@ pub struct WizardState {
     pub ai: Option<AiChoice>,
     pub sound: Option<SoundChoice>,
     pub keyboard: Option<KeyboardChoice>,
+    /// Whether enabled plugins contribute onboarding steps, so the wizard continues from
+    /// Voice to [`Step::Plugin`]. Read from the plugin catalogue, never stored.
+    #[serde(skip)]
+    pub plugin_steps: bool,
 }
 
 impl WizardState {
@@ -128,6 +139,15 @@ impl WizardState {
     pub fn choose_sound(&mut self, choice: SoundChoice) {
         self.sound = Some(choice);
         self.step = Step::SoundConfiguration;
+    }
+
+    /// Whether the current step is the wizard's last, where Continue reads Finish.
+    pub const fn is_last_step(&self) -> bool {
+        match self.step {
+            Step::Voice => !self.plugin_steps,
+            Step::Plugin => true,
+            _ => false,
+        }
     }
 
     pub fn choose_keyboard(&mut self, choice: KeyboardChoice) {
@@ -155,7 +175,8 @@ impl WizardState {
                 Step::KeyboardPractice
             }
             Step::KeyboardPractice => Step::Voice,
-            Step::Voice => return Ok(Navigation::Finish),
+            Step::Voice if self.plugin_steps => Step::Plugin,
+            Step::Voice | Step::Plugin => return Ok(Navigation::Finish),
         };
         Ok(Navigation::Moved)
     }
@@ -169,6 +190,7 @@ impl WizardState {
             Step::KeyboardChoice => Step::SoundConfiguration,
             Step::KeyboardPractice => Step::KeyboardChoice,
             Step::Voice => Step::KeyboardPractice,
+            Step::Plugin => Step::Voice,
         };
     }
 }
@@ -251,5 +273,55 @@ mod tests {
             assert_eq!(step.number(), index + 1);
             assert!(!step.title().is_empty());
         }
+        assert_eq!(Step::Plugin.number(), Step::ALL.len() + 1);
+        assert!(!Step::Plugin.title().is_empty());
+    }
+
+    fn at_voice(plugin_steps: bool) -> WizardState {
+        WizardState {
+            step: Step::Voice,
+            ai: Some(AiChoice::Disabled),
+            sound: Some(SoundChoice::Bundled),
+            keyboard: Some(KeyboardChoice::Tmux),
+            plugin_steps,
+        }
+    }
+
+    #[test]
+    fn contributed_steps_add_a_plugin_step_after_voice() {
+        let mut wizard = at_voice(true);
+        assert!(!wizard.is_last_step());
+        assert_eq!(wizard.advance(), Ok(Navigation::Moved));
+        assert_eq!(wizard.step, Step::Plugin);
+        assert!(wizard.is_last_step());
+        wizard.back();
+        assert_eq!(wizard.step, Step::Voice);
+        wizard.advance().unwrap();
+        assert_eq!(wizard.advance(), Ok(Navigation::Finish));
+        assert_eq!(wizard.step, Step::Plugin);
+    }
+
+    #[test]
+    fn without_contributed_steps_voice_stays_the_last_step() {
+        let mut wizard = at_voice(false);
+        assert!(wizard.is_last_step());
+        assert_eq!(wizard.advance(), Ok(Navigation::Finish));
+        assert_eq!(wizard.step, Step::Voice);
+        // A resumed wizard saved on the plugin step still finishes from there.
+        let mut resumed = at_voice(false);
+        resumed.step = Step::Plugin;
+        assert_eq!(resumed.advance(), Ok(Navigation::Finish));
+    }
+
+    #[test]
+    fn the_plugin_step_is_saved_but_the_contribution_flag_is_not() {
+        let mut wizard = at_voice(true);
+        wizard.step = Step::Plugin;
+        let text = serde_json::to_string(&wizard).expect("serializes");
+        assert!(text.contains("\"plugin\""), "{text}");
+        assert!(!text.contains("plugin_steps"), "{text}");
+        let back: WizardState = serde_json::from_str(&text).expect("deserializes");
+        assert_eq!(back.step, Step::Plugin);
+        assert!(!back.plugin_steps);
     }
 }

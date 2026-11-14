@@ -763,11 +763,18 @@ impl ServerFacade {
             Intent::SetInferredIcon(spec) => self.set_inferred_icon(spec),
             Intent::PlaySound(sound) => self.play_sound(&sound),
             Intent::Notify(spec) => self.notify(origin, spec),
-            Intent::MarkAttention(_)
-            | Intent::AckAttention(_)
-            | Intent::Toast(_)
-            | Intent::DismissToast(_)
-            | Intent::OpenExternal(_) => self.forward_to_clients(origin, &intent),
+            // The clients draw the mark; plugins of this side hear the change once it is sent.
+            Intent::MarkAttention(ref spec) => {
+                let outcome = self.forward_to_clients(origin, &intent);
+                self.announce_attention(origin, outcome, spec.node, Some(spec.reason.clone()))
+            }
+            Intent::AckAttention(node) => {
+                let outcome = self.forward_to_clients(origin, &intent);
+                self.announce_attention(origin, outcome, node, None)
+            }
+            Intent::Toast(_) | Intent::DismissToast(_) | Intent::OpenExternal(_) => {
+                self.forward_to_clients(origin, &intent)
+            }
             Intent::InvokeCommand(ref spec) if spec.command.starts_with("kernel.") => {
                 self.forward_to_clients(origin, &intent)
             }
@@ -776,6 +783,31 @@ impl ServerFacade {
             // its arm together with its handler (foundation contract section 12.4).
             _ => unsupported("this intent"),
         }
+    }
+
+    /// After an attention mark or acknowledgement reached the clients, the plugins hear
+    /// `attention-changed` (the attention queue rebuilds from it). A refused forward changed
+    /// nothing and is not announced.
+    fn announce_attention(
+        &self,
+        origin: &Origin,
+        outcome: Outcome,
+        node: NodeId,
+        reason: Option<String>,
+    ) -> Outcome {
+        if !matches!(outcome, Outcome::Ok) {
+            return outcome;
+        }
+        let by = match origin {
+            Origin::Plugin { plugin, .. } => Some(plugin.0.as_str()),
+            _ => None,
+        };
+        if let Some(state) = self.state.upgrade() {
+            if let Some(host) = state.plugins.get() {
+                host.attention_changed(node, reason, by);
+            }
+        }
+        outcome
     }
 
     /// Sends a client-only intent of a server plugin to every attached client.
