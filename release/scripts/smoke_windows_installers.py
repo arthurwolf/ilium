@@ -3,6 +3,7 @@ from __future__ import annotations  # Permit portable import of native-only adap
 import argparse  # Describe the existing parser's namespace.
 import json  # Retain machine-readable evidence.
 import os  # Read environment and durable filesystem state.
+import re  # SCRATCH DIAGNOSTIC ONLY
 from pathlib import Path  # Keep all execution and evidence paths explicit.
 import platform  # Record the actual native host.
 import stat  # Reject links and non-regular payload entries.
@@ -200,7 +201,23 @@ def probe(directory: Path, binding: dict, kind: str, label: str, evidence: journ
         command = [str(directory / 'ilium.exe'), '--cwd', str(project)]  # Use only the packet's public CLI.
         checked_run(job, command + ['new-pane', '--', str(system / 'cmd.exe'), '/d', '/q', '/k', 'echo ' + nonce + '>pane-marker.txt'], environment, project, evidence, label + '-new-pane')  # /k leaves the real Windows shell alive in its PTY.
         server = job.hold_image(directory / 'ilium-server.exe')  # Acquire a live original handle after job-membership verification.
-        wait_until(lambda: marker.is_file(), 30, 'pane did not create its marker')  # Startup/readiness must produce actual evidence.
+        try:  # SCRATCH DIAGNOSTIC ONLY (never on the release branch): capture the pane screen on failure.
+            wait_until(lambda: marker.is_file(), 30, 'pane did not create its marker')  # Startup/readiness must produce actual evidence.
+        except BaseException:
+            for extra in (['ctl', 'tree'], ['ctl', 'find']):
+                try:
+                    found = job.run(command + extra, environment, project, 60)
+                    evidence.record('scratch-diagnostic', label=label, command=extra, **found)
+                except BaseException as diagnostic_error:
+                    evidence.record('scratch-diagnostic', label=label, command=extra, error=str(diagnostic_error))
+            try:
+                ids = re.findall(r'"id"\s*:\s*"?(\d+)', found['stdout'])
+                for pane_id in ids[:6]:
+                    shown = job.run(command + ['ctl', 'screen', pane_id], environment, project, 60)
+                    evidence.record('scratch-diagnostic', label=label, command=['ctl', 'screen', pane_id], **shown)
+            except BaseException as diagnostic_error:
+                evidence.record('scratch-diagnostic', label=label, command=['ctl', 'screen'], error=str(diagnostic_error))
+            raise
         require(plain(marker).read_text(encoding='ascii').strip() == nonce, 'pane marker differs')  # A stale or wrong project cannot pass.
         pane = job.hold_image(system / 'cmd.exe')  # Require the system shell inside this private job.
         require(server.alive() and pane.alive(), 'server or pane exited before readiness')  # Marker creation alone is insufficient.
