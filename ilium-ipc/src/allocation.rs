@@ -42,7 +42,8 @@ impl HeapBytes for PromptSubmissionSource {
             | Self::ToolbarAction
             | Self::AskForUpdate
             | Self::TextTrigger
-            | Self::ProgressResult => 0,
+            | Self::ProgressResult
+            | Self::PluginIntent => 0,
         }
     }
 }
