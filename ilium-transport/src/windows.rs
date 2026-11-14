@@ -184,13 +184,21 @@ pub(crate) async fn connect(identity: &Path) -> io::Result<Stream> {
     // can still arrive between one accept completing and the next instance
     // existing. That is a transient condition with a documented remedy: wait
     // briefly and retry, rather than failing an otherwise healthy connect.
-    const BUSY_RETRY_LIMIT: usize = 20;
+    // The window is time-bounded, not attempt-bounded: a server that is busy
+    // (restoring panes at startup, or on a loaded machine) can take well over
+    // half a second to re-arm the next instance, and a fixed attempt count
+    // turned that into a spurious connect failure.
+    const BUSY_RETRY_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
     const BUSY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(25);
 
-    for _ in 0..BUSY_RETRY_LIMIT {
+    let deadline = tokio::time::Instant::now() + BUSY_RETRY_WINDOW;
+    loop {
         match ClientOptions::new().open(&pipe_name) {
             Ok(pipe) => return Ok(Stream::Client(pipe)),
             Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                if tokio::time::Instant::now() >= deadline {
+                    break;
+                }
                 tokio::time::sleep(BUSY_RETRY_DELAY).await;
             }
             Err(error) => return Err(error),
